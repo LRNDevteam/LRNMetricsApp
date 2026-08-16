@@ -163,6 +163,16 @@ public sealed class AnalyticsController : Controller
         {
             return BadRequest(new { message = ex.Message });
         }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 208 or 2812)
+        {
+            // 208 = invalid object name (UserReqReports not deployed to LRNMaster)
+            // 2812 = queue stored procedures missing.
+            // 400 rather than 500 on purpose: the page treats 400 as "queue unavailable" and
+            // falls back to the direct download, so the user still gets a file.
+            _logger.LogError(ex,
+                "CPT/Panel export queue failed on lab {Lab}: report queue objects are not deployed there.", lab);
+            return BadRequest(new { message = "The report queue is not available. Downloading directly instead." });
+        }
 
         static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
     }

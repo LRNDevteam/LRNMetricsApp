@@ -1,0 +1,17 @@
+{
+  "LRNMaster": {
+    "DBEnabled": true,
+    "LineClaimEnable": false,
+    "DbConnectionString": "Server=lrnanalytics-sqlmi.public.4e3a76f4ed99.database.windows.net,3342;Initial Catalog=LRNMaster;User ID=sqladmin;Password=Labrevnavigator@26;Encrypt=True;TrustServerCertificate=True;",
+    "EnableCoding": false,
+    "EnablePrediction": false,
+    "EnableForcast": false,
+    "EnableClinicsummary": false,
+    "EnableSalesRepsummary": false,
+    "EnableProductionReport": false,
+    "EnableCollectionReport": false,
+    "EnableProductionSummaryReport": false,
+    "EnableCollectionSummaryReport": false,
+    "UseDBDashboard": false
+  }
+}

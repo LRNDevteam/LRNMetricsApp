@@ -39,8 +39,18 @@ public interface ICptLookupRepository
 public sealed class SqlCptLookupRepository : ICptLookupRepository
 {
     private const int ExportRowCap = 100000;
+
+    /// <summary>Timeout for a normal UI page.</summary>
+    private const int PageTimeoutSeconds = 120;
+
+    /// <summary>
+    /// Timeout for an export read. An unfiltered export is up to <see cref="ExportRowCap"/> rows
+    /// across every lab, payer and window, which does not finish in the page timeout. Safe to be
+    /// this generous because the export runs queued in LRN.ReportWorker, not inside a request.
+    /// </summary>
+    private const int ExportTimeoutSeconds = 1800;
     private const int FilterOptionCap = 100;
-    private const int MaxPageSize = 1000;
+    internal const int MaxPageSize = 1000;
 
     private readonly string _connectionString;
 
@@ -398,9 +408,18 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
 
     // ── public surface ───────────────────────────────────────────────────────
 
-    public async Task<LookupResult<CptLookupRow>> GetCptAsync(LookupQuery query, CancellationToken ct)
+    public Task<LookupResult<CptLookupRow>> GetCptAsync(LookupQuery query, CancellationToken ct)
+        => GetCptAsync(query, MaxPageSize, PageTimeoutSeconds, ct);
+
+    /// <summary>
+    /// <paramref name="maxPageSize"/> is passed in rather than always being MaxPageSize because
+    /// the export needs a whole workbook in one read. Clamping it to the UI's 1,000-row page
+    /// limit silently truncated every export to 1,000 rows.
+    /// </summary>
+    private async Task<LookupResult<CptLookupRow>> GetCptAsync(
+        LookupQuery query, int maxPageSize, int commandTimeoutSeconds, CancellationToken ct)
     {
-        Normalise(query, MaxPageSize);
+        Normalise(query, maxPageSize);
         var where = BuildCptWhere(query, out var parameters);
         var orderBy = BuildOrderBy(query, CptSortColumns, "a.CPTCode ASC, a.PanelName ASC, a.WindowType ASC");
 
@@ -429,7 +448,7 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
             """, conn))
         {
             summary.Parameters.AddRange(Clone(parameters));
-            summary.CommandTimeout = 120;
+            summary.CommandTimeout = commandTimeoutSeconds;
             await using var reader = await summary.ExecuteReaderAsync(ct);
             if (await reader.ReadAsync(ct)) ReadSummary(reader, result);
         }
@@ -444,16 +463,21 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         cmd.Parameters.AddRange(Clone(parameters));
         cmd.Parameters.AddWithValue("@Offset", (query.Page - 1) * query.PageSize);
         cmd.Parameters.AddWithValue("@PageSize", query.PageSize);
-        cmd.CommandTimeout = 120;
+        cmd.CommandTimeout = commandTimeoutSeconds;
 
         await using var rows = await cmd.ExecuteReaderAsync(ct);
         while (await rows.ReadAsync(ct)) result.Items.Add(MapCpt(rows));
         return result;
     }
 
-    public async Task<LookupResult<PanelLookupRow>> GetPanelAsync(LookupQuery query, CancellationToken ct)
+    public Task<LookupResult<PanelLookupRow>> GetPanelAsync(LookupQuery query, CancellationToken ct)
+        => GetPanelAsync(query, MaxPageSize, PageTimeoutSeconds, ct);
+
+    /// <summary>See the CPT overload — the export reads far beyond one UI page.</summary>
+    private async Task<LookupResult<PanelLookupRow>> GetPanelAsync(
+        LookupQuery query, int maxPageSize, int commandTimeoutSeconds, CancellationToken ct)
     {
-        Normalise(query, MaxPageSize);
+        Normalise(query, maxPageSize);
         var where = BuildPanelWhere(query, out var parameters);
         var orderBy = BuildOrderBy(query, PanelSortColumns, "p.PanelName ASC, p.PayerDisplayName ASC, p.WindowType ASC");
 
@@ -474,7 +498,7 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
             """, conn))
         {
             summary.Parameters.AddRange(Clone(parameters));
-            summary.CommandTimeout = 120;
+            summary.CommandTimeout = commandTimeoutSeconds;
             await using var reader = await summary.ExecuteReaderAsync(ct);
             if (await reader.ReadAsync(ct)) ReadSummary(reader, result);
         }
@@ -487,7 +511,7 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         cmd.Parameters.AddRange(Clone(parameters));
         cmd.Parameters.AddWithValue("@Offset", (query.Page - 1) * query.PageSize);
         cmd.Parameters.AddWithValue("@PageSize", query.PageSize);
-        cmd.CommandTimeout = 120;
+        cmd.CommandTimeout = commandTimeoutSeconds;
 
         await using var rows = await cmd.ExecuteReaderAsync(ct);
         while (await rows.ReadAsync(ct)) result.Items.Add(MapPanel(rows));
@@ -517,7 +541,7 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
             ORDER BY a.WindowType;
             """, conn);
         cmd.Parameters.AddRange(parameters.ToArray());
-        cmd.CommandTimeout = 120;
+        cmd.CommandTimeout = PageTimeoutSeconds;
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct)) items.Add(MapCpt(reader));
         return items;
@@ -545,7 +569,7 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
             ORDER BY p.WindowType;
             """, conn);
         cmd.Parameters.AddRange(parameters.ToArray());
-        cmd.CommandTimeout = 120;
+        cmd.CommandTimeout = PageTimeoutSeconds;
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct)) items.Add(MapPanel(reader));
         return items;
@@ -567,14 +591,16 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
     {
         query.Page = 1;
         query.PageSize = ExportRowCap;
-        return (await GetCptAsync(query, ct)).Items;
+        // ExportRowCap, not MaxPageSize: routing through the public overload clamped the export
+        // to the UI's 1,000-row page limit, so every export silently lost everything after row 1,000.
+        return (await GetCptAsync(query, ExportRowCap, ExportTimeoutSeconds, ct)).Items;
     }
 
     public async Task<IReadOnlyList<PanelLookupRow>> ReadPanelExportRowsAsync(LookupQuery query, CancellationToken ct)
     {
         query.Page = 1;
         query.PageSize = ExportRowCap;
-        return (await GetPanelAsync(query, ct)).Items;
+        return (await GetPanelAsync(query, ExportRowCap, ExportTimeoutSeconds, ct)).Items;
     }
 
     public static byte[] BuildCptExcel(IReadOnlyList<CptLookupRow> rows)
@@ -620,7 +646,8 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
 
     // ── internals ────────────────────────────────────────────────────────────
 
-    private static void Normalise(LookupQuery q, int maxPageSize)
+    /// <summary>Internal so the export's page-size contract can be regression-tested.</summary>
+    internal static void Normalise(LookupQuery q, int maxPageSize)
     {
         q.Page = Math.Max(1, q.Page);
         q.PageSize = Math.Clamp(q.PageSize <= 0 ? 50 : q.PageSize, 10, maxPageSize);

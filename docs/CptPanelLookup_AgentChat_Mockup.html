@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<!--
+  CPT & Panel Lookup — Agentic Chat : screen mockup
+  Static, self-contained (no CDN, no build step). Class names are Bootstrap-5 friendly
+  (btn / btn-sm / card / table / badge / form-select) so the markup drops into
+  CptLookup.cshtml + _AgentChat.cshtml with minimal renaming.
+
+  Panels marked data-state are mockup-only: the strip at the top swaps them so you can
+  review each chat state without wiring anything up.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CPT &amp; Panel Lookup — Agent Chat (mockup)</title>
+<style>
+  :root{
+    --ink:#0F172A; --ink-2:#334155; --muted:#64748B; --faint:#94A3B8;
+    --line:#E2E8F0; --line-2:#CBD5E1; --surface:#EEF2F7; --card:#FFFFFF;
+    --accent:#1D4ED8; --accent-soft:#EAF0FE;
+    --agent:#6D28D9; --agent-soft:#F5F1FE; --agent-line:#DDD2F7;
+    --warn:#B45309; --warn-soft:#FEF6E8; --warn-line:#F3DFB8;
+    --pos:#047857; --neg:#B42318;
+    --mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --r:8px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:var(--sans); background:var(--surface); color:var(--ink);
+    font-size:13.5px; line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  code,.num,.mono{font-family:var(--mono); font-variant-numeric:tabular-nums}
+  a{color:var(--accent)}
+  button{font:inherit}
+
+  /* ---------- mockup-only chrome ---------- */
+  .mockbar{
+    background:#0B1220; color:#CBD5E1; padding:8px 16px;
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+    font-size:12px; position:sticky; top:0; z-index:40;
+  }
+  .mockbar .tag{
+    font-family:var(--mono); font-size:10.5px; letter-spacing:.09em; text-transform:uppercase;
+    color:#7C8CA5; border:1px solid #2A3852; padding:2px 6px; border-radius:4px;
+  }
+  .mockbar .path{font-family:var(--mono); color:#8FA3BF}
+  .seg{display:flex; gap:2px; margin-left:auto; background:#16203400; }
+  .seg button{
+    background:transparent; border:1px solid #2A3852; color:#9FB0C8;
+    padding:4px 9px; border-radius:5px; cursor:pointer;
+  }
+  .seg button[aria-pressed="true"]{background:#1E293B; color:#F1F5F9; border-color:#475569}
+  .seg button:focus-visible, .btn:focus-visible, .chip:focus-visible, select:focus-visible,
+  textarea:focus-visible, summary:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .flagtoggle{display:flex; align-items:center; gap:6px; cursor:pointer; color:#9FB0C8}
+
+  /* ---------- app shell ---------- */
+  .app{max-width:1560px; margin:0 auto; padding:14px 16px 40px}
+  .crumb{display:flex; align-items:baseline; gap:8px; margin:6px 2px 12px}
+  .crumb .up{color:var(--muted); font-size:12px}
+  .crumb h1{font-size:19px; margin:0; letter-spacing:-.01em}
+  .crumb .rowcount{margin-left:auto; color:var(--muted); font-size:12px}
+
+  .workspace{display:flex; gap:14px; align-items:flex-start}
+  .data-pane{flex:1 1 auto; min-width:0}
+  .agent-pane{flex:0 0 424px; width:424px; position:sticky; top:52px}
+  body.flag-off .agent-pane{display:none}
+
+  .card{background:var(--card); border:1px solid var(--line); border-radius:var(--r)}
+  .card + .card{margin-top:12px}
+
+  /* ---------- filters ---------- */
+  .filters{padding:12px 14px; display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end}
+  .field{display:flex; flex-direction:column; gap:4px; min-width:0}
+  .field label{font-size:10.5px; letter-spacing:.07em; text-transform:uppercase; color:var(--muted)}
+  select,.textin{
+    border:1px solid var(--line-2); border-radius:6px; padding:6px 9px; background:#fff;
+    color:var(--ink); min-width:132px; font-size:13px;
+  }
+  .toggle-group{display:flex; border:1px solid var(--line-2); border-radius:6px; overflow:hidden}
+  .toggle-group button{
+    border:0; background:#fff; padding:6px 13px; cursor:pointer; color:var(--ink-2); font-size:13px;
+  }
+  .toggle-group button[aria-pressed="true"]{background:var(--ink); color:#fff}
+  .filters .spacer{margin-left:auto; display:flex; gap:8px}
+
+  .btn{
+    border:1px solid var(--line-2); background:#fff; color:var(--ink);
+    padding:6px 12px; border-radius:6px; cursor:pointer; font-size:13px; white-space:nowrap;
+  }
+  .btn:hover{background:#F8FAFC}
+  .btn-primary{background:var(--accent); border-color:var(--accent); color:#fff}
+  .btn-primary:hover{background:#1A44BE}
+  .btn-agent{background:var(--agent); border-color:var(--agent); color:#fff}
+  .btn-agent:hover{background:#5B21B6}
+  .btn-sm{padding:4px 9px; font-size:12px}
+  .btn[disabled]{opacity:.5; cursor:not-allowed}
+
+  /* ---------- summary strip ---------- */
+  .summary{
+    display:flex; gap:0; border-top:1px solid var(--line); background:#FBFCFE;
+    border-radius:0 0 var(--r) var(--r); flex-wrap:wrap;
+  }
+  .stat{padding:9px 16px; border-right:1px solid var(--line); min-width:130px}
+  .stat:last-child{border-right:0; margin-left:auto; text-align:right}
+  .stat .k{font-size:10.5px; letter-spacing:.07em; text-transform:uppercase; color:var(--muted)}
+  .stat .v{font-family:var(--mono); font-size:15px; font-variant-numeric:tabular-nums; margin-top:1px}
+  .stat .v.small{font-size:12.5px; color:var(--ink-2)}
+
+  /* ---------- table ---------- */
+  .tablewrap{overflow:auto; max-height:520px; border-radius:var(--r)}
+  table{width:100%; border-collapse:separate; border-spacing:0; font-size:12.5px}
+  thead th{
+    position:sticky; top:0; background:#F8FAFC; z-index:2; text-align:right;
+    font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted);
+    font-weight:600; padding:9px 10px; border-bottom:1px solid var(--line-2); white-space:nowrap;
+  }
+  thead th.l{text-align:left}
+  thead th .sorted{color:var(--accent)}
+  tbody td{padding:8px 10px; border-bottom:1px solid #F1F5F9; text-align:right; white-space:nowrap;
+    font-family:var(--mono); font-variant-numeric:tabular-nums}
+  tbody td.l{text-align:left; font-family:var(--sans)}
+  tbody tr:hover td{background:#F8FAFF}
+  tbody tr.focus-row td{background:var(--accent-soft)}
+  tbody tr.focus-row td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+  .desc{color:var(--ink-2); font-size:12px}
+  .null{color:var(--faint); font-family:var(--mono)}
+  .rate-high{color:var(--neg)}
+  .chip{
+    display:inline-block; font-family:var(--sans); font-size:10px; letter-spacing:.05em;
+    text-transform:uppercase; padding:1px 5px; border-radius:4px; vertical-align:1px; margin-left:5px;
+    border:1px solid transparent; cursor:help;
+  }
+  .chip-lab{background:var(--warn-soft); color:var(--warn); border-color:var(--warn-line)}
+  .chip-payer{background:#ECFDF5; color:var(--pos); border-color:#BBE9D5}
+  .chip-cpts{background:var(--agent-soft); color:var(--agent); border-color:var(--agent-line)}
+  .tfoot{display:flex; align-items:center; gap:12px; padding:9px 14px; border-top:1px solid var(--line); color:var(--muted); font-size:12px}
+  .tfoot .spacer{margin-left:auto; display:flex; gap:6px; align-items:center}
+
+  /* ---------- agent pane ---------- */
+  .agent{
+    display:flex; flex-direction:column; height:calc(100vh - 74px); min-height:560px;
+    background:var(--card); border:1px solid var(--agent-line); border-radius:var(--r);
+    box-shadow:0 1px 2px rgba(15,23,42,.04);
+  }
+  .agent-head{
+    display:flex; align-items:center; gap:8px; padding:11px 13px;
+    border-bottom:1px solid var(--line); background:linear-gradient(180deg,#FAF8FF,#fff);
+    border-radius:var(--r) var(--r) 0 0;
+  }
+  .agent-head h2{font-size:14px; margin:0; letter-spacing:-.01em}
+  .model-chip{
+    font-family:var(--mono); font-size:10.5px; color:var(--agent); background:var(--agent-soft);
+    border:1px solid var(--agent-line); padding:2px 6px; border-radius:4px;
+  }
+  .agent-head .spacer{margin-left:auto; display:flex; gap:6px}
+  .iconbtn{border:1px solid var(--line); background:#fff; border-radius:6px; padding:3px 7px; cursor:pointer; color:var(--ink-2); font-size:12px}
+  .iconbtn:hover{background:#F8FAFC}
+
+  .thread{flex:1 1 auto; overflow:auto; padding:14px 13px; display:flex; flex-direction:column; gap:14px}
+
+  .msg-user{align-self:flex-end; max-width:88%; background:var(--ink); color:#fff; padding:8px 11px; border-radius:10px 10px 2px 10px}
+  .msg-agent{border-left:2px solid var(--agent-line); padding-left:11px}
+
+  .trace{margin:0 0 9px}
+  .trace > summary{
+    list-style:none; cursor:pointer; font-size:11.5px; color:var(--muted);
+    display:flex; align-items:center; gap:6px; user-select:none;
+  }
+  .trace > summary::-webkit-details-marker{display:none}
+  .trace > summary::before{content:"▸"; color:var(--agent); font-size:9px}
+  .trace[open] > summary::before{content:"▾"}
+  .trace > summary:hover{color:var(--ink-2)}
+  .trace-list{list-style:none; margin:7px 0 0; padding:7px 0 7px 9px; border-left:1px dashed var(--agent-line);
+    display:flex; flex-direction:column; gap:6px}
+  .trace-list li{font-size:11.5px; color:var(--muted); line-height:1.45}
+  .trace-list code{color:var(--agent); font-size:11.5px}
+  .trace-list .args{color:var(--ink-2); font-family:var(--mono); font-size:11px}
+  .trace-list .ret{display:block; color:var(--faint); font-size:11px}
+  .trace-list .running{color:var(--agent)}
+
+  .scope{display:flex; flex-wrap:wrap; gap:4px; margin-bottom:8px}
+  .scope span{
+    font-size:11px; background:#F1F5F9; border:1px solid var(--line); color:var(--ink-2);
+    padding:1px 6px; border-radius:4px; font-family:var(--mono);
+  }
+  .scope span.win{background:var(--accent-soft); border-color:#C7D8FB; color:var(--accent)}
+
+  .answer p{margin:0 0 8px}
+  .answer p:last-child{margin-bottom:0}
+  .fig{font-family:var(--mono); font-variant-numeric:tabular-nums; background:#F8FAFC; border-bottom:1px solid var(--line-2); padding:0 2px}
+
+  .provenance{
+    background:var(--warn-soft); border:1px solid var(--warn-line); border-radius:6px;
+    padding:8px 10px; margin:9px 0; font-size:12.3px; color:#7C4708;
+  }
+  .provenance b{color:var(--warn)}
+  .provenance.panel{background:var(--agent-soft); border-color:var(--agent-line); color:#4C1D95}
+  .provenance.panel b{color:var(--agent)}
+
+  .truncnote{font-size:11.5px; color:var(--muted); margin-top:9px; padding-top:8px; border-top:1px dashed var(--line)}
+  .actions{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px}
+
+  .cmp{width:100%; margin:9px 0 2px; font-size:12px; border-collapse:collapse}
+  .cmp th{font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); text-align:right; padding:3px 6px; font-weight:600}
+  .cmp th.l{text-align:left}
+  .cmp td{padding:4px 6px; text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums; border-top:1px solid var(--line)}
+  .cmp td.l{text-align:left; font-family:var(--sans); color:var(--ink-2)}
+  .delta{font-size:11px; font-family:var(--mono)}
+  .delta.dn{color:var(--neg)} .delta.up{color:var(--pos)}
+  .spark{display:flex; align-items:flex-end; gap:3px; height:26px; margin-top:2px}
+  .spark i{display:block; width:9px; background:var(--agent-line); border-radius:2px 2px 0 0}
+  .spark i.now{background:var(--agent)}
+
+  .confirm{border:1px solid var(--agent-line); background:var(--agent-soft); border-radius:7px; padding:11px}
+  .confirm h3{margin:0 0 7px; font-size:12.5px; color:var(--agent); letter-spacing:.02em}
+  .kv{display:grid; grid-template-columns:88px 1fr; gap:2px 10px; font-size:12px; margin-bottom:9px}
+  .kv dt{color:var(--muted)}
+  .kv dd{margin:0; font-family:var(--mono); font-variant-numeric:tabular-nums}
+  .receipt{border:1px solid var(--line); border-radius:7px; padding:10px; background:#FBFCFE; font-size:12.3px}
+
+  .empty{padding:6px 2px}
+  .empty h3{font-size:13.5px; margin:0 0 3px}
+  .empty p{color:var(--muted); font-size:12.3px; margin:0 0 13px}
+  .suggest{display:flex; flex-direction:column; gap:6px}
+  .suggest button{
+    text-align:left; border:1px solid var(--line); background:#fff; border-radius:7px;
+    padding:8px 10px; cursor:pointer; color:var(--ink-2); font-size:12.5px;
+  }
+  .suggest button:hover{border-color:var(--agent-line); background:var(--agent-soft); color:var(--ink)}
+  .suggest button em{display:block; font-style:normal; font-size:10.5px; color:var(--faint); margin-top:2px; text-transform:uppercase; letter-spacing:.06em}
+
+  .choicebtns{display:flex; flex-direction:column; gap:6px; margin-top:9px}
+  .choicebtns button{
+    display:flex; justify-content:space-between; gap:10px; align-items:center;
+    border:1px solid var(--line-2); background:#fff; border-radius:6px; padding:7px 10px; cursor:pointer; font-size:12.5px;
+  }
+  .choicebtns button:hover{border-color:var(--accent); background:var(--accent-soft)}
+  .choicebtns .hint{font-family:var(--mono); font-size:11px; color:var(--muted)}
+
+  .cursor{display:inline-block; width:7px; height:14px; background:var(--agent); vertical-align:-2px; animation:blink 1s steps(2) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .shimmer{height:9px; border-radius:4px; background:linear-gradient(90deg,#EEF2F7,#E2E8F0,#EEF2F7);
+    background-size:200% 100%; animation:sweep 1.4s linear infinite; margin-top:6px}
+  @keyframes sweep{to{background-position:-200% 0}}
+  .w70{width:70%} .w45{width:45%}
+
+  .notice{border:1px solid var(--line); background:#FBFCFE; border-radius:7px; padding:11px; font-size:12.3px; color:var(--ink-2)}
+  .notice b{color:var(--ink)}
+
+  /* ---------- composer ---------- */
+  .composer{border-top:1px solid var(--line); padding:9px 11px 10px; background:#FCFCFE; border-radius:0 0 var(--r) var(--r)}
+  .ctx{display:flex; align-items:center; gap:6px; font-size:11px; color:var(--muted); margin-bottom:7px; flex-wrap:wrap}
+  .ctx .ctxchip{
+    font-family:var(--mono); background:#F1F5F9; border:1px solid var(--line);
+    padding:1px 6px; border-radius:4px; color:var(--ink-2);
+  }
+  .ctx .drop{border:0; background:transparent; color:var(--faint); cursor:pointer; padding:0 2px}
+  .inputrow{display:flex; gap:7px; align-items:flex-end}
+  textarea{
+    flex:1; resize:none; border:1px solid var(--line-2); border-radius:7px; padding:8px 9px;
+    font:inherit; min-height:56px; background:#fff; color:var(--ink);
+  }
+  textarea:disabled{background:#F1F5F9}
+  .composer-foot{display:flex; align-items:center; gap:8px; margin-top:7px; font-size:10.8px; color:var(--faint)}
+  .meter{margin-left:auto; display:flex; align-items:center; gap:6px}
+  .meter .bar{width:58px; height:4px; background:var(--line); border-radius:2px; overflow:hidden}
+  .meter .bar i{display:block; height:100%; width:19%; background:var(--agent)}
+  .meter .bar i.full{width:100%; background:var(--neg)}
+
+  .flagnote{display:none}
+  body.flag-off .flagnote{
+    display:block; margin-top:12px; border:1px dashed var(--line-2); border-radius:var(--r);
+    padding:10px 14px; color:var(--muted); font-size:12.3px; background:#FBFCFE;
+  }
+
+  [hidden]{display:none !important}
+  @media (prefers-reduced-motion:reduce){*{animation:none !important}}
+  @media (max-width:1180px){
+    .workspace{flex-direction:column}
+    .agent-pane{width:100%; flex:1 1 auto; position:static}
+    .agent{height:auto; min-height:0}
+    .thread{max-height:640px}
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== mockup-only control strip ===== -->
+<div class="mockbar">
+  <span class="tag">Mockup</span>
+  <span class="path">CptLookup.cshtml + _AgentChat.cshtml</span>
+  <div class="seg" role="group" aria-label="Chat panel state">
+    <button data-show="conversation" aria-pressed="true">Conversation</button>
+    <button data-show="firstrun" aria-pressed="false">First run</button>
+    <button data-show="choice" aria-pressed="false">Needs a choice</button>
+    <button data-show="export" aria-pressed="false">Export confirm</button>
+    <button data-show="budget" aria-pressed="false">Budget spent</button>
+  </div>
+  <label class="flagtoggle"><input type="checkbox" id="flagOff"> Feature flag off</label>
+</div>
+
+<div class="app">
+
+  <div class="crumb">
+    <span class="up">Analytics /</span>
+    <h1>CPT &amp; Panel Lookup</h1>
+    <span class="rowcount">LRNMaster · CPTAverage · window 2026-01-01 → 2026-08-15</span>
+  </div>
+
+  <div class="workspace">
+
+    <!-- =================== data pane =================== -->
+    <main class="data-pane">
+
+      <section class="card">
+        <div class="filters">
+          <div class="field">
+            <label for="f-lab">Lab</label>
+            <select id="f-lab"><option>Cove (12)</option><option>NorthWest (7)</option><option>NorthWest (23)</option><option>ATI (31)</option></select>
+          </div>
+          <div class="field">
+            <label>Level</label>
+            <div class="toggle-group" role="group" aria-label="Lookup level">
+              <button aria-pressed="true">CPT</button>
+              <button aria-pressed="false">Panel</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="f-cpt">CPT code</label>
+            <input class="textin" id="f-cpt" placeholder="All codes" value="">
+          </div>
+          <div class="field">
+            <label for="f-payer">Payer</label>
+            <select id="f-payer"><option>AETNA</option><option>All payers</option><option>UHC</option><option>BCBS TX</option></select>
+          </div>
+          <div class="field">
+            <label for="f-win">Window</label>
+            <select id="f-win"><option>YTD</option><option>Rolling180</option><option>Rolling90</option></select>
+          </div>
+          <div class="spacer">
+            <button class="btn">Reset</button>
+            <button class="btn btn-primary">Search</button>
+            <button class="btn">Export</button>
+          </div>
+        </div>
+
+        <div class="summary">
+          <div class="stat"><div class="k">Rows</div><div class="v">1,284</div></div>
+          <div class="stat"><div class="k">Avg allowed / unit</div><div class="v">$37.91</div></div>
+          <div class="stat"><div class="k">Avg paid / unit</div><div class="v">$29.44</div></div>
+          <div class="stat"><div class="k">Denial rate</div><div class="v">6.8%</div></div>
+          <div class="stat"><div class="k">Scope</div><div class="v small">Cove (12) · AETNA · YTD</div></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="l">CPT</th>
+                <th class="l">Description</th>
+                <th class="l">Payer</th>
+                <th>Lines</th>
+                <th>Avg charge</th>
+                <th>Avg allowed</th>
+                <th>Avg paid</th>
+                <th>Median</th>
+                <th>P25</th>
+                <th>P75</th>
+                <th>Mode allowed</th>
+                <th>Mode paid</th>
+                <th><span class="sorted">Denial % ▾</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="l">G0480</td><td class="l desc">Definitive drug test, 1–7 classes</td><td class="l">AETNA</td>
+                <td>188</td><td>215.00</td><td>114.43</td><td>82.10</td><td>112.00</td><td>96.40</td><td>131.20</td>
+                <td class="null" title="No LabModes row — not zero">—</td><td class="null" title="No LabModes row — not zero">—</td><td class="rate-high">18.9</td>
+              </tr>
+              <tr>
+                <td class="l">80305</td><td class="l desc">Drug screen, direct optical</td><td class="l">AETNA</td>
+                <td>96</td><td>42.00</td><td>18.55</td><td>14.02</td><td>18.10</td><td>15.00</td><td>21.75</td>
+                <td class="null" title="No LabModes row — not zero">—</td><td class="null">—</td><td>9.1</td>
+              </tr>
+              <tr class="focus-row">
+                <td class="l">80307</td><td class="l desc">Drug screen, presumptive, instrument chem</td><td class="l">AETNA</td>
+                <td>143</td><td>78.00</td><td>42.18</td><td>31.07</td><td>41.60</td><td>33.90</td><td>49.25</td>
+                <td>38.00<span class="chip chip-lab" title="ModeMatch = lab — Cove's lab-wide mode, no AETNA row in LabModes">lab</span></td>
+                <td>30.40<span class="chip chip-lab" title="MedianMatch = lab">lab</span></td><td>6.4</td>
+              </tr>
+              <tr>
+                <td class="l">80359</td><td class="l desc">Methadone &amp; metabolite, confirmatory</td><td class="l">AETNA</td>
+                <td>471</td><td>96.00</td><td>21.40</td><td>17.02</td><td>20.75</td><td>17.20</td><td>24.60</td>
+                <td>19.50<span class="chip chip-payer" title="ModeMatch = payer — AETNA's own mode">payer</span></td><td>15.40<span class="chip chip-payer">payer</span></td><td>5.2</td>
+              </tr>
+              <tr>
+                <td class="l">80353</td><td class="l desc">Cocaine &amp; metabolite, confirmatory</td><td class="l">AETNA</td>
+                <td>512</td><td>96.00</td><td>21.40</td><td>17.88</td><td>20.75</td><td>17.20</td><td>24.60</td>
+                <td>19.50<span class="chip chip-payer">payer</span></td><td>16.10<span class="chip chip-payer">payer</span></td><td>4.8</td>
+              </tr>
+              <tr>
+                <td class="l">80365</td><td class="l desc">Oxycodone, confirmatory</td><td class="l">AETNA</td>
+                <td>488</td><td>96.00</td><td>21.40</td><td>18.11</td><td>20.75</td><td>17.20</td><td>24.60</td>
+                <td>19.50<span class="chip chip-payer">payer</span></td><td>16.70<span class="chip chip-payer">payer</span></td><td>4.1</td>
+              </tr>
+              <tr>
+                <td class="l">81001</td><td class="l desc">Urinalysis, automated with scope</td><td class="l">AETNA</td>
+                <td>302</td><td>24.00</td><td>4.12</td><td>3.66</td><td>4.08</td><td>3.55</td><td>4.70</td>
+                <td>3.98<span class="chip chip-payer">payer</span></td><td>3.66<span class="chip chip-payer">payer</span></td><td>3.7</td>
+              </tr>
+              <tr>
+                <td class="l">84443</td><td class="l desc">Thyroid stimulating hormone (TSH)</td><td class="l">AETNA</td>
+                <td>214</td><td>62.00</td><td>23.05</td><td>21.44</td><td>22.80</td><td>20.10</td><td>25.60</td>
+                <td>22.75<span class="chip chip-payer">payer</span></td><td>21.00<span class="chip chip-payer">payer</span></td><td>2.3</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="tfoot">
+          <span>8 of 1,284 rows</span>
+          <span class="spacer">
+            <button class="btn btn-sm" disabled>Previous</button>
+            <span>Page 1 / 52</span>
+            <button class="btn btn-sm">Next</button>
+          </span>
+        </div>
+      </section>
+
+      <div class="flagnote">
+        <b>Feature flag off.</b> The chat panel doesn't render and no agent script loads. Filters, grid,
+        paging and export behave exactly as they do today — this is the N7 fallback, not a degraded mode.
+      </div>
+    </main>
+
+    <!-- =================== agent pane =================== -->
+    <aside class="agent-pane">
+      <div class="agent">
+
+        <header class="agent-head">
+          <h2>Ask the data</h2>
+          <span class="model-chip">Opus 5</span>
+          <span class="spacer">
+            <button class="iconbtn" title="Start a new conversation">New</button>
+            <button class="iconbtn" title="Hide the panel">✕</button>
+          </span>
+        </header>
+
+        <!-- ---------- STATE: conversation ---------- -->
+        <div class="thread" data-state="conversation">
+
+          <div class="msg-user">What does Aetna pay for 80307 at Cove, YTD?</div>
+
+          <div class="msg-agent">
+            <details class="trace">
+              <summary>3 lookups · 143 rows matched, 25 read</summary>
+              <ol class="trace-list">
+                <li><code>list_labs</code> <span class="args">()</span><span class="ret">→ "Cove" resolved to labId 12 (one match)</span></li>
+                <li><code>resolve_filter_value</code> <span class="args">field:"payer", q:"Aetna"</span><span class="ret">→ 1 match: AETNA</span></li>
+                <li><code>lookup_cpt</code> <span class="args">labId:12, cptCode:"80307", payer:"AETNA", windowType:"YTD", pageSize:25</span><span class="ret">→ totalCount 143, returnedCount 25, truncated</span></li>
+              </ol>
+            </details>
+
+            <div class="scope">
+              <span>Cove (12)</span><span>80307</span><span>AETNA</span><span class="win">YTD</span><span>2026-01-01 → 2026-08-15</span>
+            </div>
+
+            <div class="answer">
+              <p>Across 143 lines, Aetna's average allowed is <span class="fig">$42.18</span> per unit and average
+                paid <span class="fig">$31.07</span> — a <span class="fig">26.3%</span> gap between allowed and paid.
+                Median allowed is <span class="fig">$41.60</span>, with P25 <span class="fig">$33.90</span> and
+                P75 <span class="fig">$49.25</span>. Denial rate <span class="fig">6.4%</span>.</p>
+            </div>
+
+            <div class="provenance">
+              <b>Rate provenance.</b> The mode allowed on these rows is $38.00, but that's Cove's
+              <b>lab-wide</b> mode — LabModes has no Aetna row for 80307. Read it as a house benchmark,
+              not as Aetna's own contracted rate.
+            </div>
+
+            <p class="truncnote">Showing 25 of 143 rows. The averages above are computed over all 143, not the page.</p>
+            <div class="actions">
+              <button class="btn btn-sm">Show these rows in the grid</button>
+              <button class="btn btn-sm">Export all 143</button>
+            </div>
+          </div>
+
+          <div class="msg-user">and for Rolling90?</div>
+
+          <div class="msg-agent">
+            <details class="trace">
+              <summary>1 lookup · 3 windows returned</summary>
+              <ol class="trace-list">
+                <li><code>compare_cpt_windows</code> <span class="args">labId:12, cptCode:"80307", payer:"AETNA"</span><span class="ret">→ YTD, Rolling180, Rolling90</span></li>
+              </ol>
+            </details>
+
+            <div class="scope">
+              <span>Cove (12)</span><span>80307</span><span>AETNA</span><span class="win">3 windows</span>
+            </div>
+
+            <div class="answer">
+              <p>Allowed per unit has drifted down over the year — Rolling90 sits
+                <span class="fig">$2.32</span> below YTD, and the denial rate has gone the other way.</p>
+              <table class="cmp">
+                <thead><tr><th class="l">Window</th><th>Lines</th><th>Avg allowed</th><th>Avg paid</th><th>Denial %</th></tr></thead>
+                <tbody>
+                  <tr><td class="l">YTD</td><td>143</td><td>42.18</td><td>31.07</td><td>6.4</td></tr>
+                  <tr><td class="l">Rolling180</td><td>101</td><td>41.02 <span class="delta dn">−2.7%</span></td><td>30.44</td><td>6.7</td></tr>
+                  <tr><td class="l">Rolling90</td><td>58</td><td>39.86 <span class="delta dn">−5.5%</span></td><td>29.90 <span class="delta dn">−3.8%</span></td><td>7.1 <span class="delta dn">+0.7</span></td></tr>
+                </tbody>
+              </table>
+              <div class="spark" aria-hidden="true">
+                <i style="height:26px"></i><i style="height:24px"></i><i class="now" style="height:22px"></i>
+              </div>
+              <p style="font-size:11px;color:var(--muted);margin-top:4px">Allowed / unit: YTD → R180 → R90</p>
+              <p>Rolling90 rests on 58 lines, so treat the move as a signal to watch rather than a settled trend.</p>
+            </div>
+            <div class="actions">
+              <button class="btn btn-sm">Switch grid to Rolling90</button>
+            </div>
+          </div>
+
+          <div class="msg-user">Which payer pays least on the ATI tox panel?</div>
+
+          <div class="msg-agent">
+            <details class="trace" open>
+              <summary>Working…</summary>
+              <ol class="trace-list">
+                <li><code>resolve_filter_value</code> <span class="args">field:"panelName", q:"tox"</span><span class="ret">→ 1 match: ATI TOX SCREEN 14</span></li>
+                <li class="running"><code>lookup_panel</code> <span class="args">labId:31, panelName:"ATI TOX SCREEN 14", windowType:"YTD", sortColumn:"avgPaidAmountPerUnit", sortDirection:"asc"</span><span class="ret">running…</span></li>
+              </ol>
+            </details>
+            <div class="shimmer w70"></div>
+            <div class="shimmer w45"></div>
+            <p style="margin-top:8px">Sorting payers by paid per unit<span class="cursor"></span></p>
+          </div>
+        </div>
+
+        <!-- ---------- STATE: first run ---------- -->
+        <div class="thread" data-state="firstrun" hidden>
+          <div class="empty">
+            <h3>Ask about the rates on this page</h3>
+            <p>Answers come from the same four tables the grid reads. Nothing is estimated, and every
+              figure links back to the lookup that produced it.</p>
+            <div class="suggest">
+              <button>What does Aetna pay for 80307 at Cove, YTD?<em>single lookup</em></button>
+              <button>Top 10 CPTs by denial rate for lab 12, last 90 days<em>ranking</em></button>
+              <button>Has 84443 moved between Rolling90 and YTD?<em>window comparison</em></button>
+              <button>Which payer pays the least on the ATI tox panel?<em>panel + ranking</em></button>
+              <button>Why is the mode rate blank on this row?<em>data question</em></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---------- STATE: needs a choice ---------- -->
+        <div class="thread" data-state="choice" hidden>
+          <div class="msg-user">Average allowed for 84443 at NorthWest</div>
+
+          <div class="msg-agent">
+            <details class="trace" open>
+              <summary>1 lookup · 2 matches</summary>
+              <ol class="trace-list">
+                <li><code>list_labs</code> <span class="args">()</span><span class="ret">→ 2 labs named "NorthWest": 7 and 23</span></li>
+              </ol>
+            </details>
+            <div class="answer">
+              <p>Two labs are registered under that name. Which one?</p>
+            </div>
+            <div class="choicebtns">
+              <button><span>NorthWest</span><span class="hint">labId 7 · 4,102 rows YTD</span></button>
+              <button><span>NorthWest</span><span class="hint">labId 23 · 918 rows YTD</span></button>
+            </div>
+          </div>
+
+          <div class="msg-user">80307 for Cigna at Cove, Rolling90</div>
+
+          <div class="msg-agent">
+            <details class="trace">
+              <summary>2 lookups · 0 rows</summary>
+              <ol class="trace-list">
+                <li><code>resolve_filter_value</code> <span class="args">field:"payer", q:"Cigna"</span><span class="ret">→ 1 match: CIGNA</span></li>
+                <li><code>lookup_cpt</code> <span class="args">labId:12, cptCode:"80307", payer:"CIGNA", windowType:"Rolling90"</span><span class="ret">→ totalCount 0</span></li>
+              </ol>
+            </details>
+            <div class="scope"><span>Cove (12)</span><span>80307</span><span>CIGNA</span><span class="win">Rolling90</span></div>
+            <div class="answer">
+              <p>No rows. CPTAverage has no Cigna line for 80307 at Cove in the Rolling90 window, so there's
+                nothing to average — not a rate of zero.</p>
+            </div>
+            <div class="actions">
+              <button class="btn btn-sm">Try YTD instead</button>
+              <button class="btn btn-sm">Drop the payer filter</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---------- STATE: export confirm ---------- -->
+        <div class="thread" data-state="export" hidden>
+          <div class="msg-user">Export everything we just looked at.</div>
+
+          <div class="msg-agent">
+            <div class="answer"><p>Ready to queue this. Check the filters before I run it:</p></div>
+            <div class="confirm">
+              <h3>Queue CptLookup export</h3>
+              <dl class="kv">
+                <dt>Lab</dt><dd>Cove (12)</dd>
+                <dt>CPT</dt><dd>80307</dd>
+                <dt>Payer</dt><dd>AETNA</dd>
+                <dt>Window</dt><dd>YTD · 2026-01-01 → 2026-08-15</dd>
+                <dt>Sort</dt><dd>denialRate desc</dd>
+                <dt>Rows</dt><dd>143 (full set, not the 25 read here)</dd>
+              </dl>
+              <div class="actions">
+                <button class="btn btn-agent btn-sm">Queue export</button>
+                <button class="btn btn-sm">Cancel</button>
+              </div>
+            </div>
+            <p class="truncnote">Nothing is queued until you press the button — this is the only action the
+              agent takes outside the read path.</p>
+          </div>
+
+          <div class="msg-agent">
+            <div class="receipt">
+              <b>Queued.</b> Report <span class="mono">#48211</span> is building on ReportQueueLabs.Master.
+              It lands in the Reports panel when it finishes — same file the Export button produces.
+              <div class="actions"><button class="btn btn-sm">Open Reports panel</button></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---------- STATE: budget spent ---------- -->
+        <div class="thread" data-state="budget" hidden>
+          <div class="msg-user">Top 10 CPTs by denial rate for lab 12</div>
+          <div class="msg-agent">
+            <div class="notice">
+              <b>You've used today's question budget.</b> It resets at 00:00 UTC. The grid, filters and
+              export are unaffected — the same ranking is one sort away: set Window to Rolling90 and sort
+              by Denial %.
+              <div class="actions"><button class="btn btn-sm">Sort the grid instead</button></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---------- composer ---------- -->
+        <div class="composer">
+          <div class="ctx">
+            Grid context
+            <span class="ctxchip">Cove (12)</span>
+            <span class="ctxchip">AETNA</span>
+            <span class="ctxchip">YTD</span>
+            <button class="drop" title="Ask without the grid filters">detach ✕</button>
+          </div>
+          <div class="inputrow">
+            <textarea id="composerInput" placeholder="Ask about a code, a panel, a payer or a window…"></textarea>
+            <button class="btn btn-agent" id="sendBtn">Send</button>
+          </div>
+          <div class="composer-foot">
+            <span>Every figure comes from a lookup call.</span>
+            <span class="meter" title="Per-user daily budget, enforced server-side">
+              <span id="meterLabel">38 / 200 today</span>
+              <span class="bar"><i id="meterBar"></i></span>
+            </span>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<script>
+  // Mockup-only: swap chat states and preview the flag-off page.
+  var seg = document.querySelectorAll('.seg button');
+  var panes = document.querySelectorAll('.thread[data-state]');
+  seg.forEach(function (b) {
+    b.addEventListener('click', function () {
+      seg.forEach(function (o) { o.setAttribute('aria-pressed', String(o === b)); });
+      panes.forEach(function (p) { p.hidden = p.dataset.state !== b.dataset.show; });
+      var spent = b.dataset.show === 'budget';
+      document.getElementById('composerInput').disabled = spent;
+      document.getElementById('sendBtn').disabled = spent;
+      document.getElementById('meterBar').className = spent ? 'full' : '';
+      document.getElementById('meterLabel').textContent = spent ? '200 / 200 today' : '38 / 200 today';
+    });
+  });
+  document.getElementById('flagOff').addEventListener('change', function (e) {
+    document.body.classList.toggle('flag-off', e.target.checked);
+  });
+</script>
+</body>
+</html>

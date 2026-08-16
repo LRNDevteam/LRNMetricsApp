@@ -1,0 +1,1461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Denial Dashboard &amp; Denial Workflow — Screens v2</title>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css" rel="stylesheet">
+<style>
+:root{
+  --navy-900:#0a2342; --navy-800:#12305a; --navy-700:#1b3f72; --navy-head:#16325c;
+  --blue-600:#1b64da; --blue-500:#2f7ce8; --blue-050:#e9f1fd;
+  --teal-600:#0f9d8e; --teal-500:#16b1a0; --teal-050:#e4f7f4;
+  --ink:#16233a; --ink-2:#4a5b74; --ink-3:#7d8ca4;
+  --line:#e2e8f0; --line-2:#eef2f7; --canvas:#eef2f7; --card:#ffffff;
+  --red-600:#d64550; --red-050:#fdecee;
+  --amber-600:#c47f10; --amber-050:#fdf4e3;
+  --green-600:#1f9254; --green-050:#e8f6ee;
+  --purple-600:#7048b6; --purple-050:#f2edfb;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --shadow:0 1px 2px rgba(13,35,64,.06), 0 10px 28px rgba(13,35,64,.05);
+}
+*{scrollbar-width:thin;}
+body{background:var(--canvas); color:var(--ink); font-size:14px;
+  font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif;}
+.mono{font-family:var(--mono); font-size:.85em;}
+.num{font-variant-numeric:tabular-nums;}
+.eyebrow{font-size:10px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3); font-weight:700;}
+.muted{color:var(--ink-3);}
+:focus-visible{outline:2px solid var(--blue-500); outline-offset:2px;}
+
+/* ---------------- top navy bar ---------------- */
+.topbar{background:linear-gradient(100deg,var(--navy-900),var(--navy-700)); color:#dfe8f5;}
+.logo{width:34px;height:34px;border:2px solid #7fa6d9;border-radius:6px;display:grid;place-items:center;
+  font-weight:800;font-size:12px;color:#bcd3f0;letter-spacing:-.05em;}
+.brandline{line-height:1.05;}
+.brandline b{font-size:15px;letter-spacing:.12em;color:#fff;font-weight:700;}
+.brandline span{font-size:9.5px;letter-spacing:.34em;color:#8fb0dc;}
+.labchip{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff;
+  border-radius:8px;padding:5px 12px;font-size:13px;font-weight:600;}
+.avatar{width:28px;height:28px;border-radius:50%;background:#3f74bb;color:#fff;display:grid;place-items:center;font-size:11px;font-weight:700;}
+.mainnav{background:#fff;border-bottom:1px solid var(--line);}
+.mainnav a{color:var(--ink-2);font-size:13.5px;font-weight:600;padding:11px 14px;display:inline-flex;gap:7px;
+  align-items:center;text-decoration:none;border-bottom:3px solid transparent;}
+.mainnav a:hover{color:var(--blue-600);background:#f7fafd;}
+.mainnav a.on{color:var(--blue-600);border-bottom-color:var(--blue-600);}
+
+/* ---------------- page header ---------------- */
+.pagehead{background:#fff;border-bottom:1px solid var(--line);}
+.pagehead h1{font-size:19px;font-weight:700;margin:0;letter-spacing:-.02em;}
+.crumb{font-size:12px;color:var(--ink-3);}
+.crumb b{color:var(--teal-600);font-weight:600;}
+.btn-teal{background:var(--teal-600);border-color:var(--teal-600);color:#fff;font-weight:600;}
+.btn-teal:hover{background:#0c8578;border-color:#0c8578;color:#fff;}
+.btn-jobs{background:var(--teal-050);border:1px solid #bfe8e2;color:#0c7a70;font-weight:600;}
+
+/* ---------------- cards ---------------- */
+.card{border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);}
+.card-header{background:#fff;border-bottom:1px solid var(--line-2);font-weight:700;font-size:14px;padding:.7rem 1rem;
+  border-radius:12px 12px 0 0;}
+.panel{background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);}
+.srcchip{background:#f2f6fb;border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:12px;color:var(--ink-2);}
+.srcchip b{color:var(--ink);}
+
+/* ---------------- kpi ---------------- */
+.kpi{background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);
+  padding:12px 14px;height:100%;border-left:4px solid var(--blue-600);}
+.kpi .l{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-weight:700;}
+.kpi .v{font-size:24px;font-weight:700;letter-spacing:-.025em;color:var(--navy-800);line-height:1.15;margin-top:2px;}
+.kpi .s{font-size:11.5px;color:var(--blue-600);cursor:pointer;}
+.kpi .s:hover{text-decoration:underline;}
+.kpi.k-blue{border-left-color:var(--blue-600);} .kpi.k-purple{border-left-color:var(--purple-600);}
+.kpi.k-green{border-left-color:var(--green-600);} .kpi.k-red{border-left-color:var(--red-600);}
+.kpi.k-amber{border-left-color:var(--amber-600);} .kpi.k-teal{border-left-color:var(--teal-600);}
+.kpi.k-navy{border-left-color:var(--navy-800);}
+
+/* ---------------- pill tabs ---------------- */
+.pilltabs{display:flex;flex-wrap:wrap;gap:8px;}
+.pilltab{background:#fff;border:1px solid var(--line);border-radius:9px;padding:8px 14px;font-size:13px;
+  font-weight:600;color:var(--ink-2);box-shadow:0 1px 2px rgba(13,35,64,.05);display:inline-flex;gap:7px;align-items:center;}
+.pilltab:hover{color:var(--blue-600);border-color:#c7d9f2;}
+.pilltab.on{background:var(--blue-600);border-color:var(--blue-600);color:#fff;box-shadow:0 4px 12px rgba(27,100,218,.28);}
+
+/* queue chips */
+.qchip{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 11px;font-size:12.5px;font-weight:600;
+  color:var(--ink-2);display:inline-flex;gap:7px;align-items:center;}
+.qchip .c{background:var(--line-2);color:var(--ink-2);border-radius:20px;padding:0 7px;font-size:11px;}
+.qchip.on{background:var(--teal-600);border-color:var(--teal-600);color:#fff;}
+.qchip.on .c{background:rgba(255,255,255,.25);color:#fff;}
+.qchip.risk{border-color:#f4c3c7;color:var(--red-600);} .qchip.risk .c{background:var(--red-600);color:#fff;}
+.qchip.risk.on{background:var(--red-600);border-color:var(--red-600);color:#fff;}
+
+/* ---------------- grids ---------------- */
+.gridwrap{overflow:auto;border:1px solid var(--line);border-radius:10px;background:#fff;}
+table.grid{width:100%;margin:0;border-collapse:separate;border-spacing:0;font-size:12.5px;}
+table.grid th{position:sticky;top:0;z-index:3;background:var(--navy-head);color:#fff;font-weight:700;font-size:11px;
+  letter-spacing:.05em;text-transform:uppercase;padding:9px 10px;white-space:nowrap;border-right:1px solid rgba(255,255,255,.12);}
+table.grid tr.filters th{top:33px;background:#eaf0f8;z-index:2;padding:5px 6px;border-right:1px solid #dbe4f0;}
+table.grid tr.filters input{width:100%;min-width:92px;border:1px solid #cdd9e8;border-radius:5px;font-size:11.5px;padding:3px 6px;background:#fff;}
+table.grid td{padding:8px 10px;border-bottom:1px solid var(--line-2);white-space:nowrap;vertical-align:middle;}
+table.grid tbody tr:nth-child(even){background:#fafcfe;}
+table.grid tbody tr:hover{background:var(--blue-050);}
+table.grid td.sticky,table.grid th.sticky{position:sticky;left:0;background:#fff;z-index:1;border-right:1px solid var(--line);}
+table.grid tbody tr:nth-child(even) td.sticky{background:#fafcfe;}
+table.grid tbody tr:hover td.sticky{background:var(--blue-050);}
+table.grid th.sticky{background:var(--navy-head);z-index:4;}
+table.grid tr.filters th.sticky{background:#eaf0f8;z-index:3;}
+.gridfoot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  padding:9px 12px;border-top:1px solid var(--line);background:#f8fafd;font-size:12.5px;color:var(--ink-2);
+  border-radius:0 0 10px 10px;}
+.wrapcell{white-space:normal !important;min-width:220px;line-height:1.35;}
+
+/* ---------------- pills ---------------- */
+.pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;border:1px solid transparent;white-space:nowrap;}
+.p-new{background:var(--teal-050);color:#0c7a70;border-color:#bfe8e2;}
+.p-pending{background:var(--blue-050);color:#1550ac;border-color:#c9def8;}
+.p-progress{background:var(--amber-050);color:var(--amber-600);border-color:#f2ddb2;}
+.p-verif{background:var(--purple-050);color:var(--purple-600);border-color:#ddd0f3;}
+.p-dup{background:var(--red-050);color:var(--red-600);border-color:#f6cfd3;}
+.p-done{background:var(--green-050);color:var(--green-600);border-color:#c6e7d3;}
+.p-closed{background:#eef2f7;color:var(--ink-2);border-color:var(--line);}
+.p-high{background:var(--red-050);color:var(--red-600);border-color:#f6cfd3;}
+.p-med{background:var(--amber-050);color:var(--amber-600);border-color:#f2ddb2;}
+.p-low{background:var(--green-050);color:var(--green-600);border-color:#c6e7d3;}
+.p-escal{background:var(--red-050);color:var(--red-600);border-color:#f6cfd3;}
+
+/* ---------------- breakdown / bars ---------------- */
+.bd{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-2);cursor:pointer;}
+.bd:last-child{border-bottom:0;}
+.bd:hover .bd-l{color:var(--blue-600);}
+.bd-l{flex:0 0 40%;font-size:12.5px;}
+.bd-t{flex:1;height:7px;background:var(--line-2);border-radius:4px;overflow:hidden;}
+.bd-f{height:100%;background:var(--blue-500);border-radius:4px;}
+.bd-f.r{background:var(--red-600);} .bd-f.a{background:var(--amber-600);} .bd-f.g{background:var(--green-600);}
+.bd-n{flex:0 0 128px;text-align:right;font-size:12px;color:var(--ink-2);}
+.insighthead{color:#fff;font-weight:700;padding:10px 14px;border-radius:12px 12px 0 0;font-size:14px;}
+.ih-blue{background:linear-gradient(90deg,#2f7ce8,#5aa0f5);}
+.ih-purple{background:linear-gradient(90deg,#7048b6,#9a72db);}
+.ih-teal{background:linear-gradient(90deg,#0f9d8e,#3ec7b6);}
+.ih-amber{background:linear-gradient(90deg,#c47f10,#e2a63c);}
+
+/* pivot */
+.pivot th{background:var(--navy-head);color:#fff;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;
+  padding:8px 10px;text-align:center;border-right:1px solid rgba(255,255,255,.12);}
+.pivot th.lbl{text-align:left;}
+.pivot td{padding:7px 10px;font-size:12.5px;border-bottom:1px solid var(--line-2);}
+.pivot tr.payer{background:#f4f8fd;font-weight:700;color:var(--navy-800);}
+.pivot tr.total{background:#fdf6e3;font-weight:700;}
+.pivot .idx{width:34px;color:var(--ink-3);font-size:11px;text-align:center;}
+.dash{color:#b6c2d2;}
+
+/* claim detail */
+.detail{border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:var(--shadow);overflow:hidden;}
+.detail-top{padding:14px 18px;border-bottom:1px solid var(--line-2);}
+.detail-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px 18px;padding:14px 18px;
+  border-bottom:1px solid var(--line-2);background:#fbfcfe;}
+.detail-meta .k{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--blue-600);font-weight:700;}
+.detail-meta .v{font-size:13px;font-weight:600;}
+.subtabs{display:flex;gap:8px;padding:10px 18px;border-bottom:1px solid var(--line-2);flex-wrap:wrap;}
+.subtab{border:0;background:transparent;border-radius:8px;padding:6px 13px;font-size:13px;font-weight:600;color:var(--ink-2);}
+.subtab.on{background:var(--teal-600);color:#fff;}
+.progresstrack{height:7px;border-radius:4px;background:var(--line-2);overflow:hidden;width:190px;}
+.progresstrack div{height:100%;background:var(--teal-500);}
+.notecard{border-left:3px solid var(--teal-500);background:#f7fbfa;border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:10px;}
+.notecard .m{font-size:11.5px;color:var(--ink-3);margin-top:5px;}
+.kv{border:1px solid var(--line);border-radius:8px;padding:8px 10px;}
+.kv .k{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);font-weight:700;}
+.kv .v{font-size:13px;font-weight:600;}
+.kv.hi{background:var(--teal-050);border-color:#bfe8e2;}
+.kv.hi .k{color:#0c7a70;} .kv.hi .v{color:#0b6b62;}
+.timeline{border-left:2px solid var(--line);padding-left:16px;margin-left:6px;}
+.timeline .it{position:relative;padding-bottom:16px;}
+.timeline .it::before{content:"";position:absolute;left:-23px;top:4px;width:10px;height:10px;border-radius:50%;
+  background:#fff;border:2px solid var(--blue-500);}
+.snap{background:#f6f8fb;border:1px solid var(--line-2);border-radius:6px;padding:7px 9px;font-family:var(--mono);
+  font-size:11px;color:var(--ink-2);white-space:pre-wrap;}
+
+/* filters */
+.fgroup{background:var(--blue-050);border:1px solid #cfe0fa;color:#1550ac;border-radius:20px;padding:4px 13px;
+  font-size:12px;font-weight:700;display:inline-flex;gap:7px;align-items:center;}
+.fgroup.teal{background:var(--teal-050);border-color:#bfe8e2;color:#0c7a70;}
+.flab{font-size:11.5px;font-weight:600;color:var(--ink-2);margin-bottom:4px;}
+.form-control,.form-select{border-color:#d6dfea;}
+.form-control:focus,.form-select:focus{border-color:var(--blue-500);box-shadow:0 0 0 3px rgba(47,124,232,.12);}
+.chip{background:#fff;border:1px solid #cfe0fa;color:#1550ac;border-radius:20px;padding:3px 10px;font-size:12px;
+  margin:0 6px 6px 0;display:inline-flex;gap:8px;align-items:center;}
+.chip button{border:0;background:none;color:#1550ac;line-height:1;padding:0;}
+
+/* drawer / misc */
+.drawer{position:fixed;top:0;right:0;height:100%;width:min(480px,94vw);background:#fff;z-index:1080;
+  border-left:1px solid var(--line);box-shadow:-16px 0 40px rgba(13,35,64,.16);transform:translateX(102%);
+  transition:transform .22s ease;display:flex;flex-direction:column;}
+.drawer.open{transform:translateX(0);}
+@media (prefers-reduced-motion:reduce){.drawer{transition:none;}}
+.notice{border-radius:10px;padding:10px 14px;font-size:12.5px;display:flex;gap:10px;align-items:flex-start;}
+.notice.warn{background:var(--amber-050);border:1px solid #f2ddb2;color:#8a5c07;}
+.notice.info{background:var(--blue-050);border:1px solid #cfe0fa;color:#1550ac;}
+.tag{font-family:var(--mono);font-size:10.5px;border:1px solid var(--line);border-radius:4px;padding:0 5px;color:var(--ink-2);background:#f7fafd;}
+.runstep{flex:1 0 120px;padding:9px 12px;border-right:1px solid var(--line-2);}
+.runstep:last-child{border-right:0;}
+.runstep .n{font-size:10px;font-family:var(--mono);color:var(--ink-3);}
+.runstep .t{font-size:12px;font-weight:600;line-height:1.25;margin-top:2px;}
+.runstep .bar{height:3px;border-radius:2px;background:var(--line);margin-top:8px;}
+.runstep.done .bar{background:var(--teal-500);}
+.runstep.now .bar{background:var(--blue-600);}
+.runstep.off{background:#f8fafc;} .runstep.off .t{color:var(--ink-3);font-weight:500;}
+.modal-content{border:0;border-radius:14px;}
+.modal-header{border-bottom:1px solid var(--line-2);}
+.modal-footer{border-top:1px solid var(--line-2);background:#f8fafd;border-radius:0 0 14px 14px;}
+</style>
+</head>
+<body>
+
+<!-- ===================== TOP BAR ===================== -->
+<div class="topbar">
+  <div class="container-fluid px-3 py-2 d-flex align-items-center gap-3">
+    <div class="d-flex align-items-center gap-2">
+      <div class="logo">LRN</div>
+      <div class="brandline"><b>LAB REVENUE</b><br><span>NAVIGATOR</span></div>
+    </div>
+    <div class="ms-auto d-flex align-items-center gap-2">
+      <select class="labchip form-select form-select-sm" style="width:auto" id="labSel" onchange="onLab()">
+        <option value="Augustus_Labs">Augustus_Labs</option>
+        <option value="NorthWest">NorthWest</option>
+        <option value="Gulf_Coast">Gulf_Coast</option>
+      </select>
+      <button class="btn btn-sm text-white position-relative" style="background:rgba(255,255,255,.1)" onclick="openDrawer('jobsDrawer')">
+        Jobs <span class="badge rounded-pill bg-warning text-dark" id="jobBadge">1</span>
+      </button>
+      <select class="labchip form-select form-select-sm" style="width:auto" id="roleSel" onchange="setRole(this.value)">
+        <option value="admin">Lab Admin</option>
+        <option value="manager">AR Manager</option>
+        <option value="reviewer">AR Reviewer</option>
+      </select>
+      <div class="avatar" id="avatarInit">LA</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MAIN NAV ===================== -->
+<div class="mainnav">
+  <div class="container-fluid px-3 d-flex flex-wrap">
+    <a href="#" class="disabled-link">Home</a>
+    <a href="#">Revenue Dashboard</a>
+    <a href="#">Standard Reports</a>
+    <a href="#" id="nav-dashboard" onclick="setModule('dashboard');return false;">Denial Dashboard</a>
+    <a href="#" id="nav-workflow" onclick="setModule('workflow');return false;">Denial Workflow</a>
+    <a href="#">Analytics</a>
+    <a href="#">Master Values</a>
+    <a href="#">Admin</a>
+  </div>
+</div>
+
+<!-- ===================== PAGE HEAD ===================== -->
+<div class="pagehead">
+  <div class="container-fluid px-3 py-2 d-flex flex-wrap align-items-center gap-2">
+    <div>
+      <h1 id="pageTitle">Denial Dashboard</h1>
+      <div class="crumb">LRN Analytics / <b id="pageCrumb">Denial Dashboard</b></div>
+    </div>
+    <div class="ms-auto d-flex align-items-center gap-2">
+      <span class="srcchip" id="srcChip"></span>
+      <button class="btn btn-sm btn-teal" onclick="queueExport()">Overall Download</button>
+      <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#filterBody">View Filters</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== GLOBAL FILTERS ===================== -->
+<div class="container-fluid px-3 pt-3">
+  <div class="panel p-3">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <div class="fw-bold">Global filters</div>
+      <div class="ms-auto text-end small">
+        <div class="muted" style="font-size:11px">Data source for selected lab</div>
+        <div id="rowCount"></div>
+      </div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 mb-2" id="ctxChips"></div>
+    <div id="chipRow" class="mb-1"></div>
+
+    <div class="collapse" id="filterBody">
+      <hr class="my-3">
+      <div class="fgroup mb-2">Workflow filters</div>
+      <div class="row g-3 mb-3">
+        <div class="col-6 col-md-3"><div class="flab">Lab <span class="text-danger">*</span></div>
+          <input class="form-control form-control-sm" value="Augustus Labs" readonly></div>
+        <div class="col-6 col-md-3"><div class="flab">Task Status</div>
+          <select class="form-select form-select-sm" multiple size="4" id="f_status">
+            <option selected>(All)</option><option>New</option><option>Pending Review</option><option>In-Progress</option>
+            <option>Verification Pending</option><option>Completed</option><option>Closed</option></select></div>
+        <div class="col-6 col-md-3"><div class="flab">Priority</div>
+          <select class="form-select form-select-sm" multiple size="4" id="f_priority">
+            <option selected>(All)</option><option>High</option><option>Medium</option><option>Low</option></select></div>
+        <div class="col-6 col-md-3"><div class="flab">Classification</div>
+          <select class="form-select form-select-sm" multiple size="4" id="f_class">
+            <option selected>(All)</option><option>Bundling/Unbundling Denial</option><option>CPT Related Denial</option>
+            <option>ICD/CPT Policy Compliance Denial</option><option>Billing Related Denial</option>
+            <option>Documentation Denial</option><option>Duplicate Claim</option><option>Authorization Denial</option></select></div>
+      </div>
+      <div class="fgroup teal mb-2">Payer / service filters</div>
+      <div class="row g-3">
+        <div class="col-6 col-md-3"><div class="flab">Action Category</div>
+          <select class="form-select form-select-sm" multiple size="4" id="f_action">
+            <option selected>(All)</option><option>Appeal</option><option>Rebill</option><option>Manual Review</option>
+            <option>Write Off</option><option>Patient Bill</option></select></div>
+        <div class="col-6 col-md-3"><div class="flab">SLA / Deadline</div>
+          <select class="form-select form-select-sm" multiple size="4" id="f_deadline">
+            <option selected>(All)</option><option>Overdue</option><option>Due in 3 days</option>
+            <option>Due in 7 days</option><option>Beyond 7 days</option></select></div>
+        <div class="col-6 col-md-3"><div class="flab">Payer Name</div><input class="form-control form-control-sm" id="f_payer" placeholder="Select payer names"></div>
+        <div class="col-6 col-md-3"><div class="flab">Payer Type</div><input class="form-control form-control-sm" id="f_ptype" placeholder="Select payer types"></div>
+        <div class="col-6 col-md-3"><div class="flab">Panel Name</div><input class="form-control form-control-sm" id="f_panel" placeholder="Select panel names"></div>
+        <div class="col-6 col-md-3"><div class="flab">Referring Provider</div><input class="form-control form-control-sm" id="f_prov" placeholder="Select providers"></div>
+        <div class="col-6 col-md-3"><div class="flab">Clinic Name</div><input class="form-control form-control-sm" id="f_clinic" placeholder="Select clinics"></div>
+        <div class="col-6 col-md-3"><div class="flab">Sales Rep</div><input class="form-control form-control-sm" id="f_rep" placeholder="Select sales reps"></div>
+        <div class="col-6 col-md-3"><div class="flab">Denial Code</div>
+          <select class="form-select form-select-sm" multiple size="4" id="f_code">
+            <option selected>(All)</option><option>CO97</option><option>CO226</option><option>CO96</option><option>CO16</option>
+            <option>CO11</option><option>CO18</option><option>COB13</option><option>CO252</option><option>CO197</option></select></div>
+        <div class="col-6 col-md-3"><div class="flab">Date of Service</div>
+          <div class="input-group input-group-sm"><input type="date" class="form-control"><span class="input-group-text">to</span><input type="date" class="form-control"></div></div>
+        <div class="col-6 col-md-3"><div class="flab">First Billed</div>
+          <div class="input-group input-group-sm"><input type="date" class="form-control"><span class="input-group-text">to</span><input type="date" class="form-control"></div></div>
+        <div class="col-6 col-md-3"><div class="flab">Denial Date</div>
+          <div class="input-group input-group-sm"><input type="date" class="form-control" value="2026-07-01"><span class="input-group-text">to</span><input type="date" class="form-control" value="2026-08-12"></div></div>
+      </div>
+      <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+        <div class="small muted">Multi-choice values travel pipe-delimited; <span class="tag">(All)</span> means no filter. Date ranges are inclusive. Per-column grid filters apply on top, server-side.</div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-outline-secondary" onclick="queueExport()">Download Excel</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="clearFilters()">Reset</button>
+          <button class="btn btn-sm btn-primary" onclick="applyFilters()">Apply Filters</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== TABS + PANE ===================== -->
+<div class="container-fluid px-3 py-3">
+  <div class="pilltabs mb-3" id="tabBar"></div>
+  <div id="pane"></div>
+  <div class="text-center muted py-4" style="font-size:12px">Copyright @Lab Revenue Navigator 2026</div>
+</div>
+
+<!-- ===================== MODALS ===================== -->
+<div class="modal fade" id="assignModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+  <div class="modal-header"><div><h6 class="modal-title mb-0">Assign reviewer</h6>
+    <div class="small muted">Assignment is by denial code × payer — a reviewer owns the pattern for this run.</div></div>
+    <button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="notice info mb-3" id="assignScope"></div>
+    <div class="row g-3">
+      <div class="col-md-6"><div class="flab">AR Reviewer</div><select class="form-select form-select-sm" id="assignTo"></select></div>
+      <div class="col-md-6"><div class="flab">Assignment note (optional)</div><input class="form-control form-control-sm" id="assignNote" placeholder="Context for the reviewer"></div>
+    </div>
+    <div class="notice warn mt-3">Status moves to <span class="pill p-pending mx-1">Pending Review</span> only where it is blank or
+      <span class="pill p-new mx-1">New</span>. An in-flight status is never overwritten, and the whole assignment is one transaction.</div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+    <button class="btn btn-sm btn-teal" onclick="commitAssign()">Assign</button></div>
+</div></div></div>
+
+<div class="modal fade" id="statusModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+  <div class="modal-header"><div><h6 class="modal-title mb-0">Update status</h6>
+    <div class="small muted">Status updates by claim, action group, denial classification, CPT, or selected lines.</div></div>
+    <button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="notice info mb-3" id="statusScope"></div>
+    <div class="row g-3">
+      <div class="col-md-6"><div class="flab">Update scope</div>
+        <select class="form-select form-select-sm" id="scopeSel"><option>By Claim</option><option>By Denial Classification</option><option>By CPT</option><option>Selected lines</option></select></div>
+      <div class="col-md-6"><div class="flab">New line status</div>
+        <select class="form-select form-select-sm" id="statusVal">
+          <option>In-Progress</option><option>Completed</option><option>Closed</option><option>Duplicate</option></select></div>
+      <div class="col-md-6"><div class="flab">Actual action / outcome</div>
+        <select class="form-select form-select-sm" id="outcomeVal">
+          <option>Appeal Submitted</option><option>Rebill Submitted</option><option>Records Sent</option>
+          <option>Written Off</option><option>Patient Billed</option></select></div>
+      <div class="col-md-6"><div class="flab">Action completed</div>
+        <select class="form-select form-select-sm"><option>Yes</option><option>No</option></select></div>
+      <div class="col-12"><div class="flab">Reviewer comments</div>
+        <textarea class="form-control form-control-sm" rows="3" id="statusNote" placeholder="What did you do, and what happens next?"></textarea></div>
+    </div>
+    <div class="notice warn mt-3 d-none" id="dupWarn"><b>Duplicate</b> removes the task from the board and raises a verification item.
+      It is never silently closed.</div>
+    <div class="notice info mt-3 d-none" id="claimWarn">This action category is registered <span class="tag mx-1">ActionScope = ClaimLevel</span>,
+      so the change applies to every task on claim <b id="claimWarnId"></b>.</div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+    <button class="btn btn-sm btn-teal" onclick="commitStatus()">Save change</button></div>
+</div></div></div>
+
+<div class="modal fade" id="verifyModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+  <div class="modal-header"><div><h6 class="modal-title mb-0">Verification decision</h6>
+    <div class="small muted">Decide whether the removed or duplicate denial was valid.</div></div>
+    <button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="notice info mb-3" id="verifyScope"></div>
+    <div class="form-check mb-1"><input class="form-check-input" type="radio" name="vdec" id="vValid" checked onchange="toggleVerify()">
+      <label class="form-check-label" for="vValid"><b>Valid denial</b> — re-insert the task on the board</label></div>
+    <div class="form-check mb-3"><input class="form-check-input" type="radio" name="vdec" id="vInvalid" onchange="toggleVerify()">
+      <label class="form-check-label" for="vInvalid"><b>Not a denial</b> — do not restore; keep the history</label></div>
+    <div id="restoreWrap" class="mb-3"><div class="flab">Restore under status</div>
+      <select class="form-select form-select-sm" id="restoreStatus"><option>Pending Review</option><option>In-Progress</option><option>New</option></select></div>
+    <div class="flab">Verifier comments</div><textarea class="form-control form-control-sm" rows="3" id="verifyNote"></textarea>
+  </div>
+  <div class="modal-footer"><button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+    <button class="btn btn-sm btn-teal" onclick="commitVerify()">Record decision</button></div>
+</div></div></div>
+
+<div class="modal fade" id="escalateModal" tabindex="-1"><div class="modal-dialog modal-xl"><div class="modal-content">
+  <div class="modal-header"><div><h6 class="modal-title mb-0" id="escTitle">Escalate claim</h6>
+    <div class="small muted">Select manager, clarification note and expected response date.</div></div>
+    <button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body"><div class="row g-4">
+    <div class="col-lg-6">
+      <div class="flab">Escalate to</div>
+      <select class="form-select form-select-sm mb-3" id="escTo">
+        <option>AR Manager — internal escalation</option>
+        <option>Client / Account Manager — external escalation</option>
+      </select>
+      <div class="flab">Clarification / escalation note</div>
+      <textarea class="form-control form-control-sm mb-1" rows="5" id="escNote" maxlength="1500" placeholder="Explain what the manager has to review…"></textarea>
+      <div class="text-end small muted mb-3">0/1500</div>
+      <div class="flab">Expected response</div>
+      <input type="date" class="form-control form-control-sm mb-3" style="max-width:220px">
+      <div class="flab">Attachment (optional)</div>
+      <input type="file" class="form-control form-control-sm">
+    </div>
+    <div class="col-lg-6">
+      <div class="fw-bold mb-2">Escalation history</div>
+      <div class="muted small mb-3" id="escHistory">No previous escalation history found.</div>
+      <div class="fw-bold mb-2">Claim notes</div>
+      <div id="escNotes"></div>
+    </div>
+  </div></div>
+  <div class="modal-footer"><button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+    <button class="btn btn-sm btn-teal" onclick="commitEscalate()">Submit escalation</button></div>
+</div></div></div>
+
+<div class="modal fade" id="docModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h6 class="modal-title" id="docTitle">Claim documents</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="flab">Denial code · CPT code</div>
+    <select class="form-select form-select-sm mb-3"><option>Overall claim</option><option>CO197 · G0480</option><option>CO252 · 80307</option></select>
+    <input type="file" class="form-control form-control-sm mb-3" multiple>
+    <textarea class="form-control form-control-sm mb-1" rows="3" maxlength="1500" placeholder="Document comment…"></textarea>
+    <div class="text-end small muted mb-3">0/1500</div>
+    <button class="btn btn-sm btn-teal w-100" onclick="toast('Documents uploaded and attached to the claim.')">Upload documents</button>
+    <div class="eyebrow mt-3">Uploaded documents</div>
+    <div class="muted small">Accepts pdf, docx, jpg, png up to 25 MB each.</div>
+  </div>
+</div></div></div>
+
+<!-- jobs drawer -->
+<div class="drawer" id="jobsDrawer">
+  <div class="d-flex justify-content-between align-items-center p-3 border-bottom">
+    <div><div class="eyebrow">Jobs</div><div class="fw-bold">Queued exports</div></div>
+    <button class="btn-close" onclick="closeDrawer('jobsDrawer')"></button></div>
+  <div class="p-3 overflow-auto" id="jobsBody"></div>
+  <div class="p-3 border-top small muted">Files are scoped to the requesting user and served through an unguessable download token, stored outside the web root.</div>
+</div>
+
+<!-- history drawer -->
+<div class="drawer" id="histDrawer">
+  <div class="d-flex justify-content-between align-items-center p-3 border-bottom">
+    <div><div class="eyebrow">Task history</div><div class="fw-bold mono" id="histTitle"></div></div>
+    <button class="btn-close" onclick="closeDrawer('histDrawer')"></button></div>
+  <div class="p-3 overflow-auto" id="histBody"></div>
+</div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3" id="toasts"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/js/bootstrap.bundle.min.js"></script>
+<script>
+/* ==========================================================
+   SEED DATA — shaped after the live Augustus Labs run
+   ========================================================== */
+let _s=20260812; const rnd=()=>(_s=(_s*1103515245+12345)%2147483648)/2147483648;
+const pick=a=>a[Math.floor(rnd()*a.length)];
+const money=n=>'$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const kmoney=n=>'$'+(n/1000).toFixed(1)+'K';
+
+const DENIALS=[
+ ['CO97','The benefit for this service is included in the payment/allowance for another service/procedure that has already been adjudicated.','Bundling/Unbundling Denial','Appeal'],
+ ['CO226','Information requested from the Billing/Rendering Provider was not provided or not provided timely or was insufficient/incomplete.','Documentation Denial','Rebill'],
+ ['CO96','Non-covered charge(s).','CPT Related Denial','Manual Review'],
+ ['CO16','Claim/service lacks information or has submission/billing error(s).','Billing Related Denial','Rebill'],
+ ['CO11','The diagnosis is inconsistent with the procedure.','ICD/CPT Policy Compliance Denial','Appeal'],
+ ['CO18','Exact duplicate claim/service.','Duplicate Claim','Write Off'],
+ ['COB13','Previously paid.','COB / Coordination of Benefits Denial','Manual Review'],
+ ['CO252','An attachment/other documentation is required to adjudicate this claim/service.','Documentation Denial','Rebill'],
+ ['CO197','Precertification/authorization/notification/pre-treatment absent.','Authorization Denial','Appeal'],
+ ['CO45','Charge exceeds fee schedule/maximum allowable.','Contractual Adjustment','Write Off']];
+const SCOPE={'Appeal':'ClaimLevel','Rebill':'ClaimLevel','Manual Review':'ClaimLevel','Write Off':'LineLevel','Patient Bill':'LineLevel'};
+const RECO={'Appeal':'Obtain retroactive authorization if possible; otherwise appeal with clinical notes',
+ 'Rebill':'Submit the required documentation and resubmit the claim',
+ 'Manual Review':'Review original claim status & resubmit if unpaid',
+ 'Write Off':'Verify payment & write off','Patient Bill':'Transfer balance to patient responsibility'};
+const PAYERS=[['AETNA BETTER HEALTH','Commercial'],['BLUE CROSS BLUE SHIELD OF IL','Commercial'],
+ ['UNITED HEALTH CARE','Commercial'],['MOLINA IL','Medicaid'],['AMBETTER IL','Commercial'],
+ ['MEDICARE','Government'],['CIGNA','Commercial'],['HUMANA MEDICARE ADVANTAGE','Medicare Advantage'],
+ ['PRESBYTERIAN CENTENNIAL CARE MCR','Medicaid']];
+const CPTS=['36415','80048','80053','80061','80307','82306','82607','83036','84153','84443','85025','87481','87500','87651','G0480'];
+const PANELS=['Toxicology','CMP Panel','Lipid Panel','Hepatic Panel','Thyroid Panel','UA Reflex','CBC w/ Diff'];
+const CLINICS=['Omega Specialty Group PLC','Core Psych, PLLC - Dearborn','PORTSMOUTH-CARDINAL TREATMENT CENTER','HomeMD Housecalls','Cedar Park Clinic'];
+const PROVIDERS=['HALICKI,NESTOR','Harb,Rami','Alexander,Fay','Iyer,Nandita','Cole,Benjamin'];
+const REPS=['D. Whitfield','S. Ahmed','L. Moreau','K. Ibarra'];
+const PATIENTS=['BYNUM, HARRISON','DARLING, GREGORY','Stearman, Corey','Rincher, Brandon','BORYS, MICHELLE','BERRY, HUSSEN','COLLEY, MICHELE'];
+const REVIEWERS=['Jameel_AR','Prasanna_NWL_AR','Kavitha_AR','Osei_AR','Tan_AR'];
+const USER={admin:{n:'Lab Admin',i:'LA',r:'Jameel_AR'},manager:{n:'AR Manager',i:'AM',r:'Jameel_AR'},reviewer:{n:'Abdul Jameel',i:'AJ',r:'Jameel_AR'}};
+const RUNS={Augustus_Labs:'R20260811AUG0367',NorthWest:'R20260811NWL0412',Gulf_Coast:'R20260810GC0288'};
+const SRC={Augustus_Labs:'Augustus_Billing Masterfile_08.03.2026 - 08.09.2026.xlsx',NorthWest:'NWL_Daq_WebPM_Union_08.10.2026.xlsx',Gulf_Coast:'Not available'};
+
+const d0=new Date('2026-08-12'), dStr=d=>d.toISOString().slice(0,10);
+const addD=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x;};
+const fmtUS=s=>{const[a,b,c]=s.split('-');return `${+b}/${+c}/${a}`;};
+
+const LINES=[],TASKS=[];
+for(let i=0;i<420;i++){
+  const [code,desc,cls,act]=pick(DENIALS), [payer,ptype]=pick(PAYERS), cpt=pick(CPTS);
+  const claimNo=String(87000+Math.floor(rnd()*70000));
+  const acct=pick(['AMC','MVFP','IWFP','FHCP','UHC'])+'-'+(10000+Math.floor(rnd()*89999));
+  const dDate=addD(d0,-Math.floor(rnd()*54)), dos=addD(dDate,-(18+Math.floor(rnd()*45))), billed=addD(dos,3+Math.floor(rnd()*9));
+  const bal=Math.round((7.5+rnd()*940)*100)/100, charge=Math.round(bal*1.4*100)/100;
+  const prio=bal>500?'High':bal>150?'Medium':'Low';
+  const slaDays=prio==='High'?14:prio==='Medium'?21:30;
+  const due=addD(dDate,slaDays), days=Math.round((due-d0)/86400000);
+  const st=rnd()<.34?'New':pick(['Pending Review','In-Progress','Pending Review','In-Progress','Completed','Closed']);
+  const assigned=st==='New'?'':pick(REVIEWERS);
+  const line={id:i+1,visit:claimNo,acct,accession:String(1700000+Math.floor(rnd()*90000)),cpt,code,desc,cls,payer,ptype,
+    payerCode:String(1000+Math.floor(rnd()*900)),payerNorm:payer.split(' ').slice(0,2).join(' '),
+    denialDate:dStr(dDate),dos:dStr(dos),billed:dStr(billed),bal,charge,units:1+Math.floor(rnd()*2),
+    panel:pick(PANELS),clinic:pick(CLINICS),provider:pick(PROVIDERS),rep:pick(REPS),patient:pick(PATIENTS),
+    payStatus:'Denied',histPay:'No',source:pick(['Webpm','Daq']),
+    icd:'Z00.00, E78.5, R73.09, E11.9, I10, N18.3'};
+  LINES.push(line);
+  if(rnd()<.78){
+    const t={taskId:'TSK-'+String(21+i).padStart(5,'0'),claim:claimNo,acct,patient:line.patient,cpt,code,desc,cls,
+      payer,ptype,action:act,scope:SCOPE[act],reco:RECO[act],prio,status:st,assigned,due:dStr(due),days,slaDays,bal,
+      denialDate:dStr(dDate),dos:dStr(dos),panel:line.panel,clinic:line.clinic,provider:line.provider,source:line.source,
+      units:line.units,modifier:'-',
+      track:`${claimNo}_${line.dos.replace(/-/g,'')}|${cpt}|${code}`,
+      notes:st==='New'?[]:[{by:assigned,when:dStr(addD(dDate,4)),scope:'By Claim',scopeVal:'Overall Claim',
+        newStatus:st,outcome:pick(['Appeal Submitted','Rebill Submitted','Records Sent']),
+        reco:RECO[act],text:pick(['Denial unclear, payer follow-up required.','Records requested from clinic.','Rebilled with corrected modifier.','Eligibility re-verified — patient inactive on DOS.'])}],
+      history:[{when:dStr(addD(dDate,1)),who:'System',what:'Created','note':'Imported from PayerValidationReport by the Denial Database Worker.'}],
+      docs:0,escalated:false,from:'Current Run'};
+    if(assigned) t.history.push({when:dStr(addD(dDate,2)),who:'Lab Admin',what:'Assigned',note:`Assigned to ${assigned} on ${code} × ${payer}.`});
+    if(['In-Progress','Completed','Closed'].includes(st))
+      t.history.push({when:dStr(addD(dDate,4)),who:assigned,what:'StatusChanged',note:`→ ${st}.`,
+        snap:`{"status":"Pending Review","assignedTo":"${assigned}","runId":"${RUNS.Augustus_Labs}"}`});
+    TASKS.push(t);
+    line.wfTask=t.taskId; line.wfStatus=st; line.wfAssigned=assigned; line.wfNotes=t.notes[0]?t.notes[0].text:'';
+  } else {line.wfTask='';line.wfStatus='';line.wfAssigned='';line.wfNotes='';}
+}
+
+let VERIFY=[
+ {vid:'VER-4411',claim:'104882',cpt:'83036',code:'CO16',payer:'CIGNA',reason:'Marked duplicate by reviewer',by:'Prasanna_NWL_AR',on:'2026-08-07',bal:412.60,src:'Workflow'},
+ {vid:'VER-4412',claim:'127419',cpt:'80053',code:'CO197',payer:'AETNA BETTER HEALTH',reason:'Marked duplicate by reviewer',by:'Kavitha_AR',on:'2026-08-08',bal:188.00,src:'Workflow'},
+ {vid:'VER-4413',claim:'133907',cpt:'84443',code:'CO226',payer:'MEDICARE',reason:'Dropped from this run — was assigned and open',by:'Pipeline',on:'2026-08-11',bal:733.15,src:'Pipeline'},
+ {vid:'VER-4414',claim:'118256',cpt:'87481',code:'CO96',payer:'HUMANA MEDICARE ADVANTAGE',reason:'Dropped from this run — was assigned and open',by:'Pipeline',on:'2026-08-11',bal:96.40,src:'Pipeline'},
+ {vid:'VER-4415',claim:'149003',cpt:'85025',code:'CO45',payer:'BLUE CROSS BLUE SHIELD OF IL',reason:'Marked duplicate by reviewer',by:'Osei_AR',on:'2026-08-09',bal:254.75,src:'Workflow'}];
+
+let JOBS=[{name:'Denial_Augustus_R20260811AUG0367_2026-W32.xlsx',at:'2026-08-12 09:14',state:'Ready',pct:100,sheet:6}];
+
+/* ==========================================================
+   STATE
+   ========================================================== */
+const state={module:'dashboard',role:'admin',tab:'summary',queue:'All',page:{},colF:{},sel:new Set(),
+  openClaim:null,claimTab:'tasks',pending:null,chips:[{k:'Denial Date',v:'2026-07-01 → 2026-08-12'}]};
+const can={assign:()=>['admin','manager'].includes(state.role),
+  status:()=>['admin','reviewer'].includes(state.role),
+  seeAll:()=>['admin','manager'].includes(state.role)};
+const me=()=>USER[state.role].r;
+const myTasks=()=>can.seeAll()?TASKS:TASKS.filter(t=>t.assigned===me());
+const myLines=()=>can.seeAll()?LINES:LINES.filter(l=>l.wfAssigned===me());
+const pillC=s=>({'New':'p-new','Pending Review':'p-pending','In-Progress':'p-progress','Verification Pending':'p-verif',
+ 'Duplicate':'p-dup','Completed':'p-done','Closed':'p-closed','High':'p-high','Medium':'p-med','Low':'p-low'}[s]||'p-new');
+const pill=s=>`<span class="pill ${pillC(s)}">${s}</span>`;
+
+const DASH_TABS=[['summary','Dashboard'],['weekly','Weekly Breakdown'],['monthly','Monthly Breakdown'],
+ ['panel','Filter Panel'],['board','Task Board'],['sla','SLA Tracker'],['insight','Denial Insight'],['line','Line Item']];
+const wfTabs=()=>[['wfhome','Dashboard'],['wfinsight','Denial Insight'],
+ ['wfboard',can.seeAll()?'Claim Assignment':'My Worklist'],['wfverify','Verification']];
+function tabs(){
+  if(state.module==='dashboard') return state.role==='reviewer'?DASH_TABS.filter(t=>['board','line'].includes(t[0])):DASH_TABS;
+  return state.role==='reviewer'?wfTabs().filter(t=>t[0]!=='wfinsight'):wfTabs();
+}
+function setModule(m){state.module=m;state.sel.clear();state.openClaim=null;state.tab=tabs()[0][0];render();}
+function setRole(r){state.role=r;state.sel.clear();state.openClaim=null;
+  if(!tabs().some(t=>t[0]===state.tab))state.tab=tabs()[0][0];render();}
+function setTab(t){state.tab=t;state.sel.clear();state.openClaim=null;render();}
+function onLab(){render();}
+
+/* ==========================================================
+   GRID
+   ========================================================== */
+function grid(cfg){
+  const k=cfg.id; state.page[k]=state.page[k]||1; state.colF[k]=state.colF[k]||{};
+  const cf=state.colF[k];
+  const rows=cfg.rows.filter(r=>cfg.cols.every(c=>{
+    const v=(cf[c.k]||'').trim().toLowerCase();
+    return !v||String(c.raw?c.raw(r):(r[c.k]??'')).toLowerCase().includes(v);}));
+  const size=cfg.size||100, pages=Math.max(1,Math.ceil(rows.length/size)), p=Math.min(state.page[k],pages);
+  const slice=rows.slice((p-1)*size,p*size);
+  const head=cfg.cols.map((c,i)=>`<th class="${i===0&&cfg.sticky?'sticky':''}" style="${c.w?`min-width:${c.w}px`:''}">${c.t}</th>`).join('');
+  const filt=cfg.cols.map((c,i)=>`<th class="${i===0&&cfg.sticky?'sticky':''}">${c.nof?'':
+    `<input value="${cf[c.k]||''}" placeholder="filter" oninput="colF('${k}','${c.k}',this.value)">`}</th>`).join('');
+  const body=slice.length?slice.map(r=>`<tr>${cfg.cols.map((c,i)=>
+    `<td class="${i===0&&cfg.sticky?'sticky':''} ${c.cls||''}">${c.f?c.f(r):(r[c.k]??'<span class="dash">-</span>')}</td>`).join('')}</tr>`).join('')
+    :`<tr><td colspan="${cfg.cols.length}" class="text-center py-5 muted">${cfg.empty||'No rows match these filters. Clear a column filter above or widen the global filter.'}</td></tr>`;
+  return `<div class="gridwrap" style="max-height:${cfg.h||560}px"><table class="grid">
+    <thead><tr>${head}</tr><tr class="filters">${filt}</tr></thead><tbody>${body}</tbody></table></div>
+  <div class="gridfoot">
+    <div>Showing <b class="num">${rows.length?((p-1)*size+1):0}-${Math.min(p*size,rows.length)}</b> of
+      <b class="num">${rows.length.toLocaleString()}</b> rows${rows.length!==cfg.rows.length?` <span class="muted">(filtered from ${cfg.rows.length.toLocaleString()})</span>`:''}
+      · paged and filtered server-side</div>
+    <div class="d-flex align-items-center gap-2">
+      <span class="muted">Rows per page</span>
+      <select class="form-select form-select-sm" style="width:80px"><option>100</option><option>50</option><option>250</option></select>
+      <div class="btn-group btn-group-sm">
+        <button class="btn btn-outline-secondary" ${p<=1?'disabled':''} onclick="goPage('${k}',1)">First</button>
+        <button class="btn btn-outline-secondary" ${p<=1?'disabled':''} onclick="goPage('${k}',${p-1})">Prev</button>
+        <button class="btn btn-primary disabled">${p} / ${pages}</button>
+        <button class="btn btn-outline-secondary" ${p>=pages?'disabled':''} onclick="goPage('${k}',${p+1})">Next</button>
+        <button class="btn btn-outline-secondary" ${p>=pages?'disabled':''} onclick="goPage('${k}',${pages})">Last</button>
+      </div>
+    </div></div>`;
+}
+function colF(k,c,v){state.colF[k][c]=v;state.page[k]=1;render(true);}
+function goPage(k,p){state.page[k]=p;render();}
+
+/* ==========================================================
+   SHARED BITS
+   ========================================================== */
+const runId=()=>RUNS[document.getElementById('labSel').value];
+function head(title,note,btns){
+  return `<div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-3">
+    <div><div class="d-flex align-items-center gap-2"><span class="fw-bold" style="font-size:16px">${title}</span>
+      <span class="srcchip mono">Run Id: ${runId()}</span></div>
+      <div class="small muted mt-1">${note}</div></div>
+    <div class="d-flex gap-2 flex-wrap">${btns||''}</div></div>`;
+}
+const dlBtn=`<button class="btn btn-sm btn-teal" onclick="queueExport()">Download Excel</button>`;
+function kpi(cls,label,val,sub){
+  return `<div class="col-6 col-lg"><div class="kpi ${cls}"><div class="l">${label}</div><div class="v num">${val}</div>
+    ${sub?`<div class="s">${sub}</div>`:''}</div></div>`;
+}
+function tally(rows,f){const m={};rows.forEach(r=>{const k=r[f]||'(Blank)';m[k]=m[k]||{n:0,b:0};m[k].n++;m[k].b+=r.bal;});
+  return Object.entries(m).map(([k,v])=>({k,...v})).sort((a,b)=>b.n-a.n);}
+function bars(list,total,color){
+  const max=Math.max(...list.map(x=>x.n),1);
+  return list.map(x=>`<div class="bd" onclick="addChip('Breakdown','${x.k.replace(/'/g,'')}')">
+    <div class="bd-l">${x.k}</div><div class="bd-t"><div class="bd-f ${color||''}" style="width:${Math.round(x.n/max*100)}%"></div></div>
+    <div class="bd-n num">${x.n.toLocaleString()} · ${money(x.b)}</div></div>`).join('');
+}
+
+/* ==========================================================
+   DASHBOARD PANES
+   ========================================================== */
+function paneSummary(){
+  const t=myTasks();
+  const open=t.filter(x=>!['Completed','Closed'].includes(x.status));
+  const c={total:t.length,open:open.length,prog:t.filter(x=>x.status==='In-Progress').length,
+    done:t.filter(x=>['Completed','Closed'].includes(x.status)).length,
+    over:open.filter(x=>x.days<0).length,soon:open.filter(x=>x.days>=0&&x.days<=3).length,
+    high:open.filter(x=>x.prio==='High').length,bal:open.reduce((s,x)=>s+x.bal,0)};
+  const steps=[['1','Start','done'],['2','Load ClaimActionMapper','done'],['3','Load denied rows','done'],
+    ['4','Normalize and map','done'],['5','Build insight rows','done'],['6','Build task board rows','done'],
+    ['7','Write export package','off'],['8','Write tables','done'],['9','Upload to SharePoint','off'],['10','Completed','now']];
+  const byStatus=tally(t,'status'), byCls=tally(t,'cls');
+  return `${head('Task Summary','One lab, one run — every tile counts the current run only.',dlBtn)}
+  <div class="row g-2 mb-2">
+    ${kpi('k-blue','Total tasks',c.total.toLocaleString())}
+    ${kpi('k-navy','Open',c.open.toLocaleString(),'Click to view filtered claims')}
+    ${kpi('k-green','In progress',c.prog.toLocaleString())}
+    ${kpi('k-teal','Completed',c.done.toLocaleString())}
+  </div>
+  <div class="row g-2 mb-3">
+    ${kpi('k-red','Overdue',c.over.toLocaleString(),'Past the SLA due date')}
+    ${kpi('k-purple','Due in 3 days',c.soon.toLocaleString())}
+    ${kpi('k-amber','High priority',c.high.toLocaleString())}
+    ${kpi('k-green','Insurance balance',money(c.bal))}
+  </div>
+
+  <div class="panel p-3 mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+      <div><div class="fw-bold">Pipeline run · Denial Report</div>
+        <div class="small muted">Tracker state reported to the Report Control Board. Steps 7 and 9 are off for this lab
+          (<span class="tag">GenerateOutputFiles = false</span>).</div></div>
+      <span class="pill p-done">Success · 09:04</span>
+    </div>
+    <div class="d-flex overflow-auto border rounded" style="border-color:var(--line)!important">
+      ${steps.map(([n,t,c])=>`<div class="runstep ${c}"><div class="n">${n}</div><div class="t">${t}</div><div class="bar"></div></div>`).join('')}
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-12 col-xl-5"><div class="card h-100"><div class="card-header">Status Summary</div>
+      <div class="p-3">${bars(byStatus.map(x=>({...x})),c.total)}</div></div></div>
+    <div class="col-12 col-xl-7"><div class="card h-100"><div class="card-header">Top Denial Classifications</div>
+      <div class="gridwrap" style="border:0;border-radius:0 0 12px 12px"><table class="grid">
+        <thead><tr><th style="min-width:250px">Classification</th><th class="text-end">Count</th><th class="text-end">Open</th>
+          <th class="text-end">Completed</th><th class="text-end">High priority</th><th class="text-end">Insurance balance</th></tr></thead>
+        <tbody>${byCls.slice(0,10).map(x=>{
+          const rows=t.filter(y=>(y.cls||'(Blank)')===x.k);
+          return `<tr><td class="wrapcell fw-semibold">${x.k}</td><td class="text-end num">${x.n}</td>
+            <td class="text-end num">${rows.filter(y=>!['Completed','Closed'].includes(y.status)).length}</td>
+            <td class="text-end num">${rows.filter(y=>['Completed','Closed'].includes(y.status)).length}</td>
+            <td class="text-end num">${rows.filter(y=>y.prio==='High').length}</td>
+            <td class="text-end num">${money(x.b)}</td></tr>`;}).join('')}</tbody></table></div></div></div>
+  </div>`;
+}
+
+function weekLabel(d){const s=new Date(d);s.setDate(s.getDate()-((s.getDay()+6)%7));const e=addD(s,6);
+  const m=x=>x.toLocaleString('en-US',{month:'short'}).toUpperCase()+' '+String(x.getDate()).padStart(2,'0');
+  return m(s)+' - '+m(e);}
+function panePivot(byMonth){
+  const key=l=>byMonth?l.denialDate.slice(0,7):weekLabel(new Date(l.denialDate));
+  const sortKey=l=>byMonth?l.denialDate.slice(0,7):new Date(l.denialDate).setDate(new Date(l.denialDate).getDate()-((new Date(l.denialDate).getDay()+6)%7));
+  const map={}; myLines().forEach(l=>{map[key(l)]=Math.min(map[key(l)]??1e18,sortKey(l));});
+  const cols=Object.entries(map).sort((a,b)=>b[1]-a[1]).slice(0,byMonth?4:4).map(x=>x[0]).reverse();
+  const payers=tally(myLines(),'payer').slice(0,7);
+  const cell=(rows)=>rows.length?`<div class="fw-semibold num">${rows.length}</div>`:'<span class="dash">-</span>';
+  const bcell=(rows)=>rows.length?`<div class="num">${money(rows.reduce((s,r)=>s+r.bal,0))}</div>`:'<span class="dash">$ -</span>';
+  let body='';
+  payers.forEach((p,pi)=>{
+    const pr=myLines().filter(l=>l.payer===p.k);
+    body+=`<tr class="payer"><td class="idx">${String.fromCharCode(65+pi)}</td><td>${p.k}
+      <span class="srcchip ms-2">${tally(pr,'code').length} denials</span></td>
+      ${cols.map(c=>{const rs=pr.filter(l=>key(l)===c);return `<td class="text-center">${cell(rs)}</td><td class="text-end">${bcell(rs)}</td>`;}).join('')}
+      <td class="text-end num fw-bold">${pr.length}</td><td class="text-end num fw-bold">${money(p.b)}</td></tr>`;
+    tally(pr,'code').slice(0,3).forEach((d,di)=>{
+      const dr=pr.filter(l=>l.code===d.k), desc=DENIALS.find(x=>x[0]===d.k);
+      body+=`<tr><td class="idx">${di+1}</td><td class="wrapcell muted" style="padding-left:20px">${d.k} — ${desc?desc[1]:''}</td>
+        ${cols.map(c=>{const rs=dr.filter(l=>key(l)===c);return `<td class="text-center">${cell(rs)}</td><td class="text-end">${bcell(rs)}</td>`;}).join('')}
+        <td class="text-end num">${dr.length}</td><td class="text-end num">${money(d.b)}</td></tr>`;});
+  });
+  const tot=myLines();
+  body+=`<tr class="total"><td colspan="2">Total</td>
+    ${cols.map(c=>{const rs=tot.filter(l=>key(l)===c);return `<td class="text-center num">${rs.length||'-'}</td><td class="text-end num">${money(rs.reduce((s,r)=>s+r.bal,0))}</td>`;}).join('')}
+    <td class="text-end num">${tot.length}</td><td class="text-end num">${money(tot.reduce((s,r)=>s+r.bal,0))}</td></tr>`;
+  const label=c=>byMonth?new Date(c+'-01').toLocaleString('en-US',{month:'long',year:'numeric'}).toUpperCase():c;
+  return `${head(byMonth?'Monthly Breakdown':'Weekly Breakdown',
+    `Pivot-style ${byMonth?'monthly':'weekly'} view from <span class="tag">DenialLineItem.DenialDate</span> showing top insurance and top denials.`,dlBtn)}
+  <div class="panel">
+    <div class="px-3 py-2 border-bottom small fw-bold text-uppercase" style="letter-spacing:.08em;color:var(--ink-2)">
+      Last ${cols.length} ${byMonth?'months':'weeks'} | Top 7 payers | Denial posted date</div>
+    <div class="gridwrap" style="border:0;max-height:620px"><table class="grid pivot">
+      <thead><tr><th class="lbl" colspan="2" style="min-width:340px">Insurance &amp; top denials</th>
+        ${cols.map(c=>`<th colspan="2">${label(c)}</th>`).join('')}<th colspan="2">Total</th></tr>
+      <tr><th class="lbl" colspan="2"></th>${cols.map(()=>`<th>No. of claims</th><th>Insurance balance</th>`).join('')}
+        <th>Claims</th><th>Balance</th></tr></thead>
+      <tbody>${body}</tbody></table></div></div>
+  <div class="small muted mt-2">Sheets 1 and 2 of the export keep this exact pivot formatting.</div>`;
+}
+
+function paneFilterPanel(){
+  const t=myTasks();
+  const card=(title,cls,field,order,label)=>{
+    let list=tally(t,field);
+    if(order) list.sort((a,b)=>order.indexOf(a.k)-order.indexOf(b.k));
+    return `<div class="col-12 col-xl-6"><div class="panel h-100">
+      <div class="insighthead ${cls}">${title}</div>
+      <div class="gridwrap" style="border:0;border-radius:0 0 12px 12px"><table class="grid">
+        <thead><tr><th style="min-width:200px">${label||'Label'}</th><th class="text-end">Claims</th>
+          <th class="text-end">Balance</th><th style="min-width:120px">Rate</th></tr></thead>
+        <tbody>${list.map(x=>`<tr onclick="addChip('${title}','${x.k.replace(/'/g,'')}')" style="cursor:pointer">
+          <td class="wrapcell">${x.k}</td><td class="text-end num">${x.n.toLocaleString()}</td>
+          <td class="text-end num" style="color:var(--red-600)">${money(x.b)}</td>
+          <td><div class="d-flex align-items-center gap-2"><div class="bd-t"><div class="bd-f" style="width:${Math.round(x.n/t.length*100)}%"></div></div>
+            <span class="num fw-bold" style="color:var(--red-600);font-size:11.5px">${(x.n/t.length*100).toFixed(1)}%</span></div></td></tr>`).join('')}
+        </tbody></table></div></div></div>`;
+  };
+  return `${head('Insights',`Breakdown panels over the filtered task set. Click any row to add it to the global filter.`,
+    `<span class="srcchip">Today: 12 Aug 2026</span>${dlBtn}`)}
+  <div class="row g-2 mb-3">
+    ${kpi('k-blue','Filtered tasks',t.length.toLocaleString())}
+    ${kpi('k-navy','Active filters',String(state.chips.length))}
+    ${kpi('k-green','Insurance balance',money(t.reduce((s,x)=>s+x.bal,0)))}
+    ${kpi('k-red','SLA breached',String(t.filter(x=>x.days<0&&!['Completed','Closed'].includes(x.status)).length))}
+  </div>
+  <div class="row g-3">
+    ${card('Task Status','ih-blue','status',['New','Pending Review','In-Progress','Verification Pending','Completed','Closed'])}
+    ${card('Priority','ih-purple','prio',['High','Medium','Low'])}
+    ${card('Action Category','ih-blue','action')}
+    ${card('Assigned To','ih-teal','assigned',null,'Reviewer')}
+    ${card('Classification','ih-amber','cls',null,'Classification')}
+    ${card('Deadline','ih-purple','deadlineBucket',['Overdue','Due in 3 days','Due in 7 days','Beyond 7 days'],'Bucket')}
+  </div>
+  <div class="small muted mt-2">Sheet 3 of the export carries the run id, the filtered task count, the active filters and then these six breakdowns.</div>`;
+}
+
+function paneBoard(){
+  const rows=myTasks();
+  const cols=[
+    {k:'taskId',t:'Task ID',w:100,cls:'mono fw-semibold'},
+    {k:'claim',t:'Claim ID',w:90,cls:'mono'},
+    {k:'track',t:'Unique Track ID',w:230,cls:'mono'},
+    {k:'acct',t:'Patient / Acct #',w:130},
+    {k:'cpt',t:'CPT Code',w:90,cls:'mono'},
+    {k:'code',t:'Denial Code',w:100,cls:'mono'},
+    {k:'desc',t:'Denial Description',w:280,cls:'wrapcell'},
+    {k:'cls',t:'Classification',w:190,cls:'wrapcell'},
+    {k:'action',t:'Action Category',w:130},
+    {k:'prio',t:'Priority',w:90,f:r=>pill(r.prio)},
+    {k:'status',t:'Status',w:140,f:r=>pill(r.status)},
+    {k:'assigned',t:'Assigned To',w:140,f:r=>r.assigned||'<span class="dash">Unassigned</span>'},
+    {k:'due',t:'Due Date',w:110,cls:'num',f:r=>fmtUS(r.due)},
+    {k:'bal',t:'Insurance Balance',w:130,cls:'num text-end',raw:r=>r.bal,f:r=>money(r.bal)},
+    {k:'act',t:'',nof:true,w:190,f:r=>`<div class="d-flex gap-1">
+      ${can.status()?`<button class="btn btn-sm btn-outline-primary py-0 px-2" onclick="openStatus('${r.taskId}')">Status</button>`:''}
+      ${can.assign()?`<button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="openAssign('task','${r.taskId}')">Assign</button>`:''}
+      <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="openHistory('${r.taskId}')">History</button></div>`}];
+  return `${head('Task Board',
+    can.seeAll()?'Operational work queue for denial follow-up. A manager assigns; a reviewer changes status.'
+    :`Your queue only — tasks assigned to ${me()}.`,
+    `<input class="form-control form-control-sm" style="width:200px" placeholder="Search this page…">${dlBtn}`)}
+  ${grid({id:'board',rows,cols,sticky:true,size:50,h:620})}`;
+}
+
+function paneSla(){
+  const rows=myTasks().filter(t=>!['Completed','Closed'].includes(t.status)).sort((a,b)=>a.days-b.days);
+  const cols=[
+    {k:'taskId',t:'Task ID',w:100,cls:'mono fw-semibold'},
+    {k:'claim',t:'Claim ID',w:90,cls:'mono'},
+    {k:'acct',t:'Patient / Acct #',w:130},
+    {k:'cpt',t:'CPT',w:80,cls:'mono'},
+    {k:'reco',t:'Task',w:250,cls:'wrapcell'},
+    {k:'prio',t:'Priority',w:90,f:r=>pill(r.prio)},
+    {k:'bal',t:'Insurance Balance',w:130,cls:'num text-end',raw:r=>r.bal,f:r=>money(r.bal)},
+    {k:'status',t:'Status',w:140,f:r=>pill(r.status)},
+    {k:'slaDays',t:'SLA Days',w:90,cls:'num text-end'},
+    {k:'due',t:'Due Date',w:110,cls:'num',f:r=>fmtUS(r.due)},
+    {k:'days',t:'Days Remaining',w:120,cls:'num text-end',f:r=>r.days<0?`<b style="color:var(--red-600)">${r.days}</b>`:r.days},
+    {k:'esc',t:'Escalation Flag',w:150,raw:r=>r.days<0?'escalate overdue':'within sla',
+      f:r=>r.days<0?'<span class="pill p-escal">Escalate - Overdue</span>':r.days<=3?'<span class="pill p-med">Due soon</span>':'<span class="pill p-low">Within SLA</span>'}];
+  const over=rows.filter(r=>r.days<0);
+  return `${head('SLA Tracker','Deadline monitor with warning and escalation logic.',
+    `<input class="form-control form-control-sm" style="width:200px" placeholder="Search this page…">${dlBtn}`)}
+  <div class="row g-2 mb-3">
+    ${kpi('k-red','SLA breached',over.length.toLocaleString(),'Click to view filtered claims')}
+    ${kpi('k-amber','Due within 3 days',rows.filter(r=>r.days>=0&&r.days<=3).length.toLocaleString())}
+    ${kpi('k-blue','Open tasks tracked',rows.length.toLocaleString())}
+    ${kpi('k-navy','Balance at risk',money(over.reduce((s,r)=>s+r.bal,0)))}
+  </div>
+  ${grid({id:'sla',rows,cols,size:50,h:600})}`;
+}
+
+function insightRows(){
+  const m={};
+  myTasks().forEach(t=>{const k=t.code+'|'+t.payer;
+    m[k]=m[k]||{key:k,code:t.code,desc:t.desc,payer:t.payer,ptype:t.ptype,action:t.action,cls:t.cls,
+      denials:0,claims:new Set(),bal:0,total:0,open:0,owners:new Set()};
+    m[k].denials++;m[k].claims.add(t.claim);m[k].bal+=t.bal;m[k].total+=t.bal*1.4;
+    if(t.assigned)m[k].owners.add(t.assigned);
+    if(!['Completed','Closed'].includes(t.status))m[k].open++;});
+  return Object.values(m).map(v=>({...v,claimCount:v.claims.size,
+    impact:(v.bal/v.total*100),owner:[...v.owners].join(', ')})).sort((a,b)=>b.bal-a.bal);
+}
+function paneInsight(wf){
+  const rows=insightRows(), sel=state.sel;
+  const cols=[
+    ...(wf&&can.assign()?[{k:'sel',t:'',nof:true,w:34,f:r=>`<input type="checkbox" ${sel.has(r.key)?'checked':''} onchange="toggleSel('${r.key}')">`}]:[]),
+    {k:'code',t:'Denial Codes',w:100,cls:'mono fw-semibold'},
+    {k:'desc',t:'Description',w:300,cls:'wrapcell'},
+    {k:'denials',t:'# of Denial',w:100,cls:'num text-end'},
+    {k:'claimCount',t:'# of Claims',w:100,cls:'num text-end'},
+    {k:'total',t:'Total Balance',w:130,cls:'num text-end',raw:r=>r.total,f:r=>money(r.total)},
+    {k:'payer',t:'High Impact Insurance',w:210,cls:'wrapcell'},
+    {k:'bal',t:'Insurance Balance',w:140,cls:'num text-end',raw:r=>r.bal,f:r=>money(r.bal)},
+    {k:'impact',t:'$ Impact (%)',w:110,cls:'num text-end',raw:r=>r.impact.toFixed(2),f:r=>r.impact.toFixed(2)+'%'},
+    {k:'action',t:'Action Category',w:140},
+    {k:'owner',t:'Assigned Reviewer',w:160,f:r=>r.owner||'<span class="dash">Unassigned</span>'},
+    ...(can.assign()?[{k:'act',t:'',nof:true,w:90,f:r=>`<button class="btn btn-sm btn-outline-primary py-0 px-2" onclick="openAssign('insight','${r.key}')">Assign</button>`}]:[])];
+  const t=myTasks();
+  const btns=`${wf&&can.assign()?`<button class="btn btn-sm btn-teal" ${sel.size?'':'disabled'} onclick="openAssign('bulk')">Assign ${sel.size||''} selected</button>`:''}
+    <input class="form-control form-control-sm" style="width:200px" placeholder="Quick search loaded rows…">${dlBtn}`;
+  return `${head('Denial Insight',
+    `Excel-style grid — filter any column, page through every insight row. $ Impact (%) = <span class="tag">(InsuranceBalance / TotalBalance) * 100</span>.`
+    +(wf?' Pick a denial pattern and give it an owner — one reviewer owns that code × payer for the whole run.':''),btns)}
+  <div class="row g-2 mb-3">
+    ${kpi('k-blue','Total denials',t.length.toLocaleString())}
+    ${kpi('k-purple','Total claims',new Set(t.map(x=>x.claim)).size.toLocaleString())}
+    ${kpi('k-green','Total balance',money(t.reduce((s,x)=>s+x.bal*1.4,0)))}
+    ${kpi('k-red','Insurance balance',money(t.reduce((s,x)=>s+x.bal,0)))}
+  </div>
+  ${grid({id:wf?'wfinsight':'insight',rows,cols,size:50,h:580})}`;
+}
+
+function paneLine(){
+  const rows=myLines();
+  const cols=[
+    {k:'accession',t:'Accession No',w:120,cls:'mono'},
+    {k:'visit',t:'Visit Number',w:110,cls:'mono'},
+    {k:'cpt',t:'CPT Code',w:90,cls:'mono'},
+    {k:'payerCode',t:'Payer Code',w:100,cls:'num text-end'},
+    {k:'payer',t:'Payer Name',w:220},
+    {k:'payerNorm',t:'Payer Name Normalized',w:180},
+    {k:'ptype',t:'Payer Type',w:130},
+    {k:'payStatus',t:'Pay Status',w:100},
+    {k:'histPay',t:'Historical Payment',w:140},
+    {k:'code',t:'Denial Code',w:100,cls:'mono'},
+    {k:'desc',t:'Denial Description',w:290,cls:'wrapcell'},
+    {k:'cls',t:'Denial Classification',w:190,cls:'wrapcell'},
+    {k:'panel',t:'Panel Name',w:130},
+    {k:'dos',t:'Date of Service',w:120,cls:'num',f:r=>fmtUS(r.dos)},
+    {k:'billed',t:'First Billed',w:110,cls:'num',f:r=>fmtUS(r.billed)},
+    {k:'denialDate',t:'Denial Date',w:110,cls:'num',f:r=>fmtUS(r.denialDate)},
+    {k:'units',t:'Units',w:70,cls:'num text-end'},
+    {k:'charge',t:'Charge',w:110,cls:'num text-end',raw:r=>r.charge,f:r=>money(r.charge)},
+    {k:'bal',t:'Insurance Balance',w:140,cls:'num text-end',raw:r=>r.bal,f:r=>money(r.bal)},
+    {k:'clinic',t:'Clinic Name',w:220},
+    {k:'provider',t:'Referring Provider',w:160},
+    {k:'rep',t:'Sales Rep',w:130},
+    {k:'icd',t:'Covered ICD-10 codes as per Payer Policy',w:250,cls:'wrapcell',f:r=>`<span class="muted">${r.icd}</span>`},
+    {k:'wfTask',t:'Workflow Task ID',w:130,cls:'mono'},
+    {k:'wfAssigned',t:'Assigned To',w:140},
+    {k:'wfStatus',t:'Workflow Status',w:150,f:r=>r.wfStatus?pill(r.wfStatus):'<span class="dash">-</span>'},
+    {k:'wfNotes',t:'Denial Notes',w:260,cls:'wrapcell'}];
+  return `${head('Line Item','Excel-style grid — filter any column, page through every line item.',
+    `<input class="form-control form-control-sm" style="width:220px" placeholder="Quick search loaded rows…">${dlBtn}`)}
+  ${grid({id:'line',rows,cols,sticky:true,size:50,h:620})}
+  <div class="notice info mt-3">
+    <div><b>Workflow columns</b> match from the task board on normalised claim + CPT + denial code, falling back to claim + CPT.
+    A claim-only fallback is deliberately not used — one claim spans many CPTs that can belong to different reviewers, so it would
+    attach the wrong reviewer's notes. Unmatched lines stay blank, never wrong. Oversized values such as
+    <span class="tag">Covered ICD 10 codes as per Payer Policy</span> spill into <span class="tag">(cont. 1)</span> … columns in the export,
+    split at a comma, capped at five.</div></div>`;
+}
+
+/* ==========================================================
+   WORKFLOW PANES
+   ========================================================== */
+function paneWfHome(){
+  const t=myTasks();
+  const c={openClaims:new Set(t.filter(x=>!['Completed','Closed'].includes(x.status)).map(x=>x.claim)).size,
+    openTasks:t.filter(x=>!['Completed','Closed'].includes(x.status)).length,
+    assigned:t.filter(x=>x.assigned).length,unassigned:t.filter(x=>!x.assigned).length,
+    breach:t.filter(x=>x.days<0&&!['Completed','Closed'].includes(x.status)).length,
+    escal:t.filter(x=>x.escalated).length,verif:VERIFY.length,
+    bal:t.filter(x=>!['Completed','Closed'].includes(x.status)).reduce((s,x)=>s+x.bal,0)};
+  const byCls=tally(t,'cls');
+  const load=REVIEWERS.map(r=>{const m=TASKS.filter(x=>x.assigned===r);
+    return {r,total:m.length,pend:m.filter(x=>x.status==='Pending Review').length,
+      prog:m.filter(x=>x.status==='In-Progress').length,
+      done:m.filter(x=>['Completed','Closed'].includes(x.status)).length,
+      over:m.filter(x=>x.days<0&&!['Completed','Closed'].includes(x.status)).length,
+      bal:m.reduce((s,x)=>s+x.bal,0)};}).sort((a,b)=>b.total-a.total);
+  const payers=tally(t,'payer').slice(0,5);
+  return `${head('Workflow Dashboard',
+    can.seeAll()?'Counts across the run, with a line per reviewer.':`Your queue — ${me()}.`,dlBtn)}
+  <div class="row g-2 mb-2">
+    ${kpi('k-blue','Total open claims',c.openClaims.toLocaleString(),'Click to view filtered claims')}
+    ${kpi('k-navy','Total open tasks',c.openTasks.toLocaleString(),'Click to view filtered claims')}
+    ${kpi('k-green','Assigned claims',c.assigned.toLocaleString(),'Click to view filtered claims')}
+    ${kpi('k-amber','Unassigned claims',c.unassigned.toLocaleString(),'Click to view filtered claims')}
+  </div>
+  <div class="row g-2 mb-3">
+    ${kpi('k-red','SLA breached',c.breach.toLocaleString(),'Click to view filtered claims')}
+    ${kpi('k-red','Escalated claims',c.escal.toLocaleString(),'Click to view filtered claims')}
+    ${kpi('k-purple','Verification pending',c.verif.toLocaleString(),'Click to view filtered claims')}
+    ${kpi('k-teal','Total insurance balance',money(c.bal),'Click to view filtered claims')}
+  </div>
+
+  <div class="panel mb-3">
+    <div class="p-3 border-bottom"><div class="fw-bold">Denial Classification Summary</div>
+      <div class="small muted">Claims are counted once per classification they carry. A claim with more than one denial classification
+        appears in more than one row, so column totals can exceed Total Open Claims.</div></div>
+    <div class="gridwrap" style="border:0;border-radius:0 0 12px 12px;max-height:420px"><table class="grid">
+      <thead><tr><th style="min-width:270px">Classification</th><th class="text-end">Claims</th><th class="text-end">Balance</th>
+        <th class="text-end">Assigned</th><th class="text-end">In progress</th><th class="text-end">Closed</th><th>SLA risk</th></tr></thead>
+      <tbody>${byCls.map(x=>{const rows=t.filter(y=>(y.cls||'(Blank)')===x.k);
+        const risk=rows.filter(y=>y.days<0).length/Math.max(rows.length,1);
+        return `<tr><td class="wrapcell fw-semibold" style="color:var(--teal-600)">${x.k}</td>
+          <td class="text-end num fw-bold" style="color:var(--teal-600)">${x.n}</td>
+          <td class="text-end num">${money(x.b)}</td>
+          <td class="text-end num">${rows.filter(y=>y.assigned).length}</td>
+          <td class="text-end num">${rows.filter(y=>y.status==='In-Progress').length}</td>
+          <td class="text-end num">${rows.filter(y=>y.status==='Closed').length}</td>
+          <td>${risk>.5?'<span class="pill p-high">High</span>':risk>.2?'<span class="pill p-med">Medium</span>':'<span class="pill p-low">Low</span>'}</td></tr>`;}).join('')}
+      </tbody></table></div></div>
+
+  ${can.seeAll()?`
+  <div class="row g-3">
+    <div class="col-12 col-xl-7"><div class="panel h-100">
+      <div class="p-3 border-bottom fw-bold">Analyst Workload Snapshot</div>
+      <div class="gridwrap" style="border:0;border-radius:0 0 12px 12px"><table class="grid">
+        <thead><tr><th style="min-width:150px">Reviewer</th><th class="text-end">Tasks</th><th class="text-end">Pending</th>
+          <th class="text-end">In progress</th><th class="text-end">Completed</th><th class="text-end">Overdue</th>
+          <th class="text-end">Balance</th><th></th></tr></thead>
+        <tbody>
+          <tr><td class="fw-semibold">Unassigned <span class="muted d-block" style="font-size:11px">Needs action</span></td>
+            <td class="text-end num">${c.unassigned}</td><td class="text-end dash">-</td><td class="text-end dash">-</td>
+            <td class="text-end dash">-</td><td class="text-end num" style="color:var(--red-600)">${TASKS.filter(x=>!x.assigned&&x.days<0).length}</td>
+            <td class="text-end num">${money(TASKS.filter(x=>!x.assigned).reduce((s,x)=>s+x.bal,0))}</td>
+            <td class="text-end"><button class="btn btn-sm btn-teal py-0 px-2" onclick="setTab('wfinsight')">Assign</button></td></tr>
+          ${load.map(l=>`<tr><td class="fw-semibold">${l.r}</td><td class="text-end num">${l.total}</td>
+            <td class="text-end num">${l.pend}</td><td class="text-end num">${l.prog}</td><td class="text-end num">${l.done}</td>
+            <td class="text-end num ${l.over?'fw-bold':''}" ${l.over?'style="color:var(--red-600)"':''}>${l.over}</td>
+            <td class="text-end num">${money(l.bal)}</td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="openQueue('${l.r}')">Open queue</button></td></tr>`).join('')}
+        </tbody></table></div></div></div>
+    <div class="col-12 col-xl-5"><div class="panel h-100">
+      <div class="p-3 border-bottom fw-bold">Top SLA Breach by payer</div>
+      <div class="p-3">${payers.map(p=>{const br=t.filter(x=>x.payer===p.k&&x.days<0);
+        return `<div class="d-flex justify-content-between align-items-center py-2 border-bottom" style="border-color:var(--line-2)!important">
+          <div><div class="fw-semibold" style="font-size:13px">${p.k}</div><div class="muted" style="font-size:11.5px">SLA risk</div></div>
+          <div class="d-flex align-items-center gap-2"><span class="num fw-bold">${kmoney(br.reduce((s,x)=>s+x.bal,0))}</span>
+            <span class="muted num">${br.length}</span><span class="pill p-dup">Breached</span></div></div>`;}).join('')}
+      </div></div></div>
+  </div>`:''}`;
+}
+
+const QUEUES=[['All','All Claims'],['New','New'],['Unassigned','Unassigned'],['SLA','SLA At Risk'],['Assigned','Assigned'],
+  ['Pending Review','Pending Review'],['In-Progress','In Progress'],['Escalated','Escalated'],
+  ['Completed','Completed'],['Closed','Closed'],['Verification','Verification Claim']];
+function queueRows(){
+  const t=myTasks();
+  const q=state.queue;
+  if(q==='All')return t;
+  if(q==='New')return t.filter(x=>x.status==='New');
+  if(q==='Unassigned')return t.filter(x=>!x.assigned);
+  if(q==='SLA')return t.filter(x=>x.days<0&&!['Completed','Closed'].includes(x.status));
+  if(q==='Assigned')return t.filter(x=>x.assigned);
+  if(q==='Escalated')return t.filter(x=>x.escalated);
+  if(q==='Verification')return [];
+  return t.filter(x=>x.status===q);
+}
+function paneWfBoard(){
+  if(state.openClaim) return claimDetail();
+  const rows=queueRows(), sel=state.sel;
+  const count=q=>{const s=state.queue;state.queue=q;const n=queueRows().length;state.queue=s;
+    return q==='Verification'?VERIFY.length:n;};
+  const chips=QUEUES.map(([k,l])=>`<button class="qchip ${state.queue===k?'on':''} ${k==='SLA'?'risk':''}"
+    onclick="setQueue('${k}')">${l}<span class="c num">${count(k).toLocaleString()}</span></button>`).join('');
+  const cols=[
+    ...(can.assign()?[{k:'sel',t:'',nof:true,w:34,f:r=>`<input type="checkbox" ${sel.has(r.taskId)?'checked':''} onchange="toggleSel('${r.taskId}')">`}]:[]),
+    {k:'open',t:'',nof:true,w:34,f:r=>`<button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="openClaim('${r.taskId}')">›</button>`},
+    {k:'claim',t:'Claim',w:150,f:r=>`<a href="#" onclick="openClaim('${r.taskId}');return false;" class="fw-bold text-decoration-none" style="color:var(--teal-600)">${r.claim}</a>
+      <div class="muted mono" style="font-size:10.5px">UID ${r.track}</div>`},
+    {k:'source',t:'Source',w:90},
+    {k:'payer',t:'Payer Name',w:210},
+    {k:'patient',t:'Patient Name',w:170},
+    {k:'acct',t:'Patient ID',w:120},
+    {k:'dos',t:'DOS',w:110,cls:'num',f:r=>fmtUS(r.dos)},
+    {k:'bal',t:'Balance',w:110,cls:'num text-end fw-semibold',raw:r=>r.bal,f:r=>money(r.bal)},
+    {k:'assigned',t:'Assigned To',w:150,f:r=>r.assigned||'<span class="dash">-</span>'},
+    {k:'due',t:'Due',w:110,cls:'num',f:r=>`${fmtUS(r.due)}${r.days<0?'<div style="color:var(--red-600);font-size:11px">'+r.days+' days</div>':''}`},
+    {k:'status',t:'Status',w:150,f:r=>pill(r.status)}];
+  return `${head(can.seeAll()?'Claim Level Assignment':'My Worklist',
+    can.seeAll()?'Assign denials to reviewers, work them to a status, and clear verification items.'
+    :`Your assigned claims — ${me()}. Open a claim to work its denial lines.`,
+    `<button class="btn btn-sm btn-outline-secondary" onclick="toast('Template downloaded.')">Download Claims</button>
+     <button class="btn btn-sm btn-outline-secondary" onclick="toast('Bulk upload opens in a popup with a per-claim result view.')">Upload Template</button>`)}
+  ${!can.seeAll()?`<div class="row g-2 mb-3">
+    ${kpi('k-blue','Assigned claims',new Set(myTasks().map(x=>x.claim)).size.toLocaleString())}
+    ${kpi('k-navy','Open tasks',myTasks().filter(x=>!['Completed','Closed'].includes(x.status)).length.toLocaleString())}
+    ${kpi('k-green','Ins. balance',money(myTasks().reduce((s,x)=>s+x.bal,0)))}
+    ${kpi('k-red','Escalated',String(myTasks().filter(x=>x.escalated).length))}</div>`:''}
+  <div class="panel p-3 mb-3">
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+      <input class="form-control form-control-sm" style="width:250px" placeholder="Search claim, payer, patient">
+      ${chips}
+    </div>
+    ${can.assign()?`<div class="d-flex flex-wrap gap-2 align-items-center pt-2 border-top">
+      <span class="small muted">${sel.size} selected</span>
+      <select class="form-select form-select-sm" style="width:190px" id="quickAssign">
+        <option>Select AR Reviewer</option>${REVIEWERS.map(r=>`<option>${r}</option>`).join('')}</select>
+      <button class="btn btn-sm btn-teal" ${sel.size?'':'disabled'} onclick="openAssign('bulkTask')">Assign</button>
+      <button class="btn btn-sm btn-outline-danger" ${sel.size?'':'disabled'} onclick="openEscalate(null)">Escalate</button>
+      <span class="ms-auto small muted">Assignment is by denial code × payer — selecting rows picks up every task on the same pattern.</span>
+    </div>`:''}
+  </div>
+  ${state.queue==='Verification'?paneVerify(true):grid({id:'wfboard',rows,cols,size:50,h:560})}`;
+}
+
+function claimDetail(){
+  const t=TASKS.find(x=>x.taskId===state.openClaim);
+  const siblings=TASKS.filter(x=>x.claim===t.claim);
+  const doneN=siblings.filter(x=>['Completed','Closed'].includes(x.status)).length;
+  const tabsHtml=[['tasks',`Tasks (${siblings.length})`],['notes',`Notes (${t.notes.length})`],
+    ['docs',`Documents (${t.docs})`],['history','History']]
+    .map(([k,l])=>`<button class="subtab ${state.claimTab===k?'on':''}" onclick="setClaimTab('${k}')">${l}</button>`).join('');
+  let body='';
+  if(state.claimTab==='tasks'){
+    const cols=[
+      {k:'cpt',t:'CPT Code',w:90,cls:'mono'},{k:'code',t:'Denial Code',w:100,cls:'mono'},
+      {k:'taskId',t:'Task ID',w:110,cls:'mono fw-semibold'},{k:'units',t:'Units',w:70,cls:'num text-end'},
+      {k:'modifier',t:'Modifier',w:90},{k:'desc',t:'Denial Description',w:280,cls:'wrapcell'},
+      {k:'cls',t:'Denial Classification',w:180,cls:'wrapcell'},{k:'action',t:'Action Category',w:130},
+      {k:'reco',t:'Recommended Action',w:250,cls:'wrapcell'},
+      {k:'prio',t:'Priority',w:90,f:r=>pill(r.prio)},
+      {k:'bal',t:'Insurance Balance',w:130,cls:'num text-end',raw:r=>r.bal,f:r=>money(r.bal)},
+      {k:'slaDays',t:'SLA Days',w:90,cls:'num text-end'},
+      {k:'status',t:'Status',w:140,f:r=>pill(r.status)}];
+    body=`<div class="d-flex justify-content-between align-items-center p-3 flex-wrap gap-2">
+      <div><div class="fw-bold" style="font-size:15px">Denial Lines / Action Tracker</div>
+        <div class="small muted">Update status by claim, action group, denial classification, CPT, or selected lines.</div></div>
+      ${can.status()?`<button class="btn btn-sm btn-teal" onclick="openStatus('${t.taskId}')">Open Update Status Modal</button>`:
+        '<span class="pill p-closed">Status changes are a reviewer action</span>'}</div>
+      <div class="px-3 pb-3">${grid({id:'claimlines',rows:siblings,cols,size:25,h:340})}</div>`;
+  } else if(state.claimTab==='notes'){
+    body=`<div class="p-3"><div class="d-flex justify-content-between mb-3">
+      <div class="fw-bold" style="font-size:15px">Claim Notes</div>
+      ${can.status()?`<button class="btn btn-sm btn-primary" onclick="openStatus('${t.taskId}')">+ Add Note</button>`:''}</div>
+      ${t.notes.length?t.notes.map(n=>`<div class="panel p-3 mb-3">
+        <div class="d-flex justify-content-between mb-2"><b>${n.by}</b><span class="muted small">${fmtUS(n.when)}</span></div>
+        <div class="row g-2">
+          <div class="col-md-6"><div class="kv"><div class="k">Update scope</div><div class="v">${n.scope}</div></div></div>
+          <div class="col-md-6"><div class="kv"><div class="k">Scope value</div><div class="v">${n.scopeVal}</div></div></div>
+          <div class="col-md-6"><div class="kv"><div class="k">New line status</div><div class="v">${n.newStatus}</div></div></div>
+          <div class="col-md-6"><div class="kv hi"><div class="k">Recommended action</div><div class="v">${n.reco}</div></div></div>
+          <div class="col-md-6"><div class="kv"><div class="k">Actual action / outcome</div><div class="v">${n.outcome}</div></div></div>
+          <div class="col-md-6"><div class="kv"><div class="k">Affected lines</div><div class="v">CPTs: ${t.cpt}</div></div></div>
+          <div class="col-12"><div class="kv"><div class="k">Note</div><div class="v">${n.text}</div></div></div>
+        </div></div>`).join('')
+      :`<div class="text-center py-5 muted">No notes yet. A status update writes its note here, visible to the reviewer, the AR Manager and the Account Manager.</div>`}
+    </div>`;
+  } else if(state.claimTab==='docs'){
+    body=`<div class="p-3 text-center py-5">
+      <div class="fw-bold mb-1">No documents uploaded</div>
+      <div class="muted small mb-3">Attach appeal packets, medical records or payer correspondence against the whole claim or one denial line.</div>
+      <button class="btn btn-sm btn-teal" onclick="openDocs('${t.claim}')">Upload documents</button></div>`;
+  } else {
+    body=`<div class="p-3"><div class="timeline">${t.history.slice().reverse().map(h=>`
+      <div class="it"><div class="d-flex justify-content-between"><b>${h.what}</b><span class="muted small">${fmtUS(h.when)}</span></div>
+      <div class="small muted">By: ${h.who}</div><div class="small mt-1">${h.note||''}</div>
+      ${h.snap?`<div class="snap mt-2">${h.snap}</div>`:''}</div>`).join('')}</div>
+      <div class="notice info mt-2">Every assignment, status change and verification decision writes a
+        <span class="tag mx-1">DenialTaskHistory</span> row with the actor, the run id and a JSON snapshot of the task before the change.</div></div>`;
+  }
+  return `<div class="mb-3"><button class="btn btn-sm btn-outline-secondary" onclick="closeClaim()">← Back to ${can.seeAll()?'Claim Assignment':'My Worklist'}</button></div>
+  <div class="detail">
+    <div class="detail-top d-flex flex-wrap justify-content-between gap-3">
+      <div>
+        <div class="eyebrow">${can.seeAll()?'Claims':'My worklist'} / ${t.status} / Line level</div>
+        <div style="font-size:26px;font-weight:700;letter-spacing:-.02em">${t.claim}</div>
+        <div class="small muted">Accession No: ${LINES.find(l=>l.visit===t.claim)?.accession||'-'}</div>
+        <div class="small fw-semibold">${t.payer} — ${t.patient} — ${money(t.bal)}</div>
+      </div>
+      <div class="d-flex gap-4 flex-wrap align-items-start">
+        <div><div class="eyebrow">Claim status</div><div class="mt-1">${pill(t.status)}</div></div>
+        <div><div class="eyebrow">Status completion</div>
+          <div class="d-flex align-items-center gap-2 mt-1"><span class="small fw-semibold">${doneN} of ${siblings.length} actions completed</span>
+            <div class="progresstrack"><div style="width:${Math.round(doneN/siblings.length*100)}%"></div></div></div></div>
+        <div><div class="eyebrow">Action summary</div><div class="mt-1"><span class="srcchip">${t.action} <b>${doneN}/${siblings.length}</b></span></div></div>
+        <button class="btn-close" onclick="closeClaim()"></button>
+      </div>
+    </div>
+    <div class="detail-meta">
+      <div><div class="k">Source</div><div class="v">${t.source}</div></div>
+      <div><div class="k">Panel</div><div class="v">${t.panel}</div></div>
+      <div><div class="k">Patient</div><div class="v">${t.patient}</div></div>
+      <div><div class="k">DOS</div><div class="v">${fmtUS(t.dos)}</div></div>
+      <div><div class="k">Created</div><div class="v">${fmtUS(t.history[0].when)}</div></div>
+      <div><div class="k">Clinic</div><div class="v">${t.clinic}</div></div>
+      <div><div class="k">Provider</div><div class="v">${t.provider}</div></div>
+      <div><div class="k">Assigned to</div><div class="v">${t.assigned||'-'}</div></div>
+      <div><div class="k">Due date</div><div class="v">${fmtUS(t.due)} ${t.days<0?`<span class="pill p-escal ms-1">${t.days} days</span>`:''}</div></div>
+    </div>
+    <div class="d-flex gap-2 px-3 py-2 border-bottom" style="border-color:var(--line-2)!important">
+      ${can.status()?`<button class="btn btn-sm btn-outline-primary" onclick="openStatus('${t.taskId}')">Update status</button>`:''}
+      <button class="btn btn-sm btn-outline-secondary" onclick="openDocs('${t.claim}')">Attach documents</button>
+      <button class="btn btn-sm btn-outline-danger" onclick="openEscalate('${t.taskId}')">Escalate</button>
+      ${can.status()?`<button class="btn btn-sm btn-outline-danger ms-auto" onclick="openStatus('${t.taskId}',true)">Mark duplicate</button>`:''}
+    </div>
+    <div class="subtabs">${tabsHtml}</div>
+    ${body}
+  </div>`;
+}
+
+function paneVerify(embedded){
+  const cols=[
+    {k:'vid',t:'Verification ID',w:130,cls:'mono fw-semibold'},
+    {k:'claim',t:'Claim ID',w:110,cls:'mono'},
+    {k:'cpt',t:'CPT',w:80,cls:'mono'},
+    {k:'code',t:'Denial Code',w:110,cls:'mono'},
+    {k:'payer',t:'Payer',w:220},
+    {k:'reason',t:'Why it is here',w:300,cls:'wrapcell'},
+    {k:'src',t:'Source',w:110,f:r=>r.src==='Pipeline'?'<span class="pill p-verif">Pipeline</span>':'<span class="pill p-pending">Workflow</span>'},
+    {k:'by',t:'Raised by',w:150},
+    {k:'on',t:'Raised on',w:110,cls:'num',f:r=>fmtUS(r.on)},
+    {k:'bal',t:'Insurance Balance',w:140,cls:'num text-end',raw:r=>r.bal,f:r=>money(r.bal)},
+    {k:'act',t:'',nof:true,w:110,f:r=>`<button class="btn btn-sm btn-teal py-0 px-2" onclick="openVerify('${r.vid}')">Decide</button>`}];
+  const g=VERIFY.length?grid({id:'verify',rows:VERIFY,cols,size:25,h:420})
+    :`<div class="panel text-center py-5"><div class="fw-bold">Nothing waiting on a decision</div>
+      <div class="muted small mt-1">Duplicates and denials dropped between runs land here as reviewers work the board.</div></div>`;
+  const banner=`<div class="notice warn mb-3">
+    <div><b>Open item 11.1 — needs confirmation.</b> The Denial Database Worker writes pipeline-raised verification rows to
+    <span class="tag">dbo.DenialVerification</span>, while the API and this screen read and write
+    <span class="tag">dbo.DenialVerificationTask</span>. Until the two are reconciled, denials that vanish between runs never reach a
+    human here. The two Pipeline-sourced rows below are shown as they would appear once they do.</div></div>`;
+  if(embedded) return banner+g;
+  return `${head('Verification','Decide whether a removed or duplicate denial was valid.',
+    `<button class="btn btn-sm btn-outline-secondary" onclick="exportSync('Verification')">Export tab</button>`)}
+  ${banner}${g}`;
+}
+
+/* ==========================================================
+   ACTIONS
+   ========================================================== */
+function toggleSel(id){state.sel.has(id)?state.sel.delete(id):state.sel.add(id);render();}
+function setQueue(q){state.queue=q;state.page.wfboard=1;state.sel.clear();render();}
+function openClaim(id){state.openClaim=id;state.claimTab='tasks';render();window.scrollTo({top:0,behavior:'smooth'});}
+function closeClaim(){state.openClaim=null;render();}
+function setClaimTab(t){state.claimTab=t;render();}
+function openQueue(r){addChip('Reviewer',r);state.tab='wfboard';state.queue='Assigned';render();}
+
+function openAssign(kind,id){
+  state.pending={kind,id};
+  document.getElementById('assignTo').innerHTML=REVIEWERS.map(r=>`<option>${r}</option>`).join('');
+  document.getElementById('assignNote').value='';
+  let scope='';
+  if(kind==='task'){const t=TASKS.find(x=>x.taskId===id);
+    scope=`Task <b class="mono">${t.taskId}</b> — <b>${t.code} × ${t.payer}</b>. This assignment picks up
+      <b>${TASKS.filter(x=>x.code===t.code&&x.payer===t.payer).length}</b> tasks on the same pattern.`;}
+  else if(kind==='insight'){const [c,p]=id.split('|');
+    scope=`<b>${c} × ${p}</b> — <b>${TASKS.filter(x=>x.code===c&&x.payer===p).length}</b> tasks in this run.`;}
+  else if(kind==='bulkTask'){
+    const keys=new Set([...state.sel].map(i=>{const t=TASKS.find(x=>x.taskId===i);return t.code+'|'+t.payer;}));
+    scope=`<b>${state.sel.size}</b> selected claims, expanded to <b>${TASKS.filter(x=>keys.has(x.code+'|'+x.payer)).length}</b> tasks
+      across <b>${keys.size}</b> denial code × payer patterns.`;}
+  else scope=`<b>${state.sel.size}</b> selected denial patterns, covering
+      <b>${TASKS.filter(x=>state.sel.has(x.code+'|'+x.payer)).length}</b> tasks.`;
+  document.getElementById('assignScope').innerHTML=`<div>${scope}</div>`;
+  new bootstrap.Modal('#assignModal').show();
+}
+function commitAssign(){
+  const who=document.getElementById('assignTo').value, p=state.pending; let n=0;
+  const apply=list=>list.forEach(t=>{
+    t.assigned=who;
+    if(!t.status||t.status==='New')t.status='Pending Review';
+    t.history.push({when:'2026-08-12',who:USER[state.role].n,what:'Assigned',note:`Assigned to ${who}.`,
+      snap:`{"status":"New","assignedTo":"","runId":"${runId()}"}`});
+    const l=LINES.find(x=>x.wfTask===t.taskId); if(l){l.wfAssigned=who;l.wfStatus=t.status;}
+    n++;});
+  if(p.kind==='task'){const t=TASKS.find(x=>x.taskId===p.id);apply(TASKS.filter(x=>x.code===t.code&&x.payer===t.payer));}
+  if(p.kind==='insight'){const [c,pa]=p.id.split('|');apply(TASKS.filter(x=>x.code===c&&x.payer===pa));}
+  if(p.kind==='bulkTask'){const keys=new Set([...state.sel].map(i=>{const t=TASKS.find(x=>x.taskId===i);return t.code+'|'+t.payer;}));
+    apply(TASKS.filter(x=>keys.has(x.code+'|'+x.payer)));}
+  if(p.kind==='bulk')apply(TASKS.filter(x=>state.sel.has(x.code+'|'+x.payer)));
+  bootstrap.Modal.getInstance('#assignModal').hide();
+  state.sel.clear(); toast(`Assigned ${n} task${n===1?'':'s'} to ${who}. One transaction, one history row each.`); render();
+}
+
+function openStatus(taskId,dup){
+  const t=TASKS.find(x=>x.taskId===taskId); state.pending={taskId};
+  document.getElementById('statusScope').innerHTML=
+    `<div>Task <b class="mono">${t.taskId}</b> · claim <b class="mono">${t.claim}</b> · CPT ${t.cpt} · ${t.code} · ${t.payer}<br>
+     Now ${pill(t.status)} ${t.assigned?`with <b>${t.assigned}</b>`:''} · due ${fmtUS(t.due)} · ${money(t.bal)}</div>`;
+  const sv=document.getElementById('statusVal');
+  sv.value=dup?'Duplicate':(t.status==='Pending Review'?'In-Progress':'Completed');
+  document.getElementById('statusNote').value='';
+  const sync=()=>{
+    document.getElementById('dupWarn').classList.toggle('d-none',sv.value!=='Duplicate');
+    document.getElementById('claimWarn').classList.toggle('d-none',t.scope!=='ClaimLevel');
+    document.getElementById('claimWarnId').textContent=t.claim;};
+  sv.onchange=sync; sync();
+  new bootstrap.Modal('#statusModal').show();
+}
+function commitStatus(){
+  const t=TASKS.find(x=>x.taskId===state.pending.taskId);
+  const v=document.getElementById('statusVal').value, note=document.getElementById('statusNote').value;
+  const out=document.getElementById('outcomeVal').value, scope=document.getElementById('scopeSel').value;
+  bootstrap.Modal.getInstance('#statusModal').hide();
+  if(v==='Duplicate'){
+    VERIFY.unshift({vid:'VER-'+(4416+VERIFY.length),claim:t.claim,cpt:t.cpt,code:t.code,payer:t.payer,
+      reason:'Marked duplicate by reviewer',by:me(),on:'2026-08-12',bal:t.bal,src:'Workflow',task:{...t}});
+    TASKS.splice(TASKS.indexOf(t),1);
+    if(state.openClaim===t.taskId)state.openClaim=null;
+    toast(`${t.taskId} moved to Verification. It stays open until someone decides.`); render(); return;
+  }
+  const targets=t.scope==='ClaimLevel'?TASKS.filter(x=>x.claim===t.claim):[t];
+  targets.forEach(x=>{
+    const before=`{"status":"${x.status}","assignedTo":"${x.assigned}","runId":"${runId()}"}`;
+    x.status=v;
+    x.notes.unshift({by:me(),when:'2026-08-12',scope,scopeVal:scope==='By Claim'?'Overall Claim':x.cpt,
+      newStatus:v,outcome:out,reco:x.reco,text:note||'(no comment)'});
+    x.history.push({when:'2026-08-12',who:me(),what:'StatusChanged',note:`→ ${v}. ${out}. ${note}`,snap:before});
+    const l=LINES.find(y=>y.wfTask===x.taskId); if(l){l.wfStatus=v;l.wfNotes=note||l.wfNotes;}});
+  toast(targets.length>1?`Saved. Applied to ${targets.length} tasks on claim ${t.claim} — claim-level action category.`
+    :'Saved. History row written with the before-snapshot.');
+  render();
+}
+
+function openVerify(vid){
+  const v=VERIFY.find(x=>x.vid===vid); state.pending={vid};
+  document.getElementById('verifyScope').innerHTML=
+    `<div><b class="mono">${v.vid}</b> · claim <b class="mono">${v.claim}</b> · CPT ${v.cpt} · ${v.code} · ${v.payer}<br>
+     ${v.reason} — raised by <b>${v.by}</b> on ${fmtUS(v.on)} · ${money(v.bal)}</div>`;
+  document.getElementById('vValid').checked=true; toggleVerify();
+  document.getElementById('verifyNote').value='';
+  new bootstrap.Modal('#verifyModal').show();
+}
+function toggleVerify(){document.getElementById('restoreWrap').classList.toggle('d-none',!document.getElementById('vValid').checked);}
+function commitVerify(){
+  const v=VERIFY.find(x=>x.vid===state.pending.vid);
+  const valid=document.getElementById('vValid').checked, st=document.getElementById('restoreStatus').value;
+  VERIFY.splice(VERIFY.indexOf(v),1);
+  bootstrap.Modal.getInstance('#verifyModal').hide();
+  if(valid){
+    const t=v.task||{taskId:'TSK-'+String(90000+TASKS.length).slice(-5),claim:v.claim,acct:'—',patient:pick(PATIENTS),
+      cpt:v.cpt,code:v.code,desc:'Restored from verification',cls:'Documentation Denial',payer:v.payer,ptype:'Commercial',
+      action:'Appeal',scope:'ClaimLevel',reco:RECO['Appeal'],prio:'High',due:'2026-08-26',days:14,slaDays:14,bal:v.bal,
+      denialDate:v.on,dos:'2026-06-20',panel:'Toxicology',clinic:CLINICS[0],provider:PROVIDERS[0],source:'Webpm',
+      units:1,modifier:'-',track:`${v.claim}|${v.cpt}|${v.code}`,notes:[],history:[],docs:0,escalated:false,from:'Old Run',assigned:''};
+    t.status=st;
+    t.history.push({when:'2026-08-12',who:USER[state.role].n,what:'VerifiedValid',note:`Restored to the task board as ${st}.`});
+    TASKS.unshift(t);
+    toast(`${v.vid} verified valid — back on the board as ${st}.`);
+  } else toast(`${v.vid} verified invalid. Not restored; the history keeps the decision.`);
+  render();
+}
+
+function openEscalate(taskId){
+  const t=taskId?TASKS.find(x=>x.taskId===taskId):null;
+  state.pending={taskId};
+  document.getElementById('escTitle').textContent=t?`Escalate claim ${t.claim}`:`Escalate ${state.sel.size} selected claims`;
+  document.getElementById('escNote').value='';
+  document.getElementById('escNotes').innerHTML=(t&&t.notes.length)
+    ?t.notes.map(n=>`<div class="notecard"><div>${n.text}</div>
+      <div class="m">Status: ${n.newStatus} · ${n.by} · ${fmtUS(n.when)}</div></div>`).join('')
+    :'<div class="muted small">No notes found.</div>';
+  new bootstrap.Modal('#escalateModal').show();
+}
+function commitEscalate(){
+  const to=document.getElementById('escTo').value;
+  const label=to.startsWith('AR Manager')?'Internal Escalation':'External Escalation';
+  const list=state.pending.taskId?[TASKS.find(x=>x.taskId===state.pending.taskId)]
+    :TASKS.filter(x=>state.sel.has(x.taskId));
+  list.forEach(t=>{t.escalated=true;
+    t.history.push({when:'2026-08-12',who:me(),what:'Escalated',note:`${label} — ${document.getElementById('escNote').value||'no note'}`});});
+  bootstrap.Modal.getInstance('#escalateModal').hide();
+  state.sel.clear();
+  toast(`${list.length} claim${list.length===1?'':'s'} escalated. Recorded as ${label}, attributed to ${me()}.`);
+  render();
+}
+function openDocs(claim){document.getElementById('docTitle').textContent=`Claim documents · ${claim}`;
+  new bootstrap.Modal('#docModal').show();}
+
+function openHistory(taskId){
+  const t=TASKS.find(x=>x.taskId===taskId);
+  document.getElementById('histTitle').textContent=`${t.taskId} · ${t.claim} · ${t.code}`;
+  document.getElementById('histBody').innerHTML=
+    `<div class="small muted mb-3">Every action carries the actor, the run id and a snapshot of the task as it was before the change.</div>
+     <div class="timeline">${t.history.slice().reverse().map(h=>`<div class="it">
+       <div class="d-flex justify-content-between"><b>${h.what}</b><span class="muted small">${fmtUS(h.when)}</span></div>
+       <div class="small muted">By: ${h.who}</div><div class="small mt-1">${h.note||''}</div>
+       ${h.snap?`<div class="snap mt-2">${h.snap}</div>`:''}</div>`).join('')}</div>`;
+  openDrawer('histDrawer');
+}
+function openDrawer(id){
+  if(id==='jobsDrawer')renderJobs();
+  document.getElementById(id).classList.add('open');
+}
+function closeDrawer(id){document.getElementById(id).classList.remove('open');}
+function renderJobs(){
+  document.getElementById('jobsBody').innerHTML=JOBS.map(j=>`
+    <div class="panel p-3 mb-2">
+      <div class="d-flex justify-content-between gap-2 align-items-start">
+        <div class="mono small" style="word-break:break-all">${j.name}</div>
+        <span class="pill ${j.state==='Ready'?'p-done':'p-progress'}">${j.state}</span></div>
+      <div class="small muted mt-1">Queued ${j.at}</div>
+      ${j.state==='Ready'
+        ?`<button class="btn btn-sm btn-teal mt-2" onclick="toast('Download started.')">Download</button>`
+        :`<div class="progress mt-2" style="height:6px"><div class="progress-bar" style="width:${j.pct}%"></div></div>
+          <div class="small muted mt-1">Writing sheet ${j.sheet} of 6 — you can leave this page.</div>`}
+    </div>`).join('')||'<div class="text-center py-5 muted">Nothing queued yet. Export from any tab and it shows up here.</div>';
+}
+function queueExport(){
+  const lab=document.getElementById('labSel').value.split('_')[0];
+  const j={name:`Denial_${lab}_${runId()}_2026-W33.xlsx`,at:'2026-08-12 14:30',state:'In progress',pct:14,sheet:1};
+  JOBS.unshift(j); document.getElementById('jobBadge').textContent=JOBS.length;
+  toast('Export queued to dbo.UserReqReports — six sheets, built in the background by LRN.ReportWorker.');
+  let n=14; const iv=setInterval(()=>{n+=15;j.pct=Math.min(100,n);j.sheet=Math.min(6,Math.ceil(n/17));
+    if(n>=100){j.state='Ready';clearInterval(iv);toast('Denial workbook ready to download.');}
+    if(document.getElementById('jobsDrawer').classList.contains('open'))renderJobs();},850);
+}
+function exportSync(tab){toast(`DenialWorkflow_${document.getElementById('labSel').value.split('_')[0]}_${tab}_20260812-1430.xlsx downloaded — one sheet, up to 50,000 rows.`);}
+function toast(msg){
+  const el=document.createElement('div');
+  el.className='toast align-items-center border-0 show';
+  el.style.background='var(--navy-800)'; el.style.color='#fff';
+  el.innerHTML=`<div class="d-flex"><div class="toast-body">${msg}</div>
+    <button class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
+  document.getElementById('toasts').appendChild(el); setTimeout(()=>el.remove(),5200);
+}
+
+/* filters */
+function applyFilters(){
+  state.chips=[{k:'Denial Date',v:'2026-07-01 → 2026-08-12'}];
+  const grab=(id,label)=>{const el=document.getElementById(id);
+    if(el.multiple){const v=[...el.selectedOptions].map(o=>o.value).filter(x=>x!=='(All)');
+      if(v.length)state.chips.push({k:label,v:v.join(' | ')});}
+    else if(el.value.trim())state.chips.push({k:label,v:el.value.trim()});};
+  grab('f_status','Task Status');grab('f_priority','Priority');grab('f_class','Classification');
+  grab('f_action','Action Category');grab('f_deadline','SLA');grab('f_code','Denial Code');
+  grab('f_payer','Payer Name');grab('f_ptype','Payer Type');grab('f_panel','Panel Name');
+  grab('f_prov','Referring Provider');grab('f_clinic','Clinic Name');grab('f_rep','Sales Rep');
+  render(); toast('Filters applied to every tab in both modules.');
+}
+function clearFilters(){
+  state.chips=[];
+  document.querySelectorAll('#filterBody select[multiple]').forEach(s=>[...s.options].forEach(o=>o.selected=o.value==='(All)'));
+  ['f_payer','f_ptype','f_panel','f_prov','f_clinic','f_rep'].forEach(i=>document.getElementById(i).value='');
+  render();
+}
+function addChip(k,v){state.chips.push({k,v});render();toast(`Added "${v}" to the global filter.`);}
+function dropChip(i){state.chips.splice(i,1);render();}
+
+/* ==========================================================
+   RENDER
+   ========================================================== */
+function render(keepFocus){
+  const a=keepFocus?document.activeElement:null;
+  const sig=a?[a.tagName,a.getAttribute('oninput')].join('|'):null, caret=a&&a.selectionStart;
+
+  const lab=document.getElementById('labSel').value;
+  const labName=lab.replace(/_/g,' ');
+  document.getElementById('avatarInit').textContent=USER[state.role].i;
+  document.getElementById('nav-dashboard').className=state.module==='dashboard'?'on':'';
+  document.getElementById('nav-workflow').className=state.module==='workflow'?'on':'';
+
+  const t=myTasks();
+  const titles={dashboard:'Denial Dashboard',workflow:state.role==='reviewer'?'My Worklist':'Denial Workflow'};
+  document.getElementById('pageTitle').textContent=titles[state.module];
+  document.getElementById('pageCrumb').textContent=titles[state.module];
+  document.getElementById('srcChip').innerHTML=`Source file <b>${SRC[lab]==='Not available'?'Not available':'Loaded'}</b>`;
+  document.getElementById('rowCount').innerHTML=
+    `<b>${labName}</b> · ${LINES.length.toLocaleString()} rows · ${myLines().length.toLocaleString()} visible after filtering`;
+  document.getElementById('ctxChips').innerHTML=
+    `<span class="srcchip">Lab: <b>${labName}</b></span>
+     <span class="srcchip mono"># Run: <b>${runId()}</b></span>
+     <span class="srcchip">Source File: <b>${SRC[lab]}</b></span>
+     <span class="srcchip">Signed in as <b>${USER[state.role].n}</b>${state.role==='reviewer'?` (${me()})`:''}</span>`;
+  document.getElementById('chipRow').innerHTML=state.chips.length
+    ? state.chips.map((c,i)=>`<span class="chip">${c.k}: <b>${c.v}</b><button onclick="dropChip(${i})" aria-label="Remove">&times;</button></span>`).join('')
+    : '<span class="small muted">No filters applied — showing the whole run.</span>';
+
+  document.getElementById('tabBar').innerHTML=tabs().map(([k,l])=>
+    `<button class="pilltab ${state.tab===k?'on':''}" onclick="setTab('${k}')">${l}</button>`).join('');
+
+  // deadline bucket is derived, keep it fresh
+  TASKS.forEach(x=>x.deadlineBucket=x.days<0?'Overdue':x.days<=3?'Due in 3 days':x.days<=7?'Due in 7 days':'Beyond 7 days');
+
+  const map={summary:paneSummary,weekly:()=>panePivot(false),monthly:()=>panePivot(true),panel:paneFilterPanel,
+    board:paneBoard,sla:paneSla,insight:()=>paneInsight(false),line:paneLine,
+    wfhome:paneWfHome,wfinsight:()=>paneInsight(true),wfboard:paneWfBoard,wfverify:()=>paneVerify(false)};
+  document.getElementById('pane').innerHTML=(map[state.tab]||paneSummary)();
+
+  if(sig){const el=[...document.querySelectorAll('input')].find(i=>[i.tagName,i.getAttribute('oninput')].join('|')===sig);
+    if(el){el.focus();try{el.setSelectionRange(caret,caret);}catch(e){}}}
+}
+TASKS.forEach(x=>x.deadlineBucket=x.days<0?'Overdue':x.days<=3?'Due in 3 days':x.days<=7?'Due in 7 days':'Beyond 7 days');
+render();
+</script>
+</body>
+</html>

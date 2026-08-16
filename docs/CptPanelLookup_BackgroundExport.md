@@ -41,22 +41,49 @@ and treats it as a queue-only lab.
 
 ## Deployment steps
 
+Until **both** of these are done the page falls back to the old direct download. That fallback
+is silent by design, so "the export still downloads on the page" is the symptom of a missing step
+here, not of a code problem.
+
 1. **Create `{LabConfigFolder}\LRNMaster.json`** on both the web server and the report-worker
    server, in the same folder as the other lab configs
-   (`LabConfig:LabConfigFolder` / `ReportWorker:LabConfigFolder`):
+   (`LabConfig:LabConfigFolder` / `ReportWorker:LabConfigFolder`). A ready copy is in
+   [samples/LRNMaster.json](samples/LRNMaster.json) — set the connection string for the target
+   environment:
 
    ```json
    {
      "LRNMaster": {
        "DBEnabled": true,
-       "DbConnectionString": "Server=...;Database=LRNMaster;..."
+       "LineClaimEnable": false,
+       "DbConnectionString": "Server=...;Initial Catalog=LRNMaster;..."
      }
    }
    ```
 
-2. **Deploy the report-queue objects to LRNMaster** — the same `dbo.UserReqReports` table and
-   queue stored procedures each lab database already has. Without them the queue call fails
-   with SQL error 208 / 2812.
+   The root property **must** equal the file name (`LRNMaster`) — `LabDbConfigLoader.Load`
+   looks the section up by lab name and returns null otherwise.
+
+2. **Deploy the report-queue objects to LRNMaster.** As of this writing LRNMaster has
+   `CPTAverage` and `PanelAverage` but **no** `UserReqReports` and no queue procedures, so this
+   step is required. Run all three, in order, against LRNMaster — they are idempotent:
+
+   ```
+   SQL_Scripts/UserReqReports/01_UserReqReports_Schema.sql
+   SQL_Scripts/UserReqReports/02_UserReqReports_Procs.sql
+   SQL_Scripts/UserReqReports/03_Add_ProgressPercent.sql
+   ```
+
+   Without them the queue call fails with SQL error 208 / 2812. `AnalyticsController.QueueExport`
+   catches exactly those two and returns 400, which the page treats as "queue unavailable" and
+   falls back to the direct download — so the user still gets a file, just a synchronous one.
+
+   Verify with:
+
+   ```sql
+   SELECT (SELECT COUNT(*) FROM sys.tables     WHERE name = 'UserReqReports')  AS QueueTable,
+          (SELECT COUNT(*) FROM sys.procedures WHERE name LIKE '%UserReqReport%') AS QueueProcs;
+   ```
 
 3. `LRNMaster` is already added to `ReportWorker:Labs` in
    [LRN.ReportWorker/appsettings.json](../LRN.ReportWorker/appsettings.json) (a lab **name**
@@ -84,12 +111,26 @@ works for filtered exports and still times out for unfiltered ones.
 The workbook is byte-identical to the synchronous one — the column definitions live only in
 `SqlCptLookupRepository`, and the worker calls the same builders.
 
+## The 1,000-row truncation (fixed)
+
+Exports returned only 1,000 rows regardless of filters. `ExportCptAsync` set
+`PageSize = ExportRowCap` (100,000) and then called the public `GetCptAsync`, which starts with
+`Normalise(query, MaxPageSize)` — clamping it straight back to the UI's 1,000-row page limit. The
+workbook looked complete, so nothing surfaced the loss.
+
+The read now takes its ceiling from the caller: `ReadCptExportRowsAsync` / `ReadPanelExportRowsAsync`
+normalise against `ExportRowCap` instead of `MaxPageSize`, and use a 1,800s command timeout rather
+than the 120s page timeout, since a full unfiltered read is far heavier than a page. Guarded by
+[CptLookupExportPagingTests](../tests/LRN.ReportsApi.Tests/CptLookupExportPagingTests.cs), which also
+asserts the export cap stays above the page limit — if the two ever converge, exports truncate again.
+
+This affected the synchronous download too, so it was never specific to the queued path.
+
 ## Known limits
 
-* `SqlCptLookupRepository.MaxExportRows` is still **100,000**. It is a ClosedXML memory guard,
-  not a filter. Backgrounding removed the *timeout*, not the cap. When an export hits it the
-  generator logs a warning naming the cap, so a truncated workbook is visible in the worker log
-  rather than silent. Raising it means moving this export to the streaming `OpenXmlRowStreamer`
-  path that LIS Summary uses.
+* `SqlCptLookupRepository.MaxExportRows` is **100,000**. It is a ClosedXML memory guard, not a
+  filter. When an export hits it the generator logs a warning naming the cap, so a truncated
+  workbook is visible in the worker log rather than silent. Raising it means moving this export to
+  the streaming `OpenXmlRowStreamer` path that LIS Summary uses.
 * Output file name is `CptLookup_<Scope>[_<Window>].xlsx` / `PanelLookup_…`, where `<Scope>` is
   the lab name, `Lab<id>` when the name could not be resolved, or `AllLabs` when unfiltered.

@@ -1,0 +1,1118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Denial Dashboard &amp; Denial Workflow — Screens</title>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css" rel="stylesheet">
+<style>
+  :root{
+    --ink:#1b2420; --ink-2:#4c5a53; --ink-3:#7b8a83;
+    --line:#dfe4e0; --line-2:#eef1ee;
+    --surface:#ffffff; --canvas:#f4f6f4;
+    --brand:#548235; --brand-dk:#3f6427; --brand-soft:#eef4e9;
+    --warn:#b45309; --warn-soft:#fdf3e6;
+    --danger:#b42318; --danger-soft:#fdeceb;
+    --info:#1f6feb; --info-soft:#eaf1fe;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  body{background:var(--canvas); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; font-size:14px;}
+  .mono{font-family:var(--mono); font-size:.82em; letter-spacing:-.01em;}
+  .num{font-variant-numeric:tabular-nums;}
+  .eyebrow{font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); font-weight:600;}
+
+  /* ---------- app bar ---------- */
+  .appbar{background:var(--ink); color:#e9eee9; border-bottom:3px solid var(--brand);}
+  .appbar .brand{font-weight:700; letter-spacing:-.02em;}
+  .appbar .form-select-sm{background-color:#28332d; border-color:#3a463f; color:#e9eee9;}
+  .runpill{background:#28332d; border:1px solid #3a463f; border-radius:999px; padding:2px 10px; font-size:12px;}
+  .modeswitch .btn{--bs-btn-color:#c8d2cb; --bs-btn-border-color:#3a463f; --bs-btn-hover-bg:#28332d; --bs-btn-hover-color:#fff;
+    --bs-btn-active-bg:var(--brand); --bs-btn-active-border-color:var(--brand); --bs-btn-hover-border-color:#3a463f;}
+
+  /* ---------- run strip (signature) ---------- */
+  .runstrip{display:flex; gap:0; overflow-x:auto; border:1px solid var(--line); background:var(--surface); border-radius:8px;}
+  .runstep{flex:1 0 118px; padding:10px 12px; border-right:1px solid var(--line-2); position:relative;}
+  .runstep:last-child{border-right:0;}
+  .runstep .n{font-size:10px; color:var(--ink-3); font-family:var(--mono);}
+  .runstep .t{font-size:12px; font-weight:600; line-height:1.25; margin-top:2px;}
+  .runstep .bar{height:3px; border-radius:2px; background:var(--line); margin-top:8px;}
+  .runstep.done .bar{background:var(--brand);}
+  .runstep.skip .bar{background:#c9d1cc;}
+  .runstep.now .bar{background:var(--warn);}
+  .runstep.now{background:var(--warn-soft);}
+  .runstep.off .t{color:var(--ink-3); font-weight:500;}
+
+  /* ---------- cards / tiles ---------- */
+  .card{border-color:var(--line); border-radius:8px;}
+  .card-header{background:var(--surface); border-bottom:1px solid var(--line); font-weight:600; padding:.6rem .85rem;}
+  .tile{background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:14px 16px; height:100%;}
+  .tile .v{font-size:26px; font-weight:700; letter-spacing:-.02em; line-height:1.1;}
+  .tile .l{font-size:12px; color:var(--ink-2);}
+  .tile .d{font-size:11px; color:var(--ink-3); margin-top:6px;}
+  .tile.accent{border-left:3px solid var(--brand);}
+  .tile.warnb{border-left:3px solid var(--warn);}
+  .tile.dangerb{border-left:3px solid var(--danger);}
+
+  /* ---------- tabs ---------- */
+  .tabbar{background:var(--surface); border-bottom:1px solid var(--line);}
+  .tabbar .nav-link{border:0; border-bottom:2px solid transparent; border-radius:0; color:var(--ink-2); font-size:13px; padding:.6rem .9rem;}
+  .tabbar .nav-link:hover{color:var(--ink);}
+  .tabbar .nav-link.active{color:var(--brand-dk); border-bottom-color:var(--brand); background:transparent; font-weight:600;}
+
+  /* ---------- grids ---------- */
+  .gridwrap{overflow:auto; border:1px solid var(--line); border-radius:8px; background:var(--surface);}
+  table.grid{width:100%; margin:0; border-collapse:separate; border-spacing:0; font-size:12.5px;}
+  table.grid th{position:sticky; top:0; z-index:3; background:var(--brand); color:#fff; font-weight:600; font-size:11.5px;
+    letter-spacing:.02em; padding:7px 9px; white-space:nowrap; border-right:1px solid rgba(255,255,255,.16);}
+  table.grid tr.filters th{top:29px; background:var(--brand-soft); z-index:2; padding:4px 5px;}
+  table.grid tr.filters input, table.grid tr.filters select{width:100%; min-width:88px; border:1px solid #cddcc2; border-radius:4px;
+    font-size:11.5px; padding:2px 5px; background:#fff;}
+  table.grid td{padding:6px 9px; border-bottom:1px solid var(--line-2); white-space:nowrap;}
+  table.grid tbody tr:hover{background:#f7faf5;}
+  table.grid td.sticky, table.grid th.sticky{position:sticky; left:0; background:var(--surface); z-index:1; border-right:1px solid var(--line);}
+  table.grid th.sticky{background:var(--brand); z-index:4;}
+  table.grid tr.filters th.sticky{background:var(--brand-soft); z-index:3;}
+  .gridfoot{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 10px;
+    border-top:1px solid var(--line); background:#fbfcfb; font-size:12px; color:var(--ink-2);}
+  .rowsel{width:26px;}
+
+  /* ---------- pills ---------- */
+  .pill{display:inline-block; padding:1px 8px; border-radius:999px; font-size:11px; font-weight:600; border:1px solid transparent; white-space:nowrap;}
+  .p-new{background:#eef1ee; color:#4c5a53; border-color:#dfe4e0;}
+  .p-pending{background:var(--info-soft); color:#14539a; border-color:#cfe0fb;}
+  .p-progress{background:var(--warn-soft); color:var(--warn); border-color:#f6dfc0;}
+  .p-verif{background:#f3ecfb; color:#6b3fa0; border-color:#e4d7f5;}
+  .p-dup{background:var(--danger-soft); color:var(--danger); border-color:#f6cfcc;}
+  .p-done{background:var(--brand-soft); color:var(--brand-dk); border-color:#d6e6c8;}
+  .p-closed{background:#eef1ee; color:#31413a; border-color:#dfe4e0;}
+  .p-high{background:var(--danger-soft); color:var(--danger); border-color:#f6cfcc;}
+  .p-med{background:var(--warn-soft); color:var(--warn); border-color:#f6dfc0;}
+  .p-low{background:#eef1ee; color:#4c5a53; border-color:#dfe4e0;}
+  .flagesc{color:var(--danger); font-weight:700;}
+
+  /* ---------- breakdown panels ---------- */
+  .bd-row{display:flex; align-items:center; gap:10px; padding:5px 0; border-bottom:1px dashed var(--line-2); cursor:pointer;}
+  .bd-row:last-child{border-bottom:0;}
+  .bd-label{flex:0 0 42%; font-size:12.5px;}
+  .bd-track{flex:1; height:6px; background:var(--line-2); border-radius:3px; overflow:hidden;}
+  .bd-fill{height:100%; background:var(--brand); border-radius:3px;}
+  .bd-fill.w{background:var(--warn);} .bd-fill.d{background:var(--danger);}
+  .bd-n{flex:0 0 76px; text-align:right; font-size:12px; font-variant-numeric:tabular-nums; color:var(--ink-2);}
+
+  /* ---------- filter bar ---------- */
+  .filterbar{background:var(--surface); border-bottom:1px solid var(--line);}
+  .filterbar label{font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3); font-weight:600; margin-bottom:2px;}
+  .filterbar .form-control, .filterbar .form-select{font-size:12.5px; padding:.25rem .5rem;}
+  .chip{background:var(--brand-soft); border:1px solid #d6e6c8; color:var(--brand-dk); border-radius:999px;
+    padding:1px 8px; font-size:11.5px; margin-right:6px; display:inline-flex; align-items:center; gap:6px;}
+  .chip button{border:0; background:none; line-height:1; color:var(--brand-dk); padding:0;}
+
+  /* ---------- misc ---------- */
+  .pivot th, .pivot td{font-size:12px;}
+  .pivot .grp{background:#f2f5f1; font-weight:600;}
+  .btn-brand{background:var(--brand); border-color:var(--brand); color:#fff;}
+  .btn-brand:hover{background:var(--brand-dk); border-color:var(--brand-dk); color:#fff;}
+  .sectitle{font-size:13px; font-weight:700; letter-spacing:-.01em;}
+  .muted{color:var(--ink-3);}
+  .drawer{position:fixed; top:0; right:0; height:100%; width:min(460px,92vw); background:var(--surface);
+    border-left:1px solid var(--line); box-shadow:-12px 0 32px rgba(20,30,25,.12); transform:translateX(102%);
+    transition:transform .22s ease; z-index:1080; display:flex; flex-direction:column;}
+  .drawer.open{transform:translateX(0);}
+  @media (prefers-reduced-motion: reduce){ .drawer{transition:none;} }
+  .hist{border-left:2px solid var(--line); padding-left:12px; margin-left:6px;}
+  .hist .it{position:relative; padding:0 0 14px 0;}
+  .hist .it::before{content:""; position:absolute; left:-19px; top:5px; width:8px; height:8px; border-radius:50%; background:var(--brand);}
+  .snap{background:#f7f9f6; border:1px solid var(--line-2); border-radius:6px; padding:6px 8px; font-family:var(--mono); font-size:11px; color:var(--ink-2); white-space:pre-wrap;}
+  .stepnote{font-size:11.5px; color:var(--ink-3);}
+  .req{font-family:var(--mono); font-size:10.5px; color:var(--ink-3); border:1px solid var(--line); border-radius:4px; padding:0 4px;}
+  :focus-visible{outline:2px solid var(--info); outline-offset:1px;}
+</style>
+</head>
+<body>
+
+<!-- ================= APP BAR ================= -->
+<div class="appbar sticky-top">
+  <div class="container-fluid px-3 py-2 d-flex flex-wrap align-items-center gap-2">
+    <div class="brand me-2">LRN Metrics <span class="opacity-50">/</span> Denials</div>
+
+    <div class="btn-group btn-group-sm modeswitch me-2" role="group" aria-label="Module">
+      <button class="btn active" id="mod-dashboard" onclick="setModule('dashboard')">Denial Dashboard</button>
+      <button class="btn" id="mod-workflow" onclick="setModule('workflow')">Denial Workflow</button>
+    </div>
+
+    <div class="d-flex align-items-center gap-2 ms-auto">
+      <select class="form-select form-select-sm" style="width:190px" id="labSel" onchange="onLabChange()">
+        <option>NorthWest Lab (NWL)</option>
+        <option>Sunrise Diagnostics</option>
+        <option>Gulf Coast Pathology</option>
+      </select>
+      <span class="runpill mono" id="runPill">RunId R2026-W31-004</span>
+      <select class="form-select form-select-sm" style="width:150px" id="roleSel" onchange="setRole(this.value)">
+        <option value="admin">Admin</option>
+        <option value="manager">AR Manager</option>
+        <option value="reviewer">AR Reviewer</option>
+      </select>
+      <button class="btn btn-sm btn-outline-light position-relative" onclick="openReports()">
+        Reports
+        <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-warning text-dark" id="reportBadge">1</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= GLOBAL FILTERS ================= -->
+<div class="filterbar">
+  <div class="container-fluid px-3 py-2">
+    <div class="d-flex align-items-center gap-2">
+      <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#filterBody">Filters</button>
+      <div class="flex-grow-1" id="chipRow"></div>
+      <span class="small muted" id="filterScope">Applies to every tab</span>
+      <button class="btn btn-sm btn-link text-decoration-none" onclick="clearFilters()">Clear all</button>
+      <button class="btn btn-sm btn-brand" onclick="applyFilters()">Apply</button>
+    </div>
+    <div class="collapse mt-2" id="filterBody">
+      <div class="row g-2">
+        <div class="col-6 col-md-2"><label>Status</label>
+          <select class="form-select form-select-sm" multiple size="4" id="f_status">
+            <option selected>(All)</option><option>New</option><option>Pending Review</option><option>In-Progress</option>
+            <option>Verification Pending</option><option>Completed</option><option>Closed</option>
+          </select></div>
+        <div class="col-6 col-md-2"><label>Priority</label>
+          <select class="form-select form-select-sm" multiple size="4" id="f_priority">
+            <option selected>(All)</option><option>High</option><option>Medium</option><option>Low</option>
+          </select></div>
+        <div class="col-6 col-md-2"><label>Action category</label>
+          <select class="form-select form-select-sm" multiple size="4" id="f_action">
+            <option selected>(All)</option><option>Appeal</option><option>Rebill</option><option>Medical Records</option>
+            <option>Coding Review</option><option>Eligibility Check</option><option>Write Off</option><option>Patient Bill</option>
+          </select></div>
+        <div class="col-6 col-md-2"><label>Deadline</label>
+          <select class="form-select form-select-sm" multiple size="4" id="f_deadline">
+            <option selected>(All)</option><option>Overdue</option><option>Due in 3 days</option><option>Due in 7 days</option><option>Beyond 7 days</option>
+          </select></div>
+        <div class="col-6 col-md-2"><label>Classification</label>
+          <select class="form-select form-select-sm" multiple size="4" id="f_class">
+            <option selected>(All)</option><option>Soft</option><option>Hard</option><option>Clinical</option><option>Technical</option>
+          </select></div>
+        <div class="col-6 col-md-2"><label>Denial code</label>
+          <select class="form-select form-select-sm" multiple size="4" id="f_code">
+            <option selected>(All)</option><option>CO-197</option><option>CO-16</option><option>CO-29</option><option>CO-45</option>
+            <option>PR-204</option><option>CO-11</option><option>CO-97</option><option>OA-23</option>
+          </select></div>
+
+        <div class="col-6 col-md-2"><label>Sales rep</label><input class="form-control form-control-sm" id="f_rep" placeholder="contains"></div>
+        <div class="col-6 col-md-2"><label>Clinic</label><input class="form-control form-control-sm" id="f_clinic" placeholder="contains"></div>
+        <div class="col-6 col-md-2"><label>Referring provider</label><input class="form-control form-control-sm" id="f_prov" placeholder="contains"></div>
+        <div class="col-6 col-md-2"><label>Payer name</label><input class="form-control form-control-sm" id="f_payer" placeholder="contains"></div>
+        <div class="col-6 col-md-2"><label>Payer type</label><input class="form-control form-control-sm" id="f_ptype" placeholder="contains"></div>
+        <div class="col-6 col-md-2"><label>Panel name</label><input class="form-control form-control-sm" id="f_panel" placeholder="contains"></div>
+
+        <div class="col-12 col-md-4"><label>First billed</label>
+          <div class="input-group input-group-sm"><input type="date" class="form-control"><span class="input-group-text">to</span><input type="date" class="form-control"></div></div>
+        <div class="col-12 col-md-4"><label>Date of service</label>
+          <div class="input-group input-group-sm"><input type="date" class="form-control"><span class="input-group-text">to</span><input type="date" class="form-control"></div></div>
+        <div class="col-12 col-md-4"><label>Denial date</label>
+          <div class="input-group input-group-sm"><input type="date" class="form-control" value="2026-07-01"><span class="input-group-text">to</span><input type="date" class="form-control" value="2026-08-11"></div></div>
+      </div>
+      <div class="small muted mt-2">Multi-choice values travel pipe-delimited; <span class="mono">(All)</span> means no filter. Date ranges are inclusive.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= TABS ================= -->
+<div class="tabbar">
+  <div class="container-fluid px-3">
+    <ul class="nav" id="tabNav"></ul>
+  </div>
+</div>
+
+<!-- ================= PANE ================= -->
+<div class="container-fluid px-3 py-3" id="pane"></div>
+
+<!-- ================= MODALS ================= -->
+<div class="modal fade" id="assignModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h6 class="modal-title">Assign reviewer</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="mb-2 small muted">Assignment is by denial code &times; payer — the reviewer owns the pattern for this run.</div>
+    <div class="border rounded p-2 mb-3 small" id="assignScope"></div>
+    <label class="form-label small fw-semibold">Reviewer</label>
+    <select class="form-select form-select-sm mb-3" id="assignTo"></select>
+    <div class="alert alert-light border small mb-0">
+      Status moves to <span class="pill p-pending">Pending Review</span> only where it is blank or <span class="pill p-new">New</span>.
+      In-flight tasks keep their status. One transaction; a partial assignment is never written.
+    </div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+    <button class="btn btn-sm btn-brand" onclick="commitAssign()">Assign</button></div>
+</div></div></div>
+
+<div class="modal fade" id="statusModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h6 class="modal-title">Update status</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="border rounded p-2 mb-3 small" id="statusScope"></div>
+    <label class="form-label small fw-semibold">New status</label>
+    <select class="form-select form-select-sm mb-3" id="statusVal">
+      <option>In-Progress</option><option>Completed</option><option>Closed</option><option>Duplicate</option>
+    </select>
+    <label class="form-label small fw-semibold">Reviewer comments</label>
+    <textarea class="form-control form-control-sm" rows="3" id="statusNote" placeholder="What did you do, and what happens next?"></textarea>
+    <div class="alert alert-warning small mt-3 mb-0 d-none" id="dupWarn">
+      <b>Duplicate</b> moves the task off the board and into Verification. It is never closed silently.
+    </div>
+    <div class="alert alert-light border small mt-3 mb-0 d-none" id="claimWarn">
+      This action category is claim-level — the change applies to all tasks on <span class="mono" id="claimWarnId"></span>.
+    </div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+    <button class="btn btn-sm btn-brand" onclick="commitStatus()">Save change</button></div>
+</div></div></div>
+
+<div class="modal fade" id="verifyModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h6 class="modal-title">Verification decision</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="border rounded p-2 mb-3 small" id="verifyScope"></div>
+    <div class="mb-3">
+      <div class="form-check"><input class="form-check-input" type="radio" name="vdec" id="vValid" checked onchange="toggleVerify()">
+        <label class="form-check-label" for="vValid"><b>Valid denial</b> — put the task back on the board</label></div>
+      <div class="form-check"><input class="form-check-input" type="radio" name="vdec" id="vInvalid" onchange="toggleVerify()">
+        <label class="form-check-label" for="vInvalid"><b>Not a denial</b> — leave it off the board, keep the history</label></div>
+    </div>
+    <div id="restoreWrap">
+      <label class="form-label small fw-semibold">Restore under status</label>
+      <select class="form-select form-select-sm mb-3" id="restoreStatus">
+        <option>Pending Review</option><option>In-Progress</option><option>New</option>
+      </select>
+    </div>
+    <label class="form-label small fw-semibold">Verifier comments</label>
+    <textarea class="form-control form-control-sm" rows="3" id="verifyNote"></textarea>
+  </div>
+  <div class="modal-footer"><button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+    <button class="btn btn-sm btn-brand" onclick="commitVerify()">Record decision</button></div>
+</div></div></div>
+
+<!-- history drawer -->
+<div class="drawer" id="histDrawer">
+  <div class="d-flex align-items-center justify-content-between p-3 border-bottom">
+    <div><div class="eyebrow">Task history</div><div class="fw-semibold mono" id="histTitle"></div></div>
+    <button class="btn-close" onclick="closeDrawer('histDrawer')"></button>
+  </div>
+  <div class="p-3 overflow-auto" id="histBody"></div>
+</div>
+
+<!-- reports drawer -->
+<div class="drawer" id="repDrawer">
+  <div class="d-flex align-items-center justify-content-between p-3 border-bottom">
+    <div><div class="eyebrow">Reports</div><div class="fw-semibold">Queued exports</div></div>
+    <button class="btn-close" onclick="closeDrawer('repDrawer')"></button>
+  </div>
+  <div class="p-3 overflow-auto" id="repBody"></div>
+  <div class="p-3 border-top small muted">Files are scoped to you and served through a one-time download token. Nothing is enumerable by id.</div>
+</div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3" id="toasts"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/js/bootstrap.bundle.min.js"></script>
+<script>
+/* ============================================================
+   SEED DATA  (deterministic, so screenshots are stable)
+   ============================================================ */
+let _s = 20260811;
+const rnd = () => (_s = (_s * 1103515245 + 12345) % 2147483648) / 2147483648;
+const pick = a => a[Math.floor(rnd()*a.length)];
+const money = n => '$' + n.toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2});
+
+const PAYERS = [
+  ['Aetna','Commercial'],['UnitedHealthcare','Commercial'],['BCBS of Texas','Commercial'],
+  ['Cigna','Commercial'],['Medicare Part B','Government'],['Humana','Medicare Advantage'],
+  ['Medicaid TX','Government'],['Tricare West','Government']
+];
+const DENIALS = [
+  ['CO-197','Precertification / authorization absent'],
+  ['CO-16','Claim lacks information needed for adjudication'],
+  ['CO-29','Time limit for filing has expired'],
+  ['CO-45','Charge exceeds fee schedule'],
+  ['PR-204','Not covered under the patient current plan'],
+  ['CO-11','Diagnosis inconsistent with the procedure'],
+  ['CO-97','Bundled into another service'],
+  ['OA-23','Prior payer adjustment']
+];
+const ACTIONS = [
+  ['Appeal','ClaimLevel'],['Rebill','ClaimLevel'],['Medical Records','ClaimLevel'],
+  ['Coding Review','LineLevel'],['Eligibility Check','LineLevel'],
+  ['Write Off','LineLevel'],['Patient Bill','LineLevel']
+];
+const CPTS = ['80053','81001','83036','84443','87804','80061','82306','85025','80048','84153'];
+const REVIEWERS = ['A. Fernandes','R. Kulkarni','M. Osei','J. Tan','P. Varghese'];
+const CLINICS = ['Cedar Park Clinic','Riverbend Family Med','Sunset Internal','Lakeview Primary','Harbor Point'];
+const REPS = ['D. Whitfield','S. Ahmed','L. Moreau','K. Ibarra'];
+const PROVIDERS = ['Dr. N. Iyer','Dr. B. Cole','Dr. F. Okonjo','Dr. H. Lam','Dr. G. Petrov'];
+const PANELS = ['CMP Panel','Lipid Panel','Hepatic Panel','Thyroid Panel','UA Reflex','CBC w/ Diff'];
+const CLASSES = ['Soft','Hard','Clinical','Technical'];
+const STATUSES = ['New','Pending Review','In-Progress','Verification Pending','Completed','Closed'];
+const CURRENT_USER = {admin:'A. Fernandes', manager:'A. Fernandes', reviewer:'R. Kulkarni'};
+
+const pillClass = s => ({
+  'New':'p-new','Pending Review':'p-pending','In-Progress':'p-progress','Verification Pending':'p-verif',
+  'Duplicate':'p-dup','Completed':'p-done','Closed':'p-closed','High':'p-high','Medium':'p-med','Low':'p-low'
+}[s] || 'p-new');
+const pill = s => `<span class="pill ${pillClass(s)}">${s}</span>`;
+
+const d0 = new Date('2026-08-11');
+const dStr = d => d.toISOString().slice(0,10);
+const addD = (d,n) => { const x=new Date(d); x.setDate(x.getDate()+n); return x; };
+
+const LINES = [], TASKS = [];
+for (let i=0;i<260;i++){
+  const [code,desc] = pick(DENIALS), [payer,ptype] = pick(PAYERS), [act,scope] = pick(ACTIONS);
+  const cpt = pick(CPTS);
+  const claimNo = 100000 + Math.floor(rnd()*89999);
+  const claim = (rnd() < .35 ? 'CLM' : '') + claimNo;         // §3.1 prefix normalisation
+  const denialDate = addD(d0, -Math.floor(rnd()*56));
+  const dos = addD(denialDate, -(20 + Math.floor(rnd()*40)));
+  const billed = addD(dos, 3 + Math.floor(rnd()*10));
+  const bal = Math.round((40 + rnd()*920)*100)/100;
+  const st = (rnd()<.30) ? 'New' : pick(['Pending Review','In-Progress','Completed','Closed','Pending Review','In-Progress']);
+  const assigned = st === 'New' ? '' : pick(REVIEWERS);
+  const prio = bal > 600 ? 'High' : bal > 250 ? 'Medium' : 'Low';
+  const due = addD(denialDate, prio==='High' ? 14 : prio==='Medium' ? 21 : 30);
+  const days = Math.round((due - d0)/86400000);
+
+  const line = {
+    id:i+1, visit:String(claimNo), claimUID:'U'+claimNo, cpt, code, desc, payer, ptype,
+    denialDate:dStr(denialDate), dos:dStr(dos), billed:dStr(billed), bal,
+    rep:pick(REPS), clinic:pick(CLINICS), provider:pick(PROVIDERS), panel:pick(PANELS),
+    cls:pick(CLASSES), units:1+Math.floor(rnd()*2), charge:Math.round(bal*1.35*100)/100,
+    icd:'Z00.00, E78.5, R73.09'
+  };
+  LINES.push(line);
+
+  if (rnd() < .72){
+    const t = {
+      taskId:'T'+(9000+i), track:`${line.claimUID}|${cpt}|${code}`, claim, cpt, code, desc, payer, ptype,
+      action:act, scope, prio, status:st, assigned, due:dStr(due), days, bal, cls:line.cls,
+      deadline: days<0?'Overdue':days<=3?'Due in 3 days':days<=7?'Due in 7 days':'Beyond 7 days',
+      denialDate:dStr(denialDate), notes: st==='New' ? '' : pick(['Appeal packet drafted.','Records requested from clinic.','Rebilled with corrected modifier.','Awaiting payer callback.','Eligibility re-verified — patient inactive on DOS.']),
+      from:'Current Run', history:[]
+    };
+    t.history.push({when:dStr(addD(denialDate,1)), who:'Pipeline', what:'Created', note:'Imported from PayerValidationReport.'});
+    if (t.assigned) t.history.push({when:dStr(addD(denialDate,2)), who:'A. Fernandes', what:'Assigned', note:`Assigned to ${t.assigned} on ${t.code} × ${t.payer}.`});
+    if (['In-Progress','Completed','Closed'].includes(t.status))
+      t.history.push({when:dStr(addD(denialDate,4)), who:t.assigned, what:'StatusChanged', note:`→ ${t.status}. ${t.notes}`});
+    TASKS.push(t);
+    line.wfTask = t.taskId; line.wfStatus = t.status; line.wfAssigned = t.assigned; line.wfNotes = t.notes;
+  } else { line.wfTask=''; line.wfStatus=''; line.wfAssigned=''; line.wfNotes=''; }
+}
+
+let VERIFY = [
+  {vid:'V-4411', claim:'CLM104882', cpt:'83036', code:'CO-16', payer:'Cigna', reason:'Marked duplicate', raisedBy:'R. Kulkarni', raisedOn:'2026-08-07', bal:412.60, source:'Workflow'},
+  {vid:'V-4412', claim:'127419', cpt:'80053', code:'CO-197', payer:'Aetna', reason:'Marked duplicate', raisedBy:'M. Osei', raisedOn:'2026-08-08', bal:188.00, source:'Workflow'},
+  {vid:'V-4413', claim:'CLM133907', cpt:'84443', code:'CO-29', payer:'Medicare Part B', reason:'Dropped from this run — was assigned and open', raisedBy:'Pipeline', raisedOn:'2026-08-10', bal:733.15, source:'Pipeline'},
+  {vid:'V-4414', claim:'118256', cpt:'87804', code:'PR-204', payer:'Humana', reason:'Dropped from this run — was assigned and open', raisedBy:'Pipeline', raisedOn:'2026-08-10', bal:96.40, source:'Pipeline'},
+  {vid:'V-4415', claim:'CLM149003', cpt:'85025', code:'CO-45', payer:'BCBS of Texas', reason:'Marked duplicate', raisedBy:'J. Tan', raisedOn:'2026-08-09', bal:254.75, source:'Workflow'}
+];
+
+let QUEUE = [
+  {name:'Denial_NWL_R2026-W31-004_2026-W31.xlsx', at:'2026-08-11 09:14', state:'Ready', pct:100},
+];
+
+/* ============================================================
+   STATE
+   ============================================================ */
+const state = {
+  module:'dashboard', role:'admin', tab:'summary',
+  sel:new Set(), page:{}, colFilters:{}, pending:null
+};
+const can = {
+  assign: () => ['admin','manager'].includes(state.role),
+  status: () => ['admin','reviewer'].includes(state.role),
+  verify: () => true,
+  seeOthers: () => ['admin','manager'].includes(state.role)
+};
+const visibleTasks = () => can.seeOthers() ? TASKS : TASKS.filter(t => t.assigned === CURRENT_USER.reviewer);
+
+const DASH_TABS = [
+  ['summary','Dashboard'],['weekly','Weekly Breakdown'],['monthly','Monthly Breakdown'],
+  ['panel','Filter Panel'],['board','Task Board'],['sla','SLA Tracker'],
+  ['insight','Denial Insight'],['line','Line Item']
+];
+const WF_TABS = [['wfhome','Dashboard'],['wfinsight','Denial Insight'],['wfboard','Task Board'],['wfverify','Verification']];
+
+function allowedTabs(){
+  if (state.module === 'dashboard')
+    return state.role === 'reviewer' ? DASH_TABS.filter(t => ['board','line'].includes(t[0])) : DASH_TABS;
+  return state.role === 'reviewer' ? WF_TABS.filter(t => t[0] !== 'wfinsight') : WF_TABS;
+}
+
+function setModule(m){
+  state.module = m; state.sel.clear();
+  document.getElementById('mod-dashboard').classList.toggle('active', m==='dashboard');
+  document.getElementById('mod-workflow').classList.toggle('active', m==='workflow');
+  state.tab = allowedTabs()[0][0];
+  render();
+}
+function setRole(r){
+  state.role = r; state.sel.clear();
+  if (!allowedTabs().some(t => t[0] === state.tab)) state.tab = allowedTabs()[0][0];
+  render();
+}
+function setTab(t){ state.tab = t; state.sel.clear(); render(); }
+function onLabChange(){
+  const lab = document.getElementById('labSel').value;
+  document.getElementById('runPill').textContent =
+    'RunId ' + (lab.startsWith('NorthWest') ? 'R2026-W31-004' : lab.startsWith('Sunrise') ? 'R2026-W31-011' : 'R2026-W30-982');
+  render();
+}
+
+/* ============================================================
+   SHARED GRID
+   ============================================================ */
+function grid(cfg){
+  const key = cfg.id;
+  state.page[key] = state.page[key] || 1;
+  state.colFilters[key] = state.colFilters[key] || {};
+  const cf = state.colFilters[key];
+  let rows = cfg.rows.filter(r => cfg.cols.every(c => {
+    const v = (cf[c.k]||'').trim().toLowerCase();
+    return !v || String(c.raw ? c.raw(r) : r[c.k] ?? '').toLowerCase().includes(v);
+  }));
+  const size = cfg.size || 25;
+  const pages = Math.max(1, Math.ceil(rows.length / size));
+  const p = Math.min(state.page[key], pages);
+  const slice = rows.slice((p-1)*size, p*size);
+
+  const head = cfg.cols.map((c,i) =>
+    `<th class="${i===0&&cfg.sticky?'sticky':''}" style="${c.w?`min-width:${c.w}px`:''}">${c.t}</th>`).join('');
+  const filt = cfg.cols.map((c,i) =>
+    `<th class="${i===0&&cfg.sticky?'sticky':''}">${c.nofilter?'':
+      `<input value="${cf[c.k]||''}" placeholder="filter" oninput="setColFilter('${key}','${c.k}',this.value)">`}</th>`).join('');
+  const body = slice.length ? slice.map(r =>
+    `<tr>${cfg.cols.map((c,i) =>
+      `<td class="${i===0&&cfg.sticky?'sticky':''} ${c.cls||''}">${c.f ? c.f(r) : (r[c.k] ?? '')}</td>`).join('')}</tr>`).join('')
+    : `<tr><td colspan="${cfg.cols.length}" class="text-center py-4 muted">${cfg.empty || 'No rows match these filters. Widen a filter or clear the column filters above.'}</td></tr>`;
+
+  return `
+  <div class="gridwrap" style="max-height:${cfg.h||560}px">
+    <table class="grid">
+      <thead><tr>${head}</tr><tr class="filters">${filt}</tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+  </div>
+  <div class="gridfoot">
+    <div>Showing <b class="num">${rows.length?((p-1)*size+1):0}–${Math.min(p*size,rows.length)}</b> of <b class="num">${rows.length.toLocaleString()}</b>${rows.length!==cfg.rows.length?` <span class="muted">(filtered from ${cfg.rows.length.toLocaleString()})</span>`:''} · paged and filtered server-side</div>
+    <div class="btn-group btn-group-sm">
+      <button class="btn btn-outline-secondary" ${p<=1?'disabled':''} onclick="goPage('${key}',${p-1})">Previous</button>
+      <button class="btn btn-outline-secondary disabled">Page ${p} / ${pages}</button>
+      <button class="btn btn-outline-secondary" ${p>=pages?'disabled':''} onclick="goPage('${key}',${p+1})">Next</button>
+    </div>
+  </div>`;
+}
+function setColFilter(k,c,v){ state.colFilters[k][c]=v; state.page[k]=1; render(true); }
+function goPage(k,p){ state.page[k]=p; render(); }
+
+/* ============================================================
+   PANE RENDERERS
+   ============================================================ */
+function toolbar(title, note, buttons){
+  return `<div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-2">
+    <div><div class="sectitle">${title}</div><div class="small muted">${note}</div></div>
+    <div class="d-flex gap-2">${buttons||''}</div></div>`;
+}
+const exportBtn = () => `<button class="btn btn-sm btn-brand" onclick="queueExport()">Export workbook</button>`;
+
+/* ---- Dashboard: summary ---- */
+function paneSummary(){
+  const t = visibleTasks();
+  const open = t.filter(x => !['Completed','Closed'].includes(x.status)).length;
+  const overdue = t.filter(x => x.days < 0 && !['Completed','Closed'].includes(x.status)).length;
+  const high = t.filter(x => x.prio === 'High' && !['Completed','Closed'].includes(x.status)).length;
+  const bal = t.filter(x => !['Completed','Closed'].includes(x.status)).reduce((s,x)=>s+x.bal,0);
+
+  const byStatus = tally(t,'status'), byCode = tally(t,'code'), byPayer = tally(t,'payer');
+  const load = REVIEWERS.map(r => {
+    const mine = TASKS.filter(x => x.assigned === r);
+    return {r, open:mine.filter(x=>!['Completed','Closed'].includes(x.status)).length,
+      over:mine.filter(x=>x.days<0 && !['Completed','Closed'].includes(x.status)).length,
+      bal:mine.reduce((s,x)=>s+x.bal,0)};
+  });
+
+  const steps = [
+    ['1','Start','done'],['2','Load ClaimActionMapper','done'],['3','Load denied rows','done'],
+    ['4','Normalize and map','done'],['5','Build insight rows','done'],['6','Build task board rows','done'],
+    ['7','Write export package','off'],['8','Write tables','done'],['9','Upload to SharePoint','off'],['10','Completed','now']
+  ];
+
+  return `
+  ${toolbar('Task summary','One lab, one run. Every tile counts the current run only.', exportBtn())}
+  <div class="row g-2 mb-3">
+    <div class="col-6 col-lg-3"><div class="tile accent"><div class="l">Open tasks</div><div class="v num">${open}</div><div class="d">Anything not Completed or Closed</div></div></div>
+    <div class="col-6 col-lg-3"><div class="tile warnb"><div class="l">Overdue</div><div class="v num">${overdue}</div><div class="d">Past the SLA due date</div></div></div>
+    <div class="col-6 col-lg-3"><div class="tile dangerb"><div class="l">High priority</div><div class="v num">${high}</div><div class="d">Balance over $600</div></div></div>
+    <div class="col-6 col-lg-3"><div class="tile"><div class="l">Open balance</div><div class="v num">${money(bal)}</div><div class="d">Sum of open task balances</div></div></div>
+  </div>
+
+  <div class="mb-3">
+    <div class="eyebrow mb-1">Pipeline run · Denial Report · ${document.getElementById('runPill').textContent.replace('RunId ','')}</div>
+    <div class="runstrip">${steps.map(([n,t,c])=>`<div class="runstep ${c}"><div class="n">${n}</div><div class="t">${t}</div><div class="bar"></div></div>`).join('')}</div>
+    <div class="stepnote mt-1">Steps 7 and 9 are off for this lab — <span class="mono">GenerateOutputFiles=false</span>. Run finished 09:04, tracker marked Success.</div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-12 col-lg-4"><div class="card h-100"><div class="card-header">By status</div><div class="card-body py-2">${bars(byStatus,t.length)}</div></div></div>
+    <div class="col-12 col-lg-4"><div class="card h-100"><div class="card-header">Top denial codes</div><div class="card-body py-2">${bars(byCode,t.length,6)}</div></div></div>
+    <div class="col-12 col-lg-4"><div class="card h-100"><div class="card-header">Top payers</div><div class="card-body py-2">${bars(byPayer,t.length,6)}</div></div></div>
+  </div>
+
+  ${can.seeOthers() ? `
+  <div class="card mt-3"><div class="card-header">Reviewer workload</div>
+    <div class="table-responsive"><table class="table table-sm mb-0 align-middle">
+      <thead><tr><th>Reviewer</th><th class="text-end">Open</th><th class="text-end">Overdue</th><th class="text-end">Balance</th><th style="width:34%">Share of open work</th></tr></thead>
+      <tbody>${load.map(l=>`<tr><td>${l.r}</td><td class="text-end num">${l.open}</td>
+        <td class="text-end num ${l.over?'flagesc':''}">${l.over}</td><td class="text-end num">${money(l.bal)}</td>
+        <td><div class="bd-track"><div class="bd-fill" style="width:${Math.round(l.open/Math.max(...load.map(x=>x.open))*100)}%"></div></div></td></tr>`).join('')}</tbody>
+    </table></div></div>` : ''}
+  `;
+}
+function tally(rows,k){
+  const m={}; rows.forEach(r=>m[r[k]]=(m[r[k]]||0)+1);
+  return Object.entries(m).sort((a,b)=>b[1]-a[1]);
+}
+function bars(pairs,total,limit){
+  const list = limit ? pairs.slice(0,limit) : pairs;
+  const max = Math.max(...list.map(p=>p[1]),1);
+  return list.map(([k,v])=>`<div class="bd-row" onclick="quickFilter('${k}')">
+    <div class="bd-label">${k}</div>
+    <div class="bd-track"><div class="bd-fill ${k==='Overdue'?'d':''}" style="width:${Math.round(v/max*100)}%"></div></div>
+    <div class="bd-n">${v} · ${Math.round(v/total*100)}%</div></div>`).join('');
+}
+
+/* ---- Weekly / Monthly pivots ---- */
+function pivot(byMonth){
+  const buckets = [];
+  LINES.forEach(l => {
+    const d = new Date(l.denialDate);
+    const key = byMonth ? l.denialDate.slice(0,7) : weekKey(d);
+    if (!buckets.includes(key)) buckets.push(key);
+  });
+  buckets.sort().reverse();
+  const cols = buckets.slice(0, byMonth?4:6);
+  const build = (field, top) => {
+    const totals = {};
+    LINES.forEach(l => { totals[l[field]] = (totals[l[field]]||0)+l.bal; });
+    const keys = Object.entries(totals).sort((a,b)=>b[1]-a[1]).slice(0,top).map(x=>x[0]);
+    return keys.map(k => {
+      const cells = cols.map(c => {
+        const rows = LINES.filter(l => l[field]===k && (byMonth ? l.denialDate.slice(0,7) : weekKey(new Date(l.denialDate)))===c);
+        return {n:rows.length, b:rows.reduce((s,r)=>s+r.bal,0)};
+      });
+      return {k, cells, total:cells.reduce((s,c)=>s+c.b,0), count:cells.reduce((s,c)=>s+c.n,0)};
+    });
+  };
+  const section = (title, rows) => `
+    <tr class="grp"><td colspan="${cols.length+3}">${title}</td></tr>
+    ${rows.map(r=>`<tr><td>${r.k}</td>${r.cells.map(c=>`<td class="text-end num">${c.n?`${c.n}<div class="muted" style="font-size:11px">${money(c.b)}</div>`:'<span class="muted">—</span>'}</td>`).join('')}
+      <td class="text-end num fw-semibold">${r.count}</td><td class="text-end num fw-semibold">${money(r.total)}</td></tr>`).join('')}`;
+
+  const label = byMonth ? 'Month' : 'Week of denial date';
+  const head = cols.map(c=>`<th class="text-end">${byMonth?monthName(c):c}</th>`).join('');
+  return `
+  ${toolbar(byMonth?'Monthly breakdown':'Weekly breakdown',
+    `Pivoted on denial date${byMonth?', grouped by year':''}. Counts on top, balance beneath.`, exportBtn())}
+  <div class="gridwrap"><table class="table table-sm mb-0 pivot">
+    <thead><tr><th style="min-width:210px">${label}</th>${head}<th class="text-end">Lines</th><th class="text-end">Balance</th></tr></thead>
+    <tbody>
+      ${section('Top insurance', build('payer', 8))}
+      ${section('Top denials', build('code', 8))}
+    </tbody>
+  </table></div>
+  <div class="small muted mt-2">Export keeps this exact pivot formatting — sheets 1 and 2 of the workbook.</div>`;
+}
+function weekKey(d){
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - day);
+  const y0 = new Date(Date.UTC(t.getUTCFullYear(),0,1));
+  return t.getUTCFullYear() + '-W' + String(Math.ceil(((t-y0)/86400000+1)/7)).padStart(2,'0');
+}
+function monthName(k){
+  const [y,m]=k.split('-'); return new Date(y, m-1, 1).toLocaleString('en-US',{month:'long'}) + ' ' + y;
+}
+
+/* ---- Filter Panel ---- */
+function paneFilterPanel(){
+  const t = visibleTasks();
+  const panel = (title, field, order) => {
+    let pairs = tally(t, field);
+    if (order) pairs.sort((a,b)=>order.indexOf(a[0])-order.indexOf(b[0]));
+    const max = Math.max(...pairs.map(p=>p[1]),1);
+    return `<div class="col-12 col-md-6 col-xl-4"><div class="card h-100">
+      <div class="card-header d-flex justify-content-between"><span>${title}</span><span class="muted small num">${t.length} tasks</span></div>
+      <div class="card-body py-2">${pairs.map(([k,v])=>`
+        <div class="bd-row" onclick="quickFilter('${k}')">
+          <div class="bd-label">${k==='Overdue'?`<span class="flagesc">${k}</span>`:k}</div>
+          <div class="bd-track"><div class="bd-fill ${k==='Overdue'?'d':k==='Due in 3 days'?'w':''}" style="width:${Math.round(v/max*100)}%"></div></div>
+          <div class="bd-n">${v} · ${money(t.filter(x=>x[field]===k).reduce((s,x)=>s+x.bal,0))}</div>
+        </div>`).join('')}</div></div></div>`;
+  };
+  return `
+  ${toolbar('Filter panel', 'Breakdowns of the filtered task set. Click any row to add it to the global filter.', exportBtn())}
+  <div class="row g-2 mb-3">
+    <div class="col-12 col-md-4"><div class="tile"><div class="l">Run</div><div class="v mono" style="font-size:16px">${document.getElementById('runPill').textContent.replace('RunId ','')}</div><div class="d">Sheet 3 header carries this value</div></div></div>
+    <div class="col-6 col-md-4"><div class="tile"><div class="l">Filtered tasks</div><div class="v num">${t.length}</div><div class="d">of ${TASKS.length} in the run</div></div></div>
+    <div class="col-6 col-md-4"><div class="tile"><div class="l">Active filters</div><div class="v num">${document.querySelectorAll('#chipRow .chip').length}</div><div class="d">Listed on the exported sheet</div></div></div>
+  </div>
+  <div class="row g-3">
+    ${panel('Task status','status',STATUSES)}
+    ${panel('Priority','prio',['High','Medium','Low'])}
+    ${panel('Assigned to','assigned')}
+    ${panel('Action category','action')}
+    ${panel('Classification','cls')}
+    ${panel('Deadline','deadline',['Overdue','Due in 3 days','Due in 7 days','Beyond 7 days'])}
+  </div>`;
+}
+
+/* ---- Task Board (dashboard) ---- */
+function paneBoard(){
+  const rows = visibleTasks();
+  const sel = state.sel;
+  const cols = [
+    {k:'sel', t:'', nofilter:true, w:30, f:r=>`<input type="checkbox" ${sel.has(r.taskId)?'checked':''} onchange="toggleSel('${r.taskId}')">`},
+    {k:'taskId', t:'Task', w:80, cls:'mono'},
+    {k:'claim', t:'Claim', w:110, cls:'mono'},
+    {k:'cpt', t:'CPT', w:70, cls:'mono'},
+    {k:'code', t:'Denial', w:80, cls:'mono'},
+    {k:'desc', t:'Denial description', w:240},
+    {k:'payer', t:'Payer', w:150},
+    {k:'action', t:'Action category', w:130},
+    {k:'prio', t:'Priority', w:90, f:r=>pill(r.prio)},
+    {k:'status', t:'Status', w:140, f:r=>pill(r.status)},
+    {k:'assigned', t:'Assigned to', w:130, f:r=>r.assigned || '<span class="muted">Unassigned</span>'},
+    {k:'due', t:'Due', w:100, cls:'num'},
+    {k:'bal', t:'Balance', w:100, cls:'num text-end', raw:r=>r.bal, f:r=>money(r.bal)},
+    {k:'act', t:'', nofilter:true, w:150, f:r=>`
+      <div class="d-flex gap-1">
+        ${can.status()?`<button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="openStatus('${r.taskId}')">Status</button>`:''}
+        ${can.assign()?`<button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="openAssign('task','${r.taskId}')">Assign</button>`:''}
+        <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="openHistory('${r.taskId}')">History</button>
+      </div>`}
+  ];
+  const note = can.seeOthers()
+    ? 'Every task in the run. Assignment is a manager action; status is a reviewer action.'
+    : `Your queue only — tasks assigned to ${CURRENT_USER.reviewer}.`;
+  const bulk = `${can.assign()?`<button class="btn btn-sm btn-outline-secondary" ${sel.size?'':'disabled'} onclick="openAssign('bulk')">Assign ${sel.size||''} selected</button>`:''} ${exportBtn()}`;
+  return toolbar('Task board', note, bulk) + grid({id:'board', rows, cols, sticky:true, size:20});
+}
+
+/* ---- SLA Tracker ---- */
+function paneSla(){
+  const rows = visibleTasks().filter(t=>!['Completed','Closed'].includes(t.status)).sort((a,b)=>a.days-b.days);
+  const cols = [
+    {k:'taskId', t:'Task', w:80, cls:'mono'},
+    {k:'claim', t:'Claim', w:110, cls:'mono'},
+    {k:'code', t:'Denial', w:80, cls:'mono'},
+    {k:'payer', t:'Payer', w:150},
+    {k:'prio', t:'Priority', w:90, f:r=>pill(r.prio)},
+    {k:'status', t:'Status', w:140, f:r=>pill(r.status)},
+    {k:'assigned', t:'Assigned to', w:130, f:r=>r.assigned||'<span class="muted">Unassigned</span>'},
+    {k:'denialDate', t:'Denial date', w:100, cls:'num'},
+    {k:'due', t:'Due date', w:100, cls:'num'},
+    {k:'days', t:'Days remaining', w:110, cls:'num text-end', f:r=>r.days<0?`<span class="flagesc">${r.days}</span>`:r.days},
+    {k:'esc', t:'Escalate', w:90, raw:r=>r.days<0?'yes':'no', f:r=>r.days<0?'<span class="flagesc">Escalate</span>':'<span class="muted">—</span>'},
+    {k:'bal', t:'Balance', w:100, cls:'num text-end', raw:r=>r.bal, f:r=>money(r.bal)}
+  ];
+  const over = rows.filter(r=>r.days<0).length, soon = rows.filter(r=>r.days>=0&&r.days<=3).length;
+  return `
+  ${toolbar('SLA tracker','Open tasks only, soonest deadline first. Negative days remaining raises the escalation flag.', exportBtn())}
+  <div class="row g-2 mb-2">
+    <div class="col-6 col-md-3"><div class="tile dangerb"><div class="l">Overdue</div><div class="v num">${over}</div></div></div>
+    <div class="col-6 col-md-3"><div class="tile warnb"><div class="l">Due within 3 days</div><div class="v num">${soon}</div></div></div>
+    <div class="col-6 col-md-3"><div class="tile"><div class="l">Open tasks tracked</div><div class="v num">${rows.length}</div></div></div>
+    <div class="col-6 col-md-3"><div class="tile"><div class="l">Balance at risk</div><div class="v num">${money(rows.filter(r=>r.days<0).reduce((s,r)=>s+r.bal,0))}</div></div></div>
+  </div>
+  ${grid({id:'sla', rows, cols, size:20})}`;
+}
+
+/* ---- Denial Insight ---- */
+function insightRows(){
+  const m = {};
+  visibleTasks().forEach(t=>{
+    const k = t.code + '|' + t.payer;
+    m[k] = m[k] || {code:t.code, desc:t.desc, payer:t.payer, ptype:t.ptype, tasks:0, claims:new Set(), bal:0, assigned:new Set(), open:0};
+    m[k].tasks++; m[k].claims.add(t.claim); m[k].bal += t.bal;
+    if (t.assigned) m[k].assigned.add(t.assigned);
+    if (!['Completed','Closed'].includes(t.status)) m[k].open++;
+  });
+  return Object.entries(m).map(([k,v])=>({
+    key:k, ...v, claimCount:v.claims.size,
+    owner:[...v.assigned].join(', ') || ''
+  })).sort((a,b)=>b.bal-a.bal);
+}
+function paneInsight(wf){
+  const rows = insightRows(), sel = state.sel;
+  const cols = [
+    ...(wf && can.assign() ? [{k:'sel', t:'', nofilter:true, w:30, f:r=>`<input type="checkbox" ${sel.has(r.key)?'checked':''} onchange="toggleSel('${r.key}')">`}] : []),
+    {k:'code', t:'Denial code', w:90, cls:'mono'},
+    {k:'desc', t:'Description', w:250},
+    {k:'payer', t:'Payer', w:160},
+    {k:'ptype', t:'Payer type', w:130},
+    {k:'tasks', t:'Tasks', w:70, cls:'num text-end'},
+    {k:'open', t:'Open', w:70, cls:'num text-end'},
+    {k:'claimCount', t:'Claims', w:80, cls:'num text-end'},
+    {k:'bal', t:'Balance impact', w:130, cls:'num text-end', raw:r=>r.bal, f:r=>money(r.bal)},
+    {k:'owner', t:'Assigned reviewer', w:160, f:r=>r.owner || '<span class="muted">Unassigned</span>'},
+    ...(can.assign() ? [{k:'act', t:'', nofilter:true, w:90, f:r=>`<button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="openAssign('insight','${r.key}')">Assign</button>`}] : [])
+  ];
+  const buttons = `${wf && can.assign() ? `<button class="btn btn-sm btn-outline-secondary" ${sel.size?'':'disabled'} onclick="openAssign('bulkInsight')">Assign ${sel.size||''} selected</button>` : ''} ${exportBtn()}`;
+  const note = wf
+    ? 'Pick a denial pattern and give it an owner. One reviewer owns that code × payer for the whole run.'
+    : 'Denial code × payer with balance impact.' + (can.assign() ? ' Managers can assign a reviewer from here.' : '');
+  return toolbar('Denial insight', note, buttons) + grid({id:wf?'wfinsight':'insight', rows, cols, size:20});
+}
+
+/* ---- Line Item ---- */
+function paneLine(){
+  const rows = state.role === 'reviewer'
+    ? LINES.filter(l => l.wfAssigned === CURRENT_USER.reviewer) : LINES;
+  const cols = [
+    {k:'visit', t:'Visit number', w:110, cls:'mono'},
+    {k:'claimUID', t:'Claim UID', w:110, cls:'mono'},
+    {k:'cpt', t:'CPT', w:70, cls:'mono'},
+    {k:'panel', t:'Panel name', w:130},
+    {k:'code', t:'Denial code', w:95, cls:'mono'},
+    {k:'desc', t:'Denial description', w:250},
+    {k:'cls', t:'Classification', w:120},
+    {k:'payer', t:'Payer name', w:160},
+    {k:'ptype', t:'Payer type', w:140},
+    {k:'dos', t:'Date of service', w:110, cls:'num'},
+    {k:'billed', t:'First billed', w:110, cls:'num'},
+    {k:'denialDate', t:'Denial date', w:110, cls:'num'},
+    {k:'units', t:'Units', w:70, cls:'num text-end'},
+    {k:'charge', t:'Charge', w:100, cls:'num text-end', raw:r=>r.charge, f:r=>money(r.charge)},
+    {k:'bal', t:'Balance', w:100, cls:'num text-end', raw:r=>r.bal, f:r=>money(r.bal)},
+    {k:'clinic', t:'Clinic', w:160},
+    {k:'provider', t:'Referring provider', w:150},
+    {k:'rep', t:'Sales rep', w:130},
+    {k:'icd', t:'Covered ICD-10 codes', w:200, f:r=>`<span class="muted">${r.icd}</span>`},
+    {k:'wfTask', t:'Workflow task ID', w:130, cls:'mono'},
+    {k:'wfAssigned', t:'Assigned to', w:140},
+    {k:'wfStatus', t:'Workflow status', w:150, f:r=>r.wfStatus?pill(r.wfStatus):''},
+    {k:'wfNotes', t:'Denial notes', w:240}
+  ];
+  return `
+  ${toolbar('Line item', 'Every DenialLineItem column, plus the four workflow columns matched from the task board.', exportBtn())}
+  ${grid({id:'line', rows, cols, sticky:true, size:25, h:600})}
+  <div class="small muted mt-2">Workflow columns match on normalised claim + CPT + denial code, falling back to claim + CPT. Unmatched lines stay blank rather than borrowing another reviewer's notes.</div>`;
+}
+
+/* ---- Workflow: home ---- */
+function paneWfHome(){
+  const t = visibleTasks();
+  const c = {
+    assigned: t.filter(x=>x.assigned).length,
+    pending: t.filter(x=>['Pending Review','In-Progress'].includes(x.status)).length,
+    completed: t.filter(x=>['Completed','Closed'].includes(x.status)).length,
+    verif: VERIFY.length,
+    unassigned: t.filter(x=>!x.assigned).length
+  };
+  const rows = REVIEWERS.map(r=>{
+    const mine = TASKS.filter(x=>x.assigned===r);
+    return {r, total:mine.length,
+      prog:mine.filter(x=>x.status==='In-Progress').length,
+      pend:mine.filter(x=>x.status==='Pending Review').length,
+      done:mine.filter(x=>['Completed','Closed'].includes(x.status)).length,
+      over:mine.filter(x=>x.days<0&&!['Completed','Closed'].includes(x.status)).length,
+      bal:mine.reduce((s,x)=>s+x.bal,0)};
+  });
+  return `
+  ${toolbar('Workflow dashboard', can.seeOthers()?'Counts across the run, with a line per reviewer.':`Your queue — ${CURRENT_USER.reviewer}.`, '')}
+  <div class="row g-2 mb-3">
+    <div class="col-6 col-lg"><div class="tile accent"><div class="l">Assigned</div><div class="v num">${c.assigned}</div></div></div>
+    <div class="col-6 col-lg"><div class="tile"><div class="l">Pending</div><div class="v num">${c.pending}</div></div></div>
+    <div class="col-6 col-lg"><div class="tile"><div class="l">Completed</div><div class="v num">${c.completed}</div></div></div>
+    <div class="col-6 col-lg"><div class="tile warnb"><div class="l">Verification pending</div><div class="v num">${c.verif}</div></div></div>
+    <div class="col-6 col-lg"><div class="tile dangerb"><div class="l">Unassigned</div><div class="v num">${c.unassigned}</div></div></div>
+  </div>
+  ${can.seeOthers()?`
+  <div class="card"><div class="card-header">Per-reviewer summary</div>
+  <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+    <thead><tr><th>Reviewer</th><th class="text-end">Tasks</th><th class="text-end">Pending</th><th class="text-end">In progress</th>
+      <th class="text-end">Completed</th><th class="text-end">Overdue</th><th class="text-end">Balance</th><th></th></tr></thead>
+    <tbody>${rows.map(l=>`<tr><td class="fw-semibold">${l.r}</td><td class="text-end num">${l.total}</td>
+      <td class="text-end num">${l.pend}</td><td class="text-end num">${l.prog}</td><td class="text-end num">${l.done}</td>
+      <td class="text-end num ${l.over?'flagesc':''}">${l.over}</td><td class="text-end num">${money(l.bal)}</td>
+      <td class="text-end"><button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="filterReviewer('${l.r}')">Open queue</button></td></tr>`).join('')}</tbody>
+  </table></div></div>`:''}`;
+}
+
+/* ---- Workflow: task board ---- */
+function paneWfBoard(){
+  const rows = visibleTasks();
+  const cols = [
+    {k:'taskId', t:'Task', w:80, cls:'mono'},
+    {k:'claim', t:'Claim', w:110, cls:'mono'},
+    {k:'cpt', t:'CPT', w:70, cls:'mono'},
+    {k:'code', t:'Denial', w:80, cls:'mono'},
+    {k:'payer', t:'Payer', w:150},
+    {k:'action', t:'Action category', w:140, f:r=>`${r.action} <span class="req">${r.scope==='ClaimLevel'?'claim':'line'}</span>`},
+    {k:'status', t:'Status', w:150, f:r=>pill(r.status)},
+    {k:'assigned', t:'Assigned to', w:130, f:r=>r.assigned||'<span class="muted">Unassigned</span>'},
+    {k:'due', t:'Due', w:100, cls:'num'},
+    {k:'notes', t:'Reviewer comments', w:260, f:r=>r.notes||'<span class="muted">—</span>'},
+    {k:'act', t:'', nofilter:true, w:210, f:r=>`
+      <div class="d-flex gap-1">
+        ${can.status()?`<button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="openStatus('${r.taskId}')">Work it</button>`:''}
+        ${can.status()?`<button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="openStatus('${r.taskId}',true)">Duplicate</button>`:''}
+        <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="openHistory('${r.taskId}')">History</button>
+      </div>`}
+  ];
+  const note = can.seeOthers() ? 'All reviewers. Status changes are reviewer or admin only — a manager assigns, a reviewer works.'
+    : `Your queue — ${CURRENT_USER.reviewer}. Set a status and leave comments; both are written with a before-snapshot.`;
+  return toolbar('Task board', note, `<button class="btn btn-sm btn-outline-secondary" onclick="exportSync('TaskBoard')">Export tab</button>`)
+    + grid({id:'wfboard', rows, cols, size:20});
+}
+
+/* ---- Workflow: verification ---- */
+function paneVerify(){
+  const cols = [
+    {k:'vid', t:'Verification', w:110, cls:'mono'},
+    {k:'claim', t:'Claim', w:120, cls:'mono'},
+    {k:'cpt', t:'CPT', w:70, cls:'mono'},
+    {k:'code', t:'Denial', w:80, cls:'mono'},
+    {k:'payer', t:'Payer', w:150},
+    {k:'reason', t:'Why it is here', w:280},
+    {k:'raisedBy', t:'Raised by', w:130},
+    {k:'raisedOn', t:'Raised on', w:110, cls:'num'},
+    {k:'bal', t:'Balance', w:110, cls:'num text-end', raw:r=>r.bal, f:r=>money(r.bal)},
+    {k:'act', t:'', nofilter:true, w:120, f:r=>`<button class="btn btn-sm btn-brand py-0 px-2" onclick="openVerify('${r.vid}')">Decide</button>`}
+  ];
+  return `
+  ${toolbar('Verification','Two ways in: a reviewer marked a task duplicate, or the pipeline found an assigned task missing from this run.',
+    `<button class="btn btn-sm btn-outline-secondary" onclick="exportSync('Verification')">Export tab</button>`)}
+  <div class="alert alert-warning py-2 small d-flex justify-content-between align-items-center">
+    <div><b>Open item 11.1 —</b> pipeline-raised rows are written to <span class="mono">dbo.DenialVerification</span> while this tab reads
+      <span class="mono">dbo.DenialVerificationTask</span>. Until they are reconciled, dropped denials never reach a human here.</div>
+    <span class="badge text-bg-warning">Needs confirmation</span>
+  </div>
+  ${VERIFY.length ? grid({id:'verify', rows:VERIFY, cols, size:15})
+    : '<div class="card"><div class="card-body text-center py-5"><div class="fw-semibold">Nothing waiting on a decision</div><div class="muted small mt-1">Duplicates and dropped denials land here as reviewers work the board.</div></div></div>'}`;
+}
+
+/* ============================================================
+   ACTIONS
+   ============================================================ */
+function toggleSel(id){ state.sel.has(id) ? state.sel.delete(id) : state.sel.add(id); render(); }
+
+function openAssign(kind, id){
+  state.pending = {kind, id};
+  const sel = document.getElementById('assignTo');
+  sel.innerHTML = REVIEWERS.map(r=>`<option>${r}</option>`).join('');
+  let scope = '';
+  if (kind === 'task'){ const t = TASKS.find(x=>x.taskId===id);
+    scope = `Task <span class="mono">${t.taskId}</span> — ${t.code} × ${t.payer}. Assigning also picks up
+      <b>${TASKS.filter(x=>x.code===t.code&&x.payer===t.payer).length}</b> tasks on the same pattern.`; }
+  else if (kind === 'insight'){ const [c,p] = id.split('|');
+    scope = `<b>${c} × ${p}</b> — ${TASKS.filter(x=>x.code===c&&x.payer===p).length} tasks in this run.`; }
+  else if (kind === 'bulk'){
+    scope = `<b>${state.sel.size}</b> selected tasks, expanded to every task on the same denial code × payer.`; }
+  else { scope = `<b>${state.sel.size}</b> selected denial patterns.`; }
+  document.getElementById('assignScope').innerHTML = scope;
+  new bootstrap.Modal('#assignModal').show();
+}
+function commitAssign(){
+  const who = document.getElementById('assignTo').value;
+  const p = state.pending; let n = 0;
+  const apply = list => list.forEach(t=>{
+    t.assigned = who;
+    if (!t.status || t.status === 'New') t.status = 'Pending Review';
+    t.history.push({when:'2026-08-11', who:CURRENT_USER[state.role], what:'Assigned', note:`Assigned to ${who}.`});
+    const l = LINES.find(x=>x.wfTask===t.taskId); if (l){ l.wfAssigned=who; l.wfStatus=t.status; }
+    n++;
+  });
+  if (p.kind==='task'){ const t = TASKS.find(x=>x.taskId===p.id); apply(TASKS.filter(x=>x.code===t.code&&x.payer===t.payer)); }
+  if (p.kind==='insight'){ const [c,pa]=p.id.split('|'); apply(TASKS.filter(x=>x.code===c&&x.payer===pa)); }
+  if (p.kind==='bulk'){ const keys = new Set([...state.sel].map(id=>{const t=TASKS.find(x=>x.taskId===id); return t.code+'|'+t.payer;}));
+    apply(TASKS.filter(x=>keys.has(x.code+'|'+x.payer))); }
+  if (p.kind==='bulkInsight'){ const keys = state.sel; apply(TASKS.filter(x=>keys.has(x.code+'|'+x.payer))); }
+  bootstrap.Modal.getInstance('#assignModal').hide();
+  state.sel.clear(); toast(`Assigned ${n} task${n===1?'':'s'} to ${who}.`); render();
+}
+
+function openStatus(taskId, dup){
+  const t = TASKS.find(x=>x.taskId===taskId);
+  state.pending = {taskId};
+  document.getElementById('statusScope').innerHTML =
+    `Task <span class="mono">${t.taskId}</span> · claim <span class="mono">${t.claim}</span> · CPT ${t.cpt} · ${t.code} · ${t.payer}<br>
+     Now ${pill(t.status)} ${t.assigned?`with ${t.assigned}`:''} · due ${t.due}`;
+  document.getElementById('statusVal').value = dup ? 'Duplicate' : (t.status === 'Pending Review' ? 'In-Progress' : 'Completed');
+  document.getElementById('statusNote').value = '';
+  onStatusChange();
+  document.getElementById('statusVal').onchange = onStatusChange;
+  function onStatusChange(){
+    const v = document.getElementById('statusVal').value;
+    document.getElementById('dupWarn').classList.toggle('d-none', v !== 'Duplicate');
+    document.getElementById('claimWarn').classList.toggle('d-none', t.scope !== 'ClaimLevel');
+    document.getElementById('claimWarnId').textContent = t.claim;
+  }
+  new bootstrap.Modal('#statusModal').show();
+}
+function commitStatus(){
+  const t = TASKS.find(x=>x.taskId===state.pending.taskId);
+  const v = document.getElementById('statusVal').value, note = document.getElementById('statusNote').value;
+  bootstrap.Modal.getInstance('#statusModal').hide();
+
+  if (v === 'Duplicate'){
+    VERIFY.unshift({vid:'V-'+(4416+VERIFY.length), claim:t.claim, cpt:t.cpt, code:t.code, payer:t.payer,
+      reason:'Marked duplicate', raisedBy:CURRENT_USER[state.role], raisedOn:'2026-08-11', bal:t.bal, source:'Workflow', task:{...t}});
+    TASKS.splice(TASKS.indexOf(t),1);
+    toast(`${t.taskId} moved to Verification. It stays open until someone decides.`);
+    render(); return;
+  }
+  const targets = t.scope === 'ClaimLevel' ? TASKS.filter(x=>x.claim===t.claim) : [t];
+  targets.forEach(x=>{
+    x.status = v; x.notes = note || x.notes;
+    x.history.push({when:'2026-08-11', who:CURRENT_USER[state.role], what:'StatusChanged', note:`→ ${v}. ${note}`, snap:`{"status":"${x.status}","assignedTo":"${x.assigned}"}`});
+    const l = LINES.find(y=>y.wfTask===x.taskId); if (l){ l.wfStatus=v; l.wfNotes=note||l.wfNotes; }
+  });
+  toast(`Saved. ${targets.length>1?`Applied to ${targets.length} tasks on claim ${t.claim} — claim-level action.`:'History row written.'}`);
+  render();
+}
+
+function openVerify(vid){
+  const v = VERIFY.find(x=>x.vid===vid); state.pending = {vid};
+  document.getElementById('verifyScope').innerHTML =
+    `<span class="mono">${v.vid}</span> · claim <span class="mono">${v.claim}</span> · CPT ${v.cpt} · ${v.code} · ${v.payer}<br>
+     ${v.reason} — raised by ${v.raisedBy} on ${v.raisedOn} · ${money(v.bal)}`;
+  document.getElementById('vValid').checked = true; toggleVerify();
+  document.getElementById('verifyNote').value = '';
+  new bootstrap.Modal('#verifyModal').show();
+}
+function toggleVerify(){ document.getElementById('restoreWrap').classList.toggle('d-none', !document.getElementById('vValid').checked); }
+function commitVerify(){
+  const v = VERIFY.find(x=>x.vid===state.pending.vid);
+  const valid = document.getElementById('vValid').checked;
+  const st = document.getElementById('restoreStatus').value;
+  VERIFY.splice(VERIFY.indexOf(v),1);
+  bootstrap.Modal.getInstance('#verifyModal').hide();
+  if (valid){
+    const t = v.task || {taskId:'T'+(9500+TASKS.length), claim:v.claim, cpt:v.cpt, code:v.code, desc:'Restored from verification',
+      payer:v.payer, ptype:'Commercial', action:'Appeal', scope:'ClaimLevel', prio:'High', due:'2026-08-25', days:14,
+      bal:v.bal, cls:'Soft', deadline:'Beyond 7 days', denialDate:v.raisedOn, assigned:'', notes:'', from:'Old Run', history:[]};
+    t.status = st; t.history.push({when:'2026-08-11', who:CURRENT_USER[state.role], what:'VerifiedValid', note:`Restored to the board as ${st}.`});
+    TASKS.unshift(t);
+    toast(`${v.vid} verified valid. Back on the board as ${st}.`);
+  } else {
+    toast(`${v.vid} verified invalid. Not restored — the history keeps the decision.`);
+  }
+  render();
+}
+
+function openHistory(taskId){
+  const t = TASKS.find(x=>x.taskId===taskId);
+  document.getElementById('histTitle').textContent = `${t.taskId} · ${t.claim} · ${t.code}`;
+  document.getElementById('histBody').innerHTML = `
+    <div class="mb-3 small muted">Every action carries the actor, the run id and a snapshot of the task as it was before the change.</div>
+    <div class="hist">${t.history.slice().reverse().map(h=>`
+      <div class="it"><div class="d-flex justify-content-between"><b>${h.what}</b><span class="muted small">${h.when}</span></div>
+      <div class="small">${h.who}</div><div class="small mt-1">${h.note||''}</div>
+      ${h.snap?`<div class="snap mt-2">${h.snap}</div>`:''}</div>`).join('')}</div>`;
+  openDrawer('histDrawer');
+}
+function openDrawer(id){ document.getElementById(id).classList.add('open'); }
+function closeDrawer(id){ document.getElementById(id).classList.remove('open'); }
+
+function openReports(){
+  document.getElementById('repBody').innerHTML = QUEUE.map(q=>`
+    <div class="border rounded p-2 mb-2">
+      <div class="d-flex justify-content-between align-items-start gap-2">
+        <div class="mono small" style="word-break:break-all">${q.name}</div>
+        <span class="pill ${q.state==='Ready'?'p-done':'p-progress'}">${q.state}</span>
+      </div>
+      <div class="small muted mt-1">Queued ${q.at}</div>
+      ${q.state==='Ready'
+        ? `<button class="btn btn-sm btn-brand mt-2" onclick="toast('Download started.')">Download</button>`
+        : `<div class="progress mt-2" style="height:5px"><div class="progress-bar" style="width:${q.pct}%"></div></div>
+           <div class="small muted mt-1">Building sheet ${Math.ceil(q.pct/17)} of 6 — you can leave this page.</div>`}
+    </div>`).join('') || '<div class="text-center py-5 muted">Nothing queued yet. Export from any tab and it shows up here.</div>';
+  openDrawer('repDrawer');
+}
+function queueExport(){
+  const lab = document.getElementById('labSel').value.match(/\(([^)]+)\)/)?.[1] || 'LAB';
+  const run = document.getElementById('runPill').textContent.replace('RunId ','');
+  const q = {name:`Denial_${lab}_${run}_2026-W32.xlsx`, at:'2026-08-11 23:47', state:'In progress', pct:18};
+  QUEUE.unshift(q);
+  document.getElementById('reportBadge').textContent = QUEUE.length;
+  toast('Export queued. Six sheets, built in the background — track it under Reports.');
+  let n = 18;
+  const iv = setInterval(()=>{ n += 14; q.pct = Math.min(100,n);
+    if (n >= 100){ q.state='Ready'; clearInterval(iv); toast('Denial workbook ready to download.'); }
+    if (document.getElementById('repDrawer').classList.contains('open')) openReports();
+  }, 900);
+}
+function exportSync(tab){ toast(`DenialWorkflow_NWL_${tab}_20260811-2347.xlsx downloaded — one sheet, up to 50,000 rows.`); }
+
+function toast(msg){
+  const el = document.createElement('div');
+  el.className = 'toast align-items-center text-bg-dark border-0 show';
+  el.innerHTML = `<div class="d-flex"><div class="toast-body">${msg}</div>
+    <button class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(()=>el.remove(), 5200);
+}
+
+/* ---- filters ---- */
+let chips = [{k:'Denial date', v:'2026-07-01 → 2026-08-11'}];
+function applyFilters(){
+  chips = [{k:'Denial date', v:'2026-07-01 → 2026-08-11'}];
+  const grab = (id,label) => {
+    const el = document.getElementById(id);
+    if (el.multiple){
+      const vals = [...el.selectedOptions].map(o=>o.value).filter(v=>v!=='(All)');
+      if (vals.length) chips.push({k:label, v:vals.join(' | ')});
+    } else if (el.value.trim()) chips.push({k:label, v:el.value.trim()});
+  };
+  grab('f_status','Status'); grab('f_priority','Priority'); grab('f_action','Action category');
+  grab('f_deadline','Deadline'); grab('f_class','Classification'); grab('f_code','Denial code');
+  grab('f_rep','Sales rep'); grab('f_clinic','Clinic'); grab('f_prov','Referring provider');
+  grab('f_payer','Payer name'); grab('f_ptype','Payer type'); grab('f_panel','Panel name');
+  render(); toast('Filters applied to every tab.');
+}
+function clearFilters(){
+  chips = []; document.querySelectorAll('#filterBody select').forEach(s=>[...s.options].forEach(o=>o.selected=o.value==='(All)'));
+  document.querySelectorAll('#filterBody input[type=text], #filterBody .form-control:not([type=date])').forEach(i=>i.value='');
+  render();
+}
+function quickFilter(v){ chips.push({k:'From breakdown', v}); render(); toast(`Added "${v}" to the global filter.`); }
+function filterReviewer(r){ chips.push({k:'Reviewer', v:r}); state.tab='wfboard'; render(); }
+function dropChip(i){ chips.splice(i,1); render(); }
+function renderChips(){
+  document.getElementById('chipRow').innerHTML = chips.length
+    ? chips.map((c,i)=>`<span class="chip">${c.k}: <b>${c.v}</b><button onclick="dropChip(${i})" aria-label="Remove">&times;</button></span>`).join('')
+    : '<span class="small muted">No filters — showing the whole run.</span>';
+}
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+function render(keepFocus){
+  const active = keepFocus ? document.activeElement : null;
+  const sig = active ? [active.tagName, active.getAttribute('oninput')].join('|') : null;
+  const caret = active && active.selectionStart;
+
+  document.getElementById('tabNav').innerHTML = allowedTabs().map(([k,l])=>
+    `<li class="nav-item"><button class="nav-link ${state.tab===k?'active':''}" onclick="setTab('${k}')">${l}</button></li>`).join('');
+  renderChips();
+
+  const map = {
+    summary:paneSummary, weekly:()=>pivot(false), monthly:()=>pivot(true), panel:paneFilterPanel,
+    board:paneBoard, sla:paneSla, insight:()=>paneInsight(false), line:paneLine,
+    wfhome:paneWfHome, wfinsight:()=>paneInsight(true), wfboard:paneWfBoard, wfverify:paneVerify
+  };
+  document.getElementById('pane').innerHTML = (map[state.tab] || paneSummary)();
+
+  if (sig){
+    const el = [...document.querySelectorAll('input')].find(i => [i.tagName, i.getAttribute('oninput')].join('|') === sig);
+    if (el){ el.focus(); try{ el.setSelectionRange(caret,caret); }catch(e){} }
+  }
+}
+render();
+</script>
+</body>
+</html>

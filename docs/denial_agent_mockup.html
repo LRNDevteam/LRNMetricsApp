@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lab Revenue Navigator — Denial Agent (mockup)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#14202B; --ink-2:#48565F; --ink-3:#7A8890;
+  --paper:#F4F6F2; --surface:#FFFFFF; --surface-2:#FAFBF9;
+  --rule:#DCE2DA; --rule-2:#EDF0EB;
+  --det:#1F4E79;  --det-bg:#E7EFF7;
+  --ai:#6B3FA0;   --ai-bg:#F0E9F9;
+  --moss:#4B7A28; --moss-bg:#E9F1E1;
+  --amber:#B15900;--amber-bg:#FBEEDD;
+  --crimson:#A3161B; --crimson-bg:#FBE8E8;
+  --rail:64px; --top:56px;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--sans); color:var(--ink); background:var(--paper);
+  font-size:14px; line-height:1.45; -webkit-font-smoothing:antialiased;
+}
+button{font:inherit;color:inherit;cursor:pointer;border:none;background:none}
+:focus-visible{outline:2px solid var(--det); outline-offset:2px; border-radius:3px}
+.mono{font-family:var(--mono);font-variant-ligatures:none}
+.tnum{font-variant-numeric:tabular-nums}
+
+/* ---------- chrome ---------- */
+.top{
+  position:fixed;inset:0 0 auto 0;height:var(--top);z-index:40;
+  background:var(--ink);color:#DCE3E8;display:flex;align-items:center;
+  gap:18px;padding:0 16px 0 14px;
+}
+.mark{display:flex;align-items:center;gap:9px;font-weight:600;letter-spacing:-.01em;color:#fff;white-space:nowrap}
+.mark .glyph{
+  width:22px;height:22px;border-radius:5px;display:grid;place-items:center;
+  background:linear-gradient(150deg,var(--ai) 0%, var(--det) 100%);
+  font-family:var(--mono);font-size:12px;font-weight:600;color:#fff
+}
+.mark small{font-weight:400;color:#8C9BA5;font-size:12px}
+.ctx{display:flex;align-items:center;gap:10px;margin-left:6px;flex-wrap:wrap}
+.ctx-item{
+  display:flex;align-items:baseline;gap:6px;background:#1E2E3B;border:1px solid #2C3E4C;
+  border-radius:6px;padding:4px 9px;font-size:12px
+}
+.ctx-item .k{color:#7E8F9B;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em}
+.ctx-item .v{color:#EAF0F4;font-family:var(--mono);font-size:12px}
+.top-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.seg{display:flex;background:#1E2E3B;border:1px solid #2C3E4C;border-radius:7px;padding:2px}
+.seg button{
+  font-size:12px;padding:4px 10px;border-radius:5px;color:#93A3AE;white-space:nowrap;
+  transition:background .12s,color .12s
+}
+.seg button[aria-pressed="true"]{background:#EAF0F4;color:var(--ink);font-weight:600}
+.kill{
+  display:flex;align-items:center;gap:7px;font-size:12px;color:#E7B4B4;
+  background:#3A1618;border:1px solid #5A2326;border-radius:7px;padding:5px 10px
+}
+.kill .dot{width:7px;height:7px;border-radius:50%;background:#5AC27E;box-shadow:0 0 0 3px rgba(90,194,126,.18)}
+.kill.off .dot{background:#E06C6C;box-shadow:0 0 0 3px rgba(224,108,108,.18)}
+
+/* ---------- rail ---------- */
+.rail{
+  position:fixed;top:var(--top);bottom:0;left:0;width:var(--rail);z-index:30;
+  background:var(--surface);border-right:1px solid var(--rule);
+  display:flex;flex-direction:column;align-items:center;padding-top:10px;gap:3px
+}
+.rail button{
+  width:52px;padding:9px 2px 7px;border-radius:8px;display:grid;justify-items:center;gap:4px;
+  color:var(--ink-3);font-size:9.5px;letter-spacing:.02em;line-height:1.15;text-align:center
+}
+.rail button svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.6}
+.rail button:hover{background:var(--surface-2);color:var(--ink-2)}
+.rail button[aria-current="page"]{background:var(--det-bg);color:var(--det);font-weight:600}
+.rail .count{
+  position:absolute;transform:translate(15px,-8px);background:var(--ai);color:#fff;
+  font-size:9px;font-weight:600;border-radius:9px;padding:1px 5px;font-family:var(--mono)
+}
+
+/* ---------- layout ---------- */
+main{margin:var(--top) 0 0 var(--rail);min-height:calc(100vh - var(--top))}
+.screen{display:none}
+.screen.on{display:block}
+.banner{
+  display:flex;align-items:center;gap:10px;padding:8px 18px;font-size:12.5px;
+  background:var(--ai-bg);border-bottom:1px solid #E0D2F2;color:#4A2B71
+}
+.banner strong{font-weight:600}
+.banner .tag{
+  font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;
+  background:var(--ai);color:#fff;padding:2px 7px;border-radius:4px
+}
+.hdr{padding:16px 18px 0}
+.hdr h1{
+  margin:0;font-size:19px;font-weight:600;letter-spacing:-.015em;
+  display:flex;align-items:baseline;gap:10px
+}
+.hdr h1 .sub{font-size:12.5px;font-weight:400;color:var(--ink-3);letter-spacing:0}
+.hdr p{margin:5px 0 0;color:var(--ink-2);font-size:12.5px;max-width:72ch}
+
+/* ---------- queue split ---------- */
+.split{display:grid;grid-template-columns:minmax(360px,42%) 1fr;gap:0;align-items:start}
+.queue{border-right:1px solid var(--rule);min-height:calc(100vh - var(--top))}
+.filters{
+  display:flex;gap:6px;padding:12px 18px;flex-wrap:wrap;align-items:center;
+  border-bottom:1px solid var(--rule-2);background:var(--surface-2)
+}
+.chip{
+  font-size:12px;padding:4px 11px;border-radius:20px;border:1px solid var(--rule);
+  background:var(--surface);color:var(--ink-2);white-space:nowrap
+}
+.chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:500}
+.chip .n{font-family:var(--mono);font-size:11px;opacity:.65;margin-left:4px}
+.qlist{list-style:none;margin:0;padding:0}
+.qrow{
+  display:block;width:100%;text-align:left;padding:11px 18px;border-bottom:1px solid var(--rule-2);
+  background:var(--surface);transition:background .1s;position:relative
+}
+.qrow:hover{background:var(--surface-2)}
+.qrow[aria-selected="true"]{background:var(--det-bg)}
+.qrow[aria-selected="true"]::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--det)}
+.qrow.done{opacity:.42}
+.qrow-top{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+.claim{font-family:var(--mono);font-size:12.5px;font-weight:500}
+.cpt{font-family:var(--mono);font-size:11px;color:var(--ink-3);background:var(--rule-2);padding:1px 5px;border-radius:3px}
+.bal{margin-left:auto;font-family:var(--mono);font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums}
+.qrow-mid{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink-2);margin-bottom:6px}
+.qrow-mid .payer{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dcode{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--crimson)}
+.qrow-bot{display:flex;align-items:center;gap:8px}
+.badge{
+  font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px;white-space:nowrap;
+  letter-spacing:.01em
+}
+.badge.appeal{background:var(--ai-bg);color:var(--ai)}
+.badge.rebill{background:var(--det-bg);color:var(--det)}
+.badge.writeoff{background:var(--amber-bg);color:var(--amber)}
+.badge.escalate{background:var(--crimson-bg);color:var(--crimson)}
+.badge.docs{background:var(--rule-2);color:var(--ink-2)}
+.meter{display:flex;gap:2px;align-items:center}
+.meter i{width:9px;height:5px;border-radius:1px;background:var(--rule);display:block}
+.meter.hi i.f{background:var(--moss)} .meter.mid i.f{background:var(--amber)} .meter.lo i.f{background:var(--crimson)}
+.meter span{font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-left:4px}
+.due{margin-left:auto;font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:4px;white-space:nowrap}
+.due.ok{color:var(--ink-3)}
+.due.warn{background:var(--amber-bg);color:var(--amber);font-weight:600}
+.due.crit{background:var(--crimson-bg);color:var(--crimson);font-weight:600}
+
+/* ---------- decision panel ---------- */
+.panel{padding:18px 22px 60px;max-width:820px}
+.p-head{display:flex;align-items:flex-start;gap:14px;padding-bottom:14px;border-bottom:1px solid var(--rule)}
+.p-head h2{margin:0;font-size:17px;font-weight:600;letter-spacing:-.01em;font-family:var(--mono)}
+.p-head .meta{margin-top:4px;font-size:12.5px;color:var(--ink-2)}
+.p-head .amt{margin-left:auto;text-align:right}
+.p-head .amt b{display:block;font-family:var(--mono);font-size:19px;font-variant-numeric:tabular-nums}
+.p-head .amt span{font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em}
+
+/* signature: the decision chain */
+.chain-wrap{margin:18px 0 6px}
+.chain-label{
+  display:flex;align-items:baseline;gap:8px;margin-bottom:9px;
+  font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--ink-3);font-weight:600
+}
+.chain{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
+.link{
+  flex:1 1 0;min-width:118px;border:1px solid var(--rule);border-right:none;background:var(--surface);
+  padding:9px 11px 10px;position:relative
+}
+.link:first-child{border-radius:7px 0 0 7px}
+.link:last-child{border-right:1px solid var(--rule);border-radius:0 7px 7px 0}
+.link .who{
+  font-family:var(--mono);font-size:9px;letter-spacing:.09em;text-transform:uppercase;
+  display:flex;align-items:center;gap:4px;margin-bottom:5px
+}
+.link .who::before{content:"";width:6px;height:6px;border-radius:1px;background:currentColor}
+.link.det .who{color:var(--det)} .link.ai .who{color:var(--ai)}
+.link .what{font-size:12px;font-weight:600;line-height:1.25;margin-bottom:3px}
+.link .val{font-size:11.5px;color:var(--ink-2);font-family:var(--mono);line-height:1.3}
+.link.det{background:linear-gradient(180deg,var(--det-bg) 0%,rgba(231,239,247,.35) 100%)}
+.link.ai{background:linear-gradient(180deg,var(--ai-bg) 0%,rgba(240,233,249,.35) 100%)}
+.link.blocked{background:var(--crimson-bg);border-color:#EAC4C4}
+.link .state{
+  position:absolute;top:8px;right:9px;font-family:var(--mono);font-size:12px;font-weight:600
+}
+.link.det .state{color:var(--det)} .link.ai .state{color:var(--ai)} .link.blocked .state{color:var(--crimson)}
+.chain-note{
+  margin:9px 0 0;font-size:12px;color:var(--ink-2);display:flex;gap:6px;align-items:flex-start
+}
+.chain-note b{color:var(--ink)}
+
+/* cards */
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:14px 15px;margin-top:14px}
+.card h3{
+  margin:0 0 9px;font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--ink-3);font-weight:600;display:flex;align-items:center;gap:8px
+}
+.card h3 .owner{
+  font-family:var(--mono);font-size:9px;padding:1.5px 6px;border-radius:3px;letter-spacing:.06em
+}
+.owner.det{background:var(--det-bg);color:var(--det)}
+.owner.ai{background:var(--ai-bg);color:var(--ai)}
+.rec-line{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.rec-line .act{font-size:16px;font-weight:600;letter-spacing:-.01em}
+.rationale{margin:0;font-size:13.5px;line-height:1.55;color:var(--ink)}
+.cite{
+  margin-top:11px;border-left:3px solid var(--ai);background:var(--surface-2);
+  padding:10px 12px;border-radius:0 6px 6px 0
+}
+.cite q{font-size:13px;font-style:italic;color:var(--ink);display:block;margin-bottom:7px;quotes:"\201C" "\201D"}
+.cite .src{font-family:var(--mono);font-size:11px;color:var(--ink-2);display:flex;flex-wrap:wrap;gap:4px 12px}
+.cite .src b{font-weight:600;color:var(--ink)}
+.eff{color:var(--moss);font-weight:600}
+
+/* diff */
+.diff{font-family:var(--mono);font-size:12px;border:1px solid var(--rule);border-radius:6px;overflow:hidden}
+.diff div{display:grid;grid-template-columns:150px 1fr;gap:0;border-bottom:1px solid var(--rule-2)}
+.diff div:last-child{border-bottom:none}
+.diff .f{padding:7px 11px;background:var(--surface-2);color:var(--ink-2);border-right:1px solid var(--rule-2)}
+.diff .v{padding:7px 11px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.diff .old{color:var(--ink-3);text-decoration:line-through}
+.diff .arw{color:var(--ink-3)}
+.diff .new{color:var(--moss);font-weight:600}
+
+/* trace */
+details.trace{margin-top:14px;border:1px solid var(--rule);border-radius:8px;background:var(--surface)}
+details.trace summary{
+  padding:11px 15px;font-size:12.5px;font-weight:500;cursor:pointer;list-style:none;
+  display:flex;align-items:center;gap:8px;color:var(--ink-2)
+}
+details.trace summary::-webkit-details-marker{display:none}
+details.trace summary::before{content:"▸";font-size:10px;color:var(--ink-3);transition:transform .15s}
+details.trace[open] summary::before{transform:rotate(90deg)}
+.tracetbl{border-top:1px solid var(--rule-2);font-family:var(--mono);font-size:11.5px}
+.tracetbl div{display:grid;grid-template-columns:22px 1fr 78px 68px;gap:10px;padding:6px 15px;border-bottom:1px solid var(--rule-2);align-items:center}
+.tracetbl div:last-child{border-bottom:none}
+.tracetbl .n{color:var(--ink-3)}
+.tracetbl .ms{text-align:right;color:var(--ink-3)}
+.tracetbl .st{font-weight:600;font-size:10.5px}
+.st.ok{color:var(--moss)} .st.blk{color:var(--crimson)} .st.na{color:var(--ink-3)}
+
+/* actions */
+.actions{
+  position:sticky;bottom:0;margin-top:18px;padding:14px 0 0;background:linear-gradient(180deg,rgba(244,246,242,0) 0%,var(--paper) 22%);
+  display:flex;gap:9px;align-items:center;flex-wrap:wrap
+}
+.btn{
+  padding:9px 17px;border-radius:7px;font-size:13.5px;font-weight:600;border:1px solid transparent;
+  transition:background .12s,border-color .12s,opacity .12s
+}
+.btn.primary{background:var(--moss);color:#fff}
+.btn.primary:hover{background:#3F681F}
+.btn.ghost{background:var(--surface);border-color:var(--rule);color:var(--ink)}
+.btn.ghost:hover{border-color:var(--ink-3)}
+.btn.danger{background:var(--surface);border-color:#E3C3C3;color:var(--crimson)}
+.btn.danger:hover{background:var(--crimson-bg)}
+.btn[disabled]{opacity:.42;cursor:not-allowed}
+.gate-note{
+  display:flex;align-items:center;gap:8px;font-size:12.5px;padding:9px 12px;border-radius:7px;
+  background:var(--amber-bg);color:#7A3E00;border:1px solid #EFD6B4;margin-top:12px
+}
+.gate-note.stop{background:var(--crimson-bg);color:#7A1114;border-color:#EAC4C4}
+.hint{font-size:12px;color:var(--ink-3);margin-left:auto}
+
+/* reason capture */
+.reason{margin-top:12px;border:1px dashed var(--rule);border-radius:8px;padding:13px 14px;background:var(--surface)}
+.reason h4{margin:0 0 9px;font-size:12.5px;font-weight:600}
+.reason .opts{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.reason textarea{
+  width:100%;border:1px solid var(--rule);border-radius:6px;padding:8px 10px;font:inherit;font-size:13px;
+  resize:vertical;min-height:56px;background:var(--surface-2)
+}
+.reason textarea:focus{outline:2px solid var(--det);outline-offset:1px}
+
+/* generic tables */
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px;background:var(--surface)}
+.tbl th{
+  text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);
+  font-weight:600;padding:9px 12px;border-bottom:1px solid var(--rule);white-space:nowrap
+}
+.tbl td{padding:9px 12px;border-bottom:1px solid var(--rule-2);vertical-align:top}
+.tbl tr:hover td{background:var(--surface-2)}
+.wrap{padding:16px 18px 60px}
+.tblbox{border:1px solid var(--rule);border-radius:8px;overflow:auto}
+
+/* metrics */
+.grid4{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:12px;margin-bottom:16px}
+.stat{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:13px 15px}
+.stat .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);font-weight:600}
+.stat .v{font-family:var(--mono);font-size:26px;font-weight:600;letter-spacing:-.02em;margin:5px 0 2px;font-variant-numeric:tabular-nums}
+.stat .d{font-size:11.5px;color:var(--ink-2)}
+.stat .d .up{color:var(--moss);font-weight:600} .stat .d .down{color:var(--crimson);font-weight:600}
+.stat.gate{border-color:var(--moss);background:var(--moss-bg)}
+.stat.gate .v{color:#3F681F}
+.bars{display:grid;gap:7px;margin-top:4px}
+.bar{display:grid;grid-template-columns:158px 1fr 44px;gap:10px;align-items:center;font-size:12.5px}
+.bar .t{color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar .track{height:9px;background:var(--rule-2);border-radius:5px;overflow:hidden}
+.bar .fill{height:100%;border-radius:5px;background:var(--ai)}
+.bar .fill.det{background:var(--det)} .bar .fill.moss{background:var(--moss)} .bar .fill.amber{background:var(--amber)}
+.bar .n{font-family:var(--mono);font-size:11.5px;text-align:right;color:var(--ink-2)}
+
+/* settings */
+.setrow{
+  display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center;
+  padding:14px 0;border-bottom:1px solid var(--rule-2)
+}
+.setrow:last-child{border-bottom:none}
+.setrow .lbl{font-size:13.5px;font-weight:600}
+.setrow .desc{font-size:12.5px;color:var(--ink-2);margin-top:2px;max-width:62ch}
+.toggle{
+  width:44px;height:25px;border-radius:14px;background:var(--rule);position:relative;transition:background .15s;flex:none
+}
+.toggle::after{
+  content:"";position:absolute;top:3px;left:3px;width:19px;height:19px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .15s
+}
+.toggle[aria-pressed="true"]{background:var(--moss)}
+.toggle[aria-pressed="true"]::after{transform:translateX(19px)}
+.num{
+  font-family:var(--mono);font-size:13px;border:1px solid var(--rule);border-radius:6px;
+  padding:6px 10px;width:118px;text-align:right;background:var(--surface)
+}
+.sec-title{
+  font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--ink-3);font-weight:600;
+  margin:22px 0 2px;padding-bottom:7px;border-bottom:1px solid var(--rule)
+}
+
+/* toast */
+.toast{
+  position:fixed;bottom:20px;left:50%;transform:translate(-50%,80px);z-index:60;
+  background:var(--ink);color:#fff;padding:11px 18px;border-radius:8px;font-size:13px;
+  display:flex;align-items:center;gap:10px;box-shadow:0 8px 26px rgba(20,32,43,.28);
+  opacity:0;transition:transform .22s cubic-bezier(.2,.8,.3,1),opacity .22s;pointer-events:none
+}
+.toast.show{transform:translate(-50%,0);opacity:1}
+.toast .ok{color:#8BD8A4;font-family:var(--mono);font-weight:600}
+.empty{padding:60px 22px;text-align:center;color:var(--ink-3)}
+.empty b{display:block;color:var(--ink);font-size:15px;margin-bottom:6px;font-weight:600}
+
+@media (max-width:900px){
+  .split{grid-template-columns:1fr}
+  .queue{border-right:none;border-bottom:1px solid var(--rule);min-height:auto}
+  .ctx{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="mark"><span class="glyph">DA</span> Lab Revenue Navigator <small>· Denial Agent</small></div>
+  <div class="ctx">
+    <div class="ctx-item"><span class="k">Lab</span><span class="v">Bio&#8203;Reference&nbsp;— MI</span></div>
+    <div class="ctx-item"><span class="k">Run</span><span class="v">R2026-08-11-A</span></div>
+    <div class="ctx-item"><span class="k">Prompt</span><span class="v">v4.2</span></div>
+  </div>
+  <div class="top-right">
+    <div class="seg" role="group" aria-label="Acting role">
+      <button data-role="reviewer" aria-pressed="true">AR Reviewer</button>
+      <button data-role="manager" aria-pressed="false">AR Manager</button>
+      <button data-role="admin" aria-pressed="false">Admin</button>
+    </div>
+    <div class="seg" role="group" aria-label="Agent mode">
+      <button data-mode="shadow" aria-pressed="false">Shadow</button>
+      <button data-mode="live" aria-pressed="true">Live</button>
+    </div>
+    <div class="kill" id="killBadge"><span class="dot"></span> Agent on</div>
+  </div>
+</div>
+
+<nav class="rail" aria-label="Modules">
+  <button data-screen="queue" aria-current="page">
+    <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h9"/><circle cx="19" cy="18" r="2.4"/></svg>
+    Review<span class="count" id="railCount">6</span>
+  </button>
+  <button data-screen="board">
+    <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/></svg>
+    Task board
+  </button>
+  <button data-screen="runs">
+    <svg viewBox="0 0 24 24"><path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="8.5"/></svg>
+    Agent runs
+  </button>
+  <button data-screen="perf">
+    <svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg>
+    Performance
+  </button>
+  <button data-screen="settings">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+    Settings
+  </button>
+</nav>
+
+<main>
+  <!-- ============ REVIEW QUEUE ============ -->
+  <section class="screen on" id="s-queue">
+    <div class="banner" id="shadowBanner" hidden>
+      <span class="tag">Shadow</span>
+      <span><strong>Nothing you do here reaches a payer.</strong> Record the decision you would have made — it scores the agent against your judgement.</span>
+    </div>
+    <div class="split">
+      <div class="queue">
+        <div class="hdr" style="padding-bottom:10px">
+          <h1>AI recommendations <span class="sub" id="qsub">6 waiting · 2 decided today</span></h1>
+        </div>
+        <div class="filters" role="group" aria-label="Filter queue">
+          <button class="chip" data-filter="all" aria-pressed="true">All<span class="n" id="f-all">6</span></button>
+          <button class="chip" data-filter="deadline" aria-pressed="false">Deadline under 14 days<span class="n" id="f-deadline">2</span></button>
+          <button class="chip" data-filter="blocked" aria-pressed="false">Blocked by a gate<span class="n" id="f-blocked">2</span></button>
+          <button class="chip" data-filter="manager" aria-pressed="false">Needs a manager<span class="n" id="f-manager">1</span></button>
+        </div>
+        <ul class="qlist" id="qlist"></ul>
+      </div>
+      <div id="panelHost"></div>
+    </div>
+  </section>
+
+  <!-- ============ TASK BOARD ============ -->
+  <section class="screen" id="s-board">
+    <div class="wrap">
+      <div class="hdr" style="padding:0 0 14px">
+        <h1>Task board <span class="sub">the existing grid, with one column added</span></h1>
+        <p>The <strong>Agent</strong> column is the only change. It shows whether a recommendation is waiting, what it proposes, and who decided. Everything else behaves exactly as it does today.</p>
+      </div>
+      <div class="tblbox">
+        <table class="tbl">
+          <thead><tr>
+            <th>Claim</th><th>CPT</th><th>Denial</th><th>Payer</th><th>Balance</th>
+            <th>Status</th><th>Assigned to</th><th>Due</th><th style="background:var(--ai-bg);color:var(--ai)">Agent</th>
+          </tr></thead>
+          <tbody id="boardBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ AGENT RUNS ============ -->
+  <section class="screen" id="s-runs">
+    <div class="wrap">
+      <div class="hdr" style="padding:0 0 14px">
+        <h1>Agent runs <span class="sub">one row per invocation, kept for audit</span></h1>
+        <p>Every run records the model, the prompt version, each tool call and the outcome. An auditor asking &ldquo;why did this claim get appealed?&rdquo; can replay the exact inputs.</p>
+      </div>
+      <div class="tblbox">
+        <table class="tbl">
+          <thead><tr>
+            <th>Run</th><th>Started</th><th>Claim</th><th>Outcome</th><th>Tools</th>
+            <th>Tokens in / out</th><th>Cost</th><th>Latency</th><th>Decided by</th>
+          </tr></thead>
+          <tbody id="runsBody"></tbody>
+        </table>
+      </div>
+      <p style="font-size:12px;color:var(--ink-3);margin-top:10px">
+        Retention follows the policy set in Settings. Prompt and response text is stored encrypted; the queue view shows hashes and token counts only.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ PERFORMANCE ============ -->
+  <section class="screen" id="s-perf">
+    <div class="wrap">
+      <div class="hdr" style="padding:0 0 14px">
+        <h1>Performance <span class="sub">rolling 30 days · BioReference — MI</span></h1>
+        <p>These are the numbers the Phase&nbsp;3 gate is decided on. Agreement is measured against the adjudicated human decision on the golden set, not against whatever the reviewer clicked.</p>
+      </div>
+      <div class="grid4">
+        <div class="stat gate">
+          <div class="k">Agreement on action</div><div class="v">87.4%</div>
+          <div class="d"><span class="up">above</span> the 85% gate · n = 100</div>
+        </div>
+        <div class="stat">
+          <div class="k">Human override rate</div><div class="v">18.2%</div>
+          <div class="d"><span class="up">↓ 6.1 pts</span> since prompt v4.0</div>
+        </div>
+        <div class="stat">
+          <div class="k">Cost per denial</div><div class="v">$0.041</div>
+          <div class="d">$205 month to date · 5,004 analysed</div>
+        </div>
+        <div class="stat">
+          <div class="k">Median time to decide</div><div class="v">2m 14s</div>
+          <div class="d">manual baseline 11m 40s</div>
+        </div>
+      </div>
+      <div class="grid4" style="grid-template-columns:1fr 1fr">
+        <div class="stat">
+          <div class="k" style="margin-bottom:11px">Why reviewers overrode</div>
+          <div class="bars">
+            <div class="bar"><span class="t">Policy read as too broad</span><span class="track"><span class="fill" style="width:34%"></span></span><span class="n">34%</span></div>
+            <div class="bar"><span class="t">Missing document not flagged</span><span class="track"><span class="fill" style="width:26%"></span></span><span class="n">26%</span></div>
+            <div class="bar"><span class="t">Payer nuance not in corpus</span><span class="track"><span class="fill" style="width:21%"></span></span><span class="n">21%</span></div>
+            <div class="bar"><span class="t">Rebill preferred to appeal</span><span class="track"><span class="fill amber" style="width:13%"></span></span><span class="n">13%</span></div>
+            <div class="bar"><span class="t">Other</span><span class="track"><span class="fill amber" style="width:6%"></span></span><span class="n">6%</span></div>
+          </div>
+          <p style="font-size:11.5px;color:var(--ink-3);margin:12px 0 0">The top two are corpus and tool problems, not model problems. Both are fixable without touching the prompt.</p>
+        </div>
+        <div class="stat">
+          <div class="k" style="margin-bottom:11px">Zero-tolerance checks</div>
+          <div class="bars">
+            <div class="bar"><span class="t">Deadline derived by model</span><span class="track"><span class="fill moss" style="width:100%"></span></span><span class="n">0</span></div>
+            <div class="bar"><span class="t">Action with no classification</span><span class="track"><span class="fill moss" style="width:100%"></span></span><span class="n">0</span></div>
+            <div class="bar"><span class="t">Recommendation with no citation</span><span class="track"><span class="fill moss" style="width:100%"></span></span><span class="n">0</span></div>
+            <div class="bar"><span class="t">Approval bypassed</span><span class="track"><span class="fill moss" style="width:100%"></span></span><span class="n">0</span></div>
+            <div class="bar"><span class="t">Duplicate submission</span><span class="track"><span class="fill moss" style="width:100%"></span></span><span class="n">0</span></div>
+          </div>
+          <p style="font-size:11.5px;color:var(--ink-3);margin:12px 0 0">Any non-zero value here stops the rollout. These are counts, not rates, on purpose.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section class="screen" id="s-settings">
+    <div class="wrap" style="max-width:840px">
+      <div class="hdr" style="padding:0 0 6px">
+        <h1>Settings <span class="sub">BioReference — MI · Admin only</span></h1>
+        <p>Every control here is per lab. Nothing on this page is a code change, and every change is written to the audit trail with your name against it.</p>
+      </div>
+
+      <div class="sec-title">Agent</div>
+      <div class="setrow">
+        <div><div class="lbl">Run the agent for this lab</div>
+          <div class="desc">Turning this off stops new analysis immediately. Recommendations already waiting stay in the queue until someone decides them.</div></div>
+        <button class="toggle" aria-pressed="true" data-set="enabled" aria-label="Run the agent for this lab"></button>
+      </div>
+      <div class="setrow">
+        <div><div class="lbl">Shadow mode</div>
+          <div class="desc">The agent analyses and records, but reviewers can only log what they would have done. Use this until the agreement gate is met.</div></div>
+        <button class="toggle" aria-pressed="false" data-set="shadow" aria-label="Shadow mode"></button>
+      </div>
+      <div class="setrow">
+        <div><div class="lbl">Model deployment</div>
+          <div class="desc">Swapping this re-runs the golden set automatically before any new recommendation reaches the queue.</div></div>
+        <select class="num" style="width:auto;text-align:left"><option>gpt-5 (reasoning)</option><option>gpt-5-nano (triage)</option><option>gpt-5.5</option></select>
+      </div>
+
+      <div class="sec-title">Thresholds</div>
+      <div class="setrow">
+        <div><div class="lbl">Show confidence warning below</div>
+          <div class="desc">Recommendations under this score are flagged in the queue and cannot be bulk approved.</div></div>
+        <input class="num" value="0.70" aria-label="Confidence warning threshold">
+      </div>
+      <div class="setrow">
+        <div><div class="lbl">Manager approval for write-offs above</div>
+          <div class="desc">A reviewer can approve everything else. This is the financial control, and it is reviewed by Finance each quarter.</div></div>
+        <input class="num" value="$250.00" aria-label="Write-off manager approval threshold">
+      </div>
+      <div class="setrow">
+        <div><div class="lbl">Flag deadline when days remaining fall below</div>
+          <div class="desc">Calculated by the deadline service, never by the model.</div></div>
+        <input class="num" value="21" aria-label="Deadline warning days">
+      </div>
+      <div class="setrow">
+        <div><div class="lbl">Stop analysis after daily token spend of</div>
+          <div class="desc">A hard stop, not a warning. The queue keeps working; only new analysis pauses.</div></div>
+        <input class="num" value="$40.00" aria-label="Daily token cap">
+      </div>
+
+      <div class="sec-title">Evidence and retention</div>
+      <div class="setrow">
+        <div><div class="lbl">Payer policy corpus</div>
+          <div class="desc">2,041 documents · last refreshed 4 August 2026 · owner: Priya, AR Policy. Retrieval returns currently-effective versions only.</div></div>
+        <button class="btn ghost" onclick="toast('Corpus refresh queued','')">Refresh now</button>
+      </div>
+      <div class="setrow">
+        <div><div class="lbl">Redact patient identifiers before sending to the model</div>
+          <div class="desc">Name, date of birth, address and medical record number are stripped in the tool layer. The agent works from claim, CPT, denial code, payer, dates and AR notes.</div></div>
+        <button class="toggle" aria-pressed="true" data-set="redact" aria-label="Redact identifiers" style="opacity:.55;pointer-events:none"></button>
+      </div>
+      <div class="setrow">
+        <div><div class="lbl">Keep prompt and response text for</div>
+          <div class="desc">Token counts and hashes are kept for the life of the claim regardless of this setting.</div></div>
+        <select class="num" style="width:auto;text-align:left"><option>90 days</option><option selected>180 days</option><option>7 years</option></select>
+      </div>
+      <p style="font-size:11.5px;color:var(--ink-3);margin-top:16px;padding-top:14px;border-top:1px solid var(--rule)">
+        Redaction cannot be turned off from this screen. Changing it requires a signed change request from the compliance owner.
+      </p>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"><span class="ok" id="toastIcon">✓</span><span id="toastMsg"></span></div>
+
+<script>
+/* ------------------------------------------------------------------ data */
+const DATA = [
+{ id:"R-4471", claim:"CLM-88431207", visit:"88431207", cpt:"80053", cptName:"Comprehensive metabolic panel",
+  dcode:"CO-197", dtext:"Precertification / authorisation absent", payer:"Aetna Better Health of Michigan",
+  payerType:"Managed Medicaid", bal:412.60, days:34, conf:0.91, action:"Appeal", actionCls:"appeal",
+  cat:"Authorisation", scope:"Line level", denialDate:"28 Jul 2026", dos:"11 Jul 2026", firstBilled:"14 Jul 2026",
+  classifier:"A-12 · Appeal with auth record",
+  rationale:"The AR note from 29 July records an authorisation number obtained by phone before the draw, but it was never attached to the claim. The payer's own manual allows a retrospective authorisation to be supplied within 90 days of the denial when the service was medically necessary and the number pre-dates the date of service. Both conditions hold here.",
+  quote:"Retrospective authorisation may be submitted within 90 days of the remittance date where the authorisation was obtained prior to the date of service.",
+  src:{doc:"Aetna Better Health MI — Provider Manual", ver:"2026.2", eff:"Effective 1 Jul 2026", loc:"§7.4, p. 112"},
+  docsNeeded:"Authorisation confirmation AUTH-556231 (on file)",
+  diff:[["Workflow status","New","Pending appeal"],["Assigned to","—","Dana O."],["Action taken","—","Appeal submitted"],["Reviewer notes","—","Retro auth per manual §7.4"]],
+  gates:{classifier:"ok",deadline:"ok",duplicate:"ok",citation:"ok"},
+  trace:[["GetDenialContext","OK",84],["GetDenialClassification","OK",12],["GetTimelyFilingDeadline","OK 34 days",9],["CheckDuplicateSubmission","OK none",31],["GetPayerPolicy","OK 3 chunks",612],["GetRequiredDocuments","OK 1 of 1",18],["DraftAppealLetter","Awaiting approval",1840]],
+  tokens:"7,940 / 1,610", cost:"$0.026", latency:"4.1s" },
+
+{ id:"R-4472", claim:"CLM-88429055", visit:"88429055", cpt:"84443", cptName:"Thyroid stimulating hormone",
+  dcode:"CO-11", dtext:"Diagnosis inconsistent with the procedure", payer:"Blue Cross Blue Shield of Michigan",
+  payerType:"Commercial PPO", bal:88.40, days:12, conf:0.83, action:"Rebill", actionCls:"rebill",
+  cat:"Coding", scope:"Line level", denialDate:"1 Aug 2026", dos:"22 Jul 2026", firstBilled:"24 Jul 2026",
+  classifier:"C-04 · Rebill with corrected diagnosis",
+  rationale:"The claim carried R53.83 as primary. The requisition and the ordering note both give E03.9, hypothyroidism unspecified, which is on the payer's covered list for this CPT. This is a coding correction on our side rather than a payer error, so a rebill is faster and cheaper than an appeal.",
+  quote:"84443 is covered when billed with a diagnosis from the endocrine group listed in Appendix C. Claims denied for diagnosis mismatch may be corrected and resubmitted.",
+  src:{doc:"BCBSM — Laboratory Medical Policy", ver:"2026.1", eff:"Effective 1 Apr 2026", loc:"Appendix C"},
+  docsNeeded:"None — correction only",
+  diff:[["Workflow status","New","Pending rebill"],["Primary diagnosis","R53.83","E03.9"],["Assigned to","—","Dana O."],["Action taken","—","Rebill queued"]],
+  gates:{classifier:"ok",deadline:"warn",duplicate:"ok",citation:"ok"},
+  trace:[["GetDenialContext","OK",77],["GetDenialClassification","OK",11],["GetTimelyFilingDeadline","12 days left",9],["CheckDuplicateSubmission","OK none",28],["GetPayerPolicy","OK 2 chunks",540],["GetRequiredDocuments","OK none",14],["RebillClaim","Awaiting approval",0]],
+  tokens:"6,220 / 940", cost:"$0.017", latency:"3.2s" },
+
+{ id:"R-4473", claim:"CLM-88402911", visit:"88402911", cpt:"83036", cptName:"Haemoglobin A1c",
+  dcode:"CO-29", dtext:"Time limit for filing has expired", payer:"UnitedHealthcare Community Plan",
+  payerType:"Managed Medicaid", bal:64.00, days:-6, conf:0.00, action:"Blocked", actionCls:"escalate",
+  cat:"Timely filing", scope:"Line level", denialDate:"2 Aug 2026", dos:"3 Jan 2026", firstBilled:"—",
+  classifier:"T-01 · Timely filing expired",
+  rationale:"The agent stopped before analysis. The filing window for this payer closed on 2 August 2026, six days ago, and the deadline service returned an expired flag. No appeal or rebill is available, and the model was not asked to look for one.",
+  quote:null,
+  src:null,
+  docsNeeded:"—",
+  diff:[["Workflow status","New","Verification pending"],["Assigned to","—","AR Manager queue"]],
+  gates:{classifier:"ok",deadline:"blocked",duplicate:"na",citation:"na"},
+  trace:[["GetDenialContext","OK",71],["GetDenialClassification","OK",10],["GetTimelyFilingDeadline","EXPIRED −6 days",8],["CheckDuplicateSubmission","Not reached",0],["GetPayerPolicy","Not reached",0],["EscalateToHuman","OK",22]],
+  tokens:"1,180 / 210", cost:"$0.003", latency:"0.4s",
+  blockedMsg:"Filing window closed on 2 August 2026. The agent cannot propose an action and has routed this to a human. A write-off needs manager approval; an appeal on payer error needs evidence the delay was not ours." },
+
+{ id:"R-4474", claim:"CLM-88437760", visit:"88437760", cpt:"80061", cptName:"Lipid panel",
+  dcode:"PR-204", dtext:"Not covered under the patient's current plan", payer:"Cigna Healthcare",
+  payerType:"Commercial HMO", bal:196.25, days:41, conf:0.62, action:"Write off", actionCls:"writeoff",
+  cat:"Non-covered", scope:"Claim level", denialDate:"25 Jul 2026", dos:"9 Jul 2026", firstBilled:"11 Jul 2026",
+  classifier:"W-02 · Write off, non-covered benefit",
+  rationale:"The plan excludes routine lipid screening without a documented cardiovascular risk factor, and no supporting diagnosis appears on the requisition. Confidence is moderate because the AR note mentions a family history discussion that is not documented anywhere in the record. If that documentation exists, this becomes an appeal instead.",
+  quote:"Routine screening lipid panels are excluded unless accompanied by a documented risk factor from the list in §4.1.",
+  src:{doc:"Cigna — Preventive Services Coverage Policy", ver:"2026.3", eff:"Effective 1 Jun 2026", loc:"§4.1, p. 28"},
+  docsNeeded:"Missing — provider note documenting cardiovascular risk",
+  diff:[["Workflow status","New","Pending write-off"],["Action taken","—","Write off $196.25"],["Applies to","This line","All 3 lines on claim"]],
+  gates:{classifier:"ok",deadline:"ok",duplicate:"ok",citation:"ok"},
+  trace:[["GetDenialContext","OK",92],["GetDenialClassification","OK",13],["GetTimelyFilingDeadline","OK 41 days",9],["CheckDuplicateSubmission","OK none",30],["GetPayerPolicy","OK 4 chunks",705],["GetRequiredDocuments","MISSING 1 of 1",16],["WriteOffClaim","Awaiting approval",0]],
+  tokens:"8,410 / 1,320", cost:"$0.024", latency:"4.6s",
+  needsManager:true },
+
+{ id:"R-4475", claim:"CLM-88440318", visit:"88440318", cpt:"87491", cptName:"Chlamydia, amplified probe",
+  dcode:"CO-16", dtext:"Claim lacks information needed for adjudication", payer:"Medicare Part B — Michigan",
+  payerType:"Medicare", bal:47.80, days:58, conf:0.88, action:"Rebill", actionCls:"rebill",
+  cat:"Missing information", scope:"Line level", denialDate:"18 Jul 2026", dos:"2 Jul 2026", firstBilled:"5 Jul 2026",
+  classifier:"C-09 · Rebill with ordering provider NPI",
+  rationale:"The remittance names the missing element as the ordering provider identifier. The requisition has Dr Whitfield's NPI and it is present in our provider master; it simply did not carry through on the outbound claim. This is a clean resubmission with no policy question attached.",
+  quote:"Claims must report the ordering provider's NPI in item 17b. Claims denied for a missing identifier may be resubmitted as a corrected claim.",
+  src:{doc:"CMS — Medicare Claims Processing Manual", ver:"Ch. 26, rev. 2026-05", eff:"Effective 1 May 2026", loc:"§10.4"},
+  docsNeeded:"None — resubmission only",
+  diff:[["Workflow status","New","Pending rebill"],["Ordering provider NPI","—","1487…3092"],["Assigned to","—","Dana O."],["Action taken","—","Corrected claim queued"]],
+  gates:{classifier:"ok",deadline:"ok",duplicate:"ok",citation:"ok"},
+  trace:[["GetDenialContext","OK",68],["GetDenialClassification","OK",10],["GetTimelyFilingDeadline","OK 58 days",8],["CheckDuplicateSubmission","OK none",26],["GetPayerPolicy","OK 2 chunks",480],["GetRequiredDocuments","OK none",13],["RebillClaim","Awaiting approval",0]],
+  tokens:"5,760 / 870", cost:"$0.016", latency:"2.9s" },
+
+{ id:"R-4476", claim:"CLM-88425544", visit:"88425544", cpt:"G0483", cptName:"Drug test, definitive, 22+ classes",
+  dcode:"CO-197", dtext:"Precertification / authorisation absent", payer:"Molina Healthcare of Michigan",
+  payerType:"Managed Medicaid", bal:1284.00, days:9, conf:0.54, action:"Escalate", actionCls:"escalate",
+  cat:"Authorisation", scope:"Line level", denialDate:"4 Aug 2026", dos:"18 Jul 2026", firstBilled:"21 Jul 2026",
+  classifier:"A-12 · Appeal with auth record",
+  rationale:"The classifier points to an appeal, but the retrieved policy is from a version that expired on 30 June and no current replacement covers definitive drug testing at this panel size. The agent will not build an appeal on a superseded clause, so it has escalated rather than guessed. The balance and the nine-day window make this worth a human look today.",
+  quote:null,
+  src:null,
+  docsNeeded:"Unknown — policy gap",
+  diff:[["Workflow status","New","Verification pending"],["Assigned to","—","AR Manager queue"],["Flag","—","Policy gap: Molina G0483"]],
+  gates:{classifier:"ok",deadline:"warn",duplicate:"ok",citation:"blocked"},
+  trace:[["GetDenialContext","OK",88],["GetDenialClassification","OK",12],["GetTimelyFilingDeadline","9 days left",9],["CheckDuplicateSubmission","OK none",29],["GetPayerPolicy","NO CURRENT VERSION",668],["EscalateToHuman","OK",24]],
+  tokens:"4,930 / 640", cost:"$0.012", latency:"2.2s",
+  blockedMsg:"The only policy the agent could find for this code expired on 30 June 2026. Rather than cite a superseded clause, it escalated. Adding the current Molina policy to the corpus would let it retry." }
+];
+
+const DECIDED = [
+ { claim:"CLM-88418822", cpt:"84153", action:"Appeal", who:"Dana O.", when:"09:14", result:"Approved" },
+ { claim:"CLM-88410903", cpt:"80048", action:"Rebill", who:"Dana O.", when:"08:51", result:"Modified" }
+];
+
+/* ------------------------------------------------------------------ state */
+let role="reviewer", mode="live", filter="all", selected=DATA[0].id, agentOn=true;
+const decided={};
+
+/* ------------------------------------------------------------------ helpers */
+const $=(s,r=document)=>r.querySelector(s);
+const $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const money=n=>"$"+n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function dueCls(d){ return d<0?"crit":d<=14?"warn":"ok"; }
+function dueTxt(d){ return d<0?`${Math.abs(d)}d overdue`:`${d}d left`; }
+function confCls(c){ return c>=.8?"hi":c>=.65?"mid":"lo"; }
+
+function visible(){
+  return DATA.filter(r=>{
+    if(decided[r.id]) return true;
+    if(filter==="deadline") return r.days<=14;
+    if(filter==="blocked")  return r.gates.deadline==="blocked"||r.gates.citation==="blocked";
+    if(filter==="manager")  return !!r.needsManager;
+    return true;
+  });
+}
+
+/* ------------------------------------------------------------------ queue */
+function renderQueue(){
+  const rows=visible();
+  $("#qlist").innerHTML = rows.map(r=>{
+    const d=decided[r.id];
+    const segs=[0,1,2,3,4].map(i=>`<i class="${i < Math.round(r.conf*5)?'f':''}"></i>`).join("");
+    return `<li><button class="qrow${d?" done":""}" data-id="${r.id}" aria-selected="${selected===r.id}">
+      <div class="qrow-top">
+        <span class="claim">${r.claim}</span>
+        <span class="cpt">${r.cpt}</span>
+        <span class="bal tnum">${money(r.bal)}</span>
+      </div>
+      <div class="qrow-mid">
+        <span class="dcode">${r.dcode}</span>
+        <span class="payer">${esc(r.payer)}</span>
+      </div>
+      <div class="qrow-bot">
+        <span class="badge ${r.actionCls}">${d?d.label:r.action}</span>
+        ${r.conf>0?`<span class="meter ${confCls(r.conf)}">${segs}<span>${r.conf.toFixed(2)}</span></span>`:``}
+        <span class="due ${dueCls(r.days)}">${dueTxt(r.days)}</span>
+      </div>
+    </button></li>`;
+  }).join("");
+
+  $$(".qrow").forEach(b=>b.onclick=()=>{ selected=b.dataset.id; renderQueue(); renderPanel(); });
+
+  const open=DATA.filter(r=>!decided[r.id]).length;
+  const done=Object.keys(decided).length+DECIDED.length;
+  $("#railCount").textContent=open;
+  $("#qsub").textContent=`${open} waiting · ${done} decided today`;
+  $("#f-all").textContent=DATA.filter(r=>!decided[r.id]).length;
+  $("#f-deadline").textContent=DATA.filter(r=>!decided[r.id]&&r.days<=14).length;
+  $("#f-blocked").textContent=DATA.filter(r=>!decided[r.id]&&(r.gates.deadline==="blocked"||r.gates.citation==="blocked")).length;
+  $("#f-manager").textContent=DATA.filter(r=>!decided[r.id]&&r.needsManager).length;
+}
+
+/* ------------------------------------------------------------------ panel */
+const GATE_GLYPH={ok:"✓",warn:"!",blocked:"✕",na:"–"};
+
+function chainLink(kind,who,what,val,state){
+  const cls=state==="blocked"?"blocked":kind;
+  return `<div class="link ${cls}">
+    <span class="state">${GATE_GLYPH[state]}</span>
+    <div class="who">${who}</div>
+    <div class="what">${what}</div>
+    <div class="val">${val}</div>
+  </div>`;
+}
+
+function renderPanel(){
+  const r=DATA.find(x=>x.id===selected);
+  const host=$("#panelHost");
+  if(!r){ host.innerHTML=`<div class="empty"><b>Queue is clear</b>Nothing is waiting on a decision for this run.</div>`; return; }
+  const d=decided[r.id];
+  const blocked = r.gates.deadline==="blocked" || r.gates.citation==="blocked";
+  const needsMgr = !!r.needsManager;
+  const canAct = agentOn && !d && !blocked && (needsMgr ? (role==="manager"||role==="admin") : true);
+
+  const chain =
+    chainLink("det","Computed","Classification",r.classifier,r.gates.classifier)+
+    chainLink("det","Computed","Filing deadline",r.days<0?`Expired ${Math.abs(r.days)} days ago`:`${r.days} days remain`,r.gates.deadline)+
+    chainLink("det","Computed","Duplicate check",r.gates.duplicate==="na"?"Not reached":"No prior submission",r.gates.duplicate)+
+    chainLink("ai","Model","Policy evidence",r.gates.citation==="ok"?`${r.src.loc}`:(r.gates.citation==="na"?"Not reached":"No current version"),r.gates.citation)+
+    chainLink("ai","Model","Proposed action",r.action+(r.conf>0?` · ${r.conf.toFixed(2)}`:""),blocked?"blocked":"ok");
+
+  host.innerHTML=`<div class="panel">
+    <div class="p-head">
+      <div>
+        <h2>${r.claim}</h2>
+        <div class="meta">${r.cpt} · ${esc(r.cptName)} &nbsp;·&nbsp; <strong>${r.dcode}</strong> ${esc(r.dtext)}</div>
+        <div class="meta" style="color:var(--ink-3)">${esc(r.payer)} · ${r.payerType} · service ${r.dos} · denied ${r.denialDate}</div>
+      </div>
+      <div class="amt"><b class="tnum">${money(r.bal)}</b><span>balance</span></div>
+    </div>
+
+    <div class="chain-wrap">
+      <div class="chain-label">Decision chain <span style="text-transform:none;letter-spacing:0;font-weight:400;color:var(--ink-3)">— read left to right</span></div>
+      <div class="chain">${chain}</div>
+      <p class="chain-note"><b>How to read this:</b> the blue steps were computed by rules and are not open to interpretation. The violet steps are the model's reading — those are the ones worth your attention.</p>
+    </div>
+
+    ${blocked?`<div class="gate-note stop"><strong>Stopped at a gate.</strong> ${esc(r.blockedMsg)}</div>`:""}
+    ${(needsMgr&&role==="reviewer"&&!blocked)?`<div class="gate-note"><strong>A manager has to approve this one.</strong> Write-offs above $250.00 sit outside a reviewer's authority. Switch role to AR Manager to see the approval controls.</div>`:""}
+
+    <div class="card">
+      <h3>Recommendation <span class="owner ai">Model</span></h3>
+      <div class="rec-line">
+        <span class="badge ${r.actionCls}" style="font-size:13px;padding:4px 12px">${r.action}</span>
+        <span style="font-size:12.5px;color:var(--ink-2)">${r.cat} · ${r.scope}</span>
+        ${r.conf>0?`<span style="margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--ink-3)">confidence ${r.conf.toFixed(2)}</span>`:""}
+      </div>
+      <p class="rationale">${esc(r.rationale)}</p>
+      ${r.src?`<div class="cite">
+        <q>${esc(r.quote)}</q>
+        <div class="src"><b>${esc(r.src.doc)}</b><span>${r.src.loc}</span><span>version ${r.src.ver}</span><span class="eff">${r.src.eff}</span></div>
+      </div>`:`<div class="cite" style="border-left-color:var(--crimson)">
+        <q style="font-style:normal;color:var(--ink-2)">No current policy version could be retrieved, so no clause is quoted. The agent will not cite an expired document.</q>
+      </div>`}
+      <div style="margin-top:11px;font-size:12.5px"><strong>Documents:</strong> <span style="color:${r.docsNeeded.startsWith("Missing")?"var(--amber)":"var(--ink-2)"}">${esc(r.docsNeeded)}</span></div>
+    </div>
+
+    <div class="card">
+      <h3>What changes if you approve <span class="owner det">Computed</span></h3>
+      <div class="diff">${r.diff.map(([f,o,n])=>`<div><span class="f">${esc(f)}</span><span class="v"><span class="old">${esc(o)}</span><span class="arw">→</span><span class="new">${esc(n)}</span></span></div>`).join("")}</div>
+      ${r.scope==="Claim level"?`<p style="font-size:12px;color:var(--amber);margin:9px 0 0"><strong>Claim level.</strong> This category propagates to every line on the claim, not just this one.</p>`:""}
+    </div>
+
+    <details class="trace">
+      <summary>Tool trace · ${r.trace.length} calls · ${r.latency} · ${r.tokens} tokens · ${r.cost}</summary>
+      <div class="tracetbl">
+        ${r.trace.map(([n,s,ms],i)=>`<div>
+          <span class="n">${i+1}</span><span>${n}</span>
+          <span class="st ${s.startsWith("OK")?"ok":(s.includes("Not reached")||s==="—"?"na":(s.includes("Awaiting")?"na":"blk"))}">${esc(s)}</span>
+          <span class="ms">${ms?ms+" ms":"—"}</span>
+        </div>`).join("")}
+      </div>
+    </details>
+
+    ${d?`<div class="gate-note" style="background:var(--moss-bg);border-color:#CADFB8;color:#37601C">
+        <strong>${d.label}.</strong> Recorded at ${d.at} by ${d.by}${d.reason?` — ${esc(d.reason)}`:""}. Written to the task history with ActorType = Agent.
+      </div>`:`
+    <div class="actions">
+      ${blocked?`
+        <button class="btn primary" onclick="decide('${r.id}','Sent to manager review')" ${agentOn?"":"disabled"}>Send to manager review</button>
+        <button class="btn ghost" onclick="toast('Marked for policy corpus update','')">Flag the policy gap</button>
+      `:`
+        <button class="btn primary" onclick="decide('${r.id}','${mode==='shadow'?'Logged as would-approve':'Approved'}')" ${canAct?"":"disabled"}>
+          ${mode==="shadow"?"I would have approved":"Approve "+r.action.toLowerCase()}
+        </button>
+        <button class="btn ghost" onclick="openReason('${r.id}','modify')" ${canAct?"":"disabled"}>Change it first</button>
+        <button class="btn danger" onclick="openReason('${r.id}','reject')" ${(agentOn&&!d)?"":"disabled"}>Reject</button>
+      `}
+      <span class="hint">${
+        !agentOn ? "Agent is switched off for this lab." :
+        (needsMgr&&role==="reviewer"&&!blocked) ? "Approval is a manager action here." :
+        mode==="shadow" ? "Shadow mode — nothing leaves the system." :
+        "Approving writes to the task board and the history in one transaction."
+      }</span>
+    </div>
+    <div id="reasonHost"></div>`}
+  </div>`;
+}
+
+/* ------------------------------------------------------------------ actions */
+const REASONS={
+  reject:["Policy read too broadly","Missing document not flagged","Payer nuance not captured","Wrong action for this denial","Balance not worth pursuing"],
+  modify:["Rebill instead of appeal","Different diagnosis","Different action scope","Add supporting document","Reassign to another reviewer"]
+};
+let pending=null;
+
+function openReason(id,kind){
+  pending={id,kind,choice:null};
+  $("#reasonHost").innerHTML=`<div class="reason">
+    <h4>${kind==="reject"?"Why are you rejecting this?":"What are you changing?"}</h4>
+    <div class="opts">${REASONS[kind].map(t=>`<button class="chip" data-reason="${esc(t)}" aria-pressed="false">${esc(t)}</button>`).join("")}</div>
+    <textarea placeholder="${kind==="reject"?"Anything else the next reviewer should know" : "Describe the change you are making"}" aria-label="Reason detail"></textarea>
+    <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+      <button class="btn primary" id="reasonGo" disabled>${kind==="reject"?"Reject and return to queue":"Save change and approve"}</button>
+      <button class="btn ghost" onclick="$('#reasonHost').innerHTML=''">Cancel</button>
+      <span class="hint">Pick a reason — it is the only signal we get about where the agent is wrong.</span>
+    </div>
+  </div>`;
+  $$("#reasonHost .chip").forEach(c=>c.onclick=()=>{
+    $$("#reasonHost .chip").forEach(x=>x.setAttribute("aria-pressed","false"));
+    c.setAttribute("aria-pressed","true"); pending.choice=c.dataset.reason;
+    $("#reasonGo").disabled=false;
+  });
+  $("#reasonGo").onclick=()=>decide(pending.id, kind==="reject"?"Rejected":"Modified and approved", pending.choice);
+  $("#reasonHost").scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+
+function decide(id,label,reason){
+  const names={reviewer:"Dana O. (AR Reviewer)",manager:"Marcus L. (AR Manager)",admin:"System Admin"};
+  decided[id]={label,by:names[role],at:new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}),reason};
+  const next=DATA.find(r=>!decided[r.id]);
+  toast(label+" · "+id, reason?"with a reason recorded":"");
+  if(next) selected=next.id;
+  renderQueue(); renderPanel(); renderBoard();
+}
+
+let toastT;
+function toast(msg,sub){
+  $("#toastMsg").textContent = sub?`${msg} — ${sub}`:msg;
+  const t=$("#toast"); t.classList.add("show");
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),2600);
+}
+
+/* ------------------------------------------------------------------ board + runs */
+function renderBoard(){
+  const cellFor=r=>{
+    const d=decided[r.id];
+    if(d) return `<span class="badge ${r.actionCls}">${d.label}</span>`;
+    if(r.gates.deadline==="blocked"||r.gates.citation==="blocked") return `<span class="badge escalate">Escalated</span>`;
+    return `<span class="badge ${r.actionCls}">${r.action} · waiting</span>`;
+  };
+  $("#boardBody").innerHTML = DATA.map(r=>`<tr>
+    <td class="mono">${r.claim}</td><td class="mono">${r.cpt}</td>
+    <td class="mono" style="color:var(--crimson);font-weight:600">${r.dcode}</td>
+    <td>${esc(r.payer)}</td><td class="mono tnum">${money(r.bal)}</td>
+    <td>${decided[r.id]?"Pending action":"New"}</td>
+    <td>${decided[r.id]?"Dana O.":"—"}</td>
+    <td><span class="due ${dueCls(r.days)}">${dueTxt(r.days)}</span></td>
+    <td style="background:rgba(240,233,249,.4)">${cellFor(r)}</td>
+  </tr>`).join("");
+}
+
+function renderRuns(){
+  $("#runsBody").innerHTML = DATA.map((r,i)=>{
+    const d=decided[r.id];
+    const blocked=r.gates.deadline==="blocked"||r.gates.citation==="blocked";
+    return `<tr>
+      <td class="mono">${r.id}</td>
+      <td class="mono">08:0${i}:12</td>
+      <td class="mono">${r.claim}</td>
+      <td>${blocked?`<span class="badge escalate">Escalated at gate</span>`:`<span class="badge ${r.actionCls}">${r.action}</span>`}</td>
+      <td class="mono tnum">${r.trace.length}</td>
+      <td class="mono tnum">${r.tokens}</td>
+      <td class="mono tnum">${r.cost}</td>
+      <td class="mono tnum">${r.latency}</td>
+      <td>${d?esc(d.by):"—"}</td>
+    </tr>`;
+  }).join("");
+}
+
+/* ------------------------------------------------------------------ chrome wiring */
+$$(".rail button").forEach(b=>b.onclick=()=>{
+  $$(".rail button").forEach(x=>x.removeAttribute("aria-current"));
+  b.setAttribute("aria-current","page");
+  $$(".screen").forEach(s=>s.classList.remove("on"));
+  $("#s-"+b.dataset.screen).classList.add("on");
+});
+
+$$(".seg [data-role]").forEach(b=>b.onclick=()=>{
+  $$(".seg [data-role]").forEach(x=>x.setAttribute("aria-pressed","false"));
+  b.setAttribute("aria-pressed","true"); role=b.dataset.role; renderPanel();
+});
+
+$$(".seg [data-mode]").forEach(b=>b.onclick=()=>{
+  $$(".seg [data-mode]").forEach(x=>x.setAttribute("aria-pressed","false"));
+  b.setAttribute("aria-pressed","true"); mode=b.dataset.mode;
+  $("#shadowBanner").hidden = mode!=="shadow";
+  $$('[data-set="shadow"]').forEach(t=>t.setAttribute("aria-pressed",String(mode==="shadow")));
+  renderPanel();
+});
+
+$$(".chip[data-filter]").forEach(b=>b.onclick=()=>{
+  $$(".chip[data-filter]").forEach(x=>x.setAttribute("aria-pressed","false"));
+  b.setAttribute("aria-pressed","true"); filter=b.dataset.filter; renderQueue();
+});
+
+$$(".toggle").forEach(t=>t.onclick=()=>{
+  const on = t.getAttribute("aria-pressed")!=="true";
+  t.setAttribute("aria-pressed",String(on));
+  if(t.dataset.set==="enabled"){
+    agentOn=on;
+    $("#killBadge").classList.toggle("off",!on);
+    $("#killBadge").lastChild.textContent = on?" Agent on":" Agent off";
+    toast(on?"Agent switched on for BioReference — MI":"Agent switched off — queue kept, no new analysis","");
+    renderPanel();
+  }
+  if(t.dataset.set==="shadow"){
+    mode = on?"shadow":"live";
+    $$(".seg [data-mode]").forEach(x=>x.setAttribute("aria-pressed",String(x.dataset.mode===mode)));
+    $("#shadowBanner").hidden = mode!=="shadow";
+    renderPanel();
+  }
+});
+
+renderQueue(); renderPanel(); renderBoard(); renderRuns();
+</script>
+</body>
+</html>
