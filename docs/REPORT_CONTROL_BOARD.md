@@ -1,5 +1,9 @@
 # Report Control Board
 
+**Version:** 1.0 · **Status:** Implemented · **Last reviewed:** 2026-08-16
+
+> Referenced from `LabMetricsDashboard/Services/ReportCatalog.cs` — keep the filename stable.
+
 The landing page at **`/ReportBoard`** ("Home Dashboard" in the navbar). One row per lab showing
 every report produced by that lab's latest run, with each green cell linking straight to the report
 and each red cell linking to the error log for that run.

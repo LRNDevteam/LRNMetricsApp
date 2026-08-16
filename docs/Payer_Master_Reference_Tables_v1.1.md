@@ -129,4 +129,4 @@ The first four are **rules tables** — hand-authored, low row count, high lever
 ## Tables Intentionally Left Out of This List
 
 - **`PayerMatchAudit`** — logs every match *attempt* (including rejections and no-matches), not reference data. It's fully system-generated and isn't something business users author or maintain; it's a read/reporting table, not a rules table.
-- **Payer Policy Insurance Master / Lab Insurance Master** — the two primary masters this whole pipeline maps between. They're maintained under the existing workflows already defined in `requirements_v1.7.md`, not new tables introduced by the matching engine.
+- **Payer Policy Insurance Master / Lab Insurance Master** — the two primary masters this whole pipeline maps between. They're maintained under the existing workflows already defined in `Payer_Master_Requirements_v1.7.md`, not new tables introduced by the matching engine.

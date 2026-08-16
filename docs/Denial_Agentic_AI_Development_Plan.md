@@ -3,13 +3,16 @@
 **Prepared for:** Engineering Management
 **Prepared by:** Development Team (Lab Revenue Navigator / DWMS)
 **Date:** 12 August 2026
-**Status:** Proposal — decisions requested in §10
+**Version:** 2.0
+**Status:** Proposal — decisions requested in §11
 
 **Related documents**
-- *Denial Dashboard & Denial Workflow — Requirements and Specification*, Rev 2.0 (11 Aug 2026)
-- *Agentic AI Implementation Guideline — Python & .NET* (10 Aug 2026)
-- *Python AI-Assisted AR Denial Management Proposal*
-- *Denial Database Screens*
+- *Denial Dashboard & Denial Workflow — Requirements and Specification*, Rev 2.0 (11 Aug 2026) — [`Denial_Dashboard_Workflow_Requirements_v2.0.pdf`](Denial_Dashboard_Workflow_Requirements_v2.0.pdf)
+- *Agentic AI Implementation Guideline — Python & .NET* (10 Aug 2026) — [`Agentic_AI_Implementation_Guideline_v1.0.docx`](Agentic_AI_Implementation_Guideline_v1.0.docx)
+- *Denial Database Screens* — [`Denial_Dashboard_Screens_Captures.docx`](Denial_Dashboard_Screens_Captures.docx) (screenshots), [`Denial_Dashboard_Screens_Mockup_v2.0.html`](Denial_Dashboard_Screens_Mockup_v2.0.html) (mockup)
+- *Denial Agent UI mockup* — [`Denial_Agent_Mockup_v1.0.html`](Denial_Agent_Mockup_v1.0.html)
+
+**Supersedes** (in [`archive/`](archive/)): *Manager Review — Development Plan, Architecture, Technology and Cost* (both the plain and PHI/Security revisions) and the original *Python AI-Assisted AR Denial Management Proposal*. §10 of this document carries forward the PHI/Security material from the PHI/Security revision.
 
 ---
 
@@ -46,9 +49,9 @@ The existing estate, per the Rev 2.0 specification:
 
 These are already logged in the specification as open items. An agent built on top of them will silently inherit them and will be blamed for them:
 
-- **§11.1 — verification table naming.** The worker writes to `dbo.DenialVerification`; the API and dashboard read `dbo.DenialVerificationTask`. Pipeline-raised verifications may never surface. The agent's escalation path would land in the same hole.
-- **§11.2 — empty task board for some labs (NorthWest).** If `DenialTaskBoard` is empty for a lab, the agent has no input at all and will report "nothing to do" rather than failing.
-- **§11.3 — unmapped labs on the Report Control Board.** Blocks per-lab enablement and the kill switch.
+- **Spec §11.1 — verification table naming.** The worker writes to `dbo.DenialVerification`; the API and dashboard read `dbo.DenialVerificationTask`. Pipeline-raised verifications may never surface. The agent's escalation path would land in the same hole.
+- **Spec §11.2 — empty task board for some labs (NorthWest).** If `DenialTaskBoard` is empty for a lab, the agent has no input at all and will report "nothing to do" rather than failing.
+- **Spec §11.3 — unmapped labs on the Report Control Board.** Blocks per-lab enablement and the kill switch.
 
 **Recommendation: treat these as Phase 0 blockers.** They are small fixes and they are prerequisites, not nice-to-haves.
 
@@ -363,7 +366,7 @@ Sensitivity: token spend scales linearly with volume, so 20,000 denials/month ro
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Agent inherits the §11.1 / §11.2 / §11.3 pipeline defects | High | High | Close them in Phase 0 |
+| Agent inherits the spec §11.1 / §11.2 / §11.3 pipeline defects | High | High | Close them in Phase 0 |
 | Model computes or reasons about a filing deadline | Medium | **Severe** — missed appeal window | Deadline is deterministic code; agent receives it as an input, never derives it |
 | Payer policy corpus goes stale | High | High | Version + effective-date metadata; retrieval filters to current versions; quarterly refresh owned by a named person |
 | Duplicate appeal submitted | Medium | High | `CheckDuplicateSubmission` guard on `UniqueTrackId`, enforced before any submission |
@@ -385,12 +388,87 @@ Sensitivity: token spend scales linearly with volume, so 20,000 denials/month ro
 
 ---
 
-## 10. Decisions requested
+## 10. PHI, privacy and security gate
+
+> Carried forward from *Manager Review — Development Plan, Architecture, Technology and Cost* (PHI/Security revision, 12 Aug 2026), now retired to [`archive/`](archive/). This section is the authoritative version.
+
+The Denial Workflow carries claim, AR-note and medical-record content. **Real PHI must not enter the AI environment until Security, Privacy/Compliance and Legal have approved the specific architecture, Azure services, model deployments, regions, contracts and operational controls.** That approval is a formal project gate, not a task inside a phase.
+
+Using Azure or Microsoft Foundry does not by itself make the application compliant. Compliance depends on which services are selected, how they are configured, what the contracts cover, how data flows, and what organisational controls exist around them.
+
+**Recommendation:** continue architecture and development on synthetic or de-identified data, and make real-PHI access a gate that sits between Phase 2 and Phase 3.
+
+### 10.1 Where the gate sits
+
+| Stage | Data | Gate to clear |
+|---|---|---|
+| Phase 0 | No production PHI | Architecture, data classification, PHI/PII assessment, security review |
+| Phase 1 | Synthetic / de-identified | Deterministic tools; regression pass |
+| Phase 2 | Synthetic / de-identified | AI POC, no live claim execution; AI evaluation pass |
+| **PHI Gate** | **Controlled PHI** | **Written Security / Privacy / Legal approval, plus confirmation that the chosen services and contracts cover the workload** |
+| Phase 3 | Approved PHI | Shadow processing with human AR decisions; human-comparison pass |
+| Phase 4 | Approved PHI | Agent workflow; safety + audit pass |
+| Phase 5+ | Approved PHI | Controlled production automation, after business approval |
+
+### 10.2 PHI-safe architecture
+
+The agent must not hold unrestricted database access or direct PMS write permissions. PHI is minimised *before* it reaches a prompt, a retrieval index, or any model call:
+
+```text
+Denial Workflow
+   → ASP.NET Core gateway
+   → PHI minimisation / redaction
+   → authorised context tools  →  AI agent  →  policy / evidence retrieval
+   → deterministic validation
+   → human approval
+   → PMS / clearinghouse
+   → immutable audit
+```
+
+**Security rule:** the model selects from approved tools; it cannot self-authorise. Tool permissions, parameters, approval requirements and financial thresholds are enforced in application code — the same principle as §3, applied to data access rather than to decisions.
+
+### 10.3 Data minimisation rules
+
+| Area | Rule |
+|---|---|
+| Prefer sending | Claim ID, CPT, denial code, payer, service dates, coverage status, ICD compliance status, and only the relevant AR note text |
+| Avoid unless required | Patient name, DOB, address, medical record number, unrelated demographics |
+| Medical documents | Document-level authorisation; process only the pages or sections the denial actually needs |
+| Prompts | A minimisation/redaction step, implemented **and tested** — not a convention |
+| Logs | Never write raw prompts, medical records or incidental PHI to telemetry |
+| Model training | Production PHI is excluded from training and fine-tuning unless separately approved |
+| Retention | Defined retention and deletion rules for prompts, outputs, documents, embeddings and audit records |
+
+### 10.4 Confirmation checklist (all items before the PHI gate opens)
+
+- [ ] Security approves the Azure architecture, identity, network and access controls
+- [ ] Privacy/Compliance confirms the applicable regime — Singapore PDPA, US healthcare requirements, or both
+- [ ] Legal confirms Microsoft contractual/privacy terms and any required BAA/DPA coverage
+- [ ] Selected Azure AI / Foundry services, model deployments and region are approved for the intended PHI workload
+- [ ] Data-residency requirements confirmed
+- [ ] Microsoft abuse-monitoring / human-review controls reviewed, and any required opt-out requests submitted
+- [ ] Production PHI excluded from developer laptops, local model calls, and uncontrolled Dev/Test environments
+- [ ] Entra ID, managed identity, RBAC and server-side authorisation enabled
+- [ ] Secrets and PMS credentials in Key Vault
+- [ ] Application Insights / OpenTelemetry configured so PHI cannot leak into traces
+- [ ] Every AI run, tool call, approval, rejection, override and execution is auditable
+- [ ] Per-lab enablement, shadow mode and kill switch all available
+- [ ] PHI incident/breach response owner and procedure defined
+
+### 10.5 Go / no-go rule
+
+- **NO-GO for real PHI** while service coverage, security architecture, data residency, retention, access control or the required contractual/privacy approvals are unresolved.
+- **GO for the PHI shadow pilot** only after written approval, with minimisation, auditability, access control and monitoring verified.
+- **GO for live execution** only after the shadow accuracy and safety thresholds in §6 are met *and* the business has approved the human-in-the-loop execution model.
+
+---
+
+## 11. Decisions requested
 
 1. **Approve the .NET-primary / Python-for-tools split** (§4), or direct otherwise.
 2. **Approve closing the three pipeline defects (§2.1) as Phase 0 work** before agent development starts.
 3. **Confirm the HIPAA BAA path** and who owns the abuse-monitoring opt-out request.
-4. **Name the pilot lab** and confirm its data is clean (i.e. not NorthWest until §11.2 is resolved).
+4. **Name the pilot lab** and confirm its data is clean (i.e. not NorthWest until spec §11.2 is resolved).
 5. **Name the AR subject-matter expert** and confirm 4–6 hours per week from Phase 1.
 6. **Set the Phase 3 go/no-go threshold** — we propose ≥ 85% agreement on action category.
 7. **Set the write-off dollar threshold** above which manager approval is mandatory.
@@ -398,6 +476,17 @@ Sensitivity: token spend scales linearly with volume, so 20,000 denials/month ro
 9. **Approve an Azure budget** of ~$1,000/month with alerting, and authorise the Dev/Test subscription.
 10. **Authorise the PMS / clearinghouse sandbox credential request now** — it is the most likely thing to delay Phase 5.
 11. **Confirm the volume assumptions in §8.2** (denials per month, document pages per month), which drive the entire cost model.
+
+### Additional decisions for the PHI gate (§10)
+
+12. **Nominate the Security / Privacy / Compliance owner** for the PHI gate. Without a named owner the gate has no one to open it.
+13. **Confirm the regulatory scope** — US-regulated healthcare data, Singapore personal data (PDPA), or both. This decides which contractual path applies and is a prerequisite for decision 3.
+14. **Approve the initial Azure region and data-residency requirements.**
+15. **Approve the PHI minimisation / redaction and document-processing approach** (§10.2, §10.3).
+16. **Approve who may access PHI** in Dev, Test, Shadow and Production.
+17. **Approve retention periods** for AI inputs, outputs, documents and audit records.
+18. **Confirm the Microsoft service privacy / abuse-monitoring review process** where PHI is involved.
+19. **Confirm that claim-changing actions remain behind human approval** for the whole pilot.
 
 ---
 

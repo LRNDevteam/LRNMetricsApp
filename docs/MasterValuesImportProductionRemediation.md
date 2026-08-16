@@ -1,5 +1,7 @@
 # Master Values import production remediation
 
+**Version:** 1.0 · **Status:** Current runbook · **Last reviewed:** 2026-08-16
+
 ## Deployment configuration
 
 Create a replacement Teams workflow/webhook and configure it outside source control:

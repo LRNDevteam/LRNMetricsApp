@@ -4,7 +4,8 @@ Design document for a conversational agent over `dbo.CPTAverage`, `dbo.PanelAver
 `dbo.LabModes` and `dbo.LabMedians` — the same four LRNMaster tables that back
 `Analytics > CPT & Panel Lookup`.
 
-**Status:** proposal. Nothing here is built yet.
+**Version:** 1.0 · **Status:** Proposal — nothing here is built yet · **Last reviewed:** 2026-08-16
+**Mockup:** [CptPanelLookup_AgenticChat_Mockup.html](CptPanelLookup_AgenticChat_Mockup.html)
 
 ---
 

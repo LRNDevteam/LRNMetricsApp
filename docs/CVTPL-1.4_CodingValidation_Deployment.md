@@ -1,6 +1,6 @@
 # Coding Validation — Output Template v1.4 alignment (tag: `CVTPL-1.4`)
 
-Date: 2026-07-27
+**Version:** 1.4 (git tag `CVTPL-1.4`) · **Status:** Deployed · **Date:** 2026-07-27
 
 Aligns the Coding Validation report to **Coding Validation Output Template_v1.4.xlsx**.
 Every code change is wrapped in `>>> CVTPL-1.4 CHANGE` / `<<< END CVTPL-1.4 CHANGE`

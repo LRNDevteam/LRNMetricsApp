@@ -1,5 +1,11 @@
 # Production Report Excel Pre-Generation Plan
 
+**Version:** 1.0 Â· **Status:** Plan â€” not yet implemented Â· **Last reviewed:** 2026-08-16
+
+> Distinct from [AsyncReportGeneration_Design.md](AsyncReportGeneration_Design.md), which covers the
+> **on-demand queued** report path (`UserReqReports` + `LRN.ReportWorker`). This document covers
+> **pre-generating** the no-filter Production Report workbook at ingestion time. Both may coexist.
+
 ## Goal
 
 Pre-generate **NO-FILTER** Production Report Excel files from `ClaimLineCSVDataCapture` after:
@@ -465,7 +471,7 @@ public sealed class ProductionReportExcelBackgroundExporter
         {
             if (string.IsNullOrWhiteSpace(lab.DbConnectionString))
             {
-                _log.Warn($"  [Prod Excel] Skipped — DbConnectionString missing for {lab.LabName}.");
+                _log.Warn($"  [Prod Excel] Skipped ï¿½ DbConnectionString missing for {lab.LabName}.");
                 return;
             }
 
@@ -792,4 +798,4 @@ public ProductionReportExcelConfig? ProductionReportExcel { get; init; }
 - Duplicate run for same lab/filter while current export exists is skipped.
 - Failed export marks `Failed` and does not fail import.
 - Refresh mode marks old file stale and creates a new current file.
-- Each lab writes metadata only to that lab’s DB.
+- Each lab writes metadata only to that labï¿½s DB.

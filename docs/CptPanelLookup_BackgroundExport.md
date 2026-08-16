@@ -1,5 +1,7 @@
 # CPT & Panel Lookup — background export
 
+**Version:** 1.0 · **Status:** Implemented, pending the deployment steps below · **Last reviewed:** 2026-08-16
+
 ## Why this changed
 
 The **Export to Excel** button on `Analytics > CPT & Panel Lookup` used to download

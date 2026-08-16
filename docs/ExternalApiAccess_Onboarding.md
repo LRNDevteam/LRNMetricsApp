@@ -1,5 +1,7 @@
 # External API access — internal onboarding
 
+**Version:** 1.0 · **Status:** Current · **Audience:** Internal only · **Last reviewed:** 2026-08-16
+
 Internal companion to [ExternalApiAccess_Guide.md](ExternalApiAccess_Guide.md) (the document
 shared with the external party). This one is **not** for external distribution.
 

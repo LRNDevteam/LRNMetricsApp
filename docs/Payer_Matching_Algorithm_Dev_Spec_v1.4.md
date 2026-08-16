@@ -1,6 +1,6 @@
 # Payer Matching Engine — Developer Implementation Spec
 
-Companion to `requirements_v1.7.md` (functional requirements), `clarifications_log.md` (decision history), and `Payer_Master_Reference_Tables_v1.1.md` (full schema for every supporting rules/alias table referenced below). This document specifies the step-by-step algorithm, the C# libraries to use at each step, and the input/output of each step, so the engineering team can implement without re-deriving the design decisions already made.
+Companion to `Payer_Master_Requirements_v1.7.md` (functional requirements), `clarifications_log.md` (decision history), and `Payer_Master_Reference_Tables_v1.1.md` (full schema for every supporting rules/alias table referenced below). This document specifies the step-by-step algorithm, the C# libraries to use at each step, and the input/output of each step, so the engineering team can implement without re-deriving the design decisions already made.
 
 **v1.1 changes:** Step 1 is split into two distinct sub-steps — cosmetic cleanup (1A) and stripping known network/plan-type codes like "PPO"/"POS II" (1B), which was previously only described as a *recommendation* in the worked examples, not an actual pipeline step. Also added Section 3.1 ("Rules Engine vs. Reasoning") and Section 3.2 ("Capturing Brand-to-State Knowledge") to make an easy-to-miss limitation explicit: the family and state-brand rules only know what a person explicitly taught them — see those sections before assuming the system can "figure out" a new brand the way a person reading this doc can.
 

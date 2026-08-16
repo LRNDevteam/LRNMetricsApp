@@ -1,5 +1,11 @@
 # Production Summary Report Implementation for Phi_Life and InHealthDTR
 
+**Version:** 1.0 · **Status:** In progress — see Status Summary below · **Last reviewed:** 2026-08-16
+
+> Two root-level files also cover this feature: `PRODUCTION_SUMMARY_REPORT_STATUS.md` (status) and
+> `DEPLOYMENT_CHECKLIST_PRODUCTION_SUMMARY.md` (deployment). Both link here for technical detail.
+> They are outside `docs/` and were left in place; consider folding them in.
+
 ## Overview
 
 This document tracks the implementation of the **Production Summary Report** feature for **Phi_Life** and **InHealthDTR** labs. The Production Summary Report is an optimized, pre-aggregated view of monthly and weekly claim production data backed by stored procedures.

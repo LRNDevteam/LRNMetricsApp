@@ -1,5 +1,11 @@
 # LRN Analytics API — integration guide
 
+**Version:** 1.0 · **Status:** Current · **Audience:** External integrators · **Last reviewed:** 2026-08-16
+
+> This markdown file is the **source of truth**. `LRN_Analytics_API_Guide.pdf` in this folder is the
+> formatted copy sent to partners — regenerate it from here rather than editing it directly.
+> Internal provisioning steps live in [ExternalApiAccess_Onboarding.md](ExternalApiAccess_Onboarding.md).
+
 Read-only HTTP API for LRN reference data:
 
 * **CPT & Panel Lookup** — CPT- and panel-level averages with mode and median rates, by payer and time window

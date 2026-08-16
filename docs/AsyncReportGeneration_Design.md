@@ -2,6 +2,7 @@
 
 **Scope:** Payer Policy Validation Report (first implementation). Architecture is generic — ForecastingSummary, ExecutiveSummary, ProductionReport, CollectionReport, and LisSummary plug in later by adding one generator class each.
 **Stack:** ASP.NET Core (.NET 9) · SQL Server (per-lab DBs) · ClosedXML · Windows Server / IIS · LRN.ReportWorker Windows Service.
+**Version:** 1.0 · **Last reviewed:** 2026-08-16
 **Status:** Implemented — projects `LRN.ReportQueue.Shared`, `LRN.ReportWorker`, web changes in `LabMetricsDashboard`, SQL in `SQL_Scripts/UserReqReports/`.
 
 ---
