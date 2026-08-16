@@ -785,11 +785,11 @@ public class CollectionSummaryController : Controller
             // Fetch raw data only when within the row limit
             var claimRows = includeClaimRaw
                 ? await _repo.GetClaimLevelDataExportAsync(connStr, payerFilter, panelFilter,
-                    fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct)
+                    fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
                 : [];
             var lineRows = includeLineRaw
                 ? await _repo.GetLineLevelDataExportAsync(connStr, payerFilter, panelFilter,
-                    fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct)
+                    fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
                 : [];
 
             // Build active filters summary

@@ -2635,13 +2635,14 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         var (sql, parameters) = BuildClaimLevelExportQuery(
             filterPayerNames, filterPanelNames,
             filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo,
-            filterCheckDateFrom, filterCheckDateTo);
+            filterCheckDateFrom, filterCheckDateTo, labName);
         return await ExecuteExportQueryAsync(connectionString, sql, parameters, ct);
     }
 
@@ -2651,7 +2652,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         List<string>? filterPanelNames = null,
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
-        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null)
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null)
     {
         var whereClauses = new List<string>();
         var parameters = new List<SqlParameter>();
@@ -2663,12 +2665,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         var whereStr = whereClauses.Count > 0 ? "WHERE " + string.Join(" AND ", whereClauses) : "";
 
         var sql = $"""
-            SELECT [ClaimID],[AccessionNumber],[PayerName],[PayerType],[BillingProvider],[ReferringProvider],
-                   [ClinicName],[SalesRepname],[PatientID],[PatientDOB],[DateofService],[ChargeEnteredDate],
-                   [FirstBilledDate],[Panelname],[CPTCodeXUnitsXModifier],[POS],[TOS],[ChargeAmount],[AllowedAmount],
-                   [InsurancePayment],[PatientPayment],[TotalPayments],[InsuranceAdjustments],[PatientAdjustments],
-                   [TotalAdjustments],[InsuranceBalance],[PatientBalance],[TotalBalance],[CheckDate],[ClaimStatus],
-                   [DenialCode],[ICDCode],[DaystoDOS],[RollingDays],[DaystoBill],[DaystoPost],[ICDPointer],[InsertedDateTime]
+            SELECT {LabClaimLineColumnCatalog.GetExportSelectList(labName, isLineLevel: false)}
             FROM dbo.ClaimLevelData
             {whereStr}
             """;
@@ -2684,13 +2681,14 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         var (sql, parameters) = BuildLineLevelExportQuery(
             filterPayerNames, filterPanelNames,
             filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo,
-            filterCheckDateFrom, filterCheckDateTo);
+            filterCheckDateFrom, filterCheckDateTo, labName);
         return await ExecuteExportQueryAsync(connectionString, sql, parameters, ct);
     }
 
@@ -2700,7 +2698,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         List<string>? filterPanelNames = null,
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
-        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null)
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null)
     {
         var whereClauses = new List<string>();
         var parameters = new List<SqlParameter>();
@@ -2712,15 +2711,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         var whereStr = whereClauses.Count > 0 ? "WHERE " + string.Join(" AND ", whereClauses) : "";
 
         var sql = $"""
-            SELECT [ClaimID],[AccessionNumber],[PayerName],[PayerType],[BillingProvider],[ReferringProvider],
-                   [ClinicName],[SalesRepname],[PatientID],[PatientDOB],[DateofService],[ChargeEnteredDate],
-                   [FirstBilledDate],[Panelname],[CPTCode],[Units],[Modifier],[POS],[TOS],
-                   [ChargeAmount],[ChargeAmountPerUnit],[AllowedAmount],[AllowedAmountPerUnit],
-                   [InsurancePayment],[InsurancePaymentPerUnit],[PatientPayment],[PatientPaymentPerUnit],
-                   [TotalPayments],[InsuranceAdjustments],[PatientAdjustments],[TotalAdjustments],
-                   [InsuranceBalance],[PatientBalance],[PatientBalancePerUnit],[TotalBalance],
-                   [CheckDate],[PostingDate],[ClaimStatus],[PayStatus],[DenialCode],[DenialDate],
-                   [ICDCode],[DaystoDOS],[RollingDays],[DaystoBill],[DaystoPost],[ICDPointer]
+            SELECT {LabClaimLineColumnCatalog.GetExportSelectList(labName, isLineLevel: true)}
             FROM dbo.LineLevelData
             {whereStr}
             """;

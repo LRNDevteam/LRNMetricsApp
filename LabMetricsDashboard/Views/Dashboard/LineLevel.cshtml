@@ -1,6 +1,6 @@
 @model LineLevelViewModel
 @{
-    ViewData["Title"]       = $"Line Level � {Model.SelectedLab}";
+    ViewData["Title"]       = $"Line Level - {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Line Level Details";
 
@@ -96,7 +96,7 @@
                 <div class="col-sm-6 col-md-2">
                     <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAYER NAME</label>
                     <input type="text" name="filterPayerName" value="@Model.FilterPayerName"
-                           class="form-control form-control-sm" placeholder="Search�" />
+                           class="form-control form-control-sm" placeholder="Search..." />
                 </div>
                 <!-- Payer Type -->
                 <div class="col-sm-6 col-md-2">
@@ -107,7 +107,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search payer types�" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search payer types..." autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var pt in Model.PayerTypes)
                                 {
@@ -127,7 +127,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search CPT codes�" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search CPT codes..." autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var cpt in Model.CPTCodes)
                                 {
@@ -147,7 +147,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search statuses�" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search statuses..." autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var cs in Model.ClaimStatuses)
                                 {
@@ -167,7 +167,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search�" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search..." autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var ps in Model.PayStatuses)
                                 {
@@ -187,7 +187,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search clinics�" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search clinics..." autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var cn in Model.ClinicNames)
                                 {
@@ -202,7 +202,7 @@
                 <div class="col-sm-6 col-md-1">
                     <label class="form-label fw-semibold mb-1" style="font-size:.75rem">DENIAL CODE</label>
                     <input type="text" name="filterDenialCode" value="@Model.FilterDenialCode"
-                           class="form-control form-control-sm" placeholder="Search�" />
+                           class="form-control form-control-sm" placeholder="Search..." />
                 </div>
             </div>
             <div class="d-flex gap-2">
@@ -260,39 +260,18 @@ else
         <table class="table table-sm table-bordered align-middle ll-table mb-0">
             <thead>
                 <tr>
-                    <th>Claim ID</th>
-                    <th>Patient ID</th>
-                    <th>Date of Service</th>
-                    <th>Panel</th>
-                    <th>CPT Code</th>
-                    <th style="text-align:center">Units</th>
-                    <th>Modifier</th>
-                    <th>Payer Name</th>
-                    <th>Payer Type</th>
-                    <th>Clinic</th>
-                    <th style="text-align:right">Charges</th>
-                    <th style="text-align:right">Chg/Unit</th>
-                    <th style="text-align:right">Allowed</th>
-                    <th style="text-align:right">Ins. Pmt</th>
-                    <th style="text-align:right">Ins. Pmt/Unit</th>
-                    <th style="text-align:right">Pat. Pmt</th>
-                    <th style="text-align:right">Total Pmts</th>
-                    <th style="text-align:right">Ins. Balance</th>
-                    <th style="text-align:right">Pat. Balance</th>
-                    <th style="text-align:right">Total Balance</th>
-                    <th>Claim Status</th>
-                    <th>Pay Status</th>
-                    <th>Denial Code</th>
-                    <th>ICD Code</th>
-                    <th style="text-align:center">Days to Bill</th>
-                    <th style="text-align:center">Days to Post</th>
+                    @foreach (var col in Model.DisplayColumns)
+                    {
+                        var money = LabClaimLineColumnCatalog.IsMoneyColumn(col);
+                        <th style="@(money ? "text-align:right" : null)">@col</th>
+                    }
                 </tr>
             </thead>
             <tbody>
                 @if (!Model.Records.Any())
                 {
                     <tr>
-                        <td colspan="26" class="text-center text-muted py-4">
+                        <td colspan="@(Model.DisplayColumns.Count > 0 ? Model.DisplayColumns.Count : 1)" class="text-center text-muted py-4">
                             No records match the selected filters.
                         </td>
                     </tr>
@@ -300,34 +279,41 @@ else
                 @foreach (var r in Model.Records)
                 {
                     <tr>
-                        <td>@r.ClaimID</td>
-                        <td>@r.PatientID</td>
-                        <td>@r.DateOfService</td>
-                        <td>@r.PanelName</td>
-                        <td><span class="badge bg-secondary">@r.CPTCode</span></td>
-                        <td style="text-align:center">@r.Units.ToString("F0")</td>
-                        <td>@r.Modifier</td>
-                        <td>@r.PayerName</td>
-                        <td><span class="badge @PayerTypeBadge(r.PayerType)">@r.PayerType</span></td>
-                        <td>@r.ClinicName</td>
-                        <td class="amt">@r.ChargeAmount.ToString("C")</td>
-                        <td class="amt">@r.ChargeAmountPerUnit.ToString("C")</td>
-                        <td class="amt">@r.AllowedAmount.ToString("C")</td>
-                        <td class="amt">@r.InsurancePayment.ToString("C")</td>
-                        <td class="amt">@r.InsurancePaymentPerUnit.ToString("C")</td>
-                        <td class="amt">@r.PatientPayment.ToString("C")</td>
-                        <td class="amt fw-semibold text-success">@r.TotalPayments.ToString("C")</td>
-                        <td class="amt">@r.InsuranceBalance.ToString("C")</td>
-                        <td class="amt">@r.PatientBalance.ToString("C")</td>
-                        <td class="amt fw-semibold @(r.TotalBalance > 0 ? "text-danger" : "text-muted")">
-                            @r.TotalBalance.ToString("C")
-                        </td>
-                        <td><span class="badge @ClaimStatusBadge(r.ClaimStatus)">@r.ClaimStatus</span></td>
-                        <td><span class="badge @PayStatusBadge(r.PayStatus)">@r.PayStatus</span></td>
-                        <td>@r.DenialCode</td>
-                        <td>@r.ICDCode</td>
-                        <td style="text-align:center">@r.DaysToBill</td>
-                        <td style="text-align:center">@r.DaysToPost</td>
+                        @foreach (var col in Model.DisplayColumns)
+                        {
+                            var val = r.Display(col);
+                            if (LabClaimLineColumnCatalog.IsMoneyColumn(col))
+                            {
+                                if (decimal.TryParse(val, NumberStyles.Any, CultureInfo.InvariantCulture, out var amt))
+                                {
+                                    <td class="amt">@amt.ToString("C")</td>
+                                }
+                                else
+                                {
+                                    <td class="amt">@val</td>
+                                }
+                            }
+                            else if (col.Equals("PayerType", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <td><span class="badge @PayerTypeBadge(val)">@val</span></td>
+                            }
+                            else if (col.Equals("ClaimStatus", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <td><span class="badge @ClaimStatusBadge(val)">@val</span></td>
+                            }
+                            else if (col.Equals("PayStatus", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <td><span class="badge @PayStatusBadge(val)">@val</span></td>
+                            }
+                            else if (col.Equals("CPTCode", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <td><span class="badge bg-secondary">@val</span></td>
+                            }
+                            else
+                            {
+                                <td>@val</td>
+                            }
+                        }
                     </tr>
                 }
             </tbody>
@@ -338,7 +324,7 @@ else
 <partial name="_Pager" model="Model.Paging" />
 
 @functions {
-    static string PayerTypeBadge(string payerType) => payerType switch
+    static string PayerTypeBadge(string? payerType) => (payerType ?? string.Empty) switch
     {
         var s when s.StartsWith("MC", StringComparison.OrdinalIgnoreCase) => "bg-primary",
         var s when s.StartsWith("CC", StringComparison.OrdinalIgnoreCase) => "bg-info text-dark",
@@ -346,7 +332,7 @@ else
         _ => "bg-secondary"
     };
 
-    static string ClaimStatusBadge(string status) => status switch
+    static string ClaimStatusBadge(string? status) => status switch
     {
         "Fully Paid"             => "bg-success",
         "No Response"            => "bg-warning text-dark",
@@ -460,13 +446,13 @@ else
 
         var original = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing�';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing...';
 
         fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
             .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
             .then(function (res) {
                 if (res.ok) {
-                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating � watch Reports ??';
+                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating - watch Reports';
                     if (window.lrnShowReportAlert) window.lrnShowReportAlert('success');
                     if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
                     setTimeout(function () { btn.disabled = false; btn.innerHTML = original; }, 8000);

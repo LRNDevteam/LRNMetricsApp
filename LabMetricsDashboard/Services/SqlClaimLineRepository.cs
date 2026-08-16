@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using LabMetricsDashboard.Models;
 using Microsoft.Data.SqlClient;
 
@@ -6,8 +7,9 @@ namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// Reads paginated Claim Level and Line Level detail rows from
-/// <c>dbo.ClaimLevelData</c> and <c>dbo.LineLevelData</c> using
-/// parameterized inline SQL with server-side filtering and pagination.
+/// <c>dbo.ClaimLevelData</c> and <c>dbo.LineLevelData</c> via
+/// <c>usp_GetClaimLevel*</c> / <c>usp_GetLineLevel*</c>
+/// (common: Sql/ClaimLineDetails_SPs.sql; lab SELECT lists: Sql/ClaimLineDetails_SPs/{Lab}_Details.sql).
 /// </summary>
 public sealed class SqlClaimLineRepository : IClaimLineRepository
 {
@@ -49,7 +51,8 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
-        var (whereStr, parameters) = BuildClaimLevelWhere(
+        int offset = (Math.Max(1, page) - 1) * pageSize;
+        var filterParams = BuildClaimLevelSpParameters(
             filterPayerName, filterPayerTypes, filterClaimStatuses, filterClinicNames,
             filterDenialCode, filterDenialCodeExcludeBlank,
             filterPayerNames, filterPayerExcludeBlank,
@@ -59,39 +62,6 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
             filterChargeEnteredFrom, filterChargeEnteredTo, filterChargeEnteredNull, filterChargeEnteredExcludeBlank,
             filterDosFrom, filterDosTo, filterDosNull);
 
-        // Filter option lists (unfiltered)
-        const string optionsSql = """
-            SELECT DISTINCT LTRIM(RTRIM(PayerType))   FROM dbo.ClaimLevelData WHERE PayerType   IS NOT NULL AND LTRIM(RTRIM(PayerType))   <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(ClaimStatus)) FROM dbo.ClaimLevelData WHERE ClaimStatus IS NOT NULL AND LTRIM(RTRIM(ClaimStatus)) <> ''
-                AND TRY_CAST(ClaimStatus AS DATE) IS NULL ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(ClinicName))  FROM dbo.ClaimLevelData WHERE ClinicName  IS NOT NULL AND LTRIM(RTRIM(ClinicName))  <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(PayerName))   FROM dbo.ClaimLevelData WHERE PayerName   IS NOT NULL AND LTRIM(RTRIM(PayerName))   <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(PanelName))   FROM dbo.ClaimLevelData WHERE PanelName   IS NOT NULL AND LTRIM(RTRIM(PanelName))   <> '' ORDER BY 1;
-            SELECT DISTINCT
-                CASE
-                    WHEN TRY_CAST(DaystoDOS AS INT) IS NULL THEN 'Current'
-                    WHEN TRY_CAST(DaystoDOS AS INT) < 30    THEN 'Current'
-                    WHEN TRY_CAST(DaystoDOS AS INT) < 60    THEN '30+'
-                    WHEN TRY_CAST(DaystoDOS AS INT) < 90    THEN '60+'
-                    WHEN TRY_CAST(DaystoDOS AS INT) < 120   THEN '90+'
-                    ELSE '120+'
-                END AS AgingBucket
-            FROM dbo.ClaimLevelData ORDER BY 1;
-            """;
-
-        // Counts
-        var countSql = $"""
-            SELECT COUNT(*) FROM dbo.ClaimLevelData;
-            SELECT COUNT(*) FROM dbo.ClaimLevelData WHERE {whereStr};
-            """;
-
-        // Paged data — order by a deterministic column for consistent paging
-        int offset = (Math.Max(1, page) - 1) * pageSize;
-        var dataSql = ClaimLevelSelectSql(whereStr) + """
-
-            OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
-            """;
-
         var payerTypes = new List<string>();
         var claimStatuses = new List<string>();
         var clinicNames = new List<string>();
@@ -100,100 +70,53 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         var agingBuckets = new List<string>();
         int totalAll = 0, totalFiltered = 0;
         var records = new List<ClaimRecord>();
+        IReadOnlyList<string> displayColumns = [];
 
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
 
-        // Options
-        await using (var cmd = new SqlCommand(optionsSql, conn) { CommandTimeout = 180 })
+        try
         {
-            cmd.Parameters.AddRange(CloneParams(parameters));
+            await using var cmd = NewProc(conn, "dbo.usp_GetClaimLevelFilterOptions");
             await using var r = await cmd.ExecuteReaderAsync(ct);
-            while (await r.ReadAsync(ct)) payerTypes.Add(r.GetString(0));
-            await r.NextResultAsync(ct);
-            while (await r.ReadAsync(ct)) claimStatuses.Add(r.GetString(0));
-            await r.NextResultAsync(ct);
-            while (await r.ReadAsync(ct)) clinicNames.Add(r.GetString(0));
-            await r.NextResultAsync(ct);
-            while (await r.ReadAsync(ct)) payerNames.Add(r.GetString(0));
-            await r.NextResultAsync(ct);
-            while (await r.ReadAsync(ct)) panelNames.Add(r.GetString(0));
-            await r.NextResultAsync(ct);
-            while (await r.ReadAsync(ct)) agingBuckets.Add(r.GetString(0));
+            await ReadStringColumnAsync(r, payerTypes, ct);
+            if (await r.NextResultAsync(ct)) await ReadStringColumnAsync(r, claimStatuses, ct);
+            if (await r.NextResultAsync(ct)) await ReadStringColumnAsync(r, clinicNames, ct);
+            if (await r.NextResultAsync(ct)) await ReadStringColumnAsync(r, payerNames, ct);
+            if (await r.NextResultAsync(ct)) await ReadStringColumnAsync(r, panelNames, ct);
+            if (await r.NextResultAsync(ct)) await ReadStringColumnAsync(r, agingBuckets, ct);
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogWarning(ex, "Claim Level filter-options SP failed for lab {Lab}", labName);
         }
 
-        // Counts
-        await using (var cmd = new SqlCommand(countSql, conn) { CommandTimeout = 180 })
+        try
         {
-            cmd.Parameters.AddRange(CloneParams(parameters));
+            await using var cmd = NewProc(conn, "dbo.usp_GetClaimLevelDetailsCounts");
+            cmd.Parameters.AddRange(CloneParams(filterParams));
             await using var r = await cmd.ExecuteReaderAsync(ct);
-            if (await r.ReadAsync(ct)) totalAll = r.GetInt32(0);
-            await r.NextResultAsync(ct);
-            if (await r.ReadAsync(ct)) totalFiltered = r.GetInt32(0);
-        }
-
-        // Paged data
-        await using (var cmd = new SqlCommand(dataSql, conn) { CommandTimeout = 180 })
-        {
-            cmd.Parameters.AddRange(CloneParams(parameters));
-            cmd.Parameters.Add(new SqlParameter("@Offset", SqlDbType.Int) { Value = offset });
-            cmd.Parameters.Add(new SqlParameter("@PageSize", SqlDbType.Int) { Value = pageSize });
-
-            await using var r = await cmd.ExecuteReaderAsync(ct);
-            while (await r.ReadAsync(ct))
+            if (await r.ReadAsync(ct))
             {
-                records.Add(new ClaimRecord
-                {
-                    LabID                = labName,
-                    LabName              = labName,
-                    ClaimID              = r.GetString(r.GetOrdinal("ClaimID")),
-                    AccessionNumber      = r.GetString(r.GetOrdinal("AccessionNumber")),
-                    SourceFileID         = r.GetString(r.GetOrdinal("SourceFileID")),
-                    IngestedOn           = r.GetString(r.GetOrdinal("IngestedOn")),
-                    RowHash              = r.GetString(r.GetOrdinal("RowHash")),
-                    PayerName_Raw        = r.GetString(r.GetOrdinal("PayerName_Raw")),
-                    PayerName            = r.GetString(r.GetOrdinal("PayerName")),
-                    Payer_Code           = r.GetString(r.GetOrdinal("Payer_Code")),
-                    Payer_Common_Code    = r.GetString(r.GetOrdinal("Payer_Common_Code")),
-                    Payer_Group_Code     = r.GetString(r.GetOrdinal("Payer_Group_Code")),
-                    Global_Payer_ID      = r.GetString(r.GetOrdinal("Global_Payer_ID")),
-                    PayerType            = r.GetString(r.GetOrdinal("PayerType")),
-                    BillingProvider      = r.GetString(r.GetOrdinal("BillingProvider")),
-                    ReferringProvider    = r.GetString(r.GetOrdinal("ReferringProvider")),
-                    ClinicName           = r.GetString(r.GetOrdinal("ClinicName")),
-                    SalesRepName         = r.GetString(r.GetOrdinal("SalesRepName")),
-                    PatientID            = r.GetString(r.GetOrdinal("PatientID")),
-                    PatientDOB           = r.GetString(r.GetOrdinal("PatientDOB")),
-                    DateOfService        = r.GetString(r.GetOrdinal("DateOfService")),
-                    ChargeEnteredDate    = r.GetString(r.GetOrdinal("ChargeEnteredDate")),
-                    FirstBilledDate      = r.GetString(r.GetOrdinal("FirstBilledDate")),
-                    PanelName            = r.GetString(r.GetOrdinal("PanelName")),
-                    CPTCodeUnitsModifier = r.GetString(r.GetOrdinal("CPTCodeUnitsModifier")),
-                    POS                  = r.GetString(r.GetOrdinal("POS")),
-                    TOS                  = r.GetString(r.GetOrdinal("TOS")),
-                    ChargeAmount         = r.GetDecimal(r.GetOrdinal("ChargeAmount")),
-                    AllowedAmount        = r.GetDecimal(r.GetOrdinal("AllowedAmount")),
-                    InsurancePayment     = r.GetDecimal(r.GetOrdinal("InsurancePayment")),
-                    PatientPayment       = r.GetDecimal(r.GetOrdinal("PatientPayment")),
-                    TotalPayments        = r.GetDecimal(r.GetOrdinal("TotalPayments")),
-                    InsuranceAdjustments = r.GetDecimal(r.GetOrdinal("InsuranceAdjustments")),
-                    PatientAdjustments   = r.GetDecimal(r.GetOrdinal("PatientAdjustments")),
-                    TotalAdjustments     = r.GetDecimal(r.GetOrdinal("TotalAdjustments")),
-                    InsuranceBalance     = r.GetDecimal(r.GetOrdinal("InsuranceBalance")),
-                    PatientBalance       = r.GetDecimal(r.GetOrdinal("PatientBalance")),
-                    TotalBalance         = r.GetDecimal(r.GetOrdinal("TotalBalance")),
-                    CheckDate            = r.GetString(r.GetOrdinal("CheckDate")),
-                    ClaimStatus          = r.GetString(r.GetOrdinal("ClaimStatus")),
-                    DenialCode           = r.GetString(r.GetOrdinal("DenialCode")),
-                    ICDCode              = r.GetString(r.GetOrdinal("ICDCode")),
-                    DaysToDOS            = r.GetString(r.GetOrdinal("DaysToDOS")),
-                    RollingDays          = r.GetString(r.GetOrdinal("RollingDays")),
-                    DaysToBill           = r.GetString(r.GetOrdinal("DaysToBill")),
-                    DaysToPost           = r.GetString(r.GetOrdinal("DaysToPost")),
-                    ICDPointer           = r.GetString(r.GetOrdinal("ICDPointer")),
-                    AgingBucket          = r.GetString(r.GetOrdinal("AgingBucket")),
-                });
+                totalFiltered = Convert.ToInt32(r.GetValue(0));
+                totalAll = r.FieldCount > 1 ? Convert.ToInt32(r.GetValue(1)) : totalFiltered;
             }
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogWarning(ex, "Claim Level counts SP failed for lab {Lab}", labName);
+        }
+
+        await using (var cmd = NewProc(conn, "dbo.usp_GetClaimLevelDetails"))
+        {
+            cmd.Parameters.AddRange(CloneParams(filterParams));
+            cmd.Parameters.Add(IntParam("@Offset", offset));
+            cmd.Parameters.Add(IntParam("@PageSize", pageSize));
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            displayColumns = ReadColumnNames(r);
+            while (await r.ReadAsync(ct))
+                records.Add(ReadClaimRecord(r, labName));
         }
 
         _logger.LogInformation(
@@ -202,131 +125,16 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
 
         return new ClaimLevelResult(payerTypes, claimStatuses, clinicNames,
             payerNames, panelNames, agingBuckets,
-            records, totalFiltered, totalAll);
+            records, totalFiltered, totalAll, displayColumns);
     }
 
-    /// <summary>Shared WHERE builder — used by the Claim Level page AND the async export.</summary>
-    private static (string WhereStr, List<SqlParameter> Parameters) BuildClaimLevelWhere(
-        string? filterPayerName, List<string>? filterPayerTypes, List<string>? filterClaimStatuses,
-        List<string>? filterClinicNames, string? filterDenialCode, bool filterDenialCodeExcludeBlank,
-        List<string>? filterPayerNames, bool filterPayerExcludeBlank,
-        List<string>? filterPanelNames, bool filterPanelExcludeBlank,
-        List<string>? filterAgingBuckets,
-        DateOnly? filterFirstBillFrom, DateOnly? filterFirstBillTo, bool filterFirstBillNull, bool filterFirstBillExcludeBlank,
-        DateOnly? filterChargeEnteredFrom, DateOnly? filterChargeEnteredTo, bool filterChargeEnteredNull, bool filterChargeEnteredExcludeBlank,
-        DateOnly? filterDosFrom, DateOnly? filterDosTo, bool filterDosNull)
-    {
-        var where = new List<string>();
-        var parameters = new List<SqlParameter>();
-
-        AddLikeFilter(where, parameters, "PayerName", "@fpn", filterPayerName);
-        AddInClause(where, parameters, "LTRIM(RTRIM(PayerType))", "@fpt", filterPayerTypes);
-        AddInClause(where, parameters, "LTRIM(RTRIM(ClaimStatus))", "@fcs", filterClaimStatuses);
-        AddInClause(where, parameters, "LTRIM(RTRIM(ClinicName))", "@fcn", filterClinicNames);
-        AddLikeFilter(where, parameters, "DenialCode", "@fdc", filterDenialCode);
-        if (filterDenialCodeExcludeBlank)
-            where.Add("DenialCode IS NOT NULL AND LTRIM(RTRIM(DenialCode)) <> ''");
-        AddInClause(where, parameters, "LTRIM(RTRIM(PayerName))", "@fpnm", filterPayerNames);
-        if (filterPayerExcludeBlank)
-            where.Add("PayerName IS NOT NULL AND LTRIM(RTRIM(PayerName)) <> ''");
-        AddInClause(where, parameters, "LTRIM(RTRIM(PanelName))", "@fplnm", filterPanelNames);
-        if (filterPanelExcludeBlank)
-            where.Add("PanelName IS NOT NULL AND LTRIM(RTRIM(PanelName)) <> ''");
-
-        // Aging bucket filter (computed column)
-        if (filterAgingBuckets is { Count: > 0 })
-        {
-            var paramNames = new List<string>(filterAgingBuckets.Count);
-            for (var i = 0; i < filterAgingBuckets.Count; i++)
-            {
-                var name = $"@fab_{i}";
-                paramNames.Add(name);
-                parameters.Add(new SqlParameter(name, filterAgingBuckets[i]));
-            }
-            where.Add($"""
-                CASE
-                    WHEN TRY_CAST(DaystoDOS AS INT) IS NULL THEN 'Current'
-                    WHEN TRY_CAST(DaystoDOS AS INT) < 30    THEN 'Current'
-                    WHEN TRY_CAST(DaystoDOS AS INT) < 60    THEN '30+'
-                    WHEN TRY_CAST(DaystoDOS AS INT) < 90    THEN '60+'
-                    WHEN TRY_CAST(DaystoDOS AS INT) < 120   THEN '90+'
-                    ELSE '120+'
-                END IN ({string.Join(", ", paramNames)})
-                """);
-        }
-
-        // Date range filters with null/blank handling
-        AddDateRangeFilter(where, parameters, "FirstBilledDate", "@ffbFrom", "@ffbTo", filterFirstBillFrom, filterFirstBillTo, filterFirstBillNull, filterFirstBillExcludeBlank);
-        AddDateRangeFilter(where, parameters, "ChargeEnteredDate", "@fceFrom", "@fceTo", filterChargeEnteredFrom, filterChargeEnteredTo, filterChargeEnteredNull, filterChargeEnteredExcludeBlank);
-        AddDateRangeFilter(where, parameters, "DateOfService", "@fdosFrom", "@fdosTo", filterDosFrom, filterDosTo, filterDosNull);
-
-        return (where.Count > 0 ? string.Join(" AND ", where) : "1=1", parameters);
-    }
-
-    /// <summary>Full Claim Level SELECT (no paging) — the page appends OFFSET/FETCH.</summary>
-    private static string ClaimLevelSelectSql(string whereStr) => $"""
-        SELECT
-            CASE WHEN ClaimID LIKE '%.00' THEN LEFT(ClaimID, LEN(ClaimID)-3) ELSE ISNULL(ClaimID,'') END AS ClaimID,
-            ISNULL(AccessionNumber,'')      AS AccessionNumber,
-            ISNULL(SourceFileID,'')         AS SourceFileID,
-            ISNULL(IngestedOn,'')           AS IngestedOn,
-            ISNULL(RowHash,'')              AS RowHash,
-            ISNULL(PayerName_Raw,'')        AS PayerName_Raw,
-            ISNULL(LTRIM(RTRIM(PayerName)),'')  AS PayerName,
-            ISNULL(Payer_Code,'')           AS Payer_Code,
-            ISNULL(Payer_Common_Code,'')    AS Payer_Common_Code,
-            ISNULL(Payer_Group_Code,'')     AS Payer_Group_Code,
-            ISNULL(Global_Payer_ID,'')      AS Global_Payer_ID,
-            ISNULL(LTRIM(RTRIM(PayerType)),'')  AS PayerType,
-            ISNULL(BillingProvider,'')      AS BillingProvider,
-            ISNULL(ReferringProvider,'')    AS ReferringProvider,
-            ISNULL(LTRIM(RTRIM(ClinicName)),'') AS ClinicName,
-            ISNULL(SalesRepName,'')         AS SalesRepName,
-            ISNULL(PatientID,'')            AS PatientID,
-            ISNULL(PatientDOB,'')           AS PatientDOB,
-            ISNULL(DateOfService,'')        AS DateOfService,
-            ISNULL(ChargeEnteredDate,'')    AS ChargeEnteredDate,
-            ISNULL(FirstBilledDate,'')      AS FirstBilledDate,
-            ISNULL(LTRIM(RTRIM(PanelName)),'')  AS PanelName,
-            ISNULL(CPTCodeXUnitsXModifier,'') AS CPTCodeUnitsModifier,
-            ISNULL(POS,'')                  AS POS,
-            ISNULL(TOS,'')                  AS TOS,
-            ISNULL(TRY_CAST(ChargeAmount         AS DECIMAL(18,2)), 0) AS ChargeAmount,
-            ISNULL(TRY_CAST(AllowedAmount        AS DECIMAL(18,2)), 0) AS AllowedAmount,
-            ISNULL(TRY_CAST(InsurancePayment     AS DECIMAL(18,2)), 0) AS InsurancePayment,
-            ISNULL(TRY_CAST(PatientPayment       AS DECIMAL(18,2)), 0) AS PatientPayment,
-            ISNULL(TRY_CAST(TotalPayments        AS DECIMAL(18,2)), 0) AS TotalPayments,
-            ISNULL(TRY_CAST(InsuranceAdjustments AS DECIMAL(18,2)), 0) AS InsuranceAdjustments,
-            ISNULL(TRY_CAST(PatientAdjustments   AS DECIMAL(18,2)), 0) AS PatientAdjustments,
-            ISNULL(TRY_CAST(TotalAdjustments     AS DECIMAL(18,2)), 0) AS TotalAdjustments,
-            ISNULL(TRY_CAST(InsuranceBalance     AS DECIMAL(18,2)), 0) AS InsuranceBalance,
-            ISNULL(TRY_CAST(PatientBalance       AS DECIMAL(18,2)), 0) AS PatientBalance,
-            ISNULL(TRY_CAST(TotalBalance         AS DECIMAL(18,2)), 0) AS TotalBalance,
-            ISNULL(CheckDate,'')             AS CheckDate,
-            ISNULL(LTRIM(RTRIM(ClaimStatus)),'') AS ClaimStatus,
-            ISNULL(DenialCode,'')            AS DenialCode,
-            ISNULL(ICDCode,'')               AS ICDCode,
-            ISNULL(DaysToDOS,'')             AS DaysToDOS,
-            ISNULL(RollingDays,'')           AS RollingDays,
-            ISNULL(DaysToBill,'')            AS DaysToBill,
-            ISNULL(DaysToPost,'')            AS DaysToPost,
-            ISNULL(ICDPointer,'')            AS ICDPointer,
-            CASE
-                WHEN TRY_CAST(DaystoDOS AS INT) IS NULL THEN 'Current'
-                WHEN TRY_CAST(DaystoDOS AS INT) < 30    THEN 'Current'
-                WHEN TRY_CAST(DaystoDOS AS INT) < 60    THEN '30+'
-                WHEN TRY_CAST(DaystoDOS AS INT) < 90    THEN '60+'
-                WHEN TRY_CAST(DaystoDOS AS INT) < 120   THEN '90+'
-                ELSE '120+'
-            END                              AS AgingBucket,
-            ClaimID AS __SortClaimId
-        FROM dbo.ClaimLevelData
-        WHERE {whereStr}
-        ORDER BY ClaimID
-        """;
-
-    /// <inheritdoc />
+    /// <summary>
+    /// Excel export: Select_Script columns for this lab (via
+    /// <see cref="LabClaimLineColumnCatalog"/>) plus the same filter parameters
+    /// as the Claim Level page. Counts still use the shared SP.
+    /// </summary>
     public (string DataSql, string CountSql, List<SqlParameter> Parameters) BuildClaimLevelDetailsExportQuery(
+        string labName,
         string? filterPayerName, List<string>? filterPayerTypes, List<string>? filterClaimStatuses,
         List<string>? filterClinicNames, string? filterDenialCode, bool filterDenialCodeExcludeBlank,
         List<string>? filterPayerNames, bool filterPayerExcludeBlank,
@@ -336,110 +144,36 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         DateOnly? filterChargeEnteredFrom, DateOnly? filterChargeEnteredTo, bool filterChargeEnteredNull, bool filterChargeEnteredExcludeBlank,
         DateOnly? filterDosFrom, DateOnly? filterDosTo, bool filterDosNull)
     {
-        var (whereStr, parameters) = BuildClaimLevelWhere(
+        var parameters = BuildClaimLevelSpParameters(
             filterPayerName, filterPayerTypes, filterClaimStatuses, filterClinicNames,
             filterDenialCode, filterDenialCodeExcludeBlank,
-            filterPayerNames, filterPayerExcludeBlank, filterPanelNames, filterPanelExcludeBlank,
+            filterPayerNames, filterPayerExcludeBlank,
+            filterPanelNames, filterPanelExcludeBlank,
             filterAgingBuckets,
             filterFirstBillFrom, filterFirstBillTo, filterFirstBillNull, filterFirstBillExcludeBlank,
             filterChargeEnteredFrom, filterChargeEnteredTo, filterChargeEnteredNull, filterChargeEnteredExcludeBlank,
             filterDosFrom, filterDosTo, filterDosNull);
-
-        return (ClaimLevelSelectSql(whereStr),
-                $"SELECT COUNT(*) FROM dbo.ClaimLevelData WHERE {whereStr}",
-                parameters);
+        parameters.Add(IntParam("@Offset", 0));
+        parameters.Add(IntParam("@PageSize", null));
+        var selectList = LabClaimLineColumnCatalog.GetExportSelectList(labName, isLineLevel: false);
+        var dataSql = $"""
+            SELECT {selectList}
+            FROM dbo.ClaimLevelData
+            {ClaimLevelWhereSql}
+            ORDER BY ClaimID
+            OFFSET ISNULL(@Offset, 0) ROWS
+            FETCH NEXT ISNULL(@PageSize, 2147483647) ROWS ONLY
+            """;
+        return (dataSql, "dbo.usp_GetClaimLevelDetailsCounts", parameters);
     }
 
-    /// <summary>Shared WHERE builder for Line Level page + async export.</summary>
-    private static (string WhereStr, List<SqlParameter> Parameters) BuildLineLevelWhere(
-        string? filterPayerName,
-        List<string>? filterPayerTypes,
-        List<string>? filterClaimStatuses,
-        List<string>? filterPayStatuses,
-        List<string>? filterCPTCodes,
-        List<string>? filterClinicNames,
-        string? filterDenialCode)
-    {
-        var where = new List<string>();
-        var parameters = new List<SqlParameter>();
-
-        AddLikeFilter(where, parameters, "PayerName", "@fpn", filterPayerName);
-        AddInClause(where, parameters, "LTRIM(RTRIM(PayerType))", "@fpt", filterPayerTypes);
-        AddInClause(where, parameters, "LTRIM(RTRIM(ClaimStatus))", "@fcs", filterClaimStatuses);
-        AddInClause(where, parameters, "LTRIM(RTRIM(PayStatus))", "@fps", filterPayStatuses);
-        AddInClause(where, parameters, "LTRIM(RTRIM(CPTCode))", "@fcpt", filterCPTCodes);
-        AddInClause(where, parameters, "LTRIM(RTRIM(ClinicName))", "@fcn", filterClinicNames);
-        AddLikeFilter(where, parameters, "DenialCode", "@fdc", filterDenialCode);
-
-        return (where.Count > 0 ? string.Join(" AND ", where) : "1=1", parameters);
-    }
-
-    /// <summary>Full Line Level SELECT (no paging) — used by the async Excel export.</summary>
-    private static string LineLevelSelectSql(string whereStr) => $"""
-        SELECT
-            CASE WHEN ClaimID LIKE '%.00' THEN LEFT(ClaimID, LEN(ClaimID)-3) ELSE ISNULL(ClaimID,'') END AS ClaimID,
-            ISNULL(AccessionNumber,'')      AS AccessionNumber,
-            ISNULL(SourceFileID,'')         AS SourceFileID,
-            ISNULL(IngestedOn,'')           AS IngestedOn,
-            ISNULL(RowHash,'')              AS RowHash,
-            ISNULL(PayerName_Raw,'')        AS PayerName_Raw,
-            ISNULL(LTRIM(RTRIM(PayerName)),'')  AS PayerName,
-            ISNULL(Payer_Code,'')           AS Payer_Code,
-            ISNULL(Payer_Common_Code,'')    AS Payer_Common_Code,
-            ISNULL(Payer_Group_Code,'')     AS Payer_Group_Code,
-            ISNULL(Global_Payer_ID,'')      AS Global_Payer_ID,
-            ISNULL(LTRIM(RTRIM(PayerType)),'')  AS PayerType,
-            ISNULL(BillingProvider,'')      AS BillingProvider,
-            ISNULL(ReferringProvider,'')    AS ReferringProvider,
-            ISNULL(LTRIM(RTRIM(ClinicName)),'') AS ClinicName,
-            ISNULL(SalesRepName,'')         AS SalesRepName,
-            CASE WHEN PatientID LIKE '%.00' THEN LEFT(PatientID, LEN(PatientID)-3) ELSE ISNULL(PatientID,'') END AS PatientID,
-            ISNULL(PatientDOB,'')           AS PatientDOB,
-            ISNULL(DateOfService,'')        AS DateOfService,
-            ISNULL(ChargeEnteredDate,'')    AS ChargeEnteredDate,
-            ISNULL(FirstBilledDate,'')      AS FirstBilledDate,
-            ISNULL(LTRIM(RTRIM(PanelName)),'')  AS PanelName,
-            CASE WHEN CPTCode LIKE '%.00' THEN LEFT(CPTCode, LEN(CPTCode)-3) ELSE ISNULL(LTRIM(RTRIM(CPTCode)),'') END AS CPTCode,
-            ISNULL(FLOOR(TRY_CAST(Units AS DECIMAL(18,2))), 0) AS Units,
-            CASE WHEN Modifier LIKE '%.00' THEN LEFT(Modifier, LEN(Modifier)-3) ELSE ISNULL(Modifier,'') END AS Modifier,
-            ISNULL(POS,'')                  AS POS,
-            ISNULL(TOS,'')                  AS TOS,
-            ISNULL(TRY_CAST(ChargeAmount         AS DECIMAL(18,2)), 0) AS ChargeAmount,
-            ISNULL(TRY_CAST(ChargeAmountPerUnit  AS DECIMAL(18,2)), 0) AS ChargeAmountPerUnit,
-            ISNULL(TRY_CAST(AllowedAmount        AS DECIMAL(18,2)), 0) AS AllowedAmount,
-            ISNULL(TRY_CAST(AllowedAmountPerUnit AS DECIMAL(18,2)), 0) AS AllowedAmountPerUnit,
-            ISNULL(TRY_CAST(InsurancePayment     AS DECIMAL(18,2)), 0) AS InsurancePayment,
-            ISNULL(TRY_CAST(InsurancePaymentPerUnit AS DECIMAL(18,2)), 0) AS InsurancePaymentPerUnit,
-            ISNULL(TRY_CAST(PatientPayment       AS DECIMAL(18,2)), 0) AS PatientPayment,
-            ISNULL(TRY_CAST(PatientPaymentPerUnit AS DECIMAL(18,2)), 0) AS PatientPaymentPerUnit,
-            ISNULL(TRY_CAST(TotalPayments        AS DECIMAL(18,2)), 0) AS TotalPayments,
-            ISNULL(TRY_CAST(InsuranceAdjustments AS DECIMAL(18,2)), 0) AS InsuranceAdjustments,
-            ISNULL(TRY_CAST(PatientAdjustments   AS DECIMAL(18,2)), 0) AS PatientAdjustments,
-            ISNULL(TRY_CAST(TotalAdjustments     AS DECIMAL(18,2)), 0) AS TotalAdjustments,
-            ISNULL(TRY_CAST(InsuranceBalance     AS DECIMAL(18,2)), 0) AS InsuranceBalance,
-            ISNULL(TRY_CAST(PatientBalance       AS DECIMAL(18,2)), 0) AS PatientBalance,
-            ISNULL(TRY_CAST(PatientBalancePerUnit AS DECIMAL(18,2)), 0) AS PatientBalancePerUnit,
-            ISNULL(TRY_CAST(TotalBalance         AS DECIMAL(18,2)), 0) AS TotalBalance,
-            ISNULL(CheckDate,'')             AS CheckDate,
-            ISNULL(LTRIM(RTRIM(ClaimStatus)),'') AS ClaimStatus,
-            ISNULL(LTRIM(RTRIM(PayStatus)),'')   AS PayStatus,
-            ISNULL(DenialCode,'')            AS DenialCode,
-            ISNULL(ICDCode,'')               AS ICDCode,
-            ISNULL(DaysToDOS,'')             AS DaysToDOS,
-            ISNULL(RollingDays,'')           AS RollingDays,
-            ISNULL(DaysToBill,'')            AS DaysToBill,
-            ISNULL(DaysToPost,'')            AS DaysToPost,
-            ISNULL(ICDPointer,'')            AS ICDPointer,
-            ClaimID AS __SortClaimId,
-            CPTCode AS __SortCpt,
-            ISNULL(RowHash,'') AS __SortRowHash
-        FROM dbo.LineLevelData
-        WHERE {whereStr}
-        ORDER BY ClaimID, CPTCode, RowHash
-        """;
-
-    /// <summary>Builds the unpaged Line Level export SELECT + count query (async My Reports).</summary>
+    /// <summary>
+    /// Excel export: Select_Script columns for this lab (via
+    /// <see cref="LabClaimLineColumnCatalog"/>) plus the same filter parameters
+    /// as the Line Level page. Counts still use the shared SP.
+    /// </summary>
     public (string DataSql, string CountSql, List<SqlParameter> Parameters) BuildLineLevelDetailsExportQuery(
+        string labName,
         string? filterPayerName = null,
         List<string>? filterPayerTypes = null,
         List<string>? filterClaimStatuses = null,
@@ -448,13 +182,21 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         List<string>? filterClinicNames = null,
         string? filterDenialCode = null)
     {
-        var (whereStr, parameters) = BuildLineLevelWhere(
+        var parameters = BuildLineLevelSpParameters(
             filterPayerName, filterPayerTypes, filterClaimStatuses, filterPayStatuses,
             filterCPTCodes, filterClinicNames, filterDenialCode);
-
-        return (LineLevelSelectSql(whereStr),
-                $"SELECT COUNT(*) FROM dbo.LineLevelData WHERE {whereStr}",
-                parameters);
+        parameters.Add(IntParam("@Offset", 0));
+        parameters.Add(IntParam("@PageSize", null));
+        var selectList = LabClaimLineColumnCatalog.GetExportSelectList(labName, isLineLevel: true);
+        var dataSql = $"""
+            SELECT {selectList}
+            FROM dbo.LineLevelData
+            {LineLevelWhereSql}
+            ORDER BY ClaimID, CPTCode
+            OFFSET ISNULL(@Offset, 0) ROWS
+            FETCH NEXT ISNULL(@PageSize, 2147483647) ROWS ONLY
+            """;
+        return (dataSql, "dbo.usp_GetLineLevelDetailsCounts", parameters);
     }
 
     // ── Line Level ───────────────────────────────────────────────────────
@@ -475,97 +217,10 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
-        var where = new List<string>();
-        var parameters = new List<SqlParameter>();
-
-        AddLikeFilter(where, parameters, "PayerName", "@fpn", filterPayerName);
-        AddInClause(where, parameters, "LTRIM(RTRIM(PayerType))", "@fpt", filterPayerTypes);
-        AddInClause(where, parameters, "LTRIM(RTRIM(ClaimStatus))", "@fcs", filterClaimStatuses);
-        AddInClause(where, parameters, "LTRIM(RTRIM(PayStatus))", "@fps", filterPayStatuses);
-        AddInClause(where, parameters, "LTRIM(RTRIM(CPTCode))", "@fcpt", filterCPTCodes);
-        AddInClause(where, parameters, "LTRIM(RTRIM(ClinicName))", "@fcn", filterClinicNames);
-        AddLikeFilter(where, parameters, "DenialCode", "@fdc", filterDenialCode);
-
-        var whereStr = where.Count > 0 ? string.Join(" AND ", where) : "1=1";
-
-        // Filter option lists (unfiltered)
-        const string optionsSql = """
-            SELECT DISTINCT LTRIM(RTRIM(PayerType))   FROM dbo.LineLevelData WHERE PayerType   IS NOT NULL AND LTRIM(RTRIM(PayerType))   <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(ClaimStatus)) FROM dbo.LineLevelData WHERE ClaimStatus IS NOT NULL AND LTRIM(RTRIM(ClaimStatus)) <> ''
-                AND TRY_CAST(ClaimStatus AS DATE) IS NULL ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(PayStatus))   FROM dbo.LineLevelData WHERE PayStatus   IS NOT NULL AND LTRIM(RTRIM(PayStatus))   <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(ClinicName))  FROM dbo.LineLevelData WHERE ClinicName  IS NOT NULL AND LTRIM(RTRIM(ClinicName))  <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(CPTCode))     FROM dbo.LineLevelData WHERE CPTCode     IS NOT NULL AND LTRIM(RTRIM(CPTCode))     <> '' ORDER BY 1;
-            """;
-
-        // Counts
-        var countSql = $"""
-            SELECT COUNT(*) FROM dbo.LineLevelData;
-            SELECT COUNT(*) FROM dbo.LineLevelData WHERE {whereStr};
-            """;
-
-        // Paged data
         int offset = (Math.Max(1, page) - 1) * pageSize;
-        var dataSql = $"""
-            SELECT
-                CASE WHEN ClaimID LIKE '%.00' THEN LEFT(ClaimID, LEN(ClaimID)-3) ELSE ISNULL(ClaimID,'') END AS ClaimID,
-                ISNULL(AccessionNumber,'')      AS AccessionNumber,
-                ISNULL(SourceFileID,'')         AS SourceFileID,
-                ISNULL(IngestedOn,'')           AS IngestedOn,
-                ISNULL(RowHash,'')              AS RowHash,
-                ISNULL(PayerName_Raw,'')        AS PayerName_Raw,
-                ISNULL(LTRIM(RTRIM(PayerName)),'')  AS PayerName,
-                ISNULL(Payer_Code,'')           AS Payer_Code,
-                ISNULL(Payer_Common_Code,'')    AS Payer_Common_Code,
-                ISNULL(Payer_Group_Code,'')     AS Payer_Group_Code,
-                ISNULL(Global_Payer_ID,'')      AS Global_Payer_ID,
-                ISNULL(LTRIM(RTRIM(PayerType)),'')  AS PayerType,
-                ISNULL(BillingProvider,'')      AS BillingProvider,
-                ISNULL(ReferringProvider,'')    AS ReferringProvider,
-                ISNULL(LTRIM(RTRIM(ClinicName)),'') AS ClinicName,
-                ISNULL(SalesRepName,'')         AS SalesRepName,
-                CASE WHEN PatientID LIKE '%.00' THEN LEFT(PatientID, LEN(PatientID)-3) ELSE ISNULL(PatientID,'') END AS PatientID,
-                ISNULL(PatientDOB,'')           AS PatientDOB,
-                ISNULL(DateOfService,'')        AS DateOfService,
-                ISNULL(ChargeEnteredDate,'')    AS ChargeEnteredDate,
-                ISNULL(FirstBilledDate,'')      AS FirstBilledDate,
-                ISNULL(LTRIM(RTRIM(PanelName)),'')  AS PanelName,
-                CASE WHEN CPTCode LIKE '%.00' THEN LEFT(CPTCode, LEN(CPTCode)-3) ELSE ISNULL(LTRIM(RTRIM(CPTCode)),'') END AS CPTCode,
-                ISNULL(FLOOR(TRY_CAST(Units AS DECIMAL(18,2))), 0) AS Units,
-                CASE WHEN Modifier LIKE '%.00' THEN LEFT(Modifier, LEN(Modifier)-3) ELSE ISNULL(Modifier,'') END AS Modifier,
-                ISNULL(POS,'')                  AS POS,
-                ISNULL(TOS,'')                  AS TOS,
-                ISNULL(TRY_CAST(ChargeAmount         AS DECIMAL(18,2)), 0) AS ChargeAmount,
-                ISNULL(TRY_CAST(ChargeAmountPerUnit  AS DECIMAL(18,2)), 0) AS ChargeAmountPerUnit,
-                ISNULL(TRY_CAST(AllowedAmount        AS DECIMAL(18,2)), 0) AS AllowedAmount,
-                ISNULL(TRY_CAST(AllowedAmountPerUnit AS DECIMAL(18,2)), 0) AS AllowedAmountPerUnit,
-                ISNULL(TRY_CAST(InsurancePayment     AS DECIMAL(18,2)), 0) AS InsurancePayment,
-                ISNULL(TRY_CAST(InsurancePaymentPerUnit AS DECIMAL(18,2)), 0) AS InsurancePaymentPerUnit,
-                ISNULL(TRY_CAST(PatientPayment       AS DECIMAL(18,2)), 0) AS PatientPayment,
-                ISNULL(TRY_CAST(PatientPaymentPerUnit AS DECIMAL(18,2)), 0) AS PatientPaymentPerUnit,
-                ISNULL(TRY_CAST(TotalPayments        AS DECIMAL(18,2)), 0) AS TotalPayments,
-                ISNULL(TRY_CAST(InsuranceAdjustments AS DECIMAL(18,2)), 0) AS InsuranceAdjustments,
-                ISNULL(TRY_CAST(PatientAdjustments   AS DECIMAL(18,2)), 0) AS PatientAdjustments,
-                ISNULL(TRY_CAST(TotalAdjustments     AS DECIMAL(18,2)), 0) AS TotalAdjustments,
-                ISNULL(TRY_CAST(InsuranceBalance     AS DECIMAL(18,2)), 0) AS InsuranceBalance,
-                ISNULL(TRY_CAST(PatientBalance       AS DECIMAL(18,2)), 0) AS PatientBalance,
-                ISNULL(TRY_CAST(PatientBalancePerUnit AS DECIMAL(18,2)), 0) AS PatientBalancePerUnit,
-                ISNULL(TRY_CAST(TotalBalance         AS DECIMAL(18,2)), 0) AS TotalBalance,
-                ISNULL(CheckDate,'')             AS CheckDate,
-                ISNULL(LTRIM(RTRIM(ClaimStatus)),'') AS ClaimStatus,
-                ISNULL(LTRIM(RTRIM(PayStatus)),'')   AS PayStatus,
-                ISNULL(DenialCode,'')            AS DenialCode,
-                ISNULL(ICDCode,'')               AS ICDCode,
-                ISNULL(DaysToDOS,'')             AS DaysToDOS,
-                ISNULL(RollingDays,'')           AS RollingDays,
-                ISNULL(DaysToBill,'')            AS DaysToBill,
-                ISNULL(DaysToPost,'')            AS DaysToPost,
-                ISNULL(ICDPointer,'')            AS ICDPointer
-            FROM dbo.LineLevelData
-            WHERE {whereStr}
-            ORDER BY ClaimID, CPTCode
-            OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
-            """;
+        var filterParams = BuildLineLevelSpParameters(
+            filterPayerName, filterPayerTypes, filterClaimStatuses, filterPayStatuses,
+            filterCPTCodes, filterClinicNames, filterDenialCode);
 
         var payerTypes = new List<string>();
         var claimStatuses = new List<string>();
@@ -574,105 +229,52 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         var cptCodes = new List<string>();
         int totalAll = 0, totalFiltered = 0;
         var records = new List<LineRecord>();
+        IReadOnlyList<string> displayColumns = [];
 
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
 
-        // Options
-        await using (var cmd = new SqlCommand(optionsSql, conn) { CommandTimeout = 180 })
+        try
         {
-            cmd.Parameters.AddRange(CloneParams(parameters));
+            await using var cmd = NewProc(conn, "dbo.usp_GetLineLevelFilterOptions");
             await using var r = await cmd.ExecuteReaderAsync(ct);
-            while (await r.ReadAsync(ct)) payerTypes.Add(r.GetString(0));
-            await r.NextResultAsync(ct);
-            while (await r.ReadAsync(ct)) claimStatuses.Add(r.GetString(0));
-            await r.NextResultAsync(ct);
-            while (await r.ReadAsync(ct)) payStatuses.Add(r.GetString(0));
-            await r.NextResultAsync(ct);
-            while (await r.ReadAsync(ct)) clinicNames.Add(r.GetString(0));
-            await r.NextResultAsync(ct);
-            while (await r.ReadAsync(ct)) cptCodes.Add(r.GetString(0));
+            await ReadStringColumnAsync(r, payerTypes, ct);
+            if (await r.NextResultAsync(ct)) await ReadStringColumnAsync(r, claimStatuses, ct);
+            if (await r.NextResultAsync(ct)) await ReadStringColumnAsync(r, payStatuses, ct);
+            if (await r.NextResultAsync(ct)) await ReadStringColumnAsync(r, clinicNames, ct);
+            if (await r.NextResultAsync(ct)) await ReadStringColumnAsync(r, cptCodes, ct);
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogWarning(ex, "Line Level filter-options SP failed for lab {Lab}", labName);
         }
 
-        // Counts
-        await using (var cmd = new SqlCommand(countSql, conn) { CommandTimeout = 180 })
+        try
         {
-            cmd.Parameters.AddRange(CloneParams(parameters));
+            await using var cmd = NewProc(conn, "dbo.usp_GetLineLevelDetailsCounts");
+            cmd.Parameters.AddRange(CloneParams(filterParams));
             await using var r = await cmd.ExecuteReaderAsync(ct);
-            if (await r.ReadAsync(ct)) totalAll = r.GetInt32(0);
-            await r.NextResultAsync(ct);
-            if (await r.ReadAsync(ct)) totalFiltered = r.GetInt32(0);
-        }
-
-        // Paged data
-        await using (var cmd = new SqlCommand(dataSql, conn) { CommandTimeout = 180 })
-        {
-            cmd.Parameters.AddRange(CloneParams(parameters));
-            cmd.Parameters.Add(new SqlParameter("@Offset", SqlDbType.Int) { Value = offset });
-            cmd.Parameters.Add(new SqlParameter("@PageSize", SqlDbType.Int) { Value = pageSize });
-
-            await using var r = await cmd.ExecuteReaderAsync(ct);
-            while (await r.ReadAsync(ct))
+            if (await r.ReadAsync(ct))
             {
-                records.Add(new LineRecord
-                {
-                    LabID                   = labName,
-                    LabName                 = labName,
-                    ClaimID                 = r.GetString(r.GetOrdinal("ClaimID")),
-                    AccessionNumber         = r.GetString(r.GetOrdinal("AccessionNumber")),
-                    SourceFileID            = r.GetString(r.GetOrdinal("SourceFileID")),
-                    IngestedOn              = r.GetString(r.GetOrdinal("IngestedOn")),
-                    RowHash                 = r.GetString(r.GetOrdinal("RowHash")),
-                    PayerName_Raw           = r.GetString(r.GetOrdinal("PayerName_Raw")),
-                    PayerName               = r.GetString(r.GetOrdinal("PayerName")),
-                    Payer_Code              = r.GetString(r.GetOrdinal("Payer_Code")),
-                    Payer_Common_Code       = r.GetString(r.GetOrdinal("Payer_Common_Code")),
-                    Payer_Group_Code        = r.GetString(r.GetOrdinal("Payer_Group_Code")),
-                    Global_Payer_ID         = r.GetString(r.GetOrdinal("Global_Payer_ID")),
-                    PayerType               = r.GetString(r.GetOrdinal("PayerType")),
-                    BillingProvider         = r.GetString(r.GetOrdinal("BillingProvider")),
-                    ReferringProvider       = r.GetString(r.GetOrdinal("ReferringProvider")),
-                    ClinicName              = r.GetString(r.GetOrdinal("ClinicName")),
-                    SalesRepName            = r.GetString(r.GetOrdinal("SalesRepName")),
-                    PatientID               = r.GetString(r.GetOrdinal("PatientID")),
-                    PatientDOB              = r.GetString(r.GetOrdinal("PatientDOB")),
-                    DateOfService           = r.GetString(r.GetOrdinal("DateOfService")),
-                    ChargeEnteredDate       = r.GetString(r.GetOrdinal("ChargeEnteredDate")),
-                    FirstBilledDate         = r.GetString(r.GetOrdinal("FirstBilledDate")),
-                    PanelName               = r.GetString(r.GetOrdinal("PanelName")),
-                    CPTCode                 = r.GetString(r.GetOrdinal("CPTCode")),
-                    Units                   = r.GetDecimal(r.GetOrdinal("Units")),
-                    Modifier                = r.GetString(r.GetOrdinal("Modifier")),
-                    POS                     = r.GetString(r.GetOrdinal("POS")),
-                    TOS                     = r.GetString(r.GetOrdinal("TOS")),
-                    ChargeAmount            = r.GetDecimal(r.GetOrdinal("ChargeAmount")),
-                    ChargeAmountPerUnit     = r.GetDecimal(r.GetOrdinal("ChargeAmountPerUnit")),
-                    AllowedAmount           = r.GetDecimal(r.GetOrdinal("AllowedAmount")),
-                    AllowedAmountPerUnit    = r.GetDecimal(r.GetOrdinal("AllowedAmountPerUnit")),
-                    InsurancePayment        = r.GetDecimal(r.GetOrdinal("InsurancePayment")),
-                    InsurancePaymentPerUnit = r.GetDecimal(r.GetOrdinal("InsurancePaymentPerUnit")),
-                    PatientPayment          = r.GetDecimal(r.GetOrdinal("PatientPayment")),
-                    PatientPaymentPerUnit   = r.GetDecimal(r.GetOrdinal("PatientPaymentPerUnit")),
-                    TotalPayments           = r.GetDecimal(r.GetOrdinal("TotalPayments")),
-                    InsuranceAdjustments    = r.GetDecimal(r.GetOrdinal("InsuranceAdjustments")),
-                    PatientAdjustments      = r.GetDecimal(r.GetOrdinal("PatientAdjustments")),
-                    TotalAdjustments        = r.GetDecimal(r.GetOrdinal("TotalAdjustments")),
-                    InsuranceBalance        = r.GetDecimal(r.GetOrdinal("InsuranceBalance")),
-                    PatientBalance          = r.GetDecimal(r.GetOrdinal("PatientBalance")),
-                    PatientBalancePerUnit   = r.GetDecimal(r.GetOrdinal("PatientBalancePerUnit")),
-                    TotalBalance            = r.GetDecimal(r.GetOrdinal("TotalBalance")),
-                    CheckDate               = r.GetString(r.GetOrdinal("CheckDate")),
-                    ClaimStatus             = r.GetString(r.GetOrdinal("ClaimStatus")),
-                    PayStatus               = r.GetString(r.GetOrdinal("PayStatus")),
-                    DenialCode              = r.GetString(r.GetOrdinal("DenialCode")),
-                    ICDCode                 = r.GetString(r.GetOrdinal("ICDCode")),
-                    DaysToDOS               = r.GetString(r.GetOrdinal("DaysToDOS")),
-                    RollingDays             = r.GetString(r.GetOrdinal("RollingDays")),
-                    DaysToBill              = r.GetString(r.GetOrdinal("DaysToBill")),
-                    DaysToPost              = r.GetString(r.GetOrdinal("DaysToPost")),
-                    ICDPointer              = r.GetString(r.GetOrdinal("ICDPointer")),
-                });
+                totalFiltered = Convert.ToInt32(r.GetValue(0));
+                totalAll = r.FieldCount > 1 ? Convert.ToInt32(r.GetValue(1)) : totalFiltered;
             }
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogWarning(ex, "Line Level counts SP failed for lab {Lab}", labName);
+        }
+
+        await using (var cmd = NewProc(conn, "dbo.usp_GetLineLevelDetails"))
+        {
+            cmd.Parameters.AddRange(CloneParams(filterParams));
+            cmd.Parameters.Add(IntParam("@Offset", offset));
+            cmd.Parameters.Add(IntParam("@PageSize", pageSize));
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            displayColumns = ReadColumnNames(r);
+            while (await r.ReadAsync(ct))
+                records.Add(ReadLineRecord(r, labName));
         }
 
         _logger.LogInformation(
@@ -680,112 +282,388 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
             labName, totalFiltered, totalAll, page);
 
         return new LineLevelResult(payerTypes, claimStatuses, payStatuses, clinicNames,
-            cptCodes, records, totalFiltered, totalAll);
+            cptCodes, records, totalFiltered, totalAll, displayColumns);
     }
 
-    // ?? Helpers ??????????????????????????????????????????????????????????
+    // ── Helpers ──────────────────────────────────────────────────────────
 
-    private static void AddInClause(List<string> where, List<SqlParameter> parms,
-        string columnExpression, string paramPrefix, List<string>? values)
+    private static async Task ReadStringColumnAsync(
+        SqlDataReader r, List<string> target, CancellationToken ct)
     {
-        if (values is not { Count: > 0 }) return;
-
-        var paramNames = new List<string>(values.Count);
-        for (var i = 0; i < values.Count; i++)
+        while (await r.ReadAsync(ct))
         {
-            var name = $"{paramPrefix}_{i}";
-            paramNames.Add(name);
-            parms.Add(new SqlParameter(name, values[i]));
+            if (r.IsDBNull(0)) continue;
+            var value = Convert.ToString(r.GetValue(0), CultureInfo.InvariantCulture)?.Trim();
+            if (!string.IsNullOrEmpty(value))
+                target.Add(value);
         }
-
-        where.Add($"{columnExpression} IN ({string.Join(", ", paramNames)})");
     }
 
-    private static void AddLikeFilter(List<string> where, List<SqlParameter> parms,
-        string column, string paramName, string? value)
+    private static IReadOnlyList<string> ReadColumnNames(SqlDataReader r)
     {
-        if (string.IsNullOrWhiteSpace(value)) return;
-
-        var parts = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (parts.Length == 0) return;
-
-        if (parts.Length == 1)
+        var names = new List<string>(r.FieldCount);
+        for (var i = 0; i < r.FieldCount; i++)
         {
-            where.Add($"LTRIM(RTRIM({column})) LIKE '%' + {paramName} + '%'");
-            parms.Add(new SqlParameter(paramName, parts[0]));
+            var name = r.GetName(i);
+            if (name.StartsWith("__", StringComparison.Ordinal)) continue;
+            names.Add(name);
         }
-        else
-        {
-            var clauses = new List<string>(parts.Length);
-            for (var i = 0; i < parts.Length; i++)
-            {
-                var name = $"{paramName}_{i}";
-                clauses.Add($"LTRIM(RTRIM({column})) LIKE '%' + {name} + '%'");
-                parms.Add(new SqlParameter(name, parts[i]));
-            }
-            where.Add($"({string.Join(" OR ", clauses)})");
-        }
+        return names;
     }
+
+    private static Dictionary<string, string> ReadCells(SqlDataReader r)
+    {
+        var cells = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < r.FieldCount; i++)
+        {
+            var name = r.GetName(i);
+            if (name.StartsWith("__", StringComparison.Ordinal)) continue;
+            cells[name] = FormatDbValue(r.IsDBNull(i) ? null : r.GetValue(i));
+        }
+        return cells;
+    }
+
+    private static string FormatDbValue(object? value)
+    {
+        if (value is null or DBNull) return string.Empty;
+        return value switch
+        {
+            DateTime dt => dt.TimeOfDay == TimeSpan.Zero
+                ? dt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                : dt.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+            DateTimeOffset dto => dto.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            decimal d => d.ToString(CultureInfo.InvariantCulture),
+            double dbl => dbl.ToString(CultureInfo.InvariantCulture),
+            float f => f.ToString(CultureInfo.InvariantCulture),
+            bool b => b ? "1" : "0",
+            byte[] => string.Empty,
+            _ => Convert.ToString(value, CultureInfo.InvariantCulture)?.Trim() ?? string.Empty,
+        };
+    }
+
+    private static string Cell(Dictionary<string, string> cells, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (cells.TryGetValue(key, out var value))
+                return value;
+        }
+        return string.Empty;
+    }
+
+    private static decimal CellDec(Dictionary<string, string> cells, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (cells.TryGetValue(key, out var value)
+                && decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var d))
+                return d;
+        }
+        return 0;
+    }
+
+    private static ClaimRecord ReadClaimRecord(SqlDataReader r, string labName)
+    {
+        var cells = ReadCells(r);
+        return new ClaimRecord
+        {
+            LabID = labName,
+            LabName = labName,
+            Cells = cells,
+            ClaimID = Cell(cells, "ClaimID"),
+            AccessionNumber = Cell(cells, "AccessionNumber"),
+            SourceFileID = Cell(cells, "SourceFileID"),
+            IngestedOn = Cell(cells, "IngestedOn"),
+            RowHash = Cell(cells, "RowHash"),
+            PayerName_Raw = Cell(cells, "PayerName_Raw"),
+            PayerName = Cell(cells, "PayerName"),
+            Payer_Code = Cell(cells, "Payer_Code"),
+            Payer_Common_Code = Cell(cells, "Payer_Common_Code"),
+            Payer_Group_Code = Cell(cells, "Payer_Group_Code"),
+            Global_Payer_ID = Cell(cells, "Global_Payer_ID"),
+            PayerType = Cell(cells, "PayerType"),
+            BillingProvider = Cell(cells, "BillingProvider"),
+            ReferringProvider = Cell(cells, "ReferringProvider"),
+            ClinicName = Cell(cells, "ClinicName"),
+            SalesRepName = Cell(cells, "SalesRepName", "SalesRepname"),
+            PatientID = Cell(cells, "PatientID"),
+            PatientDOB = Cell(cells, "PatientDOB"),
+            DateOfService = Cell(cells, "DateOfService", "DateofService"),
+            ChargeEnteredDate = Cell(cells, "ChargeEnteredDate"),
+            FirstBilledDate = Cell(cells, "FirstBilledDate"),
+            PanelName = Cell(cells, "PanelName", "Panelname"),
+            CPTCodeUnitsModifier = Cell(cells, "CPTCodeUnitsModifier", "CPTCodeXUnitsXModifier"),
+            POS = Cell(cells, "POS"),
+            TOS = Cell(cells, "TOS"),
+            ChargeAmount = CellDec(cells, "ChargeAmount"),
+            AllowedAmount = CellDec(cells, "AllowedAmount"),
+            InsurancePayment = CellDec(cells, "InsurancePayment"),
+            PatientPayment = CellDec(cells, "PatientPayment"),
+            TotalPayments = CellDec(cells, "TotalPayments"),
+            InsuranceAdjustments = CellDec(cells, "InsuranceAdjustments"),
+            PatientAdjustments = CellDec(cells, "PatientAdjustments"),
+            TotalAdjustments = CellDec(cells, "TotalAdjustments"),
+            InsuranceBalance = CellDec(cells, "InsuranceBalance"),
+            PatientBalance = CellDec(cells, "PatientBalance"),
+            TotalBalance = CellDec(cells, "TotalBalance"),
+            CheckDate = Cell(cells, "CheckDate"),
+            ClaimStatus = Cell(cells, "ClaimStatus"),
+            DenialCode = Cell(cells, "DenialCode"),
+            ICDCode = Cell(cells, "ICDCode"),
+            DaysToDOS = Cell(cells, "DaysToDOS", "DaystoDOS"),
+            RollingDays = Cell(cells, "RollingDays"),
+            DaysToBill = Cell(cells, "DaysToBill", "DaystoBill"),
+            DaysToPost = Cell(cells, "DaysToPost", "DaystoPost"),
+            ICDPointer = Cell(cells, "ICDPointer"),
+            AgingBucket = Cell(cells, "AgingBucket"),
+        };
+    }
+
+    private static LineRecord ReadLineRecord(SqlDataReader r, string labName)
+    {
+        var cells = ReadCells(r);
+        return new LineRecord
+        {
+            LabID = labName,
+            LabName = labName,
+            Cells = cells,
+            ClaimID = Cell(cells, "ClaimID"),
+            AccessionNumber = Cell(cells, "AccessionNumber"),
+            SourceFileID = Cell(cells, "SourceFileID"),
+            IngestedOn = Cell(cells, "IngestedOn"),
+            RowHash = Cell(cells, "RowHash"),
+            PayerName_Raw = Cell(cells, "PayerName_Raw"),
+            PayerName = Cell(cells, "PayerName"),
+            Payer_Code = Cell(cells, "Payer_Code"),
+            Payer_Common_Code = Cell(cells, "Payer_Common_Code"),
+            Payer_Group_Code = Cell(cells, "Payer_Group_Code"),
+            Global_Payer_ID = Cell(cells, "Global_Payer_ID"),
+            PayerType = Cell(cells, "PayerType"),
+            BillingProvider = Cell(cells, "BillingProvider"),
+            ReferringProvider = Cell(cells, "ReferringProvider"),
+            ClinicName = Cell(cells, "ClinicName"),
+            SalesRepName = Cell(cells, "SalesRepName", "SalesRepname"),
+            PatientID = Cell(cells, "PatientID"),
+            PatientDOB = Cell(cells, "PatientDOB"),
+            DateOfService = Cell(cells, "DateOfService", "DateofService"),
+            ChargeEnteredDate = Cell(cells, "ChargeEnteredDate"),
+            FirstBilledDate = Cell(cells, "FirstBilledDate"),
+            PanelName = Cell(cells, "PanelName", "Panelname"),
+            CPTCode = Cell(cells, "CPTCode"),
+            Units = CellDec(cells, "Units"),
+            Modifier = Cell(cells, "Modifier"),
+            POS = Cell(cells, "POS"),
+            TOS = Cell(cells, "TOS"),
+            ChargeAmount = CellDec(cells, "ChargeAmount"),
+            ChargeAmountPerUnit = CellDec(cells, "ChargeAmountPerUnit"),
+            AllowedAmount = CellDec(cells, "AllowedAmount"),
+            AllowedAmountPerUnit = CellDec(cells, "AllowedAmountPerUnit"),
+            InsurancePayment = CellDec(cells, "InsurancePayment"),
+            InsurancePaymentPerUnit = CellDec(cells, "InsurancePaymentPerUnit"),
+            PatientPayment = CellDec(cells, "PatientPayment"),
+            PatientPaymentPerUnit = CellDec(cells, "PatientPaymentPerUnit"),
+            TotalPayments = CellDec(cells, "TotalPayments"),
+            InsuranceAdjustments = CellDec(cells, "InsuranceAdjustments"),
+            PatientAdjustments = CellDec(cells, "PatientAdjustments"),
+            TotalAdjustments = CellDec(cells, "TotalAdjustments"),
+            InsuranceBalance = CellDec(cells, "InsuranceBalance"),
+            PatientBalance = CellDec(cells, "PatientBalance"),
+            PatientBalancePerUnit = CellDec(cells, "PatientBalancePerUnit"),
+            TotalBalance = CellDec(cells, "TotalBalance"),
+            CheckDate = Cell(cells, "CheckDate"),
+            ClaimStatus = Cell(cells, "ClaimStatus"),
+            PayStatus = Cell(cells, "PayStatus"),
+            DenialCode = Cell(cells, "DenialCode"),
+            ICDCode = Cell(cells, "ICDCode"),
+            DaysToDOS = Cell(cells, "DaysToDOS", "DaystoDOS"),
+            RollingDays = Cell(cells, "RollingDays"),
+            DaysToBill = Cell(cells, "DaysToBill", "DaystoBill"),
+            DaysToPost = Cell(cells, "DaysToPost", "DaystoPost"),
+            ICDPointer = Cell(cells, "ICDPointer"),
+        };
+    }
+
+    private static SqlCommand NewProc(SqlConnection conn, string procName)
+        => new(procName, conn)
+        {
+            CommandType = CommandType.StoredProcedure,
+            CommandTimeout = 180,
+        };
+
+    private static string? PipeJoin(List<string>? values)
+        => values is { Count: > 0 } ? string.Join("|", values.Where(v => !string.IsNullOrWhiteSpace(v))) : null;
+
+    private static SqlParameter NvarcharParam(string name, string? value, int length = -1)
+        => new(name, length <= 0 ? SqlDbType.NVarChar : SqlDbType.NVarChar, length <= 0 ? -1 : length)
+        {
+            Value = string.IsNullOrWhiteSpace(value) ? DBNull.Value : value,
+        };
+
+    private static SqlParameter BitParam(string name, bool value)
+        => new(name, SqlDbType.Bit) { Value = value };
+
+    private static SqlParameter DateParam(string name, DateOnly? value)
+        => new(name, SqlDbType.Date)
+        {
+            Value = value.HasValue ? value.Value.ToDateTime(TimeOnly.MinValue) : DBNull.Value,
+        };
+
+    private static SqlParameter IntParam(string name, int? value)
+        => new(name, SqlDbType.Int) { Value = value.HasValue ? value.Value : DBNull.Value };
+
+    /// <summary>Same predicates as dbo.usp_GetClaimLevelDetails, using the export @params directly.</summary>
+    private const string ClaimLevelWhereSql = """
+        WHERE (@PayerName IS NULL OR LTRIM(RTRIM(@PayerName)) = N''
+               OR EXISTS (SELECT 1 FROM STRING_SPLIT(@PayerName, ',') p
+                          WHERE NULLIF(LTRIM(RTRIM(p.value)), '') IS NOT NULL
+                            AND LTRIM(RTRIM(ClaimLevelData.PayerName)) LIKE N'%' + LTRIM(RTRIM(p.value)) + N'%'))
+          AND (@PayerTypes IS NULL OR LTRIM(RTRIM(@PayerTypes)) = N''
+               OR LTRIM(RTRIM(PayerType)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@PayerTypes, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
+          AND (@ClaimStatuses IS NULL OR LTRIM(RTRIM(@ClaimStatuses)) = N''
+               OR LTRIM(RTRIM(ClaimStatus)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@ClaimStatuses, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
+          AND (@ClinicNames IS NULL OR LTRIM(RTRIM(@ClinicNames)) = N''
+               OR LTRIM(RTRIM(ClinicName)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@ClinicNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
+          AND (@DenialCode IS NULL OR LTRIM(RTRIM(@DenialCode)) = N''
+               OR EXISTS (SELECT 1 FROM STRING_SPLIT(@DenialCode, ',') d
+                          WHERE NULLIF(LTRIM(RTRIM(d.value)), '') IS NOT NULL
+                            AND LTRIM(RTRIM(ClaimLevelData.DenialCode)) LIKE N'%' + LTRIM(RTRIM(d.value)) + N'%'))
+          AND (@DenialCodeExcludeBlank = 0 OR (DenialCode IS NOT NULL AND LTRIM(RTRIM(DenialCode)) <> N''))
+          AND (@PayerNames IS NULL OR LTRIM(RTRIM(@PayerNames)) = N''
+               OR LTRIM(RTRIM(PayerName)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@PayerNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
+          AND (@PayerExcludeBlank = 0 OR (PayerName IS NOT NULL AND LTRIM(RTRIM(PayerName)) <> N''))
+          AND (@PanelNames IS NULL OR LTRIM(RTRIM(@PanelNames)) = N''
+               OR LTRIM(RTRIM(PanelName)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@PanelNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
+          AND (@PanelExcludeBlank = 0 OR (PanelName IS NOT NULL AND LTRIM(RTRIM(PanelName)) <> N''))
+          AND (@AgingBuckets IS NULL OR LTRIM(RTRIM(@AgingBuckets)) = N''
+               OR CASE
+                    WHEN TRY_CAST(DaystoDOS AS INT) IS NULL THEN 'Current'
+                    WHEN TRY_CAST(DaystoDOS AS INT) < 30    THEN 'Current'
+                    WHEN TRY_CAST(DaystoDOS AS INT) < 60    THEN '30+'
+                    WHEN TRY_CAST(DaystoDOS AS INT) < 90    THEN '60+'
+                    WHEN TRY_CAST(DaystoDOS AS INT) < 120   THEN '90+'
+                    ELSE '120+'
+                  END IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 100) FROM STRING_SPLIT(@AgingBuckets, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
+          AND (@FirstBillExcludeBlank = 0 OR (FirstBilledDate IS NOT NULL AND LTRIM(RTRIM(FirstBilledDate)) <> N''))
+          AND (
+                (@FirstBillFrom IS NULL AND @FirstBillTo IS NULL AND @FirstBillNull = 0)
+             OR (@FirstBillNull = 1 AND (@FirstBillFrom IS NULL AND @FirstBillTo IS NULL)
+                 AND (FirstBilledDate IS NULL OR LTRIM(RTRIM(FirstBilledDate)) = N''))
+             OR (@FirstBillNull = 1 AND (@FirstBillFrom IS NOT NULL OR @FirstBillTo IS NOT NULL)
+                 AND ((FirstBilledDate IS NULL OR LTRIM(RTRIM(FirstBilledDate)) = N'')
+                   OR ((@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+                   AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo))))
+             OR (@FirstBillNull = 0 AND (
+                    (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+                AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)))
+              )
+          AND (@ChargeEnteredExcludeBlank = 0 OR (ChargeEnteredDate IS NOT NULL AND LTRIM(RTRIM(ChargeEnteredDate)) <> N''))
+          AND (
+                (@ChargeEnteredFrom IS NULL AND @ChargeEnteredTo IS NULL AND @ChargeEnteredNull = 0)
+             OR (@ChargeEnteredNull = 1 AND (@ChargeEnteredFrom IS NULL AND @ChargeEnteredTo IS NULL)
+                 AND (ChargeEnteredDate IS NULL OR LTRIM(RTRIM(ChargeEnteredDate)) = N''))
+             OR (@ChargeEnteredNull = 1 AND (@ChargeEnteredFrom IS NOT NULL OR @ChargeEnteredTo IS NOT NULL)
+                 AND ((ChargeEnteredDate IS NULL OR LTRIM(RTRIM(ChargeEnteredDate)) = N'')
+                   OR ((@ChargeEnteredFrom IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) >= @ChargeEnteredFrom)
+                   AND (@ChargeEnteredTo   IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @ChargeEnteredTo))))
+             OR (@ChargeEnteredNull = 0 AND (
+                    (@ChargeEnteredFrom IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) >= @ChargeEnteredFrom)
+                AND (@ChargeEnteredTo   IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @ChargeEnteredTo)))
+              )
+          AND (
+                (@DosFrom IS NULL AND @DosTo IS NULL AND @DosNull = 0)
+             OR (@DosNull = 1 AND (@DosFrom IS NULL AND @DosTo IS NULL)
+                 AND (DateOfService IS NULL OR LTRIM(RTRIM(DateOfService)) = N''))
+             OR (@DosNull = 1 AND (@DosFrom IS NOT NULL OR @DosTo IS NOT NULL)
+                 AND ((DateOfService IS NULL OR LTRIM(RTRIM(DateOfService)) = N'')
+                   OR ((@DosFrom IS NULL OR TRY_CAST(DateOfService AS DATE) >= @DosFrom)
+                   AND (@DosTo   IS NULL OR TRY_CAST(DateOfService AS DATE) <= @DosTo))))
+             OR (@DosNull = 0 AND (
+                    (@DosFrom IS NULL OR TRY_CAST(DateOfService AS DATE) >= @DosFrom)
+                AND (@DosTo   IS NULL OR TRY_CAST(DateOfService AS DATE) <= @DosTo)))
+              )
+        """;
+
+    /// <summary>Same predicates as dbo.usp_GetLineLevelDetails, using the export @params directly.</summary>
+    private const string LineLevelWhereSql = """
+        WHERE (@PayerName IS NULL OR LTRIM(RTRIM(@PayerName)) = N''
+               OR EXISTS (SELECT 1 FROM STRING_SPLIT(@PayerName, ',') p
+                          WHERE NULLIF(LTRIM(RTRIM(p.value)), '') IS NOT NULL
+                            AND LTRIM(RTRIM(LineLevelData.PayerName)) LIKE N'%' + LTRIM(RTRIM(p.value)) + N'%'))
+          AND (@PayerTypes IS NULL OR LTRIM(RTRIM(@PayerTypes)) = N''
+               OR LTRIM(RTRIM(PayerType)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@PayerTypes, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
+          AND (@ClaimStatuses IS NULL OR LTRIM(RTRIM(@ClaimStatuses)) = N''
+               OR LTRIM(RTRIM(ClaimStatus)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@ClaimStatuses, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
+          AND (@PayStatuses IS NULL OR LTRIM(RTRIM(@PayStatuses)) = N''
+               OR LTRIM(RTRIM(PayStatus)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@PayStatuses, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
+          AND (@CPTCodes IS NULL OR LTRIM(RTRIM(@CPTCodes)) = N''
+               OR LTRIM(RTRIM(CPTCode)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 100) FROM STRING_SPLIT(@CPTCodes, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
+          AND (@ClinicNames IS NULL OR LTRIM(RTRIM(@ClinicNames)) = N''
+               OR LTRIM(RTRIM(ClinicName)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@ClinicNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
+          AND (@DenialCode IS NULL OR LTRIM(RTRIM(@DenialCode)) = N''
+               OR EXISTS (SELECT 1 FROM STRING_SPLIT(@DenialCode, ',') d
+                          WHERE NULLIF(LTRIM(RTRIM(d.value)), '') IS NOT NULL
+                            AND LTRIM(RTRIM(LineLevelData.DenialCode)) LIKE N'%' + LTRIM(RTRIM(d.value)) + N'%'))
+        """;
+
+    private static List<SqlParameter> BuildClaimLevelSpParameters(
+        string? filterPayerName, List<string>? filterPayerTypes, List<string>? filterClaimStatuses,
+        List<string>? filterClinicNames, string? filterDenialCode, bool filterDenialCodeExcludeBlank,
+        List<string>? filterPayerNames, bool filterPayerExcludeBlank,
+        List<string>? filterPanelNames, bool filterPanelExcludeBlank,
+        List<string>? filterAgingBuckets,
+        DateOnly? filterFirstBillFrom, DateOnly? filterFirstBillTo, bool filterFirstBillNull, bool filterFirstBillExcludeBlank,
+        DateOnly? filterChargeEnteredFrom, DateOnly? filterChargeEnteredTo, bool filterChargeEnteredNull, bool filterChargeEnteredExcludeBlank,
+        DateOnly? filterDosFrom, DateOnly? filterDosTo, bool filterDosNull)
+        =>
+        [
+            NvarcharParam("@PayerName", filterPayerName, 500),
+            NvarcharParam("@PayerTypes", PipeJoin(filterPayerTypes)),
+            NvarcharParam("@ClaimStatuses", PipeJoin(filterClaimStatuses)),
+            NvarcharParam("@ClinicNames", PipeJoin(filterClinicNames)),
+            NvarcharParam("@DenialCode", filterDenialCode, 500),
+            BitParam("@DenialCodeExcludeBlank", filterDenialCodeExcludeBlank),
+            NvarcharParam("@PayerNames", PipeJoin(filterPayerNames)),
+            BitParam("@PayerExcludeBlank", filterPayerExcludeBlank),
+            NvarcharParam("@PanelNames", PipeJoin(filterPanelNames)),
+            BitParam("@PanelExcludeBlank", filterPanelExcludeBlank),
+            NvarcharParam("@AgingBuckets", PipeJoin(filterAgingBuckets)),
+            DateParam("@FirstBillFrom", filterFirstBillFrom),
+            DateParam("@FirstBillTo", filterFirstBillTo),
+            BitParam("@FirstBillNull", filterFirstBillNull),
+            BitParam("@FirstBillExcludeBlank", filterFirstBillExcludeBlank),
+            DateParam("@ChargeEnteredFrom", filterChargeEnteredFrom),
+            DateParam("@ChargeEnteredTo", filterChargeEnteredTo),
+            BitParam("@ChargeEnteredNull", filterChargeEnteredNull),
+            BitParam("@ChargeEnteredExcludeBlank", filterChargeEnteredExcludeBlank),
+            DateParam("@DosFrom", filterDosFrom),
+            DateParam("@DosTo", filterDosTo),
+            BitParam("@DosNull", filterDosNull),
+        ];
+
+    private static List<SqlParameter> BuildLineLevelSpParameters(
+        string? filterPayerName, List<string>? filterPayerTypes, List<string>? filterClaimStatuses,
+        List<string>? filterPayStatuses, List<string>? filterCPTCodes, List<string>? filterClinicNames,
+        string? filterDenialCode)
+        =>
+        [
+            NvarcharParam("@PayerName", filterPayerName, 500),
+            NvarcharParam("@PayerTypes", PipeJoin(filterPayerTypes)),
+            NvarcharParam("@ClaimStatuses", PipeJoin(filterClaimStatuses)),
+            NvarcharParam("@PayStatuses", PipeJoin(filterPayStatuses)),
+            NvarcharParam("@CPTCodes", PipeJoin(filterCPTCodes)),
+            NvarcharParam("@ClinicNames", PipeJoin(filterClinicNames)),
+            NvarcharParam("@DenialCode", filterDenialCode, 500),
+        ];
 
     private static SqlParameter[] CloneParams(List<SqlParameter> source)
     {
         var cloned = new SqlParameter[source.Count];
         for (var i = 0; i < source.Count; i++)
-            cloned[i] = new SqlParameter(source[i].ParameterName, source[i].Value);
+            cloned[i] = new SqlParameter(source[i].ParameterName, source[i].Value ?? DBNull.Value)
+            {
+                SqlDbType = source[i].SqlDbType,
+                Size = source[i].Size,
+            };
         return cloned;
-    }
-
-    /// <summary>
-    /// Adds a date-range filter for a string-typed date column. When <paramref name="includeNull"/>
-    /// is true, rows where the column is NULL or blank are included (OR-ed with the range).
-    /// When <paramref name="excludeBlank"/> is true, rows where the column is NULL or blank are excluded.
-    /// </summary>
-    private static void AddDateRangeFilter(
-        List<string> where, List<SqlParameter> parms,
-        string column, string fromParam, string toParam,
-        DateOnly? from, DateOnly? to, bool includeNull, bool excludeBlank = false)
-    {
-        var hasFrom = from.HasValue;
-        var hasTo = to.HasValue;
-
-        if (!hasFrom && !hasTo && !includeNull && !excludeBlank) return;
-
-        // Exclude blank takes precedence � filter out NULL/blank rows
-        if (excludeBlank)
-            where.Add($"{column} IS NOT NULL AND LTRIM(RTRIM({column})) <> ''");
-
-        var parts = new List<string>();
-
-        if (hasFrom)
-        {
-            parts.Add($"TRY_CAST({column} AS DATE) >= {fromParam}");
-            parms.Add(new SqlParameter(fromParam, SqlDbType.Date) { Value = from!.Value.ToDateTime(TimeOnly.MinValue) });
-        }
-
-        if (hasTo)
-        {
-            parts.Add($"TRY_CAST({column} AS DATE) <= {toParam}");
-            parms.Add(new SqlParameter(toParam, SqlDbType.Date) { Value = to!.Value.ToDateTime(TimeOnly.MinValue) });
-        }
-
-        if (includeNull)
-        {
-            var nullClause = $"({column} IS NULL OR LTRIM(RTRIM({column})) = '')";
-            if (parts.Count > 0)
-            {
-                // NULL/blank OR within date range
-                var rangeClause = string.Join(" AND ", parts);
-                where.Add($"({nullClause} OR ({rangeClause}))");
-            }
-            else
-            {
-                where.Add(nullClause);
-            }
-        }
-        else
-        {
-            foreach (var p in parts)
-                where.Add(p);
-        }
     }
 }

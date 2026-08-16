@@ -269,6 +269,7 @@ public interface ICollectionSummaryRepository
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -281,6 +282,7 @@ public interface ICollectionSummaryRepository
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -293,7 +295,8 @@ public interface ICollectionSummaryRepository
         List<string>? filterPanelNames = null,
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
-        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null);
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null);
 
     /// <summary>Streaming counterpart of GetLineLevelDataExportAsync (see BuildClaimLevelExportQuery).</summary>
     (string Sql, List<SqlParameter> Parameters) BuildLineLevelExportQuery(
@@ -301,7 +304,8 @@ public interface ICollectionSummaryRepository
         List<string>? filterPanelNames = null,
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
-        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null);
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null);
 
     /// <summary>
     /// Returns Status Summary data: three groupings of ClaimLevelData (all records).

@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.Data.SqlClient;
 
 namespace LRN.ReportWorker.Generators;
@@ -60,13 +61,29 @@ internal static class DetailExportStreamer
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
             await using var cmd = new SqlCommand(countSql, conn) { CommandTimeout = CountTimeoutSeconds };
-            foreach (var p in parameters)
-                cmd.Parameters.Add(new SqlParameter(p.ParameterName, p.Value ?? DBNull.Value));
+            ApplyCommand(cmd, countSql, parameters);
             return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct) ?? 0);
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {
             return null;
+        }
+    }
+
+    internal static void ApplyCommand(SqlCommand cmd, string sql, List<SqlParameter> parameters)
+    {
+        cmd.CommandText = sql;
+        if (sql.StartsWith("dbo.usp_", StringComparison.OrdinalIgnoreCase)
+            || sql.StartsWith("usp_", StringComparison.OrdinalIgnoreCase))
+            cmd.CommandType = CommandType.StoredProcedure;
+
+        foreach (var p in parameters)
+        {
+            cmd.Parameters.Add(new SqlParameter(p.ParameterName, p.Value ?? DBNull.Value)
+            {
+                SqlDbType = p.SqlDbType,
+                Size = p.Size,
+            });
         }
     }
 }

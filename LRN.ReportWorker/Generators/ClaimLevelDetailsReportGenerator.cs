@@ -7,8 +7,9 @@ using Microsoft.Extensions.Logging;
 namespace LRN.ReportWorker.Generators;
 
 /// <summary>
-/// Async Claim Level Details export — streams dbo.ClaimLevelData (same filters as
-/// Dashboard/ClaimLevel) into a green-themed workbook, sheet-split every 300K rows.
+/// Async Claim Level Details export — streams dbo.ClaimLevelData using the
+/// lab's Select_Script column list (same fields as Dashboard/ClaimLevel)
+/// into a green-themed workbook, sheet-split every 300K rows.
 /// </summary>
 public sealed class ClaimLevelDetailsReportGenerator : IReportGenerator
 {
@@ -48,6 +49,7 @@ public sealed class ClaimLevelDetailsReportGenerator : IReportGenerator
             DateOnly.TryParse(s, out var d) ? d : null;
 
         var (dataSql, countSql, parameters) = _repo.BuildClaimLevelDetailsExportQuery(
+            job.LabName,
             f.PayerName, f.PayerTypes, f.ClaimStatuses, f.ClinicNames,
             f.DenialCode, f.DenialCodeExcludeBlank,
             f.PayerNames, f.PayerExcludeBlank,

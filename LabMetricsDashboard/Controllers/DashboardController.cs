@@ -25,6 +25,24 @@ public class DashboardController : Controller
         _ => string.Join(", ", values),
     };
 
+    private static string ClaimLinePageError(string labName, Exception ex)
+    {
+        if (ex is Microsoft.Data.SqlClient.SqlException sql
+            && (sql.Number == 2812 || sql.Message.Contains("Could not find stored procedure", StringComparison.OrdinalIgnoreCase)))
+        {
+            return $"Claim/Line stored procedures are not deployed on {labName}. "
+                 + "Run Sql/ClaimLineDetails_SPs.sql, then Sql/ClaimLineDetails_SPs/{{Lab}}_Details.sql on that lab database.";
+        }
+
+        if (ex is TimeoutException or OperationCanceledException
+            || (ex is Microsoft.Data.SqlClient.SqlException timed && timed.Number is -2 or 258))
+        {
+            return $"The query for {labName} took too long. Apply filters (date range, payer, clinic) and try again.";
+        }
+
+        return $"Could not load Claim/Line details for {labName}: {ex.Message}";
+    }
+
     private readonly LabSettings _labSettings;
     private readonly LabCsvFileResolver _resolver;
     private readonly CsvParserService _csvParser;
@@ -640,7 +658,6 @@ public class DashboardController : Controller
         int page, CancellationToken ct)
     {
         var connStr   = labConfig.DbConnectionString!;
-        var dbLabName = string.IsNullOrWhiteSpace(labConfig.DbLabName) ? selectedLab : labConfig.DbLabName;
 
         DateOnly.TryParse(filterFirstBillFrom, out var fbFrom);
         DateOnly.TryParse(filterFirstBillTo, out var fbTo);
@@ -652,7 +669,7 @@ public class DashboardController : Controller
         try
         {
         var result = await _claimLineRepo.GetClaimLevelAsync(
-            connStr, dbLabName,
+            connStr, selectedLab,
             filterPayerName, filterPayerTypes, filterClaimStatuses,
             filterClinicNames, filterDenialCode, filterDenialCodeExcludeBlank,
             filterPayerNames, filterPayerExcludeBlank,
@@ -706,6 +723,9 @@ public class DashboardController : Controller
             PanelNames         = result.PanelNames,
             AgingBuckets       = result.AgingBuckets,
             Records            = result.Records,
+            DisplayColumns     = result.DisplayColumns.Count > 0
+                ? result.DisplayColumns
+                : LabClaimLineColumnCatalog.GetClaimColumns(selectedLab),
             Paging             = new PageInfo(Math.Max(1, page), PageSize, result.TotalFiltered, result.TotalAll),
             DataSource         = "SQL Database",
             AnalysisRange      = analysisRange,
@@ -713,14 +733,15 @@ public class DashboardController : Controller
 
         return View(vm);
         }
-        catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or TimeoutException or OperationCanceledException)
+        catch (Exception ex)
         {
-            _logger.LogError(ex, "Claim Level query timed out or failed for lab '{LabName}'.", selectedLab);
+            _logger.LogError(ex, "Claim Level query failed for lab '{LabName}'.", selectedLab);
             return View(new ClaimLevelViewModel
             {
                 AvailableLabs = availableLabs,
                 SelectedLab   = selectedLab,
-                ErrorMessage  = $"The query for {selectedLab} took too long and timed out. This lab has a very large dataset. Please apply filters (e.g. date range, payer, clinic) to narrow the results and try again.",
+                DisplayColumns = LabClaimLineColumnCatalog.GetClaimColumns(selectedLab),
+                ErrorMessage  = ClaimLinePageError(selectedLab, ex),
             });
         }
     }
@@ -818,6 +839,8 @@ public class DashboardController : Controller
         var filteredList  = filtered.ToList();
         var currentPage   = Math.Max(1, page);
         var pagedRecords  = filteredList.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
+        foreach (var rec in pagedRecords)
+            rec.PopulateCellsFromTyped();
 
         var vm = new ClaimLevelViewModel
         {
@@ -851,6 +874,7 @@ public class DashboardController : Controller
             PayerNames         = payerNameOpts,
             PanelNames         = panelNameOpts,
             Records            = pagedRecords,
+            DisplayColumns     = LabClaimLineColumnCatalog.GetClaimColumns(selectedLab),
             Paging             = new PageInfo(currentPage, PageSize, filteredList.Count, allRecords.Count),
             ResolvedFilePath   = claimFilePath,
             DataSource         = claimFilePath is not null ? $"CSV: {claimFilePath}" : null,
@@ -903,12 +927,11 @@ public class DashboardController : Controller
         string? filterDenialCode, int page, CancellationToken ct)
     {
         var connStr   = labConfig.DbConnectionString!;
-        var dbLabName = string.IsNullOrWhiteSpace(labConfig.DbLabName) ? selectedLab : labConfig.DbLabName;
 
         try
         {
         var result = await _claimLineRepo.GetLineLevelAsync(
-            connStr, dbLabName,
+            connStr, selectedLab,
             filterPayerName, filterPayerTypes, filterClaimStatuses,
             filterPayStatuses, filterCPTCodes, filterClinicNames,
             filterDenialCode, page, PageSize, ct);
@@ -932,6 +955,9 @@ public class DashboardController : Controller
             ClinicNames         = result.ClinicNames,
             CPTCodes            = result.CPTCodes,
             Records             = result.Records,
+            DisplayColumns      = result.DisplayColumns.Count > 0
+                ? result.DisplayColumns
+                : LabClaimLineColumnCatalog.GetLineColumns(selectedLab),
             Paging              = new PageInfo(Math.Max(1, page), PageSize, result.TotalFiltered, result.TotalAll),
             DataSource          = "SQL Database",
             AnalysisRange       = analysisRange,
@@ -939,14 +965,15 @@ public class DashboardController : Controller
 
         return View(vm);
         }
-        catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or TimeoutException or OperationCanceledException)
+        catch (Exception ex)
         {
-            _logger.LogError(ex, "Line Level query timed out or failed for lab '{LabName}'.", selectedLab);
+            _logger.LogError(ex, "Line Level query failed for lab '{LabName}'.", selectedLab);
             return View(new LineLevelViewModel
             {
                 AvailableLabs = availableLabs,
                 SelectedLab   = selectedLab,
-                ErrorMessage  = $"The query for {selectedLab} took too long and timed out. This lab has a very large dataset. Please apply filters (e.g. date range, payer, clinic) to narrow the results and try again.",
+                DisplayColumns = LabClaimLineColumnCatalog.GetLineColumns(selectedLab),
+                ErrorMessage  = ClaimLinePageError(selectedLab, ex),
             });
         }
     }
@@ -1020,6 +1047,8 @@ public class DashboardController : Controller
         var filteredList  = filtered.ToList();
         var currentPage   = Math.Max(1, page);
         var pagedRecords  = filteredList.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
+        foreach (var rec in pagedRecords)
+            rec.PopulateCellsFromTyped();
 
         var vm = new LineLevelViewModel
         {
@@ -1038,6 +1067,7 @@ public class DashboardController : Controller
             ClinicNames         = clinicNames,
             CPTCodes            = cptCodes,
             Records             = pagedRecords,
+            DisplayColumns      = LabClaimLineColumnCatalog.GetLineColumns(selectedLab),
             Paging              = new PageInfo(currentPage, PageSize, filteredList.Count, allRecords.Count),
             ResolvedFilePath    = lineFilePath,
             DataSource          = lineFilePath is not null ? $"CSV: {lineFilePath}" : null,
@@ -3046,41 +3076,13 @@ public class DashboardController : Controller
 
         try
         {
-            if (!hasFilters)
-            {
-                var recentReport = TryResolveLatestProductionReportExcel(config.Reports);
-                if (recentReport is null)
-                {
-                    TempData["ExportError"] = $"No pre-generated Production Report Excel was found for {selectedLab}. Please wait for ClaimLineCSVDataCapture to generate it or apply filters to build a live export.";
-                    return RedirectToAction(nameof(ProductionSummaryReport), new { lab });
-                }
-
-                Response.Cookies.Append("prExportDone", "1", new CookieOptions
-                {
-                    Path     = "/",
-                    HttpOnly = false,
-                    SameSite = SameSiteMode.Lax,
-                    MaxAge   = TimeSpan.FromSeconds(30),
-                });
-
-                _logger.LogInformation(
-                    "[NWExcelExport] No filters for lab '{LabName}' — serving pre-generated workbook: {FilePath}",
-                    selectedLab,
-                    recentReport.FullName);
-
-                return PhysicalFile(
-                    recentReport.FullName,
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    recentReport.Name,
-                    enableRangeProcessing: true);
-            }
-
             var sw = System.Diagnostics.Stopwatch.StartNew();
             _logger.LogInformation(
-                "[NWExcelExport] START Lab={Lab} Payers={Payers} Panels={Panels}",
+                "[NWExcelExport] START Lab={Lab} Payers={Payers} Panels={Panels} HasFilters={HasFilters}",
                 selectedLab,
                 payerArg is not null ? string.Join(", ", payerArg) : "(all)",
-                panelArg is not null ? string.Join(", ", panelArg) : "(all)");
+                panelArg is not null ? string.Join(", ", panelArg) : "(all)",
+                hasFilters);
 
             var t1 = _nwSummaryRepo.GetMonthlyAsync(
                 connStr, payerArg, panelArg,
@@ -3133,36 +3135,6 @@ public class DashboardController : Controller
             _logger.LogInformation(
                 "[NWExcelExport] Data fetched in {Ms}ms — Monthly={M} panels, Weekly={W} panels",
                 sw.ElapsedMilliseconds, monthlyResult.PanelRows.Count, weeklyResult.PanelRows.Count);
-
-            // ── Phase 2 : Raw data SQL split (ClaimLevel + LineLevel) ──────
-            sw.Restart();
-            _logger.LogInformation(
-                "[ProdExcelExportSplit] NW Phase 2 START — SQL splitting ClaimLevel + LineLevel raw export data (threshold={Threshold:N0})",
-                300_000);
-
-            var claimSegmentsTask = _nwSummaryRepo.GetClaimLevelDataExportSegmentsAsync(
-                connStr, payerArg, panelArg,
-                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
-            var lineSegmentsTask = _nwSummaryRepo.GetLineLevelDataExportSegmentsAsync(
-                connStr, payerArg, panelArg,
-                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
-
-            await Task.WhenAll(claimSegmentsTask, lineSegmentsTask);
-
-            var claimSegments = claimSegmentsTask.Result;
-            var lineSegments = lineSegmentsTask.Result;
-
-            _logger.LogInformation(
-                "[ProdExcelExportSplit] NW Phase 2 DONE in {Ms}ms — " +
-                "ClaimLevel={ClaimSheets} sheet(s)/{ClaimRows:N0} rows: [{ClaimDetail}] | " +
-                "LineLevel={LineSheets} sheet(s)/{LineRows:N0} rows: [{LineDetail}]",
-                sw.ElapsedMilliseconds,
-                claimSegments.Count,
-                claimSegments.Sum(s => s.Rows.Count),
-                string.Join(", ", claimSegments.Select(s => $"'{s.SheetName}'({s.Rows.Count:N0} rows)")),
-                lineSegments.Count,
-                lineSegments.Sum(s => s.Rows.Count),
-                string.Join(", ", lineSegments.Select(s => $"'{s.SheetName}'({s.Rows.Count:N0} rows)")));
 
             var vm = new ProductionReportViewModel
             {
@@ -3242,33 +3214,65 @@ public class DashboardController : Controller
             };
 
             sw.Restart();
-            using var workbook = NorthWestProductionSummaryExcelExportBuilder.CreateWorkbook(
-                vm, selectedLab, claimSegments, lineSegments, _logger);
-
-            _logger.LogInformation(
-                "[NWExcelExport] Workbook built in {Ms}ms — {Sheets} sheets",
-                sw.ElapsedMilliseconds, workbook.Worksheets.Count);
-
-            await using var stream = new MemoryStream();
-            workbook.SaveAs(stream);
-            stream.Position = 0;
-
-            var safeLabName = string.Join("_", selectedLab.Split(
-                Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim('_');
-            var fileName = $"{safeLabName}_NWProductionSummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
-
-            Response.Cookies.Append("prExportDone", "1", new CookieOptions
+            var tempPath = Path.Combine(Path.GetTempPath(), $"nw-pr-{Guid.NewGuid():N}.xlsx");
+            try
             {
-                Path     = "/",
-                HttpOnly = false,
-                SameSite = SameSiteMode.Lax,
-                MaxAge   = TimeSpan.FromSeconds(30),
-            });
+                using (var workbook = NorthWestProductionSummaryExcelExportBuilder.CreateWorkbook(vm, selectedLab))
+                {
+                    _logger.LogInformation(
+                        "[NWExcelExport] Summary workbook built in {Ms}ms — {Sheets} sheets; streaming Claim/Line next",
+                        sw.ElapsedMilliseconds, workbook.Worksheets.Count);
+                    workbook.SaveAs(tempPath);
+                }
 
-            return File(
-                stream.ToArray(),
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                fileName);
+                sw.Restart();
+                var sqlRepo = _productionReportRepo as LRN.ProductionReports.Services.SqlProductionReportRepository
+                    ?? throw new InvalidOperationException("Production report repository must be SqlProductionReportRepository for streamed exports.");
+                var rawRows = await sqlRepo.AppendNorthWestClaimLineSheetsToFileAsync(
+                    tempPath, connStr, payerArg, panelArg,
+                    dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
+                    LabClaimLineColumnCatalog.GetClaimColumns(selectedLab),
+                    LabClaimLineColumnCatalog.GetLineColumns(selectedLab),
+                    ct);
+                _logger.LogInformation(
+                    "[NWExcelExport] Claim/Line streamed in {Ms}ms — {Raw:N0} raw rows",
+                    sw.ElapsedMilliseconds, rawRows);
+
+                var safeLabName = string.Join("_", selectedLab.Split(
+                    Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim('_');
+                var fileName = $"{safeLabName}_NWProductionSummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
+
+                Response.Cookies.Append("prExportDone", "1", new CookieOptions
+                {
+                    Path     = "/",
+                    HttpOnly = false,
+                    SameSite = SameSiteMode.Lax,
+                    MaxAge   = TimeSpan.FromSeconds(30),
+                });
+
+                var fs = new FileStream(
+                    tempPath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    64 * 1024,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan | FileOptions.DeleteOnClose);
+                return File(
+                    fs,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    fileName);
+            }
+            catch
+            {
+                try { if (System.IO.File.Exists(tempPath)) System.IO.File.Delete(tempPath); } catch { /* ignore */ }
+                throw;
+            }
+        }
+        catch (OutOfMemoryException ex)
+        {
+            _logger.LogError(ex, "NorthWest Production Report Excel export ran out of memory for lab '{LabName}'.", selectedLab);
+            TempData["ExportError"] = "Excel export ran out of memory. Retry Download Excel — the file is summary sheets only (no ClaimLevel/LineLevel raw dump).";
+            return RedirectToAction(nameof(ProductionSummaryReport), new { lab });
         }
         catch (Exception ex)
         {

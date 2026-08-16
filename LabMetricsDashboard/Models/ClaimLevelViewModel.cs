@@ -65,6 +65,9 @@ public sealed class ClaimLevelViewModel
     // Current page of records (already sliced)
     public List<ClaimRecord> Records { get; init; } = [];
 
+    /// <summary>Column headings from this lab's ClaimLevel Select_Script.</summary>
+    public IReadOnlyList<string> DisplayColumns { get; init; } = [];
+
     public PageInfo Paging { get; init; } = new(1, 50, 0, 0);
 
     /// <summary>Full path of the source CSV file that was loaded.</summary>

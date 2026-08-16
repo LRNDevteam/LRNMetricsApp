@@ -50,4 +50,71 @@ public sealed class ClaimRecord
     public string DaysToPost { get; init; } = string.Empty;
     public string ICDPointer { get; init; } = string.Empty;
     public string AgingBucket { get; init; } = string.Empty;
+
+    /// <summary>All Select_Script columns for this lab (heading → display value).</summary>
+    public Dictionary<string, string> Cells { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public string Display(string column)
+        => Cells.TryGetValue(column, out var value) ? value : string.Empty;
+
+    public void PopulateCellsFromTyped()
+    {
+        if (Cells.Count > 0) return;
+        void Put(string key, string value)
+        {
+            if (!string.IsNullOrEmpty(key)) Cells[key] = value ?? string.Empty;
+        }
+        void PutDec(string key, decimal value) => Put(key, value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        Put("ClaimID", ClaimID);
+        Put("AccessionNumber", AccessionNumber);
+        Put("PayerName_Raw", PayerName_Raw);
+        Put("PayerName", PayerName);
+        Put("Payer_Code", Payer_Code);
+        Put("Payer_Common_Code", Payer_Common_Code);
+        Put("Payer_Group_Code", Payer_Group_Code);
+        Put("Global_Payer_ID", Global_Payer_ID);
+        Put("PayerType", PayerType);
+        Put("BillingProvider", BillingProvider);
+        Put("ReferringProvider", ReferringProvider);
+        Put("ClinicName", ClinicName);
+        Put("SalesRepName", SalesRepName);
+        Put("SalesRepname", SalesRepName);
+        Put("PatientID", PatientID);
+        Put("PatientDOB", PatientDOB);
+        Put("DateOfService", DateOfService);
+        Put("DateofService", DateOfService);
+        Put("ChargeEnteredDate", ChargeEnteredDate);
+        Put("FirstBilledDate", FirstBilledDate);
+        Put("PanelName", PanelName);
+        Put("Panelname", PanelName);
+        Put("CPTCodeUnitsModifier", CPTCodeUnitsModifier);
+        Put("CPTCodeXUnitsXModifier", CPTCodeUnitsModifier);
+        Put("POS", POS);
+        Put("TOS", TOS);
+        PutDec("ChargeAmount", ChargeAmount);
+        PutDec("AllowedAmount", AllowedAmount);
+        PutDec("InsurancePayment", InsurancePayment);
+        PutDec("PatientPayment", PatientPayment);
+        PutDec("TotalPayments", TotalPayments);
+        PutDec("InsuranceAdjustments", InsuranceAdjustments);
+        PutDec("PatientAdjustments", PatientAdjustments);
+        PutDec("TotalAdjustments", TotalAdjustments);
+        PutDec("InsuranceBalance", InsuranceBalance);
+        PutDec("PatientBalance", PatientBalance);
+        PutDec("TotalBalance", TotalBalance);
+        Put("CheckDate", CheckDate);
+        Put("ClaimStatus", ClaimStatus);
+        Put("DenialCode", DenialCode);
+        Put("ICDCode", ICDCode);
+        Put("DaysToDOS", DaysToDOS);
+        Put("DaystoDOS", DaysToDOS);
+        Put("RollingDays", RollingDays);
+        Put("DaysToBill", DaysToBill);
+        Put("DaystoBill", DaysToBill);
+        Put("DaysToPost", DaysToPost);
+        Put("DaystoPost", DaysToPost);
+        Put("ICDPointer", ICDPointer);
+        Put("AgingBucket", AgingBucket);
+    }
 }

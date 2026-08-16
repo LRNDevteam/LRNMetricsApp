@@ -314,6 +314,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             ws.Row(row).Style.Font.Bold = true;
             row++;
 
+            int firstChild = row;
             int payerIdx = 0;
             foreach (var payer in panel.TopPayers)
             {
@@ -339,6 +340,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
                 row++;
                 payerIdx++;
             }
+            GroupChildRows(ws, firstChild, row - 1);
             panelIdx++;
         }
 
@@ -381,6 +383,8 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         // Append weekly section on the same sheet
         if (vm.WeeklyPanelRows.Count > 0)
             AppendWeeklySection(ws, vm, row + 2);
+
+        FinishOutline(ws);
     }
 
     private static void AppendWeeklySection(IXLWorksheet ws, ProductionReportViewModel vm, int startRow)
@@ -452,6 +456,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             ws.Row(row).Style.Font.Bold = true;
             row++;
 
+            int firstChild = row;
             int payerIdx = 0;
             foreach (var payer in panel.TopPayers)
             {
@@ -469,6 +474,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
                 row++;
                 payerIdx++;
             }
+            GroupChildRows(ws, firstChild, row - 1);
             panelIdx++;
         }
 
@@ -491,6 +497,8 @@ public static class NorthWestProductionSummaryExcelExportBuilder
 
         WriteFooterNote(ws, row, colCount,
             "*The above table is based on 'Date of Entry' and the total numbers include 'ALL' claims billed.");
+
+        ExcelTheme.AutoFitColumns(ws, colCount);
     }
 
     // ?? Coding (Unbilled) ?????????????????????????????????????????????????????
@@ -522,6 +530,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             ws.Row(row).Style.Font.Bold = true;
             row++;
 
+            int firstChild = row;
             foreach (var cpt in panel.CptRows)
             {
                 dataIdx++;
@@ -531,6 +540,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
                 WriteCurrencyCell(ws, row, 3, cpt.TotalCharges, bg);
                 row++;
             }
+            GroupChildRows(ws, firstChild, row - 1);
             dataIdx++;
         }
 
@@ -542,6 +552,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         ws.Cell(row, 3).Style.NumberFormat.Format = "$#,##0";
 
         ExcelTheme.AutoFitColumns(ws, colCount);
+        FinishOutline(ws);
     }
 
     // ?? Payer Breakdown ???????????????????????????????????????????????????????
@@ -1016,6 +1027,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             ws.Row(row).Style.Font.Bold = true;
             row++;
 
+            int firstChild = row;
             int payerIdx = 0;
             foreach (var payer in src.TopPayers)
             {
@@ -1040,6 +1052,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
                 row++;
                 payerIdx++;
             }
+            GroupChildRows(ws, firstChild, row - 1);
         }
 
         ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
@@ -1069,6 +1082,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         ws.Cell(row, gtCol).Style.NumberFormat.Format = "$#,##0";
 
         ExcelTheme.AutoFitColumns(ws, colCount);
+        FinishOutline(ws);
     }
 
     // ?? Payer � Panel ?????????????????????????????????????????????????????????
@@ -1637,4 +1651,20 @@ public static class NorthWestProductionSummaryExcelExportBuilder
 
     private static string Truncate(string name) =>
         name.Length <= 31 ? name : name[..31];
+
+    /// <summary>
+    /// Outlines child rows under the parent row above them so Excel shows +/- grouping.
+    /// </summary>
+    private static void GroupChildRows(IXLWorksheet ws, int firstChildRow, int lastChildRow)
+    {
+        if (lastChildRow < firstChildRow) return;
+        for (int r = firstChildRow; r <= lastChildRow; r++)
+            ws.Row(r).OutlineLevel = 1;
+    }
+
+    private static void FinishOutline(IXLWorksheet ws)
+    {
+        ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
+        ws.CollapseRows();
+    }
 }

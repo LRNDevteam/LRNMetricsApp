@@ -70,7 +70,8 @@ public sealed record ClaimLevelResult(
     List<string> AgingBuckets,
     List<ClaimRecord> Records,
     int TotalFiltered,
-    int TotalAll);
+    int TotalAll,
+    IReadOnlyList<string> DisplayColumns);
 
 /// <summary>Result container for the Line Level details page.</summary>
 public sealed record LineLevelResult(
@@ -81,4 +82,5 @@ public sealed record LineLevelResult(
     List<string> CPTCodes,
     List<LineRecord> Records,
     int TotalFiltered,
-    int TotalAll);
+    int TotalAll,
+    IReadOnlyList<string> DisplayColumns);

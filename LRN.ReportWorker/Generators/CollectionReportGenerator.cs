@@ -161,6 +161,8 @@ public sealed class CollectionReportGenerator : IReportGenerator
 
         var claimPanelColumn = LabCollectionPrefix.GetPanelColumn(job.LabName);   // PanelType (NW) / PanelName
         string[] excludeColumns = ["RecordId", "FileLogId"];
+        var claimInclude = LabClaimLineColumnCatalog.GetClaimColumns(job.LabName);
+        var lineInclude  = LabClaimLineColumnCatalog.GetLineColumns(job.LabName);
 
         var claimRows = await sqlRepo.AppendSpExportSheetsToFileAsync(
             tempPath, connStr,
@@ -174,6 +176,7 @@ public sealed class CollectionReportGenerator : IReportGenerator
             filterCheckDateFrom: cdFrom, filterCheckDateTo: cdTo,
             panelColumn: claimPanelColumn,
             excludeColumns: excludeColumns,
+            includeColumns: claimInclude,
             ct: ct).ConfigureAwait(false);
         await progress(55);
 
@@ -189,6 +192,7 @@ public sealed class CollectionReportGenerator : IReportGenerator
             filterCheckDateFrom: cdFrom, filterCheckDateTo: cdTo,
             panelColumn: null,   // line table uses Panelname for every lab (SP default)
             excludeColumns: excludeColumns,
+            includeColumns: lineInclude,
             ct: ct).ConfigureAwait(false);
 
         await progress(95);

@@ -1,6 +1,6 @@
 @model ClaimLevelViewModel
 @{
-    ViewData["Title"]       = $"Claim Level � {Model.SelectedLab}";
+    ViewData["Title"]       = $"Claim Level - {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Claim Level Details";
 
@@ -116,7 +116,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search payer names�" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search payer names..." autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var pn in Model.PayerNames)
                                 {
@@ -140,7 +140,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search panels�" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search panels..." autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var pl in Model.PanelNames)
                                 {
@@ -164,7 +164,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search payer types�" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search payer types..." autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var pt in Model.PayerTypes)
                                 {
@@ -184,7 +184,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search statuses�" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search statuses..." autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var cs in Model.ClaimStatuses)
                                 {
@@ -204,7 +204,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search clinics�" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search clinics..." autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var cn in Model.ClinicNames)
                                 {
@@ -224,7 +224,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search buckets�" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search buckets..." autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var ab in Model.AgingBuckets)
                                 {
@@ -241,7 +241,7 @@
                 <div class="col-sm-6 col-md-3">
                     <label class="form-label fw-semibold mb-1" style="font-size:.75rem">DENIAL CODE</label>
                     <input type="text" name="filterDenialCode" value="@Model.FilterDenialCode"
-                           class="form-control form-control-sm" placeholder="Search�" />
+                           class="form-control form-control-sm" placeholder="Search..." />
                     <label class="form-check-label mt-1" style="font-size:.7rem">
                         <input type="checkbox" name="filterDenialCodeExcludeBlank" value="true" class="form-check-input"
                                @(Model.FilterDenialCodeExcludeBlank ? "checked" : "") style="width:.85em;height:.85em" /> Exclude Blank
@@ -356,35 +356,18 @@ else
         <table class="table table-sm table-bordered align-middle cl-table mb-0">
             <thead>
                 <tr>
-                    <th>Claim ID</th>
-                    <th>Accession #</th>
-                    <th>Date of Service</th>
-                    <th>First Billed</th>
-                    <th>Charge Entered</th>
-                    <th>Panel</th>
-                    <th>CPT�Units�Modifier</th>
-                    <th>Payer Name</th>
-                    <th>Payer Type</th>
-                    <th>Clinic</th>
-                    <th>Aging Bucket</th>
-                    <th style="text-align:right">Charges</th>
-                    <th style="text-align:right">Allowed</th>
-                    <th style="text-align:right">Ins. Payment</th>
-                    <th style="text-align:right">Pat. Payment</th>
-                    <th style="text-align:right">Total Payments</th>
-                    <th style="text-align:right">Total Balance</th>
-                    <th>Claim Status</th>
-                    <th>Denial Code</th>
-                    <th>ICD Code</th>
-                    <th style="text-align:center">Days to Bill</th>
-                    <th style="text-align:center">Days to Post</th>
+                    @foreach (var col in Model.DisplayColumns)
+                    {
+                        var money = LabClaimLineColumnCatalog.IsMoneyColumn(col);
+                        <th style="@(money ? "text-align:right" : null)">@col</th>
+                    }
                 </tr>
             </thead>
             <tbody>
                 @if (!Model.Records.Any())
                 {
                     <tr>
-                        <td colspan="22" class="text-center text-muted py-4">
+                        <td colspan="@(Model.DisplayColumns.Count > 0 ? Model.DisplayColumns.Count : 1)" class="text-center text-muted py-4">
                             No records match the selected filters.
                         </td>
                     </tr>
@@ -392,30 +375,37 @@ else
                 @foreach (var r in Model.Records)
                 {
                     <tr>
-                        <td>@r.ClaimID</td>
-                        <td>@r.AccessionNumber</td>
-                        <td>@r.DateOfService</td>
-                        <td>@r.FirstBilledDate</td>
-                        <td>@r.ChargeEnteredDate</td>
-                        <td>@r.PanelName</td>
-                        <td>@r.CPTCodeUnitsModifier</td>
-                        <td>@r.PayerName</td>
-                        <td><span class="badge @PayerTypeBadge(r.PayerType)">@r.PayerType</span></td>
-                        <td>@r.ClinicName</td>
-                        <td><span class="badge bg-secondary">@r.AgingBucket</span></td>
-                        <td class="amt">@r.ChargeAmount.ToString("C")</td>
-                        <td class="amt">@r.AllowedAmount.ToString("C")</td>
-                        <td class="amt">@r.InsurancePayment.ToString("C")</td>
-                        <td class="amt">@r.PatientPayment.ToString("C")</td>
-                        <td class="amt fw-semibold text-success">@r.TotalPayments.ToString("C")</td>
-                        <td class="amt fw-semibold @(r.TotalBalance > 0 ? "text-danger" : "text-muted")">
-                            @r.TotalBalance.ToString("C")
-                        </td>
-                        <td><span class="badge @ClaimStatusBadge(r.ClaimStatus)">@r.ClaimStatus</span></td>
-                        <td>@r.DenialCode</td>
-                        <td>@r.ICDCode</td>
-                        <td style="text-align:center">@r.DaysToBill</td>
-                        <td style="text-align:center">@r.DaysToPost</td>
+                        @foreach (var col in Model.DisplayColumns)
+                        {
+                            var val = r.Display(col);
+                            if (LabClaimLineColumnCatalog.IsMoneyColumn(col))
+                            {
+                                if (decimal.TryParse(val, NumberStyles.Any, CultureInfo.InvariantCulture, out var amt))
+                                {
+                                    <td class="amt">@amt.ToString("C")</td>
+                                }
+                                else
+                                {
+                                    <td class="amt">@val</td>
+                                }
+                            }
+                            else if (col.Equals("PayerType", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <td><span class="badge @PayerTypeBadge(val)">@val</span></td>
+                            }
+                            else if (col.Equals("ClaimStatus", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <td><span class="badge @ClaimStatusBadge(val)">@val</span></td>
+                            }
+                            else if (col.Equals("AgingBucket", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <td><span class="badge bg-secondary">@val</span></td>
+                            }
+                            else
+                            {
+                                <td>@val</td>
+                            }
+                        }
                     </tr>
                 }
             </tbody>
@@ -426,7 +416,7 @@ else
 <partial name="_Pager" model="Model.Paging" />
 
 @functions {
-    static string PayerTypeBadge(string payerType) => payerType switch
+    static string PayerTypeBadge(string? payerType) => (payerType ?? string.Empty) switch
     {
         var s when s.StartsWith("MC", StringComparison.OrdinalIgnoreCase) => "bg-primary",
         var s when s.StartsWith("CC", StringComparison.OrdinalIgnoreCase) => "bg-info text-dark",
@@ -434,7 +424,7 @@ else
         _ => "bg-secondary"
     };
 
-    static string ClaimStatusBadge(string status) => status switch
+    static string ClaimStatusBadge(string? status) => status switch
     {
         "Fully Paid"             => "bg-success",
         "No Response"            => "bg-warning text-dark",
@@ -556,13 +546,13 @@ else
 
         var original = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing�';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing...';
 
         fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
             .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
             .then(function (res) {
                 if (res.ok) {
-                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating � watch Reports ??';
+                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating - watch Reports';
                     if (window.lrnShowReportAlert) window.lrnShowReportAlert('success');
                     if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
                     setTimeout(function () { btn.disabled = false; btn.innerHTML = original; }, 8000);

@@ -6,8 +6,9 @@ using Microsoft.Extensions.Logging;
 namespace LRN.ReportWorker.Generators;
 
 /// <summary>
-/// Async Line Level Details export — streams dbo.LineLevelData (same filters as
-/// Dashboard/LineLevel) into a green-themed workbook, sheet-split every 300K rows.
+/// Async Line Level Details export — streams dbo.LineLevelData using the
+/// lab's Select_Script column list (same fields as Dashboard/LineLevel)
+/// into a green-themed workbook, sheet-split every 300K rows.
 /// </summary>
 public sealed class LineLevelDetailsReportGenerator : IReportGenerator
 {
@@ -45,6 +46,7 @@ public sealed class LineLevelDetailsReportGenerator : IReportGenerator
 
         var f = LineLevelDetailsFilters.FromJson(job.FilterDetailsJson);
         var (dataSql, countSql, parameters) = _repo.BuildLineLevelDetailsExportQuery(
+            job.LabName,
             f.PayerName, f.PayerTypes, f.ClaimStatuses, f.PayStatuses,
             f.CPTCodes, f.ClinicNames, f.DenialCode);
 
