@@ -82,6 +82,8 @@ public sealed class CptLookupRow
     public string? PayerCommonCode { get; set; }
     public int? GlobalPayerId { get; set; }
     public string? WindowType { get; set; }
+    /// <summary>CPTAverage.WindowBasis — what the window is measured against (e.g. DOS).</summary>
+    public string? WindowBasis { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
     public DateTime? AsOfDate { get; set; }
@@ -92,6 +94,8 @@ public sealed class CptLookupRow
     public decimal? AvgAllowedAmountPerUnit { get; set; }
     public decimal? AvgPaidAmountPerUnit { get; set; }
     public decimal? AvgPatientResponsibilityPerUnit { get; set; }
+    /// <summary>What the patient actually paid, as opposed to what they were responsible for.</summary>
+    public decimal? AvgPatientPaidAmountPerUnit { get; set; }
     public decimal? MedianPaidAmount { get; set; }
     public decimal? P25PaidAmount { get; set; }
     public decimal? P75PaidAmount { get; set; }
@@ -135,6 +139,8 @@ public sealed class PanelLookupRow
     public string? PayerId { get; set; }
     public string? PayerDisplayName { get; set; }
     public string? WindowType { get; set; }
+    /// <summary>PanelAverage.WindowBasis — Billed or DOS. A panel repeats once per basis.</summary>
+    public string? WindowBasis { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
     public DateTime? AsOfDate { get; set; }
@@ -142,6 +148,8 @@ public sealed class PanelLookupRow
     public decimal? AvgAllowedAmount { get; set; }
     public decimal? AvgPaidAmount { get; set; }
     public decimal? AvgPatientResponsibility { get; set; }
+    /// <summary>What the patient actually paid, as opposed to what they were responsible for.</summary>
+    public decimal? AvgPatientPaidAmount { get; set; }
     public decimal? MedianPaidAmount { get; set; }
     public decimal? P25PaidAmount { get; set; }
     public decimal? P75PaidAmount { get; set; }

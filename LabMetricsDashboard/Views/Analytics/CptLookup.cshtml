@@ -53,8 +53,11 @@
 
     .cl-grid-wrap { position: relative; }
     .cl-grid-scroll { overflow: auto; max-height: calc(100vh - 430px); min-height: 240px; }
-    /* 15 columns once the per-unit mode/median rates are shown — the wrapper scrolls. */
-    .cl-table { min-width: 1560px; font-size: .8rem; margin-bottom: 0; }
+    /* The wrapper scrolls horizontally; min-width is per tab because the CPT tab carries 21
+       columns and the panel tab 20 — one shared value over-stretches whichever has fewer. */
+    .cl-table { font-size: .8rem; margin-bottom: 0; }
+    .cl-table.tab-cpt { min-width: 2280px; }
+    .cl-table.tab-panel { min-width: 2150px; }
     .cl-table th, .cl-table td { border: 1px solid #d8e1ee; }
     .cl-table thead th { position: sticky; top: 0; z-index: 2; background: #f8fafc; color: #0f172a; white-space: nowrap; font-size: .72rem; text-transform: uppercase; letter-spacing: .02em; }
     .cl-table thead th.cl-sort { cursor: pointer; user-select: none; }
@@ -185,7 +188,7 @@
         </div>
         <div class="cl-loader" id="gridLoader"><div class="cl-loader-box"><span class="spinner-border spinner-border-sm"></span><span>Loading&hellip;</span></div></div>
         <div class="cl-grid-scroll">
-            <table class="table table-sm table-hover table-bordered align-middle cl-table">
+            <table id="clTable" class="table table-sm table-hover table-bordered align-middle cl-table tab-cpt">
                 <thead><tr id="headRow"></tr></thead>
                 <tbody id="rows"></tbody>
             </table>
@@ -229,10 +232,13 @@
 
     <p class="cl-note mb-0">
         View-only reference data. Click a row to compare it across every time window; click a column header to sort.
-        Mode and median rates come from <code>LabModes</code>/<code>LabMedians</code>, matched on lab, CPT, panel, payer and window.
+        On both tabs a row repeats once per <em>Window Basis</em> (<code>Billed</code> and <code>DOS</code> are separate
+        rows for the same window), so otherwise-matching rows are not duplicates.
+        Mode and median rates come from <code>LabModes</code>/<code>LabMedians</code>, matched on lab, CPT, panel, payer and
+        window; they are in the drill-down below rather than the grid.
         A value shown as <span class="cl-rate-lab">~$0.00</span> is the lab-wide rate, used where that source has no row for
         the specific payer; &mdash; means it has no matching row at all. On the panel tab the mode is the average of the
-        per-CPT modes for that panel &mdash; <em>Mode CPTs</em> is how many CPT codes that average covers.
+        per-CPT modes for that panel, and the drill-down reports how many CPT codes that average covers.
     </p>
 </div>
 
@@ -260,44 +266,58 @@
     const WIN_ORDER = ['Rolling90', 'Rolling180', 'YTD'];
 
     // Column sets per tab. `key` doubles as the sortColumn sent to the API.
+    // Column order mirrors the CPTAverage select the team works from, left to right. The
+    // mode/median rate columns are deliberately not here — they live in the drill-down below,
+    // which is unchanged.
     const CPT_COLUMNS = [
-        // Lab first: with the Lab filter on "All Labs" the grid interleaves rows from every lab,
-        // and CPT + panel + payer alone do not say which one a row belongs to.
-        { key: 'labName', label: 'Lab', render: r => text(r.labName) },
-        { key: 'cptCode', label: 'CPT', render: r => `<span class="cl-code">${esc(r.cptCode)}</span>` },
-        { key: 'panelName', label: 'Panel', render: r => text(r.panelName) },
-        { key: 'payerDisplayName', label: 'Payer', render: r => payer(r.payerDisplayName) },
-        { key: 'windowType', label: 'Win', render: r => `<span class="cl-win-badge">${esc(WIN_LABEL[r.windowType] || r.windowType || '')}</span>` },
-        { key: 'avgAllowedAmountPerUnit', label: 'Avg allowed/unit', money: true },
-        { key: 'avgPaidAmountPerUnit', label: 'Avg paid/unit', money: true },
-        { key: 'medianPaidAmount', label: 'Median paid', money: true },
-        { key: 'modeAllowedAmount', label: 'Mode allowed', num: true, render: r => rate(r.modeAllowedAmount, r.modeMatch) },
-        { key: 'modeInsurancePaymentAmount', label: 'Mode ins. paid', num: true, render: r => rate(r.modeInsurancePaymentAmount, r.modeMatch) },
-        { key: 'allowedAmountPerUnitMode', label: 'Allowed/unit (mode)', num: true, render: r => rate(r.allowedAmountPerUnitMode, r.modeMatch) },
-        { key: 'insurancePaymentPerUnitMode', label: 'Ins. paid/unit (mode)', num: true, render: r => rate(r.insurancePaymentPerUnitMode, r.modeMatch) },
-        { key: 'medianAllowedAmount', label: 'Median allowed', num: true, render: r => rate(r.medianAllowedAmount, r.medianMatch) },
-        { key: 'medianInsurancePaymentAmount', label: 'Median ins. paid', num: true, render: r => rate(r.medianInsurancePaymentAmount, r.medianMatch) },
-        { key: 'paidLineCount', label: 'Paid lines', num: true, render: r => lines(r.paidLineCount, r.totalLineCount) },
-        { key: 'denialRate', label: 'Denial', num: true, render: r => denial(r.denialRate) }
+        { key: 'cptCode', label: 'CPT Code', render: r => `<span class="cl-code">${esc(r.cptCode)}</span>` },
+        { key: 'labName', label: 'Lab Name', render: r => text(r.labName) },
+        { key: 'payerDisplayName', label: 'Payer Name', render: r => payer(r.payerDisplayName) },
+        { key: 'panelName', label: 'Panel Name', render: r => text(r.panelName) },
+        { key: 'avgUnits', label: 'Avg Units', num: true, render: r => count(r.avgUnits) },
+        { key: 'windowType', label: 'Window Type', render: r => `<span class="cl-win-badge">${esc(WIN_LABEL[r.windowType] || r.windowType || '')}</span>` },
+        // The same CPT/payer/panel/window appears once per basis (Billed vs DOS); without this
+        // column those rows look like duplicates.
+        { key: 'windowBasis', label: 'Window Basis', render: r => text(r.windowBasis) },
+        { key: 'startDate', label: 'Start DOS', render: r => dateCell(r.startDate) },
+        { key: 'endDate', label: 'End DOS', render: r => dateCell(r.endDate) },
+        { key: 'paidLineCount', label: 'Paid Lines', num: true, render: r => count(r.paidLineCount) },
+        { key: 'avgChargeAmountPerUnit', label: 'Avg Charge/Unit', money: true },
+        { key: 'avgPaidAmountPerUnit', label: 'Avg Paid/Unit', money: true },
+        { key: 'avgAllowedAmountPerUnit', label: 'Avg Allowed/Unit', money: true },
+        { key: 'avgPatientResponsibilityPerUnit', label: 'Avg Pt Resp/Unit', money: true },
+        { key: 'avgPatientPaidAmountPerUnit', label: 'Avg Pt Paid/Unit', money: true },
+        { key: 'medianPaidAmount', label: 'Median Paid', money: true },
+        { key: 'p25PaidAmount', label: 'P25 Paid', money: true },
+        { key: 'p75PaidAmount', label: 'P75 Paid', money: true },
+        { key: 'totalLineCount', label: 'Total Lines', num: true, render: r => count(r.totalLineCount) },
+        { key: 'deniedLineCount', label: 'Denied Lines', num: true, render: r => count(r.deniedLineCount) },
+        { key: 'adjustedLineCount', label: 'Adjusted Lines', num: true, render: r => count(r.adjustedLineCount) }
     ];
 
+    // Same order as the CPT tab, adapted to PanelAverage: Panel leads in place of CPT, there is
+    // no Avg Units at panel level, and the amounts are whole-claim rather than per-unit.
     const PANEL_COLUMNS = [
-        { key: 'labName', label: 'Lab', render: r => text(r.labName) },
-        { key: 'panelName', label: 'Panel', render: r => text(r.panelName) },
+        { key: 'panelName', label: 'Panel Name', render: r => text(r.panelName) },
+        { key: 'labName', label: 'Lab Name', render: r => text(r.labName) },
+        { key: 'payerDisplayName', label: 'Payer Name', render: r => payer(r.payerDisplayName) },
         { key: 'payerId', label: 'Payer ID', render: r => r.payerId ? `<span class="cl-code">${esc(r.payerId)}</span>` : `<span class="cl-muted">none</span>` },
-        { key: 'payerDisplayName', label: 'Payer', render: r => payer(r.payerDisplayName) },
-        { key: 'windowType', label: 'Win', render: r => `<span class="cl-win-badge">${esc(WIN_LABEL[r.windowType] || r.windowType || '')}</span>` },
-        { key: 'avgChargeAmount', label: 'Avg charge', money: true },
-        { key: 'avgAllowedAmount', label: 'Avg allowed', money: true },
-        { key: 'avgPaidAmount', label: 'Avg paid', money: true },
-        { key: 'medianPaidAmount', label: 'Median paid', money: true },
-        { key: 'p25PaidAmount', label: 'P25', money: true },
-        { key: 'p75PaidAmount', label: 'P75', money: true },
-        { key: 'modeAllowedAmount', label: 'Mode allowed', num: true, render: r => rate(r.modeAllowedAmount, r.modeMatch) },
-        { key: 'modeInsurancePaymentAmount', label: 'Mode ins. paid', num: true, render: r => rate(r.modeInsurancePaymentAmount, r.modeMatch) },
-        { key: 'modeCptCount', label: 'Mode CPTs', num: true, render: r => r.modeCptCount == null ? DASH : num.format(r.modeCptCount) },
-        { key: 'paidLineCount', label: 'Paid lines', num: true, render: r => lines(r.paidLineCount, r.totalLineCount) },
-        { key: 'denialRate', label: 'Denial', num: true, render: r => denial(r.denialRate) }
+        { key: 'windowType', label: 'Window Type', render: r => `<span class="cl-win-badge">${esc(WIN_LABEL[r.windowType] || r.windowType || '')}</span>` },
+        { key: 'windowBasis', label: 'Window Basis', render: r => text(r.windowBasis) },
+        { key: 'startDate', label: 'Start DOS', render: r => dateCell(r.startDate) },
+        { key: 'endDate', label: 'End DOS', render: r => dateCell(r.endDate) },
+        { key: 'paidLineCount', label: 'Paid Lines', num: true, render: r => count(r.paidLineCount) },
+        { key: 'avgChargeAmount', label: 'Avg Charge', money: true },
+        { key: 'avgPaidAmount', label: 'Avg Paid', money: true },
+        { key: 'avgAllowedAmount', label: 'Avg Allowed', money: true },
+        { key: 'avgPatientResponsibility', label: 'Avg Pt Resp', money: true },
+        { key: 'avgPatientPaidAmount', label: 'Avg Pt Paid', money: true },
+        { key: 'medianPaidAmount', label: 'Median Paid', money: true },
+        { key: 'p25PaidAmount', label: 'P25 Paid', money: true },
+        { key: 'p75PaidAmount', label: 'P75 Paid', money: true },
+        { key: 'totalLineCount', label: 'Total Lines', num: true, render: r => count(r.totalLineCount) },
+        { key: 'deniedLineCount', label: 'Denied Lines', num: true, render: r => count(r.deniedLineCount) },
+        { key: 'adjustedLineCount', label: 'Adjusted Lines', num: true, render: r => count(r.adjustedLineCount) }
     ];
 
     let tab = 'cpt';
@@ -314,6 +334,15 @@
     function money(v) { return (v === null || v === undefined || v === '') ? DASH : esc(usd.format(v)); }
     function text(v) { return (v === null || v === undefined || v === '') ? `<span class="cl-muted">${DASH}</span>` : esc(v); }
     function payer(v) { return (v === null || v === undefined || v === '') ? `<span class="cl-muted">Unspecified</span>` : esc(v); }
+    function count(v) { return (v === null || v === undefined) ? DASH : num.format(v); }
+    // Take the date straight off the ISO string rather than through Date(): these are DOS dates
+    // with no meaningful time, and parsing a local midnight then formatting it shifts the day
+    // backwards in any positive-offset timezone.
+    function dateCell(v) {
+        if (v === null || v === undefined || v === '') return DASH;
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v));
+        return m ? esc(`${m[1]}-${m[2]}-${m[3]}`) : esc(String(v));
+    }
     function lines(paid, total) {
         if (paid === null || paid === undefined) return DASH;
         const t = (total === null || total === undefined) ? '' : `<span class="text-muted"> / ${num.format(total)}</span>`;
@@ -666,6 +695,8 @@
         // The CPT code filter is meaningless on the panel tab.
         $('cptCodeField').style.display = next === 'cpt' ? '' : 'none';
         $('gridTitle').textContent = next === 'cpt' ? 'CPT results' : 'Panel results';
+        $('clTable').classList.toggle('tab-cpt', next === 'cpt');
+        $('clTable').classList.toggle('tab-panel', next === 'panel');
         sortColumn = next === 'cpt' ? 'cptCode' : 'panelName';
         sortDirection = 'asc';
         page = 1;
