@@ -267,11 +267,18 @@ public class UserReportsController : Controller
     }
 
     /// <summary>
-    /// GET /UserReports/Download?lab=…&id=…&token=…
+    /// POST /UserReports/Download?lab=…&id=…&token=…
     /// Auth + ownership + token verified against the lab DB; file streamed
     /// (never redirected/exposed), then status → Downloaded.
+    ///
+    /// POST rather than GET for two reasons: a GET cannot carry an antiforgery token, and
+    /// this action is not a pure read — MarkDownloadedAsync below flips the row to Downloaded
+    /// and increments DownloadCount, so it must not be reachable by a cross-site request that
+    /// merely causes the browser to navigate. lab/id/token still bind from the query string.
+    /// Trigger it with lrnPostDownload(url) rather than a plain link.
     /// </summary>
-    [HttpGet]
+    [HttpPost]
+    [ValidateAntiForgeryToken]
     public async Task<IActionResult> Download(string lab, long id, Guid token, CancellationToken ct)
     {
         // Whole action wrapped — GetForDownloadAsync/GetFilePathAsync/MarkDownloadedAsync

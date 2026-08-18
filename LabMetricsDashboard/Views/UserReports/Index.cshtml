@@ -292,10 +292,14 @@
                         <div class="ur-actions">
                             @if (r.Status.IsDownloadable())
                             {
-                                <a class="btn btn-sm btn-success"
-                                   href="@Url.Action("Download", "UserReports", new { lab = r.LabName, id = r.ReportId, token = r.DownloadToken })">
+                                @* Download is a POST so the antiforgery token can be sent; a plain
+                                   link cannot carry one. lrnPostDownload (in _Layout) submits a
+                                   hidden form, which keeps the browser's native Save dialog. *@
+                                <button type="button" class="btn btn-sm btn-success ur-download"
+                                        data-url="@Url.Action("Download", "UserReports", new { lab = r.LabName, id = r.ReportId, token = r.DownloadToken })"
+                                        title="Download">
                                     <i class="bi bi-download"></i>
-                                </a>
+                                </button>
                             }
                             @if (r.Status == ReportStatus.Failed)
                             {
@@ -370,6 +374,12 @@
     document.addEventListener('click', function (e) {
         var b = e.target.closest('button');
         if (!b) return;
+        if (b.classList.contains('ur-download')) {
+            // POSTs a hidden form carrying the antiforgery token; navigates to the file
+            // response, so unlike the actions below there is nothing to reload afterwards.
+            window.lrnPostDownload(b.getAttribute('data-url'));
+            return;
+        }
         if (b.classList.contains('ur-delete')) {
             if (confirm('Delete this report?')) post(deleteUrl, b.getAttribute('data-lab'), b.getAttribute('data-id'));
         }

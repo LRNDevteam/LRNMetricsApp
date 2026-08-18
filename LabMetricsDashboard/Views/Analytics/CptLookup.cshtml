@@ -739,7 +739,10 @@
     // cannot finish inside the dashboard's 120s HttpClient timeout, which is why the default
     // path below hands the job to LRN.ReportWorker instead.
     function legacyDownload() {
-        window.location = (tab === 'cpt' ? urls.cptExport : urls.panelExport) + '?' + new URLSearchParams(filterParams());
+        // POST, not window.location: ExportCpt/ExportPanel validate an antiforgery token and a
+        // navigation cannot carry one. lrnPostDownload (in _Layout) submits a hidden form, so
+        // the filters still ride on the query string and the Save dialog behaves as before.
+        window.lrnPostDownload((tab === 'cpt' ? urls.cptExport : urls.panelExport) + '?' + new URLSearchParams(filterParams()));
     }
 
     $('exportBtn').onclick = () => {

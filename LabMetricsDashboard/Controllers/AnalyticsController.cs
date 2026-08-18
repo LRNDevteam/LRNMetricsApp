@@ -81,14 +81,20 @@ public sealed class AnalyticsController : Controller
     public async Task<IActionResult> LookupLabs(CancellationToken ct)
         => Json(await _api.GetLabsAsync(ct));
 
-    [HttpGet]
+    // POST, not GET, so the antiforgery token can be validated: a GET cannot carry one, and
+    // these actions are reached from script rather than from a link the user can bookmark.
+    // The filters still ride on the query string — ExportCptAsync reads Request.Query — so
+    // only the verb and the token change. Trigger them with lrnPostDownload(url) in the view.
+    [HttpPost]
+    [ValidateAntiForgeryToken]
     public async Task<IActionResult> ExportCpt(CancellationToken ct)
     {
         var result = await _api.ExportCptAsync(Request.Query, ct);
         return File(result.Content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", result.FileName);
     }
 
-    [HttpGet]
+    [HttpPost]
+    [ValidateAntiForgeryToken]
     public async Task<IActionResult> ExportPanel(CancellationToken ct)
     {
         var result = await _api.ExportPanelAsync(Request.Query, ct);
