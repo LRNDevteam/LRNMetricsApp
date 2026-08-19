@@ -13,8 +13,8 @@ namespace LRN.ReportWorker.Generators;
 /// reliably blew past the dashboard's 120s HttpClient timeout and the user got a
 /// TaskCanceledException instead of a file. Queued here, the same work has no request clock.
 ///
-/// This report is NOT per-lab. It reads LRNMaster (CPTAverage / PanelAverage / LabModes /
-/// LabMedians) and its Lab filter is optional, so it is queued against the shared
+/// This report is NOT per-lab. It reads LRNMaster (CPTAverage / PanelAverage) and its
+/// Lab filter is optional, so it is queued against the shared
 /// <see cref="ReportQueueLabs.Master"/> entry — whose DbConnectionString IS LRNMaster.
 /// That is also how the connection reaches this service without adding one to appsettings:
 /// it arrives on the claimed job's own lab config, same as every other queued report.

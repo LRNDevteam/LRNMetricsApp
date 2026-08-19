@@ -9,8 +9,8 @@ namespace LabMetricsDashboard.Controllers;
 
 /// <summary>
 /// Analytics &gt; CPT &amp; Panel Lookup — a single view-only screen backed by
-/// LRN.ReportsApi over four LRNMaster tables: dbo.CPTAverage and dbo.PanelAverage
-/// (averages) plus dbo.LabModes and dbo.LabMedians (mode/median rates).
+/// LRN.ReportsApi over two LRNMaster tables: dbo.CPTAverage and dbo.PanelAverage,
+/// each carrying its own averages and mode/median columns.
 ///
 /// This replaces the previous separate Modes and Median list pages; both data
 /// sets now appear as rate columns on the CPT tab of this screen.

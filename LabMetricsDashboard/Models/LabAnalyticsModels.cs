@@ -1,11 +1,11 @@
 namespace LabMetricsDashboard.Models;
 
 // ── Analytics: CPT & Panel Lookup ────────────────────────────────────────────
-// One screen over four LRNMaster tables — dbo.CPTAverage and dbo.PanelAverage
-// for the averages, dbo.LabModes and dbo.LabMedians for the mode/median rates.
+// One screen over two LRNMaster tables — dbo.CPTAverage and dbo.PanelAverage.
+// Each carries its own averages AND mode/median columns, so nothing is joined.
 // View-only; all data comes from LRN.ReportsApi (/api/analytics/*).
 
-/// <summary>A CPTAverage row with the matching mode/median rates attached.</summary>
+/// <summary>One CPTAverage row: averages, mode, median, percentiles and counts.</summary>
 public sealed class CptLookupRowDto
 {
     public int? LabId { get; set; }
@@ -35,17 +35,9 @@ public sealed class CptLookupRowDto
 
     public decimal? ModeAllowedAmount { get; set; }
     public decimal? ModeInsurancePaymentAmount { get; set; }
-    public decimal? AllowedAmountPerUnitMode { get; set; }
-    public decimal? InsurancePaymentPerUnitMode { get; set; }
 
     public decimal? MedianAllowedAmount { get; set; }
     public decimal? MedianInsurancePaymentAmount { get; set; }
-    public decimal? AllowedAmountPerUnitMedian { get; set; }
-    public decimal? InsurancePaymentPerUnitMedian { get; set; }
-
-    /// <summary>"payer" (this payer's own rate), "lab" (lab-wide fallback) or null (no rate).</summary>
-    public string? ModeMatch { get; set; }
-    public string? MedianMatch { get; set; }
 
     public decimal? DenialRate { get; set; }
 }
@@ -74,12 +66,11 @@ public sealed class PanelLookupRowDto
     public int? DeniedLineCount { get; set; }
     public int? AdjustedLineCount { get; set; }
 
-    // Panel-level modes: the average of the per-CPT modes in dbo.LabModes for this
-    // panel, with ModeCptCount showing how many CPTs that average covers.
+    // True panel-level mode/median from the PanelAverage row itself, no longer an
+    // average of per-CPT modes — so there is no CPT count to qualify it with.
     public decimal? ModeAllowedAmount { get; set; }
     public decimal? ModeInsurancePaymentAmount { get; set; }
-    public int? ModeCptCount { get; set; }
-    public string? ModeMatch { get; set; }
+    public decimal? MedianAllowedAmount { get; set; }
 
     public decimal? DenialRate { get; set; }
 }

@@ -1,4 +1,4 @@
-using ClosedXML.Excel;
+﻿using ClosedXML.Excel;
 using LRN.ReportsApi.Models;
 using Microsoft.Data.SqlClient;
 
@@ -73,141 +73,31 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
     }
 
     // ── SQL fragments ────────────────────────────────────────────────────────
-
-    // MAX() is safe: the mode/median value is constant within a key (verified —
-    // every key groups to exactly one distinct ModeAllowedAmount).
     //
-    // CptKey exists because the two sources spell the same code differently:
-    // CPTAverage strips the spaces ("80307ATI-ATITOXSCREEN") while LabModes keeps
-    // them ("80307 ATI - ATI TOX SCREEN"). Removing every space and upper-casing
-    // makes them comparable; joining on the raw column loses real matches.
+    // Both lookups read ONE table. dbo.CPTAverage and dbo.PanelAverage each carry their
+    // own mode and median columns, written by LRN.AveragesImport from the lab's line and
+    // claim data, so there is nothing to join.
     //
-    // Each rate is resolved in two steps. The payer-specific CTE is preferred; when
-    // that misses — the payer names in LabModes only partly overlap CPTAverage's —
-    // the lab-wide CTE supplies the rate for the same lab + CPT + panel + window with
-    // the payer ignored. The row reports which one it used via ModeMatch/MedianMatch
-    // so a lab-wide figure is never silently passed off as the payer's own rate.
-    // The fallback lifts coverage from 4,218 to 7,027 rows, against a hard ceiling of
-    // 7,098 (the rows whose lab has any LabModes data at all).
-    /// <summary>
-    /// The four rate CTEs, WITHOUT the leading <c>WITH</c> so callers can compose them with
-    /// other CTEs.
-    ///
-    /// <paramref name="scopedToLab"/> pushes <c>WHERE LabId = @LabId</c> into each base-table
-    /// scan. That is provably equivalent whenever the outer query also filters
-    /// <c>a.LabID = @LabId</c>: every join predicate includes <c>LabId = a.LabID</c>, so a CTE
-    /// row for another lab could never join anyway. Without it, one page of one lab aggregates
-    /// the whole of LabModes and LabMedians four times over.
-    /// </summary>
-    private static string RateCteBody(bool scopedToLab)
-    {
-        var labFilter = scopedToLab ? "WHERE LabId = @LabId" : "";
+    // This previously joined dbo.LabModes and dbo.LabMedians through four aggregating
+    // CTEs. That was removed for two reasons: the figures are now duplicated on the
+    // averages row itself, and the join did not scale. A CTE is inlined rather than
+    // materialised, and the optimiser put the aggregation on the inner side of a nested
+    // loop, so a 394k-row heap was re-aggregated once per page row — measured at 58s for
+    // a single 500-row panel page against 524ms for the same CTEs evaluated once. Reading
+    // the columns directly makes the page a plain indexed range scan.
+    //
+    // Gone with the joins: the per-unit mode/median columns (they only ever existed in
+    // LabModes/LabMedians), ModeMatch/MedianMatch (no payer-vs-lab fallback remains — the
+    // value belongs to the row), and ModeCptCount (panel modes are no longer an average
+    // of per-CPT modes).
 
-        return $"""
-        mode_payer AS (
-            SELECT LabId, REPLACE(UPPER(CPTCode), ' ', '') AS CptKey, PanelName, RollingDays, PayerName,
-                   MAX(ModeAllowedAmount)           AS ModeAllowedAmount,
-                   MAX(ModeInsurancePaymentAmount)  AS ModeInsurancePaymentAmount,
-                   MAX(AllowedAmountPerUnitMode)    AS AllowedAmountPerUnitMode,
-                   MAX(InsurancePaymentPerUnitMode) AS InsurancePaymentPerUnitMode
-            FROM dbo.LabModes
-            {labFilter}
-            GROUP BY LabId, REPLACE(UPPER(CPTCode), ' ', ''), PanelName, RollingDays, PayerName
-        ),
-        mode_lab AS (
-            SELECT LabId, REPLACE(UPPER(CPTCode), ' ', '') AS CptKey, PanelName, RollingDays,
-                   MAX(ModeAllowedAmount)           AS ModeAllowedAmount,
-                   MAX(ModeInsurancePaymentAmount)  AS ModeInsurancePaymentAmount,
-                   MAX(AllowedAmountPerUnitMode)    AS AllowedAmountPerUnitMode,
-                   MAX(InsurancePaymentPerUnitMode) AS InsurancePaymentPerUnitMode
-            FROM dbo.LabModes
-            {labFilter}
-            GROUP BY LabId, REPLACE(UPPER(CPTCode), ' ', ''), PanelName, RollingDays
-        ),
-        median_payer AS (
-            SELECT LabId, REPLACE(UPPER(CPTCode), ' ', '') AS CptKey, PanelName, RollingDays, PayerName,
-                   MAX(MedianAllowedAmount)             AS MedianAllowedAmount,
-                   MAX(MedianInsurancePaymentAmount)    AS MedianInsurancePaymentAmount,
-                   MAX(AllowedAmountPerUnitMedian)      AS AllowedAmountPerUnitMedian,
-                   MAX(InsurancePaymentPerUnitMedian)   AS InsurancePaymentPerUnitMedian
-            FROM dbo.LabMedians
-            {labFilter}
-            GROUP BY LabId, REPLACE(UPPER(CPTCode), ' ', ''), PanelName, RollingDays, PayerName
-        ),
-        median_lab AS (
-            SELECT LabId, REPLACE(UPPER(CPTCode), ' ', '') AS CptKey, PanelName, RollingDays,
-                   MAX(MedianAllowedAmount)             AS MedianAllowedAmount,
-                   MAX(MedianInsurancePaymentAmount)    AS MedianInsurancePaymentAmount,
-                   MAX(AllowedAmountPerUnitMedian)      AS AllowedAmountPerUnitMedian,
-                   MAX(InsurancePaymentPerUnitMedian)   AS InsurancePaymentPerUnitMedian
-            FROM dbo.LabMedians
-            {labFilter}
-            GROUP BY LabId, REPLACE(UPPER(CPTCode), ' ', ''), PanelName, RollingDays
-        )
-        """;
-    }
+    private const string CptFrom = "FROM dbo.CPTAverage a";
 
-    /// <summary>The rate joins alone, so the driving table can be either CPTAverage or one page of it.</summary>
-    private const string CptJoins = """
-        LEFT JOIN mode_payer mp
-               ON mp.LabId       = a.LabID
-              AND mp.CptKey      = REPLACE(UPPER(a.CPTCode), ' ', '')
-              AND ISNULL(mp.PanelName, '') = ISNULL(a.PanelName, '')
-              AND mp.RollingDays = a.WindowType
-              AND ISNULL(mp.PayerName, '') = ISNULL(a.PayerDisplayName, '')
-        LEFT JOIN mode_lab ml
-               ON ml.LabId       = a.LabID
-              AND ml.CptKey      = REPLACE(UPPER(a.CPTCode), ' ', '')
-              AND ISNULL(ml.PanelName, '') = ISNULL(a.PanelName, '')
-              AND ml.RollingDays = a.WindowType
-        LEFT JOIN median_payer dp
-               ON dp.LabId       = a.LabID
-              AND dp.CptKey      = REPLACE(UPPER(a.CPTCode), ' ', '')
-              AND ISNULL(dp.PanelName, '') = ISNULL(a.PanelName, '')
-              AND dp.RollingDays = a.WindowType
-              AND ISNULL(dp.PayerName, '') = ISNULL(a.PayerDisplayName, '')
-        LEFT JOIN median_lab dl
-               ON dl.LabId       = a.LabID
-              AND dl.CptKey      = REPLACE(UPPER(a.CPTCode), ' ', '')
-              AND ISNULL(dl.PanelName, '') = ISNULL(a.PanelName, '')
-              AND dl.RollingDays = a.WindowType
-        """;
-
-    private const string CptFrom = $"""
-        FROM dbo.CPTAverage a
-        {CptJoins}
-        """;
-
-    /// <summary>The same joins, driven by one page of CPTAverage rather than all of it.</summary>
-    private const string CptFromPage = $"""
-        FROM page a
-        {CptJoins}
-        """;
-
-    /// <summary>
-    /// True when the sort needs a joined rate value, which forces the joins to run before
-    /// paging. Every other sort is on a CPTAverage column, so the page can be taken first.
-    /// </summary>
-    private static bool SortsOnJoinedRate(string orderBy, params string[] aliases) =>
-        aliases.Any(alias => orderBy.Contains(alias, StringComparison.Ordinal));
+    /// <summary>The same projection driven by one page of CPTAverage rather than all of it.</summary>
+    private const string CptFromPage = "FROM page a";
 
     /// <summary>The CPT page query. Separated from the I/O so its SQL can be inspected and parsed in isolation.</summary>
-    private static string BuildCptPageSql(string where, string orderBy, bool scoped, bool pageFirst) => pageFirst
-        ? $"""
-        WITH page AS (
-            SELECT *
-            FROM dbo.CPTAverage a
-            WHERE {where}
-            ORDER BY {orderBy}
-            OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
-        ),
-        {RateCteBody(scoped)}
-        SELECT {CptSelect}
-        {CptFromPage}
-        ORDER BY {orderBy};
-        """
-        : $"""
-        WITH {RateCteBody(scoped)}
+    private static string BuildCptPageSql(string where, string orderBy) => $"""
         SELECT {CptSelect}
         {CptFrom}
         WHERE {where}
@@ -215,23 +105,8 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
         """;
 
-    /// <summary>The Panel page query. Same split, same reason.</summary>
-    private static string BuildPanelPageSql(string where, string orderBy, bool scoped, bool pageFirst) => pageFirst
-        ? $"""
-        WITH page AS (
-            SELECT *
-            FROM dbo.PanelAverage p
-            WHERE {where}
-            ORDER BY {orderBy}
-            OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
-        ),
-        {PanelModeCteBody(scoped)}
-        SELECT {PanelSelect}
-        {PanelFromPage}
-        ORDER BY {orderBy};
-        """
-        : $"""
-        WITH {PanelModeCteBody(scoped)}
+    /// <summary>The Panel page query. Same shape.</summary>
+    private static string BuildPanelPageSql(string where, string orderBy) => $"""
         SELECT {PanelSelect}
         {PanelFrom}
         WHERE {where}
@@ -239,110 +114,36 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
         """;
 
-    // Expression fragments reused by the SELECT list and the sort whitelist, so a
-    // column and its sort always resolve the payer/lab fallback the same way.
-    private const string ModeAllowedExpr = "COALESCE(mp.ModeAllowedAmount, ml.ModeAllowedAmount)";
-    private const string ModePaidExpr = "COALESCE(mp.ModeInsurancePaymentAmount, ml.ModeInsurancePaymentAmount)";
-    private const string ModeAllowedUnitExpr = "COALESCE(mp.AllowedAmountPerUnitMode, ml.AllowedAmountPerUnitMode)";
-    private const string ModePaidUnitExpr = "COALESCE(mp.InsurancePaymentPerUnitMode, ml.InsurancePaymentPerUnitMode)";
-    private const string MedianAllowedExpr = "COALESCE(dp.MedianAllowedAmount, dl.MedianAllowedAmount)";
-    private const string MedianPaidExpr = "COALESCE(dp.MedianInsurancePaymentAmount, dl.MedianInsurancePaymentAmount)";
-    private const string MedianAllowedUnitExpr = "COALESCE(dp.AllowedAmountPerUnitMedian, dl.AllowedAmountPerUnitMedian)";
-    private const string MedianPaidUnitExpr = "COALESCE(dp.InsurancePaymentPerUnitMedian, dl.InsurancePaymentPerUnitMedian)";
-
-    private const string CptSelect = $"""
+    // MedianPaidAmount is projected twice on purpose: the grid labels it "Median paid" and
+    // the mode/median block labels the same figure "Median ins. paid". One column, two
+    // names the UI already uses.
+    private const string CptSelect = """
         a.LabID, a.LabName, a.CPTCode, a.PanelName, a.PayerDisplayName, a.PayerCommonCode,
         a.Global_Payer_ID, a.WindowType, a.WindowBasis, a.StartDate, a.EndDate, a.AsOfDateTime,
         a.AvgUnits, a.AvgChargeAmountPerUnit, a.AvgAllowedAmountPerUnit, a.AvgPaidAmountPerUnit,
         a.AvgPatientResponsibilityPerUnit, a.AvgPatientPaidAmountPerUnit,
         a.MedianPaidAmount, a.P25PaidAmount, a.P75PaidAmount,
         a.PaidLineCount, a.TotalLineCount, a.DeniedLineCount, a.AdjustedLineCount,
-        {ModeAllowedExpr}       AS ModeAllowedAmount,
-        {ModePaidExpr}          AS ModeInsurancePaymentAmount,
-        {ModeAllowedUnitExpr}   AS AllowedAmountPerUnitMode,
-        {ModePaidUnitExpr}      AS InsurancePaymentPerUnitMode,
-        {MedianAllowedExpr}     AS MedianAllowedAmount,
-        {MedianPaidExpr}        AS MedianInsurancePaymentAmount,
-        {MedianAllowedUnitExpr} AS AllowedAmountPerUnitMedian,
-        {MedianPaidUnitExpr}    AS InsurancePaymentPerUnitMedian,
-        CASE WHEN mp.ModeAllowedAmount   IS NOT NULL THEN 'payer'
-             WHEN ml.ModeAllowedAmount   IS NOT NULL THEN 'lab'   END AS ModeMatch,
-        CASE WHEN dp.MedianAllowedAmount IS NOT NULL THEN 'payer'
-             WHEN dl.MedianAllowedAmount IS NOT NULL THEN 'lab'   END AS MedianMatch
+        a.ModeAllowedAmount,
+        a.ModePaidAmount     AS ModeInsurancePaymentAmount,
+        a.MedianAllowedAmount,
+        a.MedianPaidAmount   AS MedianInsurancePaymentAmount
         """;
 
-    // Panel-level modes. LabModes is CPT-level, so a panel figure has to aggregate
-    // across the panel's CPT codes: MAX() collapses each CPT to its single mode, then
-    // AVG() averages those. AVG — not SUM — because PanelAverage's own amounts are
-    // per-line averages: summing the CPT modes overshoots the matching PanelAverage
-    // row by 5-12x, while the average lands in the same range. ModeCptCount is
-    // returned so the grid can show how many CPTs a panel figure rests on.
-    /// <summary>Panel mode CTEs without the leading <c>WITH</c>. See <see cref="RateCteBody"/> for why the lab filter is safe.</summary>
-    private static string PanelModeCteBody(bool scopedToLab) => $"""
-        cpt_mode AS (
-            SELECT LabId, PanelName, RollingDays, PayerName, REPLACE(UPPER(CPTCode), ' ', '') AS CptKey,
-                   MAX(ModeAllowedAmount)          AS ModeAllowed,
-                   MAX(ModeInsurancePaymentAmount) AS ModePaid
-            FROM dbo.LabModes
-            {(scopedToLab ? "WHERE LabId = @LabId" : "")}
-            GROUP BY LabId, PanelName, RollingDays, PayerName, REPLACE(UPPER(CPTCode), ' ', '')
-        ),
-        panel_mode_payer AS (
-            SELECT LabId, PanelName, RollingDays, PayerName,
-                   AVG(ModeAllowed) AS ModeAllowedAmount,
-                   AVG(ModePaid)    AS ModeInsurancePaymentAmount,
-                   COUNT(*)         AS ModeCptCount
-            FROM cpt_mode
-            GROUP BY LabId, PanelName, RollingDays, PayerName
-        ),
-        panel_mode_lab AS (
-            SELECT LabId, PanelName, RollingDays,
-                   AVG(ModeAllowed) AS ModeAllowedAmount,
-                   AVG(ModePaid)    AS ModeInsurancePaymentAmount,
-                   COUNT(*)         AS ModeCptCount
-            FROM cpt_mode
-            GROUP BY LabId, PanelName, RollingDays
-        )
-        """;
+    private const string PanelFrom = "FROM dbo.PanelAverage p";
 
-    private const string PanelJoins = """
-        LEFT JOIN panel_mode_payer pmp
-               ON pmp.LabId       = p.LabId
-              AND ISNULL(pmp.PanelName, '') = ISNULL(p.PanelName, '')
-              AND pmp.RollingDays = p.WindowType
-              AND ISNULL(pmp.PayerName, '') = ISNULL(p.PayerDisplayName, '')
-        LEFT JOIN panel_mode_lab pml
-               ON pml.LabId       = p.LabId
-              AND ISNULL(pml.PanelName, '') = ISNULL(p.PanelName, '')
-              AND pml.RollingDays = p.WindowType
-        """;
+    private const string PanelFromPage = "FROM page p";
 
-    private const string PanelFrom = $"""
-        FROM dbo.PanelAverage p
-        {PanelJoins}
-        """;
-
-    private const string PanelFromPage = $"""
-        FROM page p
-        {PanelJoins}
-        """;
-
-    private const string PanelModeAllowedExpr = "COALESCE(pmp.ModeAllowedAmount, pml.ModeAllowedAmount)";
-    private const string PanelModePaidExpr = "COALESCE(pmp.ModeInsurancePaymentAmount, pml.ModeInsurancePaymentAmount)";
-    private const string PanelModeCountExpr = "COALESCE(pmp.ModeCptCount, pml.ModeCptCount)";
-
-    private const string PanelSelect = $"""
+    private const string PanelSelect = """
         p.LabId, p.LabName, p.PanelName, p.PayerID, p.PayerDisplayName, p.WindowType, p.WindowBasis,
         p.StartDate, p.EndDate, p.AsOfDateTime,
         p.AvgChargeAmount, p.AvgAllowedAmount, p.AvgPaidAmount, p.AvgPatientResponsibility,
         p.AvgPatientPaidAmount,
         p.MedianPaidAmount, p.P25PaidAmount, p.P75PaidAmount,
         p.PaidLineCount, p.TotalLineCount, p.DeniedLineCount, p.AdjustedLineCount,
-        {PanelModeAllowedExpr} AS ModeAllowedAmount,
-        {PanelModePaidExpr}    AS ModeInsurancePaymentAmount,
-        {PanelModeCountExpr}   AS ModeCptCount,
-        CASE WHEN pmp.ModeAllowedAmount IS NOT NULL THEN 'payer'
-             WHEN pml.ModeAllowedAmount IS NOT NULL THEN 'lab' END AS ModeMatch
+        p.ModeAllowedAmount,
+        p.ModePaidAmount     AS ModeInsurancePaymentAmount,
+        p.MedianAllowedAmount
         """;
 
     private static readonly Dictionary<string, string> CptSortColumns = new(StringComparer.OrdinalIgnoreCase)
@@ -368,14 +169,12 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         ["totalLineCount"] = "a.TotalLineCount",
         ["deniedLineCount"] = "a.DeniedLineCount",
         ["adjustedLineCount"] = "a.AdjustedLineCount",
-        ["modeAllowedAmount"] = ModeAllowedExpr,
-        ["modeInsurancePaymentAmount"] = ModePaidExpr,
-        ["allowedAmountPerUnitMode"] = ModeAllowedUnitExpr,
-        ["insurancePaymentPerUnitMode"] = ModePaidUnitExpr,
-        ["medianAllowedAmount"] = MedianAllowedExpr,
-        ["medianInsurancePaymentAmount"] = MedianPaidExpr,
-        ["allowedAmountPerUnitMedian"] = MedianAllowedUnitExpr,
-        ["insurancePaymentPerUnitMedian"] = MedianPaidUnitExpr,
+        // Plain CPTAverage columns now, so every sort is indexable rather than a sort
+        // over a joined expression.
+        ["modeAllowedAmount"] = "a.ModeAllowedAmount",
+        ["modeInsurancePaymentAmount"] = "a.ModePaidAmount",
+        ["medianAllowedAmount"] = "a.MedianAllowedAmount",
+        ["medianInsurancePaymentAmount"] = "a.MedianPaidAmount",
         // Sorting by a computed rate needs the expression, not an alias.
         ["denialRate"] = "CASE WHEN ISNULL(a.TotalLineCount,0) > 0 THEN (CAST(ISNULL(a.DeniedLineCount,0) AS DECIMAL(18,4)) * 100) / a.TotalLineCount END"
     };
@@ -402,9 +201,9 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         ["paidLineCount"] = "p.PaidLineCount",
         ["totalLineCount"] = "p.TotalLineCount",
         ["deniedLineCount"] = "p.DeniedLineCount",
-        ["modeAllowedAmount"] = PanelModeAllowedExpr,
-        ["modeInsurancePaymentAmount"] = PanelModePaidExpr,
-        ["modeCptCount"] = PanelModeCountExpr,
+        ["modeAllowedAmount"] = "p.ModeAllowedAmount",
+        ["modeInsurancePaymentAmount"] = "p.ModePaidAmount",
+        ["medianAllowedAmount"] = "p.MedianAllowedAmount",
         ["denialRate"] = "CASE WHEN ISNULL(p.TotalLineCount,0) > 0 THEN (CAST(ISNULL(p.DeniedLineCount,0) AS DECIMAL(18,4)) * 100) / p.TotalLineCount END"
     };
 
@@ -469,13 +268,10 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
             if (await reader.ReadAsync(ct)) ReadSummary(reader, result);
         }
 
-        // Take the page from CPTAverage FIRST, then join rates to those rows only. Joining
-        // before paging made every request hash the whole aggregated rate set against the whole
-        // filtered table to then throw away all but one page. Only a sort on a joined rate
-        // column has to keep the old order, because the sort key does not exist until the join.
-        var pageFirst = !SortsOnJoinedRate(orderBy, "mp.", "ml.", "dp.", "dl.");
-
-        await using var cmd = new SqlCommand(BuildCptPageSql(where, orderBy, scoped, pageFirst), conn);
+        // One table, so the page is a straight ORDER BY + OFFSET/FETCH. The old page-first /
+        // join-first split existed only to keep the rate joins off the whole filtered set;
+        // with no joins left there is nothing to order around.
+        await using var cmd = new SqlCommand(BuildCptPageSql(where, orderBy), conn);
         cmd.Parameters.AddRange(Clone(parameters));
         cmd.Parameters.AddWithValue("@Offset", (query.Page - 1) * query.PageSize);
         cmd.Parameters.AddWithValue("@PageSize", query.PageSize);
@@ -519,11 +315,8 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
             if (await reader.ReadAsync(ct)) ReadSummary(reader, result);
         }
 
-        // Same shape as the CPT tab: page PanelAverage first, then join modes to that page.
-        var scoped = query.LabId.HasValue;
-        var pageFirst = !SortsOnJoinedRate(orderBy, "pmp.", "pml.");
-
-        await using var cmd = new SqlCommand(BuildPanelPageSql(where, orderBy, scoped, pageFirst), conn);
+        // Same shape as the CPT tab: a single-table page, no joins.
+        await using var cmd = new SqlCommand(BuildPanelPageSql(where, orderBy), conn);
         cmd.Parameters.AddRange(Clone(parameters));
         cmd.Parameters.AddWithValue("@Offset", (query.Page - 1) * query.PageSize);
         cmd.Parameters.AddWithValue("@PageSize", query.PageSize);
@@ -550,7 +343,6 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         await using var conn = new SqlConnection(_connectionString);
         await conn.OpenAsync(ct);
         await using var cmd = new SqlCommand($"""
-            WITH {RateCteBody(scopedToLab: true)}
             SELECT {CptSelect}
             {CptFrom}
             WHERE {string.Join(" AND ", parts)}
@@ -578,7 +370,6 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         await using var conn = new SqlConnection(_connectionString);
         await conn.OpenAsync(ct);
         await using var cmd = new SqlCommand($"""
-            WITH {PanelModeCteBody(scopedToLab: true)}
             SELECT {PanelSelect}
             {PanelFrom}
             WHERE {string.Join(" AND ", parts)}
@@ -810,14 +601,8 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         AdjustedLineCount = Int(r, "AdjustedLineCount"),
         ModeAllowedAmount = Dec(r, "ModeAllowedAmount"),
         ModeInsurancePaymentAmount = Dec(r, "ModeInsurancePaymentAmount"),
-        AllowedAmountPerUnitMode = Dec(r, "AllowedAmountPerUnitMode"),
-        InsurancePaymentPerUnitMode = Dec(r, "InsurancePaymentPerUnitMode"),
         MedianAllowedAmount = Dec(r, "MedianAllowedAmount"),
-        MedianInsurancePaymentAmount = Dec(r, "MedianInsurancePaymentAmount"),
-        AllowedAmountPerUnitMedian = Dec(r, "AllowedAmountPerUnitMedian"),
-        InsurancePaymentPerUnitMedian = Dec(r, "InsurancePaymentPerUnitMedian"),
-        ModeMatch = Str(r, "ModeMatch"),
-        MedianMatch = Str(r, "MedianMatch")
+        MedianInsurancePaymentAmount = Dec(r, "MedianInsurancePaymentAmount")
     };
 
     private static PanelLookupRow MapPanel(SqlDataReader r) => new()
@@ -846,8 +631,7 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         AdjustedLineCount = Int(r, "AdjustedLineCount"),
         ModeAllowedAmount = Dec(r, "ModeAllowedAmount"),
         ModeInsurancePaymentAmount = Dec(r, "ModeInsurancePaymentAmount"),
-        ModeCptCount = Int(r, "ModeCptCount"),
-        ModeMatch = Str(r, "ModeMatch")
+        MedianAllowedAmount = Dec(r, "MedianAllowedAmount")
     };
 
     private const string Money = "$#,##0.00";
@@ -885,14 +669,8 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         new("Payer Code", x => x.PayerCommonCode),
         new("Mode Allowed", x => x.ModeAllowedAmount, Money),
         new("Mode Insurance Paid", x => x.ModeInsurancePaymentAmount, Money),
-        new("Allowed / Unit (Mode)", x => x.AllowedAmountPerUnitMode, Money),
-        new("Insurance Paid / Unit (Mode)", x => x.InsurancePaymentPerUnitMode, Money),
-        new("Mode Source", x => MatchLabel(x.ModeMatch)),
         new("Median Allowed", x => x.MedianAllowedAmount, Money),
         new("Median Insurance Paid", x => x.MedianInsurancePaymentAmount, Money),
-        new("Allowed / Unit (Median)", x => x.AllowedAmountPerUnitMedian, Money),
-        new("Insurance Paid / Unit (Median)", x => x.InsurancePaymentPerUnitMedian, Money),
-        new("Median Source", x => MatchLabel(x.MedianMatch)),
         // Line counts moved up into the grid-order block above; only the derived rate is left here.
         new("Denial Rate", x => x.DenialRate, Rate)
     };
@@ -921,10 +699,9 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         new("Total Lines", x => x.TotalLineCount, Whole),
         new("Denied Lines", x => x.DeniedLineCount, Whole),
         new("Adjusted Lines", x => x.AdjustedLineCount, Whole),
-        new("Mode Allowed (avg of CPT modes)", x => x.ModeAllowedAmount, Money),
-        new("Mode Insurance Paid (avg of CPT modes)", x => x.ModeInsurancePaymentAmount, Money),
-        new("Mode CPT Count", x => x.ModeCptCount, Whole),
-        new("Mode Source", x => MatchLabel(x.ModeMatch)),
+        new("Mode Allowed", x => x.ModeAllowedAmount, Money),
+        new("Mode Insurance Paid", x => x.ModeInsurancePaymentAmount, Money),
+        new("Median Allowed", x => x.MedianAllowedAmount, Money),
         new("Denial Rate", x => x.DenialRate, Rate)
     };
 
