@@ -43,6 +43,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LRN.AveragesImport.Worker",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LRN.ReportsApi.Tests", "tests\LRN.ReportsApi.Tests\LRN.ReportsApi.Tests.csproj", "{3E8E95C6-5DC9-4129-B8C0-C63EC69E3034}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LRN.AzBlobSync", "LRN.AzBlobSync\LRN.AzBlobSync.csproj", "{15055C44-5604-43ED-812F-0A265AF02D5A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -281,6 +283,18 @@ Global
 		{3E8E95C6-5DC9-4129-B8C0-C63EC69E3034}.Release|x64.Build.0 = Release|Any CPU
 		{3E8E95C6-5DC9-4129-B8C0-C63EC69E3034}.Release|x86.ActiveCfg = Release|Any CPU
 		{3E8E95C6-5DC9-4129-B8C0-C63EC69E3034}.Release|x86.Build.0 = Release|Any CPU
+		{15055C44-5604-43ED-812F-0A265AF02D5A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{15055C44-5604-43ED-812F-0A265AF02D5A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{15055C44-5604-43ED-812F-0A265AF02D5A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{15055C44-5604-43ED-812F-0A265AF02D5A}.Debug|x64.Build.0 = Debug|Any CPU
+		{15055C44-5604-43ED-812F-0A265AF02D5A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{15055C44-5604-43ED-812F-0A265AF02D5A}.Debug|x86.Build.0 = Debug|Any CPU
+		{15055C44-5604-43ED-812F-0A265AF02D5A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{15055C44-5604-43ED-812F-0A265AF02D5A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{15055C44-5604-43ED-812F-0A265AF02D5A}.Release|x64.ActiveCfg = Release|Any CPU
+		{15055C44-5604-43ED-812F-0A265AF02D5A}.Release|x64.Build.0 = Release|Any CPU
+		{15055C44-5604-43ED-812F-0A265AF02D5A}.Release|x86.ActiveCfg = Release|Any CPU
+		{15055C44-5604-43ED-812F-0A265AF02D5A}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -111,7 +111,7 @@ public interface INorthWestProductionSummaryRepository
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 
-    /// <summary>Calls usp_GetNW_InsightBreakdown � top 10 payers by ChargeEnteredDate for Source Daq or Webpm.</summary>
+    /// <summary>Insight Daq/WebPM: top 10 payers for display; Grand Total sums all payers for the source.</summary>
     Task<SharedPayerBreakdownResult> GetInsightBreakdownAsync(
         string connectionString,
         string source,

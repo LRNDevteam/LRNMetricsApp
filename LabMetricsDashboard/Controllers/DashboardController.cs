@@ -2156,13 +2156,33 @@ public class DashboardController : Controller
             .OrderBy(x => x)
             .ToList();
 
+        if (availableLabs.Count == 0)
+        {
+            availableLabs = _labSettings.Labs
+                .Where(kv => kv.Value.LineClaimEnable && !string.IsNullOrWhiteSpace(kv.Value.DbConnectionString))
+                .Select(kv => kv.Key)
+                .OrderBy(x => x)
+                .ToList();
+        }
+
+        if (availableLabs.Count == 0)
+            availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+
         var selectedLab = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         filterPayerNames = filterPayerNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
         filterPanelNames = filterPanelNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
 
         if (string.IsNullOrWhiteSpace(selectedLab))
-            return View(new ProductionReportViewModel { AvailableLabs = availableLabs });
+        {
+            return View(new ProductionReportViewModel
+            {
+                AvailableLabs = availableLabs,
+                ErrorMessage = availableLabs.Count == 0
+                    ? "No lab configs were loaded for Production Summary. Check LabConfig:LabConfigFolder and that each lab JSON file exists."
+                    : "Select a lab from the dropdown to view the Production Summary Report.",
+            });
+        }
 
         if (!_labSettings.Labs.TryGetValue(selectedLab, out var config))
             return View(new ProductionReportViewModel

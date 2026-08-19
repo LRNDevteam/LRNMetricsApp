@@ -117,4 +117,9 @@ public sealed class PhiExecutiveSummaryViewModel
     public IEnumerable<ExecSummaryRow> PmsRows  => Rows.Where(r => r.Category == "PMS");
     public IEnumerable<ExecSummaryRow> CashRows => Rows.Where(r => r.Category == "Cash");
     public IEnumerable<ExecSummaryRow> AvgRows  => Rows.Where(r => r.Category == "Avg");
+
+    /// <summary>
+    /// AI Three-Pillar insights from insights.json. Separate from Notes &amp; Insights.
+    /// </summary>
+    public PredictionInsight? AiThreePillarInsight { get; set; }
 }

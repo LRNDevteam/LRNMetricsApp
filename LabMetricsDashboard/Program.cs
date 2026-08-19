@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Json;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Primitives;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
@@ -127,6 +128,23 @@ void LogStartupWarning(string message)
     LogStartupError("WARNING: " + message);
 }
 
+// A JSON file save (lab config, appsettings, or a VS/IIS Express copy into bin)
+// that is briefly empty or invalid used to throw JsonReaderException and shut
+// the whole host down. Ignore reload failures and keep the last-good values.
+void IgnoreJsonReloadError(FileLoadExceptionContext ctx)
+{
+    var path = ctx.Provider is FileConfigurationProvider fp
+        ? fp.Source.Path ?? "(json)"
+        : "(json)";
+    LogStartupError(
+        $"Ignored invalid JSON reload for '{path}'. Keeping last-good configuration so the site stays up.",
+        ctx.Exception);
+    ctx.Ignore = true;
+}
+
+foreach (var jsonSource in ((IConfigurationBuilder)builder.Configuration).Sources.OfType<JsonConfigurationSource>())
+    jsonSource.OnLoadException = IgnoreJsonReloadError;
+
 // Load each lab's dedicated JSON file from the shared config folder.
 // Convention: {LabConfigFolder}{LabName}.json  e.g. Configs\PCRLabsofAmerica.json
 var validLabNames = new List<string>();
@@ -152,9 +170,19 @@ if (labNamesToLoad.Count == 0)
     LogStartupWarning("No labs were configured to load. Configure LabConfig:Labs or LabConfig:LabsID in appsettings.json.");
 }
 
+// Lab JSON files live outside the web content root (LabConfigFolder).
+// AddJsonFile(absolutePath) is resolved against ContentRoot, so the file is
+// not found and every Enable* flag stays at its C# default (Production Summary = false).
+PhysicalFileProvider? labConfigFileProvider = null;
+var labConfigFolder = labConfigOptions.LabConfigFolder;
+if (!string.IsNullOrWhiteSpace(labConfigFolder) && Directory.Exists(labConfigFolder))
+{
+    labConfigFileProvider = new PhysicalFileProvider(Path.GetFullPath(labConfigFolder));
+}
+
 foreach (var labName in labNamesToLoad)
 {
-    var filePath = Path.Combine(labConfigOptions.LabConfigFolder ?? string.Empty, $"{labName}.json");
+    var filePath = Path.Combine(labConfigFolder ?? string.Empty, $"{labName}.json");
 
     if (!File.Exists(filePath))
     {
@@ -169,7 +197,15 @@ foreach (var labName in labNamesToLoad)
         var jsonText = File.ReadAllText(filePath);
         using var _ = System.Text.Json.JsonDocument.Parse(jsonText);
 
-        builder.Configuration.AddJsonFile(filePath, optional: false, reloadOnChange: true);
+        builder.Configuration.AddJsonFile(s =>
+        {
+            s.FileProvider = labConfigFileProvider
+                ?? new PhysicalFileProvider(Path.GetDirectoryName(Path.GetFullPath(filePath))!);
+            s.Path = Path.GetFileName(filePath);
+            s.Optional = true;
+            s.ReloadOnChange = true;
+            s.OnLoadException = IgnoreJsonReloadError;
+        });
         validLabNames.Add(labName);
     }
     catch (System.Text.Json.JsonException jsonEx)
@@ -222,14 +258,38 @@ var labSettings = new LabSettings();
 
 void RebuildLabSettings()
 {
-    // Replace the dictionary reference atomically (do not mutate in-place).
+    var previous = labSettings.Labs;
     labSettings.Labs = validLabNames.ToDictionary(
         labName => labName,
-        labName => configuration.GetSection(labName).Get<LabCsvConfig>() ?? new LabCsvConfig(),
+        labName =>
+        {
+            var loaded = configuration.GetSection(labName).Get<LabCsvConfig>() ?? new LabCsvConfig();
+            // A JSON reload that parsed but dropped lab sections (or a briefly empty file)
+            // used to replace a good config with defaults (all Enable* flags false). That
+            // left the navbar showing the lab while Production Report had nothing to bind.
+            if (string.IsNullOrWhiteSpace(loaded.DbConnectionString)
+                && previous.TryGetValue(labName, out var existing)
+                && !string.IsNullOrWhiteSpace(existing.DbConnectionString))
+            {
+                LogStartupWarning($"Kept last-good config for '{labName}' after a config reload with an empty connection string.");
+                return existing;
+            }
+            return loaded;
+        },
         StringComparer.OrdinalIgnoreCase);
 }
 
 RebuildLabSettings();
+
+var summaryEnabledLabs = labSettings.Labs
+    .Where(kv => kv.Value.EnableProductionSummaryReport)
+    .Select(kv => kv.Key)
+    .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+    .ToList();
+LogStartupWarning(
+    summaryEnabledLabs.Count == 0
+        ? $"No labs have EnableProductionSummaryReport=true after loading from '{labConfigFolder}'. Loaded labs: {string.Join(", ", validLabNames)}"
+        : $"Production Summary enabled for: {string.Join(", ", summaryEnabledLabs)}");
 
 ChangeToken.OnChange(
     () => ((IConfigurationRoot)configuration).GetReloadToken(),

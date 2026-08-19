@@ -1,6 +1,7 @@
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 
 namespace LabMetricsDashboard.Controllers;
 
@@ -17,6 +18,8 @@ public sealed class ExecutiveSummaryController : Controller
     private readonly LabSettings _labSettings;
     private readonly SqlPhiExecutiveSummaryRepository _repo;
     private readonly IAnalysisRangeService _analysisRange;
+    private readonly PredictionInsightLoader _insightLoader;
+    private readonly IConfiguration _config;
     private readonly ILogger<ExecutiveSummaryController> _logger;
 
     // Maps LabSettings key → SP prefix used to build "dbo.usp_Get{prefix}_ExecutiveSummary".
@@ -59,11 +62,15 @@ public sealed class ExecutiveSummaryController : Controller
         LabSettings labSettings,
         SqlPhiExecutiveSummaryRepository repo,
         IAnalysisRangeService analysisRange,
+        PredictionInsightLoader insightLoader,
+        IConfiguration config,
         ILogger<ExecutiveSummaryController> logger)
     {
         _labSettings = labSettings;
         _repo        = repo;
         _analysisRange = analysisRange;
+        _insightLoader = insightLoader;
+        _config = config;
         _logger      = logger;
     }
 
@@ -206,6 +213,13 @@ public sealed class ExecutiveSummaryController : Controller
         _logger.LogInformation(
             "ExecutiveSummary ready to render for lab='{Lab}' SP='{Sp}' rows={Rows} cols={Cols}",
             labName, spName, vm.Rows.Count, vm.YearMonthColumns.Count);
+
+        if (labName.Equals("Beech_Tree", StringComparison.OrdinalIgnoreCase))
+        {
+            var insightRoot = _config["ThreePillarInsights:LocalRoot"]
+                ?? @"C:\LRN-Files\Automation\LRN-Output\Coding_Validation_Report\Beech_Tree\ThreePillar";
+            vm.AiThreePillarInsight = _insightLoader.LoadThreePillar(insightRoot, vm.ReportWeekFolder);
+        }
 
         if (export == "excel")
         {
@@ -848,6 +862,8 @@ public sealed class ExecutiveSummaryController : Controller
         vm.DayWindow = dayWindow;
         vm.WeekFolder = analysisRange.WeekFolder;
 
+        // JSON snapshots are written by ClaimLineCSVDataCapture for agent insight
+        // generation. The UI keeps the existing stored-procedure path.
         const string lisSp = "dbo.usp_GetBeechTree_ThreePillarLisDiagnostic";
         if (!await _repo.StoredProcedureExistsAsync(config.DbConnectionString, lisSp, ct))
         {

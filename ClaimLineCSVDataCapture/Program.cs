@@ -744,13 +744,31 @@ foreach (var lab in labConfigs)
             log.Info($"  [STEP 14] New TransactionDetail file — running usp_RefreshBT_ExecutiveSummary_OnNewFile…");
             var onNewFileErr = db.RefreshBTExecutiveSummaryOnNewFile();
             if (onNewFileErr is null)
+            {
                 log.Info($"  [STEP 14] usp_RefreshBT_ExecutiveSummary_OnNewFile — OK.");
+                try
+                {
+                    BeechTreeThreePillarJsonWriter.Generate(lab, workingFolder, log, recreateLatest: true);
+                }
+                catch (Exception jsonEx)
+                {
+                    log.Error($"  [ThreePillar JSON] Unexpected error: {jsonEx.Message}");
+                }
+            }
             else
                 log.Error($"  [STEP 14] usp_RefreshBT_ExecutiveSummary_OnNewFile — FAILED: {onNewFileErr}");
         }
         else
         {
-            log.Info($"  [STEP 14] No RunId change and no new TransactionDetail file — nothing to refresh for {lab.LabName}.");
+            log.Info($"  [STEP 14] No RunId change and no new TransactionDetail file — skipping aggregate refresh for {lab.LabName}.");
+            try
+            {
+                BeechTreeThreePillarJsonWriter.Generate(lab, workingFolder, log, recreateLatest: false);
+            }
+            catch (Exception jsonEx)
+            {
+                log.Error($"  [ThreePillar JSON] Unexpected error: {jsonEx.Message}");
+            }
         }
 
         log.Info($"  [STEP 14] {lab.LabName} complete — STEPS 15-18 skipped (no new data).");
@@ -1238,6 +1256,18 @@ foreach (var lab in labConfigs)
                     log.Info($"  [ES] {passedEs}/{esResults.Count} SP(s) succeeded.");
                     if (failedEs > 0)
                         log.Warn($"  [ES] {failedEs} SP(s) failed — see errors above.");
+
+                    if (passedEs > 0)
+                    {
+                        try
+                        {
+                            BeechTreeThreePillarJsonWriter.Generate(lab, workingFolder, log, recreateLatest: true);
+                        }
+                        catch (Exception jsonEx)
+                        {
+                            log.Error($"  [ThreePillar JSON] Unexpected error: {jsonEx.Message}");
+                        }
+                    }
                 }
             }
             catch (Exception ex)

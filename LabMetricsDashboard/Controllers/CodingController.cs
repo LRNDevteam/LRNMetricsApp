@@ -14,19 +14,22 @@ public class CodingController : Controller
     private readonly LabCsvFileResolver _fileResolver;
     private readonly IMemoryCache _cache;
     private readonly ILogger<CodingController> _logger;
+    private readonly IConfiguration _configuration;
 
     public CodingController(
         LabSettings labSettings,
         ICodingValidationRepository repo,
         LabCsvFileResolver fileResolver,
         IMemoryCache cache,
-        ILogger<CodingController> logger)
+        ILogger<CodingController> logger,
+        IConfiguration configuration)
     {
-        _labSettings  = labSettings;
-        _repo         = repo;
-        _fileResolver = fileResolver;
-        _cache        = cache;
-        _logger       = logger;
+        _labSettings   = labSettings;
+        _repo          = repo;
+        _fileResolver  = fileResolver;
+        _cache         = cache;
+        _logger        = logger;
+        _configuration = configuration;
     }
 
     /// <summary>GET /Coding/Summary?lab=PCRLabsofAmerica</summary>
@@ -324,7 +327,9 @@ public class CodingController : Controller
                 DetailRows     = detail,
             };
 
-            using var workbook = CodingExcelExportBuilder.CreateWorkbook(vm, selectedLab);
+            var logicTemplatePath = _configuration["CodingSummary:CalculationLogicTemplatePath"];
+            using var workbook = CodingExcelExportBuilder.CreateWorkbook(
+                vm, selectedLab, logicTemplatePath);
 
             await using var stream = new MemoryStream();
             workbook.SaveAs(stream);

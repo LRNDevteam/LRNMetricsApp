@@ -80,6 +80,46 @@ public sealed class PredictionInsightLoader
         }
     }
 
+    public PredictionInsight? LoadThreePillar(string? root, string? weekFolder = null)
+    {
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+        {
+            if (!string.IsNullOrWhiteSpace(root))
+                _logger.LogInformation("Three-Pillar insight root missing: {Path}", root);
+            return null;
+        }
+
+        var files = Directory
+            .EnumerateFiles(root, "insights.json", SearchOption.AllDirectories)
+            .ToList();
+
+        if (files.Count == 0)
+        {
+            _logger.LogInformation("No insights.json under {Path}", root);
+            return null;
+        }
+
+        string? file = null;
+        if (!string.IsNullOrWhiteSpace(weekFolder))
+        {
+            file = files.FirstOrDefault(f =>
+                f.Contains(weekFolder, StringComparison.OrdinalIgnoreCase));
+        }
+
+        file ??= files.OrderByDescending(File.GetLastWriteTimeUtc).First();
+
+        _logger.LogInformation("Loading Three-Pillar insight: {File}", file);
+        try
+        {
+            return Parse(File.ReadAllText(file), Path.GetFileName(file));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to parse Three-Pillar insight: {File}", file);
+            return null;
+        }
+    }
+
     // ?? parser ??????????????????????????????????????????????????????????????
 
     private static readonly JsonDocumentOptions _lenientOpts = new()
@@ -97,10 +137,11 @@ public sealed class PredictionInsightLoader
         var reportPeriod = GetString(root, "report_period");
         var generatedAt  = GetString(root, "generated_at");
         var modelUsed    = GetString(root, "model_used");
+        var headline     = GetString(root, "headline");
 
         // Support two formats:
-        //   (a) Clean format ó "sections" array lives directly at the root
-        //   (b) AI raw format ó sections are embedded in a "raw_response" code-fence string
+        //   (a) Clean format ù "sections" array lives directly at the root
+        //   (b) AI raw format ù sections are embedded in a "raw_response" code-fence string
         IReadOnlyList<InsightSection> sections;
         if (root.TryGetProperty("sections", out var sectionsEl))
             sections = ParseSectionsElement(sectionsEl);
@@ -113,6 +154,7 @@ public sealed class PredictionInsightLoader
             ReportPeriod   = reportPeriod,
             GeneratedAt    = generatedAt,
             ModelUsed      = modelUsed,
+            Headline       = headline,
             Sections       = sections,
             SourceFileName = fileName,
         };
@@ -128,7 +170,7 @@ public sealed class PredictionInsightLoader
         if (string.IsNullOrWhiteSpace(rawResponse))
             return [];
 
-        // Strip ```json Ö ``` fence
+        // Strip ```json ù ``` fence
         var fenceMatch = Regex.Match(rawResponse, @"```json\s*([\s\S]*?)```", RegexOptions.IgnoreCase);
         var innerJson  = fenceMatch.Success ? fenceMatch.Groups[1].Value : rawResponse;
 
@@ -229,7 +271,7 @@ public sealed class PredictionInsightLoader
         Regex.Replace(json, @",\s*([}\]])", "$1");
 
     // Remove lines that are only a stray `"]` (broken bullet array continuation from AI output)
-    // e.g.  "bullets": ["item1"],\n          "extra]"\n  ó strips the orphaned line
+    // e.g.  "bullets": ["item1"],\n          "extra]"\n  ù strips the orphaned line
     private static string FixBrokenBulletArrays(string json) =>
         Regex.Replace(json, @"^\s*""[^""]*\]""\s*$", string.Empty, RegexOptions.Multiline);
 }
