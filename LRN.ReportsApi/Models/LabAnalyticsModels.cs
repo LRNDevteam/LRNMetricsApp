@@ -47,10 +47,14 @@ public sealed class LabMedianDto
 }
 
 // ── CPT & Panel Lookup ───────────────────────────────────────────────────────
-// One screen over four tables: dbo.CPTAverage and dbo.PanelAverage carry the
-// averages, dbo.LabModes and dbo.LabMedians the mode/median rates. All four use
-// the same window vocabulary — CPTAverage/PanelAverage call it WindowType and
-// LabModes/LabMedians call it RollingDays, with values YTD | Rolling180 | Rolling90.
+// One screen over two tables: dbo.CPTAverage and dbo.PanelAverage. Both carry the
+// averages AND their own mode/median columns, written by LRN.AveragesImport from the
+// lab's line/claim data, so nothing else has to be joined in.
+//
+// This used to also read dbo.LabModes and dbo.LabMedians. Those joins are gone: the
+// averages tables now hold the same figures for the same key, and re-deriving them
+// from a 394k-row heap per page made the grid time out (a CTE is inlined, not
+// materialised, so the aggregation ran once per page row).
 
 public sealed class LookupQuery
 {
@@ -67,10 +71,9 @@ public sealed class LookupQuery
 }
 
 /// <summary>
-/// A CPTAverage row with its matching mode/median rates attached. The mode and
-/// median columns are null when LabModes/LabMedians has no row for the same
-/// lab + CPT + panel + payer + window — the payer names only partly overlap
-/// between the two sources, so a missing rate is normal, not an error.
+/// One dbo.CPTAverage row. Every value — averages, mode, median, percentiles and
+/// counts — comes from that single row, so a null means the aggregate had nothing
+/// to compute from rather than a failed lookup somewhere else.
 /// </summary>
 public sealed class CptLookupRow
 {
@@ -82,6 +85,8 @@ public sealed class CptLookupRow
     public string? PayerCommonCode { get; set; }
     public int? GlobalPayerId { get; set; }
     public string? WindowType { get; set; }
+    /// <summary>CPTAverage.WindowBasis — what the window is measured against (e.g. DOS).</summary>
+    public string? WindowBasis { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
     public DateTime? AsOfDate { get; set; }
@@ -92,6 +97,8 @@ public sealed class CptLookupRow
     public decimal? AvgAllowedAmountPerUnit { get; set; }
     public decimal? AvgPaidAmountPerUnit { get; set; }
     public decimal? AvgPatientResponsibilityPerUnit { get; set; }
+    /// <summary>What the patient actually paid, as opposed to what they were responsible for.</summary>
+    public decimal? AvgPatientPaidAmountPerUnit { get; set; }
     public decimal? MedianPaidAmount { get; set; }
     public decimal? P25PaidAmount { get; set; }
     public decimal? P75PaidAmount { get; set; }
@@ -100,26 +107,27 @@ public sealed class CptLookupRow
     public int? DeniedLineCount { get; set; }
     public int? AdjustedLineCount { get; set; }
 
-    // LabModes
+    // Mode / median, straight off the same CPTAverage row.
+    //
+    // These are per-LINE amounts (what a line actually came in at), whereas the Avg*
+    // columns above are per-UNIT. On a multi-unit CPT the two are deliberately on
+    // different scales — the column names carry the distinction.
+    //
+    // The former per-unit mode/median columns (AllowedAmountPerUnitMode and friends)
+    // are gone: they only ever existed in LabModes/LabMedians and have no equivalent
+    // in CPTAverage. ModeMatch/MedianMatch are gone too — there is no longer a
+    // payer-specific vs lab-wide fallback to report, because the value belongs to
+    // this exact row.
     public decimal? ModeAllowedAmount { get; set; }
     public decimal? ModeInsurancePaymentAmount { get; set; }
-    public decimal? AllowedAmountPerUnitMode { get; set; }
-    public decimal? InsurancePaymentPerUnitMode { get; set; }
-
-    // LabMedians
     public decimal? MedianAllowedAmount { get; set; }
-    public decimal? MedianInsurancePaymentAmount { get; set; }
-    public decimal? AllowedAmountPerUnitMedian { get; set; }
-    public decimal? InsurancePaymentPerUnitMedian { get; set; }
 
     /// <summary>
-    /// How the mode rate was resolved: "payer" for this payer's own rate, "lab" for the
-    /// lab-wide rate used when LabModes has no row for this payer, null when neither exists.
+    /// Median of the insurance payment. Same underlying CPTAverage.MedianPaidAmount as
+    /// <see cref="MedianPaidAmount"/> above — both names are kept because the grid and
+    /// the export each already label one of them.
     /// </summary>
-    public string? ModeMatch { get; set; }
-
-    /// <summary>Same contract as <see cref="ModeMatch"/>, for the LabMedians rate.</summary>
-    public string? MedianMatch { get; set; }
+    public decimal? MedianInsurancePaymentAmount { get; set; }
 
     /// <summary>DeniedLineCount / TotalLineCount as a percentage; null when there are no lines.</summary>
     public decimal? DenialRate =>
@@ -135,6 +143,8 @@ public sealed class PanelLookupRow
     public string? PayerId { get; set; }
     public string? PayerDisplayName { get; set; }
     public string? WindowType { get; set; }
+    /// <summary>PanelAverage.WindowBasis — Billed or DOS. A panel repeats once per basis.</summary>
+    public string? WindowBasis { get; set; }
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
     public DateTime? AsOfDate { get; set; }
@@ -142,6 +152,8 @@ public sealed class PanelLookupRow
     public decimal? AvgAllowedAmount { get; set; }
     public decimal? AvgPaidAmount { get; set; }
     public decimal? AvgPatientResponsibility { get; set; }
+    /// <summary>What the patient actually paid, as opposed to what they were responsible for.</summary>
+    public decimal? AvgPatientPaidAmount { get; set; }
     public decimal? MedianPaidAmount { get; set; }
     public decimal? P25PaidAmount { get; set; }
     public decimal? P75PaidAmount { get; set; }
@@ -150,15 +162,13 @@ public sealed class PanelLookupRow
     public int? DeniedLineCount { get; set; }
     public int? AdjustedLineCount { get; set; }
 
-    // Panel-level modes from dbo.LabModes. That table is CPT-level, so these are the
-    // average of the per-CPT modes across the panel; ModeCptCount says how many CPTs
-    // that average covers, so a one-CPT panel figure is not mistaken for a broad one.
+    // Mode / median straight off the same PanelAverage row — a true panel-level figure
+    // computed from the panel's own claims, not an average of per-CPT modes as it was
+    // when this came from the CPT-level LabModes. ModeCptCount is therefore gone: there
+    // are no per-CPT modes being averaged any more, so there is nothing to count.
     public decimal? ModeAllowedAmount { get; set; }
     public decimal? ModeInsurancePaymentAmount { get; set; }
-    public int? ModeCptCount { get; set; }
-
-    /// <summary>"payer" | "lab" | null — see <see cref="CptLookupRow.ModeMatch"/>.</summary>
-    public string? ModeMatch { get; set; }
+    public decimal? MedianAllowedAmount { get; set; }
 
     public decimal? DenialRate =>
         TotalLineCount is > 0 ? Math.Round((decimal)(DeniedLineCount ?? 0) * 100m / TotalLineCount.Value, 1) : null;

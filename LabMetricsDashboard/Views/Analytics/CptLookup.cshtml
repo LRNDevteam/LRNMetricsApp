@@ -53,8 +53,11 @@
 
     .cl-grid-wrap { position: relative; }
     .cl-grid-scroll { overflow: auto; max-height: calc(100vh - 430px); min-height: 240px; }
-    /* 15 columns once the per-unit mode/median rates are shown — the wrapper scrolls. */
-    .cl-table { min-width: 1560px; font-size: .8rem; margin-bottom: 0; }
+    /* The wrapper scrolls horizontally; min-width is per tab because the CPT tab carries 21
+       columns and the panel tab 20 — one shared value over-stretches whichever has fewer. */
+    .cl-table { font-size: .8rem; margin-bottom: 0; }
+    .cl-table.tab-cpt { min-width: 2280px; }
+    .cl-table.tab-panel { min-width: 2150px; }
     .cl-table th, .cl-table td { border: 1px solid #d8e1ee; }
     .cl-table thead th { position: sticky; top: 0; z-index: 2; background: #f8fafc; color: #0f172a; white-space: nowrap; font-size: .72rem; text-transform: uppercase; letter-spacing: .02em; }
     .cl-table thead th.cl-sort { cursor: pointer; user-select: none; }
@@ -185,7 +188,7 @@
         </div>
         <div class="cl-loader" id="gridLoader"><div class="cl-loader-box"><span class="spinner-border spinner-border-sm"></span><span>Loading&hellip;</span></div></div>
         <div class="cl-grid-scroll">
-            <table class="table table-sm table-hover table-bordered align-middle cl-table">
+            <table id="clTable" class="table table-sm table-hover table-bordered align-middle cl-table tab-cpt">
                 <thead><tr id="headRow"></tr></thead>
                 <tbody id="rows"></tbody>
             </table>
@@ -229,10 +232,12 @@
 
     <p class="cl-note mb-0">
         View-only reference data. Click a row to compare it across every time window; click a column header to sort.
-        Mode and median rates come from <code>LabModes</code>/<code>LabMedians</code>, matched on lab, CPT, panel, payer and window.
-        A value shown as <span class="cl-rate-lab">~$0.00</span> is the lab-wide rate, used where that source has no row for
-        the specific payer; &mdash; means it has no matching row at all. On the panel tab the mode is the average of the
-        per-CPT modes for that panel &mdash; <em>Mode CPTs</em> is how many CPT codes that average covers.
+        On both tabs a row repeats once per <em>Window Basis</em> (<code>Billed</code> and <code>DOS</code> are separate
+        rows for the same window), so otherwise-matching rows are not duplicates.
+        Mode and median come from the same <code>CPTAverage</code>/<code>PanelAverage</code> row as the averages beside
+        them; they are in the drill-down below rather than the grid. A &mdash; means the aggregate had no paid line to
+        compute that figure from. Note that mode and median are per <em>line</em> amounts while the Avg columns are per
+        <em>unit</em>, so on a multi-unit CPT the two are deliberately on different scales.
     </p>
 </div>
 
@@ -260,44 +265,58 @@
     const WIN_ORDER = ['Rolling90', 'Rolling180', 'YTD'];
 
     // Column sets per tab. `key` doubles as the sortColumn sent to the API.
+    // Column order mirrors the CPTAverage select the team works from, left to right. The
+    // mode/median rate columns are deliberately not here — they live in the drill-down below,
+    // which is unchanged.
     const CPT_COLUMNS = [
-        // Lab first: with the Lab filter on "All Labs" the grid interleaves rows from every lab,
-        // and CPT + panel + payer alone do not say which one a row belongs to.
-        { key: 'labName', label: 'Lab', render: r => text(r.labName) },
-        { key: 'cptCode', label: 'CPT', render: r => `<span class="cl-code">${esc(r.cptCode)}</span>` },
-        { key: 'panelName', label: 'Panel', render: r => text(r.panelName) },
-        { key: 'payerDisplayName', label: 'Payer', render: r => payer(r.payerDisplayName) },
-        { key: 'windowType', label: 'Win', render: r => `<span class="cl-win-badge">${esc(WIN_LABEL[r.windowType] || r.windowType || '')}</span>` },
-        { key: 'avgAllowedAmountPerUnit', label: 'Avg allowed/unit', money: true },
-        { key: 'avgPaidAmountPerUnit', label: 'Avg paid/unit', money: true },
-        { key: 'medianPaidAmount', label: 'Median paid', money: true },
-        { key: 'modeAllowedAmount', label: 'Mode allowed', num: true, render: r => rate(r.modeAllowedAmount, r.modeMatch) },
-        { key: 'modeInsurancePaymentAmount', label: 'Mode ins. paid', num: true, render: r => rate(r.modeInsurancePaymentAmount, r.modeMatch) },
-        { key: 'allowedAmountPerUnitMode', label: 'Allowed/unit (mode)', num: true, render: r => rate(r.allowedAmountPerUnitMode, r.modeMatch) },
-        { key: 'insurancePaymentPerUnitMode', label: 'Ins. paid/unit (mode)', num: true, render: r => rate(r.insurancePaymentPerUnitMode, r.modeMatch) },
-        { key: 'medianAllowedAmount', label: 'Median allowed', num: true, render: r => rate(r.medianAllowedAmount, r.medianMatch) },
-        { key: 'medianInsurancePaymentAmount', label: 'Median ins. paid', num: true, render: r => rate(r.medianInsurancePaymentAmount, r.medianMatch) },
-        { key: 'paidLineCount', label: 'Paid lines', num: true, render: r => lines(r.paidLineCount, r.totalLineCount) },
-        { key: 'denialRate', label: 'Denial', num: true, render: r => denial(r.denialRate) }
+        { key: 'cptCode', label: 'CPT Code', render: r => `<span class="cl-code">${esc(r.cptCode)}</span>` },
+        { key: 'labName', label: 'Lab Name', render: r => text(r.labName) },
+        { key: 'payerDisplayName', label: 'Payer Name', render: r => payer(r.payerDisplayName) },
+        { key: 'panelName', label: 'Panel Name', render: r => text(r.panelName) },
+        { key: 'avgUnits', label: 'Avg Units', num: true, render: r => count(r.avgUnits) },
+        { key: 'windowType', label: 'Window Type', render: r => `<span class="cl-win-badge">${esc(WIN_LABEL[r.windowType] || r.windowType || '')}</span>` },
+        // The same CPT/payer/panel/window appears once per basis (Billed vs DOS); without this
+        // column those rows look like duplicates.
+        { key: 'windowBasis', label: 'Window Basis', render: r => text(r.windowBasis) },
+        { key: 'startDate', label: 'Start DOS', render: r => dateCell(r.startDate) },
+        { key: 'endDate', label: 'End DOS', render: r => dateCell(r.endDate) },
+        { key: 'paidLineCount', label: 'Paid Lines', num: true, render: r => count(r.paidLineCount) },
+        { key: 'avgChargeAmountPerUnit', label: 'Avg Charge/Unit', money: true },
+        { key: 'avgPaidAmountPerUnit', label: 'Avg Paid/Unit', money: true },
+        { key: 'avgAllowedAmountPerUnit', label: 'Avg Allowed/Unit', money: true },
+        { key: 'avgPatientResponsibilityPerUnit', label: 'Avg Pt Resp/Unit', money: true },
+        { key: 'avgPatientPaidAmountPerUnit', label: 'Avg Pt Paid/Unit', money: true },
+        { key: 'medianPaidAmount', label: 'Median Paid', money: true },
+        { key: 'p25PaidAmount', label: 'P25 Paid', money: true },
+        { key: 'p75PaidAmount', label: 'P75 Paid', money: true },
+        { key: 'totalLineCount', label: 'Total Lines', num: true, render: r => count(r.totalLineCount) },
+        { key: 'deniedLineCount', label: 'Denied Lines', num: true, render: r => count(r.deniedLineCount) },
+        { key: 'adjustedLineCount', label: 'Adjusted Lines', num: true, render: r => count(r.adjustedLineCount) }
     ];
 
+    // Same order as the CPT tab, adapted to PanelAverage: Panel leads in place of CPT, there is
+    // no Avg Units at panel level, and the amounts are whole-claim rather than per-unit.
     const PANEL_COLUMNS = [
-        { key: 'labName', label: 'Lab', render: r => text(r.labName) },
-        { key: 'panelName', label: 'Panel', render: r => text(r.panelName) },
+        { key: 'panelName', label: 'Panel Name', render: r => text(r.panelName) },
+        { key: 'labName', label: 'Lab Name', render: r => text(r.labName) },
+        { key: 'payerDisplayName', label: 'Payer Name', render: r => payer(r.payerDisplayName) },
         { key: 'payerId', label: 'Payer ID', render: r => r.payerId ? `<span class="cl-code">${esc(r.payerId)}</span>` : `<span class="cl-muted">none</span>` },
-        { key: 'payerDisplayName', label: 'Payer', render: r => payer(r.payerDisplayName) },
-        { key: 'windowType', label: 'Win', render: r => `<span class="cl-win-badge">${esc(WIN_LABEL[r.windowType] || r.windowType || '')}</span>` },
-        { key: 'avgChargeAmount', label: 'Avg charge', money: true },
-        { key: 'avgAllowedAmount', label: 'Avg allowed', money: true },
-        { key: 'avgPaidAmount', label: 'Avg paid', money: true },
-        { key: 'medianPaidAmount', label: 'Median paid', money: true },
-        { key: 'p25PaidAmount', label: 'P25', money: true },
-        { key: 'p75PaidAmount', label: 'P75', money: true },
-        { key: 'modeAllowedAmount', label: 'Mode allowed', num: true, render: r => rate(r.modeAllowedAmount, r.modeMatch) },
-        { key: 'modeInsurancePaymentAmount', label: 'Mode ins. paid', num: true, render: r => rate(r.modeInsurancePaymentAmount, r.modeMatch) },
-        { key: 'modeCptCount', label: 'Mode CPTs', num: true, render: r => r.modeCptCount == null ? DASH : num.format(r.modeCptCount) },
-        { key: 'paidLineCount', label: 'Paid lines', num: true, render: r => lines(r.paidLineCount, r.totalLineCount) },
-        { key: 'denialRate', label: 'Denial', num: true, render: r => denial(r.denialRate) }
+        { key: 'windowType', label: 'Window Type', render: r => `<span class="cl-win-badge">${esc(WIN_LABEL[r.windowType] || r.windowType || '')}</span>` },
+        { key: 'windowBasis', label: 'Window Basis', render: r => text(r.windowBasis) },
+        { key: 'startDate', label: 'Start DOS', render: r => dateCell(r.startDate) },
+        { key: 'endDate', label: 'End DOS', render: r => dateCell(r.endDate) },
+        { key: 'paidLineCount', label: 'Paid Lines', num: true, render: r => count(r.paidLineCount) },
+        { key: 'avgChargeAmount', label: 'Avg Charge', money: true },
+        { key: 'avgPaidAmount', label: 'Avg Paid', money: true },
+        { key: 'avgAllowedAmount', label: 'Avg Allowed', money: true },
+        { key: 'avgPatientResponsibility', label: 'Avg Pt Resp', money: true },
+        { key: 'avgPatientPaidAmount', label: 'Avg Pt Paid', money: true },
+        { key: 'medianPaidAmount', label: 'Median Paid', money: true },
+        { key: 'p25PaidAmount', label: 'P25 Paid', money: true },
+        { key: 'p75PaidAmount', label: 'P75 Paid', money: true },
+        { key: 'totalLineCount', label: 'Total Lines', num: true, render: r => count(r.totalLineCount) },
+        { key: 'deniedLineCount', label: 'Denied Lines', num: true, render: r => count(r.deniedLineCount) },
+        { key: 'adjustedLineCount', label: 'Adjusted Lines', num: true, render: r => count(r.adjustedLineCount) }
     ];
 
     let tab = 'cpt';
@@ -314,6 +333,15 @@
     function money(v) { return (v === null || v === undefined || v === '') ? DASH : esc(usd.format(v)); }
     function text(v) { return (v === null || v === undefined || v === '') ? `<span class="cl-muted">${DASH}</span>` : esc(v); }
     function payer(v) { return (v === null || v === undefined || v === '') ? `<span class="cl-muted">Unspecified</span>` : esc(v); }
+    function count(v) { return (v === null || v === undefined) ? DASH : num.format(v); }
+    // Take the date straight off the ISO string rather than through Date(): these are DOS dates
+    // with no meaningful time, and parsing a local midnight then formatting it shifts the day
+    // backwards in any positive-offset timezone.
+    function dateCell(v) {
+        if (v === null || v === undefined || v === '') return DASH;
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v));
+        return m ? esc(`${m[1]}-${m[2]}-${m[3]}`) : esc(String(v));
+    }
     function lines(paid, total) {
         if (paid === null || paid === undefined) return DASH;
         const t = (total === null || total === undefined) ? '' : `<span class="text-muted"> / ${num.format(total)}</span>`;
@@ -324,16 +352,8 @@
         const cls = rate >= 8 ? 'd-hi' : rate >= 5 ? 'd-mid' : 'd-ok';
         return `<span class="${cls}">${rate.toFixed(1)}%</span>`;
     }
-    // Mode/median rate cell. LabModes often has no row for the exact payer, in which
-    // case the API falls back to the lab-wide rate — that value is marked with a ~ so
-    // it is never read as this payer's own negotiated rate.
-    function rate(value, match) {
-        if (value === null || value === undefined) return DASH;
-        const amount = esc(usd.format(value));
-        return match === 'lab'
-            ? `<span class="cl-rate-lab" title="No payer-specific rate in LabModes/LabMedians — showing the lab-wide rate for this CPT, panel and window">~${amount}</span>`
-            : amount;
-    }
+    // Mode and median now come off the CPTAverage/PanelAverage row itself, so there is no
+    // payer-vs-lab-wide fallback to flag — money() renders them like any other amount.
     function columns() { return tab === 'cpt' ? CPT_COLUMNS : PANEL_COLUMNS; }
     function setBusy(on) { loader.classList.toggle('active', on); }
 
@@ -487,14 +507,10 @@
             { l: 'Avg allowed / unit', v: money(row.avgAllowedAmountPerUnit), c: '#0F9B76' },
             { l: 'Avg paid / unit', v: money(row.avgPaidAmountPerUnit), c: '#27A558' },
             { l: 'Patient responsibility', v: money(row.avgPatientResponsibilityPerUnit) },
-            { l: 'Mode allowed', v: rate(row.modeAllowedAmount, row.modeMatch) },
-            { l: 'Mode insurance paid', v: rate(row.modeInsurancePaymentAmount, row.modeMatch) },
-            { l: 'Allowed / unit (mode)', v: rate(row.allowedAmountPerUnitMode, row.modeMatch) },
-            { l: 'Ins. paid / unit (mode)', v: rate(row.insurancePaymentPerUnitMode, row.modeMatch) },
-            { l: 'Median allowed', v: rate(row.medianAllowedAmount, row.medianMatch) },
-            { l: 'Median insurance paid', v: rate(row.medianInsurancePaymentAmount, row.medianMatch) },
-            { l: 'Allowed / unit (median)', v: rate(row.allowedAmountPerUnitMedian, row.medianMatch) },
-            { l: 'Ins. paid / unit (median)', v: rate(row.insurancePaymentPerUnitMedian, row.medianMatch) }
+            { l: 'Mode allowed', v: money(row.modeAllowedAmount) },
+            { l: 'Mode insurance paid', v: money(row.modeInsurancePaymentAmount) },
+            { l: 'Median allowed', v: money(row.medianAllowedAmount) },
+            { l: 'Median insurance paid', v: money(row.medianInsurancePaymentAmount) }
         ] : [
             { l: 'Avg charge', v: money(row.avgChargeAmount) },
             { l: 'Avg allowed', v: money(row.avgAllowedAmount), c: '#0F9B76' },
@@ -502,12 +518,9 @@
             { l: 'Patient responsibility', v: money(row.avgPatientResponsibility) },
             { l: 'Median paid', v: money(row.medianPaidAmount) },
             { l: 'P25 / P75 paid', v: `${money(row.p25PaidAmount)} / ${money(row.p75PaidAmount)}` },
-            { l: 'Mode allowed', v: rate(row.modeAllowedAmount, row.modeMatch) },
-            {
-                l: 'Mode ins. paid',
-                v: rate(row.modeInsurancePaymentAmount, row.modeMatch) +
-                   (row.modeCptCount ? ` <span class="cl-note">(${num.format(row.modeCptCount)} CPT${row.modeCptCount === 1 ? '' : 's'})</span>` : '')
-            }
+            { l: 'Mode allowed', v: money(row.modeAllowedAmount) },
+            { l: 'Mode ins. paid', v: money(row.modeInsurancePaymentAmount) },
+            { l: 'Median allowed', v: money(row.medianAllowedAmount) }
         ];
         $('detailStats').innerHTML = stats.map(s =>
             `<div class="cl-stat"><div class="cl-stat-l">${esc(s.l)}</div>
@@ -526,8 +539,8 @@
                 ['Avg allowed', money(match.avgAllowedAmountPerUnit)],
                 ['Avg paid', money(match.avgPaidAmountPerUnit)],
                 ['Median paid', money(match.medianPaidAmount)],
-                ['Mode allowed', rate(match.modeAllowedAmount, match.modeMatch)],
-                ['Median allowed', rate(match.medianAllowedAmount, match.medianMatch)],
+                ['Mode allowed', money(match.modeAllowedAmount)],
+                ['Median allowed', money(match.medianAllowedAmount)],
                 ['Paid lines', lines(match.paidLineCount, match.totalLineCount)],
                 ['Denial', match.denialRate != null ? match.denialRate.toFixed(1) + '%' : DASH]
             ] : [
@@ -535,7 +548,8 @@
                 ['Avg paid', money(match.avgPaidAmount)],
                 ['Median paid', money(match.medianPaidAmount)],
                 ['P25 / P75', `${money(match.p25PaidAmount)} / ${money(match.p75PaidAmount)}`],
-                ['Mode allowed', rate(match.modeAllowedAmount, match.modeMatch)],
+                ['Mode allowed', money(match.modeAllowedAmount)],
+                ['Median allowed', money(match.medianAllowedAmount)],
                 ['Paid lines', lines(match.paidLineCount, match.totalLineCount)],
                 ['Denial', match.denialRate != null ? match.denialRate.toFixed(1) + '%' : DASH]
             ];
@@ -666,6 +680,8 @@
         // The CPT code filter is meaningless on the panel tab.
         $('cptCodeField').style.display = next === 'cpt' ? '' : 'none';
         $('gridTitle').textContent = next === 'cpt' ? 'CPT results' : 'Panel results';
+        $('clTable').classList.toggle('tab-cpt', next === 'cpt');
+        $('clTable').classList.toggle('tab-panel', next === 'panel');
         sortColumn = next === 'cpt' ? 'cptCode' : 'panelName';
         sortDirection = 'asc';
         page = 1;
@@ -708,7 +724,10 @@
     // cannot finish inside the dashboard's 120s HttpClient timeout, which is why the default
     // path below hands the job to LRN.ReportWorker instead.
     function legacyDownload() {
-        window.location = (tab === 'cpt' ? urls.cptExport : urls.panelExport) + '?' + new URLSearchParams(filterParams());
+        // POST, not window.location: ExportCpt/ExportPanel validate an antiforgery token and a
+        // navigation cannot carry one. lrnPostDownload (in _Layout) submits a hidden form, so
+        // the filters still ride on the query string and the Save dialog behaves as before.
+        window.lrnPostDownload((tab === 'cpt' ? urls.cptExport : urls.panelExport) + '?' + new URLSearchParams(filterParams()));
     }
 
     $('exportBtn').onclick = () => {

@@ -1137,6 +1137,33 @@
                 var i = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
                 return i ? i.value : '';
             }
+
+            // Downloads POST so the antiforgery token can be validated — a link cannot carry
+            // one. Submitting a real (hidden) form rather than fetch() keeps the browser's
+            // native download handling: Content-Disposition still opens the Save dialog, and
+            // the file never has to be buffered in memory as a blob.
+            //
+            // Exposed on window because the CPT/Panel Lookup page has its own IIFE and needs
+            // the same helper. Query-string filters are preserved: the actions read
+            // Request.Query, which is populated on POST just as it is on GET.
+            window.lrnPostDownload = function (url) {
+                var form = document.createElement('form');
+                form.method = 'post';
+                form.action = url;
+                form.style.display = 'none';
+
+                var token = document.createElement('input');
+                token.type = 'hidden';
+                token.name = '__RequestVerificationToken';
+                token.value = afToken();
+                form.appendChild(token);
+
+                document.body.appendChild(form);
+                form.submit();
+                // The navigation is already queued; drop the node so repeated downloads
+                // do not accumulate orphan forms in the DOM.
+                setTimeout(function () { form.remove(); }, 0);
+            };
             function statusChip(s, progress) {
                 var cls = s === 'Ready' ? 'rpt-status-ready'
                         : s === 'Processing' ? 'rpt-status-processing'
@@ -1202,7 +1229,8 @@
                             + (r.fileSizeMb ? ' · ' + r.fileSizeMb + ' MB' : '')
                             + (r.expiryDate ? ' · expires ' + esc(r.expiryDate) : '');
                     var actions = '';
-                    if (r.downloadUrl) actions += '<a class="rpt-dl" href="' + r.downloadUrl + '" title="Download"><i class="bi bi-download"></i></a>';
+                    // Button, not a link: Download is a POST so the antiforgery token can ride along.
+                    if (r.downloadUrl) actions += '<button class="rpt-dl" data-url="' + esc(r.downloadUrl) + '" title="Download"><i class="bi bi-download"></i></button>';
                     if (r.status === 'Failed') actions += '<button class="rpt-retry" data-lab="' + esc(r.lab) + '" data-id="' + r.reportId + '" title="Retry"><i class="bi bi-arrow-clockwise"></i></button>';
                     if (r.status === 'Queued' || r.status === 'Processing')
                         actions += '<button class="rpt-cancel" data-lab="' + esc(r.lab) + '" data-id="' + r.reportId + '" title="Cancel / kill report"><i class="bi bi-x-octagon"></i></button>';
@@ -1244,6 +1272,11 @@
             list.addEventListener('click', function (e) {
                 var b = e.target.closest('button');
                 if (!b) return;
+                if (b.classList.contains('rpt-dl')) {
+                    // Navigates away to the file response; nothing to refresh afterwards.
+                    window.lrnPostDownload(b.getAttribute('data-url'));
+                    return;
+                }
                 if (b.classList.contains('rpt-del')) post(deleteUrl, b.getAttribute('data-lab'), b.getAttribute('data-id'));
                 if (b.classList.contains('rpt-retry')) post(retryUrl, b.getAttribute('data-lab'), b.getAttribute('data-id'));
                 if (b.classList.contains('rpt-cancel')) {
