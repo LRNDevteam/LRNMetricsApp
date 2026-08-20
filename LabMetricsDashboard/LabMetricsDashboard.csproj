@@ -75,4 +75,10 @@
     <Compile Remove="Services\WeekRangeHelper.cs" />
   </ItemGroup>
 
+    <ItemGroup>
+      <None Include="Templates\CodingSummary_CalculationLogic.xlsx" Condition="Exists('Templates\CodingSummary_CalculationLogic.xlsx')">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+    </ItemGroup>
+
 </Project>

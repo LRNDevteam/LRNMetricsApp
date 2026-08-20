@@ -118,6 +118,13 @@ public sealed class LabOutput
     public string Avgs { get; set; } = string.Empty;
     public string Archive { get; set; } = string.Empty;
     public string ConslidatedAvgs { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional folder for BeechTree Three-Pillar diagnostic JSON snapshots
+    /// (LIS / PMS / Cash per billed week range). When empty, files go to
+    /// <see cref="Reports"/>\ThreePillar.
+    /// </summary>
+    public string ThreePillarJsonPath { get; set; } = string.Empty;
 }
 
 public sealed class ProductionSummaryConfig

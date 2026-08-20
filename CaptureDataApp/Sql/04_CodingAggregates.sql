@@ -579,6 +579,32 @@ BEGIN
         INNER JOIN ri ON ri.WeekFolder = f.WeekFolder;
         -- <<< END CVRI
 
+        -- Client expected Financial Dashboard: classify by ValidationStatus, not charge > 0.
+        ;WITH fin AS (
+            SELECT
+                cv.WeekFolder,
+                MissingOnlyClaims     = SUM(CASE WHEN LTRIM(RTRIM(cv.ValidationStatus)) = N'Missing CPTs' THEN 1 ELSE 0 END),
+                MissingOnlyBilled     = ISNULL(SUM(CASE WHEN LTRIM(RTRIM(cv.ValidationStatus)) = N'Missing CPTs' THEN TRY_CAST(cv.TotalCharge AS DECIMAL(18,2)) ELSE 0 END), 0),
+                AdditionalOnlyClaims  = SUM(CASE WHEN LTRIM(RTRIM(cv.ValidationStatus)) = N'Additional CPTs coded' THEN 1 ELSE 0 END),
+                AdditionalOnlyBilled  = ISNULL(SUM(CASE WHEN LTRIM(RTRIM(cv.ValidationStatus)) = N'Additional CPTs coded' THEN TRY_CAST(cv.TotalCharge AS DECIMAL(18,2)) ELSE 0 END), 0),
+                BothClaims            = SUM(CASE WHEN LTRIM(RTRIM(cv.ValidationStatus)) = N'Both Missing and Additional CPTs identified' THEN 1 ELSE 0 END),
+                BothBilled            = ISNULL(SUM(CASE WHEN LTRIM(RTRIM(cv.ValidationStatus)) = N'Both Missing and Additional CPTs identified' THEN TRY_CAST(cv.TotalCharge AS DECIMAL(18,2)) ELSE 0 END), 0)
+            FROM dbo.CodingValidation cv
+            WHERE ISNULL(cv.AccessionNo, '') <> ''
+            GROUP BY cv.WeekFolder
+        )
+        UPDATE f
+        SET f.RevenueLoss_Claims                   = fin.MissingOnlyClaims + fin.BothClaims,
+            f.RevenueLoss_ActualBilled             = fin.MissingOnlyBilled + fin.BothBilled,
+            f.RevenueAtRisk_Claims                 = fin.AdditionalOnlyClaims + fin.BothClaims,
+            f.RevenueAtRisk_ActualBilled           = fin.AdditionalOnlyBilled + fin.BothBilled,
+            f.ClaimsWithMissingCPTs                = fin.MissingOnlyClaims,
+            f.ClaimsWithAdditionalCPTs             = fin.AdditionalOnlyClaims,
+            f.ClaimsWithBothMissingAndAdditional   = fin.BothClaims,
+            f.TotalErrorClaims                     = fin.MissingOnlyClaims + fin.BothClaims
+        FROM dbo.CodingFinancialSummary f
+        INNER JOIN fin ON fin.WeekFolder = f.WeekFolder;
+
     COMMIT TRANSACTION;
 
     -- Row counts for caller logging

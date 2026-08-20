@@ -19,7 +19,10 @@ public static class CodingExcelExportBuilder
     // <<< END CVBILL-1.4
 
     /// <summary>Creates the workbook from the Coding Summary view model.</summary>
-    public static XLWorkbook CreateWorkbook(CodingSummaryViewModel vm, string labName)
+    public static XLWorkbook CreateWorkbook(
+        CodingSummaryViewModel vm,
+        string labName,
+        string? calculationLogicTemplatePath = null)
     {
         var wb = new XLWorkbook();
 
@@ -44,6 +47,18 @@ public static class CodingExcelExportBuilder
 
         if (vm.DetailRows.Count > 0)
             BuildValidationDetailSheet(wb, vm.DetailRows);
+
+        // Always include the Calculation Logic tab (built in-process so it
+        // cannot be dropped by a missing / wrong template xlsx).
+        try
+        {
+            CodingCalculationLogicTemplate.AddToWorkbook(wb, calculationLogicTemplatePath);
+        }
+        catch
+        {
+            try { CodingCalculationLogicTemplate.AddToWorkbook(wb, configuredPath: null); }
+            catch { /* export still returns the data sheets */ }
+        }
 
         return wb;
     }
@@ -200,8 +215,9 @@ public static class CodingExcelExportBuilder
         row++;
         // <<< END CVKPI-RI / CVKPI-2R
 
-        // ── Detail Breakdown section ─────────────────────────────────────
-        var detailRange = ws.Range(row, 1, row, totalCols);
+        // ── Detail Breakdown: compact 2-column table (label next to value) ─
+        // Header matches the two-card width (cols A–G), not the full 11-col span.
+        var detailRange = ws.Range(row, 1, row, 7);
         detailRange.Merge();
         var detailCell = ws.Cell(row, 1);
         detailCell.Value = "Detail Breakdown";
@@ -210,65 +226,75 @@ public static class CodingExcelExportBuilder
         detailCell.Style.Font.FontColor = XLColor.White;
         detailCell.Style.Fill.BackgroundColor = NavyMedium;
         detailCell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        detailCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
         ws.Row(row).Height = 24;
         row++;
 
-        string[] detLabels =
-        [
-            "Total Claims",
-            "Claims with Missing CPTs",
-            "Claims with Additional CPTs",
+        WriteDetailMetric(ws, row, 1,
+            "Total Claims", fin.TotalClaims.ToString("N0"), ValueNavy, even: true);
+        WriteDetailMetric(ws, row, 5,
             "Claims with Missing & Additional CPTs",
+            fin.ClaimsWithBothMissingAndAdditional?.ToString("N0") ?? "—", ValueNavy, even: true);
+        row++;
+
+        WriteDetailMetric(ws, row, 1,
+            "Claims with Missing CPTs",
+            fin.ClaimsWithMissingCPTs?.ToString("N0") ?? "—", ValueNavy, even: false);
+        WriteDetailMetric(ws, row, 5,
             "Total Error Claims",
-            "Compliance Rate %"
-        ];
-        string[] detValues =
-        [
-            fin.TotalClaims.ToString("N0"),
-            fin.ClaimsWithMissingCPTs?.ToString("N0") ?? "—",
-            fin.ClaimsWithAdditionalCPTs?.ToString("N0") ?? "—",
-            fin.ClaimsWithBothMissingAndAdditional?.ToString("N0") ?? "—",
-            fin.TotalErrorClaims?.ToString("N0") ?? "—",
-            fin.ComplianceRatePct
-        ];
-        XLColor[] detColors =
-        [
-            ValueNavy, ValueNavy, ValueNavy, ValueNavy, DangerRed,
-            GetComplianceColor(fin.ComplianceRatePct)
-        ];
+            fin.TotalErrorClaims?.ToString("N0") ?? "—", DangerRed, even: false);
+        row++;
 
-        for (int i = 0; i < detLabels.Length; i++)
-        {
-            var bg = i % 2 == 0 ? XLColor.White : CardBg;
-            var labelMerge = ws.Range(row, 1, row, 3);
-            labelMerge.Merge();
-            var lc = ws.Cell(row, 1);
-            lc.Value = detLabels[i];
-            lc.Style.Font.Bold = true;
-            lc.Style.Font.FontSize = 10;
-            lc.Style.Font.FontColor = LabelGray;
-            lc.Style.Fill.BackgroundColor = bg;
-            lc.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-            lc.Style.Border.OutsideBorderColor = CardBorder;
-
-            var valMerge = ws.Range(row, 4, row, totalCols);
-            valMerge.Merge();
-            var vc = ws.Cell(row, 4);
-            vc.Value = detValues[i];
-            vc.Style.Font.Bold = true;
-            vc.Style.Font.FontSize = 11;
-            vc.Style.Font.FontColor = detColors[i];
-            vc.Style.Fill.BackgroundColor = bg;
-            vc.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
-            vc.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-            vc.Style.Border.OutsideBorderColor = CardBorder;
-            row++;
-        }
+        WriteDetailMetric(ws, row, 1,
+            "Claims with Additional CPTs",
+            fin.ClaimsWithAdditionalCPTs?.ToString("N0") ?? "—", ValueNavy, even: true);
+        WriteDetailMetric(ws, row, 5,
+            "Compliance Rate %",
+            fin.ComplianceRatePct, GetComplianceColor(fin.ComplianceRatePct), even: true);
+        row++;
 
         // Print / view settings
         ws.PageSetup.PageOrientation = XLPageOrientation.Landscape;
         ws.PageSetup.FitToPages(1, 1);
         ws.SheetView.ZoomScale = 120;
+    }
+
+    /// <summary>
+    /// One Detail Breakdown metric: label in startCol..startCol+1, value in startCol+2
+    /// (same 3-column card grid as the KPI cards above).
+    /// </summary>
+    private static void WriteDetailMetric(IXLWorksheet ws, int row, int startCol,
+        string label, string value, XLColor valueColor, bool even)
+    {
+        int labelEnd = startCol + 1;
+        int valCol = startCol + 2;
+        var bg = even ? XLColor.White : CardBg;
+
+        var labelRange = ws.Range(row, startCol, row, labelEnd);
+        labelRange.Merge();
+        var lc = ws.Cell(row, startCol);
+        lc.Value = label;
+        labelRange.Style.Font.Bold = true;
+        labelRange.Style.Font.FontSize = 10;
+        labelRange.Style.Font.FontColor = LabelGray;
+        labelRange.Style.Fill.BackgroundColor = bg;
+        labelRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+        labelRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        labelRange.Style.Alignment.Indent = 1;
+        labelRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        labelRange.Style.Border.OutsideBorderColor = CardBorder;
+
+        var vc = ws.Cell(row, valCol);
+        vc.Value = value;
+        vc.Style.Font.Bold = true;
+        vc.Style.Font.FontSize = 11;
+        vc.Style.Font.FontColor = valueColor;
+        vc.Style.Fill.BackgroundColor = bg;
+        vc.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+        vc.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        vc.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        vc.Style.Border.OutsideBorderColor = CardBorder;
+        ws.Row(row).Height = 22;
     }
 
     /// <summary>Writes a card title row (bold heading + subtitle) and returns the next row.</summary>

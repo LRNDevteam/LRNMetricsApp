@@ -407,6 +407,7 @@ public sealed class PredictionInsight
     public string ReportPeriod { get; init; } = string.Empty;
     public string GeneratedAt  { get; init; } = string.Empty;
     public string ModelUsed    { get; init; } = string.Empty;
+    public string Headline     { get; init; } = string.Empty;
 
     /// <summary>
     /// The cleaned, displayable sections extracted from the raw_response JSON blob.

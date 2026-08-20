@@ -1,6 +1,7 @@
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using LRN.ReportQueue.Shared;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace LRN.ReportWorker.Generators;
@@ -18,18 +19,21 @@ public sealed class CodingSummaryReportGenerator : IReportGenerator
     private readonly LabSettings _labSettings;
     private readonly ICodingValidationRepository _repo;
     private readonly LabCsvFileResolver _fileResolver;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<CodingSummaryReportGenerator> _logger;
 
     public CodingSummaryReportGenerator(
         LabSettings labSettings,
         ICodingValidationRepository repo,
         LabCsvFileResolver fileResolver,
+        IConfiguration configuration,
         ILogger<CodingSummaryReportGenerator> logger)
     {
-        _labSettings  = labSettings;
-        _repo         = repo;
-        _fileResolver = fileResolver;
-        _logger       = logger;
+        _labSettings    = labSettings;
+        _repo           = repo;
+        _fileResolver   = fileResolver;
+        _configuration  = configuration;
+        _logger         = logger;
     }
 
     public async Task<GeneratedReportFile> GenerateAsync(
@@ -86,7 +90,15 @@ public sealed class CodingSummaryReportGenerator : IReportGenerator
             DetailRows     = detail,
         };
 
-        using var workbook = CodingExcelExportBuilder.CreateWorkbook(vm, job.LabName);
+        var logicTemplatePath = _configuration["CodingSummary:CalculationLogicTemplatePath"];
+        using var workbook = CodingExcelExportBuilder.CreateWorkbook(
+            vm, job.LabName, logicTemplatePath);
+        var sheetNames = string.Join(", ", workbook.Worksheets.Select(w => w.Name));
+        _logger.LogInformation(
+            "CodingSummary {ReportId} [{Lab}]: sheets=[{Sheets}]; CalculationLogic={HasLogic}; template={Path}",
+            job.ReportId, job.LabName, sheetNames,
+            workbook.Worksheets.Contains(CodingCalculationLogicTemplate.SheetName),
+            string.IsNullOrWhiteSpace(logicTemplatePath) ? "(embedded)" : logicTemplatePath);
         await using var stream = new MemoryStream();
         workbook.SaveAs(stream);
         var excelBytes = stream.ToArray();

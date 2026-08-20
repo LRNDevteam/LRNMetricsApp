@@ -395,6 +395,12 @@ public sealed class PayerBreakdownRow
 
     /// <summary>Grand total ChargeAmount for this payer.</summary>
     public decimal GrandTotalCharges { get; init; }
+
+    /// <summary>
+    /// Optional child rows for grouped displays, e.g. NorthWest Panel Breakdown
+    /// where the parent row is a panel and the children are payer rows.
+    /// </summary>
+    public List<PayerBreakdownRow> ChildRows { get; init; } = [];
 }
 
 // ?? Payer X Panel models ???????????????????????????????????????????????????
@@ -467,4 +473,10 @@ public sealed class CptBreakdownRow
 
     /// <summary>Grand total claim (line) count for this CPT code.</summary>
     public int GrandTotalClaims { get; init; }
+
+    /// <summary>
+    /// Optional child rows for grouped displays, e.g. NorthWest CPT Breakdown
+    /// where the parent row is a source and the children are CPT rows.
+    /// </summary>
+    public List<CptBreakdownRow> ChildRows { get; init; } = [];
 }

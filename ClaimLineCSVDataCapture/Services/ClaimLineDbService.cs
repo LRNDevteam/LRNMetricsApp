@@ -365,8 +365,11 @@ public sealed class ClaimLineDbService
             "dbo.usp_RefreshNW_CPTBreakdown",
             "dbo.usp_RefreshNW_CodingBreakdown_Unbilled",
             "dbo.usp_RefreshNW_PanelBreakdown",
+            "dbo.usp_RefreshNW_PanelBreakdownWithPayers",
             "dbo.usp_RefreshNW_InsightBreakdown",
+            "dbo.usp_RefreshNW_InsightBreakdownAllPayers",
             "dbo.usp_RefreshNW_HighestPayerBreakdown",
+            "dbo.usp_RefreshNW_CPTBreakdownBySource",
         ];
 
         return RunProductionReportSPs(procedures);
