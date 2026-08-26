@@ -1,0 +1,41 @@
+@inject Microsoft.Extensions.Configuration.IConfiguration Configuration
+@{
+    // Set ReimbursementAgent:ApiUrl in appsettings.json (or appsettings.{Environment}.json)
+    // so this can point to a different backend in dev/staging/production without a code change.
+    var agentApiUrl = Configuration["ReimbursementAgent:ApiUrl"]
+        ?? "https://<your-app-service-name>.azurewebsites.net/api/ask";
+}
+@* Only signed-in users see the widget at all. This is a convenience for
+   anonymous visitors, not the actual security boundary — the backend proxy
+   independently rejects any request without a valid chat token, so hiding
+   this element is not what makes the chat "require sign-in." *@
+@if (User?.Identity?.IsAuthenticated == true)
+{
+<div class="reimb-chat-widget" data-agent-api-url="@agentApiUrl">
+    <div class="reimb-chat-panel" id="reimbChatPanel" role="dialog" aria-label="Reimbursement chat" hidden>
+        <div class="reimb-chat-header">
+            <span>Reimbursement Insights</span>
+            <button type="button" class="reimb-chat-close" id="reimbChatClose" aria-label="Close chat">&times;</button>
+        </div>
+
+        <div class="reimb-chat-messages" id="reimbChatMessages">
+            <div class="reimb-chat-message reimb-chat-message-agent">
+                Hi! Ask me about average, median, or mode reimbursement by CPT code, panel, or payer.
+            </div>
+        </div>
+
+        <div class="reimb-chat-input-row">
+            <input
+                type="text"
+                id="reimbChatInput"
+                placeholder="e.g. Average reimbursement for CPT 87798"
+                aria-label="Ask the reimbursement agent a question" />
+            <button type="button" id="reimbChatSend">Send</button>
+        </div>
+    </div>
+
+    <button type="button" class="reimb-chat-bubble" id="reimbChatBubble" aria-label="Open reimbursement chat">
+        &#128172;
+    </button>
+</div>
+}

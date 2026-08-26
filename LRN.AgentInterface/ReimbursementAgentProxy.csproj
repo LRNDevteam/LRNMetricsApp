@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- A hand-off snippet, not source: it is loose top-level statements meant to be pasted
+         into another application, so the Web SDK's default glob compiled it as a second entry
+         point and the project would not build ("Only one compilation unit can have top-level
+         statements"). It is also superseded — LabMetricsDashboard reaches this proxy through
+         ReimbursementChatController, which signs the ticket server-side, so no /api/chat-token
+         endpoint is needed on the web app. Kept for reference; excluded from the build. -->
+    <Compile Remove="existing-webapp-chat-token-endpoint.cs" />
+    <None Include="existing-webapp-chat-token-endpoint.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- NOTE: This SDK is under active development. Check NuGet for the current
+         stable/beta version before restoring: https://www.nuget.org/packages/Azure.AI.Agents.Persistent -->
+    <PackageReference Include="Azure.AI.Agents.Persistent" Version="1.2.0-beta.9" />
+    <!-- Reads the Foundry and ChatToken secrets from kv-lrnmetrics-prod. Version matched to
+         LabMetricsDashboard so both apps resolve the same Key Vault stack. -->
+    <PackageReference Include="Azure.Extensions.AspNetCore.Configuration.Secrets" Version="1.5.2" />
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.10" />
+  </ItemGroup>
+
+</Project>

@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 18
-VisualStudioVersion = 18.8.11925.187
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.37516.0 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LabMetricsDashboard", "LabMetricsDashboard\LabMetricsDashboard.csproj", "{28C8D0C9-0B2C-25B1-944F-544054B185DE}"
 EndProject
@@ -42,6 +42,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LRN.AveragesImport.Worker", "LRN.AveragesImport\LRN.AveragesImport.Worker\LRN.AveragesImport.Worker.csproj", "{69171BDD-223A-E576-80B6-743A5083CE14}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LRN.ReportsApi.Tests", "tests\LRN.ReportsApi.Tests\LRN.ReportsApi.Tests.csproj", "{3E8E95C6-5DC9-4129-B8C0-C63EC69E3034}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ReimbursementAgentProxy", "LRN.AgentInterface\ReimbursementAgentProxy.csproj", "{BF16AC7C-B2EF-443E-E98E-2746456DA3AF}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LRN.AzBlobSync", "LRN.AzBlobSync\LRN.AzBlobSync.csproj", "{15055C44-5604-43ED-812F-0A265AF02D5A}"
 EndProject
@@ -295,6 +297,18 @@ Global
 		{15055C44-5604-43ED-812F-0A265AF02D5A}.Release|x64.Build.0 = Release|Any CPU
 		{15055C44-5604-43ED-812F-0A265AF02D5A}.Release|x86.ActiveCfg = Release|Any CPU
 		{15055C44-5604-43ED-812F-0A265AF02D5A}.Release|x86.Build.0 = Release|Any CPU
+		{BF16AC7C-B2EF-443E-E98E-2746456DA3AF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BF16AC7C-B2EF-443E-E98E-2746456DA3AF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BF16AC7C-B2EF-443E-E98E-2746456DA3AF}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{BF16AC7C-B2EF-443E-E98E-2746456DA3AF}.Debug|x64.Build.0 = Debug|Any CPU
+		{BF16AC7C-B2EF-443E-E98E-2746456DA3AF}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{BF16AC7C-B2EF-443E-E98E-2746456DA3AF}.Debug|x86.Build.0 = Debug|Any CPU
+		{BF16AC7C-B2EF-443E-E98E-2746456DA3AF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BF16AC7C-B2EF-443E-E98E-2746456DA3AF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BF16AC7C-B2EF-443E-E98E-2746456DA3AF}.Release|x64.ActiveCfg = Release|Any CPU
+		{BF16AC7C-B2EF-443E-E98E-2746456DA3AF}.Release|x64.Build.0 = Release|Any CPU
+		{BF16AC7C-B2EF-443E-E98E-2746456DA3AF}.Release|x86.ActiveCfg = Release|Any CPU
+		{BF16AC7C-B2EF-443E-E98E-2746456DA3AF}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
