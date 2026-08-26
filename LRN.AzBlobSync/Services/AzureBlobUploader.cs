@@ -61,10 +61,10 @@ public sealed class AzureBlobUploader
             var blob = container.GetBlobClient(blobPath);
 
             await using var stream = file.Open(FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            await blob.UploadAsync(stream, new BlobUploadOptions
-            {
-                HttpHeaders = new BlobHttpHeaders { ContentType = "application/json" },
-            }, ct);
+            await blob.UploadAsync(stream, overwrite: true, cancellationToken: ct);
+            await blob.SetHttpHeadersAsync(
+                new BlobHttpHeaders { ContentType = "application/json" },
+                cancellationToken: ct);
 
             uploaded++;
             _logger.LogInformation("[BlobSync] Uploaded {Blob}", blob.Uri.AbsolutePath);
@@ -80,10 +80,10 @@ public sealed class AzureBlobUploader
         var blob = container.GetBlobClient($"{prefix}/{LatestBlobName}");
         var bytes = Encoding.UTF8.GetBytes(json);
         await using var stream = new MemoryStream(bytes);
-        await blob.UploadAsync(stream, new BlobUploadOptions
-        {
-            HttpHeaders = new BlobHttpHeaders { ContentType = "application/json" },
-        }, ct);
+        await blob.UploadAsync(stream, overwrite: true, cancellationToken: ct);
+        await blob.SetHttpHeadersAsync(
+            new BlobHttpHeaders { ContentType = "application/json" },
+            cancellationToken: ct);
 
         _logger.LogInformation("[BlobSync] Updated blob latest-folder JSON: {Blob}", blob.Uri.AbsolutePath);
     }
@@ -109,10 +109,10 @@ public sealed class AzureBlobUploader
         var blob = container.GetBlobClient(NormalizeBlobPath(blobPath));
         var bytes = Encoding.UTF8.GetBytes(text);
         await using var stream = new MemoryStream(bytes);
-        await blob.UploadAsync(stream, new BlobUploadOptions
-        {
-            HttpHeaders = new BlobHttpHeaders { ContentType = "application/json" },
-        }, ct);
+        await blob.UploadAsync(stream, overwrite: true, cancellationToken: ct);
+        await blob.SetHttpHeadersAsync(
+            new BlobHttpHeaders { ContentType = "application/json" },
+            cancellationToken: ct);
 
         _logger.LogInformation("[BlobSync] Uploaded {Blob}", blob.Uri.AbsolutePath);
     }

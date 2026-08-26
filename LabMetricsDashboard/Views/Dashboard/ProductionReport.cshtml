@@ -147,7 +147,8 @@
 
     // CPT Breakdown helpers
     var cptShowUnits = Model.CptUnitsLabel != "No. of Claims";
-    var cptShowCountOfUnits = true;
+    var cptShowCountOfUnits = Model.CptUnitsLabel is "Count of CPT" or "Count of Units" or "No. of Claims";
+    var cptUnitsHeader = string.IsNullOrWhiteSpace(Model.CptUnitsLabel) ? "Count of Units" : Model.CptUnitsLabel;
     var cptYears  = Model.CptBreakdownYears.Where(y => y > 1900).ToList();
     var cptMonths = Model.CptBreakdownMonths.Where(m => int.Parse(m[..4]) > 1900).ToList();
     var cptMonthsByYear = cptMonths
@@ -711,7 +712,11 @@ th.pr-month-data, td.pr-month-data {
                 <i class="bi bi-list-ol"></i> CPT Breakdown
             </button>
         </li>
-        @if (Model.IsNorthWestLab)
+        @* Panel Breakdown is now available to every lab that has
+           usp_Get{Prefix}PanelBreakdownWithPayers deployed
+           (Sql/40_AllLabs_PanelBreakdownWithPayers.sql). Labs without it return no
+           rows, so gating on the data keeps the tab hidden exactly as before. *@
+        @if (Model.PanelBreakdownRows.Count > 0)
         {
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="panel-breakdown-tab" data-bs-toggle="pill"
@@ -720,6 +725,9 @@ th.pr-month-data, td.pr-month-data {
                 <i class="bi bi-layers"></i> Panel Breakdown
             </button>
         </li>
+        }
+        @if (Model.IsNorthWestLab)
+        {
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="insight-tab" data-bs-toggle="pill"
                     data-bs-target="#insight-pane" type="button" role="tab"
@@ -1670,13 +1678,13 @@ th.pr-month-data, td.pr-month-data {
                                                     var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                                     foreach (var mk in mons)
                                                     {
-                                                        <th class="pr-month-data">@(cptShowCountOfUnits ? "Count of Units" : Model.CptUnitsLabel)</th>
+                                                        <th class="pr-month-data">@(cptUnitsHeader)</th>
                                                         <th class="pr-month-data">Billed Amount</th>
                                                     }
-                                                    <th class="pr-year-total">@(cptShowCountOfUnits ? "Count of Units" : Model.CptUnitsLabel)</th>
+                                                    <th class="pr-year-total">@(cptUnitsHeader)</th>
                                                     <th class="pr-year-total">Billed Amount</th>
                                                 }
-                                                <th class="pr-grand-total">@(cptShowCountOfUnits ? "Count of Units" : Model.CptUnitsLabel)</th>
+                                                <th class="pr-grand-total">@(cptUnitsHeader)</th>
                                                 <th class="pr-grand-total">Billed Amount</th>
                                             </tr>
                                         </thead>
@@ -1784,13 +1792,13 @@ th.pr-month-data, td.pr-month-data {
                                         var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                         foreach (var mk in mons)
                                         {
-                                            <th class="pr-month-data">@(cptShowCountOfUnits ? "Count of Units" : Model.CptUnitsLabel)</th>
+                                            <th class="pr-month-data">@(cptUnitsHeader)</th>
                                             <th class="pr-month-data">Billed Amount</th>
                                         }
-                                        <th class="pr-year-total">@(cptShowCountOfUnits ? "Count of Units" : Model.CptUnitsLabel)</th>
+                                        <th class="pr-year-total">@(cptUnitsHeader)</th>
                                         <th class="pr-year-total">Billed Amount</th>
                                     }
-                                    <th class="pr-grand-total">@(cptShowCountOfUnits ? "Count of Units" : Model.CptUnitsLabel)</th>
+                                    <th class="pr-grand-total">@(cptUnitsHeader)</th>
                                     <th class="pr-grand-total">Billed Amount</th>
                                 </tr>
                             </thead>
@@ -1847,7 +1855,7 @@ th.pr-month-data, td.pr-month-data {
             }
         </div>
 
-        @if (Model.IsNorthWestLab)
+        @if (Model.PanelBreakdownRows.Count > 0)
         {
         <div class="tab-pane fade" id="panel-breakdown-pane" role="tabpanel" aria-labelledby="panel-breakdown-tab">
             @if (Model.PanelBreakdownRows.Count > 0 && pnlYears.Count > 0)
@@ -1857,7 +1865,15 @@ th.pr-month-data, td.pr-month-data {
                         <span class="filter-dot">•</span>
                         <span><span class="filter-label">Filter:</span>
                             <span class="filter-key-2">ChargeEnteredDate</span> is a valid date
-                            &nbsp;·&nbsp; FirstBilledDate is a date, or blank with Emedix date</span>
+                            @if (Model.IsNorthWestLab)
+                            {
+                            <text>&nbsp;·&nbsp; FirstBilledDate is a date, or blank with Emedix date</text>
+                            }
+                            else
+                            {
+                            <text>&nbsp;·&nbsp; FirstBilledDate is not blank</text>
+                            }
+                        </span>
                     </div>
                     <div class="pr-scroll">
                         <table class="pr-table">
@@ -1989,7 +2005,10 @@ th.pr-month-data, td.pr-month-data {
                 </div>
             }
         </div>
+        }
 
+        @if (Model.IsNorthWestLab)
+        {
         <div class="tab-pane fade" id="insight-pane" role="tabpanel" aria-labelledby="insight-tab">
             <div class="pr-insight-toolbar">
                 <div class="pr-source-toggle" id="insightSourceToggle" role="tablist" aria-label="Billing source">

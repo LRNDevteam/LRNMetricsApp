@@ -85,6 +85,11 @@ public sealed class CollectionSummaryViewModel
     /// </summary>
     public bool ShowInsuranceVsPayment { get; set; }
 
+    /// <summary>Augustus Collection Report ranks insurance pivots by Count of ClaimID, not SUM(InsurancePayment).</summary>
+    public bool IsAugustusLab =>
+        SelectedLab.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
+        || SelectedLab.Equals("Augustus", StringComparison.OrdinalIgnoreCase);
+
     // ?? CPT vs Payment % ???????????????????????????????????????
     public List<CptPaymentPctRow> CptPaymentPct { get; set; } = [];
 
@@ -234,7 +239,10 @@ public sealed record InsuranceAgingRow(
     int Claims120,
     decimal Balance120,
     int ClaimsTotal,
-    decimal BalanceTotal);
+    decimal BalanceTotal,
+    // Billing source (Augustus: ClaimLevelData.Source, e.g. "IRCM").
+    // Empty for labs whose Insurance vs Aging SP does not return a Source column.
+    string Source = "");
 
 /// <summary>
 /// One row in the "Panel vs Payment" table.

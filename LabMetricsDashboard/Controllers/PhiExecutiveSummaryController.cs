@@ -92,7 +92,7 @@ public class PhiExecutiveSummaryController : Controller
             return View(emptyVm);
         }
 
-        var spName  = $"dbo.usp_Get{prefix}_ExecutiveSummary";
+        var spName  = SqlPhiExecutiveSummaryRepository.ExecutiveSummaryGetSpName(prefix);
         var connStr = config.DbConnectionString;
 
         bool spExists = await _repo.StoredProcedureExistsAsync(connStr, spName, ct);

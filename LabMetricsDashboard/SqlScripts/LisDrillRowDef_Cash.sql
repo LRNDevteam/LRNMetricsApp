@@ -98,23 +98,23 @@ VALUES
  (N'Aug', N'T',   N'Patient Paid ($)', N'DateofService', N'Cash', N'PatientPayment',
      N'PatientPayment', N'>', N'0', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
  (N'Aug', N'U',   N'Patient Responsibility ($)', N'DateofService', N'Cash', N'PatientBalance',
-     N'ClaimStatus', N'NOT IN', N'Unbilled,Unbilled - PB', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
+     N'PatientBalance', N'>', N'0', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
  (N'Aug', N'U.1', N'Daqbilling', N'DateofService', N'Cash', N'PatientBalance',
-     N'ClaimStatus', N'NOT IN', N'Unbilled,Unbilled - PB', N'Source', N'=', N'Daq', NULL,NULL,NULL, NULL,NULL,NULL),
+     N'PatientBalance', N'>', N'0', N'Source', N'=', N'Daq', NULL,NULL,NULL, NULL,NULL,NULL),
  (N'Aug', N'U.2', N'IRCM', N'DateofService', N'Cash', N'PatientBalance',
-     N'ClaimStatus', N'NOT IN', N'Unbilled,Unbilled - PB', N'Source', N'=', N'IRCM', NULL,NULL,NULL, NULL,NULL,NULL),
+     N'PatientBalance', N'>', N'0', N'Source', N'=', N'IRCM', NULL,NULL,NULL, NULL,NULL,NULL),
  (N'Aug', N'V',   N'Adjustment amount ($)', N'DateofService', N'Cash', N'InsuranceAdjustments+PatientAdjustments',
      NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
  (N'Aug', N'W',   N'Total Payments ($) - Insurance', N'DateofService', N'Cash', N'InsurancePayment',
      N'InsurancePayment', N'>', N'0', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
  (N'Aug', N'X',   N'Insurance Balance ($)', N'DateofService', N'Cash', N'InsuranceBalance',
-     NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
+     N'InsuranceBalance', N'>', N'0', N'ClaimStatus', N'IN', N'Partially Denied,Fully Denied,No Response,Partial Paid', NULL,NULL,NULL, NULL,NULL,NULL),
  (N'Aug', N'X.1', N'Fully Denied', N'DateofService', N'Cash', N'InsuranceBalance',
-     N'ClaimStatus', N'=', N'Fully Denied', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
+     N'InsuranceBalance', N'>', N'0', N'ClaimStatus', N'=', N'Fully Denied', NULL,NULL,NULL, NULL,NULL,NULL),
  (N'Aug', N'X.2', N'Partially Denied', N'DateofService', N'Cash', N'InsuranceBalance',
-     N'ClaimStatus', N'=', N'Partially Denied', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
+     N'InsuranceBalance', N'>', N'0', N'ClaimStatus', N'IN', N'Partially Denied,Partial Paid', NULL,NULL,NULL, NULL,NULL,NULL),
  (N'Aug', N'X.3', N'No Response from Payor', N'DateofService', N'Cash', N'InsuranceBalance',
-     N'ClaimStatus', N'=', N'No Response', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL);
+     N'InsuranceBalance', N'>', N'0', N'ClaimStatus', N'=', N'No Response', NULL,NULL,NULL, NULL,NULL,NULL);
 GO
 
 /* -- Elixir (Elix) ---------------------------------------------------- */
@@ -378,7 +378,13 @@ UPDATE dbo.LisDrillRowDef SET
     Sec2Name = N'Partially Denied', Sec2Col = N'ClaimStatus', Sec2Vals = N'Partially Denied',
     Sec3Name = N'No Response', Sec3Col = N'ClaimStatus', Sec3Vals = N'No Response'
 WHERE Source = N'Cash' AND RowTitle = N'Insurance Balance ($)'
-  AND LabPrefix IN (N'Aug', N'BT', N'Phi', N'RT', N'PCR');
+  AND LabPrefix IN (N'BT', N'Phi', N'RT', N'PCR');
+
+UPDATE dbo.LisDrillRowDef SET
+    Sec1Name = N'Fully Denied', Sec1Col = N'ClaimStatus', Sec1Vals = N'Fully Denied',
+    Sec2Name = N'Partially Denied', Sec2Col = N'ClaimStatus', Sec2Vals = N'Partially Denied,Partial Paid',
+    Sec3Name = N'No Response', Sec3Col = N'ClaimStatus', Sec3Vals = N'No Response'
+WHERE Source = N'Cash' AND RowTitle = N'Insurance Balance ($)' AND LabPrefix = N'Aug';
 
 UPDATE dbo.LisDrillRowDef SET
     Sec1Name = N'Fully Denied', Sec1Col = N'ClaimStatus', Sec1Vals = N'Denied',

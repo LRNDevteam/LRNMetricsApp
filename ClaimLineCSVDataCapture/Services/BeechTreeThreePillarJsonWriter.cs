@@ -182,18 +182,28 @@ public static class BeechTreeThreePillarJsonWriter
         var resultSets = ReadAllResultSets(rdr);
         sw.Stop();
 
+        var scope = $"Last {trailingMonths} months · DayWindow 1–{dayWindow}";
+        var (pillarSection, charts) = pillar switch
+        {
+            "LIS" => ("Pillar 1 — Pipeline Health (LIS Breakdown)", BuildLisCharts(resultSets, trailingMonths, scope)),
+            "PMS" => ("Pillar 2 — Revenue Realization (PMS)", BuildPmsCharts(resultSets, scope)),
+            _     => ("Pillar 3 — Leakage & Risk (Cash)", BuildCashCharts(resultSets, scope)),
+        };
+
         var payload = new Dictionary<string, object?>
         {
             ["pillar"] = pillar,
+            ["pillarSection"] = pillarSection,
             ["labName"] = lab.LabName,
             ["weekFolder"] = weekFolder,
             ["asOfDate"] = asOf.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             ["dayWindow"] = dayWindow,
             ["trailingMonths"] = trailingMonths,
+            ["scope"] = scope,
             ["generatedUtc"] = DateTime.UtcNow,
             ["storedProcedure"] = spName,
             ["elapsedMs"] = sw.ElapsedMilliseconds,
-            ["resultSets"] = resultSets,
+            ["charts"] = charts,
         };
 
         var dir = Path.GetDirectoryName(path);
@@ -205,7 +215,264 @@ public static class BeechTreeThreePillarJsonWriter
         File.Copy(tmp, path, overwrite: true);
         File.Delete(tmp);
 
-        log.Info($"  [ThreePillar JSON] Wrote {pillar} m{trailingMonths} '{weekFolder}' ({sw.ElapsedMilliseconds} ms) → {path}");
+        log.Info($"  [ThreePillar JSON] Wrote {pillar} m{trailingMonths} '{weekFolder}' charts={charts.Count} ({sw.ElapsedMilliseconds} ms) → {path}");
+    }
+
+    /// <summary>
+    /// Named chart blocks matching ThreePillarDiagnostic.cshtml LIS titles.
+    /// RS1 monthly drives most graphs; RS2/RS3 backlog; RS4 full-period funnel.
+    /// </summary>
+    private static List<Dictionary<string, object?>> BuildLisCharts(
+        List<List<Dictionary<string, object?>>> sets, int trailingMonths, string scope)
+    {
+        var monthly = SetOrEmpty(sets, 0);
+        var backlogSummary = SetOrEmpty(sets, 1);
+        var backlogBuckets = SetOrEmpty(sets, 2);
+        var funnel = SetOrEmpty(sets, 3);
+
+        return
+        [
+            Chart(
+                "Monthly Collected Sample Volume",
+                "Total Samples trend · Check #1",
+                scope,
+                Project(monthly, "MonthLabel", "TotalSamples", "SortYear", "SortMonth")),
+            Chart(
+                $"Total Samples & % Resulted — Last {trailingMonths} Months",
+                "Bars = volume · % Resulted (right axis)",
+                scope,
+                Project(monthly, "MonthLabel", "TotalSamples", "Resulted", "PctResulted")),
+            Chart(
+                "Sample-to-Claim Funnel (Full Period)",
+                "Collected → Resulted → Billed over the selected comparable window",
+                scope,
+                Project(funnel,
+                    "Collected", "Resulted", "BilledToInsurance",
+                    "PctResulted", "PctBilledOfCollected", "PctBilledOfResulted")),
+            Chart(
+                "Backlog Age — Resulted Samples Never Entered in PMS",
+                "Check #2 · open Resulted / Not-in-AMD backlog as of WeekRange end",
+                scope,
+                backlogSummary),
+            Chart(
+                "Backlog Age Buckets",
+                "0–7 / 8–14 / 15–30 / 31–60 / 60+",
+                scope,
+                Project(backlogBuckets, "AgeBucket", "SortOrder", "SampleCount")),
+            Chart(
+                "% of Resulted Samples Billed to Insurance",
+                "Resulted → billed pipeline rate by month",
+                scope,
+                Project(monthly, "MonthLabel", "Resulted", "BilledToInsurance", "PctBilledOfResulted")),
+            Chart(
+                "Not Resulted Samples — Monthly Trend",
+                "Latest month often Check #1 partial-period spike",
+                scope,
+                Project(monthly, "MonthLabel", "NotResulted")),
+            Chart(
+                "Self Pay % vs Client Bill % of Total Samples",
+                "Check #6 status-transition",
+                scope,
+                Project(monthly,
+                    "MonthLabel", "TotalSamples", "SelfPay", "ClientBill", "SelfPayPct", "ClientBillPct")),
+            Chart(
+                "LIS Monthly Detail",
+                "Month-by-month breakdown for the selected comparable window",
+                scope,
+                monthly),
+        ];
+    }
+
+    /// <summary>Named chart blocks matching _ThreePillarPms.cshtml titles.</summary>
+    private static List<Dictionary<string, object?>> BuildPmsCharts(
+        List<List<Dictionary<string, object?>>> sets, string scope)
+    {
+        var reconciliation = SetOrEmpty(sets, 0);
+        var fullyAdjusted = SetOrEmpty(sets, 1);
+        var writeOffReasons = SetOrEmpty(sets, 2);
+        var fullyPaid = SetOrEmpty(sets, 3);
+        var insuranceBalance = SetOrEmpty(sets, 4);
+        var panelAvg = SetOrEmpty(sets, 5);
+        var panelPayerMom = SetOrEmpty(sets, 6);
+        var maturity = SetOrEmpty(sets, 7);
+        var denialByCarrier = SetOrEmpty(sets, 8);
+        var topDenialReasons = SetOrEmpty(sets, 9);
+
+        return
+        [
+            Chart(
+                "1. Billed Claims Reconciliation — LIS vs PMS",
+                "Reconciliation Gap = PMS Billed Claims − LIS Billed to Insurance",
+                scope,
+                Project(reconciliation, "MonthLabel", "PmsBilled", "LisBilledToInsurance", "Gap")),
+            Chart(
+                "2. Fully Adjusted % of Billed Claims (PMS)",
+                "% Fully Adjusted = Fully Adjusted ÷ Billed Claims × 100",
+                scope,
+                Project(fullyAdjusted, "MonthLabel", "BilledClaims", "FullyAdjusted", "PctFullyAdjusted")),
+            Chart(
+                "3. Top Write-Off Reason Codes",
+                "Reason-code counts from BTWOSummary",
+                scope,
+                Project(writeOffReasons, "TransactionCodeCombined", "MatchingCount")),
+            Chart(
+                "4. Insurance Balance % of Billed Claims — Headline PMS Finding",
+                "% IB = IB claims ÷ Billed × 100 · composition Fully Denied / No Response / Partially Denied",
+                scope,
+                Project(insuranceBalance,
+                    "MonthLabel", "BilledClaims", "InsuranceBalanceClaims", "PctInsuranceBalance",
+                    "FullyDeniedClaims", "NoResponseClaims", "PartiallyDeniedClaims", "InsuranceBalanceAmt")),
+            Chart(
+                "4b. Insurance Balance Composition (% of open claims)",
+                "Fully Denied / No Response / Partially Denied share of open",
+                scope,
+                Project(insuranceBalance,
+                    "MonthLabel", "FullyDeniedClaims", "NoResponseClaims", "PartiallyDeniedClaims",
+                    "InsuranceBalanceClaims")),
+            Chart(
+                "5. Fully Paid % of Billed Claims (PMS)",
+                "% Fully Paid = Fully Paid ÷ Billed Claims × 100",
+                scope,
+                Project(fullyPaid, "MonthLabel", "BilledClaims", "FullyPaid", "PctFullyPaid")),
+            Chart(
+                "6. Panel — Avg Allowed vs Avg Paid",
+                "Claim-level supplement by panel / DOS month",
+                scope,
+                Project(panelAvg,
+                    "Panelname", "MonthLabel_DOS", "AvgAllowed", "AllowedClaimCount",
+                    "AvgPaidByPaymentDate", "PaidClaimCount")),
+            Chart(
+                "Avg $ Paid per Claim — Panel (MOM by DOS)",
+                "Panel × payer month-over-month",
+                scope,
+                panelPayerMom),
+            Chart(
+                "DOS-Cohort Maturity Curve",
+                "Pct allowed paid by days since DOS",
+                scope,
+                Project(maturity, "DOSMonthLabel", "DaySinceDOS", "PctAllowedPaid")),
+            Chart(
+                "Denial Rate by Carrier — Ratio-Driver Breakdown",
+                "Denied allowed ÷ total allowed",
+                scope,
+                Project(denialByCarrier, "PayerName", "TotalAllowed", "DeniedAllowed", "DenialRatePct")),
+            Chart(
+                "Fastest-Escalating Denial Reasons by Payer — MOM",
+                "Top denial reasons by payer / month",
+                scope,
+                Project(topDenialReasons, "PayerName", "DenialCode", "MonthLabel", "DenialCount")),
+        ];
+    }
+
+    /// <summary>Named chart blocks matching _ThreePillarCash.cshtml titles.</summary>
+    private static List<Dictionary<string, object?>> BuildCashCharts(
+        List<List<Dictionary<string, object?>>> sets, string scope)
+    {
+        var headline = SetOrEmpty(sets, 0);
+        var writeOffReasons = SetOrEmpty(sets, 1);
+
+        return
+        [
+            Chart(
+                "1. Total Billed $ — Monthly Trend",
+                "Monthly $ Billed = SUM(ChargeAmount) WHERE Billed · GROUP BY DOS month",
+                scope,
+                Project(headline, "MonthLabel", "TotalBilledAmt")),
+            Chart(
+                "2. Partially Paid $ — Monthly Trend",
+                "Partially Paid $ ÷ Total Billed $ × 100",
+                scope,
+                Project(headline,
+                    "MonthLabel", "PartiallyPaidAmt", "PctPartiallyPaidOfBilled", "TotalBilledAmt")),
+            Chart(
+                "3. Collection Rate — Insurance Payment / Total Billed",
+                "Fully Paid Ins $ ÷ Total Billed $ × 100",
+                scope,
+                Project(headline,
+                    "MonthLabel", "InsurancePaymentFullyPaid", "TotalBilledAmt", "CollectionRatePct")),
+            Chart(
+                "4a. % Insurance Balance $ of Total Billed",
+                "IB $ ÷ Total Billed $ × 100",
+                scope,
+                Project(headline,
+                    "MonthLabel", "InsuranceBalanceAmt", "PctInsuranceBalanceOfBilled", "TotalBilledAmt")),
+            Chart(
+                "4b. Insurance Balance $ Composition",
+                "Fully Denied / No Response / Partially Denied share of open IB $",
+                scope,
+                Project(headline,
+                    "MonthLabel", "FullyDeniedIBAmt", "NoResponseIBAmt", "PartiallyDeniedIBAmt",
+                    "InsuranceBalanceAmt", "NoResponseSharePct")),
+            Chart(
+                "5. Patient Write-Off vs Patient Balance",
+                "Patient WO $ / Patient Balance $ / Patient Payment $",
+                scope,
+                Project(headline,
+                    "MonthLabel", "PatientWOAmt", "PatientBalanceAmt", "PatientPaymentAmt",
+                    "WriteOffRatioPct", "PatientCollectionRatePct")),
+            Chart(
+                "6. Fully Adjusted $ — Write-Off Reason Pareto",
+                "Write-off reason codes from BTWOSummary",
+                scope,
+                Project(writeOffReasons, "TransactionCodeCombined", "MatchingCount")),
+            Chart(
+                "Cash monthly detail",
+                "Full monthly cash headline metrics for the selected comparable window",
+                scope,
+                headline),
+        ];
+    }
+
+    private static Dictionary<string, object?> Chart(
+        string graphTitle, string subtitle, string scope, List<Dictionary<string, object?>> rows)
+        => new()
+        {
+            ["graphTitle"] = graphTitle,
+            ["subtitle"] = subtitle,
+            ["scope"] = scope,
+            ["rowCount"] = rows.Count,
+            ["rows"] = rows,
+        };
+
+    private static List<Dictionary<string, object?>> SetOrEmpty(
+        List<List<Dictionary<string, object?>>> sets, int index)
+        => index >= 0 && index < sets.Count ? sets[index] : [];
+
+    private static List<Dictionary<string, object?>> Project(
+        List<Dictionary<string, object?>> rows, params string[] columns)
+    {
+        if (rows.Count == 0 || columns.Length == 0)
+            return rows;
+
+        var projected = new List<Dictionary<string, object?>>(rows.Count);
+        foreach (var row in rows)
+        {
+            var copy = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var col in columns)
+            {
+                if (TryGetIgnoreCase(row, col, out var value))
+                    copy[col] = value;
+            }
+            projected.Add(copy);
+        }
+        return projected;
+    }
+
+    private static bool TryGetIgnoreCase(
+        Dictionary<string, object?> row, string key, out object? value)
+    {
+        if (row.TryGetValue(key, out value))
+            return true;
+        foreach (var kv in row)
+        {
+            if (string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase))
+            {
+                value = kv.Value;
+                return true;
+            }
+        }
+        value = null;
+        return false;
     }
 
     private static List<List<Dictionary<string, object?>>> ReadAllResultSets(SqlDataReader rdr)

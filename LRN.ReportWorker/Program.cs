@@ -66,6 +66,12 @@ var host = Host.CreateDefaultBuilder(args)
             LabMetricsDashboard.Services.SqlNorthWestProductionSummaryRepository>();
         services.AddSingleton<LabMetricsDashboard.Services.IAugustusProductionSummaryRepository,
             LabMetricsDashboard.Services.SqlAugustusProductionSummaryRepository>();
+        // Per-lab generic Production Summary repositories - same map the web app uses.
+        // Without this the queued Production Report Excel has no Panel Breakdown sheet
+        // for any lab other than Augustus / NorthWest.
+        services.AddSingleton<IReadOnlyDictionary<string, LabMetricsDashboard.Services.ILabProductionSummaryRepository>>(sp =>
+            LabMetricsDashboard.Services.LabProductionSummaryRepositoryMap.Create(
+                sp.GetRequiredService<ILogger<LabMetricsDashboard.Services.SqlLabProductionSummaryRepository>>()));
         services.AddSingleton<LabMetricsDashboard.Services.SqlPhiExecutiveSummaryRepository>();
         services.AddSingleton<LabMetricsDashboard.Services.IDashboardRepository,
             LabMetricsDashboard.Services.SqlDashboardRepository>();

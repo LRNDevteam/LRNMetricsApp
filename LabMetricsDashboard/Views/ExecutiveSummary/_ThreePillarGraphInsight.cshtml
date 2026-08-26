@@ -1,0 +1,22 @@
+@model LabMetricsDashboard.Models.ExecSummaryThreePillarViewModel
+@{
+    var graphTitle = ViewData["GraphTitle"] as string ?? string.Empty;
+    var bullets = Model.GetChartInsights(graphTitle);
+}
+@if (bullets.Count == 0)
+{
+    return;
+}
+
+<div class="tpd-ai-panel" role="note" aria-label="AI insight for @graphTitle">
+    <div class="tpd-ai-panel-head">
+        <span class="tpd-ai-panel-badge">AI Insight</span>
+        <span class="tpd-ai-panel-sub">From insights.json · @graphTitle</span>
+    </div>
+    <ul class="tpd-ai-panel-list">
+        @foreach (var bullet in bullets)
+        {
+            <li>@bullet</li>
+        }
+    </ul>
+</div>

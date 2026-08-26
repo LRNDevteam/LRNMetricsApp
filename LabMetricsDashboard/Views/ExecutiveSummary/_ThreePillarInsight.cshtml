@@ -1,0 +1,78 @@
+@model LabMetricsDashboard.Models.ExecSummaryThreePillarViewModel
+@{
+    var insight = Model.AiThreePillarInsight;
+}
+
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="tpd-lazy-status error">@Model.ErrorMessage</div>
+    return;
+}
+
+@if (insight is null)
+{
+    <div class="tpd-lazy-status">
+        No <code>insights.json</code> found for week
+        <strong>@(string.IsNullOrWhiteSpace(Model.WeekFolder) ? "—" : Model.WeekFolder)</strong>.
+        Insights appear after LRN.AzBlobSync uploads new Beech_Tree inputs and Foundry generation completes.
+    </div>
+    return;
+}
+
+@if (!string.IsNullOrWhiteSpace(insight.Headline))
+{
+    <div class="tpd-insight tpd-insight-ok" style="margin-bottom:1rem">
+        <strong>Headline.</strong> @insight.Headline
+    </div>
+}
+
+<div class="tpd-kpis" style="margin-bottom:1rem">
+    <div class="tpd-kpi">
+        <div class="tpd-kpi-label">Report period</div>
+        <div class="tpd-kpi-value" style="font-size:1rem">@(string.IsNullOrWhiteSpace(insight.ReportPeriod) ? "—" : insight.ReportPeriod)</div>
+    </div>
+    <div class="tpd-kpi">
+        <div class="tpd-kpi-label">Generated</div>
+        <div class="tpd-kpi-value" style="font-size:1rem">@(string.IsNullOrWhiteSpace(insight.GeneratedAt) ? "—" : insight.GeneratedAt)</div>
+    </div>
+    <div class="tpd-kpi">
+        <div class="tpd-kpi-label">Model</div>
+        <div class="tpd-kpi-value" style="font-size:1rem">@(string.IsNullOrWhiteSpace(insight.ModelUsed) ? "—" : insight.ModelUsed)</div>
+    </div>
+</div>
+
+@foreach (var sec in insight.Sections)
+{
+    <details class="tpd-card tpd-acc" open>
+        <summary class="tpd-acc-head">
+            <div class="tpd-acc-head-text">
+                <div class="tpd-card-title">@sec.SectionNumber. @sec.Title</div>
+                <p class="tpd-card-sub">From insights.json · not the Notes journal</p>
+            </div>
+            <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <div class="tpd-acc-body">
+            @foreach (var sub in sec.Subsections)
+            {
+                if (!string.IsNullOrWhiteSpace(sub.Title))
+                {
+                    <div class="tpd-pillar" style="margin:0.75rem 0 0.35rem;font-size:0.78rem">@sub.Title</div>
+                }
+                <ul style="margin:0 0 0.75rem;padding-left:1.25rem;font-size:0.88rem;line-height:1.55;color:#334155">
+                    @foreach (var bullet in sub.Bullets)
+                    {
+                        <li style="margin-bottom:0.35rem">@bullet</li>
+                    }
+                </ul>
+            }
+        </div>
+    </details>
+}
+
+<p class="tpd-funnel-note" style="margin-top:0.75rem">
+    Source: <strong>@insight.SourceFileName</strong>
+    @if (!string.IsNullOrWhiteSpace(insight.ReportTitle))
+    {
+        <text>· @insight.ReportTitle</text>
+    }
+</p>

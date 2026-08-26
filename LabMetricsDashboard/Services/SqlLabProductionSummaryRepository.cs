@@ -463,6 +463,152 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
 
     // ?? Payer Breakdown ???????????????????????????????????????????????????
     /// <inheritdoc/>
+    /// <summary>
+    /// Panel Breakdown with payer drill-down (Production Summary).
+    /// Calls <c>usp_Get{Prefix}PanelBreakdownWithPayers</c>, deployed by
+    /// <c>Sql\40_AllLabs_PanelBreakdownWithPayers.sql</c>. Labs whose database has
+    /// not had that script run yet return an empty result and the table simply stays
+    /// hidden - same behaviour as before this method existed.
+    /// </summary>
+    public async Task<SharedPayerBreakdownResult> GetPanelBreakdownAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
+    {
+        var spName = $"dbo.usp_Get{_cfg.Prefix}PanelBreakdownWithPayers";
+
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+
+            await using var cmd = new SqlCommand(spName, conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 180,
+            };
+            AddProductionFilterParameters(
+                cmd,
+                filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo);
+
+            await using var rdr = await cmd.ExecuteReaderAsync(ct);
+            return await ReadPanelBreakdownWithPayersAsync(rdr, ct);
+        }
+        catch (SqlException ex) when (ex.Number is 2812 or 208)
+        {
+            _logger.LogWarning(
+                "[{Prefix}] {Sp} not deployed - Panel Breakdown will be empty for this lab. "
+                + "Run Sql/40_AllLabs_PanelBreakdownWithPayers.sql on its database.",
+                _cfg.Prefix, spName);
+            return new SharedPayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[{Prefix}] GetPanelBreakdownAsync failed.", _cfg.Prefix);
+            return new SharedPayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0);
+        }
+    }
+
+    /// <summary>
+    /// Reads (PanelName, PayerName, BilledYearMonth, ClaimCount, TotalCharges) rows into
+    /// panel parent rows with payer <see cref="PayerBreakdownRow.ChildRows"/>, matching the
+    /// shape the NorthWest Panel Breakdown produces so the view renders both identically.
+    /// </summary>
+    private static async Task<SharedPayerBreakdownResult> ReadPanelBreakdownWithPayersAsync(
+        SqlDataReader rdr, CancellationToken ct)
+    {
+        var panelPayerMonth = new Dictionary<string, Dictionary<string, Dictionary<string, (int c, decimal ch)>>>(
+            StringComparer.OrdinalIgnoreCase);
+        var allMonths = new SortedSet<string>();
+
+        while (await rdr.ReadAsync(ct))
+        {
+            if (rdr.IsDBNull(0) || rdr.IsDBNull(1) || rdr.IsDBNull(2)) continue;
+
+            var panel   = rdr.GetString(0);
+            var payer   = rdr.GetString(1);
+            var month   = rdr.GetString(2);
+            var count   = rdr.IsDBNull(3) ? 0 : Convert.ToInt32(rdr.GetValue(3));
+            var charges = rdr.IsDBNull(4) ? 0m : Convert.ToDecimal(rdr.GetValue(4));
+
+            allMonths.Add(month);
+            if (!panelPayerMonth.TryGetValue(panel, out var payers))
+                panelPayerMonth[panel] = payers = new(StringComparer.OrdinalIgnoreCase);
+            if (!payers.TryGetValue(payer, out var months))
+                payers[payer] = months = new(StringComparer.OrdinalIgnoreCase);
+
+            var prev = months.GetValueOrDefault(month);
+            months[month] = (prev.c + count, prev.ch + charges);
+        }
+
+        var monthsList          = allMonths.ToList();
+        var years               = monthsList.Select(m => int.Parse(m[..4])).Distinct().OrderBy(y => y).ToList();
+        var grandByMonth        = new Dictionary<string, int>();
+        var grandChargesByMonth = new Dictionary<string, decimal>();
+        var rows                = new List<PayerBreakdownRow>();
+
+        foreach (var (panel, payers) in panelPayerMonth
+                     .OrderByDescending(x => x.Value.Sum(p => p.Value.Values.Sum(v => v.c))))
+        {
+            var panelMonth = new Dictionary<string, (int c, decimal ch)>(StringComparer.OrdinalIgnoreCase);
+            var childRows  = new List<PayerBreakdownRow>();
+
+            foreach (var (payer, mm) in payers
+                         .OrderByDescending(x => x.Value.Values.Sum(v => v.c))
+                         .ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                foreach (var (mk, v) in mm)
+                {
+                    var prev = panelMonth.GetValueOrDefault(mk);
+                    panelMonth[mk] = (prev.c + v.c, prev.ch + v.ch);
+                }
+
+                childRows.Add(new PayerBreakdownRow
+                {
+                    PayerName         = payer,
+                    ByMonth           = mm.ToDictionary(kv => kv.Key, kv => kv.Value.c),
+                    ByYear            = years.ToDictionary(y => y, y => mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.c)),
+                    GrandTotal        = mm.Values.Sum(v => v.c),
+                    ByMonthCharges    = mm.ToDictionary(kv => kv.Key, kv => kv.Value.ch),
+                    ByYearCharges     = years.ToDictionary(y => y, y => mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.ch)),
+                    GrandTotalCharges = mm.Values.Sum(v => v.ch),
+                });
+            }
+
+            foreach (var (mk, v) in panelMonth)
+            {
+                grandByMonth[mk]        = grandByMonth.GetValueOrDefault(mk) + v.c;
+                grandChargesByMonth[mk] = grandChargesByMonth.GetValueOrDefault(mk) + v.ch;
+            }
+
+            rows.Add(new PayerBreakdownRow
+            {
+                PayerName         = panel,
+                ByMonth           = panelMonth.ToDictionary(kv => kv.Key, kv => kv.Value.c),
+                ByYear            = years.ToDictionary(y => y, y => panelMonth.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.c)),
+                GrandTotal        = panelMonth.Values.Sum(v => v.c),
+                ByMonthCharges    = panelMonth.ToDictionary(kv => kv.Key, kv => kv.Value.ch),
+                ByYearCharges     = years.ToDictionary(y => y, y => panelMonth.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.ch)),
+                GrandTotalCharges = panelMonth.Values.Sum(v => v.ch),
+                ChildRows         = childRows,
+            });
+        }
+
+        return new SharedPayerBreakdownResult(
+            monthsList, years, rows, grandByMonth, grandByMonth.Values.Sum(),
+            grandChargesByMonth, grandChargesByMonth.Values.Sum());
+    }
+
     public async Task<SharedPayerBreakdownResult> GetPayerBreakdownAsync(
         string connectionString,
         List<string>? filterPayerNames = null,

@@ -24,7 +24,7 @@
             TotalCount   = g.Sum(x => x.NoOfPaidClaims),
             TotalPayment = g.Sum(x => x.InsurancePayment)
         })
-        .OrderByDescending(r => r.TotalPayment)
+        .OrderByDescending(r => Model.IsAugustusLab ? r.TotalCount : r.TotalPayment)
         .ToList();
 }
 
@@ -126,7 +126,7 @@
     </div>
 
     <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
-        <strong>Source:</strong> Aggregate snapshot table <code>{prefix}_CS_InsuranceVsPayment</code>
+        <strong>Source:</strong> @(Model.IsAugustusLab ? "Collection Claim Level Data (Posted Date)" : "Aggregate snapshot table") <code>@(Model.IsAugustusLab ? "usp_GetAug_CS_InsuranceVsPayment_v2" : "{prefix}_CS_InsuranceVsPayment")</code>
     </div>
 }
 else

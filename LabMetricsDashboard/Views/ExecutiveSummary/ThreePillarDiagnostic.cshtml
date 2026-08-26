@@ -345,6 +345,35 @@
     .tpd-card-sub { font-size: .78rem; color: #8a93a3; margin: .2rem 0 0; }
     .tpd-insight { background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px; padding: .75rem 1rem; font-size: .82rem; color: #7f1d1d; margin: 0 0 .75rem; }
     .tpd-insight-ok { background: #eff6ff; border-color: #bfdbfe; color: #1e3a8a; }
+    .tpd-ai-panel {
+        margin: 0 0 1rem;
+        border-radius: 12px;
+        border: 1px solid #99f6e4;
+        background: linear-gradient(180deg, #f0fdfa 0%, #ecfeff 100%);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.7);
+        overflow: hidden;
+    }
+    .tpd-ai-panel-head {
+        display: flex; align-items: center; gap: .55rem; flex-wrap: wrap;
+        padding: .55rem .85rem;
+        background: linear-gradient(135deg, #0f766e, #0e7490);
+        color: #ecfeff;
+    }
+    .tpd-ai-panel-badge {
+        font-size: .68rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+        background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.28);
+        border-radius: 999px; padding: .18rem .55rem;
+    }
+    .tpd-ai-panel-sub {
+        font-size: .72rem; opacity: .9; font-weight: 500;
+        max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .tpd-ai-panel-list {
+        margin: 0; padding: .7rem 1rem .85rem 1.35rem;
+        font-size: .84rem; line-height: 1.55; color: #134e4a;
+    }
+    .tpd-ai-panel-list li { margin: .28rem 0; }
+    .tpd-ai-panel-list li::marker { color: #0f766e; }
     .tpd-logic {
         background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
         padding: .7rem .9rem; margin: 0 0 .9rem; font-size: .78rem; color: #334155; line-height: 1.45;
@@ -502,11 +531,13 @@
     {
         var pmsUrl = Url.Action("ThreePillarPmsPartial", "ExecutiveSummary", new { lab = Model.LabName, months = Model.TrailingMonths });
         var cashUrl = Url.Action("ThreePillarCashPartial", "ExecutiveSummary", new { lab = Model.LabName, months = Model.TrailingMonths });
+        var insightUrl = Url.Action("ThreePillarInsightPartial", "ExecutiveSummary", new { lab = Model.LabName, months = Model.TrailingMonths });
 
         <div class="tpd-tabs" role="tablist" aria-label="Three pillars">
             <button type="button" class="tpd-tab active" role="tab" aria-selected="true" data-tpd-tab="lis">Pillar 1 — LIS</button>
             <button type="button" class="tpd-tab" role="tab" aria-selected="false" data-tpd-tab="pms" data-tpd-load="@pmsUrl">Pillar 2 — PMS</button>
             <button type="button" class="tpd-tab" role="tab" aria-selected="false" data-tpd-tab="cash" data-tpd-load="@cashUrl">Pillar 3 — Cash</button>
+            <button type="button" class="tpd-tab" role="tab" aria-selected="false" data-tpd-tab="insight" data-tpd-load="@insightUrl">Insight</button>
         </div>
 
         <div class="tpd-tab-panel active" id="tpd-panel-lis" role="tabpanel">
@@ -519,6 +550,19 @@
 
         <div class="tpd-pillar">Pillar 1 — Pipeline Health (LIS Breakdown)</div>
 
+        @if (!string.IsNullOrWhiteSpace(Model.AiThreePillarInsight?.Headline))
+        {
+            <div class="tpd-ai-panel" style="margin-bottom:1rem">
+                <div class="tpd-ai-panel-head">
+                    <span class="tpd-ai-panel-badge">AI Headline</span>
+                    <span class="tpd-ai-panel-sub">Week @Model.AiThreePillarInsight!.ReportPeriod</span>
+                </div>
+                <div class="tpd-ai-panel-list" style="list-style:none;padding-left:1rem">
+                    @Model.AiThreePillarInsight.Headline
+                </div>
+            </div>
+        }
+
         <details class="tpd-card tpd-acc" open>
             <summary class="tpd-acc-head">
                 <div class="tpd-acc-head-text">
@@ -528,6 +572,8 @@
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
+                @{ ViewData["GraphTitle"] = "Monthly Collected Sample Volume"; }
+                @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 <div class="tpd-logic">
                     <strong>Fetch logic</strong>
                     <ul>
@@ -549,6 +595,8 @@
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
+                @{ ViewData["GraphTitle"] = $"Total Samples & % Resulted — Last {scopeMonths} Months"; }
+                @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 <div class="tpd-insight tpd-insight-ok">
                     Focus on the <strong>% Resulted</strong> line. A sharp dip in the latest month is often Check #1 (partial-period), not a true quality drop.
                 </div>
@@ -573,6 +621,8 @@
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
+                @{ ViewData["GraphTitle"] = "Sample-to-Claim Funnel (Full Period)"; }
+                @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 <div class="tpd-logic">
                     <strong>Fetch logic</strong>
                     <ul>
@@ -601,6 +651,10 @@
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
+                @{ ViewData["GraphTitle"] = "Backlog Age — Resulted Samples Never Entered in PMS"; }
+                @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
+                @{ ViewData["GraphTitle"] = "Backlog Age Buckets"; }
+                @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 <div class="tpd-logic">
                     <strong>Fetch logic</strong>
                     <ul>
@@ -640,6 +694,8 @@
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
+                @{ ViewData["GraphTitle"] = "% of Resulted Samples Billed to Insurance"; }
+                @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 <div class="tpd-insight">A multi-month decline before the partial latest month is a real resulted→billed pipeline leak (Check #3).</div>
                 <div class="tpd-logic">
                     <strong>Fetch logic</strong>
@@ -662,6 +718,8 @@
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
+                @{ ViewData["GraphTitle"] = "Not Resulted Samples — Monthly Trend"; }
+                @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 <div class="tpd-logic">
                     <strong>Fetch logic</strong>
                     <ul>
@@ -682,6 +740,8 @@
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
+                @{ ViewData["GraphTitle"] = "Self Pay % vs Client Bill % of Total Samples"; }
+                @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 <div class="tpd-insight tpd-insight-ok">When Self Pay falls and Client Bill rises together, volume moved between categories — not a net volume change.</div>
                 <div class="tpd-logic">
                     <strong>Fetch logic</strong>
@@ -704,6 +764,8 @@
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
+                @{ ViewData["GraphTitle"] = "LIS Monthly Detail"; }
+                @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 <div class="tpd-logic">
                     <strong>Fetch logic</strong> — same filters as charts above; rows from <code>usp_GetBeechTree_ThreePillarLisDiagnostic</code> RS1.
                 </div>
@@ -749,6 +811,13 @@
             <div class="tpd-pillar">Pillar 3 — Leakage &amp; Risk (Cash)</div>
             <div class="tpd-lazy-host" data-tpd-lazy="cash">
                 <div class="tpd-lazy-status">Click the Cash tab to load this pillar (loads when the SP is available).</div>
+            </div>
+        </div>
+
+        <div class="tpd-tab-panel" id="tpd-panel-insight" role="tabpanel" hidden>
+            <div class="tpd-pillar">AI Three-Pillar Insights</div>
+            <div class="tpd-lazy-host" data-tpd-lazy="insight">
+                <div class="tpd-lazy-status">Click the Insight tab to load insights.json for this report week.</div>
             </div>
         </div>
     }

@@ -90,6 +90,23 @@
 
 .cs-rpt-table tbody tr:nth-child(odd) td { background: #f8fafc; }
 .cs-rpt-table tbody tr:nth-child(even) td { background: #fff; }
+
+/* Expand / collapse groups - Insurance vs Aging (Source), Panel Averages and
+   Average Payments (Panel). A group row toggles the .cs-ag-child rows that carry
+   its data-ag-group id; the handler is delegated from document further down this
+   file so it also works for lazily-loaded tab partials.
+   These rules sit after the striping rules on purpose: same specificity, later wins. */
+.cs-rpt-table tbody tr.cs-ag-group { cursor: pointer; user-select: none; }
+.cs-rpt-table tbody tr.cs-ag-group td { background: #f0fdf4; }
+.cs-rpt-table tbody tr.cs-ag-group:hover td { background: #dcfce7; }
+.cs-ag-chevron {
+    display: inline-block; margin-right: .4rem;
+    font-size: .7rem; color: #166534;
+    transition: transform .18s ease;
+}
+tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
+.cs-rpt-table tbody tr.cs-ag-child { display: none; }
+.cs-rpt-table tbody tr.cs-ag-child.cs-ag-shown { display: table-row; }
 .cs-rpt-table tbody tr:hover td { background: #eef4ff; }
 
 /* Reimbursement bar */
@@ -772,7 +789,7 @@
                 </div>
 
                 <div class="top5-card-footer">
-                    Ranked by <span class="top5-hl-blue">InsurancePayment</span> &bull;
+                    Ranked by <span class="top5-hl-blue">@(Model.IsAugustusLab ? "Count of ClaimID" : "InsurancePayment")</span> &bull;
                     Formula: SUM(InsurancePayment) / SUM(ChargeAmount) &times; 100
                 </div>
             }
@@ -1470,6 +1487,29 @@
         if (text) text.textContent = 'Loading Collection Summary...';
         overlay.classList.add('active');
         overlay.setAttribute('aria-hidden', 'false');
+    });
+}());
+</script>
+
+@* Insurance vs Aging: Source group expand / collapse.
+   Delegated from document so it also works for tab partials injected after load. *@
+<script nonce='@Context.Items["CspNonce"]'>
+(function () {
+    'use strict';
+    document.addEventListener('click', function (e) {
+        var row = e.target.closest ? e.target.closest('tr.cs-ag-group') : null;
+        if (!row) return;
+
+        var table = row.closest('table');
+        if (!table) return;
+
+        var group = row.getAttribute('data-ag-group');
+        var open = row.classList.toggle('cs-ag-open');
+        row.setAttribute('aria-expanded', open ? 'true' : 'false');
+
+        table.querySelectorAll('tr.cs-ag-child[data-ag-parent="' + group + '"]').forEach(function (child) {
+            child.classList.toggle('cs-ag-shown', open);
+        });
     });
 }());
 </script>

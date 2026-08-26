@@ -48,10 +48,10 @@ else if (!hasMonthlyGrain)
     </div>
 
     <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
-        <strong>Source:</strong> Claim Level Data &bull;
-        <strong>Filter:</strong> InsurancePayment &gt; 0 &bull;
-        <strong>Sorted by:</strong> SUM(InsurancePayment) DESC &bull;
-        <strong>Metric:</strong> COUNT(DISTINCT ClaimID), SUM(InsurancePayment)
+        <strong>Source:</strong> @(Model.IsAugustusLab ? "Collection Claim Level Data" : "Claim Level Data") &bull;
+        <strong>Filter:</strong> InsurancePayment &gt; 0@(Model.IsAugustusLab ? " · Posted Date" : "") &bull;
+        <strong>Sorted by:</strong> @(Model.IsAugustusLab ? "Count of PanelNew DESC" : "SUM(InsurancePayment) DESC") &bull;
+        <strong>Metric:</strong> @(Model.IsAugustusLab ? "COUNT(*) (Count of PanelNew), SUM(InsurancePayment)" : "COUNT(DISTINCT ClaimID), SUM(InsurancePayment)")
     </div>
 }
 else
@@ -81,7 +81,7 @@ else
             TotalCount   = g.Sum(x => x.NoOfClaims),
             TotalPayment = g.Sum(x => x.InsurancePayments)
         })
-        .OrderByDescending(r => r.TotalPayment)
+        .OrderByDescending(r => Model.IsAugustusLab ? r.TotalCount : r.TotalPayment)
         .ToList();
 
     <div class="cs-rpt-wrap">
@@ -180,7 +180,8 @@ else
     </div>
 
     <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
-        <strong>Source:</strong> Aggregate snapshot table <code>{prefix}_CS_PanelVsPayment</code> &bull;
-        <strong>Grain:</strong> Panel &times; CheckDate Year/Month
+        <strong>Source:</strong> @(Model.IsAugustusLab ? "Collection Claim Level Data" : "Aggregate snapshot table") <code>@(Model.IsAugustusLab ? "usp_GetAug_CS_PanelVsPayment_v2" : "{prefix}_CS_PanelVsPayment")</code> &bull;
+        <strong>Grain:</strong> PanelNew &times; @(Model.IsAugustusLab ? "Posted Date" : "CheckDate") Year/Month
+        @(Model.IsAugustusLab ? " · Count of PanelNew, SUM(Ins. Pay)" : "")
     </div>
 }

@@ -275,6 +275,110 @@ public sealed class ExecSummaryThreePillarViewModel
     /// <summary>Cash pillar write-off reason Pareto (shares FullyAdjustedReasons list shape).</summary>
     public List<ThreePillarFullyAdjustedReason> CashWriteOffReasons { get; set; } = [];
 
+    /// <summary>AI insights from local insights.json (Foundry / AzBlobSync), week-matched.</summary>
+    public PredictionInsight? AiThreePillarInsight { get; set; }
+
+    /// <summary>
+    /// Lookup of chart graphTitle → insight bullets, built from <see cref="AiThreePillarInsight"/>.
+    /// </summary>
+    public Dictionary<string, IReadOnlyList<string>> ChartInsights { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Returns AI bullets for a Diagnostic chart title. Matches exact title, pillar-prefixed
+    /// titles ("Pillar 1 — …: Title"), and soft matches (e.g. "Total Samples &amp; % Resulted — Last N").
+    /// </summary>
+    public IReadOnlyList<string> GetChartInsights(string graphTitle)
+    {
+        if (string.IsNullOrWhiteSpace(graphTitle) || ChartInsights.Count == 0)
+            return [];
+
+        if (ChartInsights.TryGetValue(graphTitle.Trim(), out var exact))
+            return exact;
+
+        // Strip common pillar prefixes from stored keys and retry.
+        foreach (var kv in ChartInsights)
+        {
+            var key = kv.Key;
+            var colon = key.LastIndexOf(':');
+            var bare = colon >= 0 ? key[(colon + 1)..].Trim() : key;
+            if (bare.Equals(graphTitle, StringComparison.OrdinalIgnoreCase)
+                || key.EndsWith(graphTitle, StringComparison.OrdinalIgnoreCase))
+                return kv.Value;
+        }
+
+        // Soft match: "Total Samples & % Resulted — Last 12 Months" ↔ UI with dynamic months.
+        const string resultedPrefix = "Total Samples & % Resulted";
+        if (graphTitle.StartsWith(resultedPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var kv in ChartInsights)
+            {
+                var bare = BareTitle(kv.Key);
+                if (bare.StartsWith(resultedPrefix, StringComparison.OrdinalIgnoreCase))
+                    return kv.Value;
+            }
+        }
+
+        // Soft match for panel-specific UI titles vs generic JSON titles.
+        if (graphTitle.Contains("Avg Allowed vs Avg Paid", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var kv in ChartInsights)
+            {
+                if (BareTitle(kv.Key).Contains("Avg Allowed vs Avg Paid", StringComparison.OrdinalIgnoreCase))
+                    return kv.Value;
+            }
+        }
+
+        if (graphTitle.Contains("Avg $ Paid per Claim", StringComparison.OrdinalIgnoreCase)
+            || graphTitle.Contains("(MOM by DOS)", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var kv in ChartInsights)
+            {
+                var bare = BareTitle(kv.Key);
+                if (bare.Contains("Avg $ Paid per Claim", StringComparison.OrdinalIgnoreCase)
+                    || bare.Contains("MOM by DOS", StringComparison.OrdinalIgnoreCase))
+                    return kv.Value;
+            }
+        }
+
+        return [];
+    }
+
+    /// <summary>Indexes <see cref="AiThreePillarInsight"/> sections into <see cref="ChartInsights"/>.</summary>
+    public void IndexChartInsights()
+    {
+        ChartInsights = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        if (AiThreePillarInsight?.Sections is null)
+            return;
+
+        foreach (var sec in AiThreePillarInsight.Sections)
+        {
+            var title = (sec.Title ?? string.Empty).Trim();
+            if (title.Length == 0)
+                continue;
+
+            var bullets = sec.Subsections
+                .SelectMany(s => s.Bullets ?? [])
+                .Select(b => (b ?? string.Empty).Trim())
+                .Where(b => b.Length > 0)
+                .ToList();
+
+            if (bullets.Count == 0)
+                continue;
+
+            ChartInsights[title] = bullets;
+            var bare = BareTitle(title);
+            if (!string.IsNullOrWhiteSpace(bare) && !ChartInsights.ContainsKey(bare))
+                ChartInsights[bare] = bullets;
+        }
+    }
+
+    private static string BareTitle(string title)
+    {
+        var colon = title.LastIndexOf(':');
+        return colon >= 0 ? title[(colon + 1)..].Trim() : title.Trim();
+    }
+
     public bool HasData =>
         LisMonthly.Count > 0 || FunnelPeriod.Collected > 0 || BacklogSummary.TotalBacklog > 0
         || LisFunnel.Count > 0

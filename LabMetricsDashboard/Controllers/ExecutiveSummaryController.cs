@@ -142,7 +142,7 @@ public sealed class ExecutiveSummaryController : Controller
             return View(emptyVm);
         }
 
-        var spName  = $"dbo.usp_Get{prefix}_ExecutiveSummary";
+        var spName  = SqlPhiExecutiveSummaryRepository.ExecutiveSummaryGetSpName(prefix);
         var connStr = config.DbConnectionString;
 
         bool spExists = await _repo.StoredProcedureExistsAsync(connStr, spName, ct);
@@ -213,13 +213,6 @@ public sealed class ExecutiveSummaryController : Controller
         _logger.LogInformation(
             "ExecutiveSummary ready to render for lab='{Lab}' SP='{Sp}' rows={Rows} cols={Cols}",
             labName, spName, vm.Rows.Count, vm.YearMonthColumns.Count);
-
-        if (labName.Equals("Beech_Tree", StringComparison.OrdinalIgnoreCase))
-        {
-            var insightRoot = _config["ThreePillarInsights:LocalRoot"]
-                ?? @"C:\LRN-Files\Automation\LRN-Output\Coding_Validation_Report\Beech_Tree\ThreePillar";
-            vm.AiThreePillarInsight = _insightLoader.LoadThreePillar(insightRoot, vm.ReportWeekFolder);
-        }
 
         if (export == "excel")
         {
@@ -323,7 +316,7 @@ public sealed class ExecutiveSummaryController : Controller
             return View("Detail", errorVm);
         }
 
-        if (!LabPrefixMap.TryGetValue(labName, out _))
+        if (!LabPrefixMap.TryGetValue(labName, out var prefix))
         {
             errorVm.ErrorMessage = $"Detail not available for '{labName}'.";
             return View("Detail", errorVm);
@@ -361,7 +354,7 @@ public sealed class ExecutiveSummaryController : Controller
         }
         else
         {
-            detailSp              = "dbo.usp_GetExecutiveSummaryDetail_PMSCash";
+            detailSp              = SqlPhiExecutiveSummaryRepository.ExecutiveSummaryPmsCashDetailSpName(prefix);
             sourceLabel           = "ClaimLevelData";
             sqlParams["@Category"] = category;
             sqlParams["@RowCode"]  = rowCode;
@@ -879,6 +872,7 @@ public sealed class ExecutiveSummaryController : Controller
         vm.AsOfDate ??= asOf;
         if (vm.DayWindow <= 0) vm.DayWindow = dayWindow;
         if (vm.TrailingMonths <= 0) vm.TrailingMonths = trailingMonths;
+        AttachThreePillarInsights(vm);
         return View(vm);
     }
 
@@ -910,8 +904,15 @@ public sealed class ExecutiveSummaryController : Controller
 
         var asOf = vm.AsOfDate ?? DateTime.Today.Date;
         var dayWindow = vm.DayWindow > 0 ? vm.DayWindow : 9;
+        var weekFolder = vm.WeekFolder;
+        var trailing = vm.TrailingMonths;
         vm = await _repo.GetBeechTreeThreePillarPmsAsync(
             config.DbConnectionString, vm.LabName, vm.TrailingMonths, dayWindow, asOf, ct);
+        vm.WeekFolder = weekFolder;
+        vm.TrailingMonths = trailing > 0 ? trailing : vm.TrailingMonths;
+        vm.DayWindow = dayWindow;
+        vm.AsOfDate ??= asOf;
+        AttachThreePillarInsights(vm);
         return PartialView("_ThreePillarPms", vm);
     }
 
@@ -941,10 +942,45 @@ public sealed class ExecutiveSummaryController : Controller
             return PartialView("_ThreePillarCash", vm);
         }
 
+        var weekFolder = vm.WeekFolder;
+        var trailing = vm.TrailingMonths;
+        var dayWindow = vm.DayWindow;
+        var asOf = vm.AsOfDate;
         vm = await _repo.GetBeechTreeThreePillarCashAsync(
             config.DbConnectionString, vm.LabName, vm.TrailingMonths, vm.DayWindow, vm.AsOfDate, ct);
         vm.CashLoaded = true;
+        vm.WeekFolder = weekFolder;
+        vm.TrailingMonths = trailing > 0 ? trailing : vm.TrailingMonths;
+        vm.DayWindow = dayWindow;
+        vm.AsOfDate ??= asOf;
+        AttachThreePillarInsights(vm);
         return PartialView("_ThreePillarCash", vm);
+    }
+
+    /// <summary>
+    /// Lazy-load fragment for Insight tab — reads local insights.json for the report week.
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> ThreePillarInsightPartial(
+        string? lab, int? months = null, CancellationToken ct = default)
+    {
+        var vm = await BuildThreePillarShellAsync(lab, months, ct);
+        if (!string.IsNullOrWhiteSpace(vm.ErrorMessage))
+            return PartialView("_ThreePillarInsight", vm);
+
+        AttachThreePillarInsights(vm);
+        return PartialView("_ThreePillarInsight", vm);
+    }
+
+    private void AttachThreePillarInsights(ExecSummaryThreePillarViewModel vm)
+    {
+        if (!string.Equals(vm.LabName, "Beech_Tree", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var insightRoot = _config["ThreePillarInsights:LocalRoot"]
+            ?? @"C:\LRN-Files\Automation\LRN-Output\Coding_Validation_Report\Beech_Tree\ThreePillar";
+        vm.AiThreePillarInsight = _insightLoader.LoadThreePillar(insightRoot, vm.WeekFolder);
+        vm.IndexChartInsights();
     }
 
     private async Task<ExecSummaryThreePillarViewModel> BuildThreePillarShellAsync(

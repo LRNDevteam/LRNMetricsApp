@@ -165,12 +165,25 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
     /// <summary>
     /// Labs whose live/filter Top5 Payments path prefers
     /// <c>usp_Get{prefix}_CS_Top5ReimbursementPay</c> (same set as aggregate Pay SP routing).
+    /// Augustus uses <c>usp_GetAug_CS_Top5ReimbursementPay_v2</c> (rank by claim count).
     /// </summary>
     private static bool IsTop5ReimbursementPaySpLab(string? prefix) =>
         string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Augustus Collection Report client fixes live in *_v2 SPs so LIVE usp_GetAug_CS_* stay.
+    /// </summary>
+    private static bool IsAugustusCollectionPrefix(string? prefix) =>
+        string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase);
+
+    private static string CollectionGetSp(string prefix, string leaf) =>
+        IsAugustusCollectionPrefix(prefix)
+            ? $"dbo.usp_Get{prefix}_{leaf}_v2"
+            : $"dbo.usp_Get{prefix}_{leaf}";
 
     /// <summary>
     /// Tries each Collection Summary prefix candidate (e.g. Cert then CERT for Certus).
@@ -480,7 +493,11 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         DateOnly? filterCheckDateFrom, DateOnly? filterCheckDateTo,
         CancellationToken ct)
     {
-        var perPayer = new Dictionary<string, Dictionary<string, (int Cnt, decimal Bal)>>(StringComparer.OrdinalIgnoreCase);
+        // Keyed by Source + PayerName: Augustus rows the report by billing source
+        // (ClaimLevelData.Source, e.g. "IRCM") and then payer, matching the client pivot.
+        // SPs that do not return a Source column simply yield a blank source.
+        var perPayer = new Dictionary<string, (string Source, string Payer, Dictionary<string, (int Cnt, decimal Bal)> Buckets)>(
+            StringComparer.OrdinalIgnoreCase);
         var sw = Stopwatch.StartNew();
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
@@ -502,6 +519,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         // Resolve once from schema to avoid per-row ordinal lookups.
         var firstRow = true;
         int cntOrdinal = -1;
+        var hasSource = false;
 
         static string NormalizeAgingBucket(string bucket) => bucket.Trim() switch
         {
@@ -530,39 +548,46 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                            : HasColumn(r, "Cnt")        ? r.GetOrdinal("Cnt")
                            : throw new InvalidOperationException(
                                $"SP '{spName}' result set has neither 'VisitCount' nor 'Cnt' column.");
+                hasSource  = HasColumn(r, "Source");
             }
 
             var payer  = GetStringOrEmpty(r, "PayerName");
             if (string.IsNullOrWhiteSpace(payer)) continue;
+            var source = hasSource ? GetStringOrEmpty(r, "Source") : string.Empty;
             var bucket = NormalizeAgingBucket(GetStringOrEmpty(r, "AgingBucket"));
             var cnt    = r.IsDBNull(cntOrdinal) ? 0 : Convert.ToInt32(r.GetValue(cntOrdinal));
             var bal    = GetDecimalOrDefault(r, "InsuranceBalance");
-            if (!perPayer.TryGetValue(payer, out var dict))
-                perPayer[payer] = dict = new Dictionary<string, (int, decimal)>(StringComparer.OrdinalIgnoreCase);
-            dict[bucket] = (cnt, bal);
+            var key    = $"{source}\u0001{payer}";
+            if (!perPayer.TryGetValue(key, out var entry))
+                perPayer[key] = entry = (source, payer, new Dictionary<string, (int, decimal)>(StringComparer.OrdinalIgnoreCase));
+            entry.Buckets[bucket] = (cnt, bal);
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: payers={N}, {Ms}ms", spName, perPayer.Count, sw.ElapsedMilliseconds);
 
         static (int c, decimal b) Get(Dictionary<string, (int, decimal)> d, string key)
             => d.TryGetValue(key, out var v) ? v : (0, 0m);
 
-        var rows = perPayer.Select(kv =>
+        var rows = perPayer.Values.Select(entry =>
         {
-            var (cur,  bCur)  = Get(kv.Value, "Current");
-            var (b30,  x30)   = Get(kv.Value, "30 Days");
-            var (b60,  x60)   = Get(kv.Value, "60 Days");
-            var (b90,  x90)   = Get(kv.Value, "90 Days");
-            var (b120, x120)  = Get(kv.Value, "120+ Days");
+            var (cur,  bCur)  = Get(entry.Buckets, "Current");
+            var (b30,  x30)   = Get(entry.Buckets, "30 Days");
+            var (b60,  x60)   = Get(entry.Buckets, "60 Days");
+            var (b90,  x90)   = Get(entry.Buckets, "90 Days");
+            var (b120, x120)  = Get(entry.Buckets, "120+ Days");
             return new InsuranceAgingRow(
-                PayerName: kv.Key,
+                PayerName: entry.Payer,
                 ClaimsCurrent: cur,  BalanceCurrent: bCur,
                 Claims30:  b30,  Balance30:  x30,
                 Claims60:  b60,  Balance60:  x60,
                 Claims90:  b90,  Balance90:  x90,
                 Claims120: b120, Balance120: x120,
                 ClaimsTotal: cur + b30 + b60 + b90 + b120,
-                BalanceTotal: bCur + x30 + x60 + x90 + x120);
-        }).OrderByDescending(row => row.BalanceTotal).ToList();
+                BalanceTotal: bCur + x30 + x60 + x90 + x120,
+                Source: entry.Source);
+        })
+        .OrderBy(row => row.Source, StringComparer.OrdinalIgnoreCase)
+        .ThenByDescending(row => row.BalanceTotal)
+        .ToList();
 
         return new InsuranceAgingResult(rows);
     }
@@ -1535,7 +1560,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         DateOnly? filterCheckDateFrom, DateOnly? filterCheckDateTo,
         CancellationToken ct)
     {
-        var spName = $"dbo.usp_Get{prefix}_CS_Top5ReimbursementPct";
+        var spName = CollectionGetSp(prefix, "CS_Top5ReimbursementPct");
         var rows = new List<InsuranceReimbursementRow>();
         var sw = Stopwatch.StartNew();
         await using var conn = new SqlConnection(connectionString);
@@ -1588,7 +1613,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         DateOnly? filterCheckDateFrom, DateOnly? filterCheckDateTo,
         CancellationToken ct)
     {
-        var spName = $"dbo.usp_Get{prefix}_CS_Top5ReimbursementPay";
+        var spName = CollectionGetSp(prefix, "CS_Top5ReimbursementPay");
         var rows = new List<InsuranceTotalPaymentRow>();
         var sw = Stopwatch.StartNew();
         await using var conn = new SqlConnection(connectionString);
@@ -1819,11 +1844,13 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
 
         // Labs that have a dedicated InsuranceVsAging SP route through the generic SP reader.
         // SP name pattern: dbo.usp_Get{prefix}_CS_InsuranceVsAging
+        // (Augustus resolves to usp_GetAug_CS_InsuranceVsAging_v2 — the client-fix SP that
+        //  rows by PayerName_Raw instead of Source; see 15c_Augustus_InsuranceVsAging_PayerName_Fix.sql)
         // If the SP is not deployed yet (error 2812), fall back to live ClaimLevelData so
         // Collection Report / page still work for that lab.
         if (!string.IsNullOrWhiteSpace(prefix))
         {
-            var spName = $"dbo.usp_Get{prefix}_CS_InsuranceVsAging";
+            var spName = CollectionGetSp(prefix, "CS_InsuranceVsAging");
             try
             {
                 return await GetInsuranceAgingViaSpAsync(
@@ -1863,7 +1890,10 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             var dataSql = $"""
             ;WITH src AS (
                 SELECT
-                    LTRIM(RTRIM(PayerName))                              AS PayerName,
+                    -- PayerName can be blank/NULL on labs that only carry the raw value;
+                    -- fall back to PayerName_Raw (already filtered non-blank below) so the
+                    -- payer column is never empty.
+                    LTRIM(RTRIM(COALESCE(NULLIF(LTRIM(RTRIM(PayerName)), ''), PayerName_Raw))) AS PayerName,
                     AccessionNumber,
                     ISNULL(TRY_CAST(InsuranceBalance AS DECIMAL(18,2)), 0) AS InsBalance,
                     ISNULL(TRY_CAST(DaysToDOS AS INT), 0)                AS AgingDays
@@ -1903,7 +1933,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             while (await r.ReadAsync(ct))
             {
                 rows.Add(new InsuranceAgingRow(
-                    PayerName: r.GetString(r.GetOrdinal("PayerName")),
+                    PayerName: GetStringOrEmpty(r, "PayerName"),
                     ClaimsCurrent: r.GetInt32(r.GetOrdinal("ClaimsCurrent")),
                     BalanceCurrent: r.GetDecimal(r.GetOrdinal("BalanceCurrent")),
                     Claims30: r.GetInt32(r.GetOrdinal("Claims30")),
@@ -1941,7 +1971,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         if (!string.IsNullOrWhiteSpace(prefix))
             return await GetPanelPaymentViaSpAsync(
                 connectionString,
-                $"dbo.usp_Get{prefix}_CS_PanelVsPayment",
+                CollectionGetSp(prefix, "CS_PanelVsPayment"),
                 filterPayerNames, filterPanelNames,
                 filterFirstBillFrom, filterFirstBillTo,
                 filterDosFrom, filterDosTo,
@@ -2088,6 +2118,31 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         return new RepPaymentResult(rows);
     }
 
+    public async Task<List<InsuranceVsPaymentRow>> GetInsuranceVsPaymentAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        var prefix = LabCollectionPrefix.GetPrefix(labName);
+        if (string.IsNullOrWhiteSpace(prefix))
+            return [];
+
+        return await GetInsuranceVsPaymentViaSpAsync(
+            connectionString, prefix,
+            filterPayerNames, filterPanelNames,
+            filterFirstBillFrom, filterFirstBillTo,
+            filterDosFrom, filterDosTo,
+            filterCheckDateFrom, filterCheckDateTo,
+            ct).ConfigureAwait(false);
+    }
+
     public async Task<InsurancePaymentPctResult> GetInsurancePaymentPctAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
@@ -2104,7 +2159,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         if (!string.IsNullOrWhiteSpace(prefix))
             return await GetInsurancePaymentPctViaSpAsync(
                 connectionString,
-                $"dbo.usp_Get{prefix}_CS_InsuranceVsPaymentPct",
+                CollectionGetSp(prefix, "CS_InsuranceVsPaymentPct"),
                 filterPayerNames, filterPanelNames,
                 filterFirstBillFrom, filterFirstBillTo,
                 filterDosFrom, filterDosTo,

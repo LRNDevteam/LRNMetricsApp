@@ -436,7 +436,13 @@ public static class CollectionSummaryExcelExportBuilder
         ws.TabColor = ExcelTheme.TabGreen;
         ExcelTheme.ApplyDefaults(ws);
 
-        string[] headers =
+        // Augustus carries a billing source (ClaimLevelData.Source, e.g. "IRCM") in front of
+        // the payer; labs whose SP returns no Source column keep the original column set.
+        bool showSource = rows.Any(r => !string.IsNullOrWhiteSpace(r.Source));
+
+        var headerList = new List<string>();
+        if (showSource) headerList.Add("Source");
+        headerList.AddRange(
         [
             "Payer Name",
             "Current Claims", "Current Balance",
@@ -445,7 +451,8 @@ public static class CollectionSummaryExcelExportBuilder
             "90+ Claims", "90+ Balance",
             "120+ Claims", "120+ Balance",
             "Total Claims", "Total Balance"
-        ];
+        ]);
+        string[] headers = [.. headerList];
         int colCount = headers.Length;
 
         int row = 1;
@@ -454,29 +461,91 @@ public static class CollectionSummaryExcelExportBuilder
         ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ExcelTheme.HeaderBg);
         row++;
 
-        for (int i = 0; i < rows.Count; i++)
+        if (showSource)
         {
-            var r = rows[i];
-            var bg = i % 2 == 0 ? XLColor.White : ExcelTheme.BandedRowBg;
-            int col = 1;
-            WriteCell(ws, row, col++, r.PayerName, bg, isText: true);
-            WriteCell(ws, row, col++, r.ClaimsCurrent, bg);
-            WriteCell(ws, row, col++, r.BalanceCurrent, bg, isCurrency: true);
-            WriteCell(ws, row, col++, r.Claims30, bg);
-            WriteCell(ws, row, col++, r.Balance30, bg, isCurrency: true);
-            WriteCell(ws, row, col++, r.Claims60, bg);
-            WriteCell(ws, row, col++, r.Balance60, bg, isCurrency: true);
-            WriteCell(ws, row, col++, r.Claims90, bg);
-            WriteCell(ws, row, col++, r.Balance90, bg, isCurrency: true);
-            WriteCell(ws, row, col++, r.Claims120, bg);
-            WriteCell(ws, row, col++, r.Balance120, bg, isCurrency: true);
-            WriteCell(ws, row, col++, r.ClaimsTotal, bg);
-            WriteCell(ws, row, col, r.BalanceTotal, bg, isCurrency: true);
-            row++;
+            // Mirror the report tab: one collapsible outline group per billing source,
+            // its totals on the summary row above the payers.
+            ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
+
+            var groups = rows
+                .GroupBy(r => r.Source ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+
+            int groupIdx = 0;
+            foreach (var group in groups)
+            {
+                var groupRows = group.ToList();
+                var sourceLabel = string.IsNullOrWhiteSpace(group.Key) ? "(blank)" : group.Key;
+                var bg = groupIdx % 2 == 0 ? XLColor.White : ExcelTheme.BandedRowBg;
+
+                WriteAgingRow(ws, row++, sourceLabel, $"{sourceLabel} Total",
+                    groupRows.Sum(r => r.ClaimsCurrent), groupRows.Sum(r => r.BalanceCurrent),
+                    groupRows.Sum(r => r.Claims30), groupRows.Sum(r => r.Balance30),
+                    groupRows.Sum(r => r.Claims60), groupRows.Sum(r => r.Balance60),
+                    groupRows.Sum(r => r.Claims90), groupRows.Sum(r => r.Balance90),
+                    groupRows.Sum(r => r.Claims120), groupRows.Sum(r => r.Balance120),
+                    groupRows.Sum(r => r.ClaimsTotal), groupRows.Sum(r => r.BalanceTotal),
+                    ExcelTheme.SubHeaderBg, bold: true, showSource: true);
+
+                int firstChild = row;
+                foreach (var r in groupRows)
+                {
+                    WriteAgingRow(ws, row++, r.Source, r.PayerName,
+                        r.ClaimsCurrent, r.BalanceCurrent, r.Claims30, r.Balance30,
+                        r.Claims60, r.Balance60, r.Claims90, r.Balance90,
+                        r.Claims120, r.Balance120, r.ClaimsTotal, r.BalanceTotal,
+                        bg, bold: false, showSource: true);
+                }
+
+                if (row > firstChild)
+                {
+                    ws.Rows(firstChild, row - 1).Group();
+                    ws.Rows(firstChild, row - 1).Collapse();
+                }
+
+                groupIdx++;
+            }
+        }
+        else
+        {
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var r = rows[i];
+                var bg = i % 2 == 0 ? XLColor.White : ExcelTheme.BandedRowBg;
+                WriteAgingRow(ws, row++, r.Source, r.PayerName,
+                    r.ClaimsCurrent, r.BalanceCurrent, r.Claims30, r.Balance30,
+                    r.Claims60, r.Balance60, r.Claims90, r.Balance90,
+                    r.Claims120, r.Balance120, r.ClaimsTotal, r.BalanceTotal,
+                    bg, bold: false, showSource: false);
+            }
         }
 
         AutoFitColumns(ws);
         ws.SheetView.FreezeRows(3);
+    }
+
+    private static void WriteAgingRow(
+        IXLWorksheet ws, int row, string source, string label,
+        int cCur, decimal bCur, int c30, decimal b30, int c60, decimal b60,
+        int c90, decimal b90, int c120, decimal b120, int cTot, decimal bTot,
+        XLColor bg, bool bold, bool showSource)
+    {
+        int col = 1;
+        if (showSource)
+            WriteCell(ws, row, col++, source, bg, isText: true, bold: bold);
+        WriteCell(ws, row, col++, label, bg, isText: true, bold: bold);
+        WriteCell(ws, row, col++, cCur, bg, bold: bold);
+        WriteCell(ws, row, col++, bCur, bg, isCurrency: true, bold: bold);
+        WriteCell(ws, row, col++, c30, bg, bold: bold);
+        WriteCell(ws, row, col++, b30, bg, isCurrency: true, bold: bold);
+        WriteCell(ws, row, col++, c60, bg, bold: bold);
+        WriteCell(ws, row, col++, b60, bg, isCurrency: true, bold: bold);
+        WriteCell(ws, row, col++, c90, bg, bold: bold);
+        WriteCell(ws, row, col++, b90, bg, isCurrency: true, bold: bold);
+        WriteCell(ws, row, col++, c120, bg, bold: bold);
+        WriteCell(ws, row, col++, b120, bg, isCurrency: true, bold: bold);
+        WriteCell(ws, row, col++, cTot, bg, bold: true);
+        WriteCell(ws, row, col, bTot, bg, isCurrency: true, bold: true);
     }
 
     // ?? Panel vs Payment ????????????????????????????????????????????
@@ -497,6 +566,9 @@ public static class CollectionSummaryExcelExportBuilder
         row++;
 
         // Collapse the per-month grain (Elixir) into one row per panel for the flat export.
+        // Augustus ranks by Count of PanelNew; other labs rank by SUM(InsurancePayment).
+        var isAugustus = labName.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
+            || labName.Equals("Augustus", StringComparison.OrdinalIgnoreCase);
         var flatRows = rows
             .GroupBy(r => r.PanelName, StringComparer.OrdinalIgnoreCase)
             .Select(g => new
@@ -505,7 +577,7 @@ public static class CollectionSummaryExcelExportBuilder
                 NoOfClaims = g.Sum(x => x.NoOfClaims),
                 InsurancePayments = g.Sum(x => x.InsurancePayments),
             })
-            .OrderByDescending(r => r.InsurancePayments)
+            .OrderByDescending(r => isAugustus ? r.NoOfClaims : r.InsurancePayments)
             .ToList();
 
         for (int i = 0; i < flatRows.Count; i++)
@@ -610,6 +682,9 @@ public static class CollectionSummaryExcelExportBuilder
         ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ExcelTheme.HeaderBg);
         row++;
 
+        // Mirror the report tab: each panel is a collapsible outline group over its payers.
+        ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
+
         int idx = 0;
         foreach (var panel in rows)
         {
@@ -617,10 +692,16 @@ public static class CollectionSummaryExcelExportBuilder
             WritePanelAveragesMetricsRow(ws, row, panel.PanelName, panel.Metrics, bg, bold: true);
             row++;
 
+            int firstChild = row;
             foreach (var payer in panel.Payers)
             {
                 WritePanelAveragesMetricsRow(ws, row, $"  {payer.PayerName}", payer.Metrics, bg, bold: false);
                 row++;
+            }
+            if (row > firstChild)
+            {
+                ws.Rows(firstChild, row - 1).Group();
+                ws.Rows(firstChild, row - 1).Collapse();
             }
             idx++;
         }
@@ -691,6 +772,9 @@ public static class CollectionSummaryExcelExportBuilder
         row++;
         int freezeRow = row;
 
+        // Mirror the report tab: each panel is a collapsible outline group over its payers.
+        ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
+
         int idx = 0;
         foreach (var panel in result.PanelRows)
         {
@@ -698,10 +782,16 @@ public static class CollectionSummaryExcelExportBuilder
             WriteAvgPayMetricsRow(ws, row, panel.PanelName, panel.Metrics, bg, bold: true);
             row++;
 
+            int firstChild = row;
             foreach (var payer in panel.Payers)
             {
                 WriteAvgPayMetricsRow(ws, row, $"  {payer.PayerName}", payer.Metrics, bg, bold: false);
                 row++;
+            }
+            if (row > firstChild)
+            {
+                ws.Rows(firstChild, row - 1).Group();
+                ws.Rows(firstChild, row - 1).Collapse();
             }
             idx++;
         }

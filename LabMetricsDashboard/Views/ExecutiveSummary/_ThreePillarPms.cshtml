@@ -356,6 +356,8 @@ else
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "1. Billed Claims Reconciliation — LIS vs PMS"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             <div class="tpd-insight tpd-insight-ok">Tracking this gap monthly is an ongoing tripwire — a sudden widen/narrow outside the normal ~900–1,800 band signals a routing or entry change.</div>
             <div class="tpd-logic">
                 <strong>Fetch logic</strong>
@@ -378,6 +380,8 @@ else
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "2. Fully Adjusted % of Billed Claims (PMS)"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             <div class="tpd-logic">
                 <strong>Fetch logic</strong>
                 <ul>
@@ -398,6 +402,8 @@ else
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "3. Top Write-Off Reason Codes"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             <div class="tpd-insight tpd-insight-ok">WOINS / WOOON typically dominate write-off volume. This report is counts-only — $ by reason would sharpen cost focus.</div>
             <div class="tpd-chart">@Html.Raw(SvgHBars(reasonRows, "count"))</div>
         </div>
@@ -412,6 +418,10 @@ else
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "4. Insurance Balance % of Billed Claims — Headline PMS Finding"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
+            @{ ViewData["GraphTitle"] = "4b. Insurance Balance Composition (% of open claims)"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             <div class="tpd-insight">A spike in the left chart is actionable only with the right chart — if No Response dominates, chase payer-response backlog, not denials.</div>
             <div class="tpd-grid2">
                 <div>
@@ -435,6 +445,8 @@ else
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "5. Fully Paid % of Billed Claims (PMS)"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             <div class="tpd-logic">
                 <ul>
                     <li><strong>Fully Paid</strong> = <code>ClaimStatus='Fully Paid'</code></li>
@@ -462,6 +474,8 @@ else
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
+                @{ ViewData["GraphTitle"] = $"6. {panel} — Avg Allowed vs Avg Paid"; }
+                @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 <div class="tpd-chart">@Html.Raw(SvgDualLines(plabels, allowed, paid, "Avg Allowed (DOS month)", "Avg Paid (Payment Date month)", "#1D4ED8", "#15803D", "Avg $ per claim"))</div>
                 <div class="tpd-scroll" style="margin-top:.8rem">
                     <table class="tpd-tbl">
@@ -501,6 +515,8 @@ else
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
+                @{ ViewData["GraphTitle"] = $"Avg $ Paid per Claim — {panel} (MOM by DOS)"; }
+                @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 <div class="tpd-chart">@Html.Raw(SvgGroupedBars(payers, priorPaid, latestPaid, priorLbl + " avg paid", latestLbl + " avg paid", "Avg $ paid per claim"))</div>
                 <div class="tpd-scroll" style="margin-top:.8rem">
                     <table class="tpd-tbl">
@@ -542,6 +558,8 @@ else
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "DOS-Cohort Maturity Curve"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             <div class="tpd-insight tpd-insight-ok">Direct evidence that the latest month is immature, not underperforming — newer cohorts stop early (fewer days elapsed to collect).</div>
             <div class="tpd-logic">
                 <strong>Fetch logic</strong>
@@ -565,6 +583,8 @@ else
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "Denial Rate by Carrier — Ratio-Driver Breakdown"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             <div class="tpd-insight">The Insurance Balance finding is dominated by No Response, not denials — this chart shows whether the denied $ portion is concentrated in a few payers.</div>
             <div class="tpd-logic">Blended denial rate (shown carriers): <strong>@Pct(blendedAvg)</strong> · No Response excluded from denied $.</div>
             <div class="tpd-chart">@Html.Raw(SvgHBars(denialBars, "% denied (of allowed $)"))</div>
@@ -580,6 +600,8 @@ else
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "Fastest-Escalating Denial Reasons by Payer — MOM"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             @if (denialGroups.Count == 0)
             {
                 <div class="tpd-empty">No denial-reason progression data.</div>

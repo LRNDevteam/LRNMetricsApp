@@ -2278,11 +2278,12 @@ public class DashboardController : Controller
                         null, null, null, null, null, null, null, null, ct);
                     var t6 = _augSummaryRepo.GetUnbilledAgingAsync(connStr,
                         null, null, null, null, null, null, null, null, ct);
-                    // CPT always uses live query; pass rule so Augustus gets COUNT(DISTINCT CPTCode)
-                    var t7 = _productionReportRepo.GetCptBreakdownAsync(connStr,
-                        null, null, null, null, null, null, ct, rule: productionRule);
+                    var t7 = _augSummaryRepo.GetCptBreakdownAsync(connStr,
+                        null, null, null, null, null, null, null, null, ct);
+                    var t8 = _augSummaryRepo.GetPanelBreakdownAsync(connStr,
+                        null, null, null, null, null, null, null, null, ct);
 
-                    await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7);
+                    await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7, t8);
 
                     monthlyResult = t1.Result;
                     weeklyResult  = t2.Result;
@@ -2291,6 +2292,7 @@ public class DashboardController : Controller
                     pxpResult     = t5.Result;
                     uaResult      = t6.Result;
                     cptResult     = t7.Result;
+                    pnlResult     = t8.Result;
                 }
                 else if (genericSummaryRepo is not null)
                 {
@@ -2307,8 +2309,10 @@ public class DashboardController : Controller
                         ? genericSummaryRepo.GetCptBreakdownAsync(connStr, ct: ct)
                         : _productionReportRepo.GetCptBreakdownAsync(connStr,
                             null, null, null, null, null, null, ct, rule: productionRule);
+                    // Panel Breakdown: usp_Get{Prefix}PanelBreakdownWithPayers snapshot.
+                    var t8 = genericSummaryRepo.GetPanelBreakdownAsync(connStr, ct: ct);
 
-                    await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7);
+                    await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7, t8);
 
                     monthlyResult = t1.Result;
                     weeklyResult  = t2.Result;
@@ -2317,6 +2321,7 @@ public class DashboardController : Controller
                     pxpResult     = t5.Result;
                     uaResult      = t6.Result;
                     cptResult     = t7.Result;
+                    pnlResult     = t8.Result;
                 }
                 else
                 {
@@ -2487,8 +2492,19 @@ public class DashboardController : Controller
                                 dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
                                 ct, rule: productionRule);
 
-                var t8 = isNorthWestLab
+                var t8 = isAugustusLab
+                    ? _augSummaryRepo.GetPanelBreakdownAsync(connStr,
+                        livePayerFilter, livePanelFilter,
+                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                    : isNorthWestLab
                     ? _nwSummaryRepo.GetPanelBreakdownAsync(connStr,
+                        livePayerFilter, livePanelFilter,
+                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                    // Every other lab: usp_Get{Prefix}PanelBreakdownWithPayers
+                    // (Sql/40_AllLabs_PanelBreakdownWithPayers.sql). The repo returns an
+                    // empty result when that SP is not on the lab's database yet.
+                    : genericSummaryRepo is not null
+                    ? genericSummaryRepo.GetPanelBreakdownAsync(connStr,
                         livePayerFilter, livePanelFilter,
                         dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
                     : Task.FromResult(new PayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0));
@@ -2539,6 +2555,8 @@ public class DashboardController : Controller
 
                 pbResult.PayerRows.RemoveAll(r => excPayers.Contains(r.PayerName));
                 pxpResult.PayerRows.RemoveAll(r => excPayers.Contains(r.PayerName));
+                foreach (var panel in pnlResult.PayerRows)
+                    panel.ChildRows.RemoveAll(c => excPayers.Contains(c.PayerName));
                 insightDaqResult.PayerRows.RemoveAll(r => excPayers.Contains(r.PayerName));
                 insightWebResult.PayerRows.RemoveAll(r => excPayers.Contains(r.PayerName));
                 foreach (var src in hpResult.SourceRows)
@@ -2651,7 +2669,9 @@ public class DashboardController : Controller
                 CptBreakdownGrandByMonth       = cptResult.GrandTotalByMonth,
                 CptBreakdownGrandTotalUnits    = cptResult.GrandTotalUnits,
                 CptBreakdownGrandTotalCharges  = cptResult.GrandTotalCharges,
-                CptUnitsLabel                  = genericSummaryRepo?.IsCertus == true ? "Billed Units" : "No. of Claims",
+                CptUnitsLabel                  = isAugustusLab
+                    ? "Count of CPT"
+                    : genericSummaryRepo?.IsCertus == true ? "Billed Units" : "No. of Claims",
                 ReportWeekFolder               = analysisRange.WeekFolder,
                 ReportRunId                    = analysisRange.RunId,
                 LimsRunId                      = limsRunId,
@@ -2855,7 +2875,21 @@ public class DashboardController : Controller
                 : _productionReportRepo.GetCptBreakdownAsync(
                     connStr, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
 
-            await Task.WhenAll(monthlyTask, weeklyTask, codingTask, payerBreakdownTask, payerPanelTask, unbilledAgingTask, cptBreakdownTask);
+            // Panel Breakdown: Augustus has its own SP; every other lab with
+            // usp_Get{Prefix}PanelBreakdownWithPayers deployed goes through its generic
+            // repo (Sql/40_AllLabs_PanelBreakdownWithPayers.sql). Labs without the SP
+            // return an empty result and the sheet stays empty, as before.
+            var panelBreakdownTask = isAugustusLab
+                ? _augSummaryRepo.GetPanelBreakdownAsync(
+                    connStr, payerArg, panelArg,
+                    dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                : _labSummaryRepos.TryGetValue(selectedLab, out var exportSummaryRepo)
+                ? exportSummaryRepo.GetPanelBreakdownAsync(
+                    connStr, payerArg, panelArg,
+                    dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                : Task.FromResult(new PayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0));
+
+            await Task.WhenAll(monthlyTask, weeklyTask, codingTask, payerBreakdownTask, payerPanelTask, unbilledAgingTask, cptBreakdownTask, panelBreakdownTask);
 
             var result        = monthlyTask.Result;
             var weeklyResult  = weeklyTask.Result;
@@ -2864,6 +2898,7 @@ public class DashboardController : Controller
             var pxpResult     = payerPanelTask.Result;
             var uaResult      = unbilledAgingTask.Result;
             var cptResult     = cptBreakdownTask.Result;
+            var pnlResult     = panelBreakdownTask.Result;
 
             _logger.LogInformation(
                 "[ProdExcelExport] Phase 1 DONE in {Ms}ms — " +
@@ -2964,6 +2999,14 @@ public class DashboardController : Controller
                 CptBreakdownGrandByMonth        = cptResult.GrandTotalByMonth,
                 CptBreakdownGrandTotalUnits     = cptResult.GrandTotalUnits,
                 CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
+                CptUnitsLabel                   = isAugustusLab ? "Count of CPT" : "No. of Claims",
+                PanelBreakdownMonths              = pnlResult.Months,
+                PanelBreakdownYears               = pnlResult.Years,
+                PanelBreakdownRows                = pnlResult.PayerRows,
+                PanelBreakdownGrandByMonth        = pnlResult.GrandTotalByMonth,
+                PanelBreakdownGrandTotal          = pnlResult.GrandTotal,
+                PanelBreakdownGrandChargesByMonth = pnlResult.GrandTotalChargesByMonth ?? [],
+                PanelBreakdownGrandTotalCharges   = pnlResult.GrandTotalCharges,
             };
 
             // ── Phase 4 : Build ClosedXML workbook (per-sheet logs inside) ─

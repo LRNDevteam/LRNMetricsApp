@@ -496,15 +496,21 @@ public class CollectionSummaryController : Controller
                     return PartialView("_CsTabInsPctPay", vm);
 
                 case "insvspay":
-                    // NorthWest now has its own NW_CS_InsuranceVsPayment snapshot table
-                    // and usp_GetNW_CS_InsuranceVsPayment read SP, so it follows the same
-                    // path as other labs. For labs without snapshots (aggregatePrefix is null,
-                    // e.g. Augustus) resolve the lab prefix and let
-                    // GetInsuranceVsPaymentFromAggregatesAsync fall through to the live SP.
                     var ivpPrefix = aggregatePrefix ?? LabCollectionPrefix.GetPrefix(selectedLab);
-                    vm.InsuranceVsPayment = string.IsNullOrEmpty(ivpPrefix)
-                        ? []
-                        : await _repo.GetInsuranceVsPaymentFromAggregatesAsync(connStr, ivpPrefix, ct);
+                    if (string.IsNullOrEmpty(ivpPrefix))
+                    {
+                        vm.InsuranceVsPayment = [];
+                    }
+                    else if (useAggregates)
+                    {
+                        vm.InsuranceVsPayment = await _repo.GetInsuranceVsPaymentFromAggregatesAsync(connStr, ivpPrefix, ct);
+                    }
+                    else
+                    {
+                        vm.InsuranceVsPayment = await _repo.GetInsuranceVsPaymentAsync(
+                            connStr, payerFilter, panelFilter,
+                            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+                    }
                     vm.ShowInsuranceVsPayment = true;
                     return PartialView("_CsTabInsVsPay", vm);
 

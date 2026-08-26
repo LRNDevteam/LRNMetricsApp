@@ -266,6 +266,7 @@ CREATE TABLE dbo.Aug_CS_AvgPayments (
 IF OBJECT_ID('dbo.Aug_CS_InsuranceVsAging','U') IS NOT NULL DROP TABLE dbo.Aug_CS_InsuranceVsAging;
 CREATE TABLE dbo.Aug_CS_InsuranceVsAging (
     SummaryId        INT           NOT NULL IDENTITY(1,1) PRIMARY KEY,
+    [Source]         NVARCHAR(500) NULL,
     PayerName        NVARCHAR(500) NOT NULL,
     AgingBucket      NVARCHAR(50)  NOT NULL,
     ClaimCount       INT           NOT NULL DEFAULT 0,
@@ -783,16 +784,17 @@ BEGIN
     SET NOCOUNT ON;
     TRUNCATE TABLE dbo.Aug_CS_InsuranceVsAging;
 	print 'Aug_CS_InsuranceVsAging table truncated';
-    INSERT INTO dbo.Aug_CS_InsuranceVsAging (PayerName, AgingBucket, ClaimCount, InsuranceBalance, RefreshedAt)
+    INSERT INTO dbo.Aug_CS_InsuranceVsAging ([Source], PayerName, AgingBucket, ClaimCount, InsuranceBalance, RefreshedAt)
 		SELECT
-			LTRIM(RTRIM(Source))                                  AS PayerName,      
+			LTRIM(RTRIM(ISNULL([Source], '')))                     AS [Source],
+			LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PayerName_Raw)), ''), 'Unknown'))) AS PayerName,
 			LTRIM(RTRIM(ISNULL(Aging, '(blank)')))                 AS AgingBucket,
 			COUNT( NULLIF(LTRIM(RTRIM(Claimid)), ''))    AS VisitCount,
 			ISNULL(SUM(TRY_CAST(InsuranceBalance AS DECIMAL(18,2))), 0)  AS InsuranceBalance,
 			GETDATE()
 		FROM dbo.ClaimLevelData
 		WHERE LTRIM(RTRIM(ClaimStatus)) = 'No Response' 
-		GROUP BY LTRIM(RTRIM(Source)), LTRIM(RTRIM(ISNULL(Aging, '(blank)')));
+		GROUP BY LTRIM(RTRIM(ISNULL([Source], ''))), LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PayerName_Raw)), ''), 'Unknown'))), LTRIM(RTRIM(ISNULL(Aging, '(blank)')));
 
     PRINT 'usp_RefreshAug_CS_InsuranceVsAging completed.';
 END

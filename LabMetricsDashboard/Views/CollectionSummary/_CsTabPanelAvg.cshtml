@@ -31,9 +31,13 @@
                                     paIdx++;
                                     var letter = paIdx <= 26 ? ((char)('A' + paIdx - 1)).ToString() : paIdx.ToString();
                                     var m = panel.Metrics;
-                                    <tr>
+                                    var paGroupId = $"pa-{paIdx}";
+                                    <tr class="cs-ag-group" data-ag-group="@paGroupId" role="button"
+                                        aria-expanded="false" title="Open / close payers">
                                         <td style="font-weight:700">@letter</td>
-                                        <td style="text-align:left;font-weight:700">@panel.PanelName</td>
+                                        <td style="text-align:left;font-weight:700">
+                                            <i class="bi bi-chevron-right cs-ag-chevron" aria-hidden="true"></i>@panel.PanelName
+                                        </td>
                                         <td style="text-align:right;font-weight:600">@m.ClaimCount.ToString("N0")</td>
                                         <td style="text-align:right;font-weight:600">@m.TotalCharges.ToString("C0")</td>
                                         <td style="text-align:right;font-weight:600">@m.AvgBilled.ToString("C2")</td>
@@ -55,7 +59,7 @@
                                     @foreach (var payer in panel.Payers)
                                     {
                                         var pm = payer.Metrics;
-                                        <tr class="mcv-drilldown">
+                                        <tr class="mcv-drilldown cs-ag-child" data-ag-parent="@paGroupId">
                                             <td></td>
                                             <td style="text-align:left">@payer.PayerName</td>
                                             <td style="text-align:right">@pm.ClaimCount.ToString("N0")</td>
@@ -86,7 +90,7 @@
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> Claim Level Data &bull;
                     <strong>Date Range:</strong> Last 6 months by Date of Service &bull;
-                    <strong>Rows:</strong> PanelName ? PayerName drill-down &bull;
+                    <strong>Rows:</strong> PanelName &rarr; PayerName drill-down (click a panel to open / close its payers) &bull;
                     <strong>Adjudicated Statuses:</strong> Fully Paid, Partially Paid, Complete W/O, Fully Adjusted, Fully Denied, Denied, Partially Denied, Partially Adjusted, Patient Responsibility &bull;
                     <strong>30/60 Days:</strong> Adjudicated claims where DaysToDOS ? 30 / 60 &bull;
                     <strong>Sorted by:</strong> No of Claims DESC

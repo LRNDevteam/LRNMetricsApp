@@ -456,21 +456,11 @@ builder.Services.AddScoped<IAugustusProductionSummaryRepository, SqlAugustusProd
 
 // ── Per-lab generic production summary repositories (Certus, Cove, Elixir, PCRLabsofAmerica, Beech_Tree, Rising_Tides, Phi_Life, Inhealth_DTR) ──
 // One SqlLabProductionSummaryRepository per lab, keyed by the lab name used in the LabSettings config.
+// The lab list lives in LabProductionSummaryRepositoryMap so LRN.ReportWorker
+// registers exactly the same set (queued Excel exports go through the worker).
 builder.Services.AddSingleton<IReadOnlyDictionary<string, ILabProductionSummaryRepository>>(sp =>
-{
-    var logger = sp.GetRequiredService<ILogger<SqlLabProductionSummaryRepository>>();
-    return new Dictionary<string, ILabProductionSummaryRepository>(StringComparer.OrdinalIgnoreCase)
-    {
-        ["Certus"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Certus),
-        ["Cove"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Cove),
-        ["Elixir"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Elixir),
-        ["PCRLabsofAmerica"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PCRLabsofAmerica),
-        ["Beech_Tree"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.BeechTree),
-        ["Rising_Tides"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.RisingTides),
-        ["Phi_Life"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PhiLife),
-        ["Inhealth_DTR"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.InHealthDTR),
-    };
-});
+    LabProductionSummaryRepositoryMap.Create(
+        sp.GetRequiredService<ILogger<SqlLabProductionSummaryRepository>>()));
 builder.Services.AddScoped<IClaimLineRepository, SqlClaimLineRepository>();
 builder.Services.AddScoped<ICptSearchRepository, SqlCptSearchRepository>();
 builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRepository>();

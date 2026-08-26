@@ -156,6 +156,7 @@ public sealed partial class SqlCollectionSummaryRepository
         // matching every other NorthWest/Phi/PCR Collection Summary tab. The SP returns the
         // snapshot on the no-filter path and aggregates live from ClaimLevelData when filters are supplied.
         if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
@@ -525,7 +526,7 @@ public sealed partial class SqlCollectionSummaryRepository
         {
             return await GetInsuranceAgingViaSpAsync(
                 connectionString,
-                $"dbo.usp_Get{prefix}_CS_InsuranceVsAging",
+                CollectionGetSp(prefix, "CS_InsuranceVsAging"),
                 filterPayerNames: null, filterPanelNames: null,
                 filterFirstBillFrom: null, filterFirstBillTo: null,
                 filterDosFrom: null, filterDosTo: null,
@@ -544,50 +545,71 @@ public sealed partial class SqlCollectionSummaryRepository
     private async Task<InsuranceAgingResult> GetInsuranceAgingFromSnapshotTableAsync(
         string connectionString, string prefix, CancellationToken ct)
     {
+        // Snapshot tables differ in the count column name: NW/BT use VisitCount,
+        // Augustus uses ClaimCount. Select * and resolve the ordinal from the schema.
         var sql = $"""
-            SELECT PayerName, AgingBucket, VisitCount, InsuranceBalance
+            SELECT *
             FROM   dbo.{prefix}_CS_InsuranceVsAging
             ORDER  BY PayerName, AgingBucket;
             """;
 
-        var perPayer = new Dictionary<string, Dictionary<string, (int Cnt, decimal Bal)>>(StringComparer.OrdinalIgnoreCase);
+        var perPayer = new Dictionary<string, (string Source, string Payer, Dictionary<string, (int Cnt, decimal Bal)> Buckets)>(
+            StringComparer.OrdinalIgnoreCase);
         var sw = Stopwatch.StartNew();
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 60 };
         await using var r = await cmd.ExecuteReaderAsync(ct);
+        var cntOrdinal = -1;
+        var hasSource = false;
         while (await r.ReadAsync(ct))
         {
-            var payer = r.GetString(r.GetOrdinal("PayerName"));
-            var bucket = NormalizeAgingBucketForSnapshot(r.GetString(r.GetOrdinal("AgingBucket")));
-            var cnt = Convert.ToInt32(r.GetValue(r.GetOrdinal("VisitCount")));
-            var bal = r.GetDecimal(r.GetOrdinal("InsuranceBalance"));
+            if (cntOrdinal < 0)
+            {
+                cntOrdinal = HasColumn(r, "VisitCount") ? r.GetOrdinal("VisitCount")
+                           : HasColumn(r, "ClaimCount") ? r.GetOrdinal("ClaimCount")
+                           : throw new InvalidOperationException(
+                               $"Snapshot table '{prefix}_CS_InsuranceVsAging' has neither 'VisitCount' nor 'ClaimCount'.");
+                hasSource = HasColumn(r, "Source");
+            }
 
-            if (!perPayer.TryGetValue(payer, out var dict))
-                perPayer[payer] = dict = new Dictionary<string, (int, decimal)>(StringComparer.OrdinalIgnoreCase);
-            dict[bucket] = (cnt, bal);
+            var payer = GetStringOrEmpty(r, "PayerName");
+            if (string.IsNullOrWhiteSpace(payer)) continue;
+            var source = hasSource ? GetStringOrEmpty(r, "Source") : string.Empty;
+            var bucket = NormalizeAgingBucketForSnapshot(GetStringOrEmpty(r, "AgingBucket"));
+            var cnt = r.IsDBNull(cntOrdinal) ? 0 : Convert.ToInt32(r.GetValue(cntOrdinal));
+            var bal = GetDecimalOrDefault(r, "InsuranceBalance");
+
+            var key = $"{source}\u0001{payer}";
+            if (!perPayer.TryGetValue(key, out var entry))
+                perPayer[key] = entry = (source, payer, new Dictionary<string, (int, decimal)>(StringComparer.OrdinalIgnoreCase));
+            entry.Buckets[bucket] = (cnt, bal);
         }
 
         static (int c, decimal b) Get(Dictionary<string, (int, decimal)> d, string key)
             => d.TryGetValue(key, out var v) ? v : (0, 0m);
 
-        var rows = perPayer.Select(kv =>
+        var rows = perPayer.Values.Select(entry =>
         {
-            var (cur, bCur) = Get(kv.Value, "Current");
-            var (b30, x30) = Get(kv.Value, "30 Days");
-            var (b60, x60) = Get(kv.Value, "60 Days");
-            var (b90, x90) = Get(kv.Value, "90 Days");
-            var (b120, x120) = Get(kv.Value, "120+ Days");
+            var (cur, bCur) = Get(entry.Buckets, "Current");
+            var (b30, x30) = Get(entry.Buckets, "30 Days");
+            var (b60, x60) = Get(entry.Buckets, "60 Days");
+            var (b90, x90) = Get(entry.Buckets, "90 Days");
+            var (b120, x120) = Get(entry.Buckets, "120+ Days");
             return new InsuranceAgingRow(
-                PayerName: kv.Key,
+                PayerName: entry.Payer,
                 ClaimsCurrent: cur, BalanceCurrent: bCur,
                 Claims30: b30, Balance30: x30,
                 Claims60: b60, Balance60: x60,
                 Claims90: b90, Balance90: x90,
                 Claims120: b120, Balance120: x120,
                 ClaimsTotal: cur + b30 + b60 + b90 + b120,
-                BalanceTotal: bCur + x30 + x60 + x90 + x120);
-        }).OrderByDescending(row => row.BalanceTotal).ToList();
+                BalanceTotal: bCur + x30 + x60 + x90 + x120,
+                Source: entry.Source);
+        })
+        .OrderBy(row => row.Source, StringComparer.OrdinalIgnoreCase)
+        .ThenByDescending(row => row.BalanceTotal)
+        .ToList();
 
         _logger.LogInformation("CollectionSummary[Aggregate] InsuranceVsAging({Prefix}) snapshot fallback: rows={N}, {Ms}ms",
             prefix, rows.Count, sw.ElapsedMilliseconds);
@@ -613,12 +635,13 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
         if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
             return await GetPanelPaymentViaSpAsync(
                 connectionString,
-                $"dbo.usp_Get{prefix}_CS_PanelVsPayment",
+                CollectionGetSp(prefix, "CS_PanelVsPayment"),
                 filterPayerNames: null, filterPanelNames: null,
                 filterFirstBillFrom: null, filterFirstBillTo: null,
                 filterDosFrom: null, filterDosTo: null,
@@ -726,12 +749,13 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
         if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
             return await GetInsurancePaymentPctViaSpAsync(
                 connectionString,
-                $"dbo.usp_Get{prefix}_CS_InsuranceVsPaymentPct",
+                CollectionGetSp(prefix, "CS_InsuranceVsPaymentPct"),
                 filterPayerNames: null, filterPanelNames: null,
                 filterFirstBillFrom: null, filterFirstBillTo: null,
                 filterDosFrom: null, filterDosTo: null,
@@ -874,7 +898,7 @@ public sealed partial class SqlCollectionSummaryRepository
         DateOnly? filterCheckDateFrom, DateOnly? filterCheckDateTo,
         CancellationToken ct)
     {
-        var spName = $"dbo.usp_Get{prefix}_CS_InsuranceVsPayment";
+        var spName = CollectionGetSp(prefix, "CS_InsuranceVsPayment");
         var rows = new List<InsuranceVsPaymentRow>();
         var sw = Stopwatch.StartNew();
         await using var conn = new SqlConnection(connectionString);
@@ -918,6 +942,7 @@ public sealed partial class SqlCollectionSummaryRepository
         // matching every other NorthWest/Phi/PCR Collection Summary tab. The SP returns the
         // snapshot on the no-filter path and aggregates live from ClaimLevelData when filters are supplied.
         if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))

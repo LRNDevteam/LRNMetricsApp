@@ -53,6 +53,24 @@ public sealed class SqlPhiExecutiveSummaryRepository
         => _logger = logger;
 
     /// <summary>
+    /// Augustus Cash Breakdown client fixes live in <c>usp_GetAug_ExecutiveSummary_v2</c>
+    /// so LIVE <c>usp_GetAug_ExecutiveSummary</c> is unchanged.
+    /// </summary>
+    public static string ExecutiveSummaryGetSpName(string prefix) =>
+        string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase)
+            ? "dbo.usp_GetAug_ExecutiveSummary_v2"
+            : $"dbo.usp_Get{prefix}_ExecutiveSummary";
+
+    /// <summary>
+    /// Augustus claim-level PMS/Cash drill uses <c>usp_GetExecutiveSummaryDetail_PMSCash_v2</c>.
+    /// </summary>
+    public static string ExecutiveSummaryPmsCashDetailSpName(string prefix) =>
+        string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase)
+            ? "dbo.usp_GetExecutiveSummaryDetail_PMSCash_v2"
+            : "dbo.usp_GetExecutiveSummaryDetail_PMSCash";
+
+
+    /// <summary>
     /// Reads the run/analysis-range banner values for the Executive Summary header:
     ///   • <c>WeekFolder</c> + <c>RunId</c> from the latest <c>ClaimLevelData</c> row
     ///     (drives "Analysis Range: Billed Date — …" and "ReportId (RUNID)").
@@ -892,7 +910,7 @@ public sealed class SqlPhiExecutiveSummaryRepository
         int year,
         CancellationToken ct = default)
     {
-        var spName = $"dbo.usp_Get{labPrefix}_ExecutiveSummary";
+        var spName = ExecutiveSummaryGetSpName(labPrefix);
         if (!await StoredProcedureExistsAsync(connectionString, spName, ct))
             return null;
 

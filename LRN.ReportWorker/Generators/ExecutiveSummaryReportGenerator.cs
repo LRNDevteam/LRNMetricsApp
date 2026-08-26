@@ -43,7 +43,7 @@ public sealed class ExecutiveSummaryReportGenerator : IReportGenerator
             throw new InvalidOperationException($"Executive Summary has no SP prefix mapping for '{job.LabName}'.");
 
         var connStr = labConfig.DbConnectionString;
-        var spName  = $"dbo.usp_Get{prefix}_ExecutiveSummary";
+        var spName  = SqlPhiExecutiveSummaryRepository.ExecutiveSummaryGetSpName(prefix);
         var f = ExecutiveSummaryFilters.FromJson(job.FilterDetailsJson);
 
         async Task Progress(byte pct)

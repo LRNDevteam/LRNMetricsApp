@@ -162,6 +162,11 @@ public sealed class ProductionReportViewModel
         SelectedLab.Equals("NorthWest", StringComparison.OrdinalIgnoreCase)
         || SelectedLab.Equals("NorthWest_Labs", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>True when this page is the Augustus Production Summary.</summary>
+    public bool IsAugustusLab =>
+        SelectedLab.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
+        || SelectedLab.Equals("Augustus", StringComparison.OrdinalIgnoreCase);
+
     // ?? Payer X Panel ?????????????????????????????????????????????
 
     /// <summary>Ordered list of distinct panel names used as column headers.</summary>

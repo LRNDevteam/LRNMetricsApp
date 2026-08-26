@@ -139,6 +139,7 @@ public static class ProductionReportExcelExportBuilder
         BuildMonthlyAndWeeklySheet(wb, vm, labName, weekFolder: null, runId: null);
         BuildCodingSheet(wb, vm);
         BuildPayerBreakdownSheet(wb, vm);
+        BuildPanelBreakdownSheet(wb, vm);
         BuildPayerPanelSheet(wb, vm);
         BuildUnbilledAgingSheet(wb, vm);
         BuildCptBreakdownSheet(wb, vm);
@@ -182,6 +183,12 @@ public static class ProductionReportExcelExportBuilder
         logger?.LogInformation(
             "[ProdExcelExport][Sheet] PayerBreakdown built in {Ms}ms ({Rows} payer rows)",
             sw.ElapsedMilliseconds, vm.PayerBreakdownRows.Count);
+
+        sw.Restart();
+        BuildPanelBreakdownSheet(wb, vm);
+        logger?.LogInformation(
+            "[ProdExcelExport][Sheet] PanelBreakdown built in {Ms}ms ({Rows} panel rows)",
+            sw.ElapsedMilliseconds, vm.PanelBreakdownRows.Count);
 
         sw.Restart();
         BuildPayerPanelSheet(wb, vm);
@@ -716,42 +723,61 @@ public static class ProductionReportExcelExportBuilder
             .OrderBy(g => g.Key)
             .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
 
+        const int metrics = 2;
         int colCount = 1;
         foreach (var year in pbYears)
-            colCount += pbMonthsByYear.GetValueOrDefault(year, []).Count + 1;
-        colCount += 1;
+            colCount += (pbMonthsByYear.GetValueOrDefault(year, []).Count + 1) * metrics;
+        colCount += metrics;
 
         int row = 1;
         ExcelTheme.WriteBlueTitleBar(ws, row, colCount, "Payer Breakdown (Charge Entered Date)");
         row++;
 
-        // ?? Header Row 1: year groups ??
         int hRow1 = row;
-        WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, "Payer", ExcelTheme.BlueHeaderBg);
+        WriteMergedHeader(ws, hRow1, hRow1 + 2, 1, 1, "Payer", ExcelTheme.BlueHeaderBg);
         int hCol = 2;
         foreach (var year in pbYears)
         {
             var mons = pbMonthsByYear.GetValueOrDefault(year, []);
-            int span = mons.Count + 1;
+            int span = (mons.Count + 1) * metrics;
             WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + span - 1, year.ToString(), ExcelTheme.BlueHeaderBg);
             hCol += span;
         }
-        WriteMergedHeader(ws, hRow1, hRow1 + 1, hCol, hCol, "Grand Total", ExcelTheme.AmberDarkBg);
+        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + metrics - 1, "Grand Total", ExcelTheme.AmberDarkBg);
 
-        // ?? Header Row 2: month names + year total ??
         int hRow2 = hRow1 + 1;
         hCol = 2;
         foreach (var year in pbYears)
         {
             var mons = pbMonthsByYear.GetValueOrDefault(year, []);
             foreach (var mk in mons)
-                WriteHeaderCell(ws, hRow2, hCol++, MonthLabel(mk), ExcelTheme.BlueSubHeaderBg);
-            WriteHeaderCell(ws, hRow2, hCol++, $"Year {year} Total", ExcelTheme.AmberHeaderBg);
+            {
+                WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, MonthLabel(mk), ExcelTheme.BlueSubHeaderBg);
+                hCol += 2;
+            }
+            WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, $"Year {year} Total", ExcelTheme.AmberHeaderBg);
+            hCol += 2;
         }
+        WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, "", ExcelTheme.AmberDarkBg);
 
-        row = hRow2 + 1;
+        int hRow3 = hRow1 + 2;
+        hCol = 2;
+        foreach (var year in pbYears)
+        {
+            var mons = pbMonthsByYear.GetValueOrDefault(year, []);
+            foreach (var _ in mons)
+            {
+                WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.BlueSubHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", ExcelTheme.BlueSubHeaderBg);
+            }
+            WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.AmberHeaderBg);
+            WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", ExcelTheme.AmberHeaderBg);
+        }
+        WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.AmberDarkBg);
+        WriteHeaderCell(ws, hRow3, hCol, "Charge Amount", ExcelTheme.AmberDarkBg);
 
-        // ?? Data rows ??
+        row = hRow3 + 1;
+
         int dataIdx = 0;
         foreach (var pr in vm.PayerBreakdownRows)
         {
@@ -763,18 +789,18 @@ public static class ProductionReportExcelExportBuilder
                 var mons = pbMonthsByYear.GetValueOrDefault(year, []);
                 foreach (var mk in mons)
                 {
-                    int v = pr.ByMonth.GetValueOrDefault(mk, 0);
-                    WriteCell(ws, row, col++, v, bg);
+                    WriteCell(ws, row, col++, pr.ByMonth.GetValueOrDefault(mk, 0), bg);
+                    WriteCurrencyCell(ws, row, col++, pr.ByMonthCharges.GetValueOrDefault(mk, 0m), bg);
                 }
-                int yt = pr.ByYear.GetValueOrDefault(year, 0);
-                WriteCell(ws, row, col++, yt, bg);
+                WriteCell(ws, row, col++, pr.ByYear.GetValueOrDefault(year, 0), bg);
+                WriteCurrencyCell(ws, row, col++, pr.ByYearCharges.GetValueOrDefault(year, 0m), bg);
             }
             WriteCell(ws, row, col++, pr.GrandTotal, bg);
+            WriteCurrencyCell(ws, row, col, pr.GrandTotalCharges, bg);
             row++;
             dataIdx++;
         }
 
-        // Grand total row
         ExcelTheme.StyleBlueTotalRow(ws, row, 1, colCount);
         int gtCol = 1;
         ws.Cell(row, gtCol++).Value = "Grand Total";
@@ -785,13 +811,162 @@ public static class ProductionReportExcelExportBuilder
             {
                 ws.Cell(row, gtCol).Value = vm.PayerBreakdownGrandByMonth.GetValueOrDefault(mk, 0);
                 ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+                ws.Cell(row, gtCol).Value = vm.PayerBreakdownGrandChargesByMonth.GetValueOrDefault(mk, 0m);
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = "$#,##0";
             }
             int yTotal = vm.PayerBreakdownGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
+            decimal yCharges = vm.PayerBreakdownGrandChargesByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
             ws.Cell(row, gtCol).Value = yTotal;
             ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+            ws.Cell(row, gtCol).Value = yCharges;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = "$#,##0";
         }
         ws.Cell(row, gtCol).Value = vm.PayerBreakdownGrandTotal;
-        ws.Cell(row, gtCol).Style.NumberFormat.NumberFormatId = 3;
+        ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+        ws.Cell(row, gtCol).Value = vm.PayerBreakdownGrandTotalCharges;
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = "$#,##0";
+
+        ExcelTheme.AutoFitColumns(ws, colCount);
+    }
+
+    private static void BuildPanelBreakdownSheet(XLWorkbook wb, ProductionReportViewModel vm)
+    {
+        if (vm.PanelBreakdownRows.Count == 0) return;
+
+        var ws = wb.AddWorksheet("Panel Breakdown");
+        ws.TabColor = ExcelTheme.TabBlue;
+        ExcelTheme.ApplyDefaults(ws);
+
+        var years = vm.PanelBreakdownYears.Where(y => y > 1900).ToList();
+        var months = vm.PanelBreakdownMonths.Where(m => int.Parse(m[..4]) > 1900).ToList();
+        var monthsByYear = months
+            .GroupBy(m => int.Parse(m[..4]))
+            .OrderBy(g => g.Key)
+            .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
+
+        const int metrics = 2;
+        int colCount = 1;
+        foreach (var year in years)
+            colCount += (monthsByYear.GetValueOrDefault(year, []).Count + 1) * metrics;
+        colCount += metrics;
+
+        int row = 1;
+        ExcelTheme.WriteBlueTitleBar(ws, row, colCount, "Panel Breakdown (Charge Entered Date)");
+        row++;
+
+        int hRow1 = row;
+        WriteMergedHeader(ws, hRow1, hRow1 + 2, 1, 1, "Panel", ExcelTheme.BlueHeaderBg);
+        int hCol = 2;
+        foreach (var year in years)
+        {
+            var mons = monthsByYear.GetValueOrDefault(year, []);
+            int span = (mons.Count + 1) * metrics;
+            WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + span - 1, year.ToString(), ExcelTheme.BlueHeaderBg);
+            hCol += span;
+        }
+        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + metrics - 1, "Grand Total", ExcelTheme.AmberDarkBg);
+
+        int hRow2 = hRow1 + 1;
+        hCol = 2;
+        foreach (var year in years)
+        {
+            var mons = monthsByYear.GetValueOrDefault(year, []);
+            foreach (var mk in mons)
+            {
+                WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, MonthLabel(mk), ExcelTheme.BlueSubHeaderBg);
+                hCol += 2;
+            }
+            WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, $"Year {year} Total", ExcelTheme.AmberHeaderBg);
+            hCol += 2;
+        }
+        WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, "", ExcelTheme.AmberDarkBg);
+
+        int hRow3 = hRow1 + 2;
+        hCol = 2;
+        foreach (var year in years)
+        {
+            var mons = monthsByYear.GetValueOrDefault(year, []);
+            foreach (var _ in mons)
+            {
+                WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.BlueSubHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", ExcelTheme.BlueSubHeaderBg);
+            }
+            WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.AmberHeaderBg);
+            WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", ExcelTheme.AmberHeaderBg);
+        }
+        WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.AmberDarkBg);
+        WriteHeaderCell(ws, hRow3, hCol, "Charge Amount", ExcelTheme.AmberDarkBg);
+
+        row = hRow3 + 1;
+
+        foreach (var panel in vm.PanelBreakdownRows)
+        {
+            int col = 1;
+            WriteCell(ws, row, col++, panel.PayerName, ExcelTheme.BlueGroupRowBg, isText: true);
+            foreach (var year in years)
+            {
+                var mons = monthsByYear.GetValueOrDefault(year, []);
+                foreach (var mk in mons)
+                {
+                    WriteCell(ws, row, col++, panel.ByMonth.GetValueOrDefault(mk, 0), ExcelTheme.BlueGroupRowBg);
+                    WriteCurrencyCell(ws, row, col++, panel.ByMonthCharges.GetValueOrDefault(mk, 0m), ExcelTheme.BlueGroupRowBg);
+                }
+                WriteCell(ws, row, col++, panel.ByYear.GetValueOrDefault(year, 0), ExcelTheme.BlueGroupRowBg);
+                WriteCurrencyCell(ws, row, col++, panel.ByYearCharges.GetValueOrDefault(year, 0m), ExcelTheme.BlueGroupRowBg);
+            }
+            WriteCell(ws, row, col++, panel.GrandTotal, ExcelTheme.BlueGroupRowBg);
+            WriteCurrencyCell(ws, row, col, panel.GrandTotalCharges, ExcelTheme.BlueGroupRowBg);
+            ws.Row(row).Style.Font.Bold = true;
+            row++;
+
+            int payerIdx = 0;
+            foreach (var payer in panel.ChildRows)
+            {
+                var bg = ExcelTheme.GetBlueRowBg(payerIdx);
+                col = 1;
+                WriteCell(ws, row, col++, $"    {payer.PayerName}", bg, isText: true);
+                foreach (var year in years)
+                {
+                    var mons = monthsByYear.GetValueOrDefault(year, []);
+                    foreach (var mk in mons)
+                    {
+                        WriteCell(ws, row, col++, payer.ByMonth.GetValueOrDefault(mk, 0), bg);
+                        WriteCurrencyCell(ws, row, col++, payer.ByMonthCharges.GetValueOrDefault(mk, 0m), bg);
+                    }
+                    WriteCell(ws, row, col++, payer.ByYear.GetValueOrDefault(year, 0), bg);
+                    WriteCurrencyCell(ws, row, col++, payer.ByYearCharges.GetValueOrDefault(year, 0m), bg);
+                }
+                WriteCell(ws, row, col++, payer.GrandTotal, bg);
+                WriteCurrencyCell(ws, row, col, payer.GrandTotalCharges, bg);
+                row++;
+                payerIdx++;
+            }
+        }
+
+        ExcelTheme.StyleBlueTotalRow(ws, row, 1, colCount);
+        int gtCol = 1;
+        ws.Cell(row, gtCol++).Value = "Grand Total";
+        foreach (var year in years)
+        {
+            var mons = monthsByYear.GetValueOrDefault(year, []);
+            foreach (var mk in mons)
+            {
+                ws.Cell(row, gtCol).Value = vm.PanelBreakdownGrandByMonth.GetValueOrDefault(mk, 0);
+                ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+                ws.Cell(row, gtCol).Value = vm.PanelBreakdownGrandChargesByMonth.GetValueOrDefault(mk, 0m);
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = "$#,##0";
+            }
+            int yTotal = vm.PanelBreakdownGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
+            decimal yCharges = vm.PanelBreakdownGrandChargesByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
+            ws.Cell(row, gtCol).Value = yTotal;
+            ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+            ws.Cell(row, gtCol).Value = yCharges;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = "$#,##0";
+        }
+        ws.Cell(row, gtCol).Value = vm.PanelBreakdownGrandTotal;
+        ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+        ws.Cell(row, gtCol).Value = vm.PanelBreakdownGrandTotalCharges;
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = "$#,##0";
 
         ExcelTheme.AutoFitColumns(ws, colCount);
     }
@@ -1009,7 +1184,10 @@ public static class ProductionReportExcelExportBuilder
         }
         WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, "", ExcelTheme.AmberDarkBg);
 
-        // ?? Header Row 3: "Billed Units" | "Billed Amount" ??
+        // Header Row 3: count-of-CPT (Augustus) or billed units
+        var cptUnitsHeader = !string.IsNullOrWhiteSpace(vm.CptUnitsLabel) && vm.CptUnitsLabel != "No. of Claims"
+            ? vm.CptUnitsLabel
+            : "Billed Units";
         int hRow3 = hRow1 + 2;
         hCol = 2;
         foreach (var year in cptYears)
@@ -1017,13 +1195,13 @@ public static class ProductionReportExcelExportBuilder
             var mons = cptMonthsByYear.GetValueOrDefault(year, []);
             foreach (var _ in mons)
             {
-                WriteHeaderCell(ws, hRow3, hCol++, "Billed Units", ExcelTheme.BlueSubHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, cptUnitsHeader, ExcelTheme.BlueSubHeaderBg);
                 WriteHeaderCell(ws, hRow3, hCol++, "Billed Amount", ExcelTheme.BlueSubHeaderBg);
             }
-            WriteHeaderCell(ws, hRow3, hCol++, "Billed Units", ExcelTheme.AmberHeaderBg);
+            WriteHeaderCell(ws, hRow3, hCol++, cptUnitsHeader, ExcelTheme.AmberHeaderBg);
             WriteHeaderCell(ws, hRow3, hCol++, "Billed Amount", ExcelTheme.AmberHeaderBg);
         }
-        WriteHeaderCell(ws, hRow3, hCol++, "Billed Units", ExcelTheme.AmberDarkBg);
+        WriteHeaderCell(ws, hRow3, hCol++, cptUnitsHeader, ExcelTheme.AmberDarkBg);
         WriteHeaderCell(ws, hRow3, hCol, "Billed Amount", ExcelTheme.AmberDarkBg);
 
         row = hRow3 + 1;

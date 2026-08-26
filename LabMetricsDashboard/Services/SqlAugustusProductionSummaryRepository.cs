@@ -222,14 +222,13 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default)
     {
-        // Always route through dbo.usp_GetAug_WeeklyBilledProductionSummary; with all
-        // filter params NULL the SP serves rows from dbo.Aug_WeeklyBilledProductionSummary.
-        // PayerRank semantics match the monthly SP (0 = panel total, 1..N = drilldowns).
+        // Always route through dbo.usp_GetAug_WeeklyBilledProductionSummary_v2
+        // (WeekFolder-anchored Mon-Sun weeks, live from ClaimLevelData).
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand("dbo.usp_GetAug_WeeklyBilledProductionSummary", conn)
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_WeeklyBilledProductionSummary_v2", conn)
             {
                 CommandType    = CommandType.StoredProcedure,
                 CommandTimeout = 180,
@@ -437,7 +436,7 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand("dbo.usp_GetAug_PayerBreakdown", conn)
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_PayerBreakdown_v2", conn)
             {
                 CommandType    = CommandType.StoredProcedure,
                 CommandTimeout = 180,
@@ -448,42 +447,7 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
                 filterFirstBillFrom, filterFirstBillTo,
                 filterFirstBilledFrom, filterFirstBilledTo);
             await using var rdr  = await cmd.ExecuteReaderAsync(ct);
-
-            var payerMonth = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
-            var allMonths  = new SortedSet<string>();
-
-            while (await rdr.ReadAsync(ct))
-            {
-                var payer = rdr.GetString(0);
-                var month = rdr.GetString(1);
-                var count = rdr.GetInt32(2);
-
-                allMonths.Add(month);
-                if (!payerMonth.TryGetValue(payer, out var mm)) payerMonth[payer] = mm = [];
-                mm[month] = mm.GetValueOrDefault(month) + count;
-            }
-
-            var months    = allMonths.ToList();
-            var years     = months.Select(m => int.Parse(m[..4])).Distinct().OrderBy(y => y).ToList();
-            var grandByMonth = new Dictionary<string, int>();
-            var payerRows = new List<PayerBreakdownRow>();
-
-            foreach (var (payer, mm) in payerMonth.OrderByDescending(x => x.Value.Values.Sum()))
-            {
-                var byYear = years.ToDictionary(y => y, y => mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value));
-                foreach (var (mk, cnt) in mm)
-                    grandByMonth[mk] = grandByMonth.GetValueOrDefault(mk) + cnt;
-
-                payerRows.Add(new PayerBreakdownRow
-                {
-                    PayerName  = payer,
-                    ByMonth    = mm,
-                    ByYear     = byYear,
-                    GrandTotal = mm.Values.Sum(),
-                });
-            }
-
-        return new SharedPayerBreakdownResult(months, years, payerRows, grandByMonth, grandByMonth.Values.Sum());
+            return await ReadPayerBreakdownWithChargesAsync(rdr, ct);
         }
         catch (Exception ex)
         {
@@ -492,7 +456,7 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         }
     }
 
-    // ?? Payer × Panel ???????????????????????????????????????????????????????????
+    // ?? Payer ? Panel ???????????????????????????????????????????????????????????
     /// <inheritdoc/>
     public async Task<SharedPayerPanelResult> GetPayerByPanelAsync(
         string connectionString,
@@ -574,7 +538,7 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         }
     }
 
-    // ?? Unbilled × Aging ????????????????????????????????????????????????????????
+    // ?? Unbilled ? Aging ????????????????????????????????????????????????????????
     /// <inheritdoc/>
     public async Task<SharedUnbilledAgingResult> GetUnbilledAgingAsync(
         string connectionString,
@@ -669,14 +633,13 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default)
     {
-        // The CPT tab in the controller always uses the live query path; this method
-        // surfaces the pre-aggregated data for completeness, routed through
-        // dbo.usp_GetAug_CPTBreakdown to keep a single SQL surface.
+        // Count of CPT (client report), not SUM(Units). CPTCount from the v2 SP
+        // is COUNT(*) of billed CPT line rows; use it for both Units and ClaimCount.
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand("dbo.usp_GetAug_CPTBreakdown", conn)
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_CPTBreakdown_v2", conn)
             {
                 CommandType    = CommandType.StoredProcedure,
                 CommandTimeout = 180,
@@ -693,11 +656,17 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
 
             while (await rdr.ReadAsync(ct))
             {
-                var cpt     = rdr.GetString(0);
-                var month   = rdr.GetString(1);
-                var cptCount = rdr.GetInt32(2);     // CPTCount (line count)
-                var units   = rdr.GetDecimal(3);    // BilledUnits
-                var charges = rdr.GetDecimal(4);    // TotalCharges
+                if (rdr.IsDBNull(0) || rdr.IsDBNull(1) || rdr.IsDBNull(2))
+                    continue;
+
+                var cpt   = rdr.GetString(0).Trim();
+                var month = rdr.GetString(1).Trim();
+                if (cpt.Length == 0 || month.Length < 7)
+                    continue;
+
+                var cptCount = Convert.ToInt32(rdr.GetValue(2), System.Globalization.CultureInfo.InvariantCulture);
+                var charges  = ReadDecimalByNameOrIndex(rdr, 4, "TotalCharges", "ChargeAmount", "BilledCharges");
+                var units    = (decimal)cptCount;
 
                 allMonths.Add(month);
                 if (!cptMonth.TryGetValue(cpt, out var mm)) cptMonth[cpt] = mm = [];
@@ -757,7 +726,198 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         }
     }
 
-    // (Year-total helpers are inlined as LINQ at the call sites above.)
+    // ?? Panel Breakdown (PanelNew x ChargeEnteredDate month, payer children) ???
+    /// <inheritdoc/>
+    public async Task<SharedPayerBreakdownResult> GetPanelBreakdownAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_PanelBreakdown", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 180,
+            };
+            AddAugFilterParameters(cmd,
+                filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo);
+            await using var rdr = await cmd.ExecuteReaderAsync(ct);
+            return await ReadPanelBreakdownWithPayersAsync(rdr, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Aug GetPanelBreakdownAsync failed.");
+            return new SharedPayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0);
+        }
+    }
+
+    private static async Task<SharedPayerBreakdownResult> ReadPayerBreakdownWithChargesAsync(
+        SqlDataReader rdr, CancellationToken ct)
+    {
+        var payerMonth = new Dictionary<string, Dictionary<string, (int c, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
+        var allMonths  = new SortedSet<string>();
+
+        while (await rdr.ReadAsync(ct))
+        {
+            var payer   = rdr.GetString(0);
+            var month   = rdr.GetString(1);
+            var count   = rdr.GetInt32(2);
+            var charges = ReadDecimalByNameOrIndex(rdr, 3, "TotalCharges", "ChargeAmount", "BilledCharges");
+
+            allMonths.Add(month);
+            if (!payerMonth.TryGetValue(payer, out var mm)) payerMonth[payer] = mm = [];
+            var prev = mm.GetValueOrDefault(month);
+            mm[month] = (prev.c + count, prev.ch + charges);
+        }
+
+        var months              = allMonths.ToList();
+        var years               = months.Select(m => int.Parse(m[..4])).Distinct().OrderBy(y => y).ToList();
+        var grandByMonth        = new Dictionary<string, int>();
+        var grandChargesByMonth = new Dictionary<string, decimal>();
+        var payerRows           = new List<PayerBreakdownRow>();
+
+        foreach (var (payer, mm) in payerMonth.OrderByDescending(x => x.Value.Values.Sum(v => v.c)))
+        {
+            var byYear = years.ToDictionary(
+                y => y,
+                y => mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.c));
+            var byYearCharges = years.ToDictionary(
+                y => y,
+                y => mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.ch));
+
+            foreach (var (mk, v) in mm)
+            {
+                grandByMonth[mk]        = grandByMonth.GetValueOrDefault(mk) + v.c;
+                grandChargesByMonth[mk] = grandChargesByMonth.GetValueOrDefault(mk) + v.ch;
+            }
+
+            payerRows.Add(new PayerBreakdownRow
+            {
+                PayerName         = payer,
+                ByMonth           = mm.ToDictionary(kv => kv.Key, kv => kv.Value.c),
+                ByYear            = byYear,
+                GrandTotal        = mm.Values.Sum(v => v.c),
+                ByMonthCharges    = mm.ToDictionary(kv => kv.Key, kv => kv.Value.ch),
+                ByYearCharges     = byYearCharges,
+                GrandTotalCharges = mm.Values.Sum(v => v.ch),
+            });
+        }
+
+        return new SharedPayerBreakdownResult(
+            months, years, payerRows, grandByMonth, grandByMonth.Values.Sum(),
+            grandChargesByMonth, grandChargesByMonth.Values.Sum());
+    }
+
+    private static async Task<SharedPayerBreakdownResult> ReadPanelBreakdownWithPayersAsync(
+        SqlDataReader rdr, CancellationToken ct)
+    {
+        var panelPayerMonth = new Dictionary<string, Dictionary<string, Dictionary<string, (int c, decimal ch)>>>(
+            StringComparer.OrdinalIgnoreCase);
+        var allMonths = new SortedSet<string>();
+
+        while (await rdr.ReadAsync(ct))
+        {
+            var panel   = rdr.GetString(0);
+            var payer   = rdr.GetString(1);
+            var month   = rdr.GetString(2);
+            var count   = rdr.GetInt32(3);
+            var charges = ReadDecimalByNameOrIndex(rdr, 4, "TotalCharges", "ChargeAmount", "BilledCharges");
+
+            allMonths.Add(month);
+            if (!panelPayerMonth.TryGetValue(panel, out var payers))
+                panelPayerMonth[panel] = payers = new(StringComparer.OrdinalIgnoreCase);
+            if (!payers.TryGetValue(payer, out var months))
+                payers[payer] = months = new(StringComparer.OrdinalIgnoreCase);
+
+            var prev = months.GetValueOrDefault(month);
+            months[month] = (prev.c + count, prev.ch + charges);
+        }
+
+        var monthsList          = allMonths.ToList();
+        var years               = monthsList.Select(m => int.Parse(m[..4])).Distinct().OrderBy(y => y).ToList();
+        var grandByMonth        = new Dictionary<string, int>();
+        var grandChargesByMonth = new Dictionary<string, decimal>();
+        var rows                = new List<PayerBreakdownRow>();
+
+        foreach (var (panel, payers) in panelPayerMonth.OrderByDescending(x => x.Value.Sum(p => p.Value.Values.Sum(v => v.c))))
+        {
+            var panelMonth = new Dictionary<string, (int c, decimal ch)>(StringComparer.OrdinalIgnoreCase);
+            var childRows = new List<PayerBreakdownRow>();
+
+            foreach (var (payer, mm) in payers.OrderByDescending(x => x.Value.Values.Sum(v => v.c)).ThenBy(x => x.Key))
+            {
+                foreach (var (mk, v) in mm)
+                {
+                    var prev = panelMonth.GetValueOrDefault(mk);
+                    panelMonth[mk] = (prev.c + v.c, prev.ch + v.ch);
+                }
+
+                childRows.Add(new PayerBreakdownRow
+                {
+                    PayerName         = payer,
+                    ByMonth           = mm.ToDictionary(kv => kv.Key, kv => kv.Value.c),
+                    ByYear            = years.ToDictionary(y => y, y => mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.c)),
+                    GrandTotal        = mm.Values.Sum(v => v.c),
+                    ByMonthCharges    = mm.ToDictionary(kv => kv.Key, kv => kv.Value.ch),
+                    ByYearCharges     = years.ToDictionary(y => y, y => mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.ch)),
+                    GrandTotalCharges = mm.Values.Sum(v => v.ch),
+                });
+            }
+
+            foreach (var (mk, v) in panelMonth)
+            {
+                grandByMonth[mk]        = grandByMonth.GetValueOrDefault(mk) + v.c;
+                grandChargesByMonth[mk] = grandChargesByMonth.GetValueOrDefault(mk) + v.ch;
+            }
+
+            rows.Add(new PayerBreakdownRow
+            {
+                PayerName         = panel,
+                ByMonth           = panelMonth.ToDictionary(kv => kv.Key, kv => kv.Value.c),
+                ByYear            = years.ToDictionary(y => y, y => panelMonth.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.c)),
+                GrandTotal        = panelMonth.Values.Sum(v => v.c),
+                ByMonthCharges    = panelMonth.ToDictionary(kv => kv.Key, kv => kv.Value.ch),
+                ByYearCharges     = years.ToDictionary(y => y, y => panelMonth.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.ch)),
+                GrandTotalCharges = panelMonth.Values.Sum(v => v.ch),
+                ChildRows         = childRows,
+            });
+        }
+
+        return new SharedPayerBreakdownResult(
+            monthsList, years, rows, grandByMonth, grandByMonth.Values.Sum(),
+            grandChargesByMonth, grandChargesByMonth.Values.Sum());
+    }
+
+    private static decimal ReadDecimalByNameOrIndex(System.Data.Common.DbDataReader rdr, int fallbackIndex, params string[] names)
+    {
+        for (var i = 0; i < rdr.FieldCount; i++)
+        {
+            var col = rdr.GetName(i);
+            foreach (var name in names)
+            {
+                if (string.Equals(col, name, StringComparison.OrdinalIgnoreCase))
+                    return rdr.IsDBNull(i) ? 0m : Convert.ToDecimal(rdr.GetValue(i), System.Globalization.CultureInfo.InvariantCulture);
+            }
+        }
+
+        if (fallbackIndex >= 0 && fallbackIndex < rdr.FieldCount && !rdr.IsDBNull(fallbackIndex))
+            return Convert.ToDecimal(rdr.GetValue(fallbackIndex), System.Globalization.CultureInfo.InvariantCulture);
+
+        return 0m;
+    }
 
     // Adds the filter parameters expected by every dbo.usp_GetAug_* read SP.
     // When all values are null the SP takes its no-filter branch and returns snapshot rows.

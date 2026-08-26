@@ -303,6 +303,8 @@ else
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "1. Total Billed $ — Monthly Trend"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             <div class="tpd-logic">
                 <strong>Fetch logic</strong>
                 <ul>
@@ -324,6 +326,8 @@ else
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "2. Partially Paid $ — Monthly Trend"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             <div class="tpd-logic">
                 <strong>Fetch logic</strong>
                 <ul>
@@ -345,6 +349,8 @@ else
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "3. Collection Rate — Insurance Payment / Total Billed"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             <div class="tpd-insight tpd-insight-ok">Best headline metric for a monthly lab-owner review — pair with Insurance Balance $ below.</div>
             <div class="tpd-logic">
                 <strong>Fetch logic</strong>
@@ -366,6 +372,8 @@ else
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
+                @{ ViewData["GraphTitle"] = "4a. % Insurance Balance $ of Total Billed"; }
+                @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 <div class="tpd-logic">
                     <strong>Fetch logic</strong>
                     <ul>
@@ -385,6 +393,8 @@ else
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
+                @{ ViewData["GraphTitle"] = "4b. Insurance Balance $ Composition"; }
+                @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 <div class="tpd-logic">
                     <strong>Fetch logic</strong>
                     <ul>
@@ -406,6 +416,8 @@ else
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "5. Patient Write-Off vs Patient Balance"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             <div class="tpd-logic">
                 <strong>Fetch logic</strong>
                 <ul>
@@ -451,6 +463,8 @@ else
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "6. Fully Adjusted $ — Write-Off Reason Pareto"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             <div class="tpd-insight tpd-insight-ok">WOINS + WOOON typically dominate. Prefer $ by reason from PMS when available — more decision-useful than count alone.</div>
             <div class="tpd-logic">
                 <strong>Fetch logic</strong>
@@ -472,6 +486,8 @@ else
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "Cash monthly detail"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             <div class="tpd-scroll">
                 <table class="tpd-tbl">
                     <thead>

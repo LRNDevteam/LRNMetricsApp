@@ -139,14 +139,27 @@ public sealed class PredictionInsightLoader
         var modelUsed    = GetString(root, "model_used");
         var headline     = GetString(root, "headline");
 
-        // Support two formats:
-        //   (a) Clean format ù "sections" array lives directly at the root
-        //   (b) AI raw format ù sections are embedded in a "raw_response" code-fence string
+        // Support formats:
+        //   (a) Clean format ? root "sections" array
+        //   (b) New combined format ? root "pillars"[].sections[].insights[]
+        //   (c) AI raw format ? sections embedded in "raw_response"
         IReadOnlyList<InsightSection> sections;
-        if (root.TryGetProperty("sections", out var sectionsEl))
+        if (root.TryGetProperty("sections", out var sectionsEl)
+            && sectionsEl.ValueKind == JsonValueKind.Array
+            && sectionsEl.GetArrayLength() > 0)
+        {
             sections = ParseSectionsElement(sectionsEl);
+        }
+        else if (root.TryGetProperty("pillars", out var pillarsEl)
+                 && pillarsEl.ValueKind == JsonValueKind.Array
+                 && pillarsEl.GetArrayLength() > 0)
+        {
+            sections = FlattenPillarsToSections(pillarsEl);
+        }
         else
+        {
             sections = ParseRawResponse(GetString(root, "raw_response"));
+        }
 
         return new PredictionInsight
         {
@@ -161,6 +174,96 @@ public sealed class PredictionInsightLoader
     }
 
     /// <summary>
+    /// Maps pillars[].sections[].insights[] into InsightSection / bullets for the Insight tab.
+    /// </summary>
+    private static IReadOnlyList<InsightSection> FlattenPillarsToSections(JsonElement pillarsEl)
+    {
+        var result = new List<InsightSection>();
+        var n = 0;
+        foreach (var pillar in pillarsEl.EnumerateArray())
+        {
+            var pillarLabel = GetString(pillar, "pillar_section");
+            if (string.IsNullOrWhiteSpace(pillarLabel))
+                pillarLabel = GetString(pillar, "pillar");
+
+            if (!pillar.TryGetProperty("sections", out var secs) || secs.ValueKind != JsonValueKind.Array)
+                continue;
+
+            foreach (var s in secs.EnumerateArray())
+            {
+                n++;
+                var title = GetString(s, "section_title");
+                if (string.IsNullOrWhiteSpace(title))
+                    title = $"Section {n}";
+                if (!string.IsNullOrWhiteSpace(pillarLabel))
+                    title = $"{pillarLabel}: {title}";
+
+                var subtitle = GetString(s, "subtitle");
+                var bullets = ReadStringArray(s, "insights");
+                if (bullets.Count == 0)
+                    bullets = ReadBulletsFromSubsectionsElement(s);
+
+                result.Add(new InsightSection
+                {
+                    SectionNumber = s.TryGetProperty("section_number", out var num) && num.TryGetInt32(out var sn2)
+                        ? sn2
+                        : n,
+                    Title = title,
+                    Subsections =
+                    [
+                        new InsightSubsection
+                        {
+                            Title = string.IsNullOrWhiteSpace(subtitle) ? "Insights" : subtitle,
+                            Bullets = bullets,
+                        },
+                    ],
+                });
+            }
+        }
+        return result;
+    }
+
+    private static List<string> ReadBulletsFromSubsectionsElement(JsonElement sec)
+    {
+        var list = new List<string>();
+        if (!sec.TryGetProperty("subsections", out var subs) || subs.ValueKind != JsonValueKind.Array)
+            return list;
+        foreach (var sub in subs.EnumerateArray())
+        {
+            if (sub.ValueKind == JsonValueKind.String)
+            {
+                var text = (sub.GetString() ?? string.Empty).Trim();
+                if (text.StartsWith("- ", StringComparison.Ordinal))
+                    text = text[2..].Trim();
+                if (text.Length > 0)
+                    list.Add(text);
+                continue;
+            }
+            if (sub.ValueKind == JsonValueKind.Object)
+                list.AddRange(ReadStringArray(sub, "bullets"));
+        }
+        return list;
+    }
+
+    private static List<string> ReadStringArray(JsonElement parent, string name)
+    {
+        var list = new List<string>();
+        if (!parent.TryGetProperty(name, out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return list;
+        foreach (var item in arr.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String)
+                continue;
+            var text = (item.GetString() ?? string.Empty).Trim();
+            if (text.StartsWith("- ", StringComparison.Ordinal))
+                text = text[2..].Trim();
+            if (text.Length > 0)
+                list.Add(text);
+        }
+        return list;
+    }
+
+    /// <summary>
     /// Extracts sections from an AI raw_response code-fence string.
     /// Strips the markdown fence, tolerates trailing commas and JS comments, then delegates to
     /// <see cref="ParseSectionsElement"/>.
@@ -170,7 +273,7 @@ public sealed class PredictionInsightLoader
         if (string.IsNullOrWhiteSpace(rawResponse))
             return [];
 
-        // Strip ```json ù ``` fence
+        // Strip ```json ? ``` fence
         var fenceMatch = Regex.Match(rawResponse, @"```json\s*([\s\S]*?)```", RegexOptions.IgnoreCase);
         var innerJson  = fenceMatch.Success ? fenceMatch.Groups[1].Value : rawResponse;
 
@@ -205,13 +308,11 @@ public sealed class PredictionInsightLoader
         {
             var subsections = new List<InsightSubsection>();
 
-            if (s.TryGetProperty("subsections", out var subsEl))
+            if (s.TryGetProperty("subsections", out var subsEl) && subsEl.ValueKind == JsonValueKind.Array)
             {
                 foreach (var sub in subsEl.EnumerateArray())
                 {
-                    // ?? Format A: subsection is a plain string ????????????????
-                    // e.g. "subsections": ["The model shows 99% accuracy...", ...]
-                    // Treat the string as a single bullet with no separate title.
+                    // Format A: subsection is a plain string
                     if (sub.ValueKind == JsonValueKind.String)
                     {
                         var text = sub.GetString() ?? string.Empty;
@@ -225,8 +326,7 @@ public sealed class PredictionInsightLoader
                         continue;
                     }
 
-                    // ?? Format B: subsection is an object ?????????????????????
-                    // e.g. "subsections": [{ "subsection_title": "...", "bullets": [...] }]
+                    // Format B: subsection is an object with bullets
                     if (sub.ValueKind == JsonValueKind.Object)
                     {
                         var bullets = new List<string>();
@@ -248,10 +348,26 @@ public sealed class PredictionInsightLoader
                     }
                 }
             }
+            else
+            {
+                // Format C: section has insights[] directly (combined prompt shape)
+                var insights = ReadStringArray(s, "insights");
+                if (insights.Count > 0)
+                {
+                    var subtitle = GetString(s, "subtitle");
+                    subsections.Add(new InsightSubsection
+                    {
+                        Title = string.IsNullOrWhiteSpace(subtitle) ? "Insights" : subtitle,
+                        Bullets = insights,
+                    });
+                }
+            }
 
             result.Add(new InsightSection
             {
-                SectionNumber = s.TryGetProperty("section_number", out var numEl) ? numEl.GetInt32() : 0,
+                SectionNumber = s.TryGetProperty("section_number", out var numEl) && numEl.TryGetInt32(out var sn)
+                    ? sn
+                    : 0,
                 Title         = GetString(s, "section_title"),
                 Subsections   = subsections,
             });
@@ -271,7 +387,7 @@ public sealed class PredictionInsightLoader
         Regex.Replace(json, @",\s*([}\]])", "$1");
 
     // Remove lines that are only a stray `"]` (broken bullet array continuation from AI output)
-    // e.g.  "bullets": ["item1"],\n          "extra]"\n  ù strips the orphaned line
+    // e.g.  "bullets": ["item1"],\n          "extra]"\n  ? strips the orphaned line
     private static string FixBrokenBulletArrays(string json) =>
         Regex.Replace(json, @"^\s*""[^""]*\]""\s*$", string.Empty, RegexOptions.Multiline);
 }

@@ -7,7 +7,8 @@
                 var grandPaidChg = Model.InsurancePaymentPct.Sum(r => r.PaidChargeAmount);
                 var grandPaymentPct = grandPaidChg == 0 ? 0m : Math.Round(grandPaidIns / grandPaidChg * 100m, 2);
                 var maxPct = Model.InsurancePaymentPct.Max(r => r.PaymentPct);
-                var showNorthWestSnapshotPivot = Model.InsurancePaymentPct.Any(r => r.BillYear.HasValue && r.BillMonth.HasValue);
+                var showNorthWestSnapshotPivot = !Model.IsAugustusLab
+                    && Model.InsurancePaymentPct.Any(r => r.BillYear.HasValue && r.BillMonth.HasValue);
                 var nwPeriods = Model.InsurancePaymentPct
                     .Where(r => r.BillYear.HasValue && r.BillMonth.HasValue)
                     .Select(r => (Year: r.BillYear!.Value, Month: r.BillMonth!.Value))
@@ -37,7 +38,7 @@
                         TotalCount = g.Sum(x => x.NoOfPaidClaims ?? x.TotalClaims),
                         TotalPayment = g.Sum(x => x.InsurancePayments)
                     })
-                    .OrderByDescending(r => r.TotalPayment)
+                    .OrderByDescending(r => Model.IsAugustusLab ? r.TotalCount : r.TotalPayment)
                     .ToList();
                 <div class="cs-rpt-wrap">
                     <div class="cs-rpt-scroll">
@@ -122,7 +123,10 @@
                                 }
                                 else
                                 {
-                                    @foreach (var row in Model.InsurancePaymentPct)
+                                    var pctRows = Model.IsAugustusLab
+                                        ? Model.InsurancePaymentPct.OrderByDescending(r => r.TotalClaims).ThenByDescending(r => r.InsurancePayments).ToList()
+                                        : Model.InsurancePaymentPct;
+                                    @foreach (var row in pctRows)
                                     {
                                         var pct = row.PaymentPct;
                                         var barWidth = maxPct == 0 ? 0m : Math.Round(pct / maxPct * 100m, 1);
@@ -133,7 +137,7 @@
                                         <td>
                                             <div class="reimb-bar-bg">
                                                 <div class="reimb-bar-fill" style="width:@(barWidth.ToString("F1"))%"></div>
-                                                <div class="reimb-bar-label">@pct.ToString("F2") %</div>
+                                                <div class="reimb-bar-label">@(Model.IsAugustusLab ? pct.ToString("F0") : pct.ToString("F2")) %</div>
                                             </div>
                                         </td>
                                     </tr>
@@ -183,8 +187,8 @@
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> Claim Level Data &bull;
                     <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) — @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &bull;
-                    <strong>Sorted by:</strong> SUM(InsurancePayment) DESC &bull;
-                    <strong>Payment %:</strong> SUM(InsurancePayment) / SUM(ChargeAmount) × 100 where ClaimStatus IN (Fully Paid, Partially Paid)
+                    <strong>Sorted by:</strong> @(Model.IsAugustusLab ? "Count of ClaimID DESC" : "SUM(InsurancePayment) DESC") &bull;
+                    <strong>Payment %:</strong> @(Model.IsAugustusLab ? "Average of Payment %" : "SUM(InsurancePayment) / SUM(ChargeAmount) × 100 where ClaimStatus IN (Fully Paid, Partially Paid)")
                 </div>
             }
             else

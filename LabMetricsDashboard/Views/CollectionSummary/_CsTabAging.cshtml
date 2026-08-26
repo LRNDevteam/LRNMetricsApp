@@ -1,4 +1,4 @@
-﻿@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+@model LabMetricsDashboard.Models.CollectionSummaryViewModel
             @if (Model.InsuranceAging.Count > 0)
             {
                 var grandClaimsCurrent = Model.InsuranceAging.Sum(r => r.ClaimsCurrent);
@@ -13,12 +13,97 @@
                 var grandBalance120 = Model.InsuranceAging.Sum(r => r.Balance120);
                 var grandClaimsTotal = Model.InsuranceAging.Sum(r => r.ClaimsTotal);
                 var grandBalanceTotal = Model.InsuranceAging.Sum(r => r.BalanceTotal);
+
+                // Augustus rows the report by billing source (ClaimLevelData.Source, e.g. "IRCM")
+                // and then payer, matching the client pivot: each source is an expand / collapse
+                // group carrying its own totals. Labs whose SP returns no Source column keep the
+                // plain payer list.
+                var showSource = Model.InsuranceAging.Any(r => !string.IsNullOrWhiteSpace(r.Source));
+                var agingGroups = Model.InsuranceAging
+                    .GroupBy(r => r.Source ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                // Groups render expanded; the header row toggles them closed. The click handler
+                // lives in Index.cshtml (delegated from document) so it also works when this
+                // partial is injected by the lazy-tab loader.
+                var startOpen = true;
+
+                void RenderMetricCells(
+                    int cCur, decimal bCur, int c30, decimal b30, int c60, decimal b60,
+                    int c90, decimal b90, int c120, decimal b120, int cTot, decimal bTot,
+                    string cellClass)
+                {
+                    <td class="@cellClass">@cCur.ToString("N0")</td>
+                    <td class="@cellClass">@bCur.ToString("C2")</td>
+                    <td class="@cellClass">@c30.ToString("N0")</td>
+                    <td class="@cellClass">@b30.ToString("C2")</td>
+                    <td class="@cellClass">@c60.ToString("N0")</td>
+                    <td class="@cellClass">@b60.ToString("C2")</td>
+                    <td class="@cellClass">@c90.ToString("N0")</td>
+                    <td class="@cellClass">@b90.ToString("C2")</td>
+                    <td class="@cellClass">@c120.ToString("N0")</td>
+                    <td class="@cellClass">@b120.ToString("C2")</td>
+                    <td class="@cellClass cs-ag-gt">@cTot.ToString("N0")</td>
+                    <td class="@cellClass cs-ag-gt">@bTot.ToString("C2")</td>
+                }
+
+                @* Scoped by table id: the shared .cs-rpt-table rules (row striping, the
+                   nth-child(2) label-column sizing) are more specific than plain classes. *@
+                <style>
+                    #tblInsuranceAging tbody td:first-child { width: auto; min-width: 260px; }
+                    #tblInsuranceAging td:nth-child(2) { min-width: 0; }
+
+                    #tblInsuranceAging td.cs-ag-num {
+                        text-align: right;
+                        min-width: 0;
+                        font-weight: 500;
+                        color: #1e293b;
+                        font-variant-numeric: tabular-nums;
+                    }
+                    #tblInsuranceAging td.cs-ag-gt { font-weight: 700; }
+
+                    #tblInsuranceAging tbody tr.cs-ag-group { cursor: pointer; user-select: none; }
+                    #tblInsuranceAging tbody tr.cs-ag-group td { background: #f0fdf4; font-weight: 700; }
+                    #tblInsuranceAging tbody tr.cs-ag-group:hover td { background: #dcfce7; }
+                    #tblInsuranceAging tbody tr.cs-ag-group td:first-child {
+                        text-align: left;
+                        color: #166534;
+                        font-weight: 700;
+                    }
+
+                    #tblInsuranceAging .cs-ag-chevron {
+                        display: inline-block;
+                        margin-right: .4rem;
+                        font-size: .7rem;
+                        transition: transform .18s ease;
+                    }
+                    #tblInsuranceAging tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
+
+                    #tblInsuranceAging tbody tr.cs-ag-child { display: none; }
+                    #tblInsuranceAging tbody tr.cs-ag-child.cs-ag-shown { display: table-row; }
+                    #tblInsuranceAging tbody tr.cs-ag-child td { background: #fff; }
+                    #tblInsuranceAging tbody tr.cs-ag-child:hover td { background: #f8fafc; }
+                    #tblInsuranceAging tbody tr.cs-ag-child td:first-child {
+                        text-align: left;
+                        padding-left: 1.9rem;
+                        font-weight: 600;
+                        color: #334155;
+                    }
+
+                    #tblInsuranceAging tbody tr.cs-ag-flat td:first-child {
+                        text-align: left;
+                        font-weight: 600;
+                    }
+                </style>
+
                 <div class="cs-rpt-wrap">
                     <div class="cs-rpt-scroll">
-                        <table class="cs-rpt-table">
+                        <table class="cs-rpt-table" id="tblInsuranceAging">
                             <thead>
                                 <tr>
-                                    <th rowspan="2" style="text-align:left;min-width:220px">Unbilled × Aging</th>
+                                    <th rowspan="2" style="text-align:left;min-width:260px">
+                                        @(showSource ? "Source / Payer Name" : "Payer Name")
+                                    </th>
                                     <th colspan="2">Current</th>
                                     <th colspan="2">30+</th>
                                     <th colspan="2">60+</th>
@@ -36,23 +121,65 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                @foreach (var row in Model.InsuranceAging)
+                                @if (showSource)
                                 {
-                                    <tr>
-                                        <td style="text-align:left;font-weight:600">@row.PayerName</td>
-                                        <td style="text-align:right">@row.ClaimsCurrent.ToString("N0")</td>
-                                        <td style="text-align:right">@row.BalanceCurrent.ToString("C2")</td>
-                                        <td style="text-align:right">@row.Claims30.ToString("N0")</td>
-                                        <td style="text-align:right">@row.Balance30.ToString("C2")</td>
-                                        <td style="text-align:right">@row.Claims60.ToString("N0")</td>
-                                        <td style="text-align:right">@row.Balance60.ToString("C2")</td>
-                                        <td style="text-align:right">@row.Claims90.ToString("N0")</td>
-                                        <td style="text-align:right">@row.Balance90.ToString("C2")</td>
-                                        <td style="text-align:right">@row.Claims120.ToString("N0")</td>
-                                        <td style="text-align:right">@row.Balance120.ToString("C2")</td>
-                                        <td style="text-align:right;font-weight:700">@row.ClaimsTotal.ToString("N0")</td>
-                                        <td style="text-align:right;font-weight:700">@row.BalanceTotal.ToString("C2")</td>
-                                    </tr>
+                                    var groupIndex = 0;
+                                    foreach (var group in agingGroups)
+                                    {
+                                        var groupRows = group.ToList();
+                                        var groupId = $"ag-src-{groupIndex++}";
+                                        var sourceLabel = string.IsNullOrWhiteSpace(group.Key) ? "(blank)" : group.Key;
+
+                                        <tr class="cs-ag-group @(startOpen ? "cs-ag-open" : null)"
+                                            data-ag-group="@groupId"
+                                            role="button"
+                                            aria-expanded="@(startOpen ? "true" : "false")"
+                                            title="Open / close payers">
+                                            <td>
+                                                <i class="bi bi-chevron-right cs-ag-chevron" aria-hidden="true"></i>@sourceLabel
+                                            </td>
+                                            @{ RenderMetricCells(
+                                                   groupRows.Sum(r => r.ClaimsCurrent), groupRows.Sum(r => r.BalanceCurrent),
+                                                   groupRows.Sum(r => r.Claims30), groupRows.Sum(r => r.Balance30),
+                                                   groupRows.Sum(r => r.Claims60), groupRows.Sum(r => r.Balance60),
+                                                   groupRows.Sum(r => r.Claims90), groupRows.Sum(r => r.Balance90),
+                                                   groupRows.Sum(r => r.Claims120), groupRows.Sum(r => r.Balance120),
+                                                   groupRows.Sum(r => r.ClaimsTotal), groupRows.Sum(r => r.BalanceTotal),
+                                                   "cs-ag-num"); }
+                                        </tr>
+
+                                        foreach (var row in groupRows)
+                                        {
+                                            <tr class="cs-ag-child @(startOpen ? "cs-ag-shown" : null)" data-ag-parent="@groupId">
+                                                <td>@row.PayerName</td>
+                                                @{ RenderMetricCells(
+                                                       row.ClaimsCurrent, row.BalanceCurrent,
+                                                       row.Claims30, row.Balance30,
+                                                       row.Claims60, row.Balance60,
+                                                       row.Claims90, row.Balance90,
+                                                       row.Claims120, row.Balance120,
+                                                       row.ClaimsTotal, row.BalanceTotal,
+                                                       "cs-ag-num"); }
+                                            </tr>
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    foreach (var row in Model.InsuranceAging)
+                                    {
+                                        <tr class="cs-ag-flat">
+                                            <td>@row.PayerName</td>
+                                            @{ RenderMetricCells(
+                                                   row.ClaimsCurrent, row.BalanceCurrent,
+                                                   row.Claims30, row.Balance30,
+                                                   row.Claims60, row.Balance60,
+                                                   row.Claims90, row.Balance90,
+                                                   row.Claims120, row.Balance120,
+                                                   row.ClaimsTotal, row.BalanceTotal,
+                                                   "cs-ag-num"); }
+                                        </tr>
+                                    }
                                 }
                             </tbody>
                             <tfoot>
@@ -77,11 +204,12 @@
                 </div>
 
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
-                    <strong>Source:</strong> Claim Level Data &bull;
+                    <strong>Data:</strong> Claim Level Data (Source &times; Payer) &bull;
                     <strong>Filter:</strong> ClaimStatus = No Response &bull;
                     <strong>Aging Buckets:</strong> Current (&lt;30 days), 30+, 60+, 90+, 120+ (based on DaysToDOS) &bull;
                     <strong>Metric:</strong> COUNT(DISTINCT AccessionNumber), SUM(InsuranceBalance)
                 </div>
+
             }
             else
             {

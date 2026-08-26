@@ -138,6 +138,26 @@ public interface ILabProductionSummaryRepository
 
     /// <summary>Reads <c>{prefix}CPTBreakdown</c> ? CPT × month pivot.</summary>
     /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
+    /// <summary>
+    /// Reads <c>usp_Get{prefix}PanelBreakdownWithPayers</c> - the Production Summary
+    /// "Panel Breakdown" table: one parent row per panel with its payers as
+    /// <see cref="PayerBreakdownRow.ChildRows"/>, pivoted by billed month.
+    /// Deployed by <c>Sql\40_AllLabs_PanelBreakdownWithPayers.sql</c>; returns an
+    /// empty result (never throws) when that SP is not yet on the lab's database.
+    /// </summary>
+    /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
+    Task<SharedPayerBreakdownResult> GetPanelBreakdownAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default);
+
     Task<SharedCptBreakdownResult> GetCptBreakdownAsync(
         string connectionString,
         List<string>? filterPayerNames = null,

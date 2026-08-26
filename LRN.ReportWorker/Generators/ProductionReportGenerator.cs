@@ -30,6 +30,8 @@ public sealed class ProductionReportGenerator : IReportGenerator
     private readonly IProductionReportRepository _repo;
     private readonly INorthWestProductionSummaryRepository _nwRepo;
     private readonly IAugustusProductionSummaryRepository _augRepo;
+    /// <summary>Per-lab generic Production Summary repos, keyed by lab name (Certus, Cove, ...).</summary>
+    private readonly IReadOnlyDictionary<string, ILabProductionSummaryRepository> _labSummaryRepos;
     private readonly ILogger<ProductionReportGenerator> _logger;
 
     public ProductionReportGenerator(
@@ -37,13 +39,15 @@ public sealed class ProductionReportGenerator : IReportGenerator
         IProductionReportRepository repo,
         INorthWestProductionSummaryRepository nwRepo,
         IAugustusProductionSummaryRepository augRepo,
+        IReadOnlyDictionary<string, ILabProductionSummaryRepository> labSummaryRepos,
         ILogger<ProductionReportGenerator> logger)
     {
-        _labSettings = labSettings;
-        _repo        = repo;
-        _nwRepo      = nwRepo;
-        _augRepo     = augRepo;
-        _logger      = logger;
+        _labSettings     = labSettings;
+        _repo            = repo;
+        _nwRepo          = nwRepo;
+        _augRepo         = augRepo;
+        _labSummaryRepos = labSummaryRepos;
+        _logger          = logger;
     }
 
     public async Task<GeneratedReportFile> GenerateAsync(
@@ -155,9 +159,16 @@ public sealed class ProductionReportGenerator : IReportGenerator
             connStr, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, productionRule, ct);
         var cptBreakdownTask = _repo.GetCptBreakdownAsync(
             connStr, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
+        // Panel Breakdown: usp_Get{Prefix}PanelBreakdownWithPayers via the lab's generic
+        // repo (Sql/40_AllLabs_PanelBreakdownWithPayers.sql). Labs without that SP - or
+        // with no generic repo at all - return an empty result and the sheet is skipped.
+        var panelBreakdownTask = _labSummaryRepos.TryGetValue(job.LabName, out var labSummaryRepo)
+            ? labSummaryRepo.GetPanelBreakdownAsync(
+                connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct)
+            : Task.FromResult(new PayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0));
 
         await Task.WhenAll(monthlyTask, weeklyTask, codingTask, payerBreakdownTask,
-            payerPanelTask, unbilledAgingTask, cptBreakdownTask);
+            payerPanelTask, unbilledAgingTask, cptBreakdownTask, panelBreakdownTask);
         await progress(35);
 
         // Phase 2 — run info only. Claim/Line raw sheets are OpenXml-streamed onto
@@ -173,6 +184,7 @@ public sealed class ProductionReportGenerator : IReportGenerator
         var pxpResult    = payerPanelTask.Result;
         var uaResult     = unbilledAgingTask.Result;
         var cptResult    = cptBreakdownTask.Result;
+        var pnlResult    = panelBreakdownTask.Result;
 
         var vm = new ProductionReportViewModel
         {
@@ -224,6 +236,13 @@ public sealed class ProductionReportGenerator : IReportGenerator
             CptBreakdownGrandByMonth        = cptResult.GrandTotalByMonth,
             CptBreakdownGrandTotalUnits     = cptResult.GrandTotalUnits,
             CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
+            PanelBreakdownMonths              = pnlResult.Months,
+            PanelBreakdownYears               = pnlResult.Years,
+            PanelBreakdownRows                = pnlResult.PayerRows,
+            PanelBreakdownGrandByMonth        = pnlResult.GrandTotalByMonth,
+            PanelBreakdownGrandTotal          = pnlResult.GrandTotal,
+            PanelBreakdownGrandChargesByMonth = pnlResult.GrandTotalChargesByMonth ?? [],
+            PanelBreakdownGrandTotalCharges   = pnlResult.GrandTotalCharges,
         };
 
         var (weekFolder, runId) = runInfoTask.Result;
@@ -284,9 +303,11 @@ public sealed class ProductionReportGenerator : IReportGenerator
             connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
         var cptBreakdownTask = _augRepo.GetCptBreakdownAsync(
             connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
+        var panelBreakdownTask = _augRepo.GetPanelBreakdownAsync(
+            connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
 
         await Task.WhenAll(monthlyTask, weeklyTask, codingTask, payerBreakdownTask,
-            payerPanelTask, unbilledAgingTask, cptBreakdownTask);
+            payerPanelTask, unbilledAgingTask, cptBreakdownTask, panelBreakdownTask);
         await progress(35);
 
         // Phase 2 — run info only. Claim/Line raw sheets are OpenXml-streamed onto
@@ -302,6 +323,7 @@ public sealed class ProductionReportGenerator : IReportGenerator
         var pxpResult    = payerPanelTask.Result;
         var uaResult     = unbilledAgingTask.Result;
         var cptResult    = cptBreakdownTask.Result;
+        var pnlResult    = panelBreakdownTask.Result;
 
         var vm = new ProductionReportViewModel
         {
@@ -353,6 +375,15 @@ public sealed class ProductionReportGenerator : IReportGenerator
             CptBreakdownGrandByMonth        = cptResult.GrandTotalByMonth,
             CptBreakdownGrandTotalUnits     = cptResult.GrandTotalUnits,
             CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
+            CptUnitsLabel                   = "Count of CPT",
+            ProductionSummaryRule           = "Rule3",
+            PanelBreakdownMonths              = pnlResult.Months,
+            PanelBreakdownYears               = pnlResult.Years,
+            PanelBreakdownRows                = pnlResult.PayerRows,
+            PanelBreakdownGrandByMonth        = pnlResult.GrandTotalByMonth,
+            PanelBreakdownGrandTotal          = pnlResult.GrandTotal,
+            PanelBreakdownGrandChargesByMonth = pnlResult.GrandTotalChargesByMonth ?? [],
+            PanelBreakdownGrandTotalCharges   = pnlResult.GrandTotalCharges,
         };
 
         var (weekFolder, runId) = runInfoTask.Result;

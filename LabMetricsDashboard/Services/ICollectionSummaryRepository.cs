@@ -371,6 +371,20 @@ public interface ICollectionSummaryRepository
     /// </summary>
     Task<List<InsuranceVsPaymentRow>>  GetInsuranceVsPaymentFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
 
+    /// <summary>
+    /// Live/filter path for Insurance vs Payment (Payer × Posted Date month).
+    /// Augustus uses <c>usp_GetAug_CS_InsuranceVsPayment_v2</c>.
+    /// </summary>
+    Task<List<InsuranceVsPaymentRow>> GetInsuranceVsPaymentAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
+        CancellationToken ct = default);
+
     Task<CptPaymentPctResult>          GetCptPaymentPctFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
     Task<StatusSummaryResult>          GetStatusSummaryFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
     Task<ProviderSummaryResult>        GetProviderSummaryFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);

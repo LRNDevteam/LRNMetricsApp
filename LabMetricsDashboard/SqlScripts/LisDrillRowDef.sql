@@ -267,8 +267,8 @@ INSERT INTO dbo.LisDrillRowDef
      Sec1Name, Sec1Col, Sec1Vals, Sec2Name, Sec2Col, Sec2Vals, Sec3Name, Sec3Col, Sec3Vals)
 VALUES
  (N'Aug',  N'X',  N'Insurance Balance ($)', N'DateofService', N'Cash', N'InsuranceBalance',
-     N'ClaimStatus', N'IN', N'Fully Denied,Partially Denied,No Response',
-     N'Fully Denied', N'ClaimStatus', N'Fully Denied', N'Partially Denied', N'ClaimStatus', N'Partially Denied', N'No Response', N'ClaimStatus', N'No Response'),
+     N'ClaimStatus', N'IN', N'Partially Denied,Fully Denied,No Response,Partial Paid',
+     N'Fully Denied', N'ClaimStatus', N'Fully Denied', N'Partially Denied', N'ClaimStatus', N'Partially Denied,Partial Paid', N'No Response', N'ClaimStatus', N'No Response'),
  (N'BT',   N'AJ', N'Insurance Balance ($)', N'DateofService', N'Cash', N'InsuranceBalance',
      N'ClaimStatus', N'IN', N'Fully Denied,Partially Denied,No Response',
      N'Fully Denied', N'ClaimStatus', N'Fully Denied', N'Partially Denied', N'ClaimStatus', N'Partially Denied', N'No Response', N'ClaimStatus', N'No Response'),

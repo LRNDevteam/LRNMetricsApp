@@ -31,4 +31,10 @@ public sealed class BlobSyncOptions
 
     /// <summary>Virtual folder under the container. Created on first upload if missing.</summary>
     public string BlobPrefix { get; set; } = "Beech_Tree_inputs";
+
+    /// <summary>
+    /// When true, re-upload the latest ready week folder to blob (overwrite existing
+    /// LIS/PMS/Cash) and regenerate insights.json even if that week was already synced.
+    /// </summary>
+    public bool RefreshData { get; set; }
 }
