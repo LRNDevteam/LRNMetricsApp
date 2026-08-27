@@ -1,8 +1,8 @@
-﻿using Common.Logging;
-using LRN.ExcelValidator.Models;
-using LRN.ExcelValidator.Services;
-using LRN.Notifications.Abstractions;
-using LRN.Notifications.Models;
+﻿using LRN.MasterFileProcessorWorker.BulkLoad;
+using LRN.MasterFileProcessorWorker.ExcelValidation;
+using LRN.MasterFileProcessorWorker.Logging;
+using LRN.MasterFileProcessorWorker.Notifications;
+using LRN.MasterFileProcessorWorker.SharePoint;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -13,8 +13,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using static SharePointDownloader;
-using LRN.SharePointClient.Models;
+using static LRN.MasterFileProcessorWorker.SharePoint.SharePointDownloader;
 
 public sealed class MasterFileProcessorWorker : BackgroundService
 {
@@ -35,7 +34,13 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 	private readonly IProcessLogService _processLog;
 	private readonly ITeamsNotifier _teamsNotifier;
 	private readonly ModeMedianReportPublisher _modeMedianPublisher;
+	private readonly LabInsuranceMasterRepository _labInsuranceMaster;
 	private readonly IConfiguration _configuration;
+	private readonly LineClaimImportOptions _lineClaimOptions;
+	private readonly LabRegistry _labRegistry;
+	private readonly LineClaimImportService _lineClaimImport;
+	private readonly ReportRunIdInfoLogger _runInfo;
+	private readonly ReportsWorkflowTrackerRepository _workflowTracker;
 
 	private ColumnSchema? _commonLineSchema;
 	private ColumnSchema? _commonClaimSchema;
@@ -53,7 +58,13 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		IProcessLogService processLog,
 		ITeamsNotifier teamsNotifier,
 		ModeMedianReportPublisher modeMedianPublisher,
-		IConfiguration configuration)
+		LabInsuranceMasterRepository labInsuranceMaster,
+		IConfiguration configuration,
+		IOptions<LineClaimImportOptions> lineClaimOptions,
+		LabRegistry labRegistry,
+		LineClaimImportService lineClaimImport,
+		ReportRunIdInfoLogger runInfo,
+		ReportsWorkflowTrackerRepository workflowTracker)
 	{
 		_logger = logger;
 		_fileLog = fileLog;
@@ -65,7 +76,13 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		_processLog = processLog;
 		_teamsNotifier = teamsNotifier;
 		_modeMedianPublisher = modeMedianPublisher;
+		_labInsuranceMaster = labInsuranceMaster;
 		_configuration = configuration;
+		_lineClaimOptions = lineClaimOptions.Value;
+		_labRegistry = labRegistry;
+		_lineClaimImport = lineClaimImport;
+		_runInfo = runInfo;
+		_workflowTracker = workflowTracker;
 
 	}
 
@@ -179,8 +196,9 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		{
 			ct.ThrowIfCancellationRequested();
 
-			// One unique RunID per lab-run
+			// One unique RunID per lab-run: R<YYYYMMDD><SHORT><NNNN>, e.g. R20260803CRT0001
 			var runCtx = await _processLog.StartRunAsync(
+				labId: lab.LabId,
 				labName: lab.LabName,
 				pipelineName: "LRN.MasterFileProcessor",
 				triggerType: "Schedule",
@@ -212,6 +230,11 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 			int stepSeq = 0;
 			StepLogRow? activeStep = null;
 			ModeMedianReportPublisher.ModeMedianPublishResult? modeMedianPublishResult = null;
+
+			// Declared out here so the finally below can remove it however this lab's run ends.
+			// It holds only work-in-progress copies: everything worth keeping has already been moved
+			// into the week folder by then.
+			string? stagingFolder = null;
 
 			try
 			{
@@ -271,7 +294,8 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 						logMessage: lookup.Message ?? "no eligible SharePoint file found",
 						ct: ct);
 
-					if (lookup.Status == SharePointDownloader.LatestFileLookupStatus.NoFileInCurrentWeekFolder)
+					if (lookup.Status == SharePointDownloader.LatestFileLookupStatus.NoFileInCurrentWeekFolder
+						|| lookup.Status == SharePointDownloader.LatestFileLookupStatus.NoCurrentWeekFolder)
 					{
 						await NotifyNoRecentFileFoundInLatestWeekFolderAsync(
 							lab,
@@ -366,7 +390,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 						_logger.LogInformation("Lab {LabId}: master file already processed, but LIMS SQL import is enabled. Checking sibling LIMS file.", lab.LabId);
 						_fileLog.Info($"Lab {lab.LabId}: master file already processed, but LIMS SQL import is enabled. Checking sibling LIMS file.");
 
-						await TryDownloadSiblingRawMasterAsync(lab, selected, limsRawMasterFolder, runCtx.RunId, ct);
+						await TryDownloadSiblingRawMasterAsync(lab, selected, limsRawMasterFolder, runCtx.RunId, limsWeekFolder, ct);
 					}
 
 					var (clientPaidMonthFolder, clientPaidWeekFolder) = ParseMonthAndDateFolder(selected.SharePointPath);
@@ -420,7 +444,8 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 
 				// PROCESSED OUTPUTS (Claim/Line) go under WatchFolder (LRN-Input):
 				// D:\LRN\Automation\LRN-Input\Beech_Tree\2026\02.February\02.06.2026 - 02.12.2026\Beech_Tree_LineLevel.csv
-				var processedOutFolder = Path.Combine(_opt.WatchFolder, labPrefix, yearFolder, monthFolder, weekFolder);
+				var labBaseFolder = Path.Combine(_opt.WatchFolder, labPrefix);
+				var processedOutFolder = Path.Combine(labBaseFolder, yearFolder, monthFolder, weekFolder);
 				Directory.CreateDirectory(processedOutFolder);
 
 				var rawMasterFolder = processedOutFolder;
@@ -438,6 +463,30 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				var lineOutPath = Path.Combine(processedOutFolder, lineOutFileName);
 				var modeMedianOutPath = Path.Combine(processedOutFolder, modeMedianOutFileName);
 
+				// Build all standardized outputs inside a temporary staging folder first.
+				// A downstream watcher scans the week folder and can grab a CSV the instant it
+				// appears, locking it while we are still enriching/reading it back. To avoid that,
+				// we generate + enrich + cross-copy entirely in staging and only move the finished
+				// files into processedOutFolder (an atomic rename on the same volume), then delete
+				// the staging folder.
+				//
+				// Staging sits at the LAB BASE folder, not inside the week folder:
+				//   D:\LRN\Automation\LRN-Input\Beech_Tree\~staging_<RunId>\
+				// so nothing half-written ever appears beneath the week folder the watcher reads.
+				// Still under WatchFolder, so the publish step remains a same-volume rename.
+				stagingFolder = Path.Combine(labBaseFolder, $"~staging_{runCtx.RunId}");
+
+				// Remove any leftover staging folders (e.g. from a prior run that was skipped due to
+				// a lock). The week folder is swept too, to clear folders left by the previous
+				// layout, when staging lived inside it.
+				CleanupStaleStagingFolders(labBaseFolder);
+				CleanupStaleStagingFolders(processedOutFolder);
+				Directory.CreateDirectory(stagingFolder);
+
+				var claimStagePath = Path.Combine(stagingFolder, claimOutFileName);
+				var lineStagePath = Path.Combine(stagingFolder, lineOutFileName);
+				var modeMedianStagePath = Path.Combine(stagingFolder, modeMedianOutFileName);
+
 				// RAW ROOT (no lab folder):
 				// D:\LRN\Automation\LRN-RAWFILE\02.February\02.06.2026 - 02.12.2026\
 				var rawRoot = Path.Combine(_opt.ReportOutputsRoot, "LRN-RAWFILE", monthFolder, weekFolder);
@@ -453,68 +502,6 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 
 				await DownloadSharePointFileWithRetryAsync(selected.DriveId, selected.ItemId, stagingPath, ct);
 
-				// SharePoint bumps eTag/LastModified even when a user just opens and closes
-				// the file without changing anything. Compare the downloaded content hash
-				// against previously PROCESSED files and skip when nothing really changed.
-				var contentHash = ComputeFileSha256(stagingPath);
-
-				if (await _status.IsContentProcessedAsync(lab.LabId, contentHash, ct))
-				{
-					const string unchangedMsg = "content unchanged (only SharePoint modified date/etag changed, e.g. file opened and closed); skipped reprocessing";
-
-					_logger.LogInformation("Lab {LabId}: {Msg}: {File}", lab.LabId, unchangedMsg, selected.Name);
-					_fileLog.Info($"Lab {lab.LabId}: {unchangedMsg}: {selected.Name}");
-
-					step20.EndTimeIST = _processLog.NowIST();
-					step20.Status = "SKIPPED";
-					step20.ErrorMessage = unchangedMsg;
-					await _processLog.StepEndAsync(runCtx, step20, ct);
-					activeStep = null;
-
-					// Mark this new eTag as PROCESSED so future runs skip it on the cheap eTag check.
-					await _status.UpsertStatusAsync(
-						selected.LabId, selected.DriveId, selected.ItemId, selected.ETagKey,
-						selected.Name, selected.SharePointPath, selected.LastModifiedUtc,
-						status: "PROCESSED",
-						statusMessage: unchangedMsg,
-						processedAtUtc: DateTimeOffset.UtcNow,
-						ct: ct,
-						contentHash: contentHash);
-
-					runRow.OverallStatus = "SKIPPED";
-					runRow.Notes = unchangedMsg;
-					await _processLog.CompleteRunAsync(runCtx, runRow, ct);
-
-					MasterProcessorLogCsv.Append(
-						folder: masterLogFolder,
-						localNow: runLocalNow,
-						labId: lab.LabId,
-						labName: lab.LabName,
-						sourceFileName: selected.Name,
-						sourceFileLocation: selected.SharePointPath,
-						status: "Skipped",
-						message: unchangedMsg,
-						claimOutput: "",
-						lineOutput: "");
-
-					await TryWriteAndUploadFileStatusLogAsync(
-						lab,
-						selected,
-						siteDriveId,
-						status: "Skipped",
-						outputLocation: "",
-						logMessage: unchangedMsg,
-						ct: ct);
-
-					// Same as the already-processed path: still sync sibling LIMS and client-paid files.
-					if (ParseBool(GetLabConfigValue(lab, "LimsSqlImportEnabled"), false))
-						await TryDownloadSiblingRawMasterAsync(lab, selected, rawMasterFolder, runCtx.RunId, ct);
-
-					await TrySyncClientPaidFileAsync(lab, selected, processedOutFolder, runCtx.RunId, ct);
-
-					continue;
-				}
-
 				File.Copy(stagingPath, productionRawMasterPath, overwrite: true);
 
 				_logger.LogInformation(
@@ -524,7 +511,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 
 				_fileLog.Info($"Lab {lab.LabId}: Production raw master copied to WatchFolder week folder -> {productionRawMasterPath}");
 
-				if (!await TryDownloadSiblingRawMasterAsync(lab, selected, rawMasterFolder, runCtx.RunId, ct))
+				if (!await TryDownloadSiblingRawMasterAsync(lab, selected, rawMasterFolder, runCtx.RunId, weekFolder, ct))
 					throw new InvalidOperationException("Required LIMS master file was not available in the same SharePoint week folder as the production master file.");
 
 				await TrySyncClientPaidFileAsync(lab, selected, processedOutFolder, runCtx.RunId, ct);
@@ -590,7 +577,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				activeStep = step40;
 				await _processLog.StepStartAsync(runCtx, step40, ct);
 
-				var effectiveLineCandidates = GetEffectiveLineSheetCandidates(lab);
+				var effectiveLineCandidates = GetEffectiveLineSheetCandidates(lab, stagingPath);
 				var lineValidation = _schemaValidator.Validate(stagingPath, effectiveLineCandidates, lineSchemaPath);
 				var claimValidation = _schemaValidator.Validate(stagingPath, _opt.ClaimSheetName, claimSchemaPath);
 
@@ -680,7 +667,28 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 
 				var sw = Stopwatch.StartNew();
 
+				// Per-level output switches, resolved from this lab's *FieldMappings.json.
+				// Line level and claim level are independent: either can be turned off on its own,
+				// and turning one off skips its RAW export, its standardized CSV, its publish to the
+				// output folder and its bulk copy. Defaults are true, so a lab whose mapping says
+				// nothing behaves exactly as before.
+				var (createLineCsv, createClaimCsv) = ResolveCsvOutputToggles(lab);
+
+				if (!createLineCsv)
+				{
+					_logger.LogInformation("Lab {LabId}: LineLevel.CreateCsv=false - skipping line-level CSV output.", lab.LabId);
+					_fileLog.Info($"Lab {lab.LabId}: LineLevel.CreateCsv=false, line-level CSV skipped.");
+				}
+
+				if (!createClaimCsv)
+				{
+					_logger.LogInformation("Lab {LabId}: ClaimLevel.CreateCsv=false - skipping claim-level CSV output.", lab.LabId);
+					_fileLog.Info($"Lab {lab.LabId}: ClaimLevel.CreateCsv=false, claim-level CSV skipped.");
+				}
+
 				// STEP 50: LineLevel RAW export
+				// Always runs. CreateLineLevelCsv controls only whether the finished file is
+				// PUBLISHED to the output folder - the SQL load reads from staging either way.
 				stepSeq = 50;
 				var step50 = new StepLogRow
 				{
@@ -702,10 +710,8 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 
 				if (lineSheetNames.Length > 1)
 				{
-					var sheetSourcePairs = lineSheetNames
-						.Select(s => (SheetName: s, SourceValue: ExtractSourceLabel(s)))
-						.ToArray();
-					await ExcelCsvExporter.ExportMultiSheetCombinedToCsvAsync(stagingPath, sheetSourcePairs, "Source", lineRawPath, ct);
+					var sheetSourcePairs = BuildLineSheetSourcePairs(lab, lineSheetNames);
+					await ExcelCsvExporter.ExportMultiSheetCombinedToCsvAsync(stagingPath, sheetSourcePairs, AuditColumns.SourceStamp, lineRawPath, ct);
 				}
 				else
 				{
@@ -745,7 +751,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				StandardCsvExporter.Generate(
 					sourceCsvPath: lineRawPath,
 					headerRow: _commonLineSchema!.HeaderRow,
-					outputCsvPath: lineOutPath,
+					outputCsvPath: lineStagePath,
 					commonSchema: _commonLineSchema!,
 					labId: lab.LabId,
 					labName: lab.LabName,
@@ -753,7 +759,8 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 					ingestedOnLocal: DateTime.Now,
 					labSchema: labLineSchema,
 					insuranceMaster: _insuranceMaster,
-					augmentation: lineAugmentation);
+					augmentation: lineAugmentation,
+					log: m => { _logger.LogInformation("Lab {LabId}: {Message}", lab.LabId, m); _fileLog.Info($"Lab {lab.LabId}: {m}"); });
 
 
 
@@ -765,13 +772,16 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				_logger.LogInformation("Lab {LabId}: LineLevel STANDARD CSV generated -> {Path}", lab.LabId, lineOutPath);
 				_fileLog.Info($"Lab {lab.LabId}: LineLevel STANDARD CSV -> {lineOutPath}");
 
+				await TrySyncLabInsuranceMasterPayersAsync(lab, lineStagePath, ct);
+
 				try
 				{
 					modeMedianPublishResult = await _modeMedianPublisher.PublishAsync(
 						runCtx.RunId,
 						lab.LabName,
+						lab.LabId,
 						sourceDateLabel,
-						lineOutPath,
+						lineStagePath,
 						ct);
 
 					_logger.LogInformation(
@@ -845,7 +855,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				StandardCsvExporter.Generate(
 							sourceCsvPath: claimRawPath,
 							headerRow: _commonClaimSchema!.HeaderRow,
-							outputCsvPath: claimOutPath,
+							outputCsvPath: claimStagePath,
 							commonSchema: _commonClaimSchema!,
 							labId: lab.LabId,
 							labName: lab.LabName,
@@ -853,18 +863,19 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 							ingestedOnLocal: DateTime.Now,
 							labSchema: labClaimSchema,
 							insuranceMaster: _insuranceMaster,
-							augmentation: claimAugmentation);
+							augmentation: claimAugmentation,
+							log: m => { _logger.LogInformation("Lab {LabId}: {Message}", lab.LabId, m); _fileLog.Info($"Lab {lab.LabId}: {m}"); });
 
 				StandardCsvExporter.EnrichClaimLevelWithLineLevelCptSummary(
-					claimCsvPath: claimOutPath,
-					lineCsvPath: lineOutPath,
+					claimCsvPath: claimStagePath,
+					lineCsvPath: lineStagePath,
 					targetColumnName: ResolveClaimLevelCptSummaryColumnName(claimSchemaPath));
 
 				if (ShouldCopyClaimStatusToLineLevel(lab))
 				{
 					StandardCsvExporter.CopyClaimStatusFromClaimLevelToLineLevel(
-						claimCsvPath: claimOutPath,
-						lineCsvPath: lineOutPath);
+						claimCsvPath: claimStagePath,
+						lineCsvPath: lineStagePath);
 				}
 
 				step80.EndTimeIST = _processLog.NowIST();
@@ -873,12 +884,71 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				activeStep = null;
 				runRow.SplitOutputWrittenToSharePoint = "YES";
 
-				_logger.LogInformation("Lab {LabId}: ClaimLevel STANDARD CSV generated -> {Path}", lab.LabId, claimOutPath);
-				_fileLog.Info($"Lab {lab.LabId}: ClaimLevel STANDARD CSV -> {claimOutPath}");
+				_logger.LogInformation("Lab {LabId}: ClaimLevel STANDARD CSV generated -> {Path}", lab.LabId, claimStagePath);
+				_fileLog.Info($"Lab {lab.LabId}: ClaimLevel STANDARD CSV -> {claimStagePath}");
+
+				// All standardized outputs are complete in staging. Publish them into the watched
+				// output folder via atomic moves so the downstream watcher only ever sees finished
+				// files, then remove the staging folder entirely.
+				if (createLineCsv)
+					await MoveStagedOutputToFinalAsync(lineStagePath, lineOutPath, lab.LabId, ct);
+
+				if (createClaimCsv)
+					await MoveStagedOutputToFinalAsync(claimStagePath, claimOutPath, lab.LabId, ct);
+
+				await MoveStagedOutputToFinalAsync(modeMedianStagePath, modeMedianOutPath, lab.LabId, ct);
+
+				// The bulk copy loads from wherever the file actually is: the published path when it
+				// was requested, otherwise the staging copy. Staging is deleted AFTER the load, not
+				// before, so switching the CSV off never removes the loader's input.
+				var lineLoadPath = createLineCsv ? lineOutPath : lineStagePath;
+				var claimLoadPath = createClaimCsv ? claimOutPath : claimStagePath;
 
 				sw.Stop();
 
+				// STEP 85: Bulk copy the standardized CSVs into the lab's line/claim level tables.
+				// Runs against the FINAL paths, after the atomic move, so the loader can never read a
+				// half-written file. Additive: the LRN_Step_Log / LRN_Run_Log / LRN_Error_Log writes
+				// around it are unchanged, and a bulk-copy failure is contained to this step so the
+				// rest of the lab's run (SharePoint upload, status log) still completes.
+				stepSeq = 85;
+				var step85 = new StepLogRow
+				{
+					StepSeq = stepSeq,
+					StepName = "Bulk Copy Line/Claim Level to SQL",
+					StepCategory = "Load",
+					SourceSystem = "Local",
+					StartTimeIST = _processLog.NowIST(),
+					Status = "IN_PROGRESS",
+					PathIn = processedOutFolder
+				};
+				activeStep = step85;
+				await _processLog.StepStartAsync(runCtx, step85, ct);
 
+				var bulkOutcomes = await TryImportLineClaimLevelAsync(
+					lab, runCtx.RunId, selected, weekFolder, lineLoadPath, claimLoadPath, ct);
+
+				step85.EndTimeIST = _processLog.NowIST();
+				step85.RecordsOut = (int)Math.Min(int.MaxValue, bulkOutcomes.Sum(o => o.RowsCopied));
+				step85.Status = bulkOutcomes.All(o => o.Succeeded)
+					? (bulkOutcomes.All(o => o.Skipped) ? "SKIPPED" : "SUCCESS")
+					: "FAILED";
+				var bulkErrors = string.Join(" | ",
+					bulkOutcomes.Where(o => !o.Succeeded).Select(o => $"{o.FileType}: {o.Message}"));
+
+				// LRN_Step_Log.ErrorMessage is nvarchar(800). A SqlException listing 19 invalid
+				// columns is far longer, and an over-long value aborts the whole step-log write,
+				// which previously took the entire lab run down with it. Summary goes in
+				// ErrorMessage, the untruncated text in ErrorDetail (nvarchar(max)).
+				step85.ErrorMessage = Truncate(bulkErrors, 780);
+				step85.ErrorDetail = string.IsNullOrEmpty(bulkErrors) ? null : bulkErrors;
+				await _processLog.StepEndAsync(runCtx, step85, ct);
+				activeStep = null;
+
+				// The load has finished with the staged files, so the folder can go now rather than
+				// waiting for the finally - the rest of this run has no use for it.
+				TryDeleteDirectory(stagingFolder);
+				stagingFolder = null;
 
 				// Cleanup RAW CSVs unless configured to keep
 				if (!_opt.KeepRawCsvExports)
@@ -984,8 +1054,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 					selected.Name, selected.SharePointPath, selected.LastModifiedUtc,
 					status: "PROCESSED",
 statusMessage: $"Saved LineLevel='{lineOutPath}', ClaimLevel='{claimOutPath}', ModeMedian='{modeMedianOutPath}'. OutputUpload={outputUploadResult.Summary}.", processedAtUtc: DateTimeOffset.UtcNow,
-					ct: ct,
-					contentHash: contentHash);
+					ct: ct);
 
 				step110.EndTimeIST = _processLog.NowIST();
 				step110.Status = "SUCCESS";
@@ -1118,6 +1187,62 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			{
 				throw;
 			}
+			catch (Exception ex) when (IsFileLockException(ex))
+			{
+				// A required file is temporarily locked by another process (e.g. the downstream
+				// watcher holding a previous output file). Treat this as transient: skip the file
+				// for THIS run and let the next poll retry it. Do not mark ERROR, do not raise an
+				// Error_Log row, and do not send a failure notification.
+				var skipMsg = $"File locked by another process; skipping this run and retrying on the next run. {ex.Message}";
+
+				try
+				{
+					if (activeStep != null && string.Equals(activeStep.Status, "IN_PROGRESS", StringComparison.OrdinalIgnoreCase))
+					{
+						activeStep.EndTimeIST = _processLog.NowIST();
+						activeStep.Status = "SKIPPED";
+						activeStep.ErrorCode ??= "FILE_LOCKED_RETRY";
+						activeStep.ErrorMessage ??= ex.Message;
+						await _processLog.StepEndAsync(runCtx, activeStep, ct);
+					}
+				}
+				catch { }
+
+				_logger.LogWarning(ex, "Lab {LabId}: file locked by another process; skipping this run (will retry next run).", lab.LabId);
+				_fileLog.Warn($"Lab {lab.LabId}: {skipMsg}");
+
+				// IMPORTANT: leave the SharePoint file status unprocessed (no PROCESSED/ERROR upsert)
+				// so IsProcessedAsync stays false and the file is picked up again next run.
+				try
+				{
+					runRow.OverallStatus = "SKIPPED";
+					runRow.Notes = skipMsg;
+					await _processLog.CompleteRunAsync(runCtx, runRow, ct);
+				}
+				catch { }
+
+				try
+				{
+					MasterProcessorLogCsv.Append(
+						folder: masterLogFolder,
+						localNow: runLocalNow,
+						labId: lab.LabId,
+						labName: lab.LabName,
+						sourceFileName: selected?.Name ?? "",
+						sourceFileLocation: selected?.SharePointPath ?? "",
+						status: "Skipped",
+						message: skipMsg,
+						claimOutput: "",
+						lineOutput: "");
+				}
+				catch { }
+
+				try
+				{
+					await TryWriteAndUploadFileStatusLogAsync(lab, selected, siteDriveId, status: "Skipped", outputLocation: "", logMessage: skipMsg, ct: ct);
+				}
+				catch { }
+			}
 			catch (Exception ex)
 			{
 				// If a step was started but not ended, mark it as FAILED
@@ -1192,6 +1317,17 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 					lineOutput: "");
 
 				await NotifyProcessingErrorAsync(lab, ex.Message, selected?.Name, selected?.SharePointPath, ct);
+			}
+			finally
+			{
+				// Whatever happened above - success, skip, lock, failure - the staging folder does
+				// not outlive the run. It is set to null once the normal path has already removed
+				// it, so this only fires when the run ended early and left it behind.
+				if (stagingFolder != null)
+				{
+					_fileLog.Info($"Lab {lab.LabId}: removing staging folder left by an incomplete run -> {stagingFolder}");
+					TryDeleteDirectory(stagingFolder);
+				}
 			}
 		}
 
@@ -1422,8 +1558,8 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 	}
 
 	private static string BuildSchemaErrorMessage(
-		LRN.ExcelValidator.Models.SchemaValidationResult lineValidation,
-		LRN.ExcelValidator.Models.SchemaValidationResult claimValidation,
+		SchemaValidationResult lineValidation,
+		SchemaValidationResult claimValidation,
 		string lineCandidates,
 		string claimCandidates)
 	{
@@ -1655,18 +1791,11 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		$"⚠️ No recent file found for the {lab.LabName} lab.",
 		$"📁 Latest month folder: {monthFolder ?? "Unknown"}",
 		$"📂 Latest week folder: {weekFolder ?? "Unknown"}",
-		"Earlier week folders were also checked; no matching file was found."
+		"No earlier week folders were checked."
 	};
 
 		await TrySendTeamNotificationAsync(title, string.Join(Environment.NewLine + Environment.NewLine, lines), ct);
 	}
-	private static string ComputeFileSha256(string path)
-	{
-		using var sha = System.Security.Cryptography.SHA256.Create();
-		using var fs = File.OpenRead(path);
-		return Convert.ToHexString(sha.ComputeHash(fs));
-	}
-
 	private static string CombineSpPath(params string[] parts)
 	{
 		var clean = parts
@@ -1757,20 +1886,325 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		return Regex.IsMatch(value, @"\d{1,2}\.\d{1,2}\.\d{4}\s*-\s*\d{1,2}\.\d{1,2}(\.\d{4})?", RegexOptions.IgnoreCase);
 	}
 
+	// NorthWest (LabId 20) keeps line-level data in two sheets ("Webpm LineLevel" and
+	// "Daq Line Level"). Both must be combined into a single line-level CSV. Spacing varies
+	// between "LineLevel" and "Line Level", so all variants are listed as candidates; the
+	// exporter/validator match only the sheets that actually exist.
+	private const string NorthWestLineSheetCandidates =
+		"Webpm LineLevel,Webpm Line Level,Daq LineLevel,Daq Line Level,Line Level,LineLevel";
+
 	private string GetEffectiveLineSheetCandidates(LabFileMap lab)
 	{
-		return !string.IsNullOrWhiteSpace(lab.LineLevelSheetNames)
-			? lab.LineLevelSheetNames
-			: _opt.SheetName;
+		if (!string.IsNullOrWhiteSpace(lab.LineLevelSheetNames))
+			return lab.LineLevelSheetNames;
+
+		// Fall back to the known multi-sheet layout for NorthWest even when the lab config
+		// does not set LineLevelSheetNames, so both sheets are still picked up.
+		if (IsNorthWestLab(lab))
+			return NorthWestLineSheetCandidates;
+
+		return _opt.SheetName;
+	}
+
+	/// <summary>
+	/// Line-level sheet candidates resolved against the sheets the workbook ACTUALLY contains.
+	/// <para>
+	/// NorthWest deliveries are inconsistent: usually "Webpm Line Level" + "Daq Line Level", but
+	/// sometimes one system's prefix is dropped and the sheet arrives as plain "Line Level" (or
+	/// "LineLevel"). Matching a fixed candidate list silently skipped that unprefixed sheet, so
+	/// half the data was lost. Every sheet whose name ends with Line Level / LineLevel -- with or
+	/// without a system prefix -- is therefore taken from the workbook itself.
+	/// </para>
+	/// Falls back to the static candidate list when nothing matches, so behavior is unchanged for
+	/// labs and files that do not use this naming.
+	/// </summary>
+	private string GetEffectiveLineSheetCandidates(LabFileMap lab, string workbookPath)
+	{
+		var configured = GetEffectiveLineSheetCandidates(lab);
+
+		// Only the multi-sheet labs need discovery; single-sheet labs keep the configured list.
+		if (!IsNorthWestLab(lab) && string.IsNullOrWhiteSpace(lab.LineLevelSheetNames))
+			return configured;
+
+		List<string> workbookSheets;
+		try
+		{
+			workbookSheets = ExcelCsvExporter.ListSheetNamesInOrder(workbookPath);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogWarning(ex, "Lab {LabId}: could not list workbook sheets; using configured line-level candidates.", lab.LabId);
+			return configured;
+		}
+
+		var lineSheets = workbookSheets
+			.Where(IsLineLevelSheetName)
+			.ToList();
+
+		if (lineSheets.Count == 0)
+			return configured;
+
+		// When prefixed sheets identify both source systems, a bare "Line Level" sheet alongside
+		// them is ambiguous (likely a rollup) and is excluded rather than double-counted.
+		var prefixed = lineSheets.Where(s => !string.IsNullOrWhiteSpace(ExtractSourceLabel(s))).ToList();
+		var selected = prefixed.Count >= 2 ? prefixed : lineSheets;
+
+		if (selected.Count != lineSheets.Count)
+		{
+			_logger.LogInformation(
+				"Lab {LabId}: ignoring unprefixed line-level sheet(s) [{Ignored}] because prefixed sheets [{Prefixed}] are present.",
+				lab.LabId,
+				string.Join(", ", lineSheets.Except(selected)),
+				string.Join(", ", prefixed));
+		}
+
+		_logger.LogInformation(
+			"Lab {LabId}: line-level sheets resolved from workbook -> [{Sheets}].",
+			lab.LabId,
+			string.Join(", ", selected));
+
+		_fileLog.Info($"Lab {lab.LabId}: line-level sheets resolved from workbook -> [{string.Join(", ", selected)}]");
+
+		return string.Join(",", selected);
+	}
+
+	/// <summary>
+	/// True for sheet names that denote line-level data, with or without a system prefix:
+	/// "Line Level", "LineLevel", "Daq Line Level", "Webpm LineLevel", "Master Line Level", ...
+	/// </summary>
+	private static bool IsLineLevelSheetName(string? sheetName)
+	{
+		if (string.IsNullOrWhiteSpace(sheetName))
+			return false;
+
+		var normalized = new string(sheetName.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+		return normalized.EndsWith("LINELEVEL", StringComparison.Ordinal);
+	}
+
+	/// <summary>
+	/// Per-level CSV output switches for a lab, read from its <c>*FieldMappings.json</c>.
+	/// <para>
+	/// A level produces its CSV when the mapping says <c>Enabled</c> AND <c>CreateCsv</c>. The two
+	/// levels are fully independent - line level on with claim level off is supported, and vice
+	/// versa. When the mapping cannot be read at all, both default to true so behaviour is
+	/// unchanged for any lab that has not opted in.
+	/// </para>
+	/// </summary>
+	private (bool Line, bool Claim) ResolveCsvOutputToggles(LabFileMap lab)
+	{
+		// Precedence, most specific first:
+		//   1. MasterFileProcessor:Labs[] -> CreateLineLevelCsv / CreateClaimLevelCsv   (this lab)
+		//   2. MasterFileProcessor       -> CreateLineLevelCsv / CreateClaimLevelCsv   (all labs)
+		//   3. Schemas/LabMappings/<Lab>FieldMappings.json -> <Level>.CreateCsv
+		//   4. true
+		// appsettings wins so the switch lives where the rest of this worker is configured.
+		bool line = lab.CreateLineLevelCsv ?? _opt.CreateLineLevelCsv;
+		bool claim = lab.CreateClaimLevelCsv ?? _opt.CreateClaimLevelCsv;
+
+		var lineFromAppSettings = lab.CreateLineLevelCsv.HasValue || !_opt.CreateLineLevelCsv;
+		var claimFromAppSettings = lab.CreateClaimLevelCsv.HasValue || !_opt.CreateClaimLevelCsv;
+
+		try
+		{
+			var mappingFolder = ResolvePath(_lineClaimOptions.LabMappingsFolder);
+			var mapping = _labRegistry.TryGetMapping(lab.LabId, mappingFolder);
+
+			if (mapping is not null)
+			{
+				static bool Produces(LevelMapping? level) => level is null || (level.Enabled && level.CreateCsv);
+
+				// Only consult the mapping where appsettings has not already made the call.
+				if (!lineFromAppSettings) line = Produces(mapping.LineLevel);
+				if (!claimFromAppSettings) claim = Produces(mapping.ClaimLevel);
+			}
+		}
+		catch (Exception ex)
+		{
+			// A mapping problem must not stop the file being processed; appsettings still applies.
+			_logger.LogWarning(ex, "Lab {LabId}: could not read the lab mapping for CSV toggles; using appsettings values.", lab.LabId);
+		}
+
+		_logger.LogInformation(
+			"Lab {LabId}: CSV output -> LineLevel={Line}, ClaimLevel={Claim} " +
+			"(set MasterFileProcessor:CreateLineLevelCsv / CreateClaimLevelCsv, or the same keys inside this lab's Labs[] entry).",
+			lab.LabId, line, claim);
+
+		return (line, claim);
+	}
+
+	/// <summary>
+	/// Caps a value to fit a fixed-width log column, marking it so a reader knows it was cut.
+	/// </summary>
+	private static string? Truncate(string? value, int maxLength)
+	{
+		if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+			return value;
+
+		const string suffix = "... [truncated]";
+		return value[..(maxLength - suffix.Length)] + suffix;
+	}
+
+	/// <summary>
+	/// Bulk copies this lab's standardized line-level and claim-level CSVs into its database.
+	/// <para>
+	/// Never throws. The import is an addition to an established pipeline: if it fails, the lab's
+	/// files are already published and the rest of the run must still finish. Every failure is
+	/// recorded in ReportRunIdInfoLog, ReportsWorkflowTracker and LineClaimFileLogs by the service
+	/// itself, and surfaced to LRN_Step_Log by the caller.
+	/// </para>
+	/// </summary>
+	private async Task<IReadOnlyList<LineClaimImportOutcome>> TryImportLineClaimLevelAsync(
+		LabFileMap lab,
+		string runId,
+		SharePointDownloader.SelectedFile? selected,
+		string? weekFolder,
+		string lineCsvPath,
+		string claimCsvPath,
+		CancellationToken ct)
+	{
+		var empty = Array.Empty<LineClaimImportOutcome>();
+
+		if (!_lineClaimOptions.Enabled)
+		{
+			// Logged every run, and deliberately not Debug: silence here is what makes a
+			// "nothing happened and nothing was logged" run impossible to diagnose.
+			_logger.LogWarning(
+				"Lab {LabId}: LineClaimImport:Enabled is false, so no line/claim rows are being copied to SQL. " +
+				"Set LineClaimImport:Enabled to true in appsettings.json to turn the bulk copy on.",
+				lab.LabId);
+			_fileLog.Info($"Lab {lab.LabId}: LineClaimImport:Enabled=false, bulk copy skipped.");
+			return empty;
+		}
+
+		try
+		{
+			var mappingFolder = ResolvePath(_lineClaimOptions.LabMappingsFolder);
+
+			// The lab's own connection string wins - it is where this repo keeps them. LabMaster is
+			// consulted for whether the lab is active, and as the fallback source of the connection.
+			var labConnectionString = GetLabConfigValue(lab, "LabDbConnectionString")
+				?? _configuration.GetConnectionString(GetLabConfigValue(lab, "LabDbConnectionKey") ?? string.Empty);
+
+			var resolved = await _labRegistry.TryResolveLabAsync(lab.LabId, labConnectionString, mappingFolder, ct);
+
+			if (resolved is null)
+				return empty;   // TryResolveLabAsync has already logged the specific reason
+
+			var request = new LineClaimImportRequest(
+				RunId: runId,
+				WeekFolder: weekFolder,
+				SourceFullPath: selected?.SharePointPath,
+				SourceFileName: selected?.Name,
+				FileCreatedDateTime: selected?.LastModifiedUtc?.LocalDateTime,
+				LineLevelCsvPath: lineCsvPath,
+				ClaimLevelCsvPath: claimCsvPath);
+
+			return await _lineClaimImport.ImportLabAsync(resolved, request, ct);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "Lab {LabId}: line/claim level bulk copy failed.", lab.LabId);
+			_fileLog.Error($"Lab {lab.LabId}: line/claim level bulk copy failed. {ex.Message}");
+
+			return new[]
+			{
+				new LineClaimImportOutcome(FileTypes.LineLevel, false, false, 0, ex.Message),
+				new LineClaimImportOutcome(FileTypes.ClaimLevel, false, false, 0, ex.Message)
+			};
+		}
+	}
+
+	private static bool IsNorthWestLab(LabFileMap lab)
+	{
+		if (lab == null) return false;
+
+		var labName = lab.LabName ?? string.Empty;
+
+		return lab.LabId == 20
+			|| labName.Contains("NorthWest", StringComparison.OrdinalIgnoreCase)
+			|| labName.Contains("North West", StringComparison.OrdinalIgnoreCase);
+	}
+
+	/// <summary>
+	/// Pairs each line-level sheet with the Source value its rows get.
+	/// <para>
+	/// A sheet that arrives without its system prefix (plain "Line Level") is labelled with the
+	/// configured system that is NOT otherwise present in the workbook: with "Daq Line Level" +
+	/// "Line Level", the unprefixed sheet is the Webpm delivery, so its rows are tagged "Webpm"
+	/// rather than left blank. When no sheet carries a prefix there is nothing to infer from, so
+	/// the Source stays blank.
+	/// </para>
+	/// </summary>
+	private (string SheetName, string SourceValue)[] BuildLineSheetSourcePairs(LabFileMap lab, IReadOnlyList<string> sheetNames)
+	{
+		var pairs = sheetNames
+			.Select(s => (SheetName: s, SourceValue: ExtractSourceLabel(s)))
+			.ToArray();
+
+		// Nothing missing, or nothing to infer from (every sheet unprefixed) -> leave as-is.
+		if (pairs.All(p => !string.IsNullOrWhiteSpace(p.SourceValue)) ||
+			pairs.All(p => string.IsNullOrWhiteSpace(p.SourceValue)))
+			return pairs;
+
+		// Only labs with a known multi-system layout have systems to infer.
+		if (!IsNorthWestLab(lab) && string.IsNullOrWhiteSpace(lab.LineLevelSheetNames))
+			return pairs;
+
+		var knownSources = GetEffectiveLineSheetCandidates(lab)
+			.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+			.Select(ExtractSourceLabel)
+			.Where(x => !string.IsNullOrWhiteSpace(x))
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.ToList();
+
+		var present = new HashSet<string>(
+			pairs.Where(p => !string.IsNullOrWhiteSpace(p.SourceValue)).Select(p => p.SourceValue),
+			StringComparer.OrdinalIgnoreCase);
+
+		var missingSources = new Queue<string>(knownSources.Where(k => !present.Contains(k)));
+
+		for (int i = 0; i < pairs.Length; i++)
+		{
+			if (!string.IsNullOrWhiteSpace(pairs[i].SourceValue))
+				continue;
+
+			if (missingSources.Count == 0)
+				break;
+
+			var inferred = missingSources.Dequeue();
+
+			_logger.LogInformation(
+				"Lab {LabId}: sheet '{Sheet}' has no system prefix; tagging its rows Source='{Source}' (the configured system missing from this workbook).",
+				lab.LabId,
+				pairs[i].SheetName,
+				inferred);
+
+			_fileLog.Info($"Lab {lab.LabId}: sheet '{pairs[i].SheetName}' has no system prefix; Source set to '{inferred}'");
+
+			pairs[i] = (pairs[i].SheetName, inferred);
+		}
+
+		return pairs;
 	}
 
 	private static string ExtractSourceLabel(string sheetName)
 	{
-		// "Webpm Line Level" -> "Webpm", "Daq Line Level" -> "Daq"
-		const string suffix = " Line Level";
-		var trimmed = sheetName.Trim();
-		if (trimmed.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
-			return trimmed.Substring(0, trimmed.Length - suffix.Length).Trim();
+		// "Webpm Line Level"/"Webpm LineLevel" -> "Webpm", "Daq Line Level" -> "Daq".
+		// An unprefixed sheet ("Line Level"/"LineLevel") carries no system name, so it yields
+		// "" and its rows get a blank Source rather than the literal sheet name.
+		var trimmed = (sheetName ?? string.Empty).Trim();
+
+		foreach (var suffix in new[] { "Line Level", "LineLevel" })
+		{
+			if (!trimmed.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+				continue;
+
+			return trimmed.Substring(0, trimmed.Length - suffix.Length)
+				.Trim()
+				.Trim('-', '_')
+				.Trim();
+		}
+
 		return trimmed;
 	}
 
@@ -1781,11 +2215,52 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		var labName = lab.LabName ?? string.Empty;
 
 		return lab.LabId == 19
-			|| lab.LabId == 20
+			|| IsNorthWestLab(lab)
 			|| labName.Contains("Augustus", StringComparison.OrdinalIgnoreCase)
-			|| labName.Contains("Certus", StringComparison.OrdinalIgnoreCase)
-			|| labName.Contains("NorthWest", StringComparison.OrdinalIgnoreCase)
-			|| labName.Contains("Northwest", StringComparison.OrdinalIgnoreCase);
+			|| labName.Contains("Certus", StringComparison.OrdinalIgnoreCase);
+	}
+
+	/// <summary>
+	/// Seeds dbo.LabInsuranceMaster with any PayerName_Raw from this lab's LineLevel CSV that is not
+	/// already registered against the lab's LabInsuranceMaster LabName + LabId. Never fails the run:
+	/// the master file outputs are already written by this point, so a DB problem is logged and skipped.
+	/// </summary>
+	private async Task TrySyncLabInsuranceMasterPayersAsync(LabFileMap lab, string lineLevelCsvPath, CancellationToken ct)
+	{
+		var insuranceMasterLabName = LabInsuranceMasterRepository.ResolveInsuranceMasterLabName(lab.LabName);
+
+		if (string.IsNullOrWhiteSpace(insuranceMasterLabName))
+		{
+			_logger.LogWarning(
+				"Lab {LabId}: no LabInsuranceMaster LabName mapped for '{LabName}'. Skipping payer sync.",
+				lab.LabId,
+				lab.LabName);
+
+			_fileLog.Info($"Lab {lab.LabId}: no LabInsuranceMaster LabName for '{lab.LabName}'. Payer sync skipped.");
+			return;
+		}
+
+		try
+		{
+			var result = await _labInsuranceMaster.SyncPayersFromLineLevelCsvAsync(
+				lineLevelCsvPath,
+				insuranceMasterLabName,
+				lab.LabId,
+				ct);
+
+			_logger.LogInformation(
+				"Lab {LabId} ({InsuranceMasterLabName}): LabInsuranceMaster payer sync -> {Summary}",
+				lab.LabId,
+				insuranceMasterLabName,
+				result.Summary);
+
+			_fileLog.Info($"Lab {lab.LabId} ({insuranceMasterLabName}): LabInsuranceMaster payer sync -> {result.Summary}");
+		}
+		catch (Exception ex)
+		{
+			_logger.LogWarning(ex, "LabInsuranceMaster payer sync failed for lab {LabId}", lab.LabId);
+			_fileLog.Error($"LabInsuranceMaster payer sync failed for lab {lab.LabId}", ex);
+		}
 	}
 
 	private static string ResolveClaimLevelCptSummaryColumnName(string? claimSchemaPath)
@@ -1868,12 +2343,10 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		return false;
 	}
 
+	// Single switch for Teams, matching the one TeamsWebhookNotifier itself checks. Off unless
+	// the key says otherwise.
 	private bool IsTeamsNotificationEnabled()
-	{
-		return _configuration.GetValue<bool?>("MasterFileProcessor:SendTeamsNotification")
-			?? _configuration.GetValue<bool?>("MasterFileProcessor:TeamsNotificationEnabled")
-			?? true;
-	}
+		=> _configuration.GetValue<bool?>("Notifications:Teams:Enabled") ?? false;
 
 	private bool IsSharePointFileUploadEnabled()
 	{
@@ -1887,6 +2360,7 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		SharePointDownloader.SelectedFile selected,
 		string rawMasterFolder,
 		string? runId,
+		string? weekFolder,
 		CancellationToken ct)
 	{
 		var limsPattern = GetLabConfigValue(lab, "LimsMasterFilePattern");
@@ -1919,7 +2393,7 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 			_fileLog.Info($"Lab {lab.LabId}: LIMS raw master downloaded -> {limsRawMasterPath}");
 
-			await TryImportLimsMasterAsync(lab, limsRawMasterPath, runId, ct);
+			await TryImportLimsMasterAsync(lab, limsRawMasterPath, runId, weekFolder, ct);
 			return true;
 		}
 		catch (Exception ex)
@@ -1979,25 +2453,66 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		}
 	}
 
-	private async Task TryImportLimsMasterAsync(LabFileMap lab, string limsRawMasterPath, string? runId, CancellationToken ct)
+	/// <summary>
+	/// Loads the lab's LIMS master workbook into its LIMSMaster table and records the outcome as the
+	/// "LIS Summary" report for this run.
+	/// <para>
+	/// The workflow tracker and ReportRunIdInfoLog entries are written here rather than inside the
+	/// importer so that a run which never reaches the import - no sibling file, import switched off -
+	/// still leaves a Skipped row instead of a silent gap. Both log writers swallow their own
+	/// failures, so tracking can never be what breaks a load.
+	/// </para>
+	/// </summary>
+	private async Task TryImportLimsMasterAsync(
+		LabFileMap lab,
+		string limsRawMasterPath,
+		string? runId,
+		string? weekFolder,
+		CancellationToken ct)
 	{
+		var startedOn = ReportRunIdInfoLogger.IstNow();
+		var sourceFileName = Path.GetFileName(limsRawMasterPath);
 		var enabled = _configuration.GetValue<bool?>("MasterFileProcessor:LimsSqlImportEnabled") ?? true;
+
 		if (!enabled)
 		{
+			const string reason = "MasterFileProcessor:LimsSqlImportEnabled is false";
 			_logger.LogInformation("Lab {LabId}: LIMS SQL import disabled by MasterFileProcessor:LimsSqlImportEnabled.", lab.LabId);
+
+			await _runInfo.InfoAsync(runId ?? string.Empty, WorkflowReportNames.LisSummary, lab.LabName,
+				$"LIS Summary skipped for lab {lab.LabName} ({lab.LabId}): {reason}.", ct, sourceFileName);
+
+			await _workflowTracker.UpsertAsync(runId ?? string.Empty, lab.LabId, lab.LabName, weekFolder,
+				WorkflowReportNames.LisSummary, WorkflowReportNames.LisSummary, WorkflowStatus.Skipped,
+				null, startedOn, ReportRunIdInfoLogger.IstNow(), reason, ct);
+
 			return;
 		}
 
 		try
 		{
+			await _runInfo.StartAsync(runId ?? string.Empty, WorkflowReportNames.LisSummary, lab.LabName,
+				$"LIMS master import started for lab {lab.LabName} ({lab.LabId}). Source: {sourceFileName}", ct, sourceFileName);
+
+			await _workflowTracker.UpsertAsync(runId ?? string.Empty, lab.LabId, lab.LabName, weekFolder,
+				WorkflowReportNames.LisSummary, WorkflowReportNames.LisSummary, WorkflowStatus.InProgress,
+				null, startedOn, null, null, ct);
+
+			// Deliberately NO fallback to DefaultConnection. That fallback used to sit at the end of
+			// this chain, which meant a lab with a missing or misspelt connection key silently
+			// loaded its LIMS master into LRNMaster instead of failing. A lab's data must land in
+			// that lab's database or nowhere at all.
 			var connectionString =
 				GetLabConfigValue(lab, "LabDbConnectionString")
 				?? GetLabConfigValue(lab, "LimsDbConnectionString")
-				?? _configuration.GetConnectionString(GetLabConfigValue(lab, "LabDbConnectionKey") ?? string.Empty)
-				?? _configuration.GetConnectionString("DefaultConnection");
+				?? _configuration.GetConnectionString(GetLabConfigValue(lab, "LabDbConnectionKey") ?? string.Empty);
 
 			if (string.IsNullOrWhiteSpace(connectionString))
-				throw new InvalidOperationException($"Lab {lab.LabId}: LIMS connection string missing.");
+			{
+				throw new InvalidOperationException(
+					$"Lab {lab.LabId} ({lab.LabName}): no LIMS connection string. Set LabDbConnectionKey on this lab " +
+					"in appsettings.json and add a matching entry under ConnectionStrings in appsettings.Secrets.json.");
+			}
 
 			var schemaPath = GetLabConfigValue(lab, "LIMSSchemaJsonPath");
 			if (!string.IsNullOrWhiteSpace(schemaPath))
@@ -2019,7 +2534,9 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 				CreatedOn = DateTime.Now,
 				LabId = lab.LabId,
 				LabName = lab.LabName,
-				RunId = runId
+				RunId = runId,
+				CaptureAdditionalFields = _configuration.GetValue<bool?>("MasterFileProcessor:LimsCaptureAdditionalFields") ?? true,
+				AdditionalFieldsColumn = _configuration["MasterFileProcessor:LimsAdditionalFieldsColumn"] ?? "AdditionalFields"
 			}, ct);
 
 			_logger.LogInformation(
@@ -2030,11 +2547,50 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 				result.CreatedOn);
 
 			_fileLog.Info($"Lab {lab.LabId}: LIMS SQL import completed. Sheet={result.SheetName}, RowsCopied={result.TotalRowsCopied}, CreatedOn={result.CreatedOn:yyyy-MM-dd HH:mm:ss.fffffff}");
+
+			await _runInfo.InfoAsync(runId ?? string.Empty, WorkflowReportNames.LisSummary, lab.LabName,
+				$"LIMS master import completed. Sheet={result.SheetName}, RowsRead={result.TotalRowsRead}, " +
+				$"RowsCopied={result.TotalRowsCopied}, Table={result.DestinationTable}.", ct, sourceFileName);
+
+			if (result.ExcludedSensitiveColumns.Count > 0)
+			{
+				// Logged so an audit can see the pipeline met the column and refused it, rather than
+				// having to prove a negative from the absence of data.
+				await _runInfo.WarningAsync(runId ?? string.Empty, WorkflowReportNames.LisSummary, lab.LabName,
+					$"{result.ExcludedSensitiveColumns.Count} column(s) present in the LIMS file were NOT captured, per the sensitive-column policy: " +
+					$"[{string.Join("; ", result.ExcludedSensitiveColumns)}].", ct, sourceFileName);
+			}
+
+			if (result.AdditionalFieldNames.Count > 0)
+			{
+				// Named rather than counted: this is the list someone needs to decide which of the
+				// lab's new columns deserves a real column of its own.
+				await _runInfo.WarningAsync(runId ?? string.Empty, WorkflowReportNames.LisSummary, lab.LabName,
+					$"{result.AdditionalFieldNames.Count} column(s) are absent from the LIMS schema JSON and were stored in AdditionalFields: " +
+					$"[{string.Join("; ", result.AdditionalFieldNames)}].", ct, sourceFileName);
+			}
+
+			await _workflowTracker.UpsertAsync(runId ?? string.Empty, lab.LabId, lab.LabName, weekFolder,
+				WorkflowReportNames.LisSummary, WorkflowReportNames.LisSummary, WorkflowStatus.Success,
+				result.TotalRowsCopied, startedOn, ReportRunIdInfoLogger.IstNow(), null, ct);
+
+			await _runInfo.EndAsync(runId ?? string.Empty, WorkflowReportNames.LisSummary, lab.LabName,
+				$"LIS Summary processing ended for lab {lab.LabName} ({lab.LabId}).", ct, sourceFileName);
 		}
 		catch (Exception ex)
 		{
 			_logger.LogError(ex, "Lab {LabId}: LIMS SQL import failed for {Path}", lab.LabId, limsRawMasterPath);
 			_fileLog.Error($"Lab {lab.LabId}: LIMS SQL import failed for {limsRawMasterPath}", ex);
+
+			// Full exception into ReportRunIdInfoLog, the short message into the tracker's Remarks.
+			await _runInfo.ErrorAsync(runId ?? string.Empty, WorkflowReportNames.LisSummary, lab.LabName, ex, ct, sourceFileName);
+
+			await _workflowTracker.UpsertAsync(runId ?? string.Empty, lab.LabId, lab.LabName, weekFolder,
+				WorkflowReportNames.LisSummary, WorkflowReportNames.LisSummary, WorkflowStatus.Failed,
+				null, startedOn, ReportRunIdInfoLogger.IstNow(), ex.Message, ct);
+
+			await _runInfo.EndAsync(runId ?? string.Empty, WorkflowReportNames.LisSummary, lab.LabName,
+				$"LIS Summary processing ended with failure for lab {lab.LabName} ({lab.LabId}).", ct, sourceFileName);
 		}
 	}
 
@@ -2476,7 +3032,27 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 					$"{Path.GetFileNameWithoutExtension(fileName)}_Obsolete_{DateTime.Now:yyyyMMddHHmmssfff}{Path.GetExtension(fileName)}");
 			}
 
-			File.Move(filePath, destPath);
+			// Retry briefly to ride out a transient lock; if the file is still held (e.g. the
+			// downstream watcher has it open), the lock exception propagates and the caller skips
+			// this file for the current run and retries it on the next run.
+			MoveFileWithLockRetry(filePath, destPath);
+		}
+	}
+
+	private static void MoveFileWithLockRetry(string sourcePath, string destPath)
+	{
+		const int maxAttempts = 5;
+		for (int attempt = 1; ; attempt++)
+		{
+			try
+			{
+				File.Move(sourcePath, destPath);
+				return;
+			}
+			catch (Exception ex) when (attempt < maxAttempts && IsFileLockException(ex))
+			{
+				Thread.Sleep(Math.Min(3000, attempt * attempt * 250));
+			}
 		}
 	}
 
@@ -2518,6 +3094,102 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 				File.Delete(path);
 		}
 		catch { }
+	}
+
+	// True when an exception indicates a file is temporarily locked / in use by another process
+	// (Windows sharing violation 32 / lock violation 33). These are transient: we skip the file
+	// for the current run and let the next poll retry it, instead of marking a hard error.
+	private static bool IsFileLockException(Exception ex)
+	{
+		for (var e = ex; e != null; e = e.InnerException)
+		{
+			var code = e.HResult & 0xFFFF;
+			if (code == 32 || code == 33) // ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION
+				return true;
+
+			if (e is IOException)
+			{
+				var msg = e.Message ?? string.Empty;
+				if (msg.Contains("being used by another process", StringComparison.OrdinalIgnoreCase)
+					|| msg.Contains("locked a portion of the file", StringComparison.OrdinalIgnoreCase))
+					return true;
+			}
+		}
+
+		return false;
+	}
+
+	// Moves a completed output file from the staging folder into its final (watched) location.
+	// The move is a rename on the same volume, so the watcher only ever sees a fully-written file.
+	// Retries a few times to ride out transient locks (antivirus/indexer/late handle release),
+	// which is why a plain write into the watched folder sometimes failed even with no obvious reader.
+	private async Task MoveStagedOutputToFinalAsync(string stagePath, string finalPath, int labId, CancellationToken ct)
+	{
+		if (!File.Exists(stagePath))
+			return;
+
+		const int maxAttempts = 6;
+		for (int attempt = 1; ; attempt++)
+		{
+			try
+			{
+				Directory.CreateDirectory(Path.GetDirectoryName(finalPath)!);
+				if (File.Exists(finalPath))
+					File.Delete(finalPath);
+
+				File.Move(stagePath, finalPath);
+				_fileLog.Info($"Lab {labId}: published output to watched folder -> {finalPath}");
+				return;
+			}
+			catch (IOException ex) when (attempt < maxAttempts)
+			{
+				var delay = TimeSpan.FromMilliseconds(Math.Min(5000, attempt * attempt * 250));
+				_logger.LogWarning(ex, "Lab {LabId}: move to output folder failed (attempt {Attempt}/{MaxAttempts}) for {Path}. Retrying in {DelayMs}ms.", labId, attempt, maxAttempts, finalPath, delay.TotalMilliseconds);
+				_fileLog.Warn($"Lab {labId}: move to output folder failed (attempt {attempt}/{maxAttempts}) for {finalPath}: {ex.Message}. Retrying in {delay.TotalMilliseconds:n0}ms.");
+				await Task.Delay(delay, ct);
+			}
+			catch (UnauthorizedAccessException ex) when (attempt < maxAttempts)
+			{
+				var delay = TimeSpan.FromMilliseconds(Math.Min(5000, attempt * attempt * 250));
+				_fileLog.Warn($"Lab {labId}: move to output folder blocked (attempt {attempt}/{maxAttempts}) for {finalPath}: {ex.Message}. Retrying in {delay.TotalMilliseconds:n0}ms.");
+				await Task.Delay(delay, ct);
+			}
+		}
+	}
+
+	private void TryDeleteDirectory(string folder)
+	{
+		try
+		{
+			if (Directory.Exists(folder))
+				Directory.Delete(folder, recursive: true);
+		}
+		catch (Exception ex)
+		{
+			_fileLog.Warn($"Failed to delete staging folder '{folder}': {ex.Message}");
+		}
+	}
+
+	// Removes any leftover "~staging_*" temp folders directly under the given folder. These can
+	// remain if a prior run was skipped mid-flight because a file was locked; sweeping them keeps
+	// the folder clean and avoids stale partial files lingering on disk.
+	//
+	// Called for the lab base folder (where staging lives now) and for the week folder (where it
+	// used to live), so an upgrade leaves nothing behind.
+	private void CleanupStaleStagingFolders(string parentFolder)
+	{
+		try
+		{
+			if (!Directory.Exists(parentFolder))
+				return;
+
+			foreach (var dir in Directory.EnumerateDirectories(parentFolder, "~staging_*", SearchOption.TopDirectoryOnly))
+				TryDeleteDirectory(dir);
+		}
+		catch (Exception ex)
+		{
+			_fileLog.Warn($"Failed to sweep stale staging folders under '{parentFolder}': {ex.Message}");
+		}
 	}
 
 	private static string ResolvePath(string path)

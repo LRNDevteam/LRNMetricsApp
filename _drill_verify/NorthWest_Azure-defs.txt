@@ -1,5 +1,0 @@
-﻿DEFS|10|LIS=8|PMS=2
-KEYLIS|A|Total Samples
-KEYPMS|M|No. of Fully Paid Claims
-SPLIS|17
-SPPMS|18

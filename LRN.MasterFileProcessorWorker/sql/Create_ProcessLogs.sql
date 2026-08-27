@@ -1,52 +1,22 @@
-/*
-Creates Run_Log / Step_Log / Error_Log tables matching the columns in LRN_Process_Log_Template.xlsx
-and a RunID generator (RUN-YYYY-MM-DD-0001)
+﻿/*
+Creates Run_Log / Step_Log / Error_Log tables matching the columns in LRN_Process_Log_Template.xlsx.
+RunID generation is NOT here - see sql/LRNMaster/11_RunId_PerLab.sql.
 */
 
 SET NOCOUNT ON;
 GO
 
-IF OBJECT_ID('dbo.LRN_RunIdSequence', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.LRN_RunIdSequence
-    (
-        RunDate date NOT NULL CONSTRAINT PK_LRN_RunIdSequence PRIMARY KEY,
-        LastSeq int NOT NULL
-    );
-END
-GO
+/*
+    RunID generation lives in sql/LRNMaster/11_RunId_PerLab.sql, which is authoritative.
 
-CREATE OR ALTER PROCEDURE dbo.sp_LRN_NextRunId
-    @RunId varchar(30) OUTPUT
-AS
-BEGIN
-    SET NOCOUNT ON;
+    It used to be here: dbo.LRN_RunIdSequence keyed on RunDate alone, plus a dbo.sp_LRN_NextRunId
+    that produced the old global format (20260801R0007). RunIds are now per lab and continuous
+    (R20260803CRT0001), and both objects changed shape.
 
-    DECLARE @today date = CONVERT(date, SYSDATETIME());
-    DECLARE @seq int;
-
-    BEGIN TRAN;
-
-    UPDATE dbo.LRN_RunIdSequence WITH (UPDLOCK, HOLDLOCK)
-       SET LastSeq = LastSeq + 1
-     WHERE RunDate = @today;
-
-    IF @@ROWCOUNT = 0
-    BEGIN
-        INSERT dbo.LRN_RunIdSequence (RunDate, LastSeq)
-        VALUES (@today, 1);
-    END
-
-    SELECT @seq = LastSeq
-      FROM dbo.LRN_RunIdSequence
-     WHERE RunDate = @today;
-
-    COMMIT;
-
-    SET @RunId =
-        REPLACE(CONVERT(varchar(10), getdate(), 23),'-','') + 'R' + RIGHT('0000' + CONVERT(varchar(10), @seq), 4);
-END
-GO
+    The definitions are deliberately NOT duplicated here. Re-running this file after a deployment
+    would otherwise quietly put the old daily global counter back and start issuing the old format
+    again, which is the kind of regression nobody notices until the ids are already in the data.
+*/
 
 IF OBJECT_ID('dbo.LRN_Run_Log', 'U') IS NULL
 BEGIN

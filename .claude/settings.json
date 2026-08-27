@@ -9,7 +9,10 @@
       "PowerShell(sqlcmd -S \"lrnanalytics-sqlmi.public.4e3a76f4ed99.database.windows.net,3342\" -d Certus_LRN -U sqladmin -P \"Labrevnavigator@26\" -C -Q $q -W -s \"|\" -t 600)",
       "PowerShell(sqlcmd -S \"lrnanalytics-sqlmi.public.4e3a76f4ed99.database.windows.net,3342\" -d LRNMaster -U sqladmin -P \"Labrevnavigator@26\" -C -Q \"SET NOCOUNT ON; EXEC sp_GetRecentSuccessRunByLab;\" -W -s \"|\" -t 300)",
       "PowerShell(sqlcmd -S \"ReportEngine\\\\SQLEXPRESS\" -d Augustus_LRN -U sa -P \"LRN_DevAdmin@2025!\" -C -Q \"SET NOCOUNT ON; SELECT MAX\\(LEN\\(Panelname\\)\\) AS ClaimPanel, MAX\\(LEN\\(PayerName\\)\\) AS ClaimPayer, MAX\\(LEN\\(Global_Payer_ID\\)\\) AS ClaimPayerId, MAX\\(LEN\\(LabName\\)\\) AS ClaimLab FROM dbo.ClaimLevelData; SELECT MAX\\(LEN\\(Panelname\\)\\) AS LinePanel, MAX\\(LEN\\(CPTCode\\)\\) AS LineCpt, MAX\\(LEN\\(PayerName\\)\\) AS LinePayer, MAX\\(LEN\\(Payer_Common_Code\\)\\) AS LineCommon FROM dbo.LineLevelData;\" -W -s \"|\" -t 600)",
-      "PowerShell(sqlcmd -S \"lrnanalytics-sqlmi.public.4e3a76f4ed99.database.windows.net,3342\" -d LRNMaster -U sqladmin -P \"Labrevnavigator@26\" -C -Q $q -W -s \"|\" -t 300)"
+      "PowerShell(sqlcmd -S \"lrnanalytics-sqlmi.public.4e3a76f4ed99.database.windows.net,3342\" -d LRNMaster -U sqladmin -P \"Labrevnavigator@26\" -C -Q $q -W -s \"|\" -t 300)",
+      "PowerShell(git status --short | Select-Object -First 40; \"--- count ---\"; \\(git status --short | Measure-Object -Line\\).Lines; \"--- branch ---\"; git rev-parse --abbrev-ref HEAD; \"--- upstream ---\"; git rev-parse --abbrev-ref '@{u}' 2>&1)",
+      "PowerShell(sqlcmd -S \"lrnanalytics-sqlmi.public.4e3a76f4ed99.database.windows.net,3342\" -d LRNMaster -U sqladmin -P \"Labrevnavigator@26\" -C -Q $q -W -s \"|\" -t 600)",
+      "PowerShell(dotnet build 'LabMetricsDashboard\\\\LabMetricsDashboard.csproj' -v q --nologo 2>&1)"
     ]
   }
 }

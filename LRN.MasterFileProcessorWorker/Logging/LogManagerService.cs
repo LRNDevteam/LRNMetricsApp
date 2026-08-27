@@ -3,13 +3,14 @@ using log4net.Config;
 using log4net.Util;
 using System.Reflection;
 
-namespace Common.Logging
+namespace LRN.MasterFileProcessorWorker.Logging
 {
     public sealed class LogManagerService : ILoggerService
     {
         private static readonly object _sync = new();
         private static bool _configured = false;
 
+        // We log ONLY via this named logger so framework logs never appear in our file.
         private static ILog Log
         {
             get
@@ -29,9 +30,11 @@ namespace Common.Logging
 
                 var repo = log4net.LogManager.GetRepository(Assembly.GetEntryAssembly() ?? typeof(LogManagerService).Assembly);
 
+                // Ensure logs folder exists and set a safe default log path.
                 var logDir = Path.Combine(AppContext.BaseDirectory, "logs");
                 Directory.CreateDirectory(logDir);
 
+                // This value is referenced from log4net.config as %property{LogFilePath}
                 GlobalContext.Properties["LogFilePath"] = Path.Combine(logDir, "application-log.txt");
 
                 var configPath = Path.Combine(AppContext.BaseDirectory, "log4net.config");

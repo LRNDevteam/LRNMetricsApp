@@ -1,7 +1,9 @@
+using System.ClientModel;
 using System.Text;
 using System.Threading.RateLimiting;
 using Azure;
-using Azure.AI.Agents.Persistent;
+using Azure.AI.Extensions.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
@@ -11,10 +13,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 // ---------------------------------------------------------------------
 // Azure Key Vault
-// The three secrets this app needs — Foundry--ProjectEndpoint, Foundry--AgentId and
-// ChatToken--SigningKey — live in kv-lrnmetrics-prod, the same vault LabMetricsDashboard
-// already uses. Keeping them in one vault is what stops ChatToken:SigningKey from drifting
-// between the two apps: a mismatch there rejects every /api/ask call with a 401.
+// Foundry--ProjectEndpoint, Foundry--AgentId and ChatToken--SigningKey live in
+// kv-lrnmetrics-prod, the same vault LabMetricsDashboard reads. One vault is what keeps
+// ChatToken:SigningKey identical across the two apps — a mismatch there rejects every
+// /api/ask call with a 401.
 //
 // Vault secret names use "--" wherever configuration uses ":" — ChatToken--SigningKey binds
 // to ChatToken:SigningKey. That is AddAzureKeyVault's own convention, so no custom
@@ -38,21 +40,15 @@ var allowedOriginConfig = builder.Configuration["AllowedOrigin"]
     ?? throw new InvalidOperationException("AllowedOrigin is not configured.");
 var projectEndpoint = builder.Configuration["Foundry:ProjectEndpoint"]
     ?? throw new InvalidOperationException("Foundry:ProjectEndpoint is not configured.");
-var agentId = builder.Configuration["Foundry:AgentId"]
-    ?? throw new InvalidOperationException("Foundry:AgentId is not configured.");
 
-// Foundry requires the assistant id, which always begins with "asst". The agent's page in
-// ai.azure.com also shows GUIDs for other things, and pasting one of those is accepted by every
-// check above — the mistake only surfaces on the first real question, as a 400 buried inside a
-// generic 500. Startup is where a bad value should be caught, not the first user's question.
-if (!agentId.StartsWith("asst", StringComparison.OrdinalIgnoreCase))
-{
-    throw new InvalidOperationException(
-        $"Foundry:AgentId is '{agentId}', which is not an assistant id — Foundry expects a value " +
-        "beginning with 'asst'. Copy the Agent ID from ai.azure.com > your project > Agents > " +
-        "ReimbursementAnalyst. If it is held in Key Vault as Foundry--AgentId, add a new version " +
-        "there and restart this app: vault secrets are read only at startup.");
-}
+// CONFIRMED (2026-08-20): GetProjectResponsesClientForAgent(...) expects the
+// agent's internal/display NAME, not its Entra agent identity GUID.
+// Update the Foundry:AgentId app setting's VALUE in Azure App Service ->
+// Environment variables to "ReimbursementAnalysis" (the config key itself
+// stays named Foundry:AgentId — only the value changes, from the GUID
+// d64baed8-2109-4f28-81e8-6f77e7753184 to the agent name string).
+var agentIdentifier = builder.Configuration["Foundry:AgentId"]
+    ?? throw new InvalidOperationException("Foundry:AgentId is not configured.");
 
 // The chat token is a short-lived ticket your EXISTING web app issues to a
 // signed-in user; this API checks it before answering any question. The
@@ -116,7 +112,17 @@ var app = builder.Build();
 
 // DefaultAzureCredential resolves to this App Service's managed identity in
 // production, and to your `az login` session when running locally.
-var agentsClient = new PersistentAgentsClient(projectEndpoint, new DefaultAzureCredential());
+//
+// CHANGED (2026-08-20): this agent is built on Foundry's newer unified
+// architecture (Entra agent identity, Responses/A2A protocols), not the
+// classic Assistants API (Threads/Runs) that PersistentAgentsClient targets.
+// The client below talks to the Responses API instead. See the NuGet note
+// in the accompanying message for the package change this requires.
+// The property is ProjectOpenAIClient (there is no .OpenAI). GetProjectResponsesClientForAgent
+// is an extension method on it from Azure.AI.Extensions.OpenAI, and takes an AgentReference —
+// which has an implicit conversion from string, so the agent name passes straight through.
+var projectClient = new AIProjectClient(new Uri(projectEndpoint), new DefaultAzureCredential());
+var responseClient = projectClient.ProjectOpenAIClient.GetProjectResponsesClientForAgent(agentIdentifier);
 
 app.UseCors("AllowExistingSite");
 app.UseAuthentication();
@@ -134,49 +140,18 @@ app.MapPost("/api/ask", async (AskRequest request, ILogger<Program> logger) =>
 
     try
     {
-        PersistentAgentThread thread = await agentsClient.Threads.CreateThreadAsync();
+        // Responses API: a single call replaces the old
+        // create-thread / post-message / create-run / poll / read-messages
+        // sequence that the classic Threads/Runs API required.
+        var response = await responseClient.CreateResponseAsync(request.Question);
 
-        await agentsClient.Messages.CreateMessageAsync(
-            thread.Id, MessageRole.User, request.Question);
+        // CreateResponseAsync returns ClientResult<ResponseResult>; GetOutputText() is on the
+        // ResponseResult itself, so the result has to be unwrapped through .Value first.
+        string? answer = response.Value.GetOutputText();
 
-        ThreadRun run = await agentsClient.Runs.CreateRunAsync(thread.Id, agentId);
-
-        // Poll until the agent finishes reasoning and, if needed, calling its tool.
-        while (run.Status == RunStatus.Queued || run.Status == RunStatus.InProgress)
+        if (string.IsNullOrWhiteSpace(answer))
         {
-            await Task.Delay(500);
-            run = await agentsClient.Runs.GetRunAsync(thread.Id, run.Id);
-        }
-
-        if (run.Status != RunStatus.Completed)
-        {
-            logger.LogWarning(
-                "Agent run for thread {ThreadId} ended with status {Status}: {Error}",
-                thread.Id, run.Status, run.LastError?.Message);
-            return Results.Problem("The reimbursement agent could not complete this request.");
-        }
-
-        var allMessages = new List<PersistentThreadMessage>();
-        await foreach (var message in agentsClient.Messages.GetMessagesAsync(thread.Id))
-        {
-            allMessages.Add(message);
-        }
-
-        var latestAgentMessage = allMessages
-            .Where(m => m.Role == MessageRole.Agent)
-            .OrderByDescending(m => m.CreatedAt)
-            .FirstOrDefault();
-
-        string? answer = null;
-        if (latestAgentMessage is not null)
-        {
-            foreach (var content in latestAgentMessage.ContentItems)
-            {
-                if (content is MessageTextContent textContent)
-                {
-                    answer = textContent.Text;
-                }
-            }
+            logger.LogWarning("Agent returned an empty response for a question.");
         }
 
         return Results.Ok(new { answer = answer ?? "No response was returned." });
@@ -187,24 +162,32 @@ app.MapPost("/api/ask", async (AskRequest request, ILogger<Program> logger) =>
 
         // Name the failure in the response, not just in App Service's logs. Everything reaching
         // this catch looks identical from the caller's side — a managed identity with no Foundry
-        // role, a mistyped project endpoint, and an agent id that does not exist all arrive here
-        // as one opaque 500. The exception type plus the Azure status code separates them:
-        // 401/403 is access, 404 is a wrong endpoint or agent id.
+        // role, a mistyped project endpoint, and an agent name that does not exist all arrive
+        // here as one opaque 500. The exception type plus the Azure status code separates them:
+        // 401/403 is access, 404 is a wrong endpoint, 400 is a bad agent identifier.
         //
         // Safe to include: /api/ask already requires a valid signed ticket, so only a signed-in
         // user of the web app can reach this at all, and the calling app logs this detail
         // server-side rather than showing it to the person who asked the question.
-        var azureStatus = ex is RequestFailedException failed ? failed.Status : 0;
-        var diagnosis = azureStatus is 401 or 403
-            ? " This is an access failure: confirm the App Service's managed identity is enabled and "
-              + "holds the Foundry User role on the Foundry project resource."
-            : azureStatus == 404
-                ? " Not found: confirm Foundry:ProjectEndpoint and Foundry:AgentId."
-                : string.Empty;
+        var azureStatus = ex switch
+        {
+            RequestFailedException failed => failed.Status,
+            ClientResultException clientError => clientError.Status,
+            _ => 0
+        };
+
+        var diagnosis = azureStatus switch
+        {
+            401 or 403 => " This is an access failure: confirm the App Service's managed identity is "
+                          + "enabled and holds the Foundry User role on the Foundry project resource.",
+            404 => " Not found: confirm Foundry:ProjectEndpoint.",
+            400 => " Bad request: confirm Foundry:AgentId holds the agent NAME this project expects.",
+            _ => string.Empty
+        };
 
         return Results.Problem(
             $"Unable to reach the reimbursement agent. {ex.GetType().Name}"
-            + (azureStatus != 0 ? $" (Azure status {azureStatus})" : string.Empty)
+            + (azureStatus != 0 ? $" (status {azureStatus})" : string.Empty)
             + $": {ex.Message}{diagnosis}");
     }
 }).RequireAuthorization().RequireRateLimiting("PerIp");

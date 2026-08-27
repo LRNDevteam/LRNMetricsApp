@@ -7,6 +7,13 @@
     var denialReactUrl = Configuration["DenialWorkflowReactUrl"] ?? "https://localhost:5173";
     var denialReactAgingUrl = denialReactUrl.Contains('#') ? denialReactUrl : $"{denialReactUrl}#aging";
     var denialWorkflowRendered = false;
+
+    // Reimbursement Insights renders as its own full-screen page with no dashboard chrome, so it
+    // opens in a new tab rather than replacing the dashboard the user is working in — the same
+    // treatment the Denial Workflow link below already gets. Keyed on the controller because the
+    // Menu Master table has no "open in new tab" column to drive it from.
+    bool OpensInNewTab(MenuItemVm item) =>
+        string.Equals(item.ControllerName, "ReimbursementChat", StringComparison.OrdinalIgnoreCase);
 }
 @if (Model == null || Model.Count == 0)
 {
@@ -41,7 +48,9 @@ else
                                 else
                                 {
                                     <a class="dropdown-item"
-                                       href="@Url.Action(child.ActionName, child.ControllerName, new { area = child.AreaName ?? string.Empty })">
+                                       href="@Url.Action(child.ActionName, child.ControllerName, new { area = child.AreaName ?? string.Empty })"
+                                       target="@(OpensInNewTab(child) ? "_blank" : null)"
+                                       rel="@(OpensInNewTab(child) ? "noopener" : null)">
                                         <i class="bi @child.IconClass"></i> @child.MenuName
                                     </a>
                                 }
@@ -63,7 +72,9 @@ else
                 else
                 {
                     <a class="nav-link"
-                       href="@Url.Action(menu.ActionName, menu.ControllerName, new { area = menu.AreaName ?? string.Empty })">
+                       href="@Url.Action(menu.ActionName, menu.ControllerName, new { area = menu.AreaName ?? string.Empty })"
+                       target="@(OpensInNewTab(menu) ? "_blank" : null)"
+                       rel="@(OpensInNewTab(menu) ? "noopener" : null)">
                         <i class="bi @menu.IconClass"></i> @menu.MenuName
                     </a>
                 }

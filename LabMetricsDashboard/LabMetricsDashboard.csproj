@@ -13,6 +13,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Same reasoning as the lab configs below: appsettings.Local.json holds this machine's
+         secrets, and the Web SDK's default content glob was publishing it. That shipped a
+         developer's copy of the production connection strings AND that machine's blank
+         KeyVault:Uri, which silently switches Key Vault off on the server it lands on.
+         Keep it in the build output for local debugging; never ship it. -->
+    <Content Update="appsettings.Local.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Lab configs are loaded at runtime from LabConfigFolder (appsettings.json).
          Do NOT bake a per-lab config into the build output: it ships a stale copy
          (and a plaintext DB password) into the web root and, when LabConfigFolder
@@ -22,6 +31,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Azure.Extensions.AspNetCore.Configuration.Secrets" Version="1.5.2" />
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
     <PackageReference Include="ClosedXML" Version="0.104.2" />
     <PackageReference Include="CsvHelper" Version="33.0.1" />
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.1.1" />
@@ -39,8 +50,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\LRN.ProductionReports\LRN.ProductionReports.csproj"
-                      SetTargetFramework="TargetFramework=net9.0">
+    <ProjectReference Include="..\LRN.ProductionReports\LRN.ProductionReports.csproj" SetTargetFramework="TargetFramework=net9.0">
       <Private>True</Private>
       <CopyLocalSatelliteAssemblies>true</CopyLocalSatelliteAssemblies>
       <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
@@ -59,8 +69,7 @@
   <ProjectExtensions><VisualStudio><UserProperties /></VisualStudio></ProjectExtensions>
 
   <ItemGroup>
-    <ProjectReference Include="..\LRN.ProductionReports\LRN.ProductionReports.csproj"
-                      SetTargetFramework="TargetFramework=net9.0">
+    <ProjectReference Include="..\LRN.ProductionReports\LRN.ProductionReports.csproj" SetTargetFramework="TargetFramework=net9.0">
       <Private>True</Private>
       <CopyLocalSatelliteAssemblies>true</CopyLocalSatelliteAssemblies>
       <ReferenceOutputAssembly>true</ReferenceOutputAssembly>

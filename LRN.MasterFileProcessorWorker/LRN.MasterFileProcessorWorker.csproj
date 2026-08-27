@@ -1,27 +1,22 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Worker">
+<Project Sdk="Microsoft.NET.Sdk.Worker">
 
 	<PropertyGroup>
 		<TargetFramework>net8.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<LangVersion>latest</LangVersion>
+		<RootNamespace>LRN.MasterFileProcessorWorker</RootNamespace>
+		<UserSecretsId>lrn-masterfileprocessor</UserSecretsId>
 	</PropertyGroup>
 
-
 	<!--
-    IMPORTANT:
-    This project contains an older (production) pipeline based on ImportOptions/LabFileMap
-    (MasterFileProcessorWorker.cs) and an experimental orchestrator pipeline.
-    To keep the existing config + schema shape, we compile ONLY the production pipeline.
-  -->
+		This service is self-contained on purpose: it has NO ProjectReference to any other project
+		in the repository. The small amount of code it used to share (log4net wrapper, Excel schema
+		validator, Teams/SMTP notifiers, SharePoint Graph client, ImportOptions) now lives in this
+		project under Logging/, ExcelValidation/, Notifications/, SharePoint/ and Configuration/.
+	-->
 	<ItemGroup>
-		<Compile Remove="Options\**\*.cs" />
-		<Compile Remove="Schema\**\*.cs" />
-		<Compile Remove="Processing\**\*.cs" />
-		<Compile Remove="Services\**\*.cs" />
-		<Compile Remove="Worker.cs" />
-	</ItemGroup>
-	<ItemGroup>
+		<!-- Hosting / configuration -->
 		<PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.3" />
 		<PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.3" />
 		<PackageReference Include="Microsoft.Extensions.Http" Version="10.0.3" />
@@ -29,34 +24,52 @@
 		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.3" />
 		<PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.3" />
 
-		<PackageReference Include="log4net" Version="2.0.17" />
+		<!-- Secrets: every connection string and the SharePoint app registration come from Key Vault -->
+		<PackageReference Include="Azure.Extensions.AspNetCore.Configuration.Secrets" Version="1.3.2" />
+		<PackageReference Include="Azure.Identity" Version="1.18.0" />
+
+		<!-- SQL bulk copy and all repositories -->
+		<PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.4" />
+
+		<!-- Excel: ClosedXML + OpenXml write workbooks, ExcelDataReader reads headers -->
+		<PackageReference Include="ClosedXML" Version="0.102.3" />
+		<PackageReference Include="DocumentFormat.OpenXml" Version="2.20.0" />
 		<PackageReference Include="ExcelDataReader" Version="3.6.0" />
 		<PackageReference Include="ExcelDataReader.DataSet" Version="3.6.0" />
-		<PackageReference Include="MailKit" Version="4.14.1" />
-		<PackageReference Include="Azure.Identity" Version="1.17.1" />
 
-		<PackageReference Include="DocumentFormat.OpenXml" Version="2.20.0" />
-		<PackageReference Include="ClosedXML" Version="0.102.3" />
-		<PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.0" />
-		<PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.0" />
+		<!-- Application log file -->
+		<PackageReference Include="log4net" Version="2.0.17" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<None Update="appsettings.json">
+		<!-- appsettings*.json arrive as Content items from the Worker SDK, so they need Content Update. -->
+		<Content Update="appsettings.json">
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
-		</None>
+		</Content>
+		<!-- Gitignored, and absent on a clean clone; the JSON provider loads it as optional. -->
+		<Content Update="appsettings.Secrets.json">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</Content>
+		<!-- Documentation only: must never reach the output folder. -->
+		<Content Update="appsettings.Secrets.example.json">
+			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
+		</Content>
 		<None Update="log4net.config">
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
 		</None>
-		<None Update="schemas\**\*.json">
+		<None Update="Schemas\**\*.json">
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
 		</None>
 	</ItemGroup>
 
-	<ProjectExtensions>
-		<VisualStudio>
-			<UserProperties appsettings_1json__JsonSchema="" />
-		</VisualStudio>
-	</ProjectExtensions>
+	<!-- Reference material only: never compiled, never copied to the output folder. -->
+	<ItemGroup>
+		<None Remove="Sample\**" />
+		<None Remove="sql\**" />
+		<Content Remove="Sample\**" />
+		<Content Remove="sql\**" />
+		<None Include="Sample\**" CopyToOutputDirectory="Never" />
+		<None Include="sql\**" CopyToOutputDirectory="Never" />
+	</ItemGroup>
 
 </Project>

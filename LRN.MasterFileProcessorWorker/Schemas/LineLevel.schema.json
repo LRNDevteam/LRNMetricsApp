@@ -433,6 +433,10 @@
 			]
 		},
 		{
+			"Name": "LineLevelUID",
+			"DataType": "string"
+		},
+		{
 			"Name": "Source",
 			"DataType": "string"
 		}

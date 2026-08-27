@@ -425,6 +425,10 @@
 			"Aliases": [
 				"Aging DOE"
 			]
+		},
+		{
+			"Name": "ClaimUID",
+			"DataType": "string"
 		}
 	]
 }

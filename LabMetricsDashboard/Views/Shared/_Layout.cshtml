@@ -1,6 +1,11 @@
 @using LabMetricsDashboard.Models
 @inject LabSettings LabSettingsInstance
 @inject IConfiguration Configuration
+@* Same source of truth the navbar uses, so the Reimbursement Insights shortcuts below are
+   hidden from roles that have no mapping for it — otherwise the icon would open a new tab
+   only for MenuAccessFilter to bounce it to the login page. Fails open exactly as the menu
+   does when the Reports API is unavailable. *@
+@inject LabMetricsDashboard.Services.IMenuService MenuService
 <!DOCTYPE html>
 <html lang="en">
 
@@ -367,6 +372,28 @@
         .nav-bell-btn:hover { background: rgba(255,255,255,.12); }
         #rptBtn { color: #FBBF24; }
         #rptBtn:hover { background: rgba(251,191,36,.16); }
+        /* Reimbursement Insights launcher. Same bare-glyph treatment as the bell and the reports
+           badge — that is what actually reads against this bar. A translucent white disc was
+           tried and failed: over the #1565c0 end of the gradient it renders as pale grey, and a
+           white glyph on pale grey has almost no contrast.
+           Colour matches the robot in the Reimbursement Insights page header (.rc-title i), so the
+           launcher and the screen it opens are visibly the same feature. Kept a step larger than
+           its neighbours because bi-robot is an outline glyph with thinner strokes than the
+           filled bell, and this blue sits closer to the bar than white or amber do. */
+        .nav-agent-btn {
+            color: #64b5f6;
+            font-size: 1.2rem;
+            text-decoration: none;
+        }
+
+        /* Background on hover comes from .nav-bell-btn:hover, so the highlight shape matches
+           its neighbours exactly; only the glyph colour is brightened here. */
+        .nav-agent-btn:hover { color: #BBDEFB; }
+
+        .nav-agent-btn:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(100,181,246,.5);
+        }
         .nav-bell-badge { position: absolute; top: 0; right: 0; background: #E4572E; color: #fff; border-radius: 999px; font-size: .62rem; font-weight: 800; padding: 1px 5px; line-height: 1.2; }
         .nav-bell-panel { display: none; position: absolute; right: 0; top: calc(100% + 8px); width: 340px; background: #fff; color: #1F2937; border: 1px solid #d9e2ef; border-radius: 10px; box-shadow: 0 18px 40px rgba(15,23,42,.25); z-index: 1060; overflow: hidden; }
         .nav-bell-panel .nb-title { font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: #64748b; padding: 10px 12px 4px; }
@@ -883,6 +910,13 @@
                 }
             }
 
+            // Reimbursement Insights opens in its own tab (it renders full-screen with no
+            // dashboard chrome). Read once here and shared with _HelpBotWidget through ViewData
+            // below, so the permission check runs a single time per page rather than per widget.
+            var canUseReimbursementChat = (User?.Identity?.IsAuthenticated ?? false)
+                && await MenuService.CanAccessAsync(User, null, "ReimbursementChat", "Index", Context.RequestAborted);
+            ViewData["CanUseReimbursementChat"] = canUseReimbursementChat;
+
             // Get lab-specific feature toggles
             LabCsvConfig? labConfig = null;
             if (!string.IsNullOrEmpty(activeLab) && LabSettingsInstance.Labs.ContainsKey(activeLab))
@@ -951,6 +985,21 @@
                             <a class="nb-footer" href="@Url.Action("Index", "UserReports")">View all reports</a>
                         </div>
                     </span>
+                }
+                @if (canUseReimbursementChat)
+                {
+                    @* 🤖 Reimbursement Insights — opens the full-screen agent chat in a new tab so
+                       the dashboard the user is working in stays where it is. Unlike the bell and
+                       reports badges this has no panel: it is a straight launcher. *@
+                    @* .nav-bell-btn supplies the shared sizing, padding and hover shape so this
+                       sits identically to the bell and reports icons beside it. *@
+                    <a class="nav-bell-btn nav-agent-btn"
+                       href="@Url.Action("Index", "ReimbursementChat")"
+                       target="_blank" rel="noopener"
+                       aria-label="Reimbursement Insights - ask the AI agent, opens in a new tab"
+                       title="Reimbursement Insights — ask the AI agent (opens in a new tab)">
+                        <i class="bi bi-robot"></i>
+                    </a>
                 }
                 @if (User?.Identity?.IsAuthenticated ?? false)
                 {

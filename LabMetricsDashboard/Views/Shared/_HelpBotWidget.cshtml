@@ -161,6 +161,60 @@
         font-style: italic;
         align-self: flex-start;
     }
+
+    /* Reimbursement Insights launcher.
+       Deliberately NOT styled like .helpbot-suggestion-btn: those ask this bot a question,
+       this one leaves for a different application in a new tab. The gradient, the robot and
+       the box-arrow all signal "this navigates away". */
+    .helpbot-agent-link {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin-top: 4px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 60%, #1565c0 100%);
+        color: #fff;
+        text-decoration: none;
+        transition: filter .15s, transform .15s;
+    }
+
+    .helpbot-agent-link:hover {
+        filter: brightness(1.15);
+        transform: translateY(-1px);
+        color: #fff;
+    }
+
+    .helpbot-agent-icon {
+        flex: 0 0 auto;
+        font-size: 1.15rem;
+        color: #7DD3FC;
+    }
+
+    .helpbot-agent-text {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .helpbot-agent-title {
+        display: block;
+        font-size: .82rem;
+        font-weight: 700;
+        line-height: 1.25;
+    }
+
+    .helpbot-agent-sub {
+        display: block;
+        font-size: .69rem;
+        color: rgba(255, 255, 255, .72);
+        line-height: 1.35;
+    }
+
+    .helpbot-agent-link .bi-box-arrow-up-right {
+        flex: 0 0 auto;
+        font-size: .78rem;
+        opacity: .7;
+    }
 </style>
 
 <!-- Floating Action Button -->
@@ -178,6 +232,22 @@
         <div class="helpbot-msg bot">
             <i class="bi bi-hand-wave" style="margin-right:4px;"></i> Hi! I'm the LRN Help Bot. Ask me anything about this application — coding validation, claim data, predictions, and more.
         </div>
+        @* Reimbursement figures are not this bot's job — it answers questions about how the
+           application works. Rather than fail those questions, hand them to the agent that can.
+           Visibility flag is set by _Layout, the only view that renders this partial. *@
+        @if (ViewData["CanUseReimbursementChat"] is true)
+        {
+            <a class="helpbot-agent-link"
+               href="@Url.Action("Index", "ReimbursementChat")"
+               target="_blank" rel="noopener">
+                <i class="bi bi-robot helpbot-agent-icon"></i>
+                <span class="helpbot-agent-text">
+                    <span class="helpbot-agent-title">Ask about reimbursement rates</span>
+                    <span class="helpbot-agent-sub">Average, median &amp; mode by CPT, panel or payer</span>
+                </span>
+                <i class="bi bi-box-arrow-up-right"></i>
+            </a>
+        }
         <div class="helpbot-suggestions" id="helpbotInitSuggestions"></div>
     </div>
     <div class="helpbot-footer">

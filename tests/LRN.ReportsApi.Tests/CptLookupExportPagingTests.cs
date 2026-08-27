@@ -8,9 +8,13 @@ namespace LRN.ReportsApi.Tests;
 /// Guards the CPT / Panel export row count.
 ///
 /// The export used to route through the public GetCptAsync, which normalises against
-/// MaxPageSize (1,000). It set PageSize to the 100,000-row export cap first, but the clamp
-/// pulled it straight back down, so every export — filtered or not — silently stopped at
-/// 1,000 rows and looked like a complete file.
+/// MaxPageSize (1,000). It set PageSize to the export cap first, but the clamp pulled it
+/// straight back down, so every export — filtered or not — silently stopped at 1,000 rows
+/// and looked like a complete file.
+///
+/// The cap itself was the second half of the same bug: at 100,000 it cut a ~300k-row
+/// whole-table extract to a third, again without any sign in the workbook. It is now Excel's
+/// own sheet limit, so the only thing that shortens an export is a filter.
 /// </summary>
 public class CptLookupExportPagingTests
 {
@@ -38,7 +42,24 @@ public class CptLookupExportPagingTests
         // If these ever converge, exports are truncated again and the tests above still pass.
         Assert.True(SqlCptLookupRepository.MaxExportRows > SqlCptLookupRepository.MaxPageSize,
             "Export cap must exceed the UI page limit, or exports truncate at one page.");
-        Assert.Equal(100_000, SqlCptLookupRepository.MaxExportRows);
+    }
+
+    [Fact]
+    public void The_export_cap_is_excels_sheet_limit_not_a_policy_number()
+    {
+        // 1,048,576 rows per sheet, one of them the header. Above this the workbook cannot be
+        // written; below it the cap starts silently dropping rows off the end of a full extract
+        // (CPTAverage / PanelAverage are ~300k rows, which the old 100,000 cap cut to a third).
+        Assert.Equal(1_048_575, SqlCptLookupRepository.MaxExportRows);
+    }
+
+    [Fact]
+    public void The_export_cap_clears_a_full_table_extract()
+    {
+        // The tables the export reads are in the hundreds of thousands of rows; a cap at or below
+        // that truncates every unfiltered export into a file that still looks complete.
+        Assert.True(SqlCptLookupRepository.MaxExportRows > 300_000,
+            "Export cap must clear a whole-table extract, or unfiltered exports truncate silently.");
     }
 
     [Theory]

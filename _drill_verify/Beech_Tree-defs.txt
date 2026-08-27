@@ -1,5 +1,0 @@
-﻿DEFS|31|LIS=19|PMS=12
-KEYLIS|A|Total Samples
-KEYPMS|U|Fully Paid - Insurance Pay
-SPLIS|17
-SPPMS|18

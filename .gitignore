@@ -6,7 +6,21 @@ obj/
 /LRN.WebUI/node_modules
 /LRN.WebUI/dist
 /scripts/Analyze-Biggest-Local.ps1
+
+# Throwaway run output: build logs, drill-deploy/verify logs, extraction parts.
+# Everything worth keeping was pulled out into SQL_Scripts/ and docs/ first.
+/_artifacts/
 /LRN.ReportWorker/Properties/PublishProfiles/FolderProfile.pubxml
 
 # Billing agent secrets — never commit credentials
 /BillingAgent/credentials.local.json
+
+# Per-machine secrets. Both Program.cs files describe these as gitignored, but the rule was
+# missing — LabMetricsDashboard/appsettings.Local.json holds every production connection string
+# and the JWT signing key, and a `git add -A` would have committed it.
+appsettings.Local.json
+
+# Same story: LRN.MasterFileProcessorWorker.csproj calls appsettings.Secrets.json "gitignored, and
+# absent on a clean clone", but the rule was missing and the SharePoint app-registration secret was
+# committed. The tracked template is appsettings.Secrets.example.json — keep real values out.
+appsettings.Secrets.json

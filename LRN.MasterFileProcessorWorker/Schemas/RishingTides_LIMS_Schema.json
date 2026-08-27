@@ -151,15 +151,13 @@
 			"ExcelColName": "AMD DOE",
 			"Required": false,
 			"DataType": "string",
-			"SQLColName": "AMDDOE",
-			"ParseAsDate": true
+			"SQLColName": "AMDDOE"
 		},
 		{
 			"ExcelColName": "AMD LBD",
 			"Required": false,
 			"DataType": "string",
-			"SQLColName": "AMDLBD",
-			"ParseAsDate": true
+			"SQLColName": "AMDLBD"
 		},
 		{
 			"ExcelColName": "Time to Bill",

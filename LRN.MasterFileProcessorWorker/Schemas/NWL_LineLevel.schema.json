@@ -1,21 +1,31 @@
 {
 	"SchemaName": "NWL_LineLevel",
 	"HeaderRow": 1,
+	"_comment": "NorthWest ships line level twice in one workbook: a Webpm sheet and a Daq sheet from two different billing systems. Both sheets carry the same data under different headers, and the exporter merges them into one CSV whose header is the union of both. Each column below therefore lists BOTH spellings - Name is the Webpm header, Aliases carry the Daq equivalent (and any other spelling seen in the wild). Every spelling in one column entry is treated as interchangeable, and each row takes the value from whichever of them its own sheet filled in. To support a renamed column, add the new spelling to that column's Aliases - no code change is needed.",
 	"Columns": [
 		{
 			"Name": "Enc",
 			"Required": true,
-			"DataType": "string"
+			"DataType": "string",
+			"Aliases": [ "Proc-Encounter #", "Proc Encounter #", "Encounter #", "Encounter Number" ]
 		},
 		{
 			"Name": "Acc",
 			"Required": true,
-			"DataType": "string"
+			"DataType": "string",
+			"Aliases": [ "Proc-Superbill", "Proc Superbill", "Superbill", "Superbill #" ]
 		},
 		{
 			"Name": "Payer",
 			"Required": true,
-			"DataType": "string"
+			"DataType": "string",
+			"Aliases": [ "Primary Carrier Name", "Primary Carrier", "Carrier Name" ]
+		},
+		{
+			"Name": "Subscriber Id",
+			"Required": false,
+			"DataType": "string",
+			"Aliases": [ "Primary Carrier Policy Number", "Policy Number", "Subscriber ID" ]
 		},
 		{
 			"Name": "Proc-Referring Dr Name",
@@ -33,9 +43,16 @@
 			"DataType": "string"
 		},
 		{
+			"Name": "Loc",
+			"Required": false,
+			"DataType": "string",
+			"Aliases": [ "Proc-Location Desc", "Proc Location Desc", "Location Desc" ]
+		},
+		{
 			"Name": "Pat id",
 			"Required": false,
-			"DataType": "string"
+			"DataType": "string",
+			"Aliases": [ "Proc-Patient Acct Number", "Proc Patient Acct Number", "Patient Acct Number", "Patient Account Number" ]
 		},
 		{
 			"Name": "Patient Birth Date",
@@ -45,7 +62,8 @@
 		{
 			"Name": "DOS",
 			"Required": true,
-			"DataType": "date"
+			"DataType": "date",
+			"Aliases": [ "Proc-Date of Service", "Proc Date of Service", "Date of Service" ]
 		},
 		{
 			"Name": "Entered Date",
@@ -65,17 +83,26 @@
 		{
 			"Name": "CPT",
 			"Required": true,
-			"DataType": "string"
+			"DataType": "string",
+			"Aliases": [ "Proc-CPT Code", "Proc CPT Code", "CPT Code" ]
 		},
 		{
 			"Name": "Units",
 			"Required": true,
-			"DataType": "int"
+			"DataType": "int",
+			"Aliases": [ "Proc-CPT Units per CPT", "Proc CPT Units per CPT", "CPT Units per CPT", "Units per CPT" ]
 		},
 		{
 			"Name": "Mod",
 			"Required": true,
-			"DataType": "string"
+			"DataType": "string",
+			"Aliases": [ "Proc-Modifier 1", "Proc Modifier 1", "Modifier 1" ]
+		},
+		{
+			"Name": "Proc",
+			"Required": false,
+			"DataType": "string",
+			"Aliases": [ "Proc-Billing Group Desc", "Proc Billing Group Desc", "Billing Group Desc" ]
 		},
 		{
 			"Name": "Proc-Charge Amount $",
@@ -90,12 +117,14 @@
 		{
 			"Name": "Pat Payments",
 			"Required": true,
-			"DataType": "decimal"
+			"DataType": "decimal",
+			"Aliases": [ "Proc-Total Patient Payments $", "Proc Total Patient Payments $", "Total Patient Payments $" ]
 		},
 		{
 			"Name": "Proc-Adjustment $",
 			"Required": false,
-			"DataType": "decimal"
+			"DataType": "decimal",
+			"Aliases": [ "Proc-Total Adjustments $", "Proc Total Adjustments $", "Total Adjustments $" ]
 		},
 		{
 			"Name": "Proc-Ins Balance",
@@ -110,7 +139,8 @@
 		{
 			"Name": "Posted date",
 			"Required": true,
-			"DataType": "date"
+			"DataType": "date",
+			"Aliases": [ "Proc-Pmt Acct Date", "Proc Pmt Acct Date", "Pmt Acct Date" ]
 		},
 		{
 			"Name": "Combined Claim Level Denial code",

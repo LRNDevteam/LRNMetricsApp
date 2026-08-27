@@ -1,0 +1,474 @@
+@model ReimbursementChatViewModel
+@{
+    // Standalone page: no _Layout, no navbar, no breadcrumb, no footer. The chat is opened in
+    // its own tab from the menu and owns the whole viewport, so the dashboard chrome would only
+    // steal vertical space from the conversation. The one way back is the button in the header.
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reimbursement Insights - Lab Revenue Intelligence</title>
+    @* Only the icon font is borrowed from the shared assets. Everything else is self-contained
+       so this page cannot be knocked about by future edits to site.css or the layout. *@
+    <link rel="stylesheet" href="~/lib/bootstrap-icons/font/bootstrap-icons.min.css" />
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+
+        html, body {
+            height: 100%;
+            margin: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f7f9fc;
+            color: #1a1a2e;
+            /* Column layout pinned to the viewport: only the message list scrolls, so the
+               header and the input row stay put however long the conversation gets. */
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* ── Brand header ────────────────────────────────────────────── */
+        .rc-topbar {
+            flex: 0 0 auto;
+            background: linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 60%, #1565c0 100%);
+            box-shadow: 0 2px 12px rgba(0, 0, 0, .35);
+            padding: .7rem 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .rc-topbar img {
+            height: 34px;
+            width: auto;
+            object-fit: contain;
+        }
+
+        .rc-brand-divider {
+            width: 1px;
+            height: 30px;
+            background: rgba(255, 255, 255, .22);
+        }
+
+        .rc-title {
+            color: #fff;
+            font-weight: 700;
+            font-size: 1.02rem;
+            line-height: 1.25;
+            display: flex;
+            align-items: center;
+            gap: .5rem;
+        }
+
+        .rc-title i { color: #64b5f6; font-size: 1.2rem; }
+
+        .rc-subtitle {
+            color: rgba(255, 255, 255, .68);
+            font-size: .75rem;
+        }
+
+        .rc-spacer { flex: 1 1 auto; }
+
+        .rc-back {
+            display: inline-flex;
+            align-items: center;
+            gap: .45rem;
+            background: rgba(255, 255, 255, .12);
+            border: 1px solid rgba(255, 255, 255, .28);
+            border-radius: 20px;
+            padding: .38rem 1rem;
+            color: #fff;
+            font-size: .82rem;
+            font-weight: 600;
+            text-decoration: none;
+            white-space: nowrap;
+            transition: background .15s, border-color .15s;
+        }
+
+        .rc-back:hover {
+            background: rgba(255, 255, 255, .22);
+            border-color: rgba(255, 255, 255, .45);
+            color: #fff;
+        }
+
+        .rc-back:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(100, 181, 246, .45);
+        }
+
+        /* ── Conversation ────────────────────────────────────────────── */
+        .rc-body {
+            flex: 1 1 auto;
+            overflow-y: auto;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: .85rem;
+        }
+
+        .rc-msg {
+            max-width: min(900px, 82%);
+            padding: .85rem 1.1rem;
+            border-radius: 14px;
+            font-size: .88rem;
+            line-height: 1.6;
+            /* The agent replies with a per-lab, per-payer breakdown whose line breaks carry
+               the structure — preserve them rather than reflowing into a paragraph. */
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .rc-msg-user {
+            align-self: flex-end;
+            background: linear-gradient(135deg, #1565c0, #1976d2);
+            color: #fff;
+            border-bottom-right-radius: 4px;
+        }
+
+        .rc-msg-agent {
+            align-self: flex-start;
+            background: #fff;
+            border: 1px solid #e4eaf3;
+            border-bottom-left-radius: 4px;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, .04);
+        }
+
+        .rc-msg-agent strong { color: #0d1b2a; font-weight: 700; }
+
+        .rc-msg-error {
+            align-self: flex-start;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
+        }
+
+        .rc-typing {
+            align-self: flex-start;
+            display: flex;
+            align-items: center;
+            gap: .55rem;
+            font-size: .84rem;
+            color: #64748b;
+            font-style: italic;
+        }
+
+        .rc-spinner {
+            width: 15px;
+            height: 15px;
+            border: 2px solid #cbd5e1;
+            border-top-color: #1565c0;
+            border-radius: 50%;
+            animation: rc-spin .7s linear infinite;
+        }
+
+        @@keyframes rc-spin { to { transform: rotate(360deg); } }
+
+        .rc-starters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .4rem;
+            margin-top: .6rem;
+        }
+
+        .rc-starter {
+            background: #e3f2fd;
+            border: 1px solid #90caf9;
+            border-radius: 999px;
+            padding: .32rem .9rem;
+            font-size: .78rem;
+            color: #1565c0;
+            cursor: pointer;
+            font-family: inherit;
+            transition: background .15s;
+        }
+
+        .rc-starter:hover { background: #bbdefb; }
+
+        /* ── Composer ────────────────────────────────────────────────── */
+        .rc-footer {
+            flex: 0 0 auto;
+            border-top: 1px solid #e4eaf3;
+            background: #fff;
+            padding: .85rem 1.5rem 1rem;
+        }
+
+        .rc-input-row {
+            display: flex;
+            gap: .6rem;
+            align-items: flex-end;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .rc-input {
+            flex: 1 1 auto;
+            border: 1px solid #cfd8dc;
+            border-radius: 10px;
+            padding: .65rem .9rem;
+            font-size: .9rem;
+            font-family: inherit;
+            line-height: 1.5;
+            resize: none;
+            outline: none;
+            max-height: 160px;
+            transition: border-color .15s;
+        }
+
+        .rc-input:focus { border-color: #1565c0; }
+
+        .rc-send {
+            display: inline-flex;
+            align-items: center;
+            gap: .4rem;
+            background: #1565c0;
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            padding: .65rem 1.3rem;
+            font-size: .9rem;
+            font-family: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background .15s;
+        }
+
+        .rc-send:hover:not(:disabled) { background: #0d47a1; }
+        .rc-send:disabled { background: #90a4ae; cursor: not-allowed; }
+
+        .rc-hint {
+            max-width: 1400px;
+            margin: .45rem auto 0;
+            font-size: .72rem;
+            color: #94a3b8;
+        }
+
+        /* ── Not-configured notice ───────────────────────────────────── */
+        .rc-notice {
+            margin: 2rem auto;
+            max-width: 640px;
+            background: #fffbeb;
+            border: 1px solid #fde68a;
+            border-radius: 12px;
+            padding: 1.1rem 1.3rem;
+            display: flex;
+            gap: .8rem;
+            align-items: flex-start;
+        }
+
+        .rc-notice i { color: #b45309; font-size: 1.2rem; margin-top: .1rem; }
+        .rc-notice-title { font-weight: 700; color: #78350f; margin-bottom: .3rem; }
+        .rc-notice-text { font-size: .85rem; color: #92400e; line-height: 1.55; }
+        .rc-notice code {
+            background: #fef3c7;
+            border-radius: 4px;
+            padding: .05rem .3rem;
+            font-size: .82rem;
+        }
+
+        @@media (max-width: 640px) {
+            .rc-topbar { padding: .6rem .9rem; gap: .65rem; }
+            .rc-subtitle, .rc-brand-divider { display: none; }
+            .rc-body { padding: 1rem; }
+            .rc-msg { max-width: 92%; }
+            .rc-footer { padding: .7rem .9rem .85rem; }
+        }
+    </style>
+</head>
+<body>
+    <header class="rc-topbar">
+        <img src="~/images/LRN-White-Logo-footer-1-1.png" alt="LRN" />
+        <div class="rc-brand-divider"></div>
+        <div>
+            <div class="rc-title"><i class="bi bi-robot"></i>Reimbursement Insights</div>
+            <div class="rc-subtitle">Figures come straight from the reimbursement data — the agent never estimates them.</div>
+        </div>
+        <div class="rc-spacer"></div>
+        @* This page is opened in its own tab, so window.close() would be blocked by the browser
+           (it was not opened by script). A plain link back to the dashboard is what actually
+           works, and leaves the user somewhere useful. *@
+        <a class="rc-back" href="@Url.Action("Index", "ReportBoard")">
+            <i class="bi bi-arrow-left"></i> Back to Dashboard
+        </a>
+    </header>
+
+    @if (!Model.IsConfigured)
+    {
+        <div class="rc-notice">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <div>
+                <div class="rc-notice-title">The reimbursement agent is not configured for this environment.</div>
+                <div class="rc-notice-text">
+                    An administrator needs to set <code>ReimbursementAgent:BaseUrl</code> and the shared
+                    <code>ChatToken:SigningKey</code> before this screen can answer questions.
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <span id="rcAntiforgery" hidden>@Html.AntiForgeryToken()</span>
+
+        <main class="rc-body" id="rcBody" role="log" aria-live="polite" aria-label="Conversation">
+            <div class="rc-msg rc-msg-agent">Hi! Ask me about average, median or mode reimbursement for a CPT code, a panel, or a specific payer. Results are broken out by lab and payer, with the pricing window stated for each.<div class="rc-starters" id="rcStarters">@foreach (var prompt in Model.StarterPrompts)
+                    {<button type="button" class="rc-starter" data-prompt="@prompt">@prompt</button>}</div>
+            </div>
+        </main>
+
+        <div class="rc-footer">
+            <div class="rc-input-row">
+                <textarea class="rc-input" id="rcInput" rows="1"
+                          placeholder="e.g. Average reimbursement for 87506 from Cigna"
+                          aria-label="Ask the reimbursement agent a question"
+                          maxlength="1000"></textarea>
+                <button type="button" class="rc-send" id="rcSend">
+                    <i class="bi bi-send-fill"></i> Ask
+                </button>
+            </div>
+            <div class="rc-hint">
+                Enter to send, Shift+Enter for a new line. Answers can take up to a minute while the
+                agent queries the data.
+            </div>
+        </div>
+
+        <script nonce='@Context.Items["CspNonce"]'>
+            (function () {
+                'use strict';
+
+                var askUrl = '@Url.Action("Ask", "ReimbursementChat")';
+                var body = document.getElementById('rcBody');
+                var input = document.getElementById('rcInput');
+                var sendBtn = document.getElementById('rcSend');
+                var starters = document.getElementById('rcStarters');
+                var isSending = false;
+
+                function antiforgeryToken() {
+                    var field = document.querySelector('#rcAntiforgery input[name="__RequestVerificationToken"]');
+                    return field ? field.value : '';
+                }
+
+                function scrollToBottom() {
+                    body.scrollTop = body.scrollHeight;
+                }
+
+                function escapeHtml(value) {
+                    return String(value == null ? '' : value).replace(/[&<>"']/g, function (ch) {
+                        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
+                    });
+                }
+
+                // The agent labels its six metrics in markdown-style bold. Escape first, then
+                // promote only that one pattern — so nothing the agent returns can inject markup.
+                function formatAnswer(text) {
+                    return escapeHtml(text).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+                }
+
+                function appendMessage(kind, text) {
+                    var el = document.createElement('div');
+                    el.className = 'rc-msg rc-msg-' + kind;
+                    if (kind === 'agent') {
+                        el.innerHTML = formatAnswer(text);
+                    } else {
+                        el.textContent = text;
+                    }
+                    body.appendChild(el);
+                    scrollToBottom();
+                    return el;
+                }
+
+                function appendTyping() {
+                    var el = document.createElement('div');
+                    el.className = 'rc-typing';
+                    el.innerHTML = '<span class="rc-spinner" role="status" aria-hidden="true"></span>' +
+                        '<span>Checking the reimbursement data…</span>';
+                    body.appendChild(el);
+                    scrollToBottom();
+                    return el;
+                }
+
+                function autoGrow() {
+                    input.style.height = 'auto';
+                    input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+                }
+
+                async function ask() {
+                    var question = input.value.trim();
+                    if (!question || isSending) return;
+
+                    if (starters) starters.style.display = 'none';
+
+                    appendMessage('user', question);
+                    input.value = '';
+                    autoGrow();
+
+                    isSending = true;
+                    sendBtn.disabled = true;
+                    var typing = appendTyping();
+
+                    try {
+                        var response = await fetch(askUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'RequestVerificationToken': antiforgeryToken()
+                            },
+                            body: JSON.stringify({ question: question })
+                        });
+
+                        var payload = null;
+                        try { payload = await response.json(); } catch (e) { /* non-JSON error body */ }
+
+                        typing.remove();
+
+                        if (response.ok && payload && payload.answer) {
+                            appendMessage('agent', payload.answer);
+                        } else if (response.status === 429) {
+                            appendMessage('error', 'You have asked several questions in quick succession. Please wait a moment and try again.');
+                        } else if (response.status === 401 || response.status === 403) {
+                            appendMessage('error', 'Your session has expired. Please reload the page and sign in again.');
+                        } else {
+                            appendMessage('error', (payload && payload.error) ||
+                                'Something went wrong reaching the reimbursement agent. Please try again.');
+                        }
+                    } catch (e) {
+                        typing.remove();
+                        appendMessage('error', 'The request could not be sent. Check your connection and try again.');
+                    } finally {
+                        isSending = false;
+                        sendBtn.disabled = false;
+                        input.focus();
+                    }
+                }
+
+                sendBtn.addEventListener('click', ask);
+
+                input.addEventListener('input', autoGrow);
+                input.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        ask();
+                    }
+                });
+
+                if (starters) {
+                    starters.addEventListener('click', function (e) {
+                        var btn = e.target.closest('.rc-starter');
+                        if (!btn) return;
+                        input.value = btn.getAttribute('data-prompt');
+                        autoGrow();
+                        ask();
+                    });
+                }
+
+                input.focus();
+            })();
+        </script>
+    }
+</body>
+</html>

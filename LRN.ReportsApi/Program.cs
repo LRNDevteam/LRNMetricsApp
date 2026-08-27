@@ -3,13 +3,14 @@ using LRN.ReportsApi.Services;
 using LRN.ReportsApi.Security;
 using System.Security.Claims;
 using System.IO.Compression;
+using Azure.Identity;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Data.SqlClient;
 
 // Utility mode: LRN.ReportsApi.exe --hash-secret <secret>
 // Prints the ExternalApiClients:Clients[].SecretHash verifier for an external API client and
 // exits. It runs the same ApiSecretHasher the token endpoint verifies with, so the generated
-// value cannot drift from what the server accepts. See docs/ExternalApiAccess_Guide.md.
+// value cannot drift from what the server accepts. See docs/external-api/ExternalApiAccess_Guide.md.
 if (args.Length >= 1 && args[0].Equals("--hash-secret", StringComparison.OrdinalIgnoreCase))
 {
     if (args.Length < 2 || string.IsNullOrWhiteSpace(args[1]))
@@ -28,6 +29,27 @@ var builder = WebApplication.CreateBuilder(args);
 // appsettings*.json files must never contain credentials. Environment variables can also be
 // used (e.g. ConnectionStrings__DefaultConnection).
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+
+// ── Azure Key Vault ──────────────────────────────────────────────────────────────────────
+// Production secrets live in kv-lrnmetrics-prod: every ConnectionStrings:* entry, the
+// DenialWorkflowAuth:* block (JWT signing key, import API key, issuer/audience) and the
+// ExternalApiClients client id and secret hash.
+//
+// Vault secret names use "--" wherever configuration uses ":" — ConnectionStrings--DefaultConnection
+// binds to ConnectionStrings:DefaultConnection. That is AddAzureKeyVault's own convention, so
+// nothing here needs a custom KeyVaultSecretManager. Indexed names work the same way, which is why
+// ExternalApiClients--Clients--0--ClientId merges into the same Clients[0] entry that
+// appsettings.json declares DisplayName and Roles on.
+//
+// Registered AFTER appsettings.Local.json so the vault wins wherever both define a key. A machine
+// with no vault access blanks KeyVault:Uri in its appsettings.Local.json and keeps running on local
+// secrets — an empty or absent URI skips this entirely.
+if (ApplyKeyVault(builder.Configuration, builder.Configuration["KeyVault:Uri"]))
+{
+    RequireVaultSecrets(builder.Configuration,
+        "ConnectionStrings:DefaultConnection",
+        "DenialWorkflowAuth:JwtSigningKey");
+}
 
 var apiFileLogSection = builder.Configuration.GetSection("Logging:File");
 try
@@ -310,6 +332,68 @@ app.MapGet("/health", () => Results.Ok("LRN.ReportsApi running"));
 app.MapControllers();
 app.Run();
 return 0;
+
+/// <summary>
+/// Layers Azure Key Vault over the configuration already loaded, when KeyVault:Uri names one.
+/// Returns true when a vault was actually added, so the caller can then check what it delivered.
+/// </summary>
+static bool ApplyKeyVault(IConfigurationBuilder configuration, string? uri)
+{
+    var trimmed = uri?.Trim();
+    if (string.IsNullOrEmpty(trimmed)) return false;
+
+    // Validated rather than handed straight to the SDK: the URI is hand-maintained in
+    // appsettings.json and a typo there ("https: //…") otherwise surfaces much later as a
+    // connection string that is simply missing.
+    if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var vaultUri) || vaultUri.Scheme != Uri.UriSchemeHttps)
+        throw new InvalidOperationException(
+            $"KeyVault:Uri must be an absolute https URI, e.g. https://kv-lrnmetrics-prod.vault.azure.net/ — got '{trimmed}'.");
+
+    try
+    {
+        // DefaultAzureCredential so one build authenticates everywhere it is deployed: the app
+        // pool's managed identity in Azure, AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_CLIENT_SECRET
+        // where a service principal is used instead, and the developer's `az login` or Visual
+        // Studio account locally.
+        configuration.AddAzureKeyVault(vaultUri, new DefaultAzureCredential());
+    }
+    catch (Exception ex)
+    {
+        // Continuing would boot the app with no connection strings and no JWT signing key. It
+        // would then answer every request with a failure raised deep inside a repository, naming
+        // a missing connection string rather than the vault that never loaded. Stop here, where
+        // the message can name the real cause.
+        throw new InvalidOperationException(
+            $"Could not load secrets from Azure Key Vault '{vaultUri}'. The vault uses RBAC (not access " +
+            $"policies), so the identity running this process needs the 'Key Vault Secrets User' role on it, " +
+            $"and this host must be able to reach the vault.", ex);
+    }
+
+    return true;
+}
+
+/// <summary>
+/// Confirms the vault actually delivered the settings the app cannot run without.
+///
+/// A vault that authenticates but holds none of these is not a hypothetical: it is what a
+/// deployment looks like when the identity and RBAC are in place but the secrets were never
+/// created. Nothing fails at startup, so the app comes up clean and then throws
+/// "DefaultConnection not configured" on the first request that touches a database - an error
+/// that names the symptom and hides the cause. Checking here lets the message name the secret
+/// that is missing, at the moment the app would otherwise have carried on.
+/// </summary>
+static void RequireVaultSecrets(IConfiguration configuration, params string[] requiredKeys)
+{
+    var missing = requiredKeys.Where(k => string.IsNullOrWhiteSpace(configuration[k])).ToArray();
+    if (missing.Length == 0) return;
+
+    // Config key -> the secret name to create, which is the only form that helps at 2am.
+    var secretNames = string.Join(", ", missing.Select(k => k.Replace(":", "--")));
+    throw new InvalidOperationException(
+        $"Azure Key Vault was read successfully but is missing {missing.Length} required secret(s): {secretNames}. " +
+        $"Create them in the vault (secret names use '--' where configuration uses ':'), or clear KeyVault:Uri to " +
+        $"run from local settings instead. Values stored as vault TAGS are not secrets and are never loaded.");
+}
 
 static void ApplySecurityHeaders(HttpContext context, bool isDevelopment)
 {

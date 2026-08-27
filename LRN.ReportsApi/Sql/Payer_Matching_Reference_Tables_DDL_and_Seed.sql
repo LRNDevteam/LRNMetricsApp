@@ -1,6 +1,6 @@
 /* =====================================================================
    Payer Matching Engine - Supporting Reference Tables
-   Companion DDL + seed data for Payer_Master_Reference_Tables_v1.1.md
+   Companion DDL + seed data for docs/payer-master/Payer_Master_Reference_Tables_v1.1.md
    Target: SQL Server (T-SQL)
    Generated: 2026-07-10
 

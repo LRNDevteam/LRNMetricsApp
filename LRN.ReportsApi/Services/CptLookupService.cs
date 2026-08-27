@@ -38,7 +38,16 @@ public interface ICptLookupRepository
 /// </summary>
 public sealed class SqlCptLookupRepository : ICptLookupRepository
 {
-    private const int ExportRowCap = 100000;
+    /// <summary>
+    /// Ceiling on the rows one export workbook can carry. This is Excel's own limit — a sheet holds
+    /// 1,048,576 rows and row 1 is the header — not a policy number, so a full CPTAverage /
+    /// PanelAverage extract (~300k rows today) comes down whole.
+    ///
+    /// It was 100,000, which silently truncated every unfiltered export to a third of the table:
+    /// the workbook opened fine and looked complete. Raising it puts the burden on
+    /// <see cref="BuildExcel"/> to stay flat at that scale — see the notes there.
+    /// </summary>
+    private const int ExportRowCap = 1048575;
 
     /// <summary>Timeout for a normal UI page.</summary>
     private const int PageTimeoutSeconds = 120;
@@ -713,10 +722,29 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         _ => null
     };
 
+    /// <summary>
+    /// Writes one sheet. Everything here is shaped by <see cref="ExportRowCap"/>: a full extract is
+    /// ~300k rows x ~27 columns, so anything that touches a cell twice, or walks the sheet to work
+    /// out how big it is, costs eight million operations.
+    ///
+    /// Three things are deliberate:
+    ///  * number formats are set once per COLUMN, before any data exists, and inherited by the cells
+    ///    written afterwards. Assigning <c>cell.Style.NumberFormat</c> per cell resolved a style for
+    ///    every cell in the sheet — including the empty ones it skipped writing a value to.
+    ///  * the autofilter range is stated outright rather than asked for via <c>RangeUsed()</c>, which
+    ///    scans the whole sheet to find its own bounds.
+    ///  * column widths are sized off the first 250 rows, not the full set.
+    /// </summary>
     private static byte[] BuildExcel<T>(string sheetName, IReadOnlyList<ExcelCol<T>> cols, IReadOnlyList<T> rows)
     {
         using var workbook = new XLWorkbook();
         var ws = workbook.Worksheets.Add(sheetName);
+
+        // Before the header and the data: a column style is the default for cells created later,
+        // and the header styling below then overrides it on row 1 only.
+        for (var c = 0; c < cols.Count; c++)
+            if (cols[c].Format is { } format)
+                ws.Column(c + 1).Style.NumberFormat.Format = format;
 
         for (var c = 0; c < cols.Count; c++) ws.Cell(1, c + 1).Value = cols[c].Header;
         var header = ws.Range(1, 1, 1, cols.Count);
@@ -726,22 +754,22 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
 
         for (var r = 0; r < rows.Count; r++)
         {
+            var row = rows[r];
             for (var c = 0; c < cols.Count; c++)
             {
-                var cell = ws.Cell(r + 2, c + 1);
-                switch (cols[c].Value(rows[r]))
+                // A null stays an untouched cell — never materialised, never styled.
+                switch (cols[c].Value(row))
                 {
                     case null: break;
-                    case decimal d: cell.Value = d; break;
-                    case int i: cell.Value = i; break;
-                    case var v: cell.Value = v.ToString(); break;
+                    case decimal d: ws.Cell(r + 2, c + 1).Value = d; break;
+                    case int i: ws.Cell(r + 2, c + 1).Value = i; break;
+                    case var v: ws.Cell(r + 2, c + 1).Value = v.ToString(); break;
                 }
-                if (cols[c].Format is { } format) cell.Style.NumberFormat.Format = format;
             }
         }
 
         ws.SheetView.FreezeRows(1);
-        ws.RangeUsed()?.SetAutoFilter();
+        ws.Range(1, 1, rows.Count + 1, cols.Count).SetAutoFilter();
         // AdjustToContents over huge exports is slow; sizing on a sample keeps it fast.
         ws.Columns(1, cols.Count).AdjustToContents(1, Math.Min(rows.Count + 1, 250));
 

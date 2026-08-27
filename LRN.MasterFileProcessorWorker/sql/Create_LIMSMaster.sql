@@ -15,6 +15,10 @@ BEGIN
         Category NVARCHAR(255) NULL,
         SourceFile NVARCHAR(260) NULL,
         RunId VARCHAR(30) NULL,
+        -- Every LIMS file column that *_LIMS_Schema.json does not name, as one JSON object per row.
+        -- Labs add columns to their files regularly; this is what keeps that from being an ALTER
+        -- TABLE each time. Read it with JSON_VALUE(AdditionalFields, '$."Some New Column"').
+        AdditionalFields NVARCHAR(MAX) NULL,
         CreatedOn DATETIME NOT NULL CONSTRAINT DF_LIMSMaster_CreatedOn DEFAULT (GETDATE())
     );
 END;
@@ -27,4 +31,11 @@ END;
 IF COL_LENGTH('dbo.LIMSMaster', 'RunId') IS NULL
 BEGIN
     ALTER TABLE dbo.LIMSMaster ADD RunId VARCHAR(30) NULL;
+END;
+
+-- Existing tables: add the catch-all column. The importer only writes it when it is present, so
+-- until this runs the unlisted columns are simply dropped as they always were.
+IF COL_LENGTH('dbo.LIMSMaster', 'AdditionalFields') IS NULL
+BEGIN
+    ALTER TABLE dbo.LIMSMaster ADD AdditionalFields NVARCHAR(MAX) NULL;
 END;

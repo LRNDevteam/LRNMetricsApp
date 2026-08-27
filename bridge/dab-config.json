@@ -1,0 +1,109 @@
+{
+  "$schema": "https://github.com/Azure/data-api-builder/releases/latest/download/dab.draft.schema.json",
+  "data-source": {
+    "database-type": "mssql",
+    "connection-string": "@env('DATABASE_CONNECTION_STRING')",
+    "options": {
+      "set-session-context": false
+    }
+  },
+  "runtime": {
+    "rest": {
+      "enabled": true,
+      "path": "/api"
+    },
+    "graphql": {
+      "enabled": true,
+      "path": "/graphql",
+      "allow-introspection": true
+    },
+    "mcp": {
+      "enabled": true,
+      "path": "/mcp"
+    },
+    "host": {
+      "cors": {
+        "origins": [],
+        "allow-credentials": false
+      },
+      "authentication": {
+        "provider": "Unauthenticated"
+      },
+      "mode": "production"
+    }
+  },
+  "entities": {
+    "CPTAverage": {
+      "source": {
+        "object": "dbo.CPTAverage",
+        "type": "table"
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [ "read" ]
+        }
+      ]
+    },
+    "CPTPricingStatistics": {
+      "source": {
+        "object": "dbo.vw_AI_CPT_PricingStatistics",
+        "type": "view",
+        "key-fields": [ "PricingId" ]
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [ "read" ]
+        }
+      ]
+    },
+    "PanelPricingStatistics": {
+      "source": {
+        "object": "dbo.vw_AI_Panel_PricingStatistics",
+        "type": "view",
+        "key-fields": [ "PricingId" ]
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [ "read" ]
+        }
+      ]
+    },
+    "ComparePayerPricingForCPT": {
+      "source": {
+        "object": "dbo.vw_AI_ComparePayerPricingForCPT",
+        "type": "view",
+        "key-fields": [ "PricingId" ]
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [ "read" ]
+        }
+      ]
+    },
+    "ResolvePayerName": {
+      "source": {
+        "object": "dbo.usp_AI_ResolvePayerName",
+        "type": "stored-procedure",
+        "parameters": {
+          "PayerText": ""
+        }
+      },
+      "rest": {
+        "methods": [ "GET", "POST" ]
+      },
+      "graphql": {
+        "operation": "query"
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [ "execute" ]
+        }
+      ]
+    }
+  }
+}

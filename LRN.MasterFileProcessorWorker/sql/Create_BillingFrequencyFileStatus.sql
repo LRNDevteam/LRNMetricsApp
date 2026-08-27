@@ -1,3 +1,4 @@
+\
 IF OBJECT_ID('dbo.BillingFrequencyFileStatus','U') IS NULL
 BEGIN
     CREATE TABLE dbo.BillingFrequencyFileStatus
@@ -13,8 +14,6 @@ BEGIN
         Status          nvarchar(30)     NOT NULL,
         StatusMessage   nvarchar(max)    NULL,
 
-        ContentHash     nvarchar(200)    NULL,
-
         Attempts        int             NOT NULL CONSTRAINT DF_BFFS_Attempts DEFAULT(0),
         FirstSeenUtc    datetimeoffset   NOT NULL CONSTRAINT DF_BFFS_FirstSeen DEFAULT(SYSUTCDATETIME()),
         LastAttemptUtc  datetimeoffset   NOT NULL CONSTRAINT DF_BFFS_LastAttempt DEFAULT(SYSUTCDATETIME()),
@@ -24,6 +23,5 @@ BEGIN
     );
 
     CREATE INDEX IX_BFFS_Status ON dbo.BillingFrequencyFileStatus(Status);
-    CREATE INDEX IX_BFFS_ContentHash ON dbo.BillingFrequencyFileStatus(LabId, ContentHash);
 END
 GO

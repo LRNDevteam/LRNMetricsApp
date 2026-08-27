@@ -1,19 +1,11 @@
-using LRN.Notifications.Models;
+namespace LRN.MasterFileProcessorWorker.Notifications;
 
-namespace LRN.Notifications.Abstractions
+public interface IEmailNotifier
 {
-    public interface INotifier
-    {
-        Task NotifyAsync(string title, string message, CancellationToken ct);
-    }
+	Task SendAsync(EmailNotification email, CancellationToken ct = default);
+}
 
-    public interface IEmailNotifier
-    {
-        Task SendAsync(EmailNotification email, CancellationToken ct = default);
-    }
-
-    public interface ITeamsNotifier
-    {
-        Task SendAsync(TeamsNotification msg, CancellationToken ct = default);
-    }
+public interface ITeamsNotifier
+{
+	Task SendAsync(TeamsNotification msg, CancellationToken ct = default);
 }

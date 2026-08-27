@@ -8,7 +8,7 @@ namespace LabMetricsDashboard.Services;
 /// The tracker is a pivot: report types are rows in dbo.ReportTypeMaster and become columns at
 /// execution time, so this catalog is a lookup, never the source of the column list. A tracker
 /// column with no entry here still renders - as a status-only cell - which is what keeps the board
-/// working the day a new report type is added upstream. See docs/REPORT_CONTROL_BOARD.md.
+/// working the day a new report type is added upstream. See docs/reports/REPORT_CONTROL_BOARD.md.
 /// </summary>
 public static class ReportCatalog
 {

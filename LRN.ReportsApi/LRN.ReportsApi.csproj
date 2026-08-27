@@ -5,10 +5,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Azure.Extensions.AspNetCore.Configuration.Secrets" Version="1.5.2" />
     <PackageReference Include="ClosedXML" Version="0.104.2" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.1.7" />
-    <PackageReference Include="Azure.Identity" Version="1.11.4" />
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
     <PackageReference Include="Microsoft.NETCore.Platforms" Version="1.1.0" />
   </ItemGroup>
   <ItemGroup>
@@ -16,5 +17,14 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="LRN.ReportsApi.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <!--
+      appsettings.Local.json holds this machine's secrets. The Web SDK's default content glob was
+      publishing it, which meant a deployment carried a developer's copy of the production
+      connection strings AND that machine's blank KeyVault:Uri - silently switching Key Vault off
+      on the server it was deployed to. Keep it in the build output for local debugging; never ship it.
+    -->
+    <Content Update="appsettings.Local.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
   </ItemGroup>
 </Project>

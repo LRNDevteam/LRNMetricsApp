@@ -1,0 +1,817 @@
+﻿<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* Print rules for the PDF export. The on-screen design is unchanged; these control
+     pagination only, and pin the light palette since a PDF has one ground. */
+  @page { size: A4; margin: 15mm 13mm; }
+  @media print {
+    body { background: #fff !important; }
+    .wrap { padding: 0; max-width: none; gap: 1.9rem; }
+    h1 { font-size: 2.2rem; }
+    h2, h3 { break-after: avoid; }
+    .rec, .note, .card, .step, pre, .node, tbody tr { break-inside: avoid; }
+    /* The flow is a horizontal scroller on screen; let it wrap onto the page instead. */
+    .flow { flex-wrap: wrap; overflow: visible; }
+    .flow .arrow { display: none; }
+    .flow .node { flex: 1 1 12rem; }
+    .scroll { overflow: visible; }
+    table { min-width: 0; font-size: .82rem; }
+    a { color: inherit; text-decoration: none; }
+  }
+</style>
+</head>
+<body><title>Payer Alias Resolution</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=block">
+
+<style>
+  /* ── Tokens: complete light palette on bare :root ─────────────────────── */
+  :root {
+    --ground:        #F4F6F9;
+    --surface:       #FFFFFF;
+    --surface-sunk:  #EDF1F6;
+    --line:          #D8E0EA;
+    --line-soft:     #E7ECF3;
+
+    --ink:           #10202F;
+    --ink-soft:      #35485C;
+    --ink-mute:      #5D7086;
+
+    --accent:        #1565C0;
+    --accent-soft:   #E8F0FB;
+    --accent-line:   #B9D2F0;
+
+    --pick:          #0F766E;
+    --pick-soft:     #E3F3F1;
+    --pick-line:     #A8D5CF;
+
+    --warn:          #B45309;
+    --stop:          #B42318;
+
+    --shadow:        0 1px 2px rgba(16,32,47,.06), 0 8px 24px rgba(16,32,47,.06);
+
+    --measure: 68ch;
+  }
+
+  /* Un-stamped document following a dark OS; an explicit light choice still wins. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:        #0B141D;
+      --surface:       #121E29;
+      --surface-sunk:  #0E1922;
+      --line:          #263748;
+      --line-soft:     #1C2B39;
+
+      --ink:           #E4EBF3;
+      --ink-soft:      #B4C3D3;
+      --ink-mute:      #8298AC;
+
+      --accent:        #6FB2F2;
+      --accent-soft:   #16283A;
+      --accent-line:   #2C4A68;
+
+      --pick:          #4ECDC0;
+      --pick-soft:     #102A29;
+      --pick-line:     #245A55;
+
+      --warn:          #E0A458;
+      --stop:          #F08C82;
+
+      --shadow:        0 1px 2px rgba(0,0,0,.35), 0 8px 24px rgba(0,0,0,.28);
+    }
+  }
+
+  /* Explicit dark choice wins over a light OS. */
+  :root[data-theme="dark"] {
+    --ground:        #0B141D;
+    --surface:       #121E29;
+    --surface-sunk:  #0E1922;
+    --line:          #263748;
+    --line-soft:     #1C2B39;
+
+    --ink:           #E4EBF3;
+    --ink-soft:      #B4C3D3;
+    --ink-mute:      #8298AC;
+
+    --accent:        #6FB2F2;
+    --accent-soft:   #16283A;
+    --accent-line:   #2C4A68;
+
+    --pick:          #4ECDC0;
+    --pick-soft:     #102A29;
+    --pick-line:     #245A55;
+
+    --warn:          #E0A458;
+    --stop:          #F08C82;
+
+    --shadow:        0 1px 2px rgba(0,0,0,.35), 0 8px 24px rgba(0,0,0,.28);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding: 3.5rem 1.5rem 5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 3rem;
+  }
+
+  /* ── Masthead ─────────────────────────────────────────────────────────── */
+  .masthead { display: flex; flex-direction: column; gap: .9rem; }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .72rem;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  h1 {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-weight: 600;
+    font-size: clamp(2.1rem, 5vw, 3rem);
+    line-height: 1.12;
+    letter-spacing: -.015em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    max-width: var(--measure);
+    margin: 0;
+    font-size: 1.1rem;
+    color: var(--ink-soft);
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem .75rem;
+    padding-top: .6rem;
+    border-top: 1px solid var(--line);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .74rem;
+    color: var(--ink-mute);
+  }
+  .meta span::after { content: "·"; margin-left: .75rem; color: var(--line); }
+  .meta span:last-child::after { content: ""; margin: 0; }
+
+  /* ── Sections ─────────────────────────────────────────────────────────── */
+  section { display: flex; flex-direction: column; gap: 1.15rem; }
+
+  h2 {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-weight: 600;
+    font-size: 1.5rem;
+    line-height: 1.25;
+    margin: 0;
+    text-wrap: balance;
+    display: flex;
+    align-items: baseline;
+    gap: .7rem;
+  }
+  h2 .rule { flex: 1 1 auto; height: 1px; background: var(--line); }
+
+  h3 {
+    font-family: "IBM Plex Sans", sans-serif;
+    font-weight: 600;
+    font-size: 1rem;
+    margin: 0;
+    color: var(--ink);
+  }
+
+  p { margin: 0; max-width: var(--measure); }
+  p + p { margin-top: -.15rem; }
+
+  a { color: var(--accent); text-underline-offset: .18em; }
+  a:focus-visible, .verdict:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 3px;
+  }
+
+  code {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .875em;
+    background: var(--surface-sunk);
+    border: 1px solid var(--line-soft);
+    border-radius: 3px;
+    padding: .08em .34em;
+  }
+
+  strong { font-weight: 600; }
+
+  /* ── Recommendation panel ─────────────────────────────────────────────── */
+  .rec {
+    background: var(--surface);
+    border: 1px solid var(--pick-line);
+    border-left: 3px solid var(--pick);
+    border-radius: 4px;
+    padding: 1.5rem 1.6rem;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: .85rem;
+  }
+  .rec .label {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .7rem;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--pick);
+  }
+  .rec .headline {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-size: 1.3rem;
+    line-height: 1.35;
+    font-weight: 500;
+    margin: 0;
+    max-width: 54ch;
+    text-wrap: balance;
+  }
+
+  /* ── Split lists ──────────────────────────────────────────────────────── */
+  .cols {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: 1.25rem;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1.15rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+  }
+  .card ul { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: .4rem; }
+  .card li { color: var(--ink-soft); }
+
+  /* ── Table ────────────────────────────────────────────────────────────── */
+  .scroll {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--surface);
+  }
+  table { border-collapse: collapse; width: 100%; min-width: 46rem; font-size: .92rem; }
+  thead th {
+    text-align: left;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .7rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    font-weight: 500;
+    color: var(--ink-mute);
+    padding: .8rem 1rem;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-sunk);
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: .95rem 1rem;
+    border-bottom: 1px solid var(--line-soft);
+    color: var(--ink-soft);
+    vertical-align: top;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.chosen { background: var(--pick-soft); }
+  tbody tr.chosen td { color: var(--ink); }
+  td .where { font-weight: 600; color: var(--ink); display: block; margin-bottom: .18rem; }
+  td .sub {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .74rem;
+    color: var(--ink-mute);
+  }
+
+  .verdict {
+    display: inline-block;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .68rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding: .2rem .55rem;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .verdict.yes { background: var(--pick); color: var(--surface); }
+  .verdict.no  { background: transparent; color: var(--stop); border: 1px solid var(--stop); }
+
+  /* ── Flow ─────────────────────────────────────────────────────────────── */
+  .flow {
+    display: flex;
+    align-items: stretch;
+    gap: .5rem;
+    overflow-x: auto;
+    padding: 1.35rem 1.25rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+  }
+  .node {
+    flex: 1 0 9.5rem;
+    background: var(--surface-sunk);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: .8rem .85rem;
+    display: flex;
+    flex-direction: column;
+    gap: .3rem;
+  }
+  .node.hot { border-color: var(--pick); background: var(--pick-soft); }
+  .node .n {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .66rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .node.hot .n { color: var(--pick); }
+  .node .t { font-weight: 600; font-size: .88rem; line-height: 1.3; }
+  .node .d { font-size: .78rem; color: var(--ink-mute); line-height: 1.45; }
+  .arrow {
+    flex: 0 0 auto;
+    align-self: center;
+    color: var(--line);
+    font-size: 1.1rem;
+    user-select: none;
+  }
+
+  /* ── Steps ────────────────────────────────────────────────────────────── */
+  .steps { display: flex; flex-direction: column; gap: 1.4rem; counter-reset: step; }
+  .step {
+    display: grid;
+    grid-template-columns: 2.2rem 1fr;
+    gap: 0 1rem;
+    align-items: start;
+  }
+  .step::before {
+    counter-increment: step;
+    content: counter(step);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .8rem;
+    font-weight: 500;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-line);
+    border-radius: 50%;
+    width: 2.2rem; height: 2.2rem;
+    display: grid; place-items: center;
+    grid-row: span 2;
+  }
+  .step .body { display: flex; flex-direction: column; gap: .55rem; }
+  .step .owner {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .7rem;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+
+  pre {
+    margin: 0;
+    padding: 1rem 1.1rem;
+    background: var(--surface-sunk);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    overflow-x: auto;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .82rem;
+    line-height: 1.6;
+    color: var(--ink-soft);
+  }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; }
+  .cmt { color: var(--ink-mute); font-style: italic; }
+  .kw  { color: var(--accent); }
+
+  /* ── Callout ──────────────────────────────────────────────────────────── */
+  .note {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--warn);
+    border-radius: 4px;
+    padding: 1.1rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+  }
+  .note .label {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .7rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--warn);
+  }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding-top: 1.25rem;
+    font-size: .85rem;
+    color: var(--ink-mute);
+    max-width: var(--measure);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  @media (max-width: 34rem) {
+    .wrap { padding: 2.25rem 1.1rem 3.5rem; gap: 2.25rem; }
+    .step { grid-template-columns: 1fr; }
+    .step::before { grid-row: auto; margin-bottom: .3rem; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Reimbursement Insights Agent</div>
+    <h1>Payer Alias Resolution</h1>
+    <p class="standfirst">
+      Users will type “BCBS”, “United”, or “Aetna Better Health” — not the exact
+      <code>PayerDisplayName</code> stored in the reimbursement tables. This is where that
+      translation should live, and why it does not belong in the agent's prompt or in the
+      dashboard.
+    </p>
+    <div class="meta">
+      <span>Proposal</span>
+      <span>Phase 7 · pre-launch</span>
+      <span>Reuses dbo.PayerFamilyRule</span>
+      <span>No UI change</span>
+    </div>
+  </header>
+
+  <div class="rec">
+    <div class="label">Recommendation</div>
+    <p class="headline">
+      Build it into the bridge as a database resolver the agent calls as a tool — not into the
+      Foundry instructions, and not into the dashboard.
+    </p>
+    <p>
+      The rules already exist in <code>dbo.PayerFamilyRule</code>, where business users maintain
+      them without a deployment. The bridge is the one place that can read them live, hand the
+      agent an exact answer, and serve every client at once. The agent side changes by a single
+      instruction; the dashboard does not change at all.
+    </p>
+  </div>
+
+  <section>
+    <h2>The problem<span class="rule"></span></h2>
+    <p>
+      Every reimbursement entity — <code>CPTAverage</code>, <code>CPTPricingStatistics</code>,
+      <code>PanelPricingStatistics</code>, <code>ComparePayerPricingForCPT</code> — filters on
+      <code>PayerDisplayName</code>, which holds the payer's full stored name. A user asking
+      <em>“average reimbursement for BCBS for 87798”</em> supplies a short form that matches no row,
+      so the agent returns “no matching data found” for a payer that is plainly in the data.
+    </p>
+    <p>
+      The knowledge needed to fix this is already written down. <code>dbo.PayerFamilyRule</code>
+      holds a <code>Pattern</code> column of pipe-separated aliases against a
+      <code>Family</code>, ordered by <code>Priority</code> so a sub-brand beats its parent —
+      <code>AETNA_BETTER_HEALTH</code> at priority 10 resolves before <code>AETNA</code> at 50.
+      The Payer Policy Mapper already uses exactly this table for the same purpose on the
+      claims side.
+    </p>
+  </section>
+
+  <section>
+    <h2>Where it could go<span class="rule"></span></h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Option</th>
+            <th>What it would mean</th>
+            <th>Why / why not</th>
+            <th>Verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <span class="where">Foundry agent</span>
+              <span class="sub">system instructions</span>
+            </td>
+            <td>Paste the alias list into the agent's prompt and let the model match names itself.</td>
+            <td>
+              A prompt is static text — it would be a snapshot of a live table, stale the first
+              time someone adds a brand, and it needs an agent edit and a retest every time.
+              It also asks the model to decide which payer was meant, which is the failure we have
+              already fixed four times (invented field names, self-computed statistics).
+            </td>
+            <td><span class="verdict no">No</span></td>
+          </tr>
+          <tr>
+            <td>
+              <span class="where">Dashboard</span>
+              <span class="sub">LabMetricsDashboard</span>
+            </td>
+            <td>Rewrite the user's wording before sending the question to the agent.</td>
+            <td>
+              The payer name is buried inside free-form English, so the dashboard would first have
+              to work out which words are the payer — a language-parsing job it has no business
+              doing. It would also only work for this one screen: the Foundry Playground and any
+              future caller would still be broken.
+            </td>
+            <td><span class="verdict no">No</span></td>
+          </tr>
+          <tr class="chosen">
+            <td>
+              <span class="where">The bridge</span>
+              <span class="sub">Data API Builder → MCP</span>
+            </td>
+            <td>
+              A stored procedure reads <code>PayerFamilyRule</code> and returns the real
+              <code>PayerDisplayName</code> values. Exposed through the bridge, it becomes a tool
+              the agent can call, alongside <code>read_records</code>.
+            </td>
+            <td>
+              The rules and the data are both already here, so there is nothing to duplicate and
+              nothing to keep in sync. Business users keep editing the rules table with no
+              deployment. The answer is exact rather than inferred, and every client — the chat
+              screen, the Playground, anything later — gets it for free.
+            </td>
+            <td><span class="verdict yes">Recommended</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>How it works<span class="rule"></span></h2>
+    <div class="flow">
+      <div class="node">
+        <span class="n">Asks</span>
+        <span class="t">User</span>
+        <span class="d">“Average reimbursement for BCBS for 87798”</span>
+      </div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="node">
+        <span class="n">Reads intent</span>
+        <span class="t">Agent</span>
+        <span class="d">Recognises “BCBS” as a payer, does not guess its full name</span>
+      </div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="node hot">
+        <span class="n">New</span>
+        <span class="t">Resolve payer</span>
+        <span class="d">Bridge matches PayerFamilyRule and returns the real display names</span>
+      </div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="node">
+        <span class="n">Existing</span>
+        <span class="t">read_records</span>
+        <span class="d">Filters PayerDisplayName by the exact values returned</span>
+      </div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="node">
+        <span class="n">Answers</span>
+        <span class="t">Six metrics</span>
+        <span class="d">Per lab and payer, with the window type stated</span>
+      </div>
+    </div>
+    <p>
+      Only the third box is new. The agent still asks the same questions of the same data; it
+      simply stops guessing at the payer name and asks the database instead.
+    </p>
+
+    <h3>The output contract</h3>
+    <p>
+      The resolver returns <code>PayerDisplayName</code> values, deliberately — it is the one
+      column present on all four entities, so a single resolver serves CPT, panel and payer-comparison
+      questions alike. When an alias matches several payers, it returns all of them, and the agent's
+      existing per-payer breakdown rule takes over from there. When nothing matches, it returns
+      nothing, and the agent says so plainly rather than inventing a figure.
+    </p>
+  </section>
+
+  <section>
+    <h2>Confirm this first<span class="rule"></span></h2>
+    <div class="note">
+      <div class="label">One open question</div>
+      <p>
+        There are two ways to get from a matched family to the real payer names, and a single query
+        decides which. If <code>CPTAverage.Global_Payer_ID</code> is reliably populated, we can join
+        through <code>PayerPolicyInsuranceMaster</code> and inherit its <code>PayerFamily</code>
+        directly — the cleaner path, and consistent with the claims side. If coverage is patchy, we
+        match the alias tokens against <code>PayerDisplayName</code> instead, which needs nothing
+        extra but is a text match.
+      </p>
+      <pre><code><span class="cmt">-- Run against LRNMaster. If NullIds is near zero, take the join path.</span>
+<span class="kw">SELECT</span> COUNT(*) <span class="kw">AS</span> Rows,
+       SUM(<span class="kw">CASE WHEN</span> Global_Payer_ID <span class="kw">IS NULL THEN</span> 1 <span class="kw">ELSE</span> 0 <span class="kw">END</span>) <span class="kw">AS</span> NullIds,
+       COUNT(<span class="kw">DISTINCT</span> PayerDisplayName) <span class="kw">AS</span> DistinctPayers
+<span class="kw">FROM</span> dbo.CPTAverage;</code></pre>
+      <p>
+        I have not run this — it needs database access. It is the first thing to check, because it
+        settles the shape of the stored procedure below.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Implementation<span class="rule"></span></h2>
+    <p>
+      Four steps, in order — each one depends on the one before it.
+    </p>
+
+    <div class="steps">
+
+      <div class="step">
+        <div class="body">
+          <div class="owner">Database · SQL developer</div>
+          <h3>Add the resolver stored procedure</h3>
+          <p>
+            <code>dbo.usp_AI_ResolvePayerName</code> takes the user's words and returns the payer
+            names that actually exist in the data. It canonicalises the input the same way the
+            Payer Policy Mapper does — uppercase, punctuation to spaces, collapse runs — then walks
+            <code>PayerFamilyRule</code> in <code>Priority</code> order and takes the first hit,
+            so sub-brands keep beating their parents.
+          </p>
+          <pre><code><span class="cmt">-- Sketch, not final: written from the schema, not yet run against LRNMaster.</span>
+<span class="kw">CREATE OR ALTER PROCEDURE</span> dbo.usp_AI_ResolvePayerName
+    @PayerText <span class="kw">NVARCHAR</span>(200)
+<span class="kw">AS</span>
+<span class="kw">BEGIN</span>
+    <span class="kw">SET</span> NOCOUNT <span class="kw">ON</span>;
+
+    <span class="kw">DECLARE</span> @Canonical <span class="kw">NVARCHAR</span>(200) = UPPER(LTRIM(RTRIM(@PayerText)));
+
+    <span class="cmt">-- Pattern is a pipe-separated alias list, so split it into one row per alias.</span>
+    <span class="kw">WITH</span> Alias <span class="kw">AS</span> (
+        <span class="kw">SELECT</span> r.Family, r.Priority, r.RuleId,
+               LTRIM(RTRIM(s.value)) <span class="kw">AS</span> Token
+        <span class="kw">FROM</span> dbo.PayerFamilyRule r
+        <span class="kw">CROSS APPLY</span> STRING_SPLIT(r.Pattern, <span class="cmt">'|'</span>) s
+        <span class="kw">WHERE</span> r.IsActive = 1 <span class="kw">AND</span> LTRIM(RTRIM(s.value)) &lt;&gt; <span class="cmt">''</span>
+    ),
+    Hit <span class="kw">AS</span> (                      <span class="cmt">-- lowest Priority wins: sub-brand over parent</span>
+        <span class="kw">SELECT TOP</span> (1) Family
+        <span class="kw">FROM</span> Alias
+        <span class="kw">WHERE</span> @Canonical <span class="kw">LIKE</span> <span class="cmt">'%'</span> + Token + <span class="cmt">'%'</span>
+        <span class="kw">ORDER BY</span> Priority, RuleId
+    )
+    <span class="kw">SELECT DISTINCT</span> h.Family, c.PayerDisplayName
+    <span class="kw">FROM</span> Hit h
+    <span class="kw">JOIN</span> Alias a <span class="kw">ON</span> a.Family = h.Family
+    <span class="kw">JOIN</span> dbo.CPTAverage c
+      <span class="kw">ON</span> UPPER(c.PayerDisplayName) <span class="kw">LIKE</span> <span class="cmt">'%'</span> + a.Token + <span class="cmt">'%'</span>;
+<span class="kw">END</span></code></pre>
+          <p>
+            Union in <code>PanelPricingStatistics</code> so panel questions resolve too. If the
+            coverage check above comes back clean, replace the final <code>LIKE</code> join with a
+            join on <code>Global_Payer_ID</code>.
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="body">
+          <div class="owner">Bridge · reimb-dab-api</div>
+          <h3>Expose it through the bridge</h3>
+          <p>
+            Data API Builder can publish a stored procedure as an entity, which is what turns it
+            into a tool the agent can call. Add it to <code>dab-config.json</code> alongside the
+            four existing entities, grant <code>dab_reader</code> execute rights, then rebuild and
+            push the image as <code>:v3</code> — the same path already used to go from
+            <code>:latest</code> to <code>:v2</code>.
+          </p>
+          <pre><code><span class="cmt">-- Grant, then rebuild the image and update the container app.</span>
+<span class="kw">GRANT EXECUTE ON</span> dbo.usp_AI_ResolvePayerName <span class="kw">TO</span> dab_reader;</code></pre>
+          <p>
+            Nothing about API Management, the subscription key, or the agent's MCP connection
+            changes — the new tool arrives on the address the agent already uses.
+          </p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="body">
+          <div class="owner">Foundry · agent instructions</div>
+          <h3>Add one rule to the agent</h3>
+          <p>
+            This is the entire agent-side change. It follows the pattern that has already worked
+            for us: forbid the guess, name the tool that gives the real answer.
+          </p>
+          <pre><code>Resolving payer names
+
+When a question names a payer, never filter PayerDisplayName with the
+user's own words. Call resolve_payer_name first and use only the exact
+PayerDisplayName values it returns.
+
+If it returns several payers, report them all, broken out per payer as
+usual. If it returns none, say that no payer matching that name was
+found — do not fall back to a guessed or partial name.</code></pre>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="body">
+          <div class="owner">Verification · Playground, then the chat screen</div>
+          <h3>Test the cases that matter</h3>
+          <p>
+            Confirm in the Foundry Playground before touching the chat screen, since the Playground
+            isolates the agent from everything else in the chain.
+          </p>
+          <div class="cols">
+            <div class="card">
+              <h3>Must pass</h3>
+              <ul>
+                <li>A short form — “BCBS for 87798” — returns the same figures as the full name.</li>
+                <li>A sub-brand — “Aetna Better Health” — resolves to itself, not to Aetna.</li>
+                <li>An exact full name still works, unchanged.</li>
+                <li>An unknown payer says so, rather than answering about a different one.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Watch for</h3>
+              <ul>
+                <li>An alias matching several payers — the answer must break out per payer, not merge them.</li>
+                <li>A panel question with an alias, to confirm the panel entity resolves too.</li>
+                <li>Response time, since this adds one tool call per question.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>Scope and effort<span class="rule"></span></h2>
+    <div class="cols">
+      <div class="card">
+        <h3>What changes</h3>
+        <ul>
+          <li>One new stored procedure in LRNMaster.</li>
+          <li>One new entity in the bridge's config, and a rebuilt container image.</li>
+          <li>One new section in the agent's instructions.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>What does not</h3>
+        <ul>
+          <li>The dashboard — no code, no redeploy.</li>
+          <li>The backend proxy on App Service.</li>
+          <li>API Management, its key, or the agent's MCP connection.</li>
+          <li><code>PayerFamilyRule</code> itself — read only, and it stays editable without a deploy.</li>
+        </ul>
+      </div>
+    </div>
+    <p>
+      Roughly one to two days of developer time end to end, most of it in the stored procedure and
+      its testing. The riskiest step is the bridge rebuild, and that is a path we have already run
+      once.
+    </p>
+
+    <h3>Known risks</h3>
+    <div class="cols">
+      <div class="card">
+        <h3>Pattern syntax</h3>
+        <p>
+          The patterns are plain alias lists today, which is why splitting on the pipe works. A rule
+          using genuine regular-expression syntax would not translate to SQL, so the resolver should
+          be reviewed against the live table before release.
+        </p>
+      </div>
+      <div class="card">
+        <h3>One extra call</h3>
+        <p>
+          Each payer question costs one additional round trip to the bridge. It is a small indexed
+          lookup against a short rules table, but it is worth measuring rather than assuming.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Prepared for review. The open coverage question in “Confirm this first” should be answered
+    before work starts — it determines whether the resolver joins on
+    <code>Global_Payer_ID</code> or matches on name, and that is the only structural decision left.
+  </footer>
+
+</div>
+
+</body>
+</html>

@@ -1,6 +1,8 @@
+using LabMetricsDashboard.Controllers;
 using LabMetricsDashboard.Filters;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
+using LabMetricsDashboard.Services.ReimbursementAgent;
 using LabMetricsDashboard.Services.DenialDashboard;
 using LabMetricsDashboard.Services.DenialWorkflow;
 using LabMetricsDashboard.Models.DenialWorkflow;
@@ -8,6 +10,7 @@ using LabMetricsDashboard.Services.Security;
 using LRN.ProductionReports.Services;
 using LRN.ProductionReports.Services;
 using LRN.ProductionReports.Services;
+using Azure.Identity;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -30,6 +33,26 @@ var builder = WebApplication.CreateBuilder(args);
 // never contain credentials. Environment variables can also be used
 // (e.g. ConnectionStrings__DefaultConnection).
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+
+// ── Azure Key Vault ──────────────────────────────────────────────────────────────────────
+// Production secrets live in kv-lrnmetrics-prod: every ConnectionStrings:* entry (LRNMaster plus
+// each lab database) and the DenialWorkflowAuth:* block. The signing key in particular has to be
+// byte-identical to the one LRN.ReportsApi validates with — a single vault secret is what keeps
+// the two apps from drifting apart, which is the failure that logs every workflow user out.
+//
+// Vault secret names use "--" wherever configuration uses ":" — ConnectionStrings--DefaultConnection
+// binds to ConnectionStrings:DefaultConnection. That is AddAzureKeyVault's own convention, so
+// nothing here needs a custom KeyVaultSecretManager.
+//
+// Registered AFTER appsettings.Local.json so the vault wins wherever both define a key. A machine
+// with no vault access blanks KeyVault:Uri in its appsettings.Local.json and keeps running on local
+// secrets — an empty or absent URI skips this entirely.
+// Recorded and logged below, once the file logger exists. A blank Uri silently switches the
+// vault off, which surfaces much later as "DefaultConnection not configured" from whichever
+// repository happens to resolve first — an error that names neither the vault nor the file
+// that blanked it.
+var keyVaultUri = builder.Configuration["KeyVault:Uri"];
+var keyVaultApplied = ApplyKeyVault(builder.Configuration, keyVaultUri);
 
 const string DenialWorkflowLocalDevCorsPolicy = "DenialWorkflowLocalDevCors";
 
@@ -83,6 +106,35 @@ catch (Exception ex)
 {
     // Do not fail app startup because custom file logger failed.
     Console.Error.WriteLine($"File logger initialization failed: {ex}");
+}
+
+// ── Where secrets came from ─────────────────────────────────────────────────────
+// Logged as early as the file logger allows, because getting this wrong is silent: with the
+// vault off, every ConnectionStrings:* entry is simply absent and the first repository to be
+// constructed throws "DefaultConnection not configured" — naming neither the vault nor the
+// appsettings.Local.json that switched it off. On a server this line should always report
+// the vault; if it reports SKIPPED, look for a stray appsettings.Local.json in the deployed
+// folder (it ships in build output, though never in `dotnet publish` output) or a
+// KeyVault__Uri environment variable overriding appsettings.json.
+if (keyVaultApplied)
+{
+    LogStartupWarning($"Key Vault loaded: {keyVaultUri}");
+
+    // Logged first, checked second: "loaded" only means the vault answered. A vault that
+    // authenticates but holds none of these still starts the site cleanly, and the failure then
+    // arrives as "DefaultConnection not configured" on the first page that touches a database —
+    // naming the symptom, not the empty vault behind it. That is exactly what a deployment looks
+    // like when the identity and RBAC are in place but the secrets were never created.
+    RequireVaultSecrets(builder.Configuration,
+        "ConnectionStrings:DefaultConnection",
+        "DenialWorkflowAuth:JwtSigningKey");
+}
+else
+{
+    LogStartupWarning(
+        "Key Vault SKIPPED — KeyVault:Uri is empty or absent, so connection strings and the JWT " +
+        "signing key must come from appsettings.Local.json or environment variables. This is " +
+        "expected on a developer machine and a misconfiguration on a server.");
 }
 
 // Bind the "LabConfig" section from appsettings.json.
@@ -409,6 +461,11 @@ builder.Services.AddAntiforgery(options =>
     // site is published as Production but opened over HTTP (local IIS).
     options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
     options.Cookie.HttpOnly = true;
+
+    // Lets a JSON fetch() carry the token in a header instead of a form field — the form-field
+    // name keeps working unchanged, so no existing POST is affected. Required by the
+    // Reimbursement Insights chat, which posts application/json rather than a form.
+    options.HeaderName = "RequestVerificationToken";
 });
 
 // ── Forwarded Headers (IIS reverse-proxy / SSL termination) ────────────────────
@@ -456,6 +513,21 @@ builder.Services.AddScoped<IAugustusProductionSummaryRepository, SqlAugustusProd
 
 // ── Per-lab generic production summary repositories (Certus, Cove, Elixir, PCRLabsofAmerica, Beech_Tree, Rising_Tides, Phi_Life, Inhealth_DTR) ──
 // One SqlLabProductionSummaryRepository per lab, keyed by the lab name used in the LabSettings config.
+builder.Services.AddSingleton<IReadOnlyDictionary<string, ILabProductionSummaryRepository>>(sp =>
+{
+    var logger = sp.GetRequiredService<ILogger<SqlLabProductionSummaryRepository>>();
+    return new Dictionary<string, ILabProductionSummaryRepository>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Certus"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Certus),
+        ["Cove"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Cove),
+        ["Elixir"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Elixir),
+        ["PCRLabsofAmerica"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PCRLabsofAmerica),
+        ["Beech_Tree"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.BeechTree),
+        ["Rising_Tides"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.RisingTides),
+        ["Phi_Life"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PhiLife),
+        ["Inhealth_DTR"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.InHealthDTR),
+    };
+});
 // The lab list lives in LabProductionSummaryRepositoryMap so LRN.ReportWorker
 // registers exactly the same set (queued Excel exports go through the worker).
 builder.Services.AddSingleton<IReadOnlyDictionary<string, ILabProductionSummaryRepository>>(sp =>
@@ -518,6 +590,24 @@ builder.Services
     .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<ILabNameResolver, LabNameResolver>();
 
+// ── Reimbursement Insights chat (Foundry agent via the ReimbursementAgentProxy App Service) ──
+// The browser posts to ReimbursementChatController on this origin and this app calls the proxy,
+// rather than the page calling azurewebsites.net directly. Two reasons that is not optional here:
+// the site's own Content-Security-Policy allows connect-src 'self' only, so a direct browser call
+// would be blocked outright; and relaying keeps the shared ChatToken signing key server-side.
+builder.Services.Configure<ReimbursementAgentOptions>(
+    configuration.GetSection(ReimbursementAgentOptions.Section));
+builder.Services.Configure<ReimbursementChatTokenOptions>(
+    configuration.GetSection(ReimbursementChatTokenOptions.Section));
+builder.Services.AddSingleton<ReimbursementChatTokenIssuer>();
+
+// Long timeout by design: one answer is a whole agent run — the model reasons, calls the MCP
+// bridge, and writes a per-lab breakdown — which routinely takes far longer than a data API call.
+builder.Services
+    .AddHttpClient<IReimbursementAgentApiClient, ReimbursementAgentApiClient>()
+    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(
+        builder.Configuration.GetValue<int?>("ReimbursementAgent:TimeoutSeconds") ?? 120));
+
 // Which reports the board offers to which labs — the padlocked cells. Bound with IOptionsMonitor
 // (not Get<T>()) so editing the "ReportAvailability" section of appsettings.json takes effect on
 // the next page load, without restarting the site.
@@ -576,6 +666,25 @@ builder.Services.AddRateLimiter(options =>
                 QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                 QueueLimit = 0
             }));
+
+    // Reimbursement chat: partitioned by user, not by IP. The agent proxy rate-limits per calling
+    // IP, and every question from this site now arrives from this one server address — so its
+    // limit can no longer separate one user from another. This is where per-person fairness (and
+    // the cost ceiling that limit was protecting) has to be enforced instead.
+    options.AddPolicy(ReimbursementChatRateLimit.PolicyName, context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.User.Identity?.Name
+                          ?? context.Connection.RemoteIpAddress?.ToString()
+                          ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = builder.Configuration.GetValue<int?>("ReimbursementAgent:RateLimit:PermitLimit") ?? 10,
+                Window = TimeSpan.FromMinutes(
+                    builder.Configuration.GetValue<int?>("ReimbursementAgent:RateLimit:WindowMinutes") ?? 1),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0
+            }));
+
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 });
 
@@ -855,7 +964,6 @@ app.UseResponseCompression();
 app.UseStaticFiles();
 app.UseRouting();
 app.UseRequestTimeouts();
-app.UseRateLimiter();
 
 // Must be after UseRouting and before UseAuthentication so preflight/AuthToken
 // responses include Access-Control-Allow-Origin for local React dev.
@@ -863,6 +971,12 @@ app.UseCors(DenialWorkflowLocalDevCorsPolicy);
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+// After authentication, not before: the reimbursement-chat policy partitions by signed-in
+// user, and HttpContext.User is only populated once the cookie has been read. Ahead of
+// UseAuthentication every request looks anonymous and the partition collapses to the caller
+// IP. The login policy is unaffected — it keys off the posted form and the IP, never User.
+app.UseRateLimiter();
 
 app.MapStaticAssets();
 
@@ -881,6 +995,62 @@ static async Task ApplySecurityHeadersMiddleware(HttpContext context, Func<Task>
     context.Items["CspNonce"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
     ApplySecurityHeaders(context);
     await next();
+}
+
+/// <summary>
+/// Layers Azure Key Vault over the configuration already loaded, when KeyVault:Uri names one.
+/// </summary>
+/// <returns>True when the vault was layered on; false when KeyVault:Uri named none.</returns>
+static bool ApplyKeyVault(IConfigurationBuilder configuration, string? uri)
+{
+    var trimmed = uri?.Trim();
+    if (string.IsNullOrEmpty(trimmed)) return false;
+
+    // Validated rather than handed straight to the SDK: the URI is hand-maintained in
+    // appsettings.json and a typo there ("https: //…") otherwise surfaces much later as a
+    // connection string that is simply missing.
+    if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var vaultUri) || vaultUri.Scheme != Uri.UriSchemeHttps)
+        throw new InvalidOperationException(
+            $"KeyVault:Uri must be an absolute https URI, e.g. https://kv-lrnmetrics-prod.vault.azure.net/ — got '{trimmed}'.");
+
+    try
+    {
+        // DefaultAzureCredential so one build authenticates everywhere it is deployed: the app
+        // pool's managed identity in Azure, AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_CLIENT_SECRET
+        // where a service principal is used instead, and the developer's `az login` or Visual
+        // Studio account locally.
+        configuration.AddAzureKeyVault(vaultUri, new DefaultAzureCredential());
+        return true;
+    }
+    catch (Exception ex)
+    {
+        // Continuing would boot the site with no connection strings and no JWT signing key. Every
+        // page would then fail deep inside a repository, naming a missing connection string rather
+        // than the vault that never loaded. Stop here, where the message can name the real cause.
+        throw new InvalidOperationException(
+            $"Could not load secrets from Azure Key Vault '{vaultUri}'. The vault uses RBAC (not access " +
+            $"policies), so the identity running this process needs the 'Key Vault Secrets User' role on it, " +
+            $"and this host must be able to reach the vault.", ex);
+    }
+}
+
+/// <summary>
+/// Confirms the vault actually delivered the settings the site cannot run without.
+///
+/// Reading the vault successfully and finding what you need in it are two different things, and
+/// only the first one fails loudly on its own. The message names the secret to create, in the
+/// '--' form you type into the vault, because that is the only form that helps at 2am.
+/// </summary>
+static void RequireVaultSecrets(IConfiguration configuration, params string[] requiredKeys)
+{
+    var missing = requiredKeys.Where(k => string.IsNullOrWhiteSpace(configuration[k])).ToArray();
+    if (missing.Length == 0) return;
+
+    var secretNames = string.Join(", ", missing.Select(k => k.Replace(":", "--")));
+    throw new InvalidOperationException(
+        $"Azure Key Vault was read successfully but is missing {missing.Length} required secret(s): {secretNames}. " +
+        $"Create them in the vault (secret names use '--' where configuration uses ':'), or clear KeyVault:Uri to " +
+        $"run from local settings instead. Values stored as vault TAGS are not secrets and are never loaded.");
 }
 
 static void ApplySecurityHeaders(HttpContext context)
