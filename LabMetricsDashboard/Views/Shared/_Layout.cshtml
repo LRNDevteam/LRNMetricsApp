@@ -372,23 +372,30 @@
         .nav-bell-btn:hover { background: rgba(255,255,255,.12); }
         #rptBtn { color: #FBBF24; }
         #rptBtn:hover { background: rgba(251,191,36,.16); }
-        /* Reimbursement Insights launcher. Same bare-glyph treatment as the bell and the reports
-           badge — that is what actually reads against this bar. A translucent white disc was
-           tried and failed: over the #1565c0 end of the gradient it renders as pale grey, and a
-           white glyph on pale grey has almost no contrast.
-           Colour matches the robot in the Reimbursement Insights page header (.rc-title i), so the
-           launcher and the screen it opens are visibly the same feature. Kept a step larger than
-           its neighbours because bi-robot is an outline glyph with thinner strokes than the
-           filled bell, and this blue sits closer to the bar than white or amber do. */
+        /* Reimbursement Insights launcher: the robot head drawn inline below (.nav-agent-svg),
+           replacing the bare bi-robot glyph.
+           It keeps the bare-glyph treatment the rest of this bar uses — no disc, no plate, no
+           background of its own — which is what the earlier note about this bar was really about:
+           a translucent white disc was tried and failed, because over the #1565c0 end of the bar
+           gradient it renders pale grey and a white glyph on pale grey has almost no contrast.
+           Drawn as a solid white silhouette instead, so it sits on the bar exactly like the bell
+           and reports icons do. */
         .nav-agent-btn {
-            color: #64b5f6;
-            font-size: 1.2rem;
+            display: inline-flex;
+            align-items: center;
+            line-height: 0;
             text-decoration: none;
         }
 
-        /* Background on hover comes from .nav-bell-btn:hover, so the highlight shape matches
-           its neighbours exactly; only the glyph colour is brightened here. */
-        .nav-agent-btn:hover { color: #BBDEFB; }
+        /* 20px, not the 22px the badge version used: the head now fills its own viewBox instead of
+           sitting inside padding, so it reads a size larger than the box suggests. */
+        .nav-agent-svg { width: 20px; height: 20px; display: block; }
+
+        /* The neighbours brighten their glyph colour on hover; this artwork is already white, so
+           lift the whole thing slightly instead — mainly visible on the cyan eyes. The hover
+           background still comes from .nav-bell-btn:hover, so the highlight shape matches its
+           neighbours exactly. */
+        .nav-agent-btn:hover .nav-agent-svg { filter: brightness(1.15); }
 
         .nav-agent-btn:focus-visible {
             outline: none;
@@ -998,7 +1005,28 @@
                        target="_blank" rel="noopener"
                        aria-label="Reimbursement Insights - ask the AI agent, opens in a new tab"
                        title="Reimbursement Insights — ask the AI agent (opens in a new tab)">
-                        <i class="bi bi-robot"></i>
+                        @* The robot head on its own - no badge, no background disc. The white
+                           silhouette (helmet, ears, antenna) is what carries the shape against the
+                           bar; the only colour is the navy visor and its cyan eyes. White is used
+                           rather than the artwork's navy for the ears and antenna, because those
+                           sit directly on the bar and navy-on-#1565c0 goes muddy.
+                           Inline rather than an <img>: no extra request, and it stays crisp on a
+                           high-DPI display. The anchor already carries the accessible name, so the
+                           artwork itself is hidden from assistive tech. *@
+                        <svg class="nav-agent-svg" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+                            @* Antenna first, so the stalk tucks under the helmet. *@
+                            <path d="M33 15 L37.5 8.5" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" />
+                            <circle cx="38.4" cy="7.2" r="3" fill="#FFFFFF" />
+                            @* Ears sit behind the helmet, so only their outer halves show. *@
+                            <rect x="1.5" y="21" width="9" height="14" rx="4.5" fill="#FFFFFF" />
+                            <rect x="37.5" y="21" width="9" height="14" rx="4.5" fill="#FFFFFF" />
+                            <rect x="7" y="13" width="34" height="30" rx="12" fill="#FFFFFF" />
+                            <rect x="12" y="18" width="24" height="19" rx="8.5" fill="#17204A" />
+                            <circle cx="19.6" cy="26" r="3.4" fill="#4FE0F0" />
+                            <circle cx="28.4" cy="26" r="3.4" fill="#4FE0F0" />
+                            <path d="M20.2 31.6 Q24 35.2 27.8 31.6" stroke="#FFFFFF" stroke-width="2.2"
+                                  stroke-linecap="round" fill="none" />
+                        </svg>
                     </a>
                 }
                 @if (User?.Identity?.IsAuthenticated ?? false)
