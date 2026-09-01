@@ -2,6 +2,7 @@ using System.Reflection;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace LabMetricsDashboard.Controllers;
 
@@ -19,6 +20,7 @@ public sealed class ReportBoardController : Controller
     private readonly LabSettings _labSettings;
     private readonly IMenuService _menuService;
     private readonly IReportAvailabilityService _availability;
+    private readonly IOptionsMonitor<ReportBoardSettings> _boardSettings;
     private readonly ILogger<ReportBoardController> _logger;
 
     public ReportBoardController(
@@ -27,6 +29,7 @@ public sealed class ReportBoardController : Controller
         LabSettings labSettings,
         IMenuService menuService,
         IReportAvailabilityService availability,
+        IOptionsMonitor<ReportBoardSettings> boardSettings,
         ILogger<ReportBoardController> logger)
     {
         _api = api;
@@ -34,6 +37,7 @@ public sealed class ReportBoardController : Controller
         _labSettings = labSettings;
         _menuService = menuService;
         _availability = availability;
+        _boardSettings = boardSettings;
         _logger = logger;
     }
 
@@ -50,7 +54,13 @@ public sealed class ReportBoardController : Controller
     public async Task<IActionResult> Index(string? view, string? sort, string? filter, bool refresh = false, CancellationToken ct = default)
     {
         var resolvedView = string.Equals(view, "cards", StringComparison.OrdinalIgnoreCase) ? "cards" : "matrix";
-        var resolvedSort = string.Equals(sort, "az", StringComparison.OrdinalIgnoreCase) ? "az" : "latest";
+        // "order" — the sequence admins set per lab — is the default; the other two stay opt-in.
+        var resolvedSort = sort?.ToLowerInvariant() switch
+        {
+            "az" => "az",
+            "latest" => "latest",
+            _ => "order"
+        };
         var resolvedFilter = filter?.ToLowerInvariant() switch
         {
             "failed" => "failed",
@@ -71,6 +81,9 @@ public sealed class ReportBoardController : Controller
         }
 
         var visibleLabs = VisibleLabKeys();
+        // Read the monitored section ONCE: an edit landing mid-loop must not order half the board
+        // by the old list and half by the new one.
+        var board = _boardSettings.CurrentValue ?? new ReportBoardSettings();
         var rows = new List<LabReportRow>();
 
         // A report the tracker has never returned a result for — for ANY lab in this fetch — is
@@ -108,12 +121,19 @@ public sealed class ReportBoardController : Controller
                 apiRow.Statuses.TryGetValue(source, out var raw) && ParseStatus(raw) == ReportRunStatus.Success);
 
             var runAge = apiRow.SyncedOnDate is { } synced ? DateTime.Now - synced : (TimeSpan?)null;
-            var overdue = sourcesReady && runAge > ReportBoardViewModel.OverdueAfter;
+
+            // A lab that has stopped billing is still on the board, but its missing reports are
+            // expected rather than stalled. Overdue is the only status the banner, the KPI, the row
+            // badge and the filter attribute key off, so withholding it here silences all of them —
+            // the cells stay Pending (a gear, not a warning) and nothing else about the lab changes.
+            var quiet = board.SuppressesMissingReportWarning(configKey, labDisplayName);
+            var overdue = sourcesReady && runAge > ReportBoardViewModel.OverdueAfter && !quiet;
 
             rows.Add(new LabReportRow
             {
                 LabDisplayName = labDisplayName,
                 LabConfigKey = configKey ?? string.Empty,
+                DisplayOrder = board.OrderOf(configKey, labDisplayName),
                 RunId = apiRow.RunId,
                 Week = apiRow.Week,
                 SyncedOn = apiRow.SyncedOnDate,
@@ -121,7 +141,7 @@ public sealed class ReportBoardController : Controller
                 Reports = columns
                     .Select(column => BuildCell(
                         column, apiRow, labConfig, configKey, labDisplayName, routeAllowed,
-                        sourcesReady, overdue,
+                        sourcesReady, overdue, quiet,
                         producedColumns.Contains(column.StatusFrom ?? column.TrackerColumn)))
                     .ToList()
             });
@@ -203,6 +223,7 @@ public sealed class ReportBoardController : Controller
         IReadOnlyDictionary<string, bool> routeAllowed,
         bool sourcesReady,
         bool overdue,
+        bool warningsSuppressed,
         bool producedAnywhere)
     {
         // A tile may derive its status from another report (StatusFrom) — LIMS Master mirrors
@@ -251,7 +272,11 @@ public sealed class ReportBoardController : Controller
             blocked = status switch
             {
                 ReportRunStatus.Failed => "This report failed in the latest run.",
-                ReportRunStatus.Pending => "Waiting for this run to produce it.",
+                // A lab whose warnings are switched off never reaches Overdue, so its stale cells
+                // stay Pending forever - say why rather than claiming the run is still working.
+                ReportRunStatus.Pending => warningsSuppressed
+                    ? "This lab is not expected to produce this report every run."
+                    : "Waiting for this run to produce it.",
                 ReportRunStatus.Overdue => "The source data landed over a day ago and this report has still not been produced.",
                 ReportRunStatus.NotAvailable => availability.LockReason ?? "This report is not available for this lab.",
                 _ => "Not produced for this lab."
@@ -311,13 +336,22 @@ public sealed class ReportBoardController : Controller
     }
 
     private static List<LabReportRow> Sort(List<LabReportRow> rows, string sort)
-        => sort == "az"
-            ? rows.OrderBy(r => r.LabDisplayName, StringComparer.OrdinalIgnoreCase).ToList()
+        => sort switch
+        {
+            "az" => rows.OrderBy(r => r.LabDisplayName, StringComparer.OrdinalIgnoreCase).ToList(),
+
             // Newest sync first, and within a sync date the labs that need attention lead.
-            : rows.OrderByDescending(r => r.SyncedOn ?? DateTime.MinValue)
-                  .ThenByDescending(r => r.HasFailures)
-                  .ThenBy(r => r.LabDisplayName, StringComparer.OrdinalIgnoreCase)
-                  .ToList();
+            "latest" => rows.OrderByDescending(r => r.SyncedOn ?? DateTime.MinValue)
+                            .ThenByDescending(r => r.HasFailures)
+                            .ThenBy(r => r.LabDisplayName, StringComparer.OrdinalIgnoreCase)
+                            .ToList(),
+
+            // Board order: the ReportBoard:LabOrder list. Labs missing from it share int.MaxValue
+            // and fall to the end together, where the name keeps them in a stable A-Z run.
+            _ => rows.OrderBy(r => r.DisplayOrder)
+                     .ThenBy(r => r.LabDisplayName, StringComparer.OrdinalIgnoreCase)
+                     .ToList()
+        };
 
     /// <summary>Admins see every lab; everyone else sees the labs on their LabName claims.</summary>
     private HashSet<string> VisibleLabKeys()

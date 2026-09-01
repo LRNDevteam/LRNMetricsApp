@@ -614,6 +614,10 @@ builder.Services
 builder.Services.Configure<ReportAvailabilitySettings>(configuration.GetSection("ReportAvailability"));
 builder.Services.AddSingleton<IReportAvailabilityService, ReportAvailabilityService>();
 
+// Lab display order and the labs that never warn about missing reports. Same IOptionsMonitor
+// reasoning as above: edit the "ReportBoard" section and the next page load picks it up.
+builder.Services.Configure<ReportBoardSettings>(configuration.GetSection(ReportBoardSettings.Section));
+
 // Dynamic role-based navbar (Menu Master + Role Menu Mapping via LRN.ReportsApi).
 // Short timeout: this client sits on the hot path of EVERY page (navbar + MenuAccessFilter).
 // A slow/unreachable Reports API must fail fast so pages keep rendering (menu falls back
