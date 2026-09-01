@@ -109,7 +109,7 @@ accumulated, not with the size of the current run. If it comes back, check in or
 2. **How much data.** `SELECT COUNT(1) FROM dbo.DenialTaskBoard WHERE LabId = <LabId>` and the
    same for `DenialLineItem` / `PayerValidationReport WHERE RunId = '<RunId>'`, run in the
    **lab** database.
-3. **Indexes.** `Sql_Add_Denial_Performance_Indexes.sql` has the supporting indexes for this
+3. **Indexes.** `LRN.ReportsApi/Sql/DenialChanges/03_Denial_Performance_Indexes.sql` has the supporting indexes for this
    path, with the sizing queries at the bottom. Review before applying — raising the timeout
    stops the exception, indexes are what make it fast.
 

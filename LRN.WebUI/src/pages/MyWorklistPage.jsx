@@ -725,6 +725,17 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     const recommendedActionValue = [...new Set(affected.map(line => String(line.recommendedAction || '').trim()).filter(Boolean))].join(' / ') || 'No recommendation available';
     const pendingPayerCompletionMissing = noteStatus === 'Pending Payer Response' && actionCompleted === '';
     const pendingPayerCompletionWarning = noteStatus === 'Pending Payer Response' && actionCompleted === 'false';
+    // Closing is the one status with consequences beyond the affected lines: the outcome becomes
+    // the claim's workflow status, and once no open line is left the claim moves to Closed Denials.
+    // Both happen server-side, so say so here rather than letting the reviewer discover it after.
+    const closingNow = noteStatus === 'Closed';
+    const outcomeRequired = closingNow || noteStatus === 'Write-Off Pending Approval';
+    const openLinesRemainingAfterSave = closingNow
+      ? (claim.lines || []).filter(l =>
+          normalizeStatus(l.status) !== 'Closed' &&
+          !affected.some(a => (a.taskId || '') === (l.taskId || '') && (a.cptCode || '') === (l.cptCode || ''))
+        ).length
+      : 0;
     return <Modal title={`Update Status - Claim ${claim.claimId}`} className="status-scope-modal" onClose={() => { setNoteError(''); setNoteCtx(null); }}>
       <div className="status-scope-body">
         <div className="status-scope-callout"><strong>Update Scope controls bulk behavior</strong><span>Choose what you are updating, then review the affected open lines before saving.</span></div>
@@ -735,7 +746,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
           <label className="status-scope-field"><span className="field-label-row">Recommended Action</span><select className="wl-full" value={recommendedActionValue} disabled aria-readonly="true"><option value={recommendedActionValue}>{recommendedActionValue}</option></select></label>
           <label className="status-scope-field"><span className="field-label-row">New Line Status</span><select className="wl-full" value={noteStatus} disabled={noteSaving} onChange={e => { setNoteError(''); setNoteStatus(e.target.value); }}>{statusOptions.map(x => <option key={x}>{x}</option>)}</select></label>
           <label className="status-scope-field"><span className="field-label-row">{['Payer Follow-up Required', 'Pending Payer Response', 'Pending Documentation'].includes(noteStatus) ? 'Expected Response Date' : 'Next Follow-up Date'} {['Payer Follow-up Required', 'Pending Payer Response', 'Pending Documentation'].includes(noteStatus) ? <span className="required-star">*</span> : null}</span><input type="date" value={noteFollowUpDate} onChange={e => { setNoteError(''); setNoteFollowUpDate(e.target.value); }} disabled={noteSaving} /></label>
-          <label className="status-scope-field"><span className="field-label-row">Actual Action / Outcome</span><select className="wl-full" value={actualOutcomeValue} disabled={noteSaving || !!pendingPayerAutoOutcome} onChange={e => { setNoteError(''); setActualOutcome(e.target.value); }}><option value="">Select outcome</option>{actualOutcomes.map(x => <option key={x}>{x}</option>)}</select>{pendingPayerAutoOutcome ? <span className="doctype-help">Auto-assigned from Action Category for Pending Payer Response.</span> : null}</label>
+          <label className="status-scope-field"><span className="field-label-row">Actual Action / Outcome {outcomeRequired ? <span className="required-star">*</span> : null}</span><select className="wl-full" value={actualOutcomeValue} disabled={noteSaving || !!pendingPayerAutoOutcome} onChange={e => { setNoteError(''); setActualOutcome(e.target.value); }}><option value="">Select outcome</option>{actualOutcomes.map(x => <option key={x}>{x}</option>)}</select>{pendingPayerAutoOutcome ? <span className="doctype-help">Auto-assigned from Action Category for Pending Payer Response.</span> : null}</label>
           <label className="status-scope-field"><span className="field-label-row">Action Completed? {noteStatus === 'Pending Payer Response' ? <span className="required-star">*</span> : null}</span><select className="wl-full" value={actionCompleted} disabled={noteSaving} onChange={e => { setNoteError(''); setActionCompleted(e.target.value); }}><option value="">Select</option><option value="true">Yes</option><option value="false">No</option></select></label>
           {noteStatus === 'Pending Documentation' && <label className="status-scope-field doc-type-field"><span className="field-label-row">Documentation Type</span><select className="wl-full" value={documentationType} disabled={noteSaving} onChange={e => { setNoteError(''); setDocumentationType(e.target.value); }}><option value="">Select type</option>{documentationTypes.map(x => <option key={x}>{x}</option>)}</select>{docDescription ? <span className="doctype-help">{docDescription}</span> : null}</label>}
           {noteStatus === 'Pending Documentation' && <div className="status-scope-field escalate-to-field"><span className="field-label-row">Escalate To</span><label className="wl-checkbox-inline"><input type="checkbox" checked={escalateOnDocRequest} disabled={noteSaving} onChange={e => setEscalateOnDocRequest(e.target.checked)} /> AR Manager</label><span className="doctype-help">Optional - also submits an internal escalation ("Documentation requirement unclear") to the AR Manager.</span></div>}
@@ -748,6 +759,13 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
           <h4>Affected Line Preview</h4>
           <p><strong>{affected.length}</strong> eligible open line(s) will be updated to <strong>{noteStatus}</strong>. Action Completed will be set to <strong>{completedValue}</strong>.</p>
           <div className="status-preview-chips">{affected.length ? affected.map(l => <span className="status-chip recommended" key={l.taskId || `${l.cptCode}-${l.denialCode}`}>CPT {l.cptCode || '-'} - {l.denialCode || '-'} - Recommended: {l.recommendedAction || 'Not set'}{l.actionCategory ? ` (Previous category: ${l.actionCategory})` : ''}</span>) : <span className="status-chip red">No eligible lines selected</span>}</div>
+          {closingNow ? <div className="status-preview-closure">
+            <strong>Closing these lines</strong>
+            <span>Workflow status will be set to <strong>{actualOutcomeValue || 'the selected outcome'}</strong> instead of a generic closed marker.</span>
+            <span>{openLinesRemainingAfterSave > 0
+              ? `${openLinesRemainingAfterSave} line(s) will still be open, so the claim stays on the board.`
+              : 'No open line will remain, so this claim moves to Closed Denials.'}</span>
+          </div> : null}
           {noteUpdateScope === 'By Claim' && protectedCount ? <div className="status-preview-warning">Closed and escalated lines are protected from claim-wide overwrite.</div> : null}
         </div>
         <h4>History</h4>

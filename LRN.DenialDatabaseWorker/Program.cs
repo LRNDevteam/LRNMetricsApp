@@ -44,10 +44,6 @@ builder.Configuration.AddJsonFile("appsettings.Secrets.json", optional: true, re
 
 // ProcessorOptions
 builder.Services.Configure<ProcessorOptions>(builder.Configuration.GetSection(ProcessorOptions.SectionName));
-builder.Services.PostConfigure<ProcessorOptions>(options =>
-{
-	options.Configuration = builder.Configuration;
-});
 
 // Labs. appsettings.json carries only LabDbConnectionKey - the NAME of the vault secret holding
 // that lab's connection string - so resolve each one here, after the vault provider is in place.
@@ -72,7 +68,12 @@ builder.Services.PostConfigure<List<LabConfig>>(labs =>
 				"named by KeyVault:VaultUri and that this identity may read it.");
 	}
 });
-builder.Services.Configure<DenialWorkflowApiOptions>(builder.Configuration.GetSection(DenialWorkflowApiOptions.SectionName));
+// Teams notifications. TeamsNotificationOptions was never bound, so TeamsNotification:* was read
+// by nothing and the notifier was inert whatever the config said. Binding it makes the existing
+// "Enabled" switch mean what it says; it stays false-by-default in the type, so a lab that has not
+// set Enabled=true and supplied a webhook URL still sends nothing.
+builder.Services.Configure<TeamsWebhookNotifier.TeamsNotificationOptions>(
+	builder.Configuration.GetSection("TeamsNotification"));
 
 // Logging
 builder.Logging.ClearProviders();
@@ -94,7 +95,6 @@ builder.Services.AddSingleton<FileResolver>();
 builder.Services.AddSingleton<OutputPathBuilder>();
 builder.Services.AddSingleton<DenialAnalysisRunLogRepository>();
 builder.Services.AddSingleton<DenialTaskBoardRepository>();
-builder.Services.AddHttpClient<IDenialWorkflowApiClient, DenialWorkflowApiClient>();
 
 // Run logging + workflow tracker (LRNMaster). Both wrap stored procedures and swallow
 // their own failures, so a logging outage costs a log row and not the run.

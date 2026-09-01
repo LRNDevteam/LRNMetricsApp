@@ -10,15 +10,69 @@ function riskClass(value) {
   return 'flag-blue';
 }
 
-export default function DashboardPage({ data, user = {}, labName = '', onKpiClick }) {
-  const role = user?.role || '';
-  if (isArReviewerRole(role)) return <AnalystDashboard data={data} user={user} labName={labName} onKpiClick={onKpiClick} />;
-  if (isClientManagerRole(role)) return <SingleAccountDashboard data={data} user={user} labName={labName} mode="client" />;
-  if (isAccountManagerRole(role)) return <SingleAccountDashboard data={data} user={user} labName={labName} mode="account" />;
-  return <ManagerDashboard data={data} user={user} labName={labName} onKpiClick={onKpiClick} />;
+// The queue counts App.jsx already fetches for the sidebar badges ARE the workflow status
+// breakdown — one row per workflow state a claim can sit in. Rendering them as a table here needs
+// no new endpoint and cannot drift from the badges, because it is the same object.
+//
+// Order is the operational lifecycle, not alphabetical: a manager reads this top-to-bottom to see
+// where work is piling up.
+const WORKFLOW_STATUS_ROWS = [
+  { key: 'new', label: 'New', taskView: 'new', tone: 'flag-blue' },
+  { key: 'unassigned', label: 'Unassigned', taskView: 'unassigned', tone: 'flag-amber' },
+  { key: 'assigned', label: 'Assigned To AR Reviewer', taskView: 'assigned', tone: 'flag-green' },
+  { key: 'payerFollowup', label: 'Payer Follow-up Required', taskView: 'payerFollowup', tone: 'flag-amber' },
+  { key: 'pendingDocumentation', label: 'Pending Documentation', taskView: 'pendingDocumentation', tone: 'flag-amber' },
+  { key: 'pendingPayerResponse', label: 'Pending Payer Response', taskView: 'pendingPayerResponse', tone: 'flag-blue' },
+  { key: 'writeOffApproval', label: 'Write-Off Pending Approval', taskView: 'writeOffApproval', tone: 'flag-amber' },
+  { key: 'internalEscalation', label: 'Internal Escalation', taskView: 'internalEscalation', tone: 'flag-red' },
+  { key: 'externalEscalation', label: 'External Escalation', taskView: 'externalEscalation', tone: 'flag-red' },
+  { key: 'escalationResponse', label: 'Escalation Response', taskView: 'escalationResponse', tone: 'flag-blue' },
+  { key: 'externalResponse', label: 'External Response', taskView: 'externalResponse', tone: 'flag-blue' },
+  { key: 'verification', label: 'Verification Pending', taskView: 'verification', tone: 'flag-amber' },
+  { key: 'closed', label: 'Closed', taskView: 'closed', tone: 'flag-green' }
+];
+
+function WorkflowStatusSummary({ counts = {}, onKpiClick }) {
+  const rows = WORKFLOW_STATUS_ROWS
+    .map(r => ({ ...r, count: Number(counts?.[r.key] ?? 0) }))
+    // A null count means the badge request has not returned yet; a zero means the queue really is
+    // empty. Both render, so the table never silently loses a lifecycle stage.
+    .filter(r => counts?.[r.key] !== undefined);
+
+  const total = rows.reduce((sum, r) => sum + r.count, 0);
+
+  return <RoleCard
+    title="Workflow Status Summary"
+    subtitle="Claims by workflow state. A claim sits in exactly one queue — the counts are the same ones behind the sidebar badges.">
+    <div className="role-table-wrap">
+      <table className="role-table wide">
+        <thead><tr><th>Workflow Status</th><th>Claims</th><th>% of Total</th><th>State</th></tr></thead>
+        <tbody>
+          {rows.length ? rows.map(r => <tr key={r.key}>
+            <td>
+              <button type="button" className="role-table-link" onClick={() => onKpiClick?.({ taskView: r.taskView })}>{r.label}</button>
+            </td>
+            <td>
+              <button type="button" className="role-table-link numeric" onClick={() => onKpiClick?.({ taskView: r.taskView })}>{n(r.count)}</button>
+            </td>
+            <td>{total > 0 ? `${((r.count / total) * 100).toFixed(1)}%` : '0.0%'}</td>
+            <td><span className={`role-flag ${r.tone}`}>{r.count > 0 ? 'Active' : 'Empty'}</span></td>
+          </tr>) : <EmptyRow colSpan={4} />}
+        </tbody>
+      </table>
+    </div>
+  </RoleCard>;
 }
 
-function ManagerDashboard({ data, onKpiClick }) {
+export default function DashboardPage({ data, user = {}, labName = '', onKpiClick, workflowStatusCounts }) {
+  const role = user?.role || '';
+  if (isArReviewerRole(role)) return <AnalystDashboard data={data} user={user} labName={labName} onKpiClick={onKpiClick} workflowStatusCounts={workflowStatusCounts} />;
+  if (isClientManagerRole(role)) return <SingleAccountDashboard data={data} user={user} labName={labName} mode="client" />;
+  if (isAccountManagerRole(role)) return <SingleAccountDashboard data={data} user={user} labName={labName} mode="account" />;
+  return <ManagerDashboard data={data} user={user} labName={labName} onKpiClick={onKpiClick} workflowStatusCounts={workflowStatusCounts} />;
+}
+
+function ManagerDashboard({ data, onKpiClick, workflowStatusCounts }) {
   const classifications = data.denialClassifications || [];
   const workload = data.analystWorkload || [];
   const assignedClaims = data.assignedClaims ?? data.assigned ?? 0;
@@ -48,11 +102,14 @@ function ManagerDashboard({ data, onKpiClick }) {
         </tbody></table></div>
       </RoleCard>
     </div>
+    <div className="dashboard-overview-grid dashboard-overview-grid-full">
+      <WorkflowStatusSummary counts={workflowStatusCounts} onKpiClick={onKpiClick} />
+    </div>
     <ReviewerAgingTable rows={workload} title="Analyst Workload" onReviewerClick={(reviewer, taskView) => onKpiClick?.({ taskView, reviewer })} />
   </div>;
 }
 
-function AnalystDashboard({ data, user, labName, onKpiClick }) {
+function AnalystDashboard({ data, user, labName, onKpiClick, workflowStatusCounts }) {
   const workload = data.analystWorkload || [];
   const mine = workload.find(x => String(x.reviewerName || '').toLowerCase() === String(user?.displayName || user?.userName || '').toLowerCase()) || workload[0] || {};
   // Use the same per-reviewer workload row that renders the "My Aging View" table above, so the
@@ -73,6 +130,7 @@ function AnalystDashboard({ data, user, labName, onKpiClick }) {
       <RoleKpi label="Completed Tasks" value={n(closedTasks)} tone="green" />
       <RoleKpi label="Open Balance" value={money(openBalance)} tone="teal" />
     </div>
+    <WorkflowStatusSummary counts={workflowStatusCounts} onKpiClick={onKpiClick} />
     <div className="role-grid two analyst-layout">
       <RoleCard title="Priority Work Queue" subtitle="A claim is listed under every denial classification it carries, so queue claim counts can add up to more than your assigned total.">
         <div className="role-table-wrap"><table className="role-table wide"><thead><tr><th>Queue</th><th>Claims</th><th>Tasks</th><th>Balance</th><th>Priority</th></tr></thead><tbody>

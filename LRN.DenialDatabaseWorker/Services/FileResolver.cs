@@ -6,31 +6,8 @@ namespace DenialDatabaseProcessorWorker.Services;
 
 public sealed class FileResolver
 {
-	public string GetLatestPayerPolicyFile(LabConfig lab)
-	{
-		var root = lab.PayerPolicyFile; // treated as folder root
-
-		if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
-			throw new DirectoryNotFoundException($"PayerPolicy root not found: {root}");
-
-		var yearDir = Directory.GetDirectories(root)
-			.OrderByDescending(Path.GetFileName)
-			.FirstOrDefault() ?? throw new InvalidOperationException("No year folder found.");
-
-		var monthDir = Directory.GetDirectories(yearDir)
-			.OrderByDescending(Path.GetFileName)
-			.FirstOrDefault() ?? throw new InvalidOperationException("No month folder found.");
-
-		var weekDir = Directory.GetDirectories(monthDir)
-			.OrderByDescending(Path.GetFileName)
-			.FirstOrDefault() ?? throw new InvalidOperationException("No week folder found.");
-
-		var payerFile = Directory.GetFiles(weekDir, "*_Payer_Policy_ValidationReport.xlsx")
-			.OrderByDescending(File.GetCreationTimeUtc)
-			.FirstOrDefault() ?? throw new InvalidOperationException("No Payer Policy file found.");
-
-		return payerFile;
-	}
+	// GetLatestPayerPolicyFile was removed with Labs[].PayerPolicyFile: denial rows come from
+	// dbo.PayerValidationReport, and the upstream process stopped producing the workbook it read.
 
 	public string GetLatestClaimActionMapper(LabConfig lab)
 	{
