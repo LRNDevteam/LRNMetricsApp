@@ -18,7 +18,7 @@
      3  Fully Adjusted reason-code Pareto (YTD / window counts)
      4  Fully Paid % of Billed Claims (monthly)
      5  Insurance Balance % + composition (monthly)
-     6  Panel Avg Allowed (DOS) vs Avg Paid (CheckDate) — Top 5 panels
+     6  Panel Avg Allowed vs Avg Paid — both by DOS month — Top 5 panels
      7  Panel × Top Payer MOM — Top 5 panels × top 10 payers
      8  DOS-cohort maturity curve (cumulative paid ≤ day N; censored by age)
      9  Denial rate by carrier — Top 10 by Allowed $ volume
@@ -326,9 +326,10 @@ BEGIN
 
     /* ===================================================================
        6) Panel Avg Allowed / Paid (Top 5 panels by Allowed $; no hardcodes)
+          Both averages are by Date of Service month (same claim population).
        =================================================================== */
     ;WITH Eligible AS (
-        SELECT Panelname, DOS, PaidDate, AllowedAmount, InsurancePayment
+        SELECT Panelname, DOS, AllowedAmount, InsurancePayment
         FROM #Cmp
         WHERE BillStatus = N'Billed' AND ClaimStatus <> N'No Response'
     ),
@@ -338,18 +339,13 @@ BEGIN
     ),
     ByDosMonth AS (
         SELECT e.Panelname, DOSYear = YEAR(e.DOS), DOSMonth = MONTH(e.DOS),
-               AvgAllowed = AVG(e.AllowedAmount), AllowedClaimCount = COUNT(*)
+               AvgAllowed = AVG(e.AllowedAmount),
+               AllowedClaimCount = COUNT(*),
+               AvgPaid = AVG(e.InsurancePayment),
+               PaidClaimCount = SUM(CASE WHEN e.InsurancePayment > 0 THEN 1 ELSE 0 END)
         FROM Eligible e
         INNER JOIN TopPanels tp ON tp.Panelname = e.Panelname
         GROUP BY e.Panelname, YEAR(e.DOS), MONTH(e.DOS)
-    ),
-    ByPaidMonth AS (
-        SELECT e.Panelname, PaidYear = YEAR(e.PaidDate), PaidMonth = MONTH(e.PaidDate),
-               AvgPaid = AVG(e.InsurancePayment), PaidClaimCount = COUNT(*)
-        FROM Eligible e
-        INNER JOIN TopPanels tp ON tp.Panelname = e.Panelname
-        WHERE e.PaidDate IS NOT NULL
-        GROUP BY e.Panelname, YEAR(e.PaidDate), MONTH(e.PaidDate)
     )
     SELECT
         dm.Panelname,
@@ -357,12 +353,11 @@ BEGIN
                          + ' ' + CONVERT(varchar(4), dm.DOSYear),
         AvgAllowed = CAST(dm.AvgAllowed AS decimal(18,2)),
         dm.AllowedClaimCount,
-        AvgPaidByPaymentDate = CAST(pm.AvgPaid AS decimal(18,2)),
-        PaidClaimCount = ISNULL(pm.PaidClaimCount, 0)
+        AvgPaid = CAST(dm.AvgPaid AS decimal(18,2)),
+        AvgPaidByPaymentDate = CAST(dm.AvgPaid AS decimal(18,2)),
+        PaidClaimCount = ISNULL(dm.PaidClaimCount, 0)
     FROM ByDosMonth dm
     INNER JOIN TopPanels tp ON tp.Panelname = dm.Panelname
-    LEFT JOIN ByPaidMonth pm
-        ON pm.Panelname = dm.Panelname AND pm.PaidYear = dm.DOSYear AND pm.PaidMonth = dm.DOSMonth
     ORDER BY tp.TotalAllowed DESC, dm.Panelname, dm.DOSYear, dm.DOSMonth;
 
     SET @msg = CONCAT(N'[RS6 panelAvg] ms=', DATEDIFF(MILLISECOND, @t0, SYSDATETIME()));

@@ -43,12 +43,26 @@ def build_lis(sets: list, trailing: int, scope: str) -> list[dict]:
     backlog_summary = set_or_empty(sets, 1)
     backlog_buckets = set_or_empty(sets, 2)
     funnel = set_or_empty(sets, 3)
+    payer_by_month = set_or_empty(sets, 4)
+    panel_by_month = set_or_empty(sets, 5)
     return [
         chart(
             "Monthly Collected Sample Volume",
             "Total Samples trend · Check #1",
             scope,
             project(monthly, "MonthLabel", "TotalSamples", "SortYear", "SortMonth"),
+        ),
+        chart(
+            "Payer-wise collected",
+            "Top 5 PrimaryInsurance + Other · all volume months",
+            scope,
+            project(payer_by_month, "MonthLabel", "SortYear", "SortMonth", "Name", "SampleCount", "SortOrder"),
+        ),
+        chart(
+            "Panel-wise collected",
+            "Top 5 PanelCategory + Other · all volume months",
+            scope,
+            project(panel_by_month, "MonthLabel", "SortYear", "SortMonth", "Name", "SampleCount", "SortOrder"),
         ),
         chart(
             f"Total Samples & % Resulted — Last {trailing} Months",
@@ -58,21 +72,25 @@ def build_lis(sets: list, trailing: int, scope: str) -> list[dict]:
         ),
         chart(
             "Sample-to-Claim Funnel (Full Period)",
-            "Collected → Resulted → Billed over the selected comparable window",
+            "Collected → Resulted – Insurance → Self Pay / Client Bill / Billed to Insurance",
             scope,
             project(
                 funnel,
                 "Collected",
                 "Resulted",
+                "ResultedSelfPay",
+                "ResultedClientBill",
                 "BilledToInsurance",
                 "PctResulted",
+                "PctSelfPayOfCollected",
+                "PctClientBillOfCollected",
                 "PctBilledOfCollected",
                 "PctBilledOfResulted",
             ),
         ),
         chart(
-            "Backlog Age — Resulted Samples Never Entered in PMS",
-            "Check #2 · open Resulted / Not-in-AMD backlog as of WeekRange end",
+            "Backlog – Resulted Insurance not billed",
+            "Resulted Insurance − Billed to Insurance · aging as of WeekRange end",
             scope,
             backlog_summary,
         ),
@@ -84,9 +102,9 @@ def build_lis(sets: list, trailing: int, scope: str) -> list[dict]:
         ),
         chart(
             "% of Resulted Samples Billed to Insurance",
-            "Resulted → billed pipeline rate by month",
+            "Resulted (Bill Type = Insurance) → billed pipeline rate by month",
             scope,
-            project(monthly, "MonthLabel", "Resulted", "BilledToInsurance", "PctBilledOfResulted"),
+            project(monthly, "MonthLabel", "Resulted", "ResultedInsurance", "BilledToInsurance", "PctBilledOfResulted"),
         ),
         chart(
             "Not Resulted Samples — Monthly Trend",
@@ -124,31 +142,19 @@ def build_pms(sets: list, scope: str) -> list[dict]:
     fully_paid = set_or_empty(sets, 3)
     ib = set_or_empty(sets, 4)
     panel_avg = set_or_empty(sets, 5)
-    panel_mom = set_or_empty(sets, 6)
+    _panel_mom = set_or_empty(sets, 6)  # hidden in UI for now
     maturity = set_or_empty(sets, 7)
     denial = set_or_empty(sets, 8)
     top_denial = set_or_empty(sets, 9)
     return [
         chart(
-            "1. Billed Claims Reconciliation — LIS vs PMS",
-            "Reconciliation Gap = PMS Billed Claims − LIS Billed to Insurance",
+            "1. Fully Paid % of Billed Claims (PMS)",
+            "% Fully Paid = Fully Paid ÷ Billed Claims × 100",
             scope,
-            project(reconciliation, "MonthLabel", "PmsBilled", "LisBilledToInsurance", "Gap"),
+            project(fully_paid, "MonthLabel", "BilledClaims", "FullyPaid", "PctFullyPaid"),
         ),
         chart(
-            "2. Fully Adjusted % of Billed Claims (PMS)",
-            "% Fully Adjusted = Fully Adjusted ÷ Billed Claims × 100",
-            scope,
-            project(fully_adjusted, "MonthLabel", "BilledClaims", "FullyAdjusted", "PctFullyAdjusted"),
-        ),
-        chart(
-            "3. Top Write-Off Reason Codes",
-            "Reason-code counts from BTWOSummary",
-            scope,
-            project(write_off, "TransactionCodeCombined", "MatchingCount"),
-        ),
-        chart(
-            "4. Insurance Balance % of Billed Claims — Headline PMS Finding",
+            "2. Insurance Balance % of Billed Claims",
             "% IB = IB claims ÷ Billed × 100 · composition Fully Denied / No Response / Partially Denied",
             scope,
             project(
@@ -164,7 +170,7 @@ def build_pms(sets: list, scope: str) -> list[dict]:
             ),
         ),
         chart(
-            "4b. Insurance Balance Composition (% of open claims)",
+            "2b. Insurance Balance Composition (% of open claims)",
             "Fully Denied / No Response / Partially Denied share of open",
             scope,
             project(
@@ -177,14 +183,20 @@ def build_pms(sets: list, scope: str) -> list[dict]:
             ),
         ),
         chart(
-            "5. Fully Paid % of Billed Claims (PMS)",
-            "% Fully Paid = Fully Paid ÷ Billed Claims × 100",
+            "3. Fully Adjusted % of Billed Claims (PMS)",
+            "% Fully Adjusted = Fully Adjusted ÷ Billed Claims × 100",
             scope,
-            project(fully_paid, "MonthLabel", "BilledClaims", "FullyPaid", "PctFullyPaid"),
+            project(fully_adjusted, "MonthLabel", "BilledClaims", "FullyAdjusted", "PctFullyAdjusted"),
         ),
         chart(
-            "6. Panel — Avg Allowed vs Avg Paid",
-            "Claim-level supplement by panel / DOS month",
+            "4. Top Write Off Reason Codes",
+            "Reason-code counts from BTWOSummary",
+            scope,
+            project(write_off, "TransactionCodeCombined", "MatchingCount"),
+        ),
+        chart(
+            "5. Panel-wise Average Allowed vs Average Paid",
+            "Avg Allowed and Avg Paid both by DOS month · top 5 panels",
             scope,
             project(
                 panel_avg,
@@ -192,15 +204,16 @@ def build_pms(sets: list, scope: str) -> list[dict]:
                 "MonthLabel_DOS",
                 "AvgAllowed",
                 "AllowedClaimCount",
+                "AvgPaid",
                 "AvgPaidByPaymentDate",
                 "PaidClaimCount",
             ),
         ),
         chart(
-            "Avg $ Paid per Claim — Panel (MOM by DOS)",
-            "Panel × payer month-over-month",
+            "Billed Claims Reconciliation — LIS vs PMS",
+            "Reconciliation Gap = PMS Billed Claims − LIS Billed to Insurance",
             scope,
-            panel_mom,
+            project(reconciliation, "MonthLabel", "PmsBilled", "LisBilledToInsurance", "Gap"),
         ),
         chart(
             "DOS-Cohort Maturity Curve",
@@ -225,22 +238,10 @@ def build_pms(sets: list, scope: str) -> list[dict]:
 
 def build_cash(sets: list, scope: str) -> list[dict]:
     headline = set_or_empty(sets, 0)
-    write_off = set_or_empty(sets, 1)
+    _write_off = set_or_empty(sets, 1)
     return [
         chart(
-            "1. Total Billed $ — Monthly Trend",
-            "Monthly $ Billed = SUM(ChargeAmount) WHERE Billed · GROUP BY DOS month",
-            scope,
-            project(headline, "MonthLabel", "TotalBilledAmt"),
-        ),
-        chart(
-            "2. Partially Paid $ — Monthly Trend",
-            "Partially Paid $ ÷ Total Billed $ × 100",
-            scope,
-            project(headline, "MonthLabel", "PartiallyPaidAmt", "PctPartiallyPaidOfBilled", "TotalBilledAmt"),
-        ),
-        chart(
-            "3. Collection Rate — Insurance Payment / Total Billed",
+            "1. Collection Rate — Insurance Payment / Total Billed",
             "Fully Paid Ins $ ÷ Total Billed $ × 100",
             scope,
             project(
@@ -252,7 +253,13 @@ def build_cash(sets: list, scope: str) -> list[dict]:
             ),
         ),
         chart(
-            "4a. % Insurance Balance $ of Total Billed",
+            "2. Partially Paid $ — Monthly Trend",
+            "Partially Paid $ ÷ Total Billed $ × 100",
+            scope,
+            project(headline, "MonthLabel", "PartiallyPaidAmt", "PctPartiallyPaidOfBilled", "TotalBilledAmt"),
+        ),
+        chart(
+            "3. Insurance Balance — % of Total Billed",
             "IB $ ÷ Total Billed $ × 100",
             scope,
             project(
@@ -264,7 +271,7 @@ def build_cash(sets: list, scope: str) -> list[dict]:
             ),
         ),
         chart(
-            "4b. Insurance Balance $ Composition",
+            "3b. Insurance Balance $ Composition",
             "Fully Denied / No Response / Partially Denied share of open IB $",
             scope,
             project(
@@ -278,8 +285,14 @@ def build_cash(sets: list, scope: str) -> list[dict]:
             ),
         ),
         chart(
+            "4. Fully Adjusted $",
+            "Insurance + Patient adjustments on Complete W/O / Fully Adjusted",
+            scope,
+            project(headline, "MonthLabel", "FullyAdjustedAmt", "PctFullyAdjustedOfBilled", "TotalBilledAmt"),
+        ),
+        chart(
             "5. Patient Write-Off vs Patient Balance",
-            "Patient WO $ / Patient Balance $ / Patient Payment $",
+            "Chart Patient Balance = Patient WO + Patient Balance + Patient Paid",
             scope,
             project(
                 headline,
@@ -292,10 +305,10 @@ def build_cash(sets: list, scope: str) -> list[dict]:
             ),
         ),
         chart(
-            "6. Fully Adjusted $ — Write-Off Reason Pareto",
-            "Write-off reason codes from BTWOSummary",
+            "Total Billed $ — Monthly Trend",
+            "Monthly $ Billed = SUM(ChargeAmount) WHERE Billed · GROUP BY DOS month",
             scope,
-            project(write_off, "TransactionCodeCombined", "MatchingCount"),
+            project(headline, "MonthLabel", "TotalBilledAmt"),
         ),
         chart(
             "Cash monthly detail",

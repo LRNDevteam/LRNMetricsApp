@@ -2346,7 +2346,8 @@ public sealed class SqlPhiExecutiveSummaryRepository
             cmd.Parameters.AddWithValue("@DayWindow", dayWindow);
             cmd.Parameters.AddWithValue("@AsOfDate", (object?)asOfDate?.Date ?? DBNull.Value);
 
-            await using var r = await cmd.ExecuteReaderAsync(ct);
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+            {
 
             Dictionary<string, int> Map()
             {
@@ -2376,6 +2377,7 @@ public sealed class SqlPhiExecutiveSummaryRepository
                     Resulted = L(map, "Resulted"),
                     PctResulted = DN(map, "PctResulted"),
                     BilledToInsurance = L(map, "BilledToInsurance"),
+                    ResultedInsurance = L(map, "ResultedInsurance"),
                     PctBilledOfResulted = DN(map, "PctBilledOfResulted"),
                     SelfPay = L(map, "SelfPay"),
                     SelfPayPct = DN(map, "SelfPayPct"),
@@ -2394,7 +2396,7 @@ public sealed class SqlPhiExecutiveSummaryRepository
                 vm.PctBilledOfResulted.Add(new ThreePillarPctBilledOfResultedMonth
                 {
                     MonthLabel = row.MonthLabel,
-                    Resulted = row.Resulted,
+                    Resulted = row.ResultedInsurance > 0 ? row.ResultedInsurance : row.Resulted,
                     BilledToInsurance = row.BilledToInsurance,
                     PctBilledOfResulted = row.PctBilledOfResulted,
                 });
@@ -2434,27 +2436,84 @@ public sealed class SqlPhiExecutiveSummaryRepository
                     SampleCount = L(map, "SampleCount"),
                 });
 
-            // RS4 — full-period funnel
-            if (await r.NextResultAsync(ct))
+            // Remaining result sets: funnel, then payer / panel (match on columns so an
+            // older 4-set SP or extra messages cannot steal the breakdown grids).
+            var namedSets = new List<(string Kind, List<ThreePillarNamedCountMonth> Rows)>();
+            while (await r.NextResultAsync(ct))
             {
+                if (r.FieldCount <= 0) continue;
                 map = Map();
-                if (await r.ReadAsync(ct))
-                    vm.FunnelPeriod = new ThreePillarLisFunnelPeriod
+                if (map.ContainsKey("Collected") && map.ContainsKey("BilledToInsurance") && map.ContainsKey("PctResulted"))
+                {
+                    if (await r.ReadAsync(ct))
+                        vm.FunnelPeriod = new ThreePillarLisFunnelPeriod
+                        {
+                            Collected = L(map, "Collected"),
+                            Resulted = L(map, "Resulted"),
+                            ResultedSelfPay = L(map, "ResultedSelfPay"),
+                            ResultedClientBill = L(map, "ResultedClientBill"),
+                            BilledToInsurance = L(map, "BilledToInsurance"),
+                            PctResulted = DN(map, "PctResulted"),
+                            PctSelfPayOfCollected = DN(map, "PctSelfPayOfCollected"),
+                            PctClientBillOfCollected = DN(map, "PctClientBillOfCollected"),
+                            PctBilledOfCollected = DN(map, "PctBilledOfCollected"),
+                            PctBilledOfResulted = DN(map, "PctBilledOfResulted"),
+                        };
+                    continue;
+                }
+                var hasName = map.ContainsKey("Name") || map.ContainsKey("PayerName") || map.ContainsKey("PanelName");
+                if (hasName && map.ContainsKey("SampleCount") && map.ContainsKey("SortYear"))
+                {
+                    var rows = new List<ThreePillarNamedCountMonth>();
+                    var kind = "";
+                    while (await r.ReadAsync(ct))
                     {
-                        Collected = L(map, "Collected"),
-                        Resulted = L(map, "Resulted"),
-                        BilledToInsurance = L(map, "BilledToInsurance"),
-                        PctResulted = DN(map, "PctResulted"),
-                        PctBilledOfCollected = DN(map, "PctBilledOfCollected"),
-                        PctBilledOfResulted = DN(map, "PctBilledOfResulted"),
-                    };
+                        if (kind.Length == 0)
+                            kind = S(map, "Kind");
+                        var name = S(map, "Name");
+                        if (name.Length == 0) name = S(map, "PayerName");
+                        if (name.Length == 0) name = S(map, "PanelName");
+                        rows.Add(new ThreePillarNamedCountMonth
+                        {
+                            MonthLabel = S(map, "MonthLabel"),
+                            SortYear = I(map, "SortYear"),
+                            SortMonth = I(map, "SortMonth"),
+                            Name = name,
+                            SampleCount = L(map, "SampleCount"),
+                            SortOrder = I(map, "SortOrder"),
+                        });
+                    }
+                    if (rows.Count > 0)
+                        namedSets.Add((kind, rows));
+                }
             }
+
+            foreach (var (kind, rows) in namedSets)
+            {
+                if (kind.Equals("Panel", StringComparison.OrdinalIgnoreCase))
+                    vm.CollectedByPanel.AddRange(rows);
+                else if (kind.Equals("Payer", StringComparison.OrdinalIgnoreCase))
+                    vm.CollectedByPayer.AddRange(rows);
+                else if (vm.CollectedByPayer.Count == 0)
+                    vm.CollectedByPayer.AddRange(rows);
+                else if (vm.CollectedByPanel.Count == 0)
+                    vm.CollectedByPanel.AddRange(rows);
+            }
+            } // reader — must close before a follow-up LIMSMaster query
+
+            if (vm.CollectedByPayer.Count == 0 || vm.CollectedByPanel.Count == 0)
+                await FillBeechTreeLisPayerPanelFallbackAsync(conn, vm, ct);
+
+            // Header n = Resulted – Insurance − Billed to Insurance (funnel, DayWindow, DISTINCT Accession).
+            vm.BacklogSummary.TotalBacklog = Math.Max(0,
+                vm.FunnelPeriod.Resulted - vm.FunnelPeriod.BilledToInsurance);
 
             vm.LisLoaded = true;
             _logger.LogInformation(
-                "ThreePillar LIS loaded for lab='{Lab}' months={Months} dayWin={Day} asOf={AsOf} rows={M} backlog={B} in {Ms}ms",
+                "ThreePillar LIS loaded for lab='{Lab}' months={Months} dayWin={Day} asOf={AsOf} rows={M} backlog={B} payer={P} panel={Pn} in {Ms}ms",
                 labName, trailingMonths, dayWindow, asOfDate?.ToString("yyyy-MM-dd"),
-                vm.LisMonthly.Count, vm.BacklogSummary.TotalBacklog, sw.ElapsedMilliseconds);
+                vm.LisMonthly.Count, vm.BacklogSummary.TotalBacklog,
+                vm.CollectedByPayer.Count, vm.CollectedByPanel.Count, sw.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
@@ -2462,6 +2521,188 @@ public sealed class SqlPhiExecutiveSummaryRepository
             vm.ErrorMessage = $"Failed to load LIS diagnostic: {ex.Message}";
         }
         return vm;
+    }
+
+    /// <summary>When the live LIS SP is still the 4-result-set version (or RS5/RS6 returned
+    /// no rows), load every payer/panel from LIMSMaster so month-click can list all names.</summary>
+    private async Task FillBeechTreeLisPayerPanelFallbackAsync(
+        SqlConnection conn,
+        ExecSummaryThreePillarViewModel vm,
+        CancellationToken ct)
+    {
+        if (vm.LisMonthly.Count == 0) return;
+
+        try
+        {
+            var asOf = vm.AsOfDate?.Date ?? DateTime.Today;
+            var trailing = vm.TrailingMonths is >= 1 and <= 36 ? vm.TrailingMonths : 12;
+            var dayWindow = vm.DayWindow is >= 1 and <= 31 ? vm.DayWindow : Math.Clamp(asOf.Day, 1, 31);
+            var startAnchor = asOf.AddMonths(-(trailing - 1));
+            var startDate = new DateTime(startAnchor.Year, startAnchor.Month, 1);
+
+            var cols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            await using (var colCmd = new SqlCommand(
+                "SELECT name FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.LIMSMaster')", conn))
+            {
+                await using var cr = await colCmd.ExecuteReaderAsync(ct);
+                while (await cr.ReadAsync(ct))
+                    cols.Add(cr.GetString(0));
+            }
+
+            if (cols.Count == 0 || !cols.Contains("RequestCollectDate") || !cols.Contains("Accession"))
+            {
+                _logger.LogWarning(
+                    "LIS payer/panel fallback skipped — LIMSMaster columns missing for lab='{Lab}'",
+                    vm.LabName);
+                return;
+            }
+
+            static string Q(string n) => "[" + n.Replace("]", "]]") + "]";
+            string? First(params string[] names) => names.FirstOrDefault(n => cols.Contains(n));
+
+            var payerCol = First("PrimaryInsurance", "PayerName", "PayerName_Raw", "InsuranceName",
+                "PrimaryPayer", "VisitPrimaryCarrier", "PayorName", "Payor");
+            var panelCol = First("PanelCategory", "PanelType", "PanelName", "Panelname",
+                "Panel", "TestPanel", "TestPanelName", "Tests");
+
+            string NameExpr(string? col) => col is null
+                ? "N'Unspecified'"
+                : $"ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), {Q(col)}), N''))), N''), N'Unspecified')";
+
+            var sql = $"""
+                SELECT
+                    YEAR(x.RequestCollectDate) AS SortYear,
+                    MONTH(x.RequestCollectDate) AS SortMonth,
+                    LEFT(DATENAME(MONTH, x.RequestCollectDate), 3) + ' '
+                        + CONVERT(varchar(4), YEAR(x.RequestCollectDate)) AS MonthLabel,
+                    x.Kind,
+                    x.Name,
+                    COUNT(DISTINCT LTRIM(RTRIM(CONVERT(NVARCHAR(100), x.Accession)))) AS SampleCount
+                FROM (
+                    SELECT
+                        RequestCollectDate,
+                        Accession,
+                        v.Kind,
+                        v.Name
+                    FROM dbo.LIMSMaster WITH (NOLOCK)
+                    CROSS APPLY (VALUES
+                        (N'Payer', {NameExpr(payerCol)}),
+                        (N'Panel', {NameExpr(panelCol)})
+                    ) v (Kind, Name)
+                    WHERE RequestCollectDate IS NOT NULL
+                      AND RequestCollectDate >= @StartDate
+                      AND RequestCollectDate <  DATEADD(DAY, 1, @EndDate)
+                      AND DAY(RequestCollectDate) BETWEEN 1 AND @DayWindow
+                ) x
+                GROUP BY YEAR(x.RequestCollectDate), MONTH(x.RequestCollectDate),
+                         LEFT(DATENAME(MONTH, x.RequestCollectDate), 3)
+                            + ' ' + CONVERT(varchar(4), YEAR(x.RequestCollectDate)),
+                         x.Kind, x.Name
+                """;
+
+            var raw = new List<(string Kind, ThreePillarNamedCountMonth Row)>();
+            await using (var fb = new SqlCommand(sql, conn) { CommandTimeout = 90 })
+            {
+                fb.Parameters.AddWithValue("@StartDate", startDate);
+                fb.Parameters.AddWithValue("@EndDate", asOf);
+                fb.Parameters.AddWithValue("@DayWindow", dayWindow);
+                await using var r = await fb.ExecuteReaderAsync(ct);
+                while (await r.ReadAsync(ct))
+                {
+                    raw.Add((
+                        Convert.ToString(r["Kind"]) ?? "",
+                        new ThreePillarNamedCountMonth
+                        {
+                            MonthLabel = Convert.ToString(r["MonthLabel"]) ?? "",
+                            SortYear = Convert.ToInt32(r["SortYear"]),
+                            SortMonth = Convert.ToInt32(r["SortMonth"]),
+                            Name = Convert.ToString(r["Name"]) ?? "Unspecified",
+                            SampleCount = Convert.ToInt64(r["SampleCount"]),
+                        }));
+                }
+            }
+
+            if (vm.CollectedByPayer.Count == 0)
+                vm.CollectedByPayer.AddRange(
+                    RankWithinMonths(raw
+                        .Where(x => x.Kind.Equals("Payer", StringComparison.OrdinalIgnoreCase))
+                        .Select(x => x.Row)));
+            if (vm.CollectedByPanel.Count == 0)
+                vm.CollectedByPanel.AddRange(
+                    RankWithinMonths(raw
+                        .Where(x => x.Kind.Equals("Panel", StringComparison.OrdinalIgnoreCase))
+                        .Select(x => x.Row)));
+
+            _logger.LogInformation(
+                "LIS payer/panel fallback lab='{Lab}' payerRows={P} panelRows={Pn} cols payer={Pc} panel={Plc}",
+                vm.LabName, vm.CollectedByPayer.Count, vm.CollectedByPanel.Count,
+                payerCol ?? "(none)", panelCol ?? "(none)");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "LIS payer/panel fallback failed for lab='{Lab}'", vm.LabName);
+        }
+    }
+
+    private static List<ThreePillarNamedCountMonth> RankWithinMonths(
+        IEnumerable<ThreePillarNamedCountMonth> raw)
+    {
+        var list = raw.ToList();
+        foreach (var g in list.GroupBy(x => (x.SortYear, x.SortMonth)))
+        {
+            var order = 1;
+            foreach (var row in g.OrderByDescending(x => x.SampleCount)
+                         .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
+                row.SortOrder = order++;
+        }
+        return list;
+    }
+
+    private static List<ThreePillarNamedCountMonth> RollTop5Other(
+        IEnumerable<ThreePillarNamedCountMonth> raw,
+        IReadOnlyList<ThreePillarLisMonth> months)
+    {
+        var list = raw.ToList();
+        if (list.Count == 0) return [];
+        var top = list
+            .GroupBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Name: g.First().Name, Total: g.Sum(x => x.SampleCount)))
+            .OrderByDescending(x => x.Total)
+            .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .Select(x => x.Name)
+            .ToList();
+        var topSet = new HashSet<string>(top, StringComparer.OrdinalIgnoreCase);
+        var result = new List<ThreePillarNamedCountMonth>(months.Count * 6);
+        foreach (var m in months)
+        {
+            var slice = list.Where(x => x.SortYear == m.SortYear && x.SortMonth == m.SortMonth).ToList();
+            var order = 1;
+            foreach (var name in top)
+            {
+                result.Add(new ThreePillarNamedCountMonth
+                {
+                    MonthLabel = m.MonthLabel,
+                    SortYear = m.SortYear,
+                    SortMonth = m.SortMonth,
+                    Name = name,
+                    SampleCount = slice
+                        .Where(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                        .Sum(x => x.SampleCount),
+                    SortOrder = order++,
+                });
+            }
+            result.Add(new ThreePillarNamedCountMonth
+            {
+                MonthLabel = m.MonthLabel,
+                SortYear = m.SortYear,
+                SortMonth = m.SortMonth,
+                Name = "Other",
+                SampleCount = slice.Where(x => !topSet.Contains(x.Name)).Sum(x => x.SampleCount),
+                SortOrder = 6,
+            });
+        }
+        return result;
     }
 
     /// <summary>
@@ -2579,7 +2820,7 @@ public sealed class SqlPhiExecutiveSummaryRepository
                     MonthLabelDos = S(map, "MonthLabel_DOS"),
                     AvgAllowed = D(map, "AvgAllowed"),
                     AllowedClaimCount = L(map, "AllowedClaimCount"),
-                    AvgPaidByPaymentDate = DN(map, "AvgPaidByPaymentDate"),
+                    AvgPaidByPaymentDate = DN(map, "AvgPaid") ?? DN(map, "AvgPaidByPaymentDate"),
                     PaidClaimCount = L(map, "PaidClaimCount"),
                 });
 
@@ -2824,7 +3065,7 @@ public sealed class SqlPhiExecutiveSummaryRepository
                 {
                     Panelname = S(map, "Panelname"), MonthLabelDos = S(map, "MonthLabel_DOS"),
                     AvgAllowed = D(map, "AvgAllowed"), AllowedClaimCount = L(map, "AllowedClaimCount"),
-                    AvgPaidByPaymentDate = DN(map, "AvgPaidByPaymentDate"), PaidClaimCount = L(map, "PaidClaimCount"),
+                    AvgPaidByPaymentDate = DN(map, "AvgPaid") ?? DN(map, "AvgPaidByPaymentDate"), PaidClaimCount = L(map, "PaidClaimCount"),
                 });
 
             // 14) DOS-cohort maturity curve

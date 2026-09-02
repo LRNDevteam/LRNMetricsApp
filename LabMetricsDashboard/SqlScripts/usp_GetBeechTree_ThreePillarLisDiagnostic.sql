@@ -18,9 +18,15 @@
 
    Result sets
      1  Monthly LIS breakdown (DayWindow-capped)
-     2  Backlog age summary (full Resulted/Not-in-AMD backlog as of @AsOfDate)
+         PctBilledOfResulted denominator = Resulted – Insurance (BillTo LIKE '%Insurance%')
+     2  Backlog age summary as of @AsOfDate
+         Backlog n = Resulted – Insurance − Billed to Insurance (DayWindow, DISTINCT Accession)
      3  Backlog age buckets (0-7 / 8-14 / 15-30 / 31-60 / 60+)
      4  Full-period Sample-to-Claim Funnel (DayWindow-capped)
+         Collected / Resulted (Insurance) / ResultedSelfPay / ResultedClientBill / BilledToInsurance
+         Bill to Insurance % = Billed to Insurance / Resulted – Insurance
+     5  Payer-wise collected (DayWindow) — all payers per month (UI rolls Top 5)
+     6  Panel-wise collected (DayWindow) — all panels per month (UI rolls Top 5)
    ===================================================================== */
 IF OBJECT_ID('dbo.usp_GetBeechTree_ThreePillarLisDiagnostic', 'P') IS NOT NULL
     DROP PROCEDURE dbo.usp_GetBeechTree_ThreePillarLisDiagnostic;
@@ -68,6 +74,53 @@ BEGIN
                       CONVERT(varchar(10), @EndDate, 23), N' dayWindow=1..', @DayWindow);
     RAISERROR(@msg, 0, 1) WITH NOWAIT;
 
+    DECLARE @PayerCol SYSNAME = (
+        SELECT TOP (1) name FROM sys.columns
+        WHERE object_id = OBJECT_ID(N'dbo.LIMSMaster')
+          AND name IN (N'PrimaryInsurance', N'PayerName', N'PayerName_Raw', N'InsuranceName',
+                       N'PrimaryPayer', N'VisitPrimaryCarrier', N'PayorName', N'Payor')
+        ORDER BY CASE name
+            WHEN N'PrimaryInsurance' THEN 0 WHEN N'PayerName' THEN 1 WHEN N'PayerName_Raw' THEN 2
+            WHEN N'InsuranceName' THEN 3 WHEN N'PrimaryPayer' THEN 4
+            WHEN N'VisitPrimaryCarrier' THEN 5 ELSE 6 END);
+
+    DECLARE @PanelCol SYSNAME = (
+        SELECT TOP (1) name FROM sys.columns
+        WHERE object_id = OBJECT_ID(N'dbo.LIMSMaster')
+          AND name IN (N'PanelCategory', N'PanelType', N'PanelName', N'Panelname',
+                       N'Panel', N'TestPanel', N'TestPanelName', N'Tests')
+        ORDER BY CASE name
+            WHEN N'PanelCategory' THEN 0 WHEN N'PanelType' THEN 1 WHEN N'PanelName' THEN 2
+            WHEN N'Panelname' THEN 3 WHEN N'Panel' THEN 4 WHEN N'TestPanel' THEN 5
+            WHEN N'TestPanelName' THEN 6 ELSE 7 END);
+
+    DECLARE @PayerExpr NVARCHAR(400) = CASE WHEN @PayerCol IS NOT NULL
+        THEN N'ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), ' + QUOTENAME(@PayerCol) + N'), N''''))), N''''), N''Unspecified'')'
+        ELSE N'N''Unspecified''' END;
+    DECLARE @PanelExpr NVARCHAR(400) = CASE WHEN @PanelCol IS NOT NULL
+        THEN N'ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), ' + QUOTENAME(@PanelCol) + N'), N''''))), N''''), N''Unspecified'')'
+        ELSE N'N''Unspecified''' END;
+
+    DECLARE @BillToCol SYSNAME = (
+        SELECT TOP (1) name FROM sys.columns
+        WHERE object_id = OBJECT_ID(N'dbo.LIMSMaster')
+          AND name IN (N'BillTo', N'BillCategory', N'Bill_Category', N'BillingCategory')
+        ORDER BY CASE name
+            WHEN N'BillTo' THEN 0 WHEN N'BillCategory' THEN 1
+            WHEN N'Bill_Category' THEN 2 ELSE 3 END);
+
+    /* Prefer LIMS BillTo; if the column is absent, treat non-Self-Pay / non-Client-Bill as Insurance. */
+    DECLARE @BillToExpr NVARCHAR(800) = CASE WHEN @BillToCol IS NOT NULL
+        THEN N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), ' + QUOTENAME(@BillToCol) + N'), N'''')))'
+        ELSE N'CASE WHEN LTRIM(RTRIM(ISNULL(ClientStatus, N''''))) IN (N''Self Pay'', N''Client Bill'')
+                    THEN LTRIM(RTRIM(ISNULL(ClientStatus, N'''')))
+                    ELSE N''Insurance'' END' END;
+
+    SET @msg = CONCAT(N'[Cols] payer=', ISNULL(@PayerCol, N'(none)'),
+                      N' panel=', ISNULL(@PanelCol, N'(none)'),
+                      N' billTo=', ISNULL(@BillToCol, N'(ClientStatus fallback)'));
+    RAISERROR(@msg, 0, 1) WITH NOWAIT;
+
     IF OBJECT_ID('tempdb..#Lis') IS NOT NULL DROP TABLE #Lis;
     CREATE TABLE #Lis (
         Accession    NVARCHAR(100) COLLATE DATABASE_DEFAULT NOT NULL,
@@ -78,22 +131,33 @@ BEGIN
         Resulted     NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL,
         ClaimStatus  NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL,
         BilledorNot  NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL,
-        ClientStatus NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL
+        ClientStatus NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL,
+        BillTo       NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL,
+        PayerName    NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL,
+        PanelName    NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL
     );
 
-    INSERT INTO #Lis (Accession, ESYear, ESMonth, CollectDay, CollectDate, Resulted, ClaimStatus, BilledorNot, ClientStatus)
+    DECLARE @ins NVARCHAR(MAX) = N'
+    INSERT INTO #Lis (Accession, ESYear, ESMonth, CollectDay, CollectDate, Resulted, ClaimStatus, BilledorNot, ClientStatus, BillTo, PayerName, PanelName)
     SELECT
         LTRIM(RTRIM(CONVERT(NVARCHAR(100), Accession))) COLLATE DATABASE_DEFAULT,
         YEAR(RequestCollectDate), MONTH(RequestCollectDate), DAY(RequestCollectDate),
         RequestCollectDate,
-        LTRIM(RTRIM(ISNULL(RessultedStatus, N''))) COLLATE DATABASE_DEFAULT,
-        LTRIM(RTRIM(ISNULL(ClaimStatus, N''))) COLLATE DATABASE_DEFAULT,
-        LTRIM(RTRIM(ISNULL(BilledorNot, N''))) COLLATE DATABASE_DEFAULT,
-        LTRIM(RTRIM(ISNULL(ClientStatus, N''))) COLLATE DATABASE_DEFAULT
+        LTRIM(RTRIM(ISNULL(RessultedStatus, N''''))) COLLATE DATABASE_DEFAULT,
+        LTRIM(RTRIM(ISNULL(ClaimStatus, N''''))) COLLATE DATABASE_DEFAULT,
+        LTRIM(RTRIM(ISNULL(BilledorNot, N''''))) COLLATE DATABASE_DEFAULT,
+        LTRIM(RTRIM(ISNULL(ClientStatus, N''''))) COLLATE DATABASE_DEFAULT,
+        ' + @BillToExpr + N' COLLATE DATABASE_DEFAULT,
+        ' + @PayerExpr + N' COLLATE DATABASE_DEFAULT,
+        ' + @PanelExpr + N' COLLATE DATABASE_DEFAULT
     FROM dbo.LIMSMaster WITH (NOLOCK)
     WHERE RequestCollectDate IS NOT NULL
       AND RequestCollectDate >= @StartDate
-      AND RequestCollectDate <  DATEADD(DAY, 1, @EndDate);
+      AND RequestCollectDate <  DATEADD(DAY, 1, @EndDate);';
+
+    EXEC sys.sp_executesql @ins,
+        N'@StartDate date, @EndDate date',
+        @StartDate = @StartDate, @EndDate = @EndDate;
 
     IF EXISTS (SELECT 1 FROM #Lis)
         CREATE CLUSTERED INDEX IX_Lis_YM_Day ON #Lis (ESYear, ESMonth, CollectDay);
@@ -144,12 +208,17 @@ BEGIN
         BilledToInsurance = COUNT(DISTINCT CASE
             WHEN l.Resulted = N'Resulted' AND l.ClaimStatus = N'Billed'
              AND l.BilledorNot = N'Billed' AND l.ClientStatus = N'' THEN l.Accession END),
+        /* Resulted – Insurance: RessultedStatus = Resulted AND BillTo contains Insurance. */
+        ResultedInsurance = COUNT(DISTINCT CASE
+            WHEN l.Resulted = N'Resulted' AND l.BillTo LIKE N'%Insurance%' THEN l.Accession END),
         PctBilledOfResulted = CASE
-            WHEN COUNT(DISTINCT CASE WHEN l.Resulted = N'Resulted' THEN l.Accession END) = 0 THEN NULL
+            WHEN COUNT(DISTINCT CASE
+                    WHEN l.Resulted = N'Resulted' AND l.BillTo LIKE N'%Insurance%' THEN l.Accession END) = 0 THEN NULL
             ELSE CAST(COUNT(DISTINCT CASE
                     WHEN l.Resulted = N'Resulted' AND l.ClaimStatus = N'Billed'
                      AND l.BilledorNot = N'Billed' AND l.ClientStatus = N'' THEN l.Accession END) * 100.0
-                 / COUNT(DISTINCT CASE WHEN l.Resulted = N'Resulted' THEN l.Accession END) AS decimal(18,2)) END,
+                 / COUNT(DISTINCT CASE
+                    WHEN l.Resulted = N'Resulted' AND l.BillTo LIKE N'%Insurance%' THEN l.Accession END) AS decimal(18,2)) END,
         SelfPay = COUNT(DISTINCT CASE
             WHEN l.Resulted = N'Resulted' AND l.ClientStatus = N'Self Pay' THEN l.Accession END),
         SelfPayPct = CASE WHEN COUNT(DISTINCT l.Accession) = 0 THEN NULL
@@ -173,20 +242,20 @@ BEGIN
     RAISERROR(@msg, 0, 1) WITH NOWAIT; SET @t0 = SYSDATETIME();
 
     /* ===================================================================
-       2–3) Backlog age — full Resulted/Not-in-AMD as of @AsOfDate
-            (not DayWindow-capped — aging needs the open backlog population)
+       2–3) Backlog age as of @AsOfDate (DayWindow, DISTINCT Accession)
+            Backlog = Resulted – Insurance − Billed to Insurance
        =================================================================== */
     IF OBJECT_ID('tempdb..#Backlog') IS NOT NULL DROP TABLE #Backlog;
     SELECT
         Accession,
-        CollectDate,
-        AgeDays = DATEDIFF(DAY, CollectDate, @AsOfDate)
+        CollectDate = MIN(CollectDate),
+        AgeDays = DATEDIFF(DAY, MIN(CollectDate), @AsOfDate)
     INTO #Backlog
-    FROM #Lis
+    FROM #Cmp
     WHERE Resulted = N'Resulted'
-      AND ClaimStatus = N'Not Entered in AMD'
-      AND BilledorNot = N'UnBilled'
-      AND ClientStatus IN (N'', N'Billing Review Required');
+      AND BillTo LIKE N'%Insurance%'
+      AND NOT (ClaimStatus = N'Billed' AND BilledorNot = N'Billed' AND ClientStatus = N'')
+    GROUP BY Accession;
 
     ;WITH Ordered AS (
         SELECT AgeDays,
@@ -235,27 +304,93 @@ BEGIN
        =================================================================== */
     SELECT
         Collected = COUNT(DISTINCT Accession),
-        Resulted  = COUNT(DISTINCT CASE WHEN Resulted = N'Resulted' THEN Accession END),
+        /* Funnel "Resulted" bar = Resulted – Insurance (BillTo LIKE '%Insurance%'). */
+        Resulted  = COUNT(DISTINCT CASE
+            WHEN Resulted = N'Resulted' AND BillTo LIKE N'%Insurance%' THEN Accession END),
+        ResultedSelfPay = COUNT(DISTINCT CASE
+            WHEN Resulted = N'Resulted' AND ClientStatus = N'Self Pay' THEN Accession END),
+        ResultedClientBill = COUNT(DISTINCT CASE
+            WHEN Resulted = N'Resulted' AND ClientStatus = N'Client Bill' THEN Accession END),
         BilledToInsurance = COUNT(DISTINCT CASE
             WHEN Resulted = N'Resulted' AND ClaimStatus = N'Billed'
              AND BilledorNot = N'Billed' AND ClientStatus = N'' THEN Accession END),
         PctResulted = CASE WHEN COUNT(DISTINCT Accession) = 0 THEN NULL
-            ELSE CAST(COUNT(DISTINCT CASE WHEN Resulted = N'Resulted' THEN Accession END) * 100.0
+            ELSE CAST(COUNT(DISTINCT CASE
+                    WHEN Resulted = N'Resulted' AND BillTo LIKE N'%Insurance%' THEN Accession END) * 100.0
                      / COUNT(DISTINCT Accession) AS decimal(18,2)) END,
+        PctSelfPayOfCollected = CASE WHEN COUNT(DISTINCT Accession) = 0 THEN NULL
+            ELSE CAST(COUNT(DISTINCT CASE
+                    WHEN Resulted = N'Resulted' AND ClientStatus = N'Self Pay' THEN Accession END) * 100.0
+                 / COUNT(DISTINCT Accession) AS decimal(18,2)) END,
+        PctClientBillOfCollected = CASE WHEN COUNT(DISTINCT Accession) = 0 THEN NULL
+            ELSE CAST(COUNT(DISTINCT CASE
+                    WHEN Resulted = N'Resulted' AND ClientStatus = N'Client Bill' THEN Accession END) * 100.0
+                 / COUNT(DISTINCT Accession) AS decimal(18,2)) END,
         PctBilledOfCollected = CASE WHEN COUNT(DISTINCT Accession) = 0 THEN NULL
             ELSE CAST(COUNT(DISTINCT CASE
                     WHEN Resulted = N'Resulted' AND ClaimStatus = N'Billed'
                      AND BilledorNot = N'Billed' AND ClientStatus = N'' THEN Accession END) * 100.0
                  / COUNT(DISTINCT Accession) AS decimal(18,2)) END,
         PctBilledOfResulted = CASE
-            WHEN COUNT(DISTINCT CASE WHEN Resulted = N'Resulted' THEN Accession END) = 0 THEN NULL
+            WHEN COUNT(DISTINCT CASE
+                    WHEN Resulted = N'Resulted' AND BillTo LIKE N'%Insurance%' THEN Accession END) = 0 THEN NULL
             ELSE CAST(COUNT(DISTINCT CASE
                     WHEN Resulted = N'Resulted' AND ClaimStatus = N'Billed'
                      AND BilledorNot = N'Billed' AND ClientStatus = N'' THEN Accession END) * 100.0
-                 / COUNT(DISTINCT CASE WHEN Resulted = N'Resulted' THEN Accession END) AS decimal(18,2)) END
+                 / COUNT(DISTINCT CASE
+                    WHEN Resulted = N'Resulted' AND BillTo LIKE N'%Insurance%' THEN Accession END) AS decimal(18,2)) END
     FROM #Cmp;
 
     SET @msg = CONCAT(N'[RS4 funnel] ms=', DATEDIFF(MILLISECOND, @t0, SYSDATETIME()));
+    RAISERROR(@msg, 0, 1) WITH NOWAIT; SET @t0 = SYSDATETIME();
+
+    /* ===================================================================
+       5) Payer-wise collected — every payer, every volume month
+          (page shows Top 5 + Other by default; click a month for all)
+       =================================================================== */
+    SELECT
+        MonthLabel = LEFT(DATENAME(MONTH, m.MY), 3) + ' ' + CONVERT(varchar(4), YEAR(m.MY)),
+        SortYear   = m.CollYear,
+        SortMonth  = m.CollMonth,
+        Kind       = N'Payer',
+        Name       = p.PayerName,
+        SampleCount = p.SampleCount,
+        SortOrder  = ROW_NUMBER() OVER (
+            PARTITION BY m.CollYear, m.CollMonth
+            ORDER BY p.SampleCount DESC, p.PayerName)
+    FROM #Months m
+    INNER JOIN (
+        SELECT ESYear, ESMonth, PayerName, SampleCount = COUNT(DISTINCT Accession)
+        FROM #Cmp
+        GROUP BY ESYear, ESMonth, PayerName
+    ) p ON p.ESYear = m.CollYear AND p.ESMonth = m.CollMonth
+    ORDER BY m.MY, p.SampleCount DESC, p.PayerName;
+
+    SET @msg = CONCAT(N'[RS5 payer] ms=', DATEDIFF(MILLISECOND, @t0, SYSDATETIME()));
+    RAISERROR(@msg, 0, 1) WITH NOWAIT; SET @t0 = SYSDATETIME();
+
+    /* ===================================================================
+       6) Panel-wise collected — every panel, every volume month
+       =================================================================== */
+    SELECT
+        MonthLabel = LEFT(DATENAME(MONTH, m.MY), 3) + ' ' + CONVERT(varchar(4), YEAR(m.MY)),
+        SortYear   = m.CollYear,
+        SortMonth  = m.CollMonth,
+        Kind       = N'Panel',
+        Name       = p.PanelName,
+        SampleCount = p.SampleCount,
+        SortOrder  = ROW_NUMBER() OVER (
+            PARTITION BY m.CollYear, m.CollMonth
+            ORDER BY p.SampleCount DESC, p.PanelName)
+    FROM #Months m
+    INNER JOIN (
+        SELECT ESYear, ESMonth, PanelName, SampleCount = COUNT(DISTINCT Accession)
+        FROM #Cmp
+        GROUP BY ESYear, ESMonth, PanelName
+    ) p ON p.ESYear = m.CollYear AND p.ESMonth = m.CollMonth
+    ORDER BY m.MY, p.SampleCount DESC, p.PanelName;
+
+    SET @msg = CONCAT(N'[RS6 panel] ms=', DATEDIFF(MILLISECOND, @t0, SYSDATETIME()));
     RAISERROR(@msg, 0, 1) WITH NOWAIT;
 
     IF OBJECT_ID('tempdb..#Lis')     IS NOT NULL DROP TABLE #Lis;

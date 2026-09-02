@@ -546,6 +546,7 @@ builder.Services.AddScoped<UserReportService>();
 
 builder.Services.AddScoped<ILisSummaryRepository, SqlLisSummaryRepository>();
 builder.Services.AddScoped<SqlPhiExecutiveSummaryRepository>();
+builder.Services.AddScoped<BeechTreeRevenuePipelineLisService>();
 builder.Services.AddScoped<INotesRepository, SqlNotesRepository>();
 builder.Services.AddScoped<ExecutiveSummaryExcelBuilder>();
 

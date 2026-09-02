@@ -8,7 +8,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.0" />
+    <!-- 5.2.2 keeps Microsoft.Extensions on 9.x for IIS in-process. SqlClient 7 pulls 10.x. -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
     <!-- 9.0.15 matches the EF Core 9.0.15 transitive graph pulled in via LabMetricsDashboard
          (LRN.ReportWorker references both — lower versions trigger NU1605 downgrades). -->
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.15" />

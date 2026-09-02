@@ -1,6 +1,7 @@
 @model LabMetricsDashboard.Models.ExecSummaryThreePillarViewModel
 @using System.Globalization
 @using System.Text
+@using System.Text.Json
 @{
     ViewData["Title"] = "Three-Pillar Diagnostic — " + Model.LabName;
     Layout = "~/Views/Shared/_Layout.cshtml";
@@ -11,7 +12,6 @@
     string Dec(decimal? v) => v is { } d ? d.ToString("#,##0.#", ci) : "—";
     var monthOpts = new[] { 3, 6, 9, 12 };
     var months = Model.LisMonthly;
-    var last = months.LastOrDefault();
     var buckets = Model.BacklogBuckets.OrderBy(b => b.SortOrder).ToList();
 
     // Compact month labels like reference charts: Jul25, Aug25, …
@@ -31,7 +31,8 @@
     }
 
     string SvgLine(IReadOnlyList<string> labels, IReadOnlyList<double> values, string stroke, string yTitle,
-        bool fill = false, string? fillColor = null, int? dashLast = null, bool asPct = false, bool rotateX = true)
+        bool fill = false, string? fillColor = null, int? dashLast = null, bool asPct = false, bool rotateX = true,
+        bool clickable = false)
     {
         if (labels.Count == 0 || values.Count == 0) return "<div class='tpd-empty'>No chart data.</div>";
         double W = ChartW, H = 400, L = 62, R = 20, T = 32, B = rotateX ? 62 : 44;
@@ -47,7 +48,8 @@
         double Xn(int i) => L + (labels.Count == 1 ? plotW / 2 : i * plotW / (labels.Count - 1));
         double Yn(double v) => T + plotH - (v - min) / (max - min) * plotH;
         var sb = new StringBuilder();
-        sb.Append($"<svg viewBox='0 0 {W} {H}' class='tpd-svg' role='img' aria-label='{Esc(yTitle)}'>");
+        var svgId = clickable ? " id='tpd-vol-line'" : "";
+        sb.Append($"<svg viewBox='0 0 {W} {H}' class='tpd-svg{(clickable ? " tpd-vol-svg" : "")}'{svgId} role='img' aria-label='{Esc(yTitle)}'>");
         // axis lines
         sb.Append($"<line x1='{F(L)}' y1='{F(T)}' x2='{F(L)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
         sb.Append($"<line x1='{F(L)}' y1='{F(T + plotH)}' x2='{F(W - R)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
@@ -87,8 +89,11 @@
         {
             var op = (dashLast is int d2 && i == d2) ? "0.6" : "1";
             var lbl = asPct ? FmtPct(values[i]) : FmtCnt(values[i]);
-            sb.Append($"<circle cx='{F(Xn(i))}' cy='{F(Yn(values[i]))}' r='4' fill='{stroke}' opacity='{op}'><title>{Esc(labels[i])}: {Esc(lbl)}</title></circle>");
-            sb.Append($"<text x='{F(Xn(i))}' y='{F(Yn(values[i]) - 9)}' text-anchor='middle' class='tpd-val'>{Esc(lbl)}</text>");
+            var monthAttr = clickable ? $" data-month='{Esc(labels[i])}'" : "";
+            if (clickable)
+                sb.Append($"<circle cx='{F(Xn(i))}' cy='{F(Yn(values[i]))}' r='16' fill='transparent' class='tpd-vol-hit' data-month='{Esc(labels[i])}'><title>{Esc(labels[i])}: {Esc(lbl)}</title></circle>");
+            sb.Append($"<circle cx='{F(Xn(i))}' cy='{F(Yn(values[i]))}' r='4' fill='{stroke}' opacity='{op}' class='{(clickable ? "tpd-vol-pt" : "")}'{(clickable ? " role='button' tabindex='0'" : "")}{monthAttr}><title>{Esc(labels[i])}: {Esc(lbl)}</title></circle>");
+            sb.Append($"<text x='{F(Xn(i))}' y='{F(Yn(values[i]) - 9)}' text-anchor='middle' class='tpd-val{(clickable ? " tpd-vol-lbl" : "")}'{monthAttr}>{Esc(lbl)}</text>");
             if (rotateX) AppendRotatedLabel(sb, Xn(i), T + plotH + 14, labels[i]);
             else if (i % Math.Max(1, labels.Count / 8) == 0 || i == labels.Count - 1)
                 sb.Append($"<text x='{F(Xn(i))}' y='{F(H - 10)}' text-anchor='middle' class='tpd-axis'>{Esc(labels[i])}</text>");
@@ -192,23 +197,16 @@
         return sb.ToString();
     }
 
-    string SvgHFunnel(long collected, long resulted, long billed, decimal? pctR, decimal? pctBOfColl)
+    string SvgHFunnel(params (string Label, long N, decimal? PctOfCollected, string Color)[] rows)
     {
-        if (collected <= 0) return "<div class='tpd-empty'>No funnel data.</div>";
-        double W = ChartW, H = 300, L = 100, R = 130, T = 22, B = 40;
+        if (rows.Length == 0 || rows[0].N <= 0) return "<div class='tpd-empty'>No funnel data.</div>";
+        double W = ChartW, H = 28 + rows.Length * 52 + 40, L = 168, R = 150, T = 22, B = 40;
         var plotW = W - L - R; var plotH = H - T - B;
-        var rows = new[]
-        {
-            (Label: "Collected", N: (double)collected, Pct: 100.0, Color: "#1E3A8A"),
-            (Label: "Resulted", N: (double)resulted, Pct: (double)(pctR ?? 0), Color: "#2563EB"),
-            (Label: "Billed", N: (double)billed, Pct: (double)(pctBOfColl ?? 0), Color: "#93C5FD"),
-        };
-        var max = rows[0].N;
-        // nice x max
+        var max = (double)rows[0].N;
         var xMax = Math.Ceiling(max / 50000.0) * 50000;
         if (xMax < max) xMax = max * 1.05;
         if (xMax <= 0) xMax = 1;
-        var rowH = plotH / 3.15;
+        var rowH = plotH / Math.Max(rows.Length, 1);
         var sb = new StringBuilder();
         sb.Append($"<svg viewBox='0 0 {W} {H}' class='tpd-svg' role='img'>");
         sb.Append($"<line x1='{F(L)}' y1='{F(T)}' x2='{F(L)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
@@ -223,14 +221,100 @@
         sb.Append($"<text x='{F(L + plotW / 2)}' y='{F(H - 4)}' text-anchor='middle' class='tpd-axis-title'>Samples</text>");
         for (int i = 0; i < rows.Length; i++)
         {
-            var y = T + i * (plotH / 3.0) + 4;
+            var y = T + i * rowH + 4;
             var bw = Math.Max(8, rows[i].N / xMax * plotW);
-            sb.Append($"<text x='{F(L - 10)}' y='{F(y + rowH * 0.55)}' text-anchor='end' class='tpd-funnel-label'>{Esc(rows[i].Label)}</text>");
+            var pct = (double)(rows[i].PctOfCollected ?? 0);
+            sb.Append($"<text x='{F(L - 10)}' y='{F(y + rowH * 0.52)}' text-anchor='end' class='tpd-funnel-label'>{Esc(rows[i].Label)}</text>");
             sb.Append($"<rect x='{F(L)}' y='{F(y)}' width='{F(bw)}' height='{F(rowH * 0.7)}' fill='{rows[i].Color}'/>");
-            sb.Append($"<text x='{F(L + bw + 8)}' y='{F(y + rowH * 0.52)}' class='tpd-funnel-val'>{rows[i].N.ToString("N0", ci)} ({rows[i].Pct.ToString("0.0", ci)}%)</text>");
+            sb.Append($"<text x='{F(L + bw + 8)}' y='{F(y + rowH * 0.52)}' class='tpd-funnel-val'>{rows[i].N.ToString("N0", ci)} ({pct.ToString("0.0", ci)}%)</text>");
         }
         sb.Append("</svg>");
         return sb.ToString();
+    }
+
+    string SvgStackedMonths(
+        IReadOnlyList<string> monthLabels,
+        IReadOnlyList<(string Name, IReadOnlyList<double> Values)> series,
+        IReadOnlyList<string> colors)
+    {
+        if (monthLabels.Count == 0 || series.Count == 0)
+            return "<div class='tpd-empty'>No payer/panel breakdown for these months.</div>";
+        double W = ChartW, H = 300, L = 52, R = 16, T = 12, B = 52;
+        var plotW = W - L - R; var plotH = H - T - B;
+        var gap = plotW / monthLabels.Count;
+        var n = Math.Max(1, series.Count);
+        var cluster = gap * 0.86;
+        var inner = 0.7;
+        var bw = Math.Max(1.8, (cluster - inner * (n - 1)) / n);
+        var max = Math.Max(1, series.SelectMany(s => s.Values).DefaultIfEmpty(0).Max());
+        var wrap = new StringBuilder();
+        wrap.Append("<div class='tpd-stack-legend'>");
+        for (int s = 0; s < series.Count; s++)
+        {
+            var nm = series[s].Name.Length > 22 ? series[s].Name[..21] + "…" : series[s].Name;
+            wrap.Append($"<span><i style='background:{colors[s % colors.Count]}'></i>{Esc(nm)}</span>");
+        }
+        wrap.Append("</div>");
+        var sb = new StringBuilder();
+        sb.Append($"<svg viewBox='0 0 {W} {H}' class='tpd-svg tpd-stack-svg' role='img'>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T)}' x2='{F(L)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T + plotH)}' x2='{F(W - R)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        for (int g = 0; g <= 3; g++)
+        {
+            var gy = T + plotH * g / 3.0;
+            var gv = max - max * g / 3.0;
+            sb.Append($"<line x1='{F(L)}' y1='{F(gy)}' x2='{F(W - R)}' y2='{F(gy)}' class='tpd-grid'/>");
+            sb.Append($"<text x='{F(L - 6)}' y='{F(gy + 3)}' text-anchor='end' class='tpd-axis'>{Esc(gv >= 1000 ? (gv / 1000).ToString("0.#", ci) + "k" : gv.ToString("0", ci))}</text>");
+        }
+        for (int i = 0; i < monthLabels.Count; i++)
+        {
+            var x0 = L + i * gap + (gap - cluster) / 2;
+            sb.Append($"<g class='tpd-stack-col' data-month='{Esc(monthLabels[i])}'>");
+            for (int s = 0; s < series.Count; s++)
+            {
+                var v = i < series[s].Values.Count ? series[s].Values[i] : 0;
+                if (v <= 0) continue;
+                var bh = Math.Max(0.6, v / max * plotH);
+                var x = x0 + s * (bw + inner);
+                var y = T + plotH - bh;
+                sb.Append($"<rect x='{F(x)}' y='{F(y)}' width='{F(bw)}' height='{F(bh)}' fill='{colors[s % colors.Count]}'><title>{Esc(monthLabels[i])} · {Esc(series[s].Name)}: {v.ToString("N0", ci)}</title></rect>");
+            }
+            sb.Append("</g>");
+            AppendRotatedLabel(sb, x0 + cluster / 2, T + plotH + 12, monthLabels[i]);
+        }
+        sb.Append("</svg>");
+        wrap.Append(sb);
+        return wrap.ToString();
+    }
+
+    List<(string Name, IReadOnlyList<double> Values)> NamedSeries(IEnumerable<ThreePillarNamedCountMonth> rows)
+    {
+        var list = rows.ToList();
+        var top = list
+            .Where(r => !string.Equals(r.Name, "Other", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Name: g.First().Name, Total: g.Sum(x => x.SampleCount)))
+            .OrderByDescending(x => x.Total)
+            .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .Select(x => x.Name)
+            .ToList();
+        var topSet = new HashSet<string>(top, StringComparer.OrdinalIgnoreCase);
+        var names = new List<string>(top);
+        if (list.Any(r => !topSet.Contains(r.Name)))
+            names.Add("Other");
+        var series = new List<(string Name, IReadOnlyList<double> Values)>();
+        foreach (var name in names)
+        {
+            var vals = months.Select(m => (double)list
+                .Where(r => r.SortYear == m.SortYear && r.SortMonth == m.SortMonth)
+                .Where(r => name == "Other"
+                    ? !topSet.Contains(r.Name)
+                    : string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase))
+                .Sum(r => r.SampleCount)).ToList();
+            series.Add((name, vals));
+        }
+        return series;
     }
 
     string SvgAgeBars(IReadOnlyList<(string Label, long Count, string Color)> rows)
@@ -322,6 +406,30 @@
     var notRes = months.Select(m => (double)m.NotResulted).ToList();
     var selfPct = months.Select(m => m.SelfPayPct is { } p ? (double)p : double.NaN).ToList();
     var clientPct = months.Select(m => m.ClientBillPct is { } p ? (double)p : double.NaN).ToList();
+    var jsonOpts = new JsonSerializerOptions();
+    var volByMonth = months.ToDictionary(
+        m => ShortLbl(m.SortYear, m.SortMonth),
+        m => new
+        {
+            payers = Model.CollectedByPayer
+                .Where(p => p.SortYear == m.SortYear && p.SortMonth == m.SortMonth)
+                .OrderBy(p => p.SortOrder)
+                .ThenByDescending(p => p.SampleCount)
+                .Select(p => new { n = p.Name, c = p.SampleCount })
+                .ToList(),
+            panels = Model.CollectedByPanel
+                .Where(p => p.SortYear == m.SortYear && p.SortMonth == m.SortMonth)
+                .OrderBy(p => p.SortOrder)
+                .ThenByDescending(p => p.SampleCount)
+                .Select(p => new { n = p.Name, c = p.SampleCount })
+                .ToList(),
+        },
+        StringComparer.OrdinalIgnoreCase);
+    var volJson = JsonSerializer.Serialize(volByMonth, jsonOpts);
+    var payerSeries = NamedSeries(Model.CollectedByPayer);
+    var panelSeries = NamedSeries(Model.CollectedByPanel);
+    var payerColors = new[] { "#1E3A8A", "#1D4ED8", "#3B82F6", "#60A5FA", "#93C5FD", "#94A3B8" };
+    var panelColors = new[] { "#134E4A", "#0F766E", "#14B8A6", "#2DD4BF", "#99F6E4", "#94A3B8" };
     var ageColors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
         ["0-7d"] = "#16A34A", ["8-14d"] = "#16A34A", ["15-30d"] = "#F59E0B", ["31-60d"] = "#F59E0B", ["60+d"] = "#DC2626"
@@ -386,18 +494,20 @@
     .tpd-logic ul { margin: .35rem 0 0; padding-left: 1.1rem; }
     .tpd-logic li { margin: .15rem 0; }
     .tpd-pillar { margin: 1.2rem 0 .4rem; padding: .55rem .9rem; border-radius: 10px; font-size: .78rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; background: #e8f6ee; color: #1f7a46; }
-    /* Period buttons = indigo (distinct from pillar tabs) */
+    /* Pillars = underline tabs (distinct from Period segmented control) */
     .tpd-tabs {
-        display: flex; flex-wrap: wrap; gap: .4rem; margin: 1rem 0 1.1rem;
-        border-bottom: 1px solid #e6eaf0; padding-bottom: .55rem;
+        display: flex; flex-wrap: wrap; gap: 0; margin: 1rem 0 1.15rem;
+        border-bottom: 2px solid #e6eaf0; padding: 0;
     }
     .tpd-tab {
-        appearance: none; border: 1px solid #bbf7d0; background: #f0fdf4; color: #166534;
-        border-radius: 999px; padding: .45rem .95rem; font-size: .82rem; font-weight: 700;
-        cursor: pointer; line-height: 1.2;
+        appearance: none; border: none; background: transparent; color: #64748b;
+        border-radius: 0; border-bottom: 3px solid transparent;
+        padding: .7rem 1.15rem; font-size: .88rem; font-weight: 700;
+        cursor: pointer; line-height: 1.2; margin-bottom: -2px;
     }
-    .tpd-tab:hover { border-color: #16a34a; color: #14532d; background: #dcfce7; }
-    .tpd-tab.active { background: #15803d; border-color: #15803d; color: #fff; }
+    .tpd-tab:hover { color: #14532d; background: #f8fafc; }
+    .tpd-tab.active { color: #14532d; border-bottom-color: #15803d; background: transparent; }
+    .tpd-tab:focus-visible { outline: 2px solid #15803d; outline-offset: 2px; }
     .tpd-tab-panel { display: none; }
     .tpd-tab-panel.active { display: block; }
     .tpd-lazy-host { min-height: 120px; }
@@ -419,14 +529,77 @@
     .tpd-cash-grid .tpd-card { margin-top: 0; margin-bottom: 0; }
     .tpd-toolbar { display: flex; flex-wrap: wrap; gap: .55rem; align-items: center; margin-bottom: 1rem; }
     .tpd-toolbar label { font-size: .78rem; font-weight: 700; color: #5b6472; margin: 0; }
-    .tpd-month-btns { display: inline-flex; flex-wrap: wrap; gap: .35rem; }
-    .tpd-month-btns a {
-        display: inline-block; padding: .35rem .75rem; border-radius: 8px; font-size: .82rem; font-weight: 700;
-        text-decoration: none; border: 1px solid #c7d2fe; color: #3730a3; background: #eef2ff;
+    .tpd-month-btns {
+        display: inline-flex; flex-wrap: nowrap; align-items: stretch;
+        border: 1px solid #c7d2fe; border-radius: 8px; overflow: hidden; background: #fff;
     }
-    .tpd-month-btns a:hover { border-color: #4f46e5; color: #312e81; background: #e0e7ff; }
-    .tpd-month-btns a.active { background: #4f46e5; border-color: #4f46e5; color: #fff; }
+    .tpd-month-btns a {
+        display: inline-block; padding: .4rem .85rem; font-size: .82rem; font-weight: 700;
+        text-decoration: none; border: none; border-right: 1px solid #c7d2fe;
+        border-radius: 0; color: #4338ca; background: #fff;
+    }
+    .tpd-month-btns a:last-child { border-right: none; }
+    .tpd-month-btns a:hover { color: #312e81; background: #eef2ff; }
+    .tpd-month-btns a.active { background: #4f46e5; color: #fff; }
     .tpd-window-note { font-size: .78rem; color: #6b7280; margin-left: .25rem; }
+    .tpd-pdf-btns { display: inline-flex; flex-wrap: wrap; gap: .4rem; margin-left: auto; }
+    .tpd-pdf-btn {
+        display: inline-flex; align-items: center; gap: .35rem;
+        border: 1px solid #c5ced8; background: #fff; color: #334155;
+        font-size: .78rem; font-weight: 700; padding: .38rem .7rem; border-radius: 8px; cursor: pointer;
+    }
+    .tpd-pdf-btn:hover { background: #f8fafc; border-color: #94a3b8; color: #0f766e; }
+    .tpd-pdf-btn:disabled { opacity: .55; cursor: wait; }
+    .tpd-pdf-btn-all { background: #0f766e; color: #ecfeff; border-color: #0f766e; }
+    .tpd-pdf-btn-all:hover { background: #115e59; color: #fff; }
+    .tpd-print-only { display: none !important; }
+    .tpd-print-head {
+        display: none; align-items: center; justify-content: space-between; gap: 1rem;
+        background: #0f766e; color: #ecfeff; border-radius: 10px; padding: .7rem 1rem; margin-bottom: 1rem;
+    }
+    .tpd-print-brand { display: flex; align-items: center; gap: .7rem; }
+    .tpd-print-brand img { height: 36px; width: auto; }
+    .tpd-print-title { font-size: 1.05rem; font-weight: 800; margin: 0; }
+    .tpd-print-lab { font-size: .82rem; opacity: .92; }
+    .tpd-print-meta { font-size: .78rem; text-align: right; line-height: 1.45; }
+    .tpd-print-pillar-h { font-size: 1.05rem; font-weight: 800; color: #14532d; margin: 0 0 .75rem; padding-bottom: .35rem; border-bottom: 2px solid #bbf7d0; }
+
+    @@media print {
+        @@page { size: letter; margin: .5in .45in; }
+        body { background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .lmd-navbar, .lmd-menubar, .lmd-breadcrumb, footer.footer,
+        .tpd-no-print, .tpd-back, .tpd-toolbar, .tpd-banner, .tpd-checks, .tpd-tabs,
+        .tpd-pdf-btns, .tpd-logic { display: none !important; }
+        .tpd-wrap { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+        .tpd-print-only { display: block !important; }
+        .tpd-print-head { display: flex !important; }
+        .tpd-head { display: none !important; }
+        .tpd-tab-panel { display: none !important; }
+        html.tpd-print-lis #tpd-panel-lis,
+        html.tpd-print-pms #tpd-panel-pms,
+        html.tpd-print-cash #tpd-panel-cash { display: block !important; }
+        html.tpd-print-all #tpd-panel-lis,
+        html.tpd-print-all #tpd-panel-pms,
+        html.tpd-print-all #tpd-panel-cash { display: block !important; }
+        html.tpd-print-all #tpd-panel-pms,
+        html.tpd-print-all #tpd-panel-cash { margin-top: 1.1rem; padding-top: .9rem; border-top: 2px solid #d1d5db; }
+        .tpd-tab-panel[hidden] { display: none !important; }
+        html.tpd-print-all #tpd-panel-lis[hidden],
+        html.tpd-print-all #tpd-panel-pms[hidden],
+        html.tpd-print-all #tpd-panel-cash[hidden] { display: block !important; }
+        html.tpd-print-lis #tpd-panel-lis[hidden],
+        html.tpd-print-pms #tpd-panel-pms[hidden],
+        html.tpd-print-cash #tpd-panel-cash[hidden] { display: block !important; }
+        details.tpd-acc { break-inside: avoid; page-break-inside: avoid; }
+        .tpd-scroll { max-height: none !important; overflow: visible !important; }
+        .tpd-tbl thead th { position: static !important; }
+        .tpd-acc-chevron { display: none !important; }
+        .tpd-pillar { display: none !important; }
+        .tpd-subtabs { display: none !important; }
+        .tpd-subpanel, .tpd-subpanel[hidden], .tpd-top5[hidden] { display: block !important; }
+        .tpd-all-month { display: none !important; }
+        .tpd-subpanel + .tpd-subpanel { margin-top: .85rem; }
+    }
     .tpd-checks { font-size: .78rem; color: #5b6472; margin: 0 0 1rem; }
     .tpd-soon { color: #6b7280; font-size: .88rem; padding: .2rem 0; }
     .tpd-funnel-note { font-size: .82rem; color: #374151; margin-top: .6rem; }
@@ -450,8 +623,70 @@
     .tpd-acc > summary.tpd-acc-head:hover { background: #fafbfc; }
     .tpd-acc-body { padding: 0 1.15rem 1.15rem; border-top: 1px solid #f1f3f6; }
 
-    .tpd-chart { max-width: 780px; margin: 0 auto; }
+    .tpd-split { display: grid; grid-template-columns: 1fr; gap: .85rem; margin-top: 1.05rem; width: 85%; max-width: 85%; align-items: start; }
+    .tpd-split-card { background: #f8fafc; border: 1px solid #e6eaf0; border-radius: 10px; padding: .7rem .8rem .55rem; }
+    .tpd-split-title { font-size: .7rem; font-weight: 700; color: #1f2733; margin: 0 0 .1rem; }
+    .tpd-split-sub { font-size: .62rem; color: #8a93a3; margin: 0 0 .35rem; }
+    .tpd-vol-block { width: 85%; max-width: 85%; }
+    .tpd-subtabs {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 0; margin: 0;
+        border-bottom: 2px solid #e6eaf0; padding: 0; width: 100%;
+    }
+    .tpd-subtab {
+        appearance: none; border: none; background: transparent; color: #64748b;
+        border-radius: 0; border-bottom: 3px solid transparent;
+        padding: .5rem .95rem; font-size: .82rem; font-weight: 700;
+        cursor: pointer; line-height: 1.2; margin-bottom: -2px;
+    }
+    .tpd-subtab:hover { color: #1e40af; background: #f8fafc; }
+    .tpd-subtab.active { color: #1d4ed8; border-bottom-color: #1d4ed8; background: transparent; }
+    .tpd-subtab:focus-visible { outline: 2px solid #1d4ed8; outline-offset: 2px; }
+    .tpd-sub-clear {
+        appearance: none; margin-left: auto; margin-bottom: 4px;
+        border: 1px solid #c5ced8; background: #fff; color: #334155;
+        font-size: .72rem; font-weight: 700; padding: .28rem .7rem; border-radius: 8px; cursor: pointer;
+    }
+    .tpd-sub-clear:hover { background: #eef2ff; border-color: #93c5fd; color: #1d4ed8; }
+    .tpd-sub-clear:disabled { opacity: .4; cursor: default; background: #fff; color: #94a3b8; border-color: #e2e8f0; }
+    .tpd-subpanel { display: none; width: 100%; margin-top: .15rem; }
+    .tpd-subpanel.active { display: block; }
+    .tpd-all-month { background: #f8fafc; border: 1px solid #e6eaf0; border-radius: 10px; padding: .7rem .8rem .55rem; }
+    .tpd-all-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; margin-bottom: .45rem; }
+    .tpd-all-back {
+        flex: 0 0 auto; appearance: none; border: 1px solid #c5ced8; background: #fff; color: #334155;
+        font-size: .72rem; font-weight: 700; padding: .28rem .6rem; border-radius: 8px; cursor: pointer;
+    }
+    .tpd-all-back:hover { background: #eef2ff; border-color: #93c5fd; color: #1d4ed8; }
+    .tpd-all-rows { max-height: 420px; overflow: auto; }
+    .tpd-all-row {
+        display: grid; grid-template-columns: minmax(7.5rem, 1.15fr) minmax(4rem, 2fr) 4.4rem;
+        gap: .45rem; align-items: center; padding: .22rem 0; border-bottom: 1px solid #f1f3f6;
+    }
+    .tpd-all-name { font-size: .78rem; color: #1f2733; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tpd-all-bar { height: 10px; background: #e2e8f0; border-radius: 4px; overflow: hidden; }
+    .tpd-all-bar > i { display: block; height: 100%; background: #1d4ed8; border-radius: 4px; min-width: 0; }
+    .tpd-subpanel[data-tpd-subpanel="panel"] .tpd-all-bar > i { background: #0f766e; }
+    .tpd-all-n { font-size: .78rem; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; color: #1f2733; }
+    .tpd-stack-legend {
+        display: flex; flex-wrap: wrap; gap: .12rem .55rem; align-items: center;
+        margin: 0 0 .35rem; min-height: 1.1rem;
+    }
+    .tpd-stack-legend span {
+        display: inline-flex; align-items: center; gap: .22rem;
+        font-size: .62rem; font-weight: 600; color: #475569; line-height: 1.2;
+        white-space: nowrap;
+    }
+    .tpd-stack-legend i {
+        width: 7px; height: 7px; border-radius: 1px; flex: 0 0 7px; display: inline-block;
+    }
+    .tpd-vol-hint { font-size: .78rem; color: #64748b; margin: .4rem 0 0; }
+    .tpd-stack-col { cursor: pointer; }
+    .tpd-stack-svg .tpd-stack-col.is-on rect { stroke: #0f172a; stroke-width: 1.4; }
+    .tpd-stack-svg .tpd-stack-col.is-dim { opacity: .38; }
+    .tpd-vol-svg .tpd-vol-hit, .tpd-vol-svg .tpd-vol-pt, .tpd-vol-svg .tpd-vol-lbl { cursor: pointer; }
+    .tpd-vol-svg .tpd-vol-pt.is-on { stroke: #0f172a; stroke-width: 2.2; }
     .tpd-chart-lg { max-width: none; width: 100%; margin: 0; }
+    .tpd-chart-vol { width: 100%; max-width: none; }
     .tpd-backlog-row {
         display: grid;
         grid-template-columns: 65% 35%;
@@ -477,14 +712,30 @@
 </style>
 
 <div class="tpd-wrap">
-    <a class="tpd-back" href="@Model.BackUrl">&larr; Back to Executive Summary</a>
+    <a class="tpd-back tpd-no-print" href="@Model.BackUrl">&larr; Back to Executive Summary</a>
+
+    <div class="tpd-print-head tpd-print-only">
+        <div class="tpd-print-brand">
+            <img src="@Url.Content("~/images/LRN-White-Logo-footer-1-1.png")" alt="LRN" />
+            <div>
+                <div class="tpd-print-title">Three-Pillar Diagnostic</div>
+                <div class="tpd-print-lab">@Model.LabName</div>
+            </div>
+        </div>
+        <div class="tpd-print-meta">
+            <div id="tpd-print-pillar">Pillar 1 — LIS</div>
+            <div>Period: Last @Model.TrailingMonths months</div>
+            <div>Comparable window: days 1–@dayWin each month</div>
+            <div>WeekRange end: @(Model.AsOfDate?.ToString("MM/dd/yyyy") ?? "—")@(string.IsNullOrWhiteSpace(Model.WeekFolder) ? "" : " · " + Model.WeekFolder)</div>
+        </div>
+    </div>
 
     <div class="tpd-head">
         <h1>Three-Pillar Diagnostic — @Model.LabName</h1>
-        <div class="tpd-sub">Phase 1: LIS / Pipeline Health · scope: @Model.ScopeLabel</div>
+        <div class="tpd-sub">LIS / Pipeline Health · scope: @Model.ScopeLabel</div>
     </div>
 
-    <div class="tpd-toolbar">
+    <div class="tpd-toolbar tpd-no-print">
         <label>Period</label>
         <div class="tpd-month-btns">
             @foreach (var m in monthOpts)
@@ -507,6 +758,12 @@
                 }
             </span>
         }
+        <div class="tpd-pdf-btns">
+            <button type="button" class="tpd-pdf-btn" data-tpd-pdf="lis" title="Save LIS as PDF"><i class="bi bi-file-earmark-pdf"></i> PDF LIS</button>
+            <button type="button" class="tpd-pdf-btn" data-tpd-pdf="pms" title="Save PMS as PDF"><i class="bi bi-file-earmark-pdf"></i> PDF PMS</button>
+            <button type="button" class="tpd-pdf-btn" data-tpd-pdf="cash" title="Save Cash as PDF"><i class="bi bi-file-earmark-pdf"></i> PDF Cash</button>
+            <button type="button" class="tpd-pdf-btn tpd-pdf-btn-all" data-tpd-pdf="all" title="Save all three pillars as PDF"><i class="bi bi-file-earmark-pdf"></i> PDF all 3</button>
+        </div>
     </div>
 
     <div class="tpd-banner">
@@ -541,15 +798,7 @@
         </div>
 
         <div class="tpd-tab-panel active" id="tpd-panel-lis" role="tabpanel">
-        <div class="tpd-kpis">
-            <div class="tpd-kpi"><div class="tpd-kpi-label">Backlog (Resulted, Not in AMD)</div><div class="tpd-kpi-value">@Num(Model.BacklogSummary.TotalBacklog)</div></div>
-            <div class="tpd-kpi"><div class="tpd-kpi-label">Median Backlog Age</div><div class="tpd-kpi-value">@Dec(Model.BacklogSummary.MedianAgeDays) d</div></div>
-            <div class="tpd-kpi"><div class="tpd-kpi-label">Backlog &gt; 60 Days</div><div class="tpd-kpi-value">@Pct(Model.BacklogSummary.PctOver60Days)</div></div>
-            <div class="tpd-kpi"><div class="tpd-kpi-label">Latest % Billed of Resulted</div><div class="tpd-kpi-value">@Pct(last?.PctBilledOfResulted)</div></div>
-        </div>
-
-        <div class="tpd-pillar">Pillar 1 — Pipeline Health (LIS Breakdown)</div>
-
+        <h2 class="tpd-print-only tpd-print-pillar-h">Pillar 1 — LIS / Pipeline Health</h2>
         @if (!string.IsNullOrWhiteSpace(Model.AiThreePillarInsight?.Headline))
         {
             <div class="tpd-ai-panel" style="margin-bottom:1rem">
@@ -580,9 +829,58 @@
                         <li>Table: <code>LIMSMaster</code> · Count: <code>COUNT(DISTINCT Accession)</code></li>
                         <li>Date: <code>RequestCollectDate</code> in month · Day filter: <code>DAY(RequestCollectDate) BETWEEN 1 AND @dayWin</code></li>
                         <li>No status filter — all accessions in the comparable day window</li>
+                        <li><strong>Monthly collected sample</strong> = volume line (this chart)</li>
+                        <li><strong>Payers / Panels</strong> = Top 5 + Other across all volume months</li>
+                        <li>Click a month value on the line to open <strong>Payers</strong> with every payer for that month (same chart area). <strong>Clear</strong> returns to the volume line.</li>
                     </ul>
                 </div>
-                <div class="tpd-chart">@Html.Raw(SvgLine(labels, totals, "#1D4ED8", "Samples collected", dashLast: labels.Count > 1 ? labels.Count - 1 : null))</div>
+                <div class="tpd-vol-block">
+                <div class="tpd-subtabs" role="tablist" aria-label="Collected sample volume views">
+                    <button type="button" class="tpd-subtab active" role="tab" aria-selected="true" data-tpd-sub="chart">Monthly collected sample</button>
+                    <button type="button" class="tpd-subtab" role="tab" aria-selected="false" data-tpd-sub="payer">Payers</button>
+                    <button type="button" class="tpd-subtab" role="tab" aria-selected="false" data-tpd-sub="panel">Panels</button>
+                    <button type="button" class="tpd-sub-clear" id="tpd-vol-clear" disabled>Clear</button>
+                </div>
+                <div class="tpd-subpanel active" data-tpd-subpanel="chart" role="tabpanel">
+                    <div class="tpd-chart tpd-chart-vol">@Html.Raw(SvgLine(labels, totals, "#1D4ED8", "Samples collected", dashLast: labels.Count > 1 ? labels.Count - 1 : null, clickable: true))</div>
+                    <p class="tpd-vol-hint">Click a month value to open Payers for that month<span id="tpd-vol-month-wrap"> (<strong id="tpd-vol-month"></strong>)</span>.</p>
+                </div>
+                <div class="tpd-subpanel" data-tpd-subpanel="payer" role="tabpanel" hidden>
+                    <div class="tpd-split-card tpd-top5">
+                        <div class="tpd-split-title">Top 5 payers + Other</div>
+                        <p class="tpd-split-sub">All volume months</p>
+                        <div id="tpd-payer-chart">@Html.Raw(SvgStackedMonths(labels, payerSeries, payerColors))</div>
+                    </div>
+                    <div class="tpd-all-month" hidden>
+                        <div class="tpd-all-head">
+                            <div>
+                                <div class="tpd-split-title" data-tpd-all-title>All payers</div>
+                                <p class="tpd-split-sub" data-tpd-all-sub></p>
+                            </div>
+                            <button type="button" class="tpd-all-back" data-tpd-all-back>Clear</button>
+                        </div>
+                        <div data-tpd-all-body></div>
+                    </div>
+                </div>
+                <div class="tpd-subpanel" data-tpd-subpanel="panel" role="tabpanel" hidden>
+                    <div class="tpd-split-card tpd-top5">
+                        <div class="tpd-split-title">Top 5 panels + Other</div>
+                        <p class="tpd-split-sub">All volume months</p>
+                        <div id="tpd-panel-chart">@Html.Raw(SvgStackedMonths(labels, panelSeries, panelColors))</div>
+                    </div>
+                    <div class="tpd-all-month" hidden>
+                        <div class="tpd-all-head">
+                            <div>
+                                <div class="tpd-split-title" data-tpd-all-title>All panels</div>
+                                <p class="tpd-split-sub" data-tpd-all-sub></p>
+                            </div>
+                            <button type="button" class="tpd-all-back" data-tpd-all-back>Clear</button>
+                        </div>
+                        <div data-tpd-all-body></div>
+                    </div>
+                </div>
+                <script type="application/json" id="tpd-vol-data">@Html.Raw(volJson)</script>
+                </div>
             </div>
         </details>
 
@@ -616,28 +914,42 @@
             <summary class="tpd-acc-head">
                 <div class="tpd-acc-head-text">
                     <div class="tpd-card-title">Sample-to-Claim Funnel (Full Period)</div>
-                    <p class="tpd-card-sub">Collected → Resulted → Billed over the selected comparable window</p>
+                    <p class="tpd-card-sub">Collected → Resulted – Insurance → Self Pay / Client Bill / Billed to Insurance</p>
                 </div>
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
-                @{ ViewData["GraphTitle"] = "Sample-to-Claim Funnel (Full Period)"; }
+                @{
+                    ViewData["GraphTitle"] = "Sample-to-Claim Funnel (Full Period)";
+                    var funnelSvg = SvgHFunnel(
+                        ("Collected", Model.FunnelPeriod.Collected, 100m, "#1E3A8A"),
+                        ("Resulted – Insurance", Model.FunnelPeriod.Resulted, Model.FunnelPeriod.PctResulted, "#2563EB"),
+                        ("Resulted – Self Pay", Model.FunnelPeriod.ResultedSelfPay, Model.FunnelPeriod.PctSelfPayOfCollected, "#7C3AED"),
+                        ("Resulted – Client Bill", Model.FunnelPeriod.ResultedClientBill, Model.FunnelPeriod.PctClientBillOfCollected, "#D97706"),
+                        ("Billed to Insurance", Model.FunnelPeriod.BilledToInsurance, Model.FunnelPeriod.PctBilledOfResulted, "#93C5FD"));
+                }
                 @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 <div class="tpd-logic">
                     <strong>Fetch logic</strong>
                     <ul>
                         <li><strong>Collected</strong> = all accessions in DayWindow (same as Total Samples sum)</li>
-                        <li><strong>Resulted</strong> = <code>RessultedStatus = 'Resulted'</code></li>
-                        <li><strong>Billed</strong> = Resulted + <code>ClaimStatus='Billed'</code> + <code>BilledOrNot='Billed'</code> + <code>ClientStatus=''</code> (Billed to Insurance)</li>
-                        <li>% shown next to each bar = stage ÷ Collected × 100</li>
+                        <li><strong>Resulted – Insurance</strong> = <code>RessultedStatus = 'Resulted'</code> + <code>BillTo LIKE '%Insurance%'</code></li>
+                        <li><strong>Resulted – Self Pay</strong> = Resulted + <code>ClientStatus = 'Self Pay'</code></li>
+                        <li><strong>Resulted – Client Bill</strong> = Resulted + <code>ClientStatus = 'Client Bill'</code></li>
+                        <li><strong>Billed to Insurance</strong> = Resulted + <code>ClaimStatus='Billed'</code> + <code>BilledOrNot='Billed'</code> + <code>ClientStatus=''</code></li>
+                        <li>% next to Collected / Resulted–Insurance / Self Pay / Client Bill = stage ÷ Collected × 100</li>
+                        <li><strong>Bill to Insurance %</strong> (on the billed bar) = Billed to Insurance ÷ Resulted – Insurance × 100</li>
                     </ul>
                 </div>
-                <div class="tpd-chart">@Html.Raw(SvgHFunnel(Model.FunnelPeriod.Collected, Model.FunnelPeriod.Resulted, Model.FunnelPeriod.BilledToInsurance, Model.FunnelPeriod.PctResulted, Model.FunnelPeriod.PctBilledOfCollected))</div>
+                <div class="tpd-chart">@Html.Raw(funnelSvg)</div>
                 <p class="tpd-funnel-note">
                     Collected <strong>@Num(Model.FunnelPeriod.Collected)</strong>
-                    → Resulted <strong>@Num(Model.FunnelPeriod.Resulted)</strong> (@Pct(Model.FunnelPeriod.PctResulted))
-                    → Billed <strong>@Num(Model.FunnelPeriod.BilledToInsurance)</strong>
-                    (@Pct(Model.FunnelPeriod.PctBilledOfCollected) of collected; @Pct(Model.FunnelPeriod.PctBilledOfResulted) of resulted).
+                    → Resulted – Insurance <strong>@Num(Model.FunnelPeriod.Resulted)</strong> (@Pct(Model.FunnelPeriod.PctResulted))
+                    · Self Pay <strong>@Num(Model.FunnelPeriod.ResultedSelfPay)</strong>
+                    · Client Bill <strong>@Num(Model.FunnelPeriod.ResultedClientBill)</strong>
+                    · Billed to Insurance <strong>@Num(Model.FunnelPeriod.BilledToInsurance)</strong>
+                    · Bill to Insurance % <strong>@Pct(Model.FunnelPeriod.PctBilledOfResulted)</strong>
+                    (Billed to Insurance ÷ Resulted – Insurance).
                 </p>
             </div>
         </details>
@@ -645,20 +957,21 @@
         <details class="tpd-card tpd-acc" open>
             <summary class="tpd-acc-head">
                 <div class="tpd-acc-head-text">
-                    <div class="tpd-card-title">Backlog Age — Resulted Samples Never Entered in PMS (n=@Num(Model.BacklogSummary.TotalBacklog))</div>
-                    <p class="tpd-card-sub">Check #2 · open Resulted / Not-in-AMD backlog as of WeekRange end</p>
+                    <div class="tpd-card-title">Backlog – Resulted Insurance not billed (n=@Num(Model.BacklogSummary.TotalBacklog))</div>
+                    <p class="tpd-card-sub">Resulted – Insurance − Billed to Insurance · aging as of WeekRange end</p>
                 </div>
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
-                @{ ViewData["GraphTitle"] = "Backlog Age — Resulted Samples Never Entered in PMS"; }
+                @{ ViewData["GraphTitle"] = "Backlog – Resulted Insurance not billed"; }
                 @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 @{ ViewData["GraphTitle"] = "Backlog Age Buckets"; }
                 @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 <div class="tpd-logic">
                     <strong>Fetch logic</strong>
                     <ul>
-                        <li>Population (not DayWindow-capped): <code>RessultedStatus='Resulted'</code> + <code>ClaimStatus='Not Entered in AMD'</code> + <code>BilledOrNot='UnBilled'</code> + <code>ClientStatus IN ('', 'Billing Review Required')</code></li>
+                        <li><strong>Backlog</strong> = Resulted – Insurance − Billed to Insurance (DayWindow, <code>COUNT(DISTINCT Accession)</code>)</li>
+                        <li>i.e. <code>RessultedStatus='Resulted'</code> + <code>BillTo LIKE '%Insurance%'</code> and not billed-to-insurance (<code>ClaimStatus='Billed'</code> + <code>BilledOrNot='Billed'</code> + <code>ClientStatus=''</code>)</li>
                         <li><strong>AgeDays</strong> = <code>DATEDIFF(DAY, RequestCollectDate, @@AsOfDate)</code> (@asOfTxt)</li>
                         <li>Buckets: 0–7 / 8–14 / 15–30 / 31–60 / 60+</li>
                     </ul>
@@ -689,7 +1002,7 @@
             <summary class="tpd-acc-head">
                 <div class="tpd-acc-head-text">
                     <div class="tpd-card-title">% of Resulted Samples Billed to Insurance</div>
-                    <p class="tpd-card-sub">Resulted → billed pipeline rate by month</p>
+                    <p class="tpd-card-sub">Bill to Insurance % = Billed to Insurance ÷ Resulted – Insurance</p>
                 </div>
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
@@ -700,9 +1013,9 @@
                 <div class="tpd-logic">
                     <strong>Fetch logic</strong>
                     <ul>
-                        <li><strong>Resulted</strong> = <code>RessultedStatus='Resulted'</code> (DayWindow)</li>
+                        <li><strong>Resulted – Insurance</strong> = <code>RessultedStatus='Resulted'</code> + <code>BillTo LIKE '%Insurance%'</code></li>
                         <li><strong>Billed to Insurance</strong> = Resulted + <code>ClaimStatus='Billed'</code> + <code>BilledOrNot='Billed'</code> + <code>ClientStatus=''</code></li>
-                        <li><strong>% Billed of Resulted</strong> = Billed to Insurance ÷ Resulted × 100</li>
+                        <li><strong>Bill to Insurance %</strong> = Billed to Insurance ÷ Resulted – Insurance × 100</li>
                     </ul>
                 </div>
                 <div class="tpd-chart">@Html.Raw(SvgLine(labels, billedPct.Select(v => double.IsNaN(v) ? 0 : v).ToList(), "#B91C1C", "% billed to insurance of resulted", fill: true, fillColor: "rgba(185,28,28,.14)", dashLast: labels.Count > 1 ? labels.Count - 1 : null, asPct: true))</div>
@@ -774,7 +1087,7 @@
                     <thead>
                         <tr>
                             <th>Month</th><th class="num">Total Samples</th><th class="num">Resulted</th><th class="num">% Resulted</th>
-                            <th class="num">Billed to Ins</th><th class="num">% Billed of Resulted</th>
+                            <th class="num">Resulted (Ins)</th><th class="num">Billed to Ins</th><th class="num">% Billed of Resulted (Ins)</th>
                             <th class="num">Self Pay %</th><th class="num">Client Bill %</th><th class="num">Not Resulted</th>
                         </tr>
                     </thead>
@@ -786,6 +1099,7 @@
                             <td class="num">@Num(m.TotalSamples)</td>
                             <td class="num">@Num(m.Resulted)</td>
                             <td class="num">@Pct(m.PctResulted)</td>
+                            <td class="num">@Num(m.ResultedInsurance)</td>
                             <td class="num">@Num(m.BilledToInsurance)</td>
                             <td class="num">@Pct(m.PctBilledOfResulted)</td>
                             <td class="num">@Pct(m.SelfPayPct)</td>
@@ -801,6 +1115,7 @@
         </div><!-- /lis panel -->
 
         <div class="tpd-tab-panel" id="tpd-panel-pms" role="tabpanel" hidden>
+            <h2 class="tpd-print-only tpd-print-pillar-h">Pillar 2 — PMS / Revenue Realization</h2>
             <div class="tpd-pillar">Pillar 2 — Revenue Realization (PMS)</div>
             <div class="tpd-lazy-host" data-tpd-lazy="pms">
                 <div class="tpd-lazy-status">Click the PMS tab to load this pillar (loads when the SP is available).</div>
@@ -808,6 +1123,7 @@
         </div>
 
         <div class="tpd-tab-panel" id="tpd-panel-cash" role="tabpanel" hidden>
+            <h2 class="tpd-print-only tpd-print-pillar-h">Pillar 3 — Cash / Leakage &amp; Risk</h2>
             <div class="tpd-pillar">Pillar 3 — Leakage &amp; Risk (Cash)</div>
             <div class="tpd-lazy-host" data-tpd-lazy="cash">
                 <div class="tpd-lazy-status">Click the Cash tab to load this pillar (loads when the SP is available).</div>
@@ -826,7 +1142,7 @@
 <script nonce="@Context.Items["CspNonce"]">
 (function () {
     var tabs = document.querySelectorAll('.tpd-tab');
-    var loaded = {};
+    var loaded = { lis: true };
 
     function showPanel(name) {
         document.querySelectorAll('.tpd-tab-panel').forEach(function (p) {
@@ -843,25 +1159,30 @@
     }
 
     function loadPanel(tab) {
-        var name = tab.getAttribute('data-tpd-tab');
-        var url = tab.getAttribute('data-tpd-load');
-        if (!url || loaded[name]) return;
-        var host = document.querySelector('[data-tpd-lazy="' + name + '"]');
-        if (!host) return;
-        host.innerHTML = '<div class="tpd-lazy-status">Loading…</div>';
-        fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' })
-            .then(function (r) {
-                if (!r.ok) throw new Error('HTTP ' + r.status);
-                return r.text();
-            })
-            .then(function (html) {
-                host.innerHTML = html;
-                loaded[name] = true;
-            })
-            .catch(function (err) {
-                host.innerHTML = '<div class="tpd-lazy-status error">Could not load pillar: '
-                    + (err && err.message ? err.message : 'unknown error') + '</div>';
-            });
+        return new Promise(function (resolve, reject) {
+            if (!tab) { resolve(); return; }
+            var name = tab.getAttribute('data-tpd-tab');
+            var url = tab.getAttribute('data-tpd-load');
+            if (!url || loaded[name]) { resolve(); return; }
+            var host = document.querySelector('[data-tpd-lazy="' + name + '"]');
+            if (!host) { resolve(); return; }
+            host.innerHTML = '<div class="tpd-lazy-status">Loading…</div>';
+            fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' })
+                .then(function (r) {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.text();
+                })
+                .then(function (html) {
+                    host.innerHTML = html;
+                    loaded[name] = true;
+                    resolve();
+                })
+                .catch(function (err) {
+                    host.innerHTML = '<div class="tpd-lazy-status error">Could not load pillar: '
+                        + (err && err.message ? err.message : 'unknown error') + '</div>';
+                    reject(err);
+                });
+        });
     }
 
     tabs.forEach(function (tab) {
@@ -872,7 +1193,195 @@
         });
     });
 
-    // Ensure LIS panel is visible on first paint (styles + hidden attrs).
     showPanel('lis');
+
+    var printTitles = {
+        lis: 'Pillar 1 — LIS / Pipeline Health',
+        pms: 'Pillar 2 — PMS / Revenue Realization',
+        cash: 'Pillar 3 — Cash / Leakage & Risk',
+        all: 'LIS + PMS + Cash'
+    };
+
+    function expandDetails(name) {
+        var panel = document.getElementById('tpd-panel-' + name);
+        if (!panel) return;
+        panel.querySelectorAll('details.tpd-acc').forEach(function (d) { d.open = true; });
+    }
+
+    function downloadPdf(scope) {
+        var names = scope === 'all' ? ['lis', 'pms', 'cash'] : [scope];
+        var html = document.documentElement;
+        ['lis', 'pms', 'cash', 'all'].forEach(function (k) {
+            html.classList.remove('tpd-print-' + k);
+        });
+        html.classList.add(scope === 'all' ? 'tpd-print-all' : 'tpd-print-' + scope);
+        var titleEl = document.getElementById('tpd-print-pillar');
+        if (titleEl) titleEl.textContent = printTitles[scope] || scope;
+
+        var btns = document.querySelectorAll('.tpd-pdf-btn');
+        btns.forEach(function (b) { b.disabled = true; });
+
+        var jobs = names.map(function (n) {
+            var tab = document.querySelector('.tpd-tab[data-tpd-tab="' + n + '"]');
+            return loadPanel(tab);
+        });
+        Promise.all(jobs).then(function () {
+            names.forEach(expandDetails);
+            window.setTimeout(function () { window.print(); }, 120);
+        }).catch(function () {
+            window.setTimeout(function () { window.print(); }, 120);
+        }).then(function () {
+            btns.forEach(function (b) { b.disabled = false; });
+        });
+    }
+
+    document.querySelectorAll('[data-tpd-pdf]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            downloadPdf(btn.getAttribute('data-tpd-pdf'));
+        });
+    });
+    window.addEventListener('afterprint', function () {
+        ['lis', 'pms', 'cash', 'all'].forEach(function (k) {
+            document.documentElement.classList.remove('tpd-print-' + k);
+        });
+    });
+})();
+</script>
+<script nonce="@Context.Items["CspNonce"]">
+(function () {
+    var monthEl = document.getElementById('tpd-vol-month');
+    var wrap = document.getElementById('tpd-vol-month-wrap');
+    var svg = document.getElementById('tpd-vol-line');
+    var dataEl = document.getElementById('tpd-vol-data');
+    var data = {};
+    try { data = JSON.parse(dataEl ? dataEl.textContent : '{}') || {}; } catch (e) { data = {}; }
+    var selectedMonth = '';
+    var clearBtn = document.getElementById('tpd-vol-clear');
+    if (wrap) wrap.style.display = 'none';
+
+    function esc(s) {
+        return String(s || '').replace(/[&<>"']/g, function (c) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+        });
+    }
+    function fmt(n) {
+        return Number(n || 0).toLocaleString('en-US');
+    }
+    function monthRec(month) {
+        var key = String(month || '').toLowerCase();
+        for (var p in data) {
+            if (Object.prototype.hasOwnProperty.call(data, p) && String(p).toLowerCase() === key)
+                return data[p];
+        }
+        return null;
+    }
+    function rowsFor(month, kind) {
+        var rec = monthRec(month);
+        if (!rec) return [];
+        var list = kind === 'panel' ? rec.panels : rec.payers;
+        return (list || []).slice().sort(function (a, b) { return (b.c || 0) - (a.c || 0); });
+    }
+    function renderAll(panel) {
+        var body = panel.querySelector('[data-tpd-all-body]');
+        var title = panel.querySelector('[data-tpd-all-title]');
+        var sub = panel.querySelector('[data-tpd-all-sub]');
+        var kind = panel.getAttribute('data-tpd-subpanel') || 'payer';
+        var noun = kind === 'panel' ? 'panels' : 'payers';
+        var rows = rowsFor(selectedMonth, kind);
+        if (title) title.textContent = 'All ' + noun + ' — ' + selectedMonth;
+        if (sub) sub.textContent = rows.length + ' ' + noun + ' · collected samples';
+        if (!body) return;
+        if (!rows.length) {
+            body.innerHTML = '<div class="tpd-empty">No ' + noun + ' for ' + esc(selectedMonth) + '.</div>';
+            return;
+        }
+        var max = 0;
+        rows.forEach(function (r) { if ((r.c || 0) > max) max = r.c; });
+        var html = '<div class="tpd-all-rows">';
+        rows.forEach(function (r) {
+            var pct = max > 0 ? (100 * (r.c || 0) / max) : 0;
+            html += '<div class="tpd-all-row"><span class="tpd-all-name" title="' + esc(r.n) + '">' + esc(r.n) + '</span>'
+                + '<span class="tpd-all-bar"><i style="width:' + pct.toFixed(1) + '%"></i></span>'
+                + '<span class="tpd-all-n">' + fmt(r.c) + '</span></div>';
+        });
+        html += '</div>';
+        body.innerHTML = html;
+    }
+    function applyMode() {
+        if (monthEl) monthEl.textContent = selectedMonth || '';
+        if (wrap) wrap.style.display = selectedMonth ? '' : 'none';
+        document.querySelectorAll('.tpd-subpanel[data-tpd-subpanel="payer"], .tpd-subpanel[data-tpd-subpanel="panel"]').forEach(function (p) {
+            var allEl = p.querySelector('.tpd-all-month');
+            var top5 = p.querySelector('.tpd-top5');
+            var on = !!selectedMonth;
+            if (top5) {
+                if (on) top5.setAttribute('hidden', 'hidden');
+                else top5.removeAttribute('hidden');
+            }
+            if (allEl) {
+                if (on) {
+                    allEl.removeAttribute('hidden');
+                    renderAll(p);
+                } else {
+                    allEl.setAttribute('hidden', 'hidden');
+                }
+            }
+        });
+        if (clearBtn) clearBtn.disabled = !selectedMonth;
+        if (svg) {
+            svg.querySelectorAll('.tpd-vol-pt').forEach(function (pt) {
+                var on = !!selectedMonth && String(pt.getAttribute('data-month') || '').toLowerCase() === selectedMonth.toLowerCase();
+                pt.classList.toggle('is-on', on);
+                pt.setAttribute('r', on ? '6.5' : '4');
+            });
+        }
+    }
+    function selectMonth(month) {
+        selectedMonth = month || '';
+        applyMode();
+        if (selectedMonth) showSub('payer');
+    }
+    function showSub(name) {
+        document.querySelectorAll('.tpd-subtab').forEach(function (t) {
+            var on = t.getAttribute('data-tpd-sub') === name;
+            t.classList.toggle('active', on);
+            t.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        document.querySelectorAll('.tpd-subpanel').forEach(function (p) {
+            var on = p.getAttribute('data-tpd-subpanel') === name;
+            p.classList.toggle('active', on);
+            if (on) p.removeAttribute('hidden');
+            else p.setAttribute('hidden', 'hidden');
+        });
+    }
+    function clearSelection() {
+        selectedMonth = '';
+        applyMode();
+        showSub('chart');
+    }
+    document.querySelectorAll('.tpd-subtab').forEach(function (t) {
+        t.addEventListener('click', function () {
+            showSub(t.getAttribute('data-tpd-sub'));
+        });
+    });
+    if (clearBtn) clearBtn.addEventListener('click', clearSelection);
+    document.querySelectorAll('[data-tpd-all-back]').forEach(function (b) {
+        b.addEventListener('click', clearSelection);
+    });
+    if (svg) {
+        svg.addEventListener('click', function (e) {
+            var t = e.target && e.target.closest ? e.target.closest('[data-month]') : null;
+            if (!t) return;
+            var month = t.getAttribute('data-month');
+            if (month) selectMonth(month);
+        });
+        svg.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            var t = e.target && e.target.closest ? e.target.closest('[data-month]') : null;
+            if (!t) return;
+            e.preventDefault();
+            selectMonth(t.getAttribute('data-month'));
+        });
+    }
 })();
 </script>

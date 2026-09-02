@@ -33,6 +33,22 @@ Fields:
 • SortYear — The year of the month.
 • SortMonth — The month number (if present).
 
+1b) Payer-wise collected
+Context: Top 5 primary-insurance names (plus Other) for each collect month. Rows are month × payer; interpret a month’s mix, not a single total.
+Fields:
+• MonthLabel, SortYear, SortMonth — The collect month.
+• Name — PrimaryInsurance (or Other).
+• SampleCount — Distinct accessions for that payer in the month.
+• SortOrder — Rank within the month.
+
+1c) Panel-wise collected
+Context: Top 5 panel categories (plus Other) for each collect month. Rows are month × panel.
+Fields:
+• MonthLabel, SortYear, SortMonth — The collect month.
+• Name — PanelCategory (or Other).
+• SampleCount — Distinct accessions for that panel in the month.
+• SortOrder — Rank within the month.
+
 2) Total Samples & % Resulted — Last {trailingMonths} Months
 Context: Analyzes the trend of total samples received per month over the window, and the percentage of those samples resulted.
 Note: Use the exact graphTitle from the file (e.g. “Last 12 Months” or “Last 19 Months”).
@@ -43,37 +59,42 @@ Fields:
 • PctResulted — Percentage of samples resulted for the month.
 
 3) Sample-to-Claim Funnel (Full Period)
-Context: Compares the trend of total samples received as of a given date against total samples resulted and total samples billed to insurance.
+Context: Compares total samples received against samples resulted with BillTo = Insurance, then shows Self Pay, Client Bill, and billed to insurance as parallel paths.
 Note: graphTitle in JSON is “Sample-to-Claim Funnel (Full Period)” (same analysis as “Samples to Claim Funnel”).
 Fields:
 • Collected — Total number of samples received for the time period.
-• Resulted — Total number of samples resulted for the time period.
-• BilledToInsurance — Total number of samples billed to insurance for the time period.
-• PctResulted — Percentage of samples resulted out of total samples received.
+• Resulted — Resulted – Insurance: RessultedStatus = Resulted AND BillTo LIKE '%Insurance%'.
+• ResultedSelfPay — Resulted samples with ClientStatus = Self Pay.
+• ResultedClientBill — Resulted samples with ClientStatus = Client Bill.
+• BilledToInsurance — Resulted samples billed to insurance.
+• PctResulted — Percentage of Resulted – Insurance out of total samples received.
+• PctSelfPayOfCollected — Self Pay share of collected.
+• PctClientBillOfCollected — Client Bill share of collected.
 • PctBilledOfCollected — Percentage of samples billed to insurance out of total samples received.
-• PctBilledOfResulted — Percentage of samples billed to insurance out of total samples resulted.
+• PctBilledOfResulted — Percentage of samples billed to insurance out of Resulted – Insurance (BillTo LIKE '%Insurance%').
 
-4) Backlog Age — Resulted Samples Never Entered in PMS
-Context: Presents the breakdown of samples not yet billed to insurance by age from date of service, grouping the unbilled backlog by age bucket. This section’s rows are the summary totals (use Backlog Age Buckets for the bucket breakdown).
+4) Backlog – Resulted Insurance not billed
+Context: Backlog = Resulted Insurance − Billed to Insurance, aged from collect date as of WeekRange end. Use Backlog Age Buckets for the bucket breakdown.
 Fields:
-• TotalBacklog — Total number of samples unbilled to insurance.
-• MedianAgeDays — Median number of days the samples have been unbilled from the sample-collected date.
-• PctOver60Days — Percentage of unbilled samples over 60 days old.
+• TotalBacklog — Resulted Insurance samples not billed to insurance.
+• MedianAgeDays — Median number of days from sample-collected date.
+• PctOver60Days — Percentage of backlog samples over 60 days old.
 
 5) Backlog Age Buckets
-Context: Provides a breakdown of samples unbilled to insurance by age bucket.
+Context: Age-bucket breakdown of the backlog (Resulted Insurance − Billed to Insurance).
 Fields:
 • AgeBucket — The age bucket.
 • SortOrder — The order in which the data is presented.
-• SampleCount — Number of samples unbilled to insurance under the age bucket.
+• SampleCount — Number of residual backlog samples in the age bucket.
 
 6) % of Resulted Samples Billed to Insurance
-Context: Analyzes the trend of samples billed to insurance against resulted samples, expressed as a percentage.
+Context: Analyzes the trend of samples billed to insurance against resulted samples with BillTo = Insurance, expressed as a percentage.
 Fields:
 • MonthLabel — Month of the year.
-• Resulted — Total number of samples resulted.
+• Resulted — Total samples resulted (all bill types).
+• ResultedInsurance — Resulted samples with BillTo LIKE '%Insurance%'.
 • BilledToInsurance — Total number of samples billed to insurance.
-• PctBilledOfResulted — Percentage of samples billed to insurance out of resulted samples.
+• PctBilledOfResulted — Percentage of samples billed to insurance out of ResultedInsurance.
 
 7) Not Resulted Samples — Monthly Trend
 Context: Analyzes the monthly trend of total samples not resulted.
@@ -98,63 +119,62 @@ Fields: full monthly row fields as provided (TotalSamples, Resulted, PctResulted
 ════════════════════════════════════════
 INPUT FILE 2: PMS.json — Sections & Fields
 ════════════════════════════════════════
-1) 1. Billed Claims Reconciliation — LIS vs PMS
+1) 1. Fully Paid % of Billed Claims (PMS)
+Fields: MonthLabel, BilledClaims, FullyPaid, PctFullyPaid
+
+2) 2. Insurance Balance % of Billed Claims
+Fields: MonthLabel, BilledClaims, InsuranceBalanceClaims, PctInsuranceBalance, FullyDeniedClaims, NoResponseClaims, PartiallyDeniedClaims, InsuranceBalanceAmt
+
+3) 2b. Insurance Balance Composition (% of open claims)
+Fields: MonthLabel, FullyDeniedClaims, NoResponseClaims, PartiallyDeniedClaims, InsuranceBalanceClaims
+
+4) 3. Fully Adjusted % of Billed Claims (PMS)
+Fields: MonthLabel, BilledClaims, FullyAdjusted, PctFullyAdjusted
+
+5) 4. Top Write Off Reason Codes
+Fields: TransactionCodeCombined, MatchingCount
+
+6) 5. Panel-wise Average Allowed vs Average Paid
+Context: Avg Allowed and Avg Paid are both grouped by Date of Service month (same billed claims, exclude No Response). AvgPaidByPaymentDate is a legacy column name; the value is DOS-month average paid.
+Fields: Panelname, MonthLabel_DOS, AvgAllowed, AllowedClaimCount, AvgPaid, AvgPaidByPaymentDate, PaidClaimCount
+
+7) Billed Claims Reconciliation — LIS vs PMS
 Purpose: PMS billed claims vs LIS billed-to-insurance; Gap = PMS − LIS.
 Fields: MonthLabel, PmsBilled, LisBilledToInsurance, Gap
 
-2) 2. Fully Adjusted % of Billed Claims (PMS)
-Fields: MonthLabel, BilledClaims, FullyAdjusted, PctFullyAdjusted
-
-3) 3. Top Write-Off Reason Codes
-Fields: TransactionCodeCombined, MatchingCount
-
-4) 4. Insurance Balance % of Billed Claims — Headline PMS Finding
-Fields: MonthLabel, BilledClaims, InsuranceBalanceClaims, PctInsuranceBalance, FullyDeniedClaims, NoResponseClaims, PartiallyDeniedClaims, InsuranceBalanceAmt
-
-5) 4b. Insurance Balance Composition (% of open claims)
-Fields: MonthLabel, FullyDeniedClaims, NoResponseClaims, PartiallyDeniedClaims, InsuranceBalanceClaims
-
-6) 5. Fully Paid % of Billed Claims (PMS)
-Fields: MonthLabel, BilledClaims, FullyPaid, PctFullyPaid
-
-7) 6. Panel — Avg Allowed vs Avg Paid
-Fields: Panelname, MonthLabel_DOS, AvgAllowed, AllowedClaimCount, AvgPaidByPaymentDate, PaidClaimCount
-
-8) Avg $ Paid per Claim — Panel (MOM by DOS)
-Fields: Panelname, PayerName, PriorMonthLabel, LatestMonthLabel, PriorAllowed, PriorPaid, PriorN, LatestAllowed, LatestPaid, LatestN, MomPctPaid
-
-9) DOS-Cohort Maturity Curve
+8) DOS-Cohort Maturity Curve
 Fields: DOSMonthLabel, DaySinceDOS, PctAllowedPaid
 
-10) Denial Rate by Carrier — Ratio-Driver Breakdown
+9) Denial Rate by Carrier — Ratio-Driver Breakdown
 Fields: PayerName, TotalAllowed, DeniedAllowed, DenialRatePct
 
-11) Fastest-Escalating Denial Reasons by Payer — MOM
+10) Fastest-Escalating Denial Reasons by Payer — MOM
 Fields: PayerName, DenialCode, MonthLabel, DenialCount
 
 ════════════════════════════════════════
 INPUT FILE 3: Cash.json — Sections & Fields
 ════════════════════════════════════════
-1) 1. Total Billed $ — Monthly Trend
-Fields: MonthLabel, TotalBilledAmt
+1) 1. Collection Rate — Insurance Payment / Total Billed
+Fields: MonthLabel, InsurancePaymentFullyPaid, TotalBilledAmt, CollectionRatePct
 
 2) 2. Partially Paid $ — Monthly Trend
 Fields: MonthLabel, PartiallyPaidAmt, PctPartiallyPaidOfBilled, TotalBilledAmt
 
-3) 3. Collection Rate — Insurance Payment / Total Billed
-Fields: MonthLabel, InsurancePaymentFullyPaid, TotalBilledAmt, CollectionRatePct
-
-4) 4a. % Insurance Balance $ of Total Billed
+3) 3. Insurance Balance — % of Total Billed
 Fields: MonthLabel, InsuranceBalanceAmt, PctInsuranceBalanceOfBilled, TotalBilledAmt
 
-5) 4b. Insurance Balance $ Composition
+4) 3b. Insurance Balance $ Composition
 Fields: MonthLabel, FullyDeniedIBAmt, NoResponseIBAmt, PartiallyDeniedIBAmt, InsuranceBalanceAmt, NoResponseSharePct
 
+5) 4. Fully Adjusted $
+Fields: MonthLabel, FullyAdjustedAmt, PctFullyAdjustedOfBilled, TotalBilledAmt
+
 6) 5. Patient Write-Off vs Patient Balance
+Context: Chart Patient Balance displayed as Patient WO + Patient Balance + Patient Paid (all three components).
 Fields: MonthLabel, PatientWOAmt, PatientBalanceAmt, PatientPaymentAmt, WriteOffRatioPct, PatientCollectionRatePct
 
-7) 6. Fully Adjusted $ — Write-Off Reason Pareto
-Fields: TransactionCodeCombined, MatchingCount
+7) Total Billed $ — Monthly Trend
+Fields: MonthLabel, TotalBilledAmt
 
 8) Cash monthly detail
 Purpose: Full cash headline metrics; synthesize material findings only.

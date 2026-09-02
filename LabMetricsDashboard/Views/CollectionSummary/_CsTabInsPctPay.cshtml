@@ -1,4 +1,4 @@
-﻿@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+@model LabMetricsDashboard.Models.CollectionSummaryViewModel
             @if (Model.InsurancePaymentPct.Count > 0)
             {
                 var grandTotalClaims = Model.InsurancePaymentPct.Sum(r => r.TotalClaims);

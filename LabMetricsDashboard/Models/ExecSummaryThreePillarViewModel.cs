@@ -20,6 +20,8 @@ public sealed class ThreePillarLisMonth
     public long Resulted { get; set; }
     public decimal? PctResulted { get; set; }
     public long BilledToInsurance { get; set; }
+    /// <summary>Resulted samples with BillTo = Insurance (BillTo LIKE '%Insurance%').</summary>
+    public long ResultedInsurance { get; set; }
     public decimal? PctBilledOfResulted { get; set; }
     public long SelfPay { get; set; }
     public decimal? SelfPayPct { get; set; }
@@ -28,12 +30,27 @@ public sealed class ThreePillarLisMonth
     public long NotResulted { get; set; }
 }
 
+/// <summary>One payer or panel bar for a collect-month (LIS collected volume drill-down).</summary>
+public sealed class ThreePillarNamedCountMonth
+{
+    public string MonthLabel { get; set; } = string.Empty;
+    public int SortYear { get; set; }
+    public int SortMonth { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public long SampleCount { get; set; }
+    public int SortOrder { get; set; }
+}
+
 public sealed class ThreePillarLisFunnelPeriod
 {
     public long Collected { get; set; }
     public long Resulted { get; set; }
+    public long ResultedSelfPay { get; set; }
+    public long ResultedClientBill { get; set; }
     public long BilledToInsurance { get; set; }
     public decimal? PctResulted { get; set; }
+    public decimal? PctSelfPayOfCollected { get; set; }
+    public decimal? PctClientBillOfCollected { get; set; }
     public decimal? PctBilledOfCollected { get; set; }
     public decimal? PctBilledOfResulted { get; set; }
 }
@@ -48,6 +65,7 @@ public sealed class ThreePillarLisFunnelMonth
 
 public sealed class ThreePillarBacklogSummary
 {
+    /// <summary>Resulted – Insurance − Billed to Insurance (funnel, DayWindow, DISTINCT Accession).</summary>
     public long TotalBacklog { get; set; }
     public decimal? MedianAgeDays { get; set; }
     public decimal? PctOver60Days { get; set; }
@@ -190,6 +208,9 @@ public sealed class ThreePillarCashHeadlineMonth
     public decimal NoResponseIBAmt { get; set; }
     public decimal PartiallyDeniedIBAmt { get; set; }
     public decimal? NoResponseSharePct { get; set; }
+
+    /// <summary>Chart Patient Balance = Patient WO + Patient Balance + Patient Paid.</summary>
+    public decimal PatientBalanceDisplayAmt => PatientWOAmt + PatientBalanceAmt + PatientPaymentAmt;
 }
 
 /// <summary>Panel × payer prior-vs-latest DOS month avg allowed/paid (PMS RS7).</summary>
@@ -258,6 +279,10 @@ public sealed class ExecSummaryThreePillarViewModel
     public List<ThreePillarPctBilledOfResultedMonth> PctBilledOfResulted { get; set; } = [];
     public List<ThreePillarSelfPayClientBillMonth> SelfPayClientBill { get; set; } = [];
     public List<ThreePillarNotResultedMonth> NotResulted { get; set; } = [];
+    /// <summary>All payers per collect-month (RS5). UI rolls Top 5 + Other; month-click lists every name.</summary>
+    public List<ThreePillarNamedCountMonth> CollectedByPayer { get; set; } = [];
+    /// <summary>All panels per collect-month (RS6). UI rolls Top 5 + Other; month-click lists every name.</summary>
+    public List<ThreePillarNamedCountMonth> CollectedByPanel { get; set; } = [];
     public List<ThreePillarReconciliationMonth> Reconciliation { get; set; } = [];
     public List<ThreePillarFullyAdjustedMonth> FullyAdjusted { get; set; } = [];
     public List<ThreePillarFullyAdjustedReason> FullyAdjustedReasons { get; set; } = [];
@@ -319,12 +344,28 @@ public sealed class ExecSummaryThreePillarViewModel
             }
         }
 
-        // Soft match for panel-specific UI titles vs generic JSON titles.
-        if (graphTitle.Contains("Avg Allowed vs Avg Paid", StringComparison.OrdinalIgnoreCase))
+        if (graphTitle.Contains("Backlog", StringComparison.OrdinalIgnoreCase)
+            && graphTitle.Contains("Resulted", StringComparison.OrdinalIgnoreCase))
         {
             foreach (var kv in ChartInsights)
             {
-                if (BareTitle(kv.Key).Contains("Avg Allowed vs Avg Paid", StringComparison.OrdinalIgnoreCase))
+                var bare = BareTitle(kv.Key);
+                if (bare.Contains("Backlog", StringComparison.OrdinalIgnoreCase)
+                    && bare.Contains("Resulted", StringComparison.OrdinalIgnoreCase)
+                    && !bare.Contains("Bucket", StringComparison.OrdinalIgnoreCase))
+                    return kv.Value;
+            }
+        }
+
+        // Soft match for panel-specific UI titles vs generic JSON titles.
+        if (graphTitle.Contains("Avg Allowed vs Avg Paid", StringComparison.OrdinalIgnoreCase)
+            || graphTitle.Contains("Average Allowed vs Average Paid", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var kv in ChartInsights)
+            {
+                var bare = BareTitle(kv.Key);
+                if (bare.Contains("Avg Allowed vs Avg Paid", StringComparison.OrdinalIgnoreCase)
+                    || bare.Contains("Average Allowed vs Average Paid", StringComparison.OrdinalIgnoreCase))
                     return kv.Value;
             }
         }

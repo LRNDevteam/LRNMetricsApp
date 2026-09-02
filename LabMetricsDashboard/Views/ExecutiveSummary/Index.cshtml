@@ -729,6 +729,12 @@
                            title="Three-Pillar Diagnostic page with charts (not an Excel export)">
                             <i class="bi bi-clipboard2-pulse me-1"></i>Three-Pillar Diagnostic
                         </a>
+                        <a asp-controller="ExecutiveSummary" asp-action="RevenuePipelineLis"
+                           asp-route-lab="@Model.SelectedLab"
+                           class="btn btn-sm btn-primary"
+                           title="v1.6 LIS volume and resulting timeliness (VOL-01, VOL-02, RES-01)">
+                            <i class="bi bi-bar-chart-line me-1"></i>Three-Pillar LIS
+                        </a>
                     }
                 </div>
             </div>

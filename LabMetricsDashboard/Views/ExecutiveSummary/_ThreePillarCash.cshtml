@@ -270,7 +270,8 @@
         pdShare.Add((double)r.PartiallyDeniedIBAmt / tot * 100);
     }
     var wo = rows.Select(r => (double)r.PatientWOAmt).ToList();
-    var pbal = rows.Select(r => (double)r.PatientBalanceAmt).ToList();
+    var pbal = rows.Select(r => (double)r.PatientBalanceDisplayAmt).ToList();
+    var faAmt = rows.Select(r => (double)r.FullyAdjustedAmt).ToList();
     var reasons = Model.CashWriteOffReasons
         .Where(r => !string.IsNullOrWhiteSpace(r.TransactionCodeCombined) && r.MatchingCount > 0)
         .Select(r => (r.TransactionCodeCombined, (double)r.MatchingCount))
@@ -297,23 +298,22 @@ else
     <details class="tpd-card tpd-acc" open>
         <summary class="tpd-acc-head">
             <div class="tpd-acc-head-text">
-                <div class="tpd-card-title">1. Total Billed $ — Monthly Trend</div>
-                <p class="tpd-card-sub">Monthly $ Billed = SUM(ChargeAmount) WHERE Billed · GROUP BY DOS month</p>
+                <div class="tpd-card-title">1. Collection Rate — Insurance Payment / Total Billed</div>
+                <p class="tpd-card-sub">Fully Paid Ins $ ÷ Total Billed $ × 100</p>
             </div>
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
-            @{ ViewData["GraphTitle"] = "1. Total Billed $ — Monthly Trend"; }
+            @{ ViewData["GraphTitle"] = "1. Collection Rate — Insurance Payment / Total Billed"; }
             @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
+            <div class="tpd-insight tpd-insight-ok">Best headline metric for a monthly lab-owner review — pair with Insurance Balance $ below.</div>
             <div class="tpd-logic">
                 <strong>Fetch logic</strong>
                 <ul>
-                    <li><strong>Total Billed $</strong> = <code>SUM(ChargeAmount)</code> where BillStatus = <code>Billed</code> (ES <code>BilledUnbilled</code>)</li>
-                    <li>Comparable window = DOS day 1–@Model.DayWindow</li>
+                    <li><strong>Collection Rate</strong> = Fully Paid <code>InsurancePayment</code> ÷ Total Billed $ × 100</li>
                 </ul>
             </div>
-            <div class="tpd-chart">@Html.Raw(SvgBars(labels, billed, "#2563EB", "Total Billed $"))</div>
-            <p class="tpd-funnel-note">Shrinking billed base is independent of collections performance — read alongside LIS % Billed to Insurance.</p>
+            <div class="tpd-chart">@Html.Raw(SvgPctLine(labels, collRate, "#15803D", "Collection Rate %"))</div>
         </div>
     </details>
 
@@ -340,39 +340,17 @@ else
         </div>
     </details>
 
-    <details class="tpd-card tpd-acc" open>
-        <summary class="tpd-acc-head">
-            <div class="tpd-acc-head-text">
-                <div class="tpd-card-title">3. Collection Rate — Insurance Payment / Total Billed</div>
-                <p class="tpd-card-sub">Fully Paid Ins $ ÷ Total Billed $ × 100</p>
-            </div>
-            <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
-        </summary>
-        <div class="tpd-acc-body">
-            @{ ViewData["GraphTitle"] = "3. Collection Rate — Insurance Payment / Total Billed"; }
-            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
-            <div class="tpd-insight tpd-insight-ok">Best headline metric for a monthly lab-owner review — pair with Insurance Balance $ below.</div>
-            <div class="tpd-logic">
-                <strong>Fetch logic</strong>
-                <ul>
-                    <li><strong>Collection Rate</strong> = Fully Paid <code>InsurancePayment</code> ÷ Total Billed $ × 100</li>
-                </ul>
-            </div>
-            <div class="tpd-chart">@Html.Raw(SvgPctLine(labels, collRate, "#15803D", "Collection Rate %"))</div>
-        </div>
-    </details>
-
     <div class="tpd-grid2 tpd-cash-grid">
         <details class="tpd-card tpd-acc" open>
             <summary class="tpd-acc-head">
                 <div class="tpd-acc-head-text">
-                    <div class="tpd-card-title">4a. % Insurance Balance $ of Total Billed</div>
+                    <div class="tpd-card-title">3. Insurance Balance — % of Total Billed</div>
                     <p class="tpd-card-sub">IB $ ÷ Total Billed $ × 100</p>
                 </div>
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
-                @{ ViewData["GraphTitle"] = "4a. % Insurance Balance $ of Total Billed"; }
+                @{ ViewData["GraphTitle"] = "3. Insurance Balance — % of Total Billed"; }
                 @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 <div class="tpd-logic">
                     <strong>Fetch logic</strong>
@@ -387,13 +365,13 @@ else
         <details class="tpd-card tpd-acc" open>
             <summary class="tpd-acc-head">
                 <div class="tpd-acc-head-text">
-                    <div class="tpd-card-title">4b. Insurance Balance $ Composition</div>
+                    <div class="tpd-card-title">3b. Insurance Balance $ Composition</div>
                     <p class="tpd-card-sub">Fully Denied / No Response / Partially Denied share of open IB $</p>
                 </div>
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
-                @{ ViewData["GraphTitle"] = "4b. Insurance Balance $ Composition"; }
+                @{ ViewData["GraphTitle"] = "3b. Insurance Balance $ Composition"; }
                 @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
                 <div class="tpd-logic">
                     <strong>Fetch logic</strong>
@@ -410,8 +388,31 @@ else
     <details class="tpd-card tpd-acc" open>
         <summary class="tpd-acc-head">
             <div class="tpd-acc-head-text">
+                <div class="tpd-card-title">4. Fully Adjusted $</div>
+                <p class="tpd-card-sub">Insurance + Patient adjustments on Complete W/O / Fully Adjusted claims</p>
+            </div>
+            <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "4. Fully Adjusted $"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
+            <div class="tpd-logic">
+                <strong>Fetch logic</strong>
+                <ul>
+                    <li><strong>Fully Adjusted $</strong> = SUM(InsuranceAdjustments + PatientAdjustments) where Billed + ClaimStatus IN (<code>Complete W/O</code>, <code>Fully Adjusted</code>)</li>
+                </ul>
+            </div>
+            <div class="tpd-chart">@Html.Raw(SvgMoneyLine(labels, faAmt, "#9F1239", "Fully Adjusted $"))</div>
+            <div class="tpd-insight tpd-insight-ok">WOINS + WOOON typically dominate. Prefer $ by reason from PMS when available — more decision-useful than count alone.</div>
+            <div class="tpd-chart">@Html.Raw(SvgHBars(reasons))</div>
+        </div>
+    </details>
+
+    <details class="tpd-card tpd-acc" open>
+        <summary class="tpd-acc-head">
+            <div class="tpd-acc-head-text">
                 <div class="tpd-card-title">5. Patient Write-Off vs Patient Balance</div>
-                <p class="tpd-card-sub">Write-off ratio and Patient Collection Rate</p>
+                <p class="tpd-card-sub">Chart Patient Balance = Patient WO + Patient Balance + Patient Paid</p>
             </div>
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
@@ -421,18 +422,22 @@ else
             <div class="tpd-logic">
                 <strong>Fetch logic</strong>
                 <ul>
+                    <li><strong>Patient Write-Off</strong> = SUM(PatientAdjustments &gt; 0)</li>
+                    <li><strong>Chart Patient Balance</strong> = Patient WO + Patient Balance + Patient Paid</li>
                     <li><strong>Write-off ratio</strong> = Patient WO $ ÷ (Patient WO $ + Patient Balance $) × 100</li>
                     <li><strong>Patient Collection Rate</strong> = Patient Payment $ ÷ (Patient Payment $ + Patient Balance $) × 100</li>
                 </ul>
             </div>
-            <div class="tpd-chart">@Html.Raw(SvgDualMoney(labels, wo, pbal, "Patient Write-Off", "Patient Balance", "#2563EB", "#D97706"))</div>
+            <div class="tpd-chart">@Html.Raw(SvgDualMoney(labels, wo, pbal, "Patient Write-Off", "Patient Balance (WO + Bal + Paid)", "#2563EB", "#D97706"))</div>
             <div class="tpd-scroll" style="margin-top:.75rem;max-height:280px">
                 <table class="tpd-tbl">
                     <thead>
                         <tr>
                             <th>Month</th>
                             <th class="num">WO $</th>
+                            <th class="num">Patient Paid $</th>
                             <th class="num">Patient Bal $</th>
+                            <th class="num">Chart Bal $</th>
                             <th class="num">WO Ratio</th>
                             <th class="num">Pat Coll. Rate</th>
                         </tr>
@@ -443,7 +448,9 @@ else
                         <tr>
                             <td>@ShortLbl(r.MonthLabel)</td>
                             <td class="num">@MoneyFull(r.PatientWOAmt)</td>
+                            <td class="num">@MoneyFull(r.PatientPaymentAmt)</td>
                             <td class="num">@MoneyFull(r.PatientBalanceAmt)</td>
+                            <td class="num">@MoneyFull(r.PatientBalanceDisplayAmt)</td>
                             <td class="num">@Pct(r.WriteOffRatioPct)</td>
                             <td class="num">@Pct(r.PatientCollectionRatePct)</td>
                         </tr>
@@ -457,23 +464,23 @@ else
     <details class="tpd-card tpd-acc" open>
         <summary class="tpd-acc-head">
             <div class="tpd-acc-head-text">
-                <div class="tpd-card-title">6. Fully Adjusted $ — Write-Off Reason Pareto</div>
-                <p class="tpd-card-sub">Reason % of Fully Adjusted matching counts · BTWOSummary</p>
+                <div class="tpd-card-title">Total Billed $ — Monthly Trend</div>
+                <p class="tpd-card-sub">Monthly $ Billed = SUM(ChargeAmount) WHERE Billed · GROUP BY DOS month</p>
             </div>
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
-            @{ ViewData["GraphTitle"] = "6. Fully Adjusted $ — Write-Off Reason Pareto"; }
+            @{ ViewData["GraphTitle"] = "Total Billed $ — Monthly Trend"; }
             @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
-            <div class="tpd-insight tpd-insight-ok">WOINS + WOOON typically dominate. Prefer $ by reason from PMS when available — more decision-useful than count alone.</div>
             <div class="tpd-logic">
                 <strong>Fetch logic</strong>
                 <ul>
-                    <li><strong>Reason %</strong> = SUM(count for reason) ÷ SUM(Fully Adjusted matching counts) × 100</li>
-                    <li>Claims: Billed + ClaimStatus IN (<code>Complete W/O</code>, <code>Fully Adjusted</code>)</li>
+                    <li><strong>Total Billed $</strong> = <code>SUM(ChargeAmount)</code> where BillStatus = <code>Billed</code> (ES <code>BilledUnbilled</code>)</li>
+                    <li>Comparable window = DOS day 1–@Model.DayWindow</li>
                 </ul>
             </div>
-            <div class="tpd-chart">@Html.Raw(SvgHBars(reasons))</div>
+            <div class="tpd-chart">@Html.Raw(SvgBars(labels, billed, "#2563EB", "Total Billed $"))</div>
+            <p class="tpd-funnel-note">Shrinking billed base is independent of collections performance — read alongside LIS % Billed to Insurance.</p>
         </div>
     </details>
 

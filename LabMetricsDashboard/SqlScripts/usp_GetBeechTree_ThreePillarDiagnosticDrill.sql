@@ -259,8 +259,9 @@ BEGIN
     SELECT Accession, CollectDate, DATEDIFF(DAY, CollectDate, @AsOfDate) AS AgeDays
     INTO #Backlog
     FROM #Lis
-    WHERE Resulted = N'Resulted' AND ClaimStatus = N'Not Entered in AMD'
-      AND BilledorNot = N'UnBilled' AND ClientStatus IN (N'', N'Billing Review Required');
+    WHERE Resulted = N'Resulted'
+      AND NOT (ClaimStatus = N'Billed' AND BilledorNot = N'Billed' AND ClientStatus = N'')
+      AND ClientStatus NOT IN (N'Self Pay', N'Client Bill');
 
     ;WITH Ordered AS (
         SELECT AgeDays,
@@ -314,10 +315,14 @@ BEGIN
         Resulted   = COUNT(DISTINCT CASE WHEN l.Resulted = N'Resulted' THEN l.Accession END),
         BilledToInsurance = COUNT(DISTINCT CASE WHEN l.Resulted = N'Resulted' AND l.ClaimStatus = N'Billed'
                                                   AND l.BilledorNot = N'Billed' AND l.ClientStatus = N'' THEN l.Accession END),
-        PctBilledOfResulted = CASE WHEN COUNT(DISTINCT CASE WHEN l.Resulted = N'Resulted' THEN l.Accession END) = 0 THEN NULL
+        PctBilledOfResulted = CASE WHEN COUNT(DISTINCT CASE
+                    WHEN l.Resulted = N'Resulted'
+                     AND l.ClientStatus NOT IN (N'Self Pay', N'Client Bill') THEN l.Accession END) = 0 THEN NULL
             ELSE CAST(COUNT(DISTINCT CASE WHEN l.Resulted = N'Resulted' AND l.ClaimStatus = N'Billed'
                                             AND l.BilledorNot = N'Billed' AND l.ClientStatus = N'' THEN l.Accession END) * 100.0
-                     / COUNT(DISTINCT CASE WHEN l.Resulted = N'Resulted' THEN l.Accession END) AS decimal(18,2)) END
+                     / COUNT(DISTINCT CASE
+                    WHEN l.Resulted = N'Resulted'
+                     AND l.ClientStatus NOT IN (N'Self Pay', N'Client Bill') THEN l.Accession END) AS decimal(18,2)) END
     FROM #Months m
     LEFT JOIN #Lis l ON l.ESYear = m.CollYear AND l.ESMonth = m.CollMonth
     GROUP BY m.MY
@@ -578,7 +583,7 @@ BEGIN
        13) Panel-level Avg Allowed/Paid (top 5 panels)
        =================================================================== */
     ;WITH Eligible AS (
-        SELECT Panelname, DOS, PaidDate, AllowedAmount, InsurancePayment
+        SELECT Panelname, DOS, AllowedAmount, InsurancePayment
         FROM #Base WHERE BillStatus = N'Billed' AND ClaimStatus <> N'No Response'
     ),
     TopPanels AS (
@@ -587,26 +592,23 @@ BEGIN
     ),
     ByDosMonth AS (
         SELECT Panelname, DOSYear = YEAR(DOS), DOSMonth = MONTH(DOS),
-               AvgAllowed = AVG(AllowedAmount), AllowedClaimCount = COUNT(*)
+               AvgAllowed = AVG(AllowedAmount),
+               AllowedClaimCount = COUNT(*),
+               AvgPaid = AVG(InsurancePayment),
+               PaidClaimCount = SUM(CASE WHEN InsurancePayment > 0 THEN 1 ELSE 0 END)
         FROM Eligible
         GROUP BY Panelname, YEAR(DOS), MONTH(DOS)
-    ),
-    ByPaidMonth AS (
-        SELECT Panelname, PaidYear = YEAR(PaidDate), PaidMonth = MONTH(PaidDate),
-               AvgPaid = AVG(InsurancePayment), PaidClaimCount = COUNT(*)
-        FROM Eligible WHERE PaidDate IS NOT NULL
-        GROUP BY Panelname, YEAR(PaidDate), MONTH(PaidDate)
     )
     SELECT
         dm.Panelname,
         MonthLabel_DOS = LEFT(DATENAME(MONTH, DATEFROMPARTS(dm.DOSYear, dm.DOSMonth, 1)), 3) + ' ' + CONVERT(varchar(4), dm.DOSYear),
         AvgAllowed = CAST(dm.AvgAllowed AS decimal(18,2)),
         dm.AllowedClaimCount,
-        AvgPaidByPaymentDate = CAST(pm.AvgPaid AS decimal(18,2)),
-        PaidClaimCount = ISNULL(pm.PaidClaimCount, 0)
+        AvgPaid = CAST(dm.AvgPaid AS decimal(18,2)),
+        AvgPaidByPaymentDate = CAST(dm.AvgPaid AS decimal(18,2)),
+        PaidClaimCount = ISNULL(dm.PaidClaimCount, 0)
     FROM ByDosMonth dm
     INNER JOIN TopPanels tp ON tp.Panelname = dm.Panelname
-    LEFT JOIN ByPaidMonth pm ON pm.Panelname = dm.Panelname AND pm.PaidYear = dm.DOSYear AND pm.PaidMonth = dm.DOSMonth
     ORDER BY dm.Panelname, dm.DOSYear, dm.DOSMonth;
 
     SET @msg = CONCAT(N'[RS13] ms=', DATEDIFF(MILLISECOND, @t0, SYSDATETIME()));

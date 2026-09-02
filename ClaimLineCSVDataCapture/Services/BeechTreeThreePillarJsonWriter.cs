@@ -229,6 +229,8 @@ public static class BeechTreeThreePillarJsonWriter
         var backlogSummary = SetOrEmpty(sets, 1);
         var backlogBuckets = SetOrEmpty(sets, 2);
         var funnel = SetOrEmpty(sets, 3);
+        var payerByMonth = SetOrEmpty(sets, 4);
+        var panelByMonth = SetOrEmpty(sets, 5);
 
         return
         [
@@ -238,20 +240,31 @@ public static class BeechTreeThreePillarJsonWriter
                 scope,
                 Project(monthly, "MonthLabel", "TotalSamples", "SortYear", "SortMonth")),
             Chart(
+                "Payer-wise collected",
+                "Top 5 PrimaryInsurance + Other · all volume months",
+                scope,
+                Project(payerByMonth, "MonthLabel", "SortYear", "SortMonth", "Name", "SampleCount", "SortOrder")),
+            Chart(
+                "Panel-wise collected",
+                "Top 5 PanelCategory + Other · all volume months",
+                scope,
+                Project(panelByMonth, "MonthLabel", "SortYear", "SortMonth", "Name", "SampleCount", "SortOrder")),
+            Chart(
                 $"Total Samples & % Resulted — Last {trailingMonths} Months",
                 "Bars = volume · % Resulted (right axis)",
                 scope,
                 Project(monthly, "MonthLabel", "TotalSamples", "Resulted", "PctResulted")),
             Chart(
                 "Sample-to-Claim Funnel (Full Period)",
-                "Collected → Resulted → Billed over the selected comparable window",
+                "Collected → Resulted – Insurance → Self Pay / Client Bill / Billed to Insurance",
                 scope,
                 Project(funnel,
-                    "Collected", "Resulted", "BilledToInsurance",
-                    "PctResulted", "PctBilledOfCollected", "PctBilledOfResulted")),
+                    "Collected", "Resulted", "ResultedSelfPay", "ResultedClientBill", "BilledToInsurance",
+                    "PctResulted", "PctSelfPayOfCollected", "PctClientBillOfCollected",
+                    "PctBilledOfCollected", "PctBilledOfResulted")),
             Chart(
-                "Backlog Age — Resulted Samples Never Entered in PMS",
-                "Check #2 · open Resulted / Not-in-AMD backlog as of WeekRange end",
+                "Backlog – Resulted Insurance not billed",
+                "Resulted Insurance − Billed to Insurance · aging as of WeekRange end",
                 scope,
                 backlogSummary),
             Chart(
@@ -261,9 +274,9 @@ public static class BeechTreeThreePillarJsonWriter
                 Project(backlogBuckets, "AgeBucket", "SortOrder", "SampleCount")),
             Chart(
                 "% of Resulted Samples Billed to Insurance",
-                "Resulted → billed pipeline rate by month",
+                "Resulted (Bill Type = Insurance) → billed pipeline rate by month",
                 scope,
-                Project(monthly, "MonthLabel", "Resulted", "BilledToInsurance", "PctBilledOfResulted")),
+                Project(monthly, "MonthLabel", "Resulted", "ResultedInsurance", "BilledToInsurance", "PctBilledOfResulted")),
             Chart(
                 "Not Resulted Samples — Monthly Trend",
                 "Latest month often Check #1 partial-period spike",
@@ -293,7 +306,7 @@ public static class BeechTreeThreePillarJsonWriter
         var fullyPaid = SetOrEmpty(sets, 3);
         var insuranceBalance = SetOrEmpty(sets, 4);
         var panelAvg = SetOrEmpty(sets, 5);
-        var panelPayerMom = SetOrEmpty(sets, 6);
+        _ = SetOrEmpty(sets, 6); // Panel × payer MOM — hidden in UI for now
         var maturity = SetOrEmpty(sets, 7);
         var denialByCarrier = SetOrEmpty(sets, 8);
         var topDenialReasons = SetOrEmpty(sets, 9);
@@ -301,51 +314,46 @@ public static class BeechTreeThreePillarJsonWriter
         return
         [
             Chart(
-                "1. Billed Claims Reconciliation — LIS vs PMS",
-                "Reconciliation Gap = PMS Billed Claims − LIS Billed to Insurance",
+                "1. Fully Paid % of Billed Claims (PMS)",
+                "% Fully Paid = Fully Paid ÷ Billed Claims × 100",
                 scope,
-                Project(reconciliation, "MonthLabel", "PmsBilled", "LisBilledToInsurance", "Gap")),
+                Project(fullyPaid, "MonthLabel", "BilledClaims", "FullyPaid", "PctFullyPaid")),
             Chart(
-                "2. Fully Adjusted % of Billed Claims (PMS)",
-                "% Fully Adjusted = Fully Adjusted ÷ Billed Claims × 100",
-                scope,
-                Project(fullyAdjusted, "MonthLabel", "BilledClaims", "FullyAdjusted", "PctFullyAdjusted")),
-            Chart(
-                "3. Top Write-Off Reason Codes",
-                "Reason-code counts from BTWOSummary",
-                scope,
-                Project(writeOffReasons, "TransactionCodeCombined", "MatchingCount")),
-            Chart(
-                "4. Insurance Balance % of Billed Claims — Headline PMS Finding",
+                "2. Insurance Balance % of Billed Claims",
                 "% IB = IB claims ÷ Billed × 100 · composition Fully Denied / No Response / Partially Denied",
                 scope,
                 Project(insuranceBalance,
                     "MonthLabel", "BilledClaims", "InsuranceBalanceClaims", "PctInsuranceBalance",
                     "FullyDeniedClaims", "NoResponseClaims", "PartiallyDeniedClaims", "InsuranceBalanceAmt")),
             Chart(
-                "4b. Insurance Balance Composition (% of open claims)",
+                "2b. Insurance Balance Composition (% of open claims)",
                 "Fully Denied / No Response / Partially Denied share of open",
                 scope,
                 Project(insuranceBalance,
                     "MonthLabel", "FullyDeniedClaims", "NoResponseClaims", "PartiallyDeniedClaims",
                     "InsuranceBalanceClaims")),
             Chart(
-                "5. Fully Paid % of Billed Claims (PMS)",
-                "% Fully Paid = Fully Paid ÷ Billed Claims × 100",
+                "3. Fully Adjusted % of Billed Claims (PMS)",
+                "% Fully Adjusted = Fully Adjusted ÷ Billed Claims × 100",
                 scope,
-                Project(fullyPaid, "MonthLabel", "BilledClaims", "FullyPaid", "PctFullyPaid")),
+                Project(fullyAdjusted, "MonthLabel", "BilledClaims", "FullyAdjusted", "PctFullyAdjusted")),
             Chart(
-                "6. Panel — Avg Allowed vs Avg Paid",
-                "Claim-level supplement by panel / DOS month",
+                "4. Top Write Off Reason Codes",
+                "Reason-code counts from BTWOSummary",
+                scope,
+                Project(writeOffReasons, "TransactionCodeCombined", "MatchingCount")),
+            Chart(
+                "5. Panel-wise Average Allowed vs Average Paid",
+                "Avg Allowed and Avg Paid both by DOS month · top 5 panels",
                 scope,
                 Project(panelAvg,
                     "Panelname", "MonthLabel_DOS", "AvgAllowed", "AllowedClaimCount",
-                    "AvgPaidByPaymentDate", "PaidClaimCount")),
+                    "AvgPaid", "AvgPaidByPaymentDate", "PaidClaimCount")),
             Chart(
-                "Avg $ Paid per Claim — Panel (MOM by DOS)",
-                "Panel × payer month-over-month",
+                "Billed Claims Reconciliation — LIS vs PMS",
+                "Reconciliation Gap = PMS Billed Claims − LIS Billed to Insurance",
                 scope,
-                panelPayerMom),
+                Project(reconciliation, "MonthLabel", "PmsBilled", "LisBilledToInsurance", "Gap")),
             Chart(
                 "DOS-Cohort Maturity Curve",
                 "Pct allowed paid by days since DOS",
@@ -369,15 +377,16 @@ public static class BeechTreeThreePillarJsonWriter
         List<List<Dictionary<string, object?>>> sets, string scope)
     {
         var headline = SetOrEmpty(sets, 0);
-        var writeOffReasons = SetOrEmpty(sets, 1);
+        _ = SetOrEmpty(sets, 1);
 
         return
         [
             Chart(
-                "1. Total Billed $ — Monthly Trend",
-                "Monthly $ Billed = SUM(ChargeAmount) WHERE Billed · GROUP BY DOS month",
+                "1. Collection Rate — Insurance Payment / Total Billed",
+                "Fully Paid Ins $ ÷ Total Billed $ × 100",
                 scope,
-                Project(headline, "MonthLabel", "TotalBilledAmt")),
+                Project(headline,
+                    "MonthLabel", "InsurancePaymentFullyPaid", "TotalBilledAmt", "CollectionRatePct")),
             Chart(
                 "2. Partially Paid $ — Monthly Trend",
                 "Partially Paid $ ÷ Total Billed $ × 100",
@@ -385,36 +394,35 @@ public static class BeechTreeThreePillarJsonWriter
                 Project(headline,
                     "MonthLabel", "PartiallyPaidAmt", "PctPartiallyPaidOfBilled", "TotalBilledAmt")),
             Chart(
-                "3. Collection Rate — Insurance Payment / Total Billed",
-                "Fully Paid Ins $ ÷ Total Billed $ × 100",
-                scope,
-                Project(headline,
-                    "MonthLabel", "InsurancePaymentFullyPaid", "TotalBilledAmt", "CollectionRatePct")),
-            Chart(
-                "4a. % Insurance Balance $ of Total Billed",
+                "3. Insurance Balance — % of Total Billed",
                 "IB $ ÷ Total Billed $ × 100",
                 scope,
                 Project(headline,
                     "MonthLabel", "InsuranceBalanceAmt", "PctInsuranceBalanceOfBilled", "TotalBilledAmt")),
             Chart(
-                "4b. Insurance Balance $ Composition",
+                "3b. Insurance Balance $ Composition",
                 "Fully Denied / No Response / Partially Denied share of open IB $",
                 scope,
                 Project(headline,
                     "MonthLabel", "FullyDeniedIBAmt", "NoResponseIBAmt", "PartiallyDeniedIBAmt",
                     "InsuranceBalanceAmt", "NoResponseSharePct")),
             Chart(
+                "4. Fully Adjusted $",
+                "Insurance + Patient adjustments on Complete W/O / Fully Adjusted",
+                scope,
+                Project(headline, "MonthLabel", "FullyAdjustedAmt", "PctFullyAdjustedOfBilled", "TotalBilledAmt")),
+            Chart(
                 "5. Patient Write-Off vs Patient Balance",
-                "Patient WO $ / Patient Balance $ / Patient Payment $",
+                "Chart Patient Balance = Patient WO + Patient Balance + Patient Paid",
                 scope,
                 Project(headline,
                     "MonthLabel", "PatientWOAmt", "PatientBalanceAmt", "PatientPaymentAmt",
                     "WriteOffRatioPct", "PatientCollectionRatePct")),
             Chart(
-                "6. Fully Adjusted $ — Write-Off Reason Pareto",
-                "Write-off reason codes from BTWOSummary",
+                "Total Billed $ — Monthly Trend",
+                "Monthly $ Billed = SUM(ChargeAmount) WHERE Billed · GROUP BY DOS month",
                 scope,
-                Project(writeOffReasons, "TransactionCodeCombined", "MatchingCount")),
+                Project(headline, "MonthLabel", "TotalBilledAmt")),
             Chart(
                 "Cash monthly detail",
                 "Full monthly cash headline metrics for the selected comparable window",

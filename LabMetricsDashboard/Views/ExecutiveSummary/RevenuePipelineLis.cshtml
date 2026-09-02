@@ -1,0 +1,1008 @@
+@model LabMetricsDashboard.Models.RevenuePipelineLisViewModel
+@using System.Collections.Generic
+@using System.Globalization
+@using System.Linq
+@using System.Text.Encodings.Web
+@using System.Text.Json
+@{
+    ViewData["Title"] = "Three-Pillar LIS — " + Model.LabName;
+    Layout = "~/Views/Shared/_Layout.cshtml";
+    var ci = CultureInfo.InvariantCulture;
+    string Num(int v) => v.ToString("N0", ci);
+    string Pct(decimal? v, string suffix = "%") => v is { } d ? (d * 100m).ToString("0.0", ci) + suffix : "—";
+    string SignedPct(decimal? v)
+    {
+        if (v is not { } d) return "—";
+        var n = d * 100m;
+        return (n >= 0 ? "+" : "") + n.ToString("0.0", ci) + "%";
+    }
+    string SignedInt(int v) => (v >= 0 ? "+" : "") + v.ToString("N0", ci);
+    string FmtDate(string? iso)
+    {
+        if (string.IsNullOrWhiteSpace(iso) || !DateTime.TryParse(iso, out var d)) return iso ?? "—";
+        return d.ToString("MMM d, yyyy", ci);
+    }
+    var jsonOpts = new JsonSerializerOptions
+    {
+        PropertyNamingPolicy = null,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+    string Json(object? o) => JsonSerializer.Serialize(o, jsonOpts).Replace("<", "\\u003c");
+    var vol01 = Model.Vol01;
+    var vol02 = Model.Vol02;
+    var vol02b = Model.Vol02b;
+    var res = Model.Res01;
+    var cutoff = vol02?.MatchedCutoffDay ?? Model.AsOfDate.Day;
+}
+<style>
+    :root {
+        --rpl-ink: #172033; --rpl-muted: #667085; --rpl-line: #d9dee7; --rpl-panel: #fff;
+        --rpl-current: #246bfd; --rpl-previous: #8aa7df; --rpl-history: #a7b9da;
+        --rpl-prior: #6f8fc8; --rpl-avg: #e47a20; --rpl-median: #138a72;
+        --rpl-p75: #7f56d9; --rpl-p90: #e47a20; --rpl-p95: #b54708; --rpl-risk: #c4320a;
+        --rpl-shade: #edf4ff;
+    }
+    .rpl-wrap { max-width: 1180px; margin: 0 auto; padding-bottom: 3rem; color: var(--rpl-ink); }
+    .rpl-back { display: inline-block; margin: 1.1rem 0 .6rem; color: #1f7a46; font-weight: 600; text-decoration: none; font-size: .85rem; }
+    .rpl-head h1 { font-size: 1.55rem; font-weight: 800; margin: 0 0 .3rem; }
+    .rpl-sub { color: var(--rpl-muted); font-size: .9rem; }
+    .rpl-meta { display: flex; gap: 1rem; flex-wrap: wrap; color: var(--rpl-muted); font-size: .8rem; margin: .35rem 0 1rem; }
+    .rpl-error { background: #fdecea; border: 1px solid #f3b7b0; color: #922; border-radius: 12px; padding: 1rem 1.2rem; }
+    .rpl-note { background: #fff7df; border: 1px solid #ead59a; border-radius: 8px; padding: .7rem .9rem; font-size: .82rem; color: #854a0e; margin-top: .7rem; }
+    .rpl-kpis { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: .75rem; margin: .9rem 0 1rem; }
+    .rpl-kpi { background: #fff; border: 1px solid var(--rpl-line); border-radius: 10px; padding: .85rem 1rem; }
+    .rpl-kpi span { display: block; font-size: .72rem; color: var(--rpl-muted); }
+    .rpl-kpi b { display: block; font-size: 1.45rem; font-variant-numeric: tabular-nums; margin: .15rem 0; }
+    .rpl-kpi .up { color: #067647; }
+    .rpl-kpi .down { color: var(--rpl-risk); }
+    .rpl-card { background: #fff; border: 1px solid var(--rpl-line); border-radius: 12px; padding: 1rem 1.1rem 1.15rem; margin: 1.1rem 0; }
+    .rpl-card h2 { font-size: 1.05rem; font-weight: 800; margin: 0 0 .25rem; }
+    .rpl-hint { font-size: .8rem; color: var(--rpl-muted); margin: 0 0 .6rem; }
+    .rpl-chart { min-height: 360px; position: relative; overflow: visible; }
+    .rpl-chart.svg-host { cursor: pointer; }
+    .rpl-chart svg { width: 100%; display: block; }
+    .rpl-chart svg text { font: 12px Segoe UI, Arial, sans-serif; fill: var(--rpl-ink); }
+    .rpl-chart svg text.up { fill: #067647; }
+    .rpl-chart svg text.down { fill: #c4320a; }
+    .rpl-tip { position: absolute; pointer-events: none; background: #101828; color: #fff; border-radius: 6px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px #0003; z-index: 5; display: none; }
+    .rpl-drill {
+        display: none;
+        margin-top: .85rem;
+        padding: .9rem 1rem 1rem;
+        border: 1px solid #c5d4ea;
+        border-radius: 10px;
+        background: #f6f9fd;
+    }
+    .rpl-drill.is-open { display: block; }
+    .rpl-drill-head { display: flex; justify-content: space-between; align-items: flex-start; gap: .8rem; margin-bottom: .65rem; }
+    .rpl-drill-kicker { font-size: .68rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #1849a9; margin-bottom: .15rem; }
+    .rpl-drill-close {
+        flex: 0 0 auto; font: inherit; font-size: .8rem; font-weight: 600;
+        border: 1px solid var(--rpl-line); background: #fff; border-radius: 7px; padding: 5px 10px; color: var(--rpl-ink);
+    }
+    .rpl-tabs { display: flex; gap: .15rem; margin: .75rem 0 0; border-bottom: 1px solid var(--rpl-line); }
+    .rpl-tab {
+        border: 0; background: transparent; font: inherit; font-size: .85rem; font-weight: 700;
+        color: var(--rpl-muted); padding: .45rem .85rem .55rem; border-bottom: 2px solid transparent; margin-bottom: -1px;
+    }
+    .rpl-tab:hover { color: var(--rpl-ink); }
+    .rpl-tab[aria-selected="true"] { color: #1849a9; border-bottom-color: #246bfd; }
+    .rpl-tab-panel { display: none; }
+    .rpl-tab-panel.is-active { display: block; }
+    .rpl-explain { font-size: .82rem; margin: .35rem 0 0; }
+    .rpl-explain button { border: 0; background: none; color: #175cd3; font: inherit; font-weight: 600; padding: 0; }
+    .rpl-badges { display: flex; gap: .45rem; flex-wrap: wrap; margin: .4rem 0 .7rem; }
+    .rpl-badge { border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600; background: #eef4ff; color: #1849a9; }
+    .rpl-badge.warn { background: #fff7df; color: #854a0e; }
+    .rpl-controls { display: flex; gap: .7rem; flex-wrap: wrap; align-items: center; margin: .4rem 0 .7rem; }
+    .rpl-seg button { font: inherit; padding: 6px 12px; border: 1px solid var(--rpl-line); background: #fff; color: var(--rpl-ink); }
+    .rpl-seg button:first-child { border-radius: 7px 0 0 7px; }
+    .rpl-seg button:last-child { border-radius: 0 7px 7px 0; }
+    .rpl-seg button[aria-pressed="true"] { background: var(--rpl-ink); color: #fff; }
+    .rpl-controls select, .rpl-controls input { font: inherit; padding: 6px 10px; border: 1px solid var(--rpl-line); border-radius: 7px; }
+    .rpl-legend { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 12px; color: var(--rpl-muted); margin: .35rem 0; }
+    .rpl-legend i { display: inline-block; width: 16px; height: 3px; margin-right: 5px; vertical-align: middle; }
+    .rpl-hidden { display: none; }
+    .rpl-tbl { width: 100%; border-collapse: collapse; font-size: .82rem; background: #fff; }
+    .rpl-tbl th, .rpl-tbl td { padding: 7px 8px; border-bottom: 1px solid var(--rpl-line); text-align: left; }
+    .rpl-tbl th { background: #f0f3f7; font-weight: 700; }
+    .rpl-tbl .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .rpl-tbl .up { color: #067647; }
+    .rpl-tbl .down { color: var(--rpl-risk); }
+    .rpl-table-wrap { overflow: auto; border: 1px solid var(--rpl-line); border-radius: 10px; background: #fff; margin-top: .55rem; }
+    .rpl-detail-title { font-size: .95rem; font-weight: 800; margin: 1rem 0 .35rem; }
+    .rpl-spark { width: 130px; height: 28px; display: block; }
+    .rpl-link { color: #175cd3; font-size: .85rem; }
+    .rpl-calc-title { font-size: 1.25rem; font-weight: 800; margin: 1.35rem 0 .55rem; }
+    .rpl-formula {
+        background: #eef4ff;
+        border-left: 4px solid var(--rpl-current);
+        padding: 14px 16px;
+        font-family: Consolas, "Courier New", monospace;
+        white-space: pre-wrap;
+        font-size: .82rem;
+        line-height: 1.5;
+        color: var(--rpl-ink);
+        border-radius: 0 8px 8px 0;
+        margin: 0 0 .7rem;
+    }
+    .rpl-calc-copy { font-size: .88rem; margin: 0 0 .7rem; }
+    @@media (max-width: 720px) { .rpl-kpis { grid-template-columns: repeat(2, 1fr); } }
+</style>
+
+<div class="rpl-wrap">
+    <a class="rpl-back" href="@Model.BackUrl">&larr; Back to Executive Summary</a>
+    <div class="rpl-head">
+        <h1>Three-Pillar LIS — @Model.LabName</h1>
+        <div class="rpl-sub">Revenue Pipeline · Operational / cohort LIS (v1.6 VOL-01, VOL-02, RES-01)</div>
+        <div class="rpl-meta">
+            <span>As of @Model.AsOfDate.ToString("MMMM d, yyyy", ci)</span>
+            @if (!string.IsNullOrWhiteSpace(Model.WeekFolder))
+            {
+                <span>WeekRange: @Model.WeekFolder</span>
+            }
+            <span>Grain: valid LIS sample · Collected date</span>
+            <a class="rpl-link" asp-action="ThreePillarDiagnostic" asp-route-lab="@Model.LabName" asp-route-months="12">Open funnel diagnostic</a>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="rpl-error">@Model.ErrorMessage</div>
+    }
+    else
+    {
+        if (!string.IsNullOrWhiteSpace(Model.WarningMessage))
+        {
+            <div class="rpl-note">@Model.WarningMessage</div>
+        }
+
+        if (vol01 is not null)
+        {
+            var ch = vol01.Calculation;
+            <section class="rpl-card" id="vol01">
+                <h2>VOL-01 — Latest 28 Days</h2>
+                <p class="rpl-hint">Rolling 28-day sample volume. Current window is inclusive of as-of; previous is the non-overlapping prior 28 days. Not labeled as a calendar month.</p>
+                <div class="rpl-kpis">
+                    <div class="rpl-kpi"><span>Current 28 days</span><b>@Num(ch.CurrentTotalSamples)</b><span>@FmtDate(vol01.CurrentWindow.Start)–@FmtDate(vol01.CurrentWindow.End)</span></div>
+                    <div class="rpl-kpi"><span>Previous 28 days</span><b>@Num(ch.PreviousTotalSamples)</b><span>@FmtDate(vol01.PreviousWindow.Start)–@FmtDate(vol01.PreviousWindow.End)</span></div>
+                    <div class="rpl-kpi"><span>Absolute change</span><b>@SignedInt(ch.AbsoluteChangeSamples)</b><span>samples</span></div>
+                    <div class="rpl-kpi"><span>Percent change</span><b class="@(ch.PercentChange < 0 ? "down" : "up")">@SignedPct(ch.PercentChange)</b><span>@ch.SampleCalculation</span></div>
+                </div>
+                <div class="rpl-chart svg-host" id="vol01-chart" role="button" tabindex="0" aria-label="Daily sample volume. Select to view clinic and panel distribution."></div>
+                    <p class="rpl-hint">Bar = daily samples. Orange line = trailing 7-day average.
+                    <span class="rpl-explain"><button type="button" id="vol01-open">Explain by clinic / panel</button> — same 28-day windows, opened under this chart.</span>
+                </p>
+                <div class="rpl-drill" id="vol01-drill" hidden>
+                    <div class="rpl-drill-head">
+                        <div>
+                            <div class="rpl-drill-kicker">VOL-01A · drill-down</div>
+                            <strong>Who drove the Latest 28 Days change?</strong>
+                        </div>
+                        <button type="button" class="rpl-drill-close" id="vol01-close">Hide</button>
+                    </div>
+                    <div class="rpl-controls">
+                        <div class="rpl-seg" id="vol01a-dim">
+                            <button type="button" data-dim="clinic" aria-pressed="true">Clinic</button>
+                            <button type="button" data-dim="panel" aria-pressed="false">Panel</button>
+                        </div>
+                        <label>Display
+                            <select id="vol01a-top">
+                                <option value="10">Top 10 + other</option>
+                                <option value="20">Top 20 + other</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="rpl-legend"><span><i style="background:var(--rpl-previous);height:8px"></i>Previous 28 days</span><span><i style="background:var(--rpl-current);height:8px"></i>Current 28 days</span></div>
+                    <div class="rpl-chart" id="vol01a-chart"></div>
+                    <p class="rpl-hint" id="vol01a-status"></p>
+                    @{
+                        var exPanel = Model.Vol01Panel?.Rows.FirstOrDefault();
+                        var exClinic = Model.Vol01Clinic?.Rows.FirstOrDefault();
+                        var exLines = new List<string>();
+                        if (exPanel is not null)
+                        {
+                            exLines.Add("Panel: " + exPanel.Name);
+                            exLines.Add("Current " + Num(exPanel.CurrentSamples) + " - Previous " + Num(exPanel.PreviousSamples) + " = " + SignedInt(exPanel.AbsoluteChange) + " samples");
+                            exLines.Add("Percent change = " + Num(exPanel.CurrentSamples) + " / " + Num(exPanel.PreviousSamples) + " - 1 = " + (exPanel.PercentChange is null ? "New" : SignedPct(exPanel.PercentChange)));
+                        }
+                        if (exClinic is not null)
+                        {
+                            if (exLines.Count > 0) exLines.Add("");
+                            exLines.Add("Clinic: " + exClinic.Name);
+                            exLines.Add("Current " + Num(exClinic.CurrentSamples) + " - Previous " + Num(exClinic.PreviousSamples) + " = " + SignedInt(exClinic.AbsoluteChange) + " samples");
+                            exLines.Add("Percent change = " + Num(exClinic.CurrentSamples) + " / " + Num(exClinic.PreviousSamples) + " - 1 = " + (exClinic.PercentChange is null ? "New" : SignedPct(exClinic.PercentChange)));
+                        }
+                    }
+                    @if (exLines.Count > 0)
+                    {
+                        <h3 class="rpl-calc-title">Calculation and sample values</h3>
+                        <div class="rpl-formula">@string.Join("\n", exLines)</div>
+                    }
+                    <h3 class="rpl-detail-title">Ranked details</h3>
+                    <div class="rpl-table-wrap">
+                        <table class="rpl-tbl" id="vol01a-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th class="num">Previous</th>
+                                    <th class="num">Current</th>
+                                    <th class="num">Change</th>
+                                    <th class="num">Change %</th>
+                                    <th class="num">Current share</th>
+                                    <th class="num">Previous share</th>
+                                    <th class="num">Share change (pp)</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+                <h3 class="rpl-calc-title">Calculation and sample values</h3>
+                <div class="rpl-formula">Current window = @vol01.CurrentWindow.Start through @vol01.CurrentWindow.End (28 calendar days)
+Previous window = @vol01.PreviousWindow.Start through @vol01.PreviousWindow.End (28 calendar days)
+
+Rolling change = Current total / Previous total - 1
+               = @Num(ch.CurrentTotalSamples) / @Num(ch.PreviousTotalSamples) - 1
+               = @SignedPct(ch.PercentChange)
+
+Current average per calendar day = @Num(ch.CurrentTotalSamples) / 28 = @ch.CurrentAveragePerCalendarDay.ToString("0.0", ci)
+Previous average per calendar day = @Num(ch.PreviousTotalSamples) / 28 = @ch.PreviousAveragePerCalendarDay.ToString("0.0", ci)</div>
+                <p class="rpl-calc-copy">The bar height is the count of Sample ID records grouped by Collected date. The line is a trailing seven-calendar-day average and is included to reduce weekday/weekend volatility.</p>
+                <div class="rpl-note"><strong>Important limitation:</strong> this calculation uses complete calendar-day windows. A business calendar identifying validated completed collection days was not supplied, so this view does not infer day completion from the existence of rows. VOL-02B provides only a disclosed LIS-observed-date normalization proxy.</div>
+            </section>
+        }
+
+        if (vol02 is not null)
+        {
+            var c = vol02.Calculation;
+            <section class="rpl-card" id="vol02">
+                <h2>VOL-02 — Matched month-to-date sample volume</h2>
+                <p class="rpl-hint">13 comparable windows: calendar day 1 through day @cutoff every month. Click a month for clinic / panel mix.</p>
+                <div class="rpl-kpis">
+                    <div class="rpl-kpi"><span>Current matched MTD</span><b>@Num(c.CurrentMatchedMtdSamples)</b><span>days 1–@cutoff</span></div>
+                    <div class="rpl-kpi"><span>Versus prior month</span><b class="@(c.PreviousMonthPercentVariance < 0 ? "down" : "up")">@SignedPct(c.PreviousMonthPercentVariance)</b><span>@SignedInt(c.PreviousMonthAbsoluteChange) samples</span></div>
+                    <div class="rpl-kpi"><span>Versus same month LY</span><b class="@(c.SameMonthPriorYearPercentVariance < 0 ? "down" : "up")">@SignedPct(c.SameMonthPriorYearPercentVariance)</b><span>@SignedInt(c.SameMonthPriorYearAbsoluteChange) samples</span></div>
+                    <div class="rpl-kpi"><span>Versus prior-12 average</span><b class="@(c.PercentVarianceToPrior12Average < 0 ? "down" : "up")">@SignedPct(c.PercentVarianceToPrior12Average)</b><span>average @c.Prior12MonthAverage.ToString("N1", ci)</span></div>
+                </div>
+                <div class="rpl-badges">
+                    <span class="rpl-badge">@c.InterpretationLabel</span>
+                    <span class="rpl-badge warn">Projection suppressed</span>
+                </div>
+                <div class="rpl-chart" id="vol02-chart"></div>
+                <p class="rpl-hint">Click a month to open clinic / panel mix under this chart. Observed-date rates stay a supplemental tab — not a third volume chart.</p>
+                <h3 class="rpl-calc-title">Calculation and sample values</h3>
+                <div class="rpl-formula">Matched window for every month = calendar day 1 through calendar day @cutoff
+
+Prior-month variance = @Num(c.CurrentMatchedMtdSamples) / @Num(c.PreviousMonthMatchedMtdSamples) - 1 = @SignedPct(c.PreviousMonthPercentVariance)
+Prior-year variance  = @Num(c.CurrentMatchedMtdSamples) / @Num(c.SameMonthPriorYearSamples) - 1  = @SignedPct(c.SameMonthPriorYearPercentVariance)
+Prior-12 average     = @c.Prior12MonthAverage.ToString("N1", ci)
+Variance to average  = @Num(c.CurrentMatchedMtdSamples) / @c.Prior12MonthAverage.ToString("N1", ci) - 1 = @SignedPct(c.PercentVarianceToPrior12Average)</div>
+                <div class="rpl-note"><strong>Important limitation:</strong> an LIS-observed collection date proves sample activity was recorded, not that the lab operating day or source load was complete. Weekday, weekend, holiday, closure, and partial-load mix can differ across monthly windows. No schedule-based projection is published.</div>
+                <div class="rpl-tabs" role="tablist" aria-label="VOL-02 drill-downs">
+                    <button type="button" class="rpl-tab" id="tab-vol02a" role="tab" aria-selected="false" aria-controls="vol02a-panel">Clinic / panel mix</button>
+                    <button type="button" class="rpl-tab" id="tab-vol02b" role="tab" aria-selected="false" aria-controls="vol02b-panel">Per observed date</button>
+                </div>
+                <div class="rpl-drill" id="vol02-drill" hidden>
+                    <div class="rpl-drill-head">
+                        <div>
+                            <div class="rpl-drill-kicker" id="vol02-drill-kicker">VOL-02 drill-down</div>
+                            <strong id="vol02-drill-title">Matched MTD detail</strong>
+                        </div>
+                        <button type="button" class="rpl-drill-close" id="vol02-close">Hide</button>
+                    </div>
+                    <div class="rpl-tab-panel" id="vol02a-panel" role="tabpanel">
+                        <p class="rpl-hint" id="vol02a-sub">Same matched cutoff as VOL-02. One comparison at a time.</p>
+                        <div class="rpl-controls">
+                            <div class="rpl-seg" id="vol02a-dim">
+                                <button type="button" data-dim="clinic" aria-pressed="true">Clinic</button>
+                                <button type="button" data-dim="panel" aria-pressed="false">Panel</button>
+                            </div>
+                            <label>Comparison
+                                <select id="vol02a-comp"></select>
+                            </label>
+                            <label>Categories
+                                <select id="vol02a-top">
+                                    <option value="10">Top 10 + other</option>
+                                    <option value="20">Top 20 + other</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="rpl-kpis" id="vol02a-kpis"></div>
+                        <div class="rpl-legend"><span><i style="background:#9bb3df;height:8px"></i>Comparison</span><span><i style="background:var(--rpl-current);height:8px"></i>Selected month</span></div>
+                        <div class="rpl-chart" id="vol02a-chart"></div>
+                        <h3 class="rpl-detail-title">Ranked details and 13-month context</h3>
+                        <div class="rpl-table-wrap">
+                            <table class="rpl-tbl" id="vol02a-table">
+                                <thead>
+                                    <tr>
+                                        <th>Category</th>
+                                        <th class="num" id="vol02a-cur-head">Selected</th>
+                                        <th class="num" id="vol02a-comp-head">Comparison</th>
+                                        <th class="num">Change</th>
+                                        <th class="num">% change</th>
+                                        <th class="num">Selected share</th>
+                                        <th class="num">Comparison share</th>
+                                        <th class="num">Share change (pp)</th>
+                                        <th>13-month trend</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    @if (vol02b is not null)
+                    {
+                        var curB = vol02b.CurrentRolling28Day;
+                        var prevB = vol02b.PreviousRolling28Day;
+                        var mtdB = vol02b.MonthlyData.Count > 0 ? vol02b.MonthlyData[vol02b.MonthlyData.Count - 1] : null;
+                        <div class="rpl-tab-panel" id="vol02b-panel" role="tabpanel">
+                            <p class="rpl-hint">VOL-02B supplemental normalization. An LIS-observed date is not a completed operating day.</p>
+                            <div class="rpl-kpis">
+                                <div class="rpl-kpi"><span>Latest 28 days</span><b>@(curB.SamplesPerLisObservedDate?.ToString("N1", ci) ?? "—")</b><span>@Num(curB.Samples) / @curB.LisObservedCollectionDates observed dates</span></div>
+                                <div class="rpl-kpi"><span>Previous 28 days</span><b>@(prevB.SamplesPerLisObservedDate?.ToString("N1", ci) ?? "—")</b><span>@Num(prevB.Samples) / @prevB.LisObservedCollectionDates observed dates</span></div>
+                                <div class="rpl-kpi"><span>Rolling change</span><b class="@(vol02b.Rolling28DayPercentChange < 0 ? "down" : "up")">@SignedPct(vol02b.Rolling28DayPercentChange)</b><span>current vs previous 28-day ratio</span></div>
+                                <div class="rpl-kpi"><span>Matched MTD</span><b>@(mtdB?.SamplesPerLisObservedDate?.ToString("N1", ci) ?? "—")</b><span>@(mtdB is null ? "—" : Num(mtdB.MatchedMtdSamples)) / @(mtdB?.LisObservedCollectionDates ?? 0) observed dates</span></div>
+                            </div>
+                            <h3 class="rpl-calc-title">Calculation and sample values</h3>
+                            <div class="rpl-formula">Samples per LIS-observed date = samples / LIS-observed collection dates
+Latest 28 days = @Num(curB.Samples) / @curB.LisObservedCollectionDates = @(curB.SamplesPerLisObservedDate?.ToString("0.00", ci) ?? "n/a")
+Previous 28 days = @Num(prevB.Samples) / @prevB.LisObservedCollectionDates = @(prevB.SamplesPerLisObservedDate?.ToString("0.00", ci) ?? "n/a")
+Rolling change = current ratio / previous ratio - 1 = @SignedPct(vol02b.Rolling28DayPercentChange)
+Matched MTD = @(mtdB is null ? "n/a" : Num(mtdB.MatchedMtdSamples) + " / " + mtdB.LisObservedCollectionDates + " = " + (mtdB.SamplesPerLisObservedDate?.ToString("0.00", ci) ?? "n/a"))</div>
+                            <div class="rpl-note"><strong>Important limitation:</strong> @vol02b.DataNote Missing loads, partial loads, closures, holidays, and true zero-activity dates cannot be distinguished without an authoritative operating calendar.</div>
+                        </div>
+                    }
+                </div>
+            </section>
+        }
+
+        if (res is not null)
+        {
+            var h = res.Headline;
+            <section class="rpl-card" id="res01">
+                <h2>RES-01 + RES-02 — Resulting Timeliness</h2>
+                <p class="rpl-hint">One panel: D10 rate and turnaround percentiles for eight mature Monday–Sunday weeks. Collections after @FmtDate(h.CohortEnd) are too young for D10.</p>
+                <div class="rpl-kpis">
+                    <div class="rpl-kpi"><span>D10 resulted rate</span><b>@((h.D10ResultedRate * 100m).ToString("0.0", ci))%</b><span>@Num(h.ReportedWithin10Days) of @Num(h.EligibleSamples) eligible</span></div>
+                    <div class="rpl-kpi"><span>Versus prior four weeks</span><b class="@(h.ChangePercentagePoints < 0 ? "down" : "up")">@(h.ChangePercentagePoints >= 0 ? "+" : "")@h.ChangePercentagePoints.ToString("0.0", ci) pp</b><span>prior rate @((h.PriorD10ResultedRate * 100m).ToString("0.0", ci))%</span></div>
+                    <div class="rpl-kpi"><span>Turnaround tail</span><b>@(h.P95Days?.ToString("0.#", ci) ?? "—") days</b><span>P95 · median @(h.MedianDays?.ToString("0.#", ci) ?? "—") days</span></div>
+                    <div class="rpl-kpi"><span>Open more than 10 days</span><b class="down">@Num(h.OpenSamplesOlderThan10Days)</b><span>all unresolved inventory</span></div>
+                </div>
+                <div class="rpl-legend">
+                    <span><i style="background:var(--rpl-current)"></i>D10 rate</span>
+                    <span><i style="background:var(--rpl-median)"></i>Median</span>
+                    <span><i style="background:var(--rpl-p75)"></i>P75</span>
+                    <span><i style="background:var(--rpl-p90)"></i>P90</span>
+                    <span><i style="background:var(--rpl-p95)"></i>P95</span>
+                </div>
+                <div class="rpl-chart" id="res01-chart" style="min-height:620px"></div>
+                @{
+                    var resCurWeeks = res.WeeklyCohorts.Where(w => w.ComparisonWindow == "current").ToList();
+                    var resPriorWeeks = res.WeeklyCohorts.Where(w => w.ComparisonWindow == "previous").ToList();
+                    var priorElig = resPriorWeeks.Sum(w => w.Eligible);
+                    var priorIn = resPriorWeeks.Sum(w => w.WithinD10);
+                    var priorStart = resPriorWeeks.FirstOrDefault()?.WeekStart;
+                    var priorEnd = resPriorWeeks.LastOrDefault()?.WeekEnd;
+                    var curStart = resCurWeeks.FirstOrDefault()?.WeekStart ?? h.CohortStart;
+                    var curEnd = resCurWeeks.LastOrDefault()?.WeekEnd ?? h.CohortEnd;
+                }
+                <h3 class="rpl-calc-title">Calculation and sample values</h3>
+                <div class="rpl-formula">D10 Resulted Rate = Samples reported within 10 calendar days of collection / Samples aged at least 10 days
+
+Current four mature weeks (@FmtDate(curStart)–@FmtDate(curEnd)): @Num(h.ReportedWithin10Days) / @Num(h.EligibleSamples) = @((h.D10ResultedRate * 100m).ToString("0.0", ci))%
+Prior four mature weeks (@FmtDate(priorStart)–@FmtDate(priorEnd)): @Num(priorIn) / @Num(priorElig) = @((h.PriorD10ResultedRate * 100m).ToString("0.0", ci))%
+Change: @(h.ChangePercentagePoints >= 0 ? "+" : "")@h.ChangePercentagePoints.ToString("0.0", ci) percentage points</div>
+                <p class="rpl-calc-copy">Turnaround percentiles use nonnegative calendar-day lags from Collected to Reported for resulted samples in the identical cohorts. Unresolved eligible samples remain in the D10 denominator as failures but are excluded from percentiles.</p>
+                <div class="rpl-note"><strong>Important limitation:</strong> collections after @FmtDate(h.CohortEnd) are too young for D10. The visual uses full Monday–Sunday cohorts, so the latest displayed week ends @FmtDate(curEnd). Negative lags are retained as data-quality exceptions and are not treated as successes.</div>
+            </section>
+        }
+    }
+</div>
+
+<script type="application/json" id="rpl-payload">@Html.Raw(Json(new {
+    vol01 = Model.Vol01,
+    vol01Clinic = Model.Vol01Clinic,
+    vol01Panel = Model.Vol01Panel,
+    vol02 = Model.Vol02,
+    vol02a = Model.Vol02a,
+    vol02b = Model.Vol02b,
+    res01 = Model.Res01,
+    res01Aging = Model.Res01Aging
+}))</script>
+<script nonce="@Context.Items["CspNonce"]">
+(function () {
+    const payload = JSON.parse(document.getElementById('rpl-payload').textContent);
+    const tip = document.createElement('div');
+    tip.className = 'rpl-tip';
+    document.body.appendChild(tip);
+    const fmt = n => Number(n).toLocaleString('en-US');
+    const pct = v => v == null ? '—' : ((v * 100).toFixed(1) + '%');
+    const signedPct = v => v == null ? '—' : ((v >= 0 ? '+' : '') + (v * 100).toFixed(1) + '%');
+    const monthLbl = m => {
+        const [y, mo] = m.split('-').map(Number);
+        return new Date(y, mo - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    };
+    const dateLbl = iso => {
+        const d = new Date(iso + 'T00:00:00');
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    };
+    function showTip(html, x, y) {
+        tip.innerHTML = html;
+        tip.style.display = 'block';
+        tip.style.left = Math.min(window.innerWidth - 220, x + 12) + 'px';
+        tip.style.top = (window.scrollY + y - 10) + 'px';
+    }
+    function hideTip() { tip.style.display = 'none'; }
+    function svgEl(tag, attrs) {
+        const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
+        Object.entries(attrs || {}).forEach(([k, v]) => n.setAttribute(k, v));
+        return n;
+    }
+    function text(parent, attrs, value) {
+        const t = svgEl('text', attrs);
+        t.textContent = value;
+        parent.appendChild(t);
+        return t;
+    }
+    function esc(s) {
+        return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+    function clsDelta(v) {
+        if (v == null || Number(v) === 0) return '';
+        return Number(v) > 0 ? 'up' : 'down';
+    }
+    function niceMax(v) {
+        if (!(v > 0)) return 1;
+        const p = Math.pow(10, Math.floor(Math.log10(v)));
+        const n = v / p;
+        const nice = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+        return nice * p;
+    }
+    function compact(n) {
+        const v = Math.abs(n);
+        if (v >= 1000) {
+            const k = n / 1000;
+            return (Number.isInteger(k) ? k.toString() : k.toFixed(k >= 10 ? 0 : 1).replace(/\.0$/, '')) + 'k';
+        }
+        return String(Math.round(n));
+    }
+    function hBarTicks(max) {
+        if (!(max > 0)) return { top: 1, ticks: [0, 1] };
+        let step = max / 7;
+        const mag = Math.pow(10, Math.floor(Math.log10(step)));
+        const err = step / mag;
+        step = (err <= 1.5 ? 1 : err <= 3.5 ? 2 : err <= 7.5 ? 5 : 10) * mag;
+        const top = Math.ceil(max / step) * step;
+        const ticks = [];
+        for (let t = 0; t <= top + step / 2; t += step) ticks.push(t);
+        return { top, ticks };
+    }
+    function drawHAxis(svg, L, T, iw, ih, top, ticks) {
+        ticks.forEach(t => {
+            const x = L + (t / top) * iw;
+            svg.appendChild(svgEl('line', { x1: x, y1: T, x2: x, y2: T + ih, stroke: '#d9dee7' }));
+            text(svg, { x, y: T + ih + 16, 'text-anchor': 'middle', fill: '#667085' }, compact(t));
+        });
+        svg.appendChild(svgEl('rect', { x: L, y: T, width: iw, height: ih, fill: 'none', stroke: '#d9dee7' }));
+    }
+    function nicePctDomain(min, max) {
+        let lo = Math.floor(min * 1000) / 10;
+        let hi = Math.ceil(max * 1000) / 10;
+        if (!(hi > lo)) hi = lo + 1;
+        const span = hi - lo;
+        const step = span <= 4 ? 1 : span <= 10 ? 2 : 5;
+        lo = Math.floor(lo / step) * step;
+        hi = Math.ceil(hi / step) * step;
+        const ticks = [];
+        for (let t = lo; t <= hi + 1e-6; t += step) ticks.push(t / 100);
+        return { min: lo / 100, max: hi / 100, ticks };
+    }
+    function drawVAxis(svg, L, panelY, iw, ih, ticks, yFn, formatFn) {
+        ticks.forEach(t => {
+            const gy = yFn(t);
+            svg.appendChild(svgEl('line', { x1: L, y1: gy, x2: L + iw, y2: gy, stroke: '#d9dee7' }));
+            text(svg, { x: L - 8, y: gy + 4, 'text-anchor': 'end', fill: '#667085' }, formatFn(t));
+        });
+        svg.appendChild(svgEl('rect', { x: L, y: panelY, width: iw, height: ih, fill: 'none', stroke: '#d9dee7' }));
+    }
+    function barValueLabel(svg, x0, yMid, wBar, value, fillInside) {
+        const label = fmt(Math.round(value));
+        const inside = wBar > 52;
+        text(svg, {
+            x: inside ? x0 + wBar - 5 : x0 + wBar + 4,
+            y: yMid + 3,
+            'text-anchor': inside ? 'end' : 'start',
+            fill: inside ? fillInside : '#172033',
+            'font-size': '11',
+            'font-weight': '600'
+        }, label);
+    }
+    function sparkline(trend, selectedMonth) {
+        const months = vol02aMonths();
+        const vals = months.map(mo => {
+            const pt = (trend || []).find(t => t.month === mo);
+            return pt ? Number(pt.samples) || 0 : 0;
+        });
+        const w = 130, h = 28, m = 2;
+        const max = Math.max(...vals, 1);
+        const x = i => months.length <= 1 ? w / 2 : m + i * ((w - 2 * m) / (months.length - 1));
+        const y = v => h - m - (v / max) * (h - 2 * m);
+        let d = '';
+        vals.forEach((v, i) => { d += (i ? ' L' : 'M') + x(i).toFixed(1) + ',' + y(v).toFixed(1); });
+        const sel = months.indexOf(selectedMonth);
+        const dot = sel >= 0
+            ? `<circle cx="${x(sel).toFixed(1)}" cy="${y(vals[sel]).toFixed(1)}" r="2.5" fill="#246bfd"/>`
+            : '';
+        return `<svg class="rpl-spark" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="${d}" fill="none" stroke="#9bb3df" stroke-width="1.6"/>${dot}</svg>`;
+    }
+
+    function drawVol01() {
+        const host = document.getElementById('vol01-chart');
+        if (!host || !payload.vol01) return;
+        const rows = payload.vol01.daily_data;
+        const W = Math.max(640, host.clientWidth || 860), H = 420, L = 62, R = 22, T = 36, B = 58;
+        const iw = W - L - R, ih = H - T - B;
+        const max = Math.max(...rows.map(d => Math.max(d.samples, d.moving_average_7d))) * 1.12 || 1;
+        const gap = iw / rows.length;
+        const bw = Math.max(2, gap * 0.72);
+        const x = i => L + i * gap + (gap - bw) / 2;
+        const y = v => T + ih - (v / max) * ih;
+        const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
+        for (let g = 0; g <= 4; g++) {
+            const gy = T + ih * g / 4, gv = max * (1 - g / 4);
+            svg.appendChild(svgEl('line', { x1: L, y1: gy, x2: L + iw, y2: gy, stroke: '#d9dee7' }));
+            text(svg, { x: L - 8, y: gy + 4, 'text-anchor': 'end' }, gv >= 1000 ? (gv / 1000).toFixed(1) + 'k' : Math.round(gv).toString());
+        }
+        const bd = rows.findIndex(d => d.window === 'current_28_days');
+        if (bd > 0) {
+            const bx = L + bd * gap;
+            svg.appendChild(svgEl('line', { x1: bx, y1: T, x2: bx, y2: T + ih, stroke: '#172033', 'stroke-dasharray': '4 4', 'stroke-opacity': '.45' }));
+            text(svg, { x: bx - 8, y: T - 10, 'text-anchor': 'end' }, 'Previous 28 days');
+            text(svg, { x: bx + 8, y: T - 10 }, 'Current 28 days');
+        }
+        rows.forEach((d, i) => {
+            const r = svgEl('rect', {
+                x: x(i), y: y(d.samples), width: bw, height: Math.max(0, T + ih - y(d.samples)),
+                fill: d.window === 'current_28_days' ? '#246bfd' : '#8aa7df',
+                opacity: d.window === 'current_28_days' ? 1 : 0.7
+            });
+            r.addEventListener('mousemove', e => showTip(
+                `<strong>${dateLbl(d.date)}</strong><br>${fmt(d.samples)} samples<br>7-day avg: ${d.moving_average_7d.toFixed(1)}<br>${d.window === 'current_28_days' ? 'Current' : 'Previous'} window`,
+                e.clientX, e.clientY));
+            r.addEventListener('mouseleave', hideTip);
+            svg.appendChild(r);
+        });
+        let dAttr = '';
+        rows.forEach((d, i) => { dAttr += (i ? ' L' : 'M') + (x(i) + bw / 2) + ',' + y(d.moving_average_7d); });
+        svg.appendChild(svgEl('path', { d: dAttr, fill: 'none', stroke: '#e47a20', 'stroke-width': 2.4 }));
+        rows.forEach((d, i) => {
+            if (i % 7 !== 0 && i !== rows.length - 1) return;
+            text(svg, { x: x(i) + bw / 2, y: T + ih + 16, 'text-anchor': 'end', transform: `rotate(-30 ${x(i) + bw / 2} ${T + ih + 16})` }, dateLbl(d.date));
+        });
+        host.replaceChildren(svg);
+        host.onclick = openVol01a;
+        host.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openVol01a(); } };
+    }
+
+    function setOpen(el, open) {
+        if (!el) return;
+        el.hidden = !open;
+        el.classList.toggle('is-open', open);
+    }
+    function openVol01a() {
+        const drill = document.getElementById('vol01-drill');
+        setOpen(drill, true);
+        drawVol01a();
+        drill.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    function closeVol01a() {
+        setOpen(document.getElementById('vol01-drill'), false);
+    }
+
+    let vol01aDim = 'clinic', vol01aTop = 10;
+    function vol01aRows() {
+        const src = (vol01aDim === 'clinic' ? payload.vol01Clinic : payload.vol01Panel)?.rows || [];
+        const top = src.slice(0, vol01aTop);
+        const rest = src.slice(vol01aTop);
+        if (!rest.length) return { rows: top, total: src.length };
+        const cur = rest.reduce((s, d) => s + d.current_samples, 0);
+        const prev = rest.reduce((s, d) => s + d.previous_samples, 0);
+        return {
+            rows: [...top, {
+                name: `All other ${vol01aDim === 'clinic' ? 'clinics' : 'panels'}`,
+                current_samples: cur, previous_samples: prev,
+                absolute_change: cur - prev,
+                percent_change: prev ? cur / prev - 1 : null
+            }],
+            total: src.length
+        };
+    }
+    function drawVol01a() {
+        const host = document.getElementById('vol01a-chart');
+        if (!host) return;
+        const { rows, total } = vol01aRows();
+        const W = Math.max(640, host.clientWidth || 860), rowH = 32, H = Math.max(420, rows.length * rowH + 72);
+        const L = Math.min(250, Math.max(160, W * 0.26)), R = Math.min(130, Math.max(90, W * 0.14)), T = 8, B = 36;
+        const iw = W - L - R, ih = H - T - B;
+        const rawMax = Math.max(...rows.map(d => Math.max(d.current_samples, d.previous_samples)), 1);
+        const { top, ticks } = hBarTicks(rawMax * 1.08);
+        const band = rows.length ? ih / rows.length : ih;
+        const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}` });
+        drawHAxis(svg, L, T, iw, ih, top, ticks);
+        rows.forEach((d, i) => {
+            const y0 = T + i * band, h = band * 0.32;
+            const wPrev = (d.previous_samples / top) * iw, wCur = (d.current_samples / top) * iw;
+            svg.appendChild(svgEl('rect', { x: L, y: y0 + 3, width: wPrev, height: h, fill: '#8aa7df', opacity: 0.75 }));
+            svg.appendChild(svgEl('rect', { x: L, y: y0 + h + 5, width: wCur, height: h, fill: '#246bfd' }));
+            const label = d.name.length > 34 ? d.name.slice(0, 33) + '…' : d.name;
+            text(svg, { x: L - 8, y: y0 + band / 2 + 4, 'text-anchor': 'end' }, label);
+            const delta = (d.absolute_change >= 0 ? '+' : '') + fmt(d.absolute_change)
+                + (d.percent_change == null ? ' new' : ' (' + signedPct(d.percent_change) + ')');
+            const deltaCls = clsDelta(d.absolute_change) || clsDelta(d.percent_change);
+            text(svg, { x: L + Math.min(iw, Math.max(wPrev, wCur)) + 6, y: y0 + band / 2 + 4, 'font-weight': '600', class: deltaCls }, delta);
+        });
+        host.replaceChildren(svg);
+        const st = document.getElementById('vol01a-status');
+        if (st) st.textContent = `Showing top ${Math.min(vol01aTop, total)} of ${total} ${vol01aDim === 'clinic' ? 'clinics' : 'panels'} plus the remainder.`;
+        const tb = document.querySelector('#vol01a-table tbody');
+        if (tb) {
+            const src = (vol01aDim === 'clinic' ? payload.vol01Clinic : payload.vol01Panel)?.rows || [];
+            tb.innerHTML = src.map(d => {
+                const chg = d.absolute_change;
+                const pc = d.percent_change;
+                return `<tr>
+                    <td>${esc(d.name)}</td>
+                    <td class="num">${fmt(d.previous_samples)}</td>
+                    <td class="num">${fmt(d.current_samples)}</td>
+                    <td class="num ${clsDelta(chg)}">${chg >= 0 ? '+' : ''}${fmt(chg)}</td>
+                    <td class="num ${clsDelta(pc)}">${pc == null ? 'New' : signedPct(pc)}</td>
+                    <td class="num">${pct(d.current_share)}</td>
+                    <td class="num">${pct(d.previous_share)}</td>
+                    <td class="num ${clsDelta(d.share_change_percentage_points)}">${d.share_change_percentage_points >= 0 ? '+' : ''}${(d.share_change_percentage_points ?? 0).toFixed(2)}</td>
+                </tr>`;
+            }).join('');
+        }
+    }
+
+    function drawVol02() {
+        const host = document.getElementById('vol02-chart');
+        if (!host || !payload.vol02) return;
+        const rows = payload.vol02.monthly_data;
+        const avg = payload.vol02.calculation.prior_12_month_average;
+        const W = Math.max(640, host.clientWidth || 860), H = 450, L = 72, R = 22, T = 52, B = 64;
+        const iw = W - L - R, ih = H - T - B;
+        const max = Math.max(...rows.map(d => d.matched_mtd_samples), avg) * 1.18 || 1;
+        const gap = iw / rows.length, bw = gap * 0.62;
+        const x = i => L + i * gap + (gap - bw) / 2;
+        const y = v => T + ih - (v / max) * ih;
+        const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}` });
+        for (let g = 0; g <= 4; g++) {
+            const gy = T + ih * g / 4, gv = max * (1 - g / 4);
+            svg.appendChild(svgEl('line', { x1: L, y1: gy, x2: L + iw, y2: gy, stroke: '#d9dee7' }));
+            text(svg, { x: L - 8, y: gy + 4, 'text-anchor': 'end' }, fmt(Math.round(gv)));
+        }
+        svg.appendChild(svgEl('rect', { x: L, y: T, width: iw, height: ih, fill: 'none', stroke: '#d9dee7' }));
+        svg.appendChild(svgEl('line', { x1: L, y1: y(avg), x2: L + iw, y2: y(avg), stroke: '#e47a20', 'stroke-width': 2, 'stroke-dasharray': '6 4' }));
+        text(svg, { x: L + 8, y: y(avg) - 7, fill: '#e47a20' }, 'Prior-12 avg ' + fmt(Math.round(avg)));
+        rows.forEach((d, i) => {
+            const selected = vol02aMonth === d.month;
+            const fill = d.period === 'current_month' ? '#246bfd' : d.period === 'prior_year' ? '#6f8fc8' : '#a7b9da';
+            const r = svgEl('rect', {
+                x: x(i), y: y(d.matched_mtd_samples), width: bw,
+                height: Math.max(0, T + ih - y(d.matched_mtd_samples)),
+                fill, rx: 2, style: 'cursor:pointer',
+                stroke: selected ? '#172033' : 'none',
+                'stroke-width': selected ? 2 : 0
+            });
+            r.addEventListener('mousemove', e => showTip(
+                `<strong>${monthLbl(d.month)}</strong><br>${fmt(d.matched_mtd_samples)} samples<br>${d.window_start} to ${d.window_end}<br>${d.lis_observed_collection_dates} LIS-observed dates`,
+                e.clientX, e.clientY));
+            r.addEventListener('mouseleave', hideTip);
+            r.addEventListener('click', () => openVol02a(d.month));
+            svg.appendChild(r);
+            const labelY = Math.max(T + 12, y(d.matched_mtd_samples) - 5);
+            text(svg, { x: x(i) + bw / 2, y: labelY, 'text-anchor': 'middle', 'font-weight': '600', 'font-size': bw < 42 ? '10' : '11' },
+                bw < 40 ? compact(d.matched_mtd_samples) : fmt(d.matched_mtd_samples));
+            text(svg, { x: x(i) + bw / 2, y: T + ih + 16, 'text-anchor': 'end', transform: `rotate(-35 ${x(i) + bw / 2} ${T + ih + 16})` }, monthLbl(d.month));
+        });
+        host.replaceChildren(svg);
+    }
+
+    let vol02aMonth = null, vol02aDim = 'clinic', vol02aTop = 10, vol02aComp = 'prior_month';
+    function vol02aMonths() {
+        return payload.vol02?.monthly_data?.map(d => d.month) || Object.keys(payload.vol02a?.monthly_totals || {});
+    }
+    function fillVol02aComp() {
+        const sel = document.getElementById('vol02a-comp');
+        if (!sel || !vol02aMonth) return;
+        const months = vol02aMonths();
+        const idx = months.indexOf(vol02aMonth);
+        const prior = idx > 0 ? months[idx - 1] : null;
+        const ly = months[0];
+        const opts = [];
+        if (prior) opts.push({ id: prior, label: monthLbl(prior) });
+        if (ly && ly !== vol02aMonth && ly !== prior) opts.push({ id: ly, label: monthLbl(ly) + ' (same month LY)' });
+        opts.push({ id: 'prior_12_average', label: 'Prior-12-month average' });
+        sel.innerHTML = opts.map(o => `<option value="${o.id}">${o.label}</option>`).join('');
+        vol02aComp = opts[0].id;
+        sel.value = vol02aComp;
+    }
+    function catValue(cat, monthOrAvg) {
+        if (monthOrAvg === 'prior_12_average') {
+            const t = (cat.trend || []).filter(x => x.month !== vol02aMonth);
+            if (!t.length) return 0;
+            return t.reduce((s, x) => s + x.samples, 0) / t.length;
+        }
+        return (cat.trend || []).find(x => x.month === monthOrAvg)?.samples || 0;
+    }
+    function monthTotal(id) {
+        const totals = payload.vol02a?.monthly_totals || {};
+        if (id === 'prior_12_average') {
+            const vals = Object.entries(totals).filter(([m]) => m !== vol02aMonth).map(([, v]) => v);
+            return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
+        }
+        return totals[id] || 0;
+    }
+    function vol02aView() {
+        const dim = payload.vol02a?.dimensions?.[vol02aDim];
+        const all = dim?.categories || [];
+        const currentTotal = monthTotal(vol02aMonth);
+        const compTotal = monthTotal(vol02aComp);
+        const ranked = all.map(c => {
+            const current = catValue(c, vol02aMonth);
+            const comparison = catValue(c, vol02aComp);
+            return { ...c, current_samples: current, comparison_samples: comparison, _key: current + comparison };
+        }).sort((a, b) => b._key - a._key || a.category.localeCompare(b.category));
+        const shown = ranked.slice(0, vol02aTop);
+        const names = new Set(shown.map(d => d.category));
+        const excluded = ranked.filter(d => !names.has(d.category));
+        if (excluded.length) {
+            const months = vol02aMonths();
+            shown.push({
+                category: 'All Other',
+                current_samples: excluded.reduce((s, d) => s + d.current_samples, 0),
+                comparison_samples: excluded.reduce((s, d) => s + d.comparison_samples, 0),
+                trend: months.map(month => ({
+                    month,
+                    samples: excluded.reduce((s, d) => s + catValue(d, month), 0)
+                }))
+            });
+        }
+        return { rows: shown, ranked, currentTotal, compTotal, count: all.length };
+    }
+    function setVol02Tab(which) {
+        const drill = document.getElementById('vol02-drill');
+        const panelA = document.getElementById('vol02a-panel');
+        const panelB = document.getElementById('vol02b-panel');
+        const tabA = document.getElementById('tab-vol02a');
+        const tabB = document.getElementById('tab-vol02b');
+        setOpen(drill, true);
+        panelA?.classList.toggle('is-active', which === 'a');
+        panelB?.classList.toggle('is-active', which === 'b');
+        tabA?.setAttribute('aria-selected', String(which === 'a'));
+        tabB?.setAttribute('aria-selected', String(which === 'b'));
+        const kicker = document.getElementById('vol02-drill-kicker');
+        const title = document.getElementById('vol02-drill-title');
+        if (which === 'a') {
+            if (!vol02aMonth) {
+                const months = vol02aMonths();
+                vol02aMonth = months[months.length - 1] || null;
+                fillVol02aComp();
+            }
+            if (kicker) kicker.textContent = 'VOL-02A · drill-down';
+            if (title) title.textContent = vol02aMonth
+                ? 'Who drove ' + monthLbl(vol02aMonth) + ' matched MTD?'
+                : 'Clinic and panel mix';
+            drawVol02a();
+            drawVol02();
+        } else {
+            if (kicker) kicker.textContent = 'VOL-02B · supplemental';
+            if (title) title.textContent = 'Samples per LIS-observed collection date';
+        }
+    }
+    function closeVol02() {
+        setOpen(document.getElementById('vol02-drill'), false);
+        document.getElementById('tab-vol02a')?.setAttribute('aria-selected', 'false');
+        document.getElementById('tab-vol02b')?.setAttribute('aria-selected', 'false');
+        vol02aMonth = null;
+        drawVol02();
+    }
+    function openVol02a(month) {
+        vol02aMonth = month;
+        fillVol02aComp();
+        setVol02Tab('a');
+        document.getElementById('vol02-drill')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    function drawVol02a() {
+        const host = document.getElementById('vol02a-chart');
+        const kpis = document.getElementById('vol02a-kpis');
+        const sub = document.getElementById('vol02a-sub');
+        if (!host || !payload.vol02a || !vol02aMonth) return;
+        const { rows, ranked, currentTotal, compTotal, count } = vol02aView();
+        const change = currentTotal - compTotal;
+        const variance = compTotal ? currentTotal / compTotal - 1 : null;
+        const compLabel = vol02aComp === 'prior_12_average' ? 'Prior-12 average' : monthLbl(vol02aComp);
+        if (sub) sub.textContent = `Selected ${monthLbl(vol02aMonth)} vs ${compLabel}. Matched cutoff day ${payload.vol02a.matched_cutoff_day}.`;
+        if (kpis) kpis.innerHTML = `
+            <div class="rpl-kpi"><span>Selected-month total</span><b>${fmt(Math.round(currentTotal))}</b><span>${monthLbl(vol02aMonth)}</span></div>
+            <div class="rpl-kpi"><span>${compLabel} total</span><b>${fmt(Math.round(compTotal))}</b><span>matched days 1–${payload.vol02a.matched_cutoff_day}</span></div>
+            <div class="rpl-kpi"><span>Overall variance</span><b class="${clsDelta(variance)}">${signedPct(variance)}</b><span class="${clsDelta(change)}">${change >= 0 ? '+' : ''}${fmt(Math.round(change))} samples</span></div>
+            <div class="rpl-kpi"><span>Categories</span><b>${fmt(count)}</b><span>${vol02aDim === 'clinic' ? 'clinics' : 'panel categories'}</span></div>`;
+        const W = Math.max(640, host.clientWidth || 860), rowH = 38, H = Math.max(420, rows.length * rowH + 72);
+        const L = Math.min(300, Math.max(170, W * 0.28)), R = Math.min(140, Math.max(100, W * 0.14)), T = 8, B = 36;
+        const iw = W - L - R, ih = H - T - B;
+        const rawMax = Math.max(...rows.map(d => Math.max(d.current_samples, d.comparison_samples)), 1);
+        const { top, ticks } = hBarTicks(rawMax * 1.08);
+        const band = rows.length ? ih / rows.length : ih;
+        const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}` });
+        drawHAxis(svg, L, T, iw, ih, top, ticks);
+        rows.forEach((d, i) => {
+            const y0 = T + i * band, h = band * 0.32;
+            const wComp = (d.comparison_samples / top) * iw, wCur = (d.current_samples / top) * iw;
+            svg.appendChild(svgEl('rect', { x: L, y: y0 + 2, width: wComp, height: h, fill: '#9bb3df' }));
+            svg.appendChild(svgEl('rect', { x: L, y: y0 + h + 5, width: wCur, height: h, fill: '#246bfd' }));
+            barValueLabel(svg, L, y0 + 2 + h / 2, wComp, d.comparison_samples, '#fff');
+            barValueLabel(svg, L, y0 + h + 5 + h / 2, wCur, d.current_samples, '#fff');
+            const label = d.category.length > 36 ? d.category.slice(0, 35) + '…' : d.category;
+            text(svg, { x: L - 8, y: y0 + band / 2 + 4, 'text-anchor': 'end' }, label);
+            const abs = d.current_samples - d.comparison_samples;
+            const pc = d.comparison_samples === 0 ? null : d.current_samples / d.comparison_samples - 1;
+            const delta = (abs >= 0 ? '+' : '') + fmt(Math.round(abs))
+                + (pc == null ? ' new' : ' (' + signedPct(pc) + ')');
+            text(svg, {
+                x: L + Math.min(iw, Math.max(wComp, wCur)) + 6,
+                y: y0 + band / 2 + 4,
+                'font-weight': '600',
+                class: clsDelta(abs) || clsDelta(pc)
+            }, delta);
+        });
+        host.replaceChildren(svg);
+        const curHead = document.getElementById('vol02a-cur-head');
+        const compHead = document.getElementById('vol02a-comp-head');
+        if (curHead) curHead.textContent = monthLbl(vol02aMonth);
+        if (compHead) compHead.textContent = compLabel.replace(' 20', '');
+        const tb = document.querySelector('#vol02a-table tbody');
+        if (tb) {
+            tb.innerHTML = ranked.map(d => {
+                const abs = d.current_samples - d.comparison_samples;
+                const pc = d.comparison_samples === 0 ? null : d.current_samples / d.comparison_samples - 1;
+                const cs = currentTotal ? d.current_samples / currentTotal : 0;
+                const ps = compTotal ? d.comparison_samples / compTotal : 0;
+                const pp = (cs - ps) * 100;
+                return `<tr>
+                    <td>${esc(d.category)}</td>
+                    <td class="num">${fmt(Math.round(d.current_samples))}</td>
+                    <td class="num">${fmt(Math.round(d.comparison_samples))}</td>
+                    <td class="num ${clsDelta(abs)}">${abs >= 0 ? '+' : ''}${fmt(Math.round(abs))}</td>
+                    <td class="num ${clsDelta(pc)}">${pc == null ? 'New' : signedPct(pc)}</td>
+                    <td class="num">${pct(cs)}</td>
+                    <td class="num">${pct(ps)}</td>
+                    <td class="num ${clsDelta(pp)}">${pp >= 0 ? '+' : ''}${pp.toFixed(2)}</td>
+                    <td>${sparkline(d.trend, vol02aMonth)}</td>
+                </tr>`;
+            }).join('');
+        }
+    }
+
+    function drawRes01() {
+        const host = document.getElementById('res01-chart');
+        if (!host || !payload.res01) return;
+        const weeks = payload.res01.weekly_cohorts;
+        const aging = payload.res01Aging || [];
+        const W = Math.max(640, host.clientWidth || 860), H = 650, L = 72, R = 24;
+        const iw = W - L - R;
+        const top = { y: 48, h: 200 }, bot = { y: 320, h: 200 };
+        const x = i => L + (weeks.length === 1 ? iw / 2 : i * iw / (weeks.length - 1));
+        const rates = weeks.map(w => w.d10_rate);
+        const rawMin = Math.min(...rates, payload.res01.headline.prior_d10_resulted_rate, 0.90);
+        const rawMax = Math.max(...rates, payload.res01.headline.d10_resulted_rate, 0.99);
+        const pctScale = nicePctDomain(rawMin - 0.005, rawMax + 0.005);
+        const yr = v => top.y + top.h - ((v - pctScale.min) / (pctScale.max - pctScale.min)) * top.h;
+        const dayTicks = [0, 2, 4, 6, 8, 10, 12];
+        const yt = v => bot.y + bot.h - (v / 12) * bot.h;
+        const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}` });
+        const bd = weeks.findIndex(w => w.comparison_window === 'current');
+        if (bd > 0) {
+            const bx = (x(bd - 1) + x(bd)) / 2;
+            svg.appendChild(svgEl('rect', { x: bx, y: top.y, width: L + iw - bx, height: bot.y + bot.h - top.y, fill: '#edf4ff' }));
+            svg.appendChild(svgEl('line', { x1: bx, y1: top.y, x2: bx, y2: bot.y + bot.h, stroke: '#172033', 'stroke-dasharray': '4 4', 'stroke-opacity': '.5' }));
+            text(svg, { x: bx - 8, y: 24, 'text-anchor': 'end' }, 'Prior 4 weeks');
+            text(svg, { x: bx + 8, y: 24 }, 'Current 4 weeks');
+        }
+        text(svg, { x: L, y: top.y - 14, 'font-weight': '600' }, 'D10 resulted rate');
+        drawVAxis(svg, L, top.y, iw, top.h, pctScale.ticks, yr, v => (v * 100).toFixed(0) + '%');
+        const prior = payload.res01.headline.prior_d10_resulted_rate;
+        svg.appendChild(svgEl('line', { x1: L, y1: yr(prior), x2: L + iw, y2: yr(prior), stroke: '#8aa7df', 'stroke-dasharray': '5 4' }));
+        text(svg, { x: L + iw - 4, y: yr(prior) - 6, 'text-anchor': 'end', fill: '#667085' }, 'Prior 4-week rate ' + pct(prior));
+        let d10 = '';
+        weeks.forEach((w, i) => { d10 += (i ? ' L' : 'M') + x(i) + ',' + yr(w.d10_rate); });
+        svg.appendChild(svgEl('path', { d: d10, fill: 'none', stroke: '#246bfd', 'stroke-width': 2.7 }));
+        weeks.forEach((w, i) => {
+            svg.appendChild(svgEl('circle', { cx: x(i), cy: yr(w.d10_rate), r: 5, fill: '#246bfd' }));
+            text(svg, { x: x(i), y: yr(w.d10_rate) - 11, 'text-anchor': 'middle' }, pct(w.d10_rate));
+        });
+        text(svg, { x: L, y: bot.y - 14, 'font-weight': '600' }, 'Collection-to-report turnaround');
+        drawVAxis(svg, L, bot.y, iw, bot.h, dayTicks, yt, v => String(v));
+        [['median_days', '#138a72', 2], ['p75_days', '#7f56d9', 2], ['p90_days', '#e47a20', 2], ['p95_days', '#b54708', 2.7]].forEach(([k, c, w]) => {
+            let d = '';
+            weeks.forEach((row, i) => { d += (i ? ' L' : 'M') + x(i) + ',' + yt(row[k] || 0); });
+            svg.appendChild(svgEl('path', { d, fill: 'none', stroke: c, 'stroke-width': w }));
+            weeks.forEach((row, i) => svg.appendChild(svgEl('circle', { cx: x(i), cy: yt(row[k] || 0), r: k === 'p95_days' ? 4 : 3, fill: c })));
+        });
+        weeks.forEach((w, i) => text(svg, { x: x(i), y: bot.y + bot.h + 18, 'text-anchor': 'middle' }, dateLbl(w.week_start)));
+        text(svg, { x: L + iw / 2, y: bot.y + bot.h + 40, 'text-anchor': 'middle' }, 'Collection cohort week starting');
+        const hit = svgEl('rect', { x: L, y: top.y, width: iw, height: bot.y + bot.h - top.y, fill: 'transparent', style: 'cursor:crosshair' });
+        hit.addEventListener('mousemove', e => {
+            const rect = host.getBoundingClientRect();
+            const mx = (e.clientX - rect.left) / rect.width * W;
+            let best = 0, bestD = 1e9;
+            weeks.forEach((_, i) => { const dist = Math.abs(x(i) - mx); if (dist < bestD) { bestD = dist; best = i; } });
+            const w = weeks[best];
+            showTip(`<strong>Week of ${w.week_start}</strong><br>D10: ${pct(w.d10_rate)} (${fmt(w.within_d10)} / ${fmt(w.eligible)})<br>Median / P75: ${w.median_days ?? '—'}d / ${w.p75_days ?? '—'}d<br>P90 / P95: ${w.p90_days ?? '—'}d / ${w.p95_days ?? '—'}d<br>Unresolved: ${fmt(w.unresolved)}`, e.clientX, e.clientY);
+        });
+        hit.addEventListener('mouseleave', hideTip);
+        svg.appendChild(hit);
+        text(svg, { x: L, y: 586, 'font-weight': '600' }, 'Open-result backlog aging');
+        const ageTotal = aging.reduce((s, d) => s + d.samples, 0) || 1;
+        const colors = ['#8aa7df', '#8aa7df', '#7f56d9', '#e47a20', '#c4320a'];
+        let n = 0;
+        aging.forEach((d, i) => {
+            const x0 = L + (n / ageTotal) * iw;
+            const x1 = L + ((n + d.samples) / ageTotal) * iw;
+            svg.appendChild(svgEl('rect', { x: x0, y: 598, width: Math.max(0, x1 - x0), height: 18, fill: colors[i] || '#8aa7df' }));
+            if (x1 - x0 > 54) text(svg, { x: (x0 + x1) / 2, y: 635, 'text-anchor': 'middle' }, `${d.label}d · ${fmt(d.samples)}`);
+            n += d.samples;
+        });
+        host.replaceChildren(svg);
+    }
+
+    document.querySelectorAll('#vol01a-dim button').forEach(b => b.addEventListener('click', () => {
+        vol01aDim = b.dataset.dim;
+        document.querySelectorAll('#vol01a-dim button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+        drawVol01a();
+    }));
+    const top01 = document.getElementById('vol01a-top');
+    if (top01) top01.addEventListener('change', e => { vol01aTop = Number(e.target.value); drawVol01a(); });
+    document.getElementById('vol01-open')?.addEventListener('click', openVol01a);
+    document.getElementById('vol01-close')?.addEventListener('click', closeVol01a);
+    document.querySelectorAll('#vol02a-dim button').forEach(b => b.addEventListener('click', () => {
+        vol02aDim = b.dataset.dim;
+        document.querySelectorAll('#vol02a-dim button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+        drawVol02a();
+    }));
+    const top02 = document.getElementById('vol02a-top');
+    if (top02) top02.addEventListener('change', e => { vol02aTop = Number(e.target.value); drawVol02a(); });
+    const comp02 = document.getElementById('vol02a-comp');
+    if (comp02) comp02.addEventListener('change', e => { vol02aComp = e.target.value; drawVol02a(); });
+    document.getElementById('tab-vol02a')?.addEventListener('click', () => {
+        if (!vol02aMonth) {
+            const months = vol02aMonths();
+            vol02aMonth = months[months.length - 1] || null;
+            fillVol02aComp();
+        }
+        setVol02Tab('a');
+    });
+    document.getElementById('tab-vol02b')?.addEventListener('click', () => setVol02Tab('b'));
+    document.getElementById('vol02-close')?.addEventListener('click', closeVol02);
+    document.addEventListener('keydown', e => {
+        if (e.key !== 'Escape') return;
+        closeVol01a();
+        closeVol02();
+    });
+
+    drawVol01();
+    drawVol02();
+    drawRes01();
+    window.addEventListener('resize', () => {
+        drawVol01();
+        const d1 = document.getElementById('vol01-drill');
+        if (d1 && d1.classList.contains('is-open')) drawVol01a();
+        drawVol02();
+        const d2 = document.getElementById('vol02-drill');
+        const a2 = document.getElementById('vol02a-panel');
+        if (d2 && d2.classList.contains('is-open') && a2 && a2.classList.contains('is-active')) drawVol02a();
+        drawRes01();
+    });
+})();
+</script>

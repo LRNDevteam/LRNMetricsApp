@@ -350,77 +350,36 @@ else
     <details class="tpd-card tpd-acc" open>
         <summary class="tpd-acc-head">
             <div class="tpd-acc-head-text">
-                <div class="tpd-card-title">1. Billed Claims Reconciliation — LIS vs PMS</div>
-                <p class="tpd-card-sub">Reconciliation Gap = PMS Billed Claims − LIS Billed to Insurance</p>
+                <div class="tpd-card-title">1. Fully Paid % of Billed Claims (PMS)</div>
+                <p class="tpd-card-sub">% Fully Paid = Fully Paid ÷ Billed Claims × 100 · latest-month drop is often Check #4 maturity</p>
             </div>
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
-            @{ ViewData["GraphTitle"] = "1. Billed Claims Reconciliation — LIS vs PMS"; }
-            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
-            <div class="tpd-insight tpd-insight-ok">Tracking this gap monthly is an ongoing tripwire — a sudden widen/narrow outside the normal ~900–1,800 band signals a routing or entry change.</div>
-            <div class="tpd-logic">
-                <strong>Fetch logic</strong>
-                <ul>
-                    <li><strong>PMS Billed</strong> = <code>COUNT(DISTINCT ClaimID)</code> where <code>BilledUnbilled='Billed'</code> (DOS DayWindow)</li>
-                    <li><strong>LIS Billed to Insurance</strong> = Resulted + ClaimStatus='Billed' + BilledorNot='Billed' + ClientStatus=''</li>
-                    <li><strong>Gap</strong> = PMS − LIS</li>
-                </ul>
-            </div>
-            <div class="tpd-chart">@Html.Raw(SvgDualLines(reconLabels, reconLis, reconPms, "LIS: Billed to Insurance (samples)", "PMS: Billed Claims", "#2563EB", "#D97706", "Count"))</div>
-        </div>
-    </details>
-
-    <details class="tpd-card tpd-acc" open>
-        <summary class="tpd-acc-head">
-            <div class="tpd-acc-head-text">
-                <div class="tpd-card-title">2. Fully Adjusted % of Billed Claims (PMS)</div>
-                <p class="tpd-card-sub">% Fully Adjusted = Fully Adjusted ÷ Billed Claims × 100 · Check #4 maturity artifact in latest month</p>
-            </div>
-            <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
-        </summary>
-        <div class="tpd-acc-body">
-            @{ ViewData["GraphTitle"] = "2. Fully Adjusted % of Billed Claims (PMS)"; }
+            @{ ViewData["GraphTitle"] = "1. Fully Paid % of Billed Claims (PMS)"; }
             @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             <div class="tpd-logic">
-                <strong>Fetch logic</strong>
                 <ul>
-                    <li><strong>Billed Claims</strong> = <code>BilledUnbilled='Billed'</code></li>
-                    <li><strong>Fully Adjusted</strong> = Billed + <code>ClaimStatus IN ('Complete W/O','Fully Adjusted')</code> (ES-aligned)</li>
+                    <li><strong>Fully Paid</strong> = <code>ClaimStatus='Fully Paid'</code></li>
+                    <li>Denom = Billed Claims (DayWindow)</li>
                 </ul>
             </div>
-            <div class="tpd-chart">@Html.Raw(SvgPctLine(faLabels, faPct, "#9F1239", "% fully adjusted of billed"))</div>
+            <div class="tpd-chart">@Html.Raw(SvgPctLine(fpLabels, fpPct, "#166534", "% fully paid of billed"))</div>
         </div>
     </details>
 
     <details class="tpd-card tpd-acc" open>
         <summary class="tpd-acc-head">
             <div class="tpd-acc-head-text">
-                <div class="tpd-card-title">3. Top Write-Off Reason Codes</div>
-                <p class="tpd-card-sub">Reason-code % of Fully Adjusted = count(reason) ÷ SUM(Fully Adjusted) × 100 · counts from BTWOSummary</p>
-            </div>
-            <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
-        </summary>
-        <div class="tpd-acc-body">
-            @{ ViewData["GraphTitle"] = "3. Top Write-Off Reason Codes"; }
-            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
-            <div class="tpd-insight tpd-insight-ok">WOINS / WOOON typically dominate write-off volume. This report is counts-only — $ by reason would sharpen cost focus.</div>
-            <div class="tpd-chart">@Html.Raw(SvgHBars(reasonRows, "count"))</div>
-        </div>
-    </details>
-
-    <details class="tpd-card tpd-acc" open>
-        <summary class="tpd-acc-head">
-            <div class="tpd-acc-head-text">
-                <div class="tpd-card-title">4. Insurance Balance % of Billed Claims — Headline PMS Finding</div>
+                <div class="tpd-card-title">2. Insurance Balance % of Billed Claims</div>
                 <p class="tpd-card-sub">% IB = IB claims ÷ Billed × 100 · composition = Fully Denied / No Response / Partially Denied share of open</p>
             </div>
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
-            @{ ViewData["GraphTitle"] = "4. Insurance Balance % of Billed Claims — Headline PMS Finding"; }
+            @{ ViewData["GraphTitle"] = "2. Insurance Balance % of Billed Claims"; }
             @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
-            @{ ViewData["GraphTitle"] = "4b. Insurance Balance Composition (% of open claims)"; }
+            @{ ViewData["GraphTitle"] = "2b. Insurance Balance Composition (% of open claims)"; }
             @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             <div class="tpd-insight">A spike in the left chart is actionable only with the right chart — if No Response dominates, chase payer-response backlog, not denials.</div>
             <div class="tpd-grid2">
@@ -439,25 +398,42 @@ else
     <details class="tpd-card tpd-acc" open>
         <summary class="tpd-acc-head">
             <div class="tpd-acc-head-text">
-                <div class="tpd-card-title">5. Fully Paid % of Billed Claims (PMS)</div>
-                <p class="tpd-card-sub">% Fully Paid = Fully Paid ÷ Billed Claims × 100 · latest-month drop is often Check #4 maturity</p>
+                <div class="tpd-card-title">3. Fully Adjusted % of Billed Claims (PMS)</div>
+                <p class="tpd-card-sub">% Fully Adjusted = Fully Adjusted ÷ Billed Claims × 100 · Check #4 maturity artifact in latest month</p>
             </div>
             <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
         </summary>
         <div class="tpd-acc-body">
-            @{ ViewData["GraphTitle"] = "5. Fully Paid % of Billed Claims (PMS)"; }
+            @{ ViewData["GraphTitle"] = "3. Fully Adjusted % of Billed Claims (PMS)"; }
             @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
             <div class="tpd-logic">
+                <strong>Fetch logic</strong>
                 <ul>
-                    <li><strong>Fully Paid</strong> = <code>ClaimStatus='Fully Paid'</code></li>
-                    <li>Denom = Billed Claims (DayWindow)</li>
+                    <li><strong>Billed Claims</strong> = <code>BilledUnbilled='Billed'</code></li>
+                    <li><strong>Fully Adjusted</strong> = Billed + <code>ClaimStatus IN ('Complete W/O','Fully Adjusted')</code> (ES-aligned)</li>
                 </ul>
             </div>
-            <div class="tpd-chart">@Html.Raw(SvgPctLine(fpLabels, fpPct, "#166534", "% fully paid of billed"))</div>
+            <div class="tpd-chart">@Html.Raw(SvgPctLine(faLabels, faPct, "#9F1239", "% fully adjusted of billed"))</div>
         </div>
     </details>
 
-    <div class="tpd-pillar">Claim-Level Supplement: Panel &amp; Payer Detail</div>
+    <details class="tpd-card tpd-acc" open>
+        <summary class="tpd-acc-head">
+            <div class="tpd-acc-head-text">
+                <div class="tpd-card-title">4. Top Write Off Reason Codes</div>
+                <p class="tpd-card-sub">Reason-code % of Fully Adjusted = count(reason) ÷ SUM(Fully Adjusted) × 100 · counts from BTWOSummary</p>
+            </div>
+            <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "4. Top Write Off Reason Codes"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
+            <div class="tpd-insight tpd-insight-ok">WOINS / WOOON typically dominate write-off volume. This report is counts-only — $ by reason would sharpen cost focus.</div>
+            <div class="tpd-chart">@Html.Raw(SvgHBars(reasonRows, "count"))</div>
+        </div>
+    </details>
+
+    <div class="tpd-card-title" style="margin:1.1rem 0 .45rem">5. Panel-wise Average Allowed vs Average Paid</div>
 
     @foreach (var panel in panels)
     {
@@ -468,18 +444,18 @@ else
         <details class="tpd-card tpd-acc" open>
             <summary class="tpd-acc-head">
                 <div class="tpd-acc-head-text">
-                    <div class="tpd-card-title">6. @panel — Avg Allowed vs Avg Paid</div>
-                    <p class="tpd-card-sub">Top 5 panels by Allowed $ · Avg Allowed by DOS month · Avg Paid by CheckDate month · excludes No Response / Unbilled</p>
+                    <div class="tpd-card-title">@panel — Average Allowed vs Average Paid</div>
+                    <p class="tpd-card-sub">Top 5 panels by Allowed $ · Avg Allowed and Avg Paid both by DOS month · excludes No Response / Unbilled</p>
                 </div>
                 <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
             </summary>
             <div class="tpd-acc-body">
-                @{ ViewData["GraphTitle"] = $"6. {panel} — Avg Allowed vs Avg Paid"; }
+                @{ ViewData["GraphTitle"] = $"5. {panel} — Average Allowed vs Average Paid"; }
                 @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
-                <div class="tpd-chart">@Html.Raw(SvgDualLines(plabels, allowed, paid, "Avg Allowed (DOS month)", "Avg Paid (Payment Date month)", "#1D4ED8", "#15803D", "Avg $ per claim"))</div>
+                <div class="tpd-chart">@Html.Raw(SvgDualLines(plabels, allowed, paid, "Avg Allowed (DOS month)", "Avg Paid (DOS month)", "#1D4ED8", "#15803D", "Avg $ per claim"))</div>
                 <div class="tpd-scroll" style="margin-top:.8rem">
                     <table class="tpd-tbl">
-                        <thead><tr><th>Month</th><th class="num">Avg Allowed $</th><th class="num">n</th><th class="num">Avg Paid $</th><th class="num">n</th></tr></thead>
+                        <thead><tr><th>DOS month</th><th class="num">Avg Allowed $</th><th class="num">n</th><th class="num">Avg Paid $</th><th class="num">Paid n</th></tr></thead>
                         <tbody>
                         @foreach (var r in rows)
                         {
@@ -498,56 +474,29 @@ else
         </details>
     }
 
-    @foreach (var panel in Model.PanelPayerMom.Select(p => p.Panelname).Distinct().ToList())
-    {
-        var momRows = Model.PanelPayerMom.Where(p => p.Panelname == panel).ToList();
-        var payers = momRows.Select(r => r.PayerName).ToList();
-        var priorPaid = momRows.Select(r => (double)r.PriorPaid).ToList();
-        var latestPaid = momRows.Select(r => (double)r.LatestPaid).ToList();
-        var priorLbl = momRows.FirstOrDefault()?.PriorMonthLabel ?? "Prior";
-        var latestLbl = momRows.FirstOrDefault()?.LatestMonthLabel ?? "Latest";
-        <details class="tpd-card tpd-acc" open>
-            <summary class="tpd-acc-head">
-                <div class="tpd-acc-head-text">
-                    <div class="tpd-card-title">Avg $ Paid per Claim — @panel (MOM by DOS)</div>
-                    <p class="tpd-card-sub">Top 5 panels by Allowed $ · top payers · @priorLbl vs @latestLbl · adjudicated claims only</p>
-                </div>
-                <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
-            </summary>
-            <div class="tpd-acc-body">
-                @{ ViewData["GraphTitle"] = $"Avg $ Paid per Claim — {panel} (MOM by DOS)"; }
-                @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
-                <div class="tpd-chart">@Html.Raw(SvgGroupedBars(payers, priorPaid, latestPaid, priorLbl + " avg paid", latestLbl + " avg paid", "Avg $ paid per claim"))</div>
-                <div class="tpd-scroll" style="margin-top:.8rem">
-                    <table class="tpd-tbl">
-                        <thead>
-                            <tr>
-                                <th>Payer</th>
-                                <th class="num">@priorLbl Allowed</th><th class="num">Paid</th><th class="num">n</th>
-                                <th class="num">@latestLbl Allowed</th><th class="num">Paid</th><th class="num">n</th>
-                                <th class="num">MOM % Paid</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        @foreach (var r in momRows)
-                        {
-                            <tr>
-                                <td>@r.PayerName</td>
-                                <td class="num">@Money(r.PriorAllowed)</td>
-                                <td class="num">@Money(r.PriorPaid)</td>
-                                <td class="num">@Num(r.PriorN)</td>
-                                <td class="num">@Money(r.LatestAllowed)</td>
-                                <td class="num">@Money(r.LatestPaid)</td>
-                                <td class="num">@Num(r.LatestN)</td>
-                                <td class="num">@(r.MomPctPaid is { } m ? (m >= 0 ? "+" : "") + m.ToString("0", ci) + "%" : "N/A")</td>
-                            </tr>
-                        }
-                        </tbody>
-                    </table>
-                </div>
+    <details class="tpd-card tpd-acc" open>
+        <summary class="tpd-acc-head">
+            <div class="tpd-acc-head-text">
+                <div class="tpd-card-title">Billed Claims Reconciliation — LIS vs PMS</div>
+                <p class="tpd-card-sub">Reconciliation Gap = PMS Billed Claims − LIS Billed to Insurance</p>
             </div>
-        </details>
-    }
+            <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <div class="tpd-acc-body">
+            @{ ViewData["GraphTitle"] = "Billed Claims Reconciliation — LIS vs PMS"; }
+            @await Html.PartialAsync("_ThreePillarGraphInsight", Model)
+            <div class="tpd-insight tpd-insight-ok">Tracking this gap monthly is an ongoing tripwire — a sudden widen/narrow outside the normal ~900–1,800 band signals a routing or entry change.</div>
+            <div class="tpd-logic">
+                <strong>Fetch logic</strong>
+                <ul>
+                    <li><strong>PMS Billed</strong> = <code>COUNT(DISTINCT ClaimID)</code> where <code>BilledUnbilled='Billed'</code> (DOS DayWindow)</li>
+                    <li><strong>LIS Billed to Insurance</strong> = Resulted + ClaimStatus='Billed' + BilledorNot='Billed' + ClientStatus=''</li>
+                    <li><strong>Gap</strong> = PMS − LIS</li>
+                </ul>
+            </div>
+            <div class="tpd-chart">@Html.Raw(SvgDualLines(reconLabels, reconLis, reconPms, "LIS: Billed to Insurance (samples)", "PMS: Billed Claims", "#2563EB", "#D97706", "Count"))</div>
+        </div>
+    </details>
 
     <details class="tpd-card tpd-acc" open>
         <summary class="tpd-acc-head">

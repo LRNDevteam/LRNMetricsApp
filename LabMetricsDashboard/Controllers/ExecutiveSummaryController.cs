@@ -21,6 +21,7 @@ public sealed class ExecutiveSummaryController : Controller
     private readonly PredictionInsightLoader _insightLoader;
     private readonly IConfiguration _config;
     private readonly ILogger<ExecutiveSummaryController> _logger;
+    private readonly BeechTreeRevenuePipelineLisService _pipelineLis;
 
     // Maps LabSettings key → SP prefix used to build "dbo.usp_Get{prefix}_ExecutiveSummary".
     // Keep aligned with PhiExecutiveSummaryController.LabPrefixMap.
@@ -64,7 +65,8 @@ public sealed class ExecutiveSummaryController : Controller
         IAnalysisRangeService analysisRange,
         PredictionInsightLoader insightLoader,
         IConfiguration config,
-        ILogger<ExecutiveSummaryController> logger)
+        ILogger<ExecutiveSummaryController> logger,
+        BeechTreeRevenuePipelineLisService pipelineLis)
     {
         _labSettings = labSettings;
         _repo        = repo;
@@ -72,6 +74,7 @@ public sealed class ExecutiveSummaryController : Controller
         _insightLoader = insightLoader;
         _config = config;
         _logger      = logger;
+        _pipelineLis = pipelineLis;
     }
 
     // All labs in LabPrefixMap now support extended filter parameters.
@@ -1017,5 +1020,56 @@ public sealed class ExecutiveSummaryController : Controller
             analysisRange.WeekFolder, asOf, fallback: 9);
         vm.WeekFolder = analysisRange.WeekFolder;
         return vm;
+    }
+
+    /// <summary>
+    /// Beech Tree v1.6 Revenue Pipeline LIS executive screen (VOL-01 / VOL-02 / RES-01).
+    /// Separate from ThreePillarDiagnostic (funnel / backlog diagnostic).
+    /// URL: /ExecutiveSummary/RevenuePipelineLis?lab=Beech_Tree
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> RevenuePipelineLis(string? lab, CancellationToken ct = default)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var labName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+        var backUrl = Url.Action("Index", "ExecutiveSummary", new { lab = labName }) ?? "/ExecutiveSummary";
+
+        ViewData["Title"]             = "Three-Pillar LIS";
+        ViewData["SelectedLab"]       = labName;
+        ViewData["DisableLabSwitch"]  = true;
+        ViewData["BreadcrumbParent"]    = "Executive Summary";
+        ViewData["BreadcrumbParentUrl"] = backUrl;
+
+        var vm = new RevenuePipelineLisViewModel
+        {
+            LabName = labName,
+            BackUrl = backUrl,
+            AsOfDate = DateTime.Today.Date,
+        };
+
+        var isBeechTree = string.Equals(labName, "Beech_Tree", StringComparison.OrdinalIgnoreCase);
+        if (!isBeechTree)
+        {
+            vm.ErrorMessage =
+                $"This Revenue Pipeline LIS view is a Beech_Tree prototype — not yet available for '{labName}'.";
+            return View(vm);
+        }
+
+        if (!_labSettings.Labs.TryGetValue(labName, out var config)
+            || string.IsNullOrWhiteSpace(config.DbConnectionString))
+        {
+            vm.ErrorMessage = "Lab not configured.";
+            return View(vm);
+        }
+
+        var analysisRange = await _analysisRange.GetAsync(config.DbConnectionString, ct);
+        ViewData["AnalysisRange"] = analysisRange;
+        var asOf = analysisRange.WeekRangeEndDate?.Date ?? DateTime.Today.Date;
+
+        vm = await _pipelineLis.GetAsync(config.DbConnectionString, labName, asOf, ct);
+        vm.BackUrl = backUrl;
+        vm.WeekFolder = analysisRange.WeekFolder;
+        vm.AsOfDate = asOf;
+        return View(vm);
     }
 }

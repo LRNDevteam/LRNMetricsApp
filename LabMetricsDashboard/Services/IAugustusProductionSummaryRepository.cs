@@ -72,7 +72,7 @@ public interface IAugustusProductionSummaryRepository
             DateOnly? filterFirstBilledTo = null,
             CancellationToken ct = default);
 
-        /// <summary>Reads Aug_PayerBreakdown ? payer ù month pivot (includes charge amount).</summary>
+        /// <summary>Reads Aug_PayerBreakdown ? payer ÔøΩ month pivot (includes charge amount).</summary>
         /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
         Task<SharedPayerBreakdownResult> GetPayerBreakdownAsync(
             string connectionString,
@@ -86,7 +86,7 @@ public interface IAugustusProductionSummaryRepository
             DateOnly? filterFirstBilledTo = null,
             CancellationToken ct = default);
 
-        /// <summary>Reads Aug_PayerByPanel ? payer ù panel pivot.</summary>
+        /// <summary>Reads Aug_PayerByPanel ? payer ÔøΩ panel pivot.</summary>
         /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
         Task<SharedPayerPanelResult> GetPayerByPanelAsync(
             string connectionString,
@@ -100,7 +100,7 @@ public interface IAugustusProductionSummaryRepository
             DateOnly? filterFirstBilledTo = null,
             CancellationToken ct = default);
 
-        /// <summary>Reads Aug_UnbilledAging ? panel ù aging bucket pivot.</summary>
+        /// <summary>Reads Aug_UnbilledAging ? panel ÔøΩ aging bucket pivot.</summary>
         /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
         Task<SharedUnbilledAgingResult> GetUnbilledAgingAsync(
             string connectionString,
@@ -115,7 +115,7 @@ public interface IAugustusProductionSummaryRepository
             CancellationToken ct = default);
 
         /// <summary>
-        /// Panel breakdown (PanelNew ◊ ChargeEnteredDate month) with payer children.
+        /// Panel breakdown (PanelNew ÔøΩ ChargeEnteredDate month) with payer children.
         /// Same result shape as NorthWest Panel Breakdown.
         /// </summary>
         Task<SharedPayerBreakdownResult> GetPanelBreakdownAsync(
@@ -130,7 +130,7 @@ public interface IAugustusProductionSummaryRepository
             DateOnly? filterFirstBilledTo = null,
             CancellationToken ct = default);
 
-        /// <summary>CPT code ◊ month pivot. Metric is COUNT of CPT rows, not SUM(Units).</summary>
+        /// <summary>CPT code ÔøΩ month pivot. Metric is COUNT of CPT rows, not SUM(Units).</summary>
         Task<SharedCptBreakdownResult> GetCptBreakdownAsync(
             string connectionString,
             List<string>? filterPayerNames = null,
