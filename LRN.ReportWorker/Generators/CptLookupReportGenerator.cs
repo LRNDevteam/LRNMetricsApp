@@ -68,6 +68,9 @@ public sealed class CptLookupReportGenerator : IReportGenerator
             LabId         = f.LabId,
             SortColumn    = NullIfBlank(f.SortColumn),
             SortDirection = NullIfBlank(f.SortDirection),
+            // Carried from the queueing request: this service has no caller identity to derive
+            // it from, so without it an unfiltered export would span every lab.
+            AllowedLabIds = f.AllowedLabIds,
         };
 
         async Task Progress(byte pct)

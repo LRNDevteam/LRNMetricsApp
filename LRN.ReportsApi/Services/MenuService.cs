@@ -18,6 +18,15 @@ public interface IMenuRepository
     Task<IReadOnlyList<MenuRoleOptionDto>> GetRolesAsync(CancellationToken ct);
     Task<IReadOnlyList<int>> GetRoleMenuIdsAsync(int roleId, CancellationToken ct);
     Task ReplaceRoleMenusAsync(int roleId, IReadOnlyCollection<int> menuIds, string userName, CancellationToken ct);
+
+    /// <summary>
+    /// Explicit feature settings for the current user, resolved across all of their roles:
+    /// any role that enables a feature wins over a role that disables it. Features with no
+    /// row for any of the user's roles are omitted so the caller can apply its own default.
+    /// </summary>
+    Task<IReadOnlyList<RoleFeatureDto>> GetFeaturesForRolesAsync(IEnumerable<string> roleNames, CancellationToken ct);
+    Task<IReadOnlyList<RoleFeatureDto>> GetRoleFeaturesAsync(int roleId, CancellationToken ct);
+    Task ReplaceRoleFeaturesAsync(int roleId, IReadOnlyCollection<RoleFeatureDto> features, string userName, CancellationToken ct);
 }
 
 public sealed class SqlMenuRepository : IMenuRepository
@@ -320,6 +329,110 @@ WHERE m.MenuItemId = @MenuItemId AND m.IsDeleted = 0;";
                 insert.Parameters.AddWithValue("@UserName", userName);
                 await insert.ExecuteNonQueryAsync(ct);
             }
+        }
+
+        await tx.CommitAsync(ct);
+    }
+
+    // ── Role feature access (non-menu UI elements) ─────────────────────────
+
+    public async Task<IReadOnlyList<RoleFeatureDto>> GetFeaturesForRolesAsync(IEnumerable<string> roleNames, CancellationToken ct)
+    {
+        var roles = roleNames
+            .Where(r => !string.IsNullOrWhiteSpace(r))
+            .Select(r => r.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (roles.Count == 0) return Array.Empty<RoleFeatureDto>();
+
+        var roleParams = roles.Select((_, i) => "@Role" + i).ToList();
+        var sql = $@"
+SELECT   fa.FeatureKey, CONVERT(BIT, MAX(CONVERT(INT, fa.IsEnabled))) AS IsEnabled
+FROM     dbo.RoleFeatureAccess fa
+INNER JOIN dbo.Roles r ON r.RoleID = fa.RoleId
+WHERE    r.RoleName IN ({string.Join(",", roleParams)})
+  AND    ISNULL(r.IsActive, 0) = 1
+GROUP BY fa.FeatureKey;";
+
+        var result = new List<RoleFeatureDto>();
+        await using var conn = Open();
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(sql, conn);
+        for (var i = 0; i < roles.Count; i++) cmd.Parameters.AddWithValue("@Role" + i, roles[i]);
+        try
+        {
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var key = reader.GetString(0);
+                if (!MenuFeatureCatalog.IsKnown(key)) continue; // stale row from a removed feature
+                result.Add(new RoleFeatureDto { FeatureKey = key, IsEnabled = reader.GetBoolean(1) });
+            }
+        }
+        catch (SqlException ex) when (ex.Number == 208)
+        {
+            // Table not deployed yet. This runs on every page render, so an un-migrated
+            // database must read as "nothing decided" and let the host apply its default,
+            // rather than failing the navbar. The admin endpoints below still surface the
+            // error, which is where an admin needs to see it.
+            return Array.Empty<RoleFeatureDto>();
+        }
+        return result;
+    }
+
+    public async Task<IReadOnlyList<RoleFeatureDto>> GetRoleFeaturesAsync(int roleId, CancellationToken ct)
+    {
+        const string sql = @"
+SELECT FeatureKey, IsEnabled FROM dbo.RoleFeatureAccess WHERE RoleId = @RoleId;";
+
+        var result = new List<RoleFeatureDto>();
+        await using var conn = Open();
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@RoleId", roleId);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var key = reader.GetString(0);
+            if (!MenuFeatureCatalog.IsKnown(key)) continue;
+            result.Add(new RoleFeatureDto { FeatureKey = key, IsEnabled = reader.GetBoolean(1) });
+        }
+        return result;
+    }
+
+    public async Task ReplaceRoleFeaturesAsync(int roleId, IReadOnlyCollection<RoleFeatureDto> features, string userName, CancellationToken ct)
+    {
+        foreach (var feature in features)
+        {
+            if (!MenuFeatureCatalog.IsKnown(feature.FeatureKey))
+                throw new ArgumentException($"Unknown feature '{feature.FeatureKey}'.");
+        }
+
+        // Full replace, like ReplaceRoleMenusAsync: a feature the admin left on "Default"
+        // is simply absent from the payload, and its row must go away so the host falls
+        // back to menu access again.
+        const string insertSql = @"
+INSERT dbo.RoleFeatureAccess (RoleId, FeatureKey, IsEnabled, CreatedBy)
+VALUES (@RoleId, @FeatureKey, @IsEnabled, @UserName);";
+
+        await using var conn = Open();
+        await conn.OpenAsync(ct);
+        await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct);
+
+        await using (var delete = new SqlCommand("DELETE FROM dbo.RoleFeatureAccess WHERE RoleId = @RoleId;", conn, tx))
+        {
+            delete.Parameters.AddWithValue("@RoleId", roleId);
+            await delete.ExecuteNonQueryAsync(ct);
+        }
+
+        foreach (var feature in features.GroupBy(f => f.FeatureKey, StringComparer.OrdinalIgnoreCase).Select(g => g.Last()))
+        {
+            await using var cmd = new SqlCommand(insertSql, conn, tx);
+            cmd.Parameters.AddWithValue("@RoleId", roleId);
+            cmd.Parameters.AddWithValue("@FeatureKey", feature.FeatureKey);
+            cmd.Parameters.AddWithValue("@IsEnabled", feature.IsEnabled);
+            cmd.Parameters.AddWithValue("@UserName", userName);
+            await cmd.ExecuteNonQueryAsync(ct);
         }
 
         await tx.CommitAsync(ct);

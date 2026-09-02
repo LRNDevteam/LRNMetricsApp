@@ -5,7 +5,8 @@
 <div class="container py-3" style="max-width: 760px">
     <h3 class="fw-bold">Role Menu Mapping</h3>
     <p class="text-secondary">
-        Choose which menus each role can see. Checking a submenu automatically includes its parent.
+        Choose which menus each role can see, and which non-menu screen elements it gets.
+        Checking a submenu automatically includes its parent.
         Menu items are managed in <a asp-controller="Admin" asp-action="MenuMaster">Menu Master</a>.
     </p>
 
@@ -28,6 +29,21 @@
         <div class="list-group-item text-secondary">Select a role to load its menu access.</div>
     </div>
 
+    @* Screen elements that are not navbar menus (header icons, in-page launchers) and so
+       cannot be checked in the tree above. "Default" leaves them following the role's menu
+       access, which is how they behaved before this section existed. *@
+    <h6 class="fw-bold mt-4 mb-1">Other screen access</h6>
+    <p class="text-secondary small">
+        Icons and shortcuts that are not navbar menus. <strong>Default</strong> follows the
+        role's access to the screen behind it; <strong>Enabled</strong> and
+        <strong>Disabled</strong> override that. Enabling one of these also grants the role
+        the screen it opens, so a <strong>Default</strong> option pointing at the same screen
+        turns on with it — set that one to <strong>Disabled</strong> to keep it hidden.
+    </p>
+    <div id="featureList" class="list-group mb-3">
+        <div class="list-group-item text-secondary">Select a role to load its screen access.</div>
+    </div>
+
     <button class="btn btn-primary" type="button" id="btnSaveMapping" disabled>
         <i class="bi bi-save me-1"></i>Save mapping
     </button>
@@ -44,11 +60,14 @@
         roles: '@Url.Action("MenuRoles", "Admin")',
         items: '@Url.Action("MenuItems", "Admin")',
         roleMenus: '@Url.Action("RoleMenus", "Admin")',
+        features: '@Url.Action("MenuFeatures", "Admin")',
+        roleFeatures: '@Url.Action("RoleFeatures", "Admin")',
         save: '@Url.Action("SaveRoleMenus", "Admin")'
     };
     const antiForgery = () => document.querySelector('input[name="__RequestVerificationToken"]').value;
 
     let allItems = [];
+    let allFeatures = [];
 
     function showAlert(message, isError) {
         const el = document.getElementById('mapAlert');
@@ -77,8 +96,11 @@
 
     async function init() {
         try {
-            const [roles, items] = await Promise.all([getJson(urls.roles), getJson(urls.items)]);
+            const [roles, items, features] = await Promise.all([
+                getJson(urls.roles), getJson(urls.items), getJson(urls.features)
+            ]);
             allItems = items;
+            allFeatures = features;
             document.getElementById('ddlRole').innerHTML =
                 '<option value="">Select a role…</option>' +
                 roles.map(r => '<option value="' + r.roleId + '">' + escapeHtml(r.roleName) + '</option>').join('');
@@ -114,17 +136,46 @@
             html || '<div class="list-group-item text-secondary">No menu items defined yet.</div>';
     }
 
+    // "" = Default (no row saved), "1" = Enabled, "0" = Disabled.
+    function renderFeatures(roleFeatures) {
+        const settings = new Map((roleFeatures || []).map(f => [f.featureKey, f.isEnabled ? '1' : '0']));
+        const html = allFeatures.map(feature => {
+            const current = settings.has(feature.featureKey) ? settings.get(feature.featureKey) : '';
+            const option = (value, label) =>
+                '<option value="' + value + '"' + (current === value ? ' selected' : '') + '>' + label + '</option>';
+            return '<div class="list-group-item d-flex align-items-center gap-3">' +
+                '<div class="flex-grow-1">' +
+                    '<div class="fw-semibold">' + escapeHtml(feature.displayName) + '</div>' +
+                    '<div class="small text-secondary">' + escapeHtml(feature.description) + '</div>' +
+                '</div>' +
+                '<select class="form-select form-select-sm feature-select" style="width:auto" ' +
+                        'data-key="' + escapeHtml(feature.featureKey) + '" ' +
+                        'aria-label="' + escapeHtml(feature.displayName) + ' access">' +
+                    option('', 'Default') + option('1', 'Enabled') + option('0', 'Disabled') +
+                '</select>' +
+            '</div>';
+        }).join('');
+        document.getElementById('featureList').innerHTML =
+            html || '<div class="list-group-item text-secondary">No screen access options are defined.</div>';
+    }
+
     async function loadRoleMenus(roleId) {
         const saveBtn = document.getElementById('btnSaveMapping');
         if (!roleId) {
             saveBtn.disabled = true;
             document.getElementById('menuTree').innerHTML =
                 '<div class="list-group-item text-secondary">Select a role to load its menu access.</div>';
+            document.getElementById('featureList').innerHTML =
+                '<div class="list-group-item text-secondary">Select a role to load its screen access.</div>';
             return;
         }
         try {
-            const ids = await getJson(urls.roleMenus + '?roleId=' + roleId);
+            const [ids, roleFeatures] = await Promise.all([
+                getJson(urls.roleMenus + '?roleId=' + roleId),
+                getJson(urls.roleFeatures + '?roleId=' + roleId)
+            ]);
             renderTree(ids);
+            renderFeatures(roleFeatures);
             saveBtn.disabled = false;
         } catch (err) {
             showAlert(err.message, true);
@@ -135,6 +186,9 @@
         const roleId = +document.getElementById('ddlRole').value;
         if (!roleId) return showAlert('Select a role first.', true);
         const menuIds = Array.from(document.querySelectorAll('#menuTree input:checked')).map(c => +c.dataset.id);
+        const features = Array.from(document.querySelectorAll('.feature-select'))
+            .filter(s => s.value !== '')   // "Default" saves no row
+            .map(s => ({ featureKey: s.dataset.key, isEnabled: s.value === '1' }));
 
         const btn = document.getElementById('btnSaveMapping');
         btn.disabled = true;
@@ -146,7 +200,7 @@
                     'Content-Type': 'application/json',
                     'RequestVerificationToken': antiForgery()
                 },
-                body: JSON.stringify({ roleId: roleId, menuIds: menuIds })
+                body: JSON.stringify({ roleId: roleId, menuIds: menuIds, features: features })
             });
             if (!resp.ok) {
                 let message = 'Save failed (' + resp.status + ')';

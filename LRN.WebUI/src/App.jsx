@@ -4,7 +4,7 @@ import { emptyDashboard, emptyFilter, emptyFilterOptions, emptyPagedResult } fro
 import { denialWorkflowService, qs } from './services/denialWorkflowService';
 import { GENERIC_WORKFLOW_ERROR } from './services/httpClient';
 import { claimRole, claimUser, clearWorkflowJwt, ensureWorkflowJwt, getJwt, parseJwt } from './utils/auth';
-import { canAssignRole, canDownloadWorkflowRole, initials, isArManagerRole, isArReviewerRole, isClientManagerRole, isAccountManagerRole, isReadOnlyWorkflowRole } from './utils/formatters';
+import { canAssignRole, canDownloadWorkflowRole, initials, isArManagerRole, isArReviewerRole, isClientManagerRole, isAccountManagerRole, isLabUserRole, isReadOnlyWorkflowRole } from './utils/formatters';
 import DashboardFilter from './components/DashboardFilter';
 import { clearHiddenWorkflowFilters, getFiltersForRoleQueue, getQueuesForRole, normalizeQueueKey } from './config/workflowRoleQueues';
 import DashboardPage from './pages/DashboardPage';
@@ -105,6 +105,7 @@ export default function App() {
   const clientManager = isClientManagerRole(user.role);
   const accountManager = isAccountManagerRole(user.role);
   const externalManager = clientManager || accountManager;
+  const labUser = isLabUserRole(user.role);
   const adminRole = String(user.role || '').toLowerCase().includes('admin');
   const readOnlyWorkflow = isReadOnlyWorkflowRole(user.role);
   const denialMapperViewer = /viewer|read\s*only/i.test(String(user.role || ''));
@@ -161,6 +162,9 @@ export default function App() {
     let blockedByRole = false;
     if (reviewerOnly && safeView === 'claims') { safeView = 'myworklist'; blockedByRole = true; }
     if (externalManager && safeView === 'myworklist') { safeView = 'claims'; blockedByRole = true; }
+    // Lab User is view-only on the claim queues: no worklist (nothing is assigned to them), no
+    // escalation queues and no verification decisions. Deep links to those land on Claim View.
+    if (labUser && ['myworklist', 'escalations', 'verification'].includes(safeView)) { safeView = 'claims'; blockedByRole = true; }
     if ((safeView === 'denialcodemaster' || safeView === 'denialactionverification') && !isArManagerRole(user.role) && !String(user.role || '').toLowerCase().includes('admin')) { safeView = resolveLandingView(user.role); blockedByRole = true; }
     // Cumulative Audit F-19: the security boundary was already enforced (the restricted
     // content never rendered), but the user got no explanation for why they landed somewhere
@@ -1274,7 +1278,7 @@ export default function App() {
         <button className={`lrn-nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}><i className="bi bi-speedometer2" />Denial Dashboard</button>
         <button className={`lrn-nav-item ${view === 'aging' ? 'active' : ''}`} onClick={() => setView('aging')}><i className="bi bi-hourglass-split" />Aging Dashboard</button>
         <div className="lrn-nav-section">Denial Workflow</div>
-        {(canAssign || externalManager || adminRole) && (
+        {(canAssign || externalManager || adminRole || labUser) && (
           <>
             <button className={`lrn-nav-item ${view === 'claims' ? 'active' : ''}`} onClick={() => setView('claims', { closeSidebar: false })}><i className="bi bi-folder-check" />{canAssign ? 'Claim Assignment' : 'Claim View'}</button>
             {(view === 'claims' || view === 'verification' || (view === 'escalations' && escalationView === 'response')) && (
@@ -1311,8 +1315,10 @@ export default function App() {
         )}
         {/* Client/Account Managers now use the unified Claim View (with External Escalation /
             External Response tabs) instead of the separate escalation page. The standalone
-            Escalation Queue nav remains only for other read-only roles. */}
-        {(readOnlyWorkflow && !externalManager) && (
+            Escalation Queue nav remains only for other read-only roles -- but not the Lab User,
+            who never acts on an escalation and so gets no escalation queue (the API refuses
+            those views for the role too). */}
+        {(readOnlyWorkflow && !externalManager && !labUser) && (
           <>
             <button className={`lrn-nav-item ${view === 'escalations' ? 'active' : ''}`} onClick={() => setView('escalations', { closeSidebar: false })}><i className="bi bi-exclamation-triangle" />Escalation Queue<span className="lrn-nav-badge">{menuCountText(claimMenuCounts.escalations)}</span></button>
             {view === 'escalations' && (

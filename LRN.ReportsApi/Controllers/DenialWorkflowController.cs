@@ -105,6 +105,7 @@ public sealed class DenialWorkflowController : ControllerBase
     [HttpPost("import")]
     public async Task<ActionResult<DenialWorkflowImportResult>> Import(DenialTaskImportRequest request, CancellationToken ct)
     {
+        if (DenyWriteForLabUser("import workflow tasks") is { } denied) return denied;
         if (request.LabId <= 0) return BadRequest("LabId is required.");
         if (string.IsNullOrWhiteSpace(request.RunId)) return BadRequest("RunId is required.");
         return Ok(await _service.ImportAsync(request, ct));
@@ -838,6 +839,7 @@ public sealed class DenialWorkflowController : ControllerBase
     public async Task<ActionResult<DenialNoteRow>> SaveNote(SaveDenialNoteRequest request, CancellationToken ct)
     {
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        if (DenyWriteForLabUser("add comments") is { } denied) return denied;
         if (request.LabId <= 0) return BadRequest("LabId is required.");
         if (string.IsNullOrWhiteSpace(request.ClaimId)) return BadRequest("ClaimId is required.");
         if (string.IsNullOrWhiteSpace(request.NoteText)) return BadRequest("Note text is required.");
@@ -893,6 +895,7 @@ public sealed class DenialWorkflowController : ControllerBase
     public async Task<ActionResult<IReadOnlyList<ClaimDocumentRow>>> UploadClaimDocuments([FromForm] int labId, [FromForm] string claimId, [FromForm] string? comment, [FromForm] string? uploadedBy, [FromForm] List<IFormFile> files, CancellationToken ct)
     {
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        if (DenyWriteForLabUser("upload documents") is { } denied) return denied;
         if (labId <= 0) return BadRequest("LabId is required.");
         if (string.IsNullOrWhiteSpace(claimId)) return BadRequest("ClaimId is required.");
         if ((IsClientManagerRole(role) || IsAccountManagerRole(role)) && !await HasExternalManagerDocumentAccessAsync(labId, claimId, null, null, role, ct))
@@ -956,6 +959,7 @@ public sealed class DenialWorkflowController : ControllerBase
     public async Task<IActionResult> DeleteClaimDocument([FromRoute] long documentId, [FromQuery] int labId, CancellationToken ct)
     {
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        if (DenyWriteForLabUser("delete documents") is { } denied) return denied;
         if (labId <= 0) return BadRequest("LabId is required.");
 
         var doc = await _service.GetClaimDocumentAsync(labId, documentId, ct);
@@ -1108,6 +1112,7 @@ public sealed class DenialWorkflowController : ControllerBase
     [HttpPost("verification/decision")]
     public async Task<ActionResult<DenialWorkflowResult>> VerificationDecision(VerificationDecisionRequest request, CancellationToken ct)
     {
+        if (DenyWriteForLabUser("decide verifications") is { } denied) return denied;
         var rows = await _service.DecideVerificationAsync(request, ct);
         return Ok(new DenialWorkflowResult { Success = rows > 0, RowsAffected = rows, Message = rows > 0 ? "Verification saved." : "Verification update failed." });
     }
@@ -1261,6 +1266,11 @@ public sealed class DenialWorkflowController : ControllerBase
         if ((IsClientManagerRole(role) || IsAccountManagerRole(role))
             && (view.Contains("INTERNALESCALATION") || view.Contains("ESCALATIONRESPONSE") || view == "RESPONSE"))
             return false;
+        // A Lab User never acts on an escalation, so no escalation queue is theirs to read
+        // either - they get the plain claim queues only.
+        if (IsLabUserRole(role)
+            && (view.Contains("ESCALATION") || view == "RESPONSE"))
+            return false;
         return true;
     }
 
@@ -1272,12 +1282,31 @@ public sealed class DenialWorkflowController : ControllerBase
             || r.Contains("ARMANAGER")
             || IsReviewerOnly(role)
             || r.Contains("CLIENTMANAGER")
-            || r.Contains("ACCOUNTMANAGER");
+            || r.Contains("ACCOUNTMANAGER")
+            // Exporting is reading: a Lab User may take their lab's claim data to a
+            // spreadsheet even though they cannot change any of it.
+            || IsLabUserRole(role);
     }
 
-    internal static bool IsReadOnlyWorkflowRole(string? role) => IsClientManagerRole(role) || IsAccountManagerRole(role);
+    internal static bool IsReadOnlyWorkflowRole(string? role)
+        => IsClientManagerRole(role) || IsAccountManagerRole(role) || IsLabUserRole(role);
+
     internal static bool IsClientManagerRole(string? role) => NormalizeRoleToken(role).Contains("CLIENTMANAGER");
     internal static bool IsAccountManagerRole(string? role) => NormalizeRoleToken(role).Contains("ACCOUNTMANAGER");
+
+    /// <summary>
+    /// Lab User: a lab's own staff, given the workflow screens to watch their claims but never
+    /// to change them. Stricter than Client/Account Manager, who are read-only on the claim
+    /// queues yet still respond to escalations routed to them - a Lab User has no write path at
+    /// all, so every write endpoint refuses the role outright.
+    /// </summary>
+    internal static bool IsLabUserRole(string? role) => NormalizeRoleToken(role).Contains("LABUSER");
+
+    /// <summary>403 for a Lab User, null for everyone else. Guards each write endpoint.</summary>
+    private ObjectResult? DenyWriteForLabUser(string action)
+        => IsLabUserRole(FirstClaim(ClaimTypes.Role, "role", "roles"))
+            ? StatusCode(StatusCodes.Status403Forbidden, new { message = $"Lab User access is view-only and cannot {action}." })
+            : null;
 
     internal static bool IsReviewerOnly(string? role)
     {

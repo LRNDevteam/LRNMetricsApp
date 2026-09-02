@@ -74,6 +74,34 @@ public sealed class RoleMenuSaveDto
 {
     public int RoleId { get; set; }
     public List<int> MenuIds { get; set; } = new();
+
+    /// <summary>
+    /// Non-menu UI elements toggled on the same screen (header chat icon, help-bubble
+    /// shortcut). Saved together with the menus so one Save button covers both.
+    /// </summary>
+    public List<RoleFeatureDto> Features { get; set; } = new();
+}
+
+/// <summary>A togglable UI element that is not a navbar menu item.</summary>
+public sealed class MenuFeatureDto
+{
+    public string FeatureKey { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+}
+
+/// <summary>One role's explicit setting for a feature. No row = not decided.</summary>
+public sealed class RoleFeatureDto
+{
+    public string FeatureKey { get; set; } = string.Empty;
+    public bool IsEnabled { get; set; }
+}
+
+/// <summary>Feature keys the dashboard reads. Must match LRN.ReportsApi's MenuFeatureCatalog.</summary>
+public static class MenuFeatureKeys
+{
+    public const string ReimbursementChatHeaderIcon = "ReimbursementChat.HeaderIcon";
+    public const string ReimbursementChatHelpBubble = "ReimbursementChat.HelpBubble";
 }
 
 public sealed class MenuDisabledDto

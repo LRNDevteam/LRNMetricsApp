@@ -16,7 +16,12 @@ export const priorityClass = (v) => String(v || '').toLowerCase().includes('high
 export const normalizeRole = (role) => String(role || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
 export const isClientManagerRole = (role) => normalizeRole(role).includes('clientmanager');
 export const isAccountManagerRole = (role) => normalizeRole(role).includes('accountmanager');
-export const isReadOnlyWorkflowRole = (role) => isClientManagerRole(role) || isAccountManagerRole(role);
+// Lab User: the lab's own staff, watching their claims. Stricter than Client/Account Manager,
+// who are read-only on the queues but still respond to escalations routed to them -- a Lab User
+// has no write path at all and no escalation queues. Mirrors IsLabUserRole in the API's
+// DenialWorkflowController; both must agree or the UI offers something the API refuses.
+export const isLabUserRole = (role) => normalizeRole(role).includes('labuser');
+export const isReadOnlyWorkflowRole = (role) => isClientManagerRole(role) || isAccountManagerRole(role) || isLabUserRole(role);
 export const isArManagerRole = (role) => normalizeRole(role).includes('armanager');
 export const isArReviewerRole = (role) => {
   const r = normalizeRole(role);
@@ -30,7 +35,9 @@ export const canAssignRole = (role) => {
 };
 export const canDownloadWorkflowRole = (role) => {
   const r = normalizeRole(role);
-  return r.includes('admin') || r.includes('armanager') || isArReviewerRole(role) || isClientManagerRole(role) || isAccountManagerRole(role);
+  // Exporting is reading: a Lab User may take their lab's claim data to a spreadsheet
+  // even though they cannot change any of it.
+  return r.includes('admin') || r.includes('armanager') || isArReviewerRole(role) || isClientManagerRole(role) || isAccountManagerRole(role) || isLabUserRole(role);
 };
 export const canUpdateWorkflowRole = (role) => {
   const r = normalizeRole(role);

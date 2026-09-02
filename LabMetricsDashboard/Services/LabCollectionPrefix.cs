@@ -37,6 +37,10 @@ public static class LabCollectionPrefix
         ["Phi_Life"]           = "Phi",
         ["PCRLabsofAmerica"]   = "PCR",
         ["PCR_Labs_of_America"]= "PCR",
+        // Demo lab: a clone of PCR, so its database carries PCR's own PCR_CS_* aggregate
+        // tables. Without this entry GetPrefix returns null and the Collection Summary
+        // tabs silently fall back to live queries on a lab whose config says otherwise.
+        ["LRNLabDemo"]         = "PCR",
         ["RisingTides"]        = "RT",
         ["Rising_Tides"]       = "RT",
         ["InHealthDTR"]        = "IHD",

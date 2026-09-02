@@ -668,7 +668,20 @@
             const response = await fetch(urls.labs);
             if (!response.ok) return;
             const labs = await response.json();
-            $('labSelect').innerHTML = '<option value="">All Labs</option>' +
+            const select = $('labSelect');
+
+            // This list is already limited to the labs the signed-in user is assigned to, so
+            // "All Labs" here means "all of my labs". With exactly one assigned lab there is
+            // nothing to switch between, and an "All Labs" option would wrongly suggest the
+            // grid is showing more than that one lab — so pin it instead.
+            if ((labs || []).length === 1) {
+                select.innerHTML = `<option value="${labs[0].labId}">${esc(labs[0].labName)}</option>`;
+                select.disabled = true;
+                return;
+            }
+
+            select.disabled = false;
+            select.innerHTML = '<option value="">All Labs</option>' +
                 (labs || []).map(l => `<option value="${l.labId}">${esc(l.labName)}</option>`).join('');
         } catch (e) { /* lab filter stays on All Labs */ }
     }

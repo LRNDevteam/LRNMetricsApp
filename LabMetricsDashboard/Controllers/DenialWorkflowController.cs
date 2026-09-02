@@ -21,13 +21,15 @@ public sealed class DenialWorkflowController : Controller
     private readonly IDenialRecordRepository _denialRepository;
     private readonly IUserManagementRepository _userRepository;
     private readonly WorkflowJwtIssuer _jwtIssuer;
+    private readonly IConfiguration _configuration;
 
-    public DenialWorkflowController(IDenialWorkflowApiClient workflowApi, IDenialRecordRepository denialRepository, IUserManagementRepository userRepository, WorkflowJwtIssuer jwtIssuer)
+    public DenialWorkflowController(IDenialWorkflowApiClient workflowApi, IDenialRecordRepository denialRepository, IUserManagementRepository userRepository, WorkflowJwtIssuer jwtIssuer, IConfiguration configuration)
     {
         _workflowApi = workflowApi;
         _denialRepository = denialRepository;
         _userRepository = userRepository;
         _jwtIssuer = jwtIssuer;
+        _configuration = configuration;
     }
 
     [AllowAnonymous]
@@ -62,6 +64,13 @@ public sealed class DenialWorkflowController : Controller
         int page = 1,
         CancellationToken cancellationToken = default)
     {
+        // This Razor screen has no view-only mode: its Tasks and Verification tabs render the
+        // status and decision controls for everyone, and only the POST handlers refuse the role.
+        // A Lab User's Denial Workflow menu link points at the React app, so this page is only
+        // reachable by typing the URL — send them where they are meant to be instead of showing
+        // controls that would 403 on submit.
+        if (IsLabUserRole()) return RedirectToReactWorkflow();
+
         var labs = (await _denialRepository.GetLabsAsync(cancellationToken)).OrderBy(x => x.LabName).ToList();
         var selectedLab = ResolveSelectedLab(labs, labId, lab);
         if (selectedLab == null) return View(new DenialWorkflowPageViewModel());
@@ -126,6 +135,11 @@ public sealed class DenialWorkflowController : Controller
         string? payerName = null,
         CancellationToken cancellationToken = default)
     {
+        // A Lab User exports from the React app, where the export is scoped by the labs on
+        // their token. This one resolves the lab from the query string instead, so it is not
+        // the export path to hand a view-only role.
+        if (IsLabUserRole()) return RedirectToReactWorkflow();
+
         var labs = (await _denialRepository.GetLabsAsync(cancellationToken)).OrderBy(x => x.LabName).ToList();
         var selectedLab = ResolveSelectedLab(labs, labId, lab);
         if (selectedLab == null) return NotFound("No lab found.");
@@ -472,6 +486,25 @@ public sealed class DenialWorkflowController : Controller
     }
 
     private bool HasAnyRole(params string[] roles) => roles.Any(role => User.IsInRole(role));
+
+    /// <summary>
+    /// Lab User: view-only access to the Denial Workflow React app. Matched on the normalised
+    /// role name the same way LRN.ReportsApi's DenialWorkflowController.IsLabUserRole does, so
+    /// "Lab User", "LabUser" and "Lab-User" all resolve.
+    /// </summary>
+    private bool IsLabUserRole() => User.Claims
+        .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role)
+        .Any(c => new string(c.Value.Where(char.IsLetterOrDigit).ToArray())
+            .Contains("LabUser", StringComparison.OrdinalIgnoreCase));
+
+    private IActionResult RedirectToReactWorkflow()
+    {
+        var url = _configuration["DenialWorkflowReactUrl"];
+        // Nothing configured to redirect to: refuse rather than fall through to a screen this
+        // role must not edit from.
+        if (string.IsNullOrWhiteSpace(url)) return Forbid();
+        return Redirect(url.Contains('#') ? url : $"{url}#aging");
+    }
 }
 
 public sealed class InsightAssignmentRow
