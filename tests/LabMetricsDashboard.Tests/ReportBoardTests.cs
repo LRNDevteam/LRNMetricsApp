@@ -255,3 +255,53 @@ public class ReportBoardFeatureGatingTests
             Assert.Contains(entry.FeatureFlag!, boolProperties);
     }
 }
+
+public class ReportBoardSettingsTests
+{
+    private static readonly ReportBoardSettings Settings = new()
+    {
+        LabOrder = ["PCRLabsofAmerica", "Cove", "Phi_Life"],
+        NoMissingReportWarning = ["Beech_Tree"]
+    };
+
+    [Fact]
+    public void Position_in_the_list_is_the_order()
+    {
+        Assert.Equal(0, Settings.OrderOf("PCRLabsofAmerica", null));
+        Assert.Equal(1, Settings.OrderOf("Cove", null));
+        Assert.Equal(2, Settings.OrderOf("Phi_Life", null));
+    }
+
+    /// <summary>The board resolves labs loosely everywhere else; the order list must agree.</summary>
+    [Theory]
+    [InlineData("CoveLRN")]
+    [InlineData("Cove_LRN")]
+    [InlineData("cove")]
+    public void A_lab_is_matched_on_the_same_normalised_token_as_the_rest_of_the_board(string key)
+        => Assert.Equal(1, Settings.OrderOf(key, null));
+
+    /// <summary>An unmapped lab has no config key - the tracker name still has to place it.</summary>
+    [Fact]
+    public void The_tracker_display_name_places_a_lab_with_no_config_key()
+        => Assert.Equal(0, Settings.OrderOf(null, "PCR Labs of America"));
+
+    [Fact]
+    public void A_lab_missing_from_the_list_sorts_last()
+        => Assert.Equal(int.MaxValue, Settings.OrderOf("Rising_Tides", "Rising Tides"));
+
+    [Fact]
+    public void An_empty_section_leaves_every_lab_unordered_rather_than_throwing()
+        => Assert.Equal(int.MaxValue, new ReportBoardSettings().OrderOf("Cove", "Cove"));
+
+    [Fact]
+    public void A_listed_lab_suppresses_its_missing_report_warning()
+        => Assert.True(Settings.SuppressesMissingReportWarning("Beech_Tree", "Beech Tree"));
+
+    [Fact]
+    public void An_unlisted_lab_still_warns()
+        => Assert.False(Settings.SuppressesMissingReportWarning("Cove", "Cove"));
+
+    [Fact]
+    public void A_lab_with_no_key_and_no_name_is_never_suppressed()
+        => Assert.False(Settings.SuppressesMissingReportWarning(null, null));
+}

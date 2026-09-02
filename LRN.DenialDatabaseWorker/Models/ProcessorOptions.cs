@@ -58,13 +58,40 @@ public sealed class ProcessorOptions
 	/// </summary>
 	public int SqlCommandTimeoutSeconds { get; init; } = 600;
 
-	// Add this so worker can access configuration
-	public IConfiguration? Configuration { get; set; }
-	public double IntervalMinutes { get; set; }
+	/// <summary>
+	/// Loop interval when <see cref="RunOnceOnStartup"/> is false. Must never be zero: a zero
+	/// here turns the continuous mode into an uninterrupted loop over every lab, which is what
+	/// an unbound property produced before this default existed (spec §10.1, drift 11.1).
+	/// </summary>
+	public double IntervalMinutes { get; set; } = 60;
 
-	// NEW — REQUIRED BY BULK WRITERS
-	public string DatabaseConnectionString { get; set; } = "";
+	/// <summary>
+	/// Lab table holding the current line-level report, read by the resubmission check (spec §6.2).
+	/// Existence is probed at run time; an absent table skips the check rather than failing the lab.
+	/// </summary>
+	public string LineLevelTable { get; init; } = "dbo.LineLevelData";
 
+	/// <summary>
+	/// Master switch for the upstream-resolution check (spec §6.1): did the claim line become a
+	/// write-off or an adjustment rather than simply disappearing?
+	/// </summary>
+	public bool EnableUpstreamResolutionCheck { get; init; } = true;
+
+	/// <summary>
+	/// Master switch for the resubmission check (spec §6.2). Off by default until the line-level
+	/// table name and grain are confirmed — see REQUIREMENTS §12.1.
+	/// </summary>
+	public bool EnableResubmissionCheck { get; init; } = false;
+
+	/// <summary>
+	/// Source PayStatus / ClaimStatus values that mean the line was written off. Configurable
+	/// because the vocabulary comes from the labs' billing systems, not from us. Matching is
+	/// case-insensitive and ignores spaces and hyphens, so one entry covers several spellings.
+	/// </summary>
+	public List<string> WriteOffStatusValues { get; init; } = new() { "Write Off", "Fully WriteOff", "Write-Off" };
+
+	/// <summary>As <see cref="WriteOffStatusValues"/>, for adjustments.</summary>
+	public List<string> AdjustedStatusValues { get; init; } = new() { "Adjusted", "Fully Adjusted" };
 }
 
 public sealed class SharePointOptions

@@ -109,7 +109,7 @@ accumulated, not with the size of the current run. If it comes back, check in or
 2. **How much data.** `SELECT COUNT(1) FROM dbo.DenialTaskBoard WHERE LabId = <LabId>` and the
    same for `DenialLineItem` / `PayerValidationReport WHERE RunId = '<RunId>'`, run in the
    **lab** database.
-3. **Indexes.** `Sql_Add_Denial_Performance_Indexes.sql` has the supporting indexes for this
+3. **Indexes.** `LRN.ReportsApi/Sql/DenialChanges/03_Denial_Performance_Indexes.sql` has the supporting indexes for this
    path, with the sizing queries at the bottom. Review before applying — raising the timeout
    stops the exception, indexes are what make it fast.
 
@@ -152,11 +152,106 @@ sc.exe start  "LRN - Denial Database Processor"
 
 ---
 
+## Configuration and secrets
+
+`appsettings.json` holds **no secrets** and is safe to commit. Every secret comes from Azure Key
+Vault at run time, the same vault and the same pattern as
+[`LRN.MasterFileProcessorWorker`](../LRN.MasterFileProcessorWorker/README.md):
+
+```
+https://kv-lrnmetrics-prod.vault.azure.net/
+```
+
+Key Vault secret names cannot contain `:`, so they use `--` instead. The configuration provider maps
+them back, which means a vault secret binds straight onto a configuration key. The provider is added
+after `appsettings.json`, so a vault value always wins over it.
+
+| Vault secret | Configuration key |
+| --- | --- |
+| `ConnectionStrings--DenialDatabase` | `ConnectionStrings:DenialDatabase` |
+| `DenialDatabaseProcessor--SharePoint--TenantId` | `DenialDatabaseProcessor:SharePoint:TenantId` |
+| `DenialDatabaseProcessor--SharePoint--ClientId` | `DenialDatabaseProcessor:SharePoint:ClientId` |
+| `DenialDatabaseProcessor--SharePoint--ClientSecret` | `DenialDatabaseProcessor:SharePoint:ClientSecret` |
+
+`ConnectionStrings--DenialDatabase` is the `LRNMaster` database — the same connection the Master File
+Processor reads from `ConnectionStrings--DefaultConnection`. **Known wart:** the same connection
+string therefore lives in the vault under two names and both have to be rotated together.
+Consolidating means renaming the key at the six `GetConnectionString("DenialDatabase")` call sites.
+
+### Per-lab databases
+
+`appsettings.json` carries no lab connection strings. Each `Labs[]` entry instead names the vault
+secret holding its own database, via `LabDbConnectionKey`; `Program.cs` resolves it at startup, once
+the vault provider is in place. These are the **same per-lab secrets the Master File Processor uses**,
+so none had to be created:
+
+| Lab | `LabId` | `LabDbConnectionKey` | Database |
+| --- | --- | --- | --- |
+| Inhealth_DTR | 2 | `InHealthConn` | `InHealthDTRLRN` |
+| Cove | 4 | `CoveConnection` | `CoveLRN` |
+| PCR_Dx_AL | 7 | `PCRALConnection` | `PCRAL_LRN` |
+| PCR_Dx_CO | 8 | `PCRDxConnection` | `PCRCO_LRN` |
+| Rising Tides | 9 | `RisingTidesConnStr` | `RisingTides` |
+| Beech_Tree | 10 | `BeechTreeConnStr` | `BeechTree_LRN` |
+| Phi Life | 12 | `PhiLifeConnStr` | `PhiLife_LRN` |
+| PCR Labs of America | 13 | `PCRLOAConnStr` | `PCRLOA_LRN` |
+| Elixir | 16 | `ElixirConnection` | `Elixir_LRN` |
+| Certus | 18 | `CertusConnection` | `Certus_LRN` |
+| Augustus Labs | 19 | `AugustusConnStr` | `Augustus_LRN` |
+| NorthWest | 20 | `NWLConnection` | `NWL_LRN` |
+
+Startup throws, naming the lab and the missing secret, if a key cannot be resolved. A literal
+`LabConnectionString` in configuration still wins over the vault — use that only for a throwaway
+local override, never in a committed file.
+
+> The `LabId` values above are this worker's own and **disagree with the Master File Processor's**
+> for four labs: PCR_Dx_AL (6 there), PCR_Dx_CO (7), Augustus Labs (24) and NorthWest (23). The
+> mapping above was made by database name, which is unambiguous. Worth reconciling separately — it
+> was not touched here.
+
+### The one secret that is not in the vault
+
+The Teams incoming-webhook URL is 265 characters, longer than the 256-character limit on the vault
+tags these settings are managed through, so it lives in `appsettings.Secrets.json` instead. That file
+is gitignored and is loaded **after** the vault, so anything in it wins.
+
+Copy [`appsettings.Secrets.example.json`](appsettings.Secrets.example.json) to
+`appsettings.Secrets.json` and fill in the URL. Nothing else belongs in that file — every other
+secret comes from the vault.
+
+> `TeamsNotificationOptions` is **not bound** in `Program.cs`, so `TeamsNotification:*` is read by
+> nothing and the notifier is inert whatever the config says. Pre-existing; left alone here, because
+> binding it would start sending Teams messages that are not being sent today.
+
+### Authenticating to the vault
+
+Access uses `DefaultAzureCredential`:
+
+* **On the server** — the service's managed identity.
+* **Locally** — your `az login` / Visual Studio sign-in.
+
+The vault has RBAC authorization enabled, so that identity needs the **Key Vault Secrets User** role
+on `kv-lrnmetrics-prod`. Without it, startup fails when the first secret is read.
+
+### Running without the vault
+
+Set `KeyVault:VaultUri` to `""` and supply the same keys through environment variables or user
+secrets, for example:
+
+```powershell
+$env:ConnectionStrings__DenialDatabase = "Server=...;Initial Catalog=LRNMaster;..."
+$env:ConnectionStrings__CoveConnection = "Server=...;Initial Catalog=CoveLRN;..."
+$env:DenialDatabaseProcessor__SharePoint__ClientSecret = "..."
+```
+
+---
+
 ## SharePoint upload configuration (Graph)
 Set in appsettings.json:
 - DenialDatabaseProcessor:SharePoint:Enabled = true
-- TenantId, ClientId, ClientSecret (App Registration)
 - SiteUrl (e.g. https://tenant.sharepoint.com/sites/SiteName)
+
+TenantId, ClientId and ClientSecret come from Key Vault — see **Configuration and secrets** above.
 
 Permissions needed for the app registration (typical):
 - Microsoft Graph -> Application permissions -> Sites.ReadWrite.All (or Sites.Selected if you prefer tighter)

@@ -163,6 +163,11 @@ public class DenialDashboardController : Controller
 			RecordsTotalPages = recordsTotalPages,
 			Summary = BuildSummary(filteredRecords),
 			StatusBreakdown = BuildBreakdown(filteredRecords, x => x.Status, ["Open", "In Progress", "Completed", "On Hold", "Escalated", "Closed"]),
+			// No seed list: the workflow axis is open-ended (escalation states, "Assigned To AR
+			// Reviewer", and — since the reviewer-closure change — whichever Actual Action /
+			// Outcome was chosen), so seeding it would only invent zero rows for values this lab
+			// may never use while hiding the ones it does.
+			WorkflowStatusBreakdown = BuildBreakdown(filteredRecords, x => x.EffectiveWorkFlowStatus),
 			PriorityBreakdown = BuildBreakdown(filteredRecords, x => x.Priority, ["High", "Medium", "Low"]),
 			ActionCategoryBreakdown = BuildBreakdown(filteredRecords, x => x.EffectiveActionCategory),
 			ClassificationBreakdown = BuildBreakdown(filteredRecords, x => x.DenialClassification),

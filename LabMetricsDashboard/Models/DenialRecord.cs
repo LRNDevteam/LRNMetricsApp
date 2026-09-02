@@ -25,6 +25,25 @@ public class DenialRecord
     public decimal TotalBalance { get; set; }
     public bool IsCurrentDenial { get; set; }
     public string Status { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The workflow/escalation axis from the Denial Workflow app ("Assigned To AR Reviewer",
+    /// "Internal Escalation", "Closed Claim", or the reviewer's chosen outcome on closure).
+    /// Distinct from <see cref="Status"/>, which is task progression. Shown here so users who do
+    /// not have the Denial Workflow application can still see where the work actually sits.
+    /// </summary>
+    public string WorkFlowStatus { get; set; } = string.Empty;
+
+    /// <summary>
+    /// WorkFlowStatus, falling back to Status when the workflow app has never touched the row.
+    /// Grouping on the raw column alone reported every untouched denial as blank, which is what
+    /// made the workflow breakdown look empty on a freshly imported run.
+    /// </summary>
+    public string EffectiveWorkFlowStatus =>
+        !string.IsNullOrWhiteSpace(WorkFlowStatus)
+            ? WorkFlowStatus.Trim()
+            : string.IsNullOrWhiteSpace(Status) ? "Not Set" : Status.Trim();
+
     public DateTime DateOpened { get; set; }
     public DateTime DueDate { get; set; }
     public DateTime? DateCompleted { get; set; }

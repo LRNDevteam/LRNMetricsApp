@@ -1405,7 +1405,7 @@ export default function App() {
           {message.type === 'danger' && message.correlationId && <small>Error ID: {message.correlationId}</small>}
         </div>}
         {loading && <div className="loading-line" />}
-        {view === 'dashboard' && <DashboardPage data={{ ...dashboard, assignedClaims: (reviewerOnly ? myWorklistMenuCounts.assigned : claimMenuCounts.assigned) ?? dashboard.assignedClaims }} user={user} labName={labName} onKpiClick={(next = {}) => {
+        {view === 'dashboard' && <DashboardPage data={{ ...dashboard, assignedClaims: (reviewerOnly ? myWorklistMenuCounts.assigned : claimMenuCounts.assigned) ?? dashboard.assignedClaims }} workflowStatusCounts={reviewerOnly ? myWorklistMenuCounts : claimMenuCounts} user={user} labName={labName} onKpiClick={(next = {}) => {
           const { taskView: nextTaskView, ...nextFilter } = next;
           const targetQueue = normalizeQueueKey(nextTaskView || 'all');
           applyDrilldownFilters(nextFilter);

@@ -1166,6 +1166,52 @@
                     </div>
                 </div>
             </div>
+            @* Workflow Status Summary. Status Summary above is task progression; this is the
+               workflow/escalation axis the Denial Workflow application writes. Shown here so users
+               without access to that application can still see where the work sits, and so a
+               workflow status change is visible in LRNMetrics. *@
+            <div class="col-12 col-xl-6">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body">
+                        <div class="section-title mb-3">
+                            Workflow Status Summary
+                            <span class="text-muted fw-normal ms-2" style="font-size:.78rem;">from Denial Workflow</span>
+                        </div>
+                        <div class="lis-scroll no-fs">
+                            <table class="table table-sm align-middle lis-summary-grid sortable-table mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Workflow Status</th>
+                                        <th class="lis-number-cell">Count</th>
+                                        <th class="lis-number-cell">% Filtered</th>
+                                        <th class="lis-number-cell">SLA Breach</th>
+                                        <th class="lis-number-cell">Insurance Balance</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @if (Model.WorkflowStatusBreakdown.Count == 0)
+                                    {
+                                        <tr><td colspan="5" class="text-muted">No workflow activity for this run yet.</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var item in Model.WorkflowStatusBreakdown)
+                                        {
+                                            <tr>
+                                                <td>@item.Label</td>
+                                                <td class="lis-number-cell fw-semibold">@item.Count.ToString("N0")</td>
+                                                <td class="lis-number-cell">@item.Percentage.ToString("0.0")%</td>
+                                                <td class="lis-number-cell">@item.OverdueCount.ToString("N0")</td>
+                                                <td class="lis-number-cell">@Money(item.InsuranceBalanceSum)</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div class="col-12 col-xl-6">
                 <div class="card border-0 shadow-sm">
                     <div class="card-body">

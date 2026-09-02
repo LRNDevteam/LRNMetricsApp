@@ -27,6 +27,27 @@ public sealed class SqlDenialWorkflowRepository : IDenialWorkflowRepository
     private static readonly TimeSpan ClaimCountsCacheDuration = TimeSpan.FromSeconds(60);
     // Per-cache-key single-flight gates for the claim counts aggregation (see GetClaimSubMenuCountsAsync).
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> ClaimCountsLocks = new();
+
+    // Claim Assignment tab switches (see GetClaimsAsync).
+    //
+    // Every tab runs the SAME expensive prefix — #ClaimBase over the lab's DenialLineItem rows, then
+    // the #TaskClaimAgg / #EscalationClaimAgg per-claim aggregates — and differs ONLY in the final
+    // predicate on tca.QueueName. For an AR Reviewer that prefix is first narrowed to their own
+    // claims by #ReviewerScope, so it is trivial; for an AR Manager there is no such narrowing and
+    // the whole lab is aggregated again on every tab click. That asymmetry is exactly the reported
+    // "slow as manager, fast as reviewer when moving between tabs".
+    //
+    // This cache does not remove the first visit to a tab, but moving BETWEEN tabs — the reported
+    // complaint — is a revisit, and a revisit within the TTL now costs nothing. The structural fix
+    // is to compute the tab-independent prefix once and reuse it across tabs; that is a change to a
+    // heavily-UAT'd hot query and is deliberately not attempted here.
+    private static readonly ConcurrentDictionary<string, ClaimsCacheEntry> ClaimsCache = new();
+    private static readonly TimeSpan ClaimsCacheDuration = TimeSpan.FromSeconds(45);
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> ClaimsLocks = new();
+    // Claim pages are far larger than the count/dashboard objects these caches were built for, so
+    // this one is bounded. Without a cap the dictionary only ever grows: every filter + page + tab
+    // combination a user visits is a new key that nothing but a prefix invalidation removes.
+    private const int ClaimsCacheMaxEntries = 240;
     private static readonly ConcurrentDictionary<int, byte> ClaimSupportSchemaReady = new();
     private static readonly ConcurrentDictionary<int, SemaphoreSlim> ClaimSupportSchemaLocks = new();
     // Guards EnsureDenialTaskBoardNormalizedClaimIdAsync — runs DDL once per database per process lifetime
@@ -1814,13 +1835,85 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         return result;
     }
 
+    /// <summary>
+    /// Claim Assignment / My Worklist claim list, cached briefly per lab + filter + tab + page.
+    ///
+    /// See the ClaimsCache declaration for why: every tab re-runs the same lab-wide aggregate and
+    /// only the closing predicate differs, which is what makes tab switching slow for an AR Manager
+    /// and fast for an AR Reviewer. Invalidated by <see cref="InvalidateClaimCounts"/> on every
+    /// write, so a status change is still reflected immediately.
+    /// </summary>
     public async Task<PagedResult<ClaimLevelRow>> GetClaimsAsync(DenialWorkflowFilter filter, CancellationToken ct)
     {
-        // Honor the client's page size (Rows-per-page: 25/50/100) instead of forcing 100. Clamp to
-        // a safe range so a crafted request cannot ask for an unbounded page.
+        // Normalize paging BEFORE the key is built so page 1 of 50 and page 1 of 100 cannot collide.
         filter.PageSize = filter.PageSize <= 0 ? 50 : Math.Clamp(filter.PageSize, 25, 100);
         if (filter.Page <= 0) filter.Page = 1;
 
+        // BuildFilterCacheKey deliberately carries no paging (its other users are unpaged
+        // aggregates), so append it here. Without this, page 2 would be served page 1's rows.
+        var cacheKey = $"{BuildFilterCacheKey("claims", filter)}|P{filter.Page}|S{filter.PageSize}";
+
+        if (ClaimsCache.TryGetValue(cacheKey, out var cached)
+            && DateTime.UtcNow - cached.CachedOnUtc < ClaimsCacheDuration)
+        {
+            return cached.Result;
+        }
+
+        // Single-flight, matching GetClaimSubMenuCountsAsync: on a cold key, concurrent requests for
+        // the same tab would otherwise each run the full aggregation.
+        var gate = ClaimsLocks.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
+        {
+            if (ClaimsCache.TryGetValue(cacheKey, out cached)
+                && DateTime.UtcNow - cached.CachedOnUtc < ClaimsCacheDuration)
+            {
+                return cached.Result;
+            }
+
+            var result = await GetClaimsUncachedAsync(filter, ct);
+            PruneClaimsCache();
+            ClaimsCache[cacheKey] = new ClaimsCacheEntry(DateTime.UtcNow, result);
+            return result;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Drops expired entries, then the oldest, so the claim-page cache cannot grow without bound.
+    /// Cheap: it only walks the dictionary once the cap is actually reached.
+    /// </summary>
+    private static void PruneClaimsCache()
+    {
+        if (ClaimsCache.Count < ClaimsCacheMaxEntries) return;
+
+        var now = DateTime.UtcNow;
+        foreach (var pair in ClaimsCache)
+        {
+            if (now - pair.Value.CachedOnUtc >= ClaimsCacheDuration)
+            {
+                ClaimsCache.TryRemove(pair.Key, out _);
+                ClaimsLocks.TryRemove(pair.Key, out _);
+            }
+        }
+
+        if (ClaimsCache.Count < ClaimsCacheMaxEntries) return;
+
+        foreach (var key in ClaimsCache.OrderBy(x => x.Value.CachedOnUtc)
+                                       .Take(ClaimsCache.Count - ClaimsCacheMaxEntries + 1)
+                                       .Select(x => x.Key)
+                                       .ToList())
+        {
+            ClaimsCache.TryRemove(key, out _);
+            ClaimsLocks.TryRemove(key, out _);
+        }
+    }
+
+    private async Task<PagedResult<ClaimLevelRow>> GetClaimsUncachedAsync(DenialWorkflowFilter filter, CancellationToken ct)
+    {
         await using var con = OpenLab(filter.LabId);
         await con.OpenAsync(ct);
         await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
@@ -3278,12 +3371,21 @@ SELECT COUNT(1) FROM @Changed;";
         if (taskColumns.Contains("LastWorkflowUpdatedOn")) optionalSets.Add("LastWorkflowUpdatedOn=SYSDATETIME()");
         var optionalSetSql = optionalSets.Count > 0 ? "," + Environment.NewLine + "    " + string.Join("," + Environment.NewLine + "    ", optionalSets) : string.Empty;
         var historySnapshot = BuildWorkflowStatusSnapshot(request);
+
+        // On closure the workflow status carries the reviewer's Actual Action / Outcome ("Claim
+        // Paid", "Appeal Submitted", …) rather than the flat literal 'Closed Claim'. Closure itself
+        // is still signalled by Status='Closed', which is what every open/closed filter in this
+        // service and in DenialCodeMasterServices tests, so widening this value changes what the
+        // closed-claims list and the task history SHOW without changing what any query COUNTS.
+        // The fallback keeps older callers that close without an outcome working unchanged.
+        const string closedWorkflowStatus = "ISNULL(NULLIF(LTRIM(RTRIM(@ActualOutcome)), ''), 'Closed Claim')";
+
         var sql = $@"
 DECLARE @Changed TABLE(TaskID nvarchar(100), ClaimId nvarchar(150), ClaimUid nvarchar(150), OldWorkFlowStatus nvarchar(100), NewWorkFlowStatus nvarchar(100), OldAssignedTo nvarchar(255), NewAssignedTo nvarchar(255));
 
 UPDATE dbo.DenialTaskBoard
 SET Status=@Status,
-    WorkFlowStatus=CASE WHEN @IsClosed=1 THEN 'Closed Claim' ELSE NULLIF(@Status,'') END,
+    WorkFlowStatus=CASE WHEN @IsClosed=1 THEN {closedWorkflowStatus} ELSE NULLIF(@Status,'') END,
     ReviewerComments=@Comments,
     ReviewerUpdatedBy=@ActionBy,
     ReviewerUpdatedOn=SYSDATETIME(),
@@ -3299,7 +3401,7 @@ BEGIN
     -- Scoped to the DOS-specific ClaimUID (see scopeLineByClaimUid) so a two-DOS ClaimID no longer
     -- cross-contaminates the other DOS's line status.
     UPDATE l
-    SET WorkFlowStatus = CASE WHEN @IsClosed=1 THEN 'Closed Claim' ELSE NULLIF(@Status,'') END,
+    SET WorkFlowStatus = CASE WHEN @IsClosed=1 THEN {closedWorkflowStatus} ELSE NULLIF(@Status,'') END,
         TaskStatus = CASE WHEN @IsClosed=1 THEN 'Closed' ELSE NULLIF(@Status,'') END
     FROM dbo.DenialLineItem l
     JOIN @Changed c ON {lineChangedJoin};
@@ -3342,11 +3444,11 @@ BEGIN
         PayerName=source.PayerName, PanelName=source.PanelName, PatientName=source.PatientName, PatientDOB=source.PatientDOB,
         PatientId=source.PatientId, SubscriberId=source.SubscriberId, ClinicName=source.ClinicName, SalesRepname=source.SalesRepname,
         ReferringProvider=source.ReferringProvider, DateOfService=source.DateOfService, AssignedTo=source.AssignedTo,
-        Status='Closed', WorkFlowStatus='Closed Claim', TaskCount=source.TaskCount, InsuranceBalance=source.InsuranceBalance,
+        Status='Closed', WorkFlowStatus={closedWorkflowStatus}, TaskCount=source.TaskCount, InsuranceBalance=source.InsuranceBalance,
         ClosedBy=@ActionBy, LastUpdatedOn=SYSUTCDATETIME()
     WHEN NOT MATCHED THEN
         INSERT(LabId,ClaimId,PayerName,PanelName,PatientName,PatientDOB,PatientId,SubscriberId,ClinicName,SalesRepname,ReferringProvider,DateOfService,AssignedTo,Status,WorkFlowStatus,TaskCount,InsuranceBalance,ClosedBy)
-        VALUES(source.LabId,source.ClaimId,source.PayerName,source.PanelName,source.PatientName,source.PatientDOB,source.PatientId,source.SubscriberId,source.ClinicName,source.SalesRepname,source.ReferringProvider,source.DateOfService,source.AssignedTo,'Closed','Closed Claim',source.TaskCount,source.InsuranceBalance,@ActionBy);
+        VALUES(source.LabId,source.ClaimId,source.PayerName,source.PanelName,source.PatientName,source.PatientDOB,source.PatientId,source.SubscriberId,source.ClinicName,source.SalesRepname,source.ReferringProvider,source.DateOfService,source.AssignedTo,'Closed',{closedWorkflowStatus},source.TaskCount,source.InsuranceBalance,@ActionBy);
 
     INSERT INTO dbo.DenialClosedClaimsHistory(ClosedClaimId,LabId,ClaimId,ActionType,OldWorkFlowStatus,NewWorkFlowStatus,OldAssignedTo,NewAssignedTo,Comments,ActionBy)
     SELECT dc.ClosedClaimId,@LabId,c.ClaimId,'Closed',c.OldWorkFlowStatus,c.NewWorkFlowStatus,c.OldAssignedTo,c.NewAssignedTo,@Comments,@ActionBy
@@ -3782,6 +3884,16 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
         foreach (var key in ClaimCountsCache.Keys.Where(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
             ClaimCountsCache.TryRemove(key, out _);
 
+        // The claim LIST is cached on the same terms as the badges (see GetClaimsAsync). Busting it
+        // here means a status change, assignment or closure is visible on the next tab load rather
+        // than up to 45 seconds later — every call site that already invalidates counts gets this.
+        var claimsPrefix = $"claims|{labId}|";
+        foreach (var key in ClaimsCache.Keys.Where(key => key.StartsWith(claimsPrefix, StringComparison.OrdinalIgnoreCase)))
+        {
+            ClaimsCache.TryRemove(key, out _);
+            ClaimsLocks.TryRemove(key, out _);
+        }
+
         // UAT: queue tab badges refresh immediately after a bulk action (ClaimCountsCache is
         // invalidated above), but the top-level Dashboard KPI cards read from a separate,
         // 90-second-TTL DashboardCache that nothing ever busted — so the dashboard could still
@@ -3793,6 +3905,8 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
     }
 
     private sealed record FilterOptionsCacheEntry(DateTime CachedOnUtc, DenialWorkflowFilterOptions Options);
+
+    private sealed record ClaimsCacheEntry(DateTime CachedOnUtc, PagedResult<ClaimLevelRow> Result);
     private sealed record DashboardCacheEntry(DateTime CachedOnUtc, DenialWorkflowDashboardSummary Summary);
     private sealed record ClaimCountsCacheEntry(DateTime CachedOnUtc, ClaimSubMenuCounts Counts);
 

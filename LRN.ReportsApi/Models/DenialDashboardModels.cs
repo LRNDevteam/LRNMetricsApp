@@ -90,6 +90,15 @@ public class DenialRecord
     public decimal TotalBalance { get; set; }
     public bool IsCurrentDenial { get; set; }
     public string Status { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The workflow/escalation axis of the task board — "Assigned To AR Reviewer",
+    /// "Internal Escalation", "Closed Claim", or (since the reviewer-closure change) the actual
+    /// outcome the reviewer chose. Distinct from <see cref="Status"/>, which is task progression.
+    /// Surfaced here so LRNMetrics users without access to the Denial Workflow app can still see
+    /// where work sits.
+    /// </summary>
+    public string WorkFlowStatus { get; set; } = string.Empty;
     public DateTime DateOpened { get; set; }
     public DateTime DueDate { get; set; }
     public DateTime? DateCompleted { get; set; }

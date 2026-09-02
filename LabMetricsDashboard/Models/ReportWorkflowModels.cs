@@ -74,6 +74,13 @@ public sealed class LabReportRow
     public required string LabConfigKey { get; init; }
 
     public bool IsMapped => !string.IsNullOrEmpty(LabConfigKey);
+
+    /// <summary>
+    /// Board position: this lab's index in <c>ReportBoard:LabOrder</c>. Labs missing from that
+    /// list share <see cref="int.MaxValue"/> and sort last, A–Z.
+    /// </summary>
+    public int DisplayOrder { get; init; } = int.MaxValue;
+
     public string? RunId { get; init; }
     public string? Week { get; init; }
     public DateTime? SyncedOn { get; init; }
@@ -114,7 +121,7 @@ public sealed class ReportBoardViewModel
     public List<LabReportRow> Rows { get; init; } = [];
     public DateTime? LastSyncedOn { get; init; }
     public string View { get; init; } = "matrix";     // matrix | cards
-    public string Sort { get; init; } = "latest";     // latest | az
+    public string Sort { get; init; } = "order";      // order | latest | az
     public string Filter { get; init; } = "all";      // all | failed | incomplete
 
     /// <summary>Set when the tracker call failed; the page renders an error card instead of a blank grid.</summary>

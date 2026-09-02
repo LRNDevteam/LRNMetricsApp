@@ -1,4 +1,5 @@
 using DenialDatabaseProcessorWorker.Normalizers;
+using DenialDatabaseProcessorWorker.Services.ReportLogging;
 using static DenialDatabaseProcessorWorker.Services.DenialTaskBoardRepository;
 
 namespace DenialDatabaseProcessorWorker.Builders;
@@ -10,6 +11,14 @@ public sealed class TaskBoardBuilder
 	private readonly string _runId;
 	private readonly Dictionary<string, ExistingTaskInfo> _existingTasks;
 
+	/// <summary>
+	/// Rows that need a freshly issued TaskID, in the order they were built. The number cannot be
+	/// known before the board is built, so Build leaves their "Task ID" blank and the caller
+	/// reserves exactly this many from the lab's sequence, then calls
+	/// <see cref="AssignNewTaskIds"/>. See <see cref="Services.TaskIdSequenceRepository"/>.
+	/// </summary>
+	private readonly List<Dictionary<string, string>> _pendingNewTasks = new();
+
 	public TaskBoardBuilder(int labId, string labName, string runId, Dictionary<string, ExistingTaskInfo> existingTasks)
 	{
 		_labId = labId;
@@ -18,11 +27,23 @@ public sealed class TaskBoardBuilder
 		_existingTasks = existingTasks ?? new();
 	}
 
+	/// <summary>How many TaskIDs the caller must reserve after Build.</summary>
+	public int NewTaskCount => _pendingNewTasks.Count;
+
+	/// <summary>
+	/// Stamps the reserved block onto the rows that Build left blank, in build order.
+	/// </summary>
+	public void AssignNewTaskIds(long firstId)
+	{
+		for (int i = 0; i < _pendingNewTasks.Count; i++)
+			_pendingNewTasks[i]["Task ID"] = Services.TaskIdSequenceRepository.Format(firstId + i);
+	}
+
 	public List<Dictionary<string, string>> Build(List<Dictionary<string, string>> lineRows)
 	{
 		var result = new List<Dictionary<string, string>>();
 		var today = DateTime.Today;
-		int newTaskCounter = 1;
+		_pendingNewTasks.Clear();
 
 		foreach (var line in lineRows)
 		{
@@ -75,20 +96,10 @@ public sealed class TaskBoardBuilder
 				// Try to get existing task
 				_existingTasks.TryGetValue(key, out var existing);
 
-				string taskId;
-				DateTime dateOpened;
-
-				if (existing != null)
-				{
-					taskId = existing.TaskId;
-					dateOpened = existing.DateOpened ?? today;
-				}
-				else
-				{
-					taskId = $"TSK-{newTaskCounter:D5}";
-					newTaskCounter++;
-					dateOpened = today;
-				}
+				// Blank for a new task: the id is issued from the lab's persistent sequence after
+				// the board is built (DD-04). Existing tasks keep the id they were quoted under.
+				string taskId = existing?.TaskId ?? "";
+				DateTime dateOpened = existing?.DateOpened ?? today;
 
 				var dueDate = slaDays > 0 ? dateOpened.AddDays(slaDays) : (DateTime?)null;
 
@@ -172,37 +183,55 @@ public sealed class TaskBoardBuilder
 				// STATUS + DATE COMPLETED LOGIC
 				// ------------------------------
 
-				string status = "New";
+				// ------------------------------
+				// STATUS CARRY-FORWARD (spec §4.9)
+				//
+				// This is what protects human work: an in-flight status must never be overwritten
+				// by a re-import (WK-17). Where the task recurs, data columns are refreshed and
+				// workflow columns are preserved.
+				// ------------------------------
+
+				string status = DenialStatus.New;
 				DateTime? dateCompleted = null;
 				string assignedTo = "";
 				string workflowStatus = "";
 
-				// 1. Preserve existing Closed/Review tasks
 				if (existing != null)
 				{
 					assignedTo = existing.AssignedTo.Trim();
-					workflowStatus = existing.WorkFlowStatus.Trim();
+					workflowStatus = DenialStatus.Clean(existing.WorkFlowStatus);
 
-					var oldStatus = CleanStatus(existing.Status);
+					var oldStatus = DenialStatus.Canonical(existing.Status);
 
-					if (!string.IsNullOrWhiteSpace(assignedTo))
+					if (DenialStatus.IsClosed(oldStatus))
 					{
-						status = oldStatus.Equals("Closed", StringComparison.OrdinalIgnoreCase)
-							? oldStatus
-							: "Review";
+						// Spec §4.9 says this is unreachable because §7 archives closed denials
+						// before carry-forward runs. Until that archival exists, preserve Closed
+						// rather than resurrecting finished work as New. See REQUIREMENTS §12.
+						status = DenialStatus.Closed;
 					}
-					else if (!string.IsNullOrWhiteSpace(oldStatus) &&
-						(oldStatus.Equals("Closed", StringComparison.OrdinalIgnoreCase) ||
-						 oldStatus.Equals("Review", StringComparison.OrdinalIgnoreCase)))
+					else if (!string.IsNullOrWhiteSpace(assignedTo))
 					{
-						status = oldStatus;
+						// Somebody owns it. Keep the state they put it in; anything else they set
+						// (or that has no progression meaning) returns to their queue for review.
+						status = oldStatus switch
+						{
+							DenialStatus.InProgress => DenialStatus.InProgress,
+							DenialStatus.Completed => DenialStatus.Completed,
+							DenialStatus.VerificationPending => DenialStatus.VerificationPending,
+							_ => DenialStatus.PendingReview
+						};
+					}
+					else
+					{
+						// Unassigned: no human work to protect, so the incoming run defines it.
+						status = DenialStatus.New;
 					}
 
-					if (status.Equals("Closed", StringComparison.OrdinalIgnoreCase) &&
-						existing.DateCompleted.HasValue)
-					{
+					if (DenialStatus.IsClosed(status) && existing.DateCompleted.HasValue)
 						dateCompleted = existing.DateCompleted;
-					}
+					else if (status == DenialStatus.Completed)
+						dateCompleted = existing.DateCompleted;
 				}
 
 				// ------------------------------
@@ -284,6 +313,10 @@ public sealed class TaskBoardBuilder
 				};
 
 				result.Add(row);
+
+				// Ordered so AssignNewTaskIds can stamp the reserved block positionally.
+				if (existing == null)
+					_pendingNewTasks.Add(row);
 			}
 		}
 

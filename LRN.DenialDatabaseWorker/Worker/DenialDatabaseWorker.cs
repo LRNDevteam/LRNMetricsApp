@@ -35,7 +35,6 @@ public sealed class DenialDatabaseWorker : BackgroundService
     private readonly OutputPathBuilder _outputPathBuilder;
     private readonly DenialAnalysisRunLogRepository _runLogRepo;
     private readonly DenialTaskBoardRepository _denialTaskBoardRepo;
-    private readonly IDenialWorkflowApiClient _workflowApiClient;
     private readonly SharePointGraphOptions _spOpt;
 
     // Run logging + workflow tracker (LRNMaster). These are what the report dashboard reads.
@@ -58,7 +57,6 @@ public sealed class DenialDatabaseWorker : BackgroundService
         OutputPathBuilder outputPathBuilder,
         DenialAnalysisRunLogRepository runLogRepo,
         DenialTaskBoardRepository denialTaskBoardRepo,
-        IDenialWorkflowApiClient workflowApiClient,
         ISharePointUploader uploader,
         IOptions<SharePointGraphOptions> spOpt,
         RecentSuccessRunProvider recentSuccessRunProvider,
@@ -78,7 +76,6 @@ public sealed class DenialDatabaseWorker : BackgroundService
         _outputPathBuilder = outputPathBuilder;
         _runLogRepo = runLogRepo;
         _denialTaskBoardRepo = denialTaskBoardRepo;
-        _workflowApiClient = workflowApiClient;
         _uploader = uploader;
         _spOpt = spOpt.Value;
         _teamsNotifier = teamsNotifier;
@@ -219,6 +216,17 @@ public sealed class DenialDatabaseWorker : BackgroundService
             var labTaskBoardRepo = new DenialTaskBoardRepository(lab.LabConnectionString, _options.SqlCommandTimeoutSeconds);
             var existingTasks = await labTaskBoardRepo.GetExistingTasksAsync(lab.LabId);
 
+            // The archive of denials that have terminally left the board. Created on first use so a
+            // lab that has not had the migration run still gets a working archive.
+            var closureLog = new DenialClosureLogRepository(lab.LabConnectionString, _options.SqlCommandTimeoutSeconds);
+            await closureLog.EnsureTableAsync(ct);
+
+            // AR-03: a denial a reviewer closed, or a verifier judged invalid, must not walk back
+            // onto the board when the same line denies again. Re-Submitted / Write Off / Adjusted
+            // are deliberately NOT suppressed (AR-04) — those describe the claim at a point in
+            // time, so a later genuine denial is new work.
+            var suppressedTrackIds = await closureLog.GetSuppressedTrackIdsAsync(lab.LabId, ct);
+
             // 2. Load Claim Action Mapper
             await _stepLogger.LogAsync(lab, "Load ClaimActionMapper excel", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
             var claimRows = _excelReader.Read(claimActionMapperFile, "Denial Classifier");
@@ -274,7 +282,44 @@ public sealed class DenialDatabaseWorker : BackgroundService
             await _stepLogger.LogAsync(lab, "Build task board rows", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
             var taskBuilder = new TaskBoardBuilder(lab.LabId, lab.LabName, runId, existingTasks);
             var taskRows = taskBuilder.Build(finalRows);
-            await _stepLogger.LogAsync(lab, "Build task board rows", "Completed", payerPolicySource, claimActionMapperFile, outFile, null, ct);
+
+            // TaskIDs for genuinely new tasks come from the lab's persistent sequence, not a
+            // counter that restarts at 1 each pass — otherwise a task created this run can be
+            // issued an id a surviving task from an earlier run already holds (spec DD-04).
+            // The count is only knowable after the board is built, so the block is reserved here.
+            if (taskBuilder.NewTaskCount > 0)
+            {
+                var taskIdSequence = new TaskIdSequenceRepository(lab.LabConnectionString, _options.SqlCommandTimeoutSeconds);
+                var firstTaskId = await taskIdSequence.ReserveAsync(lab.LabId, taskBuilder.NewTaskCount, ct);
+                taskBuilder.AssignNewTaskIds(firstTaskId);
+
+                _logger.LogInformation(
+                    "Lab {LabName}: reserved {Count} TaskID(s) from {First}.",
+                    lab.LabName, taskBuilder.NewTaskCount, TaskIdSequenceRepository.Format(firstTaskId));
+            }
+
+            // AR-03 suppression, applied before load so a retired denial never reaches the board.
+            if (suppressedTrackIds.Count > 0)
+            {
+                var beforeSuppression = taskRows.Count;
+                taskRows = taskRows
+                    .Where(r => !suppressedTrackIds.Contains(GetValueByAnyKey(r, "UniqueTrackId")))
+                    .ToList();
+
+                var suppressed = beforeSuppression - taskRows.Count;
+                if (suppressed > 0)
+                {
+                    _logger.LogInformation(
+                        "Lab {LabName}: suppressed {Count} task(s) already archived as closed or verified invalid.",
+                        lab.LabName, suppressed);
+
+                    await _infoLogger.InfoAsync(runId, lab.LabName,
+                        $"Suppressed {suppressed} task(s) previously archived as closed or verified invalid.", ct: ct);
+                }
+            }
+
+            await _stepLogger.LogAsync(lab, "Build task board rows", "Completed", payerPolicySource, claimActionMapperFile, outFile,
+                $"TaskRows={taskRows.Count}, NewTaskIds={taskBuilder.NewTaskCount}", ct);
 
             var filteredLineRows = finalRows
               .Where(r =>
@@ -325,13 +370,51 @@ public sealed class DenialDatabaseWorker : BackgroundService
             // DenialTaskBoard must be copied here also; do not depend on Workflow API for this worker run.
             await _stepLogger.LogAsync(lab, "Write Denial insight/line/task-board tables", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
 
-            await labTaskBoardRepo.ReconcileBeforeWriteAsync(lab.LabId, lab.LabName, runId, lineItemTable, taskRows, ct);
+            var reconcileSettings = new DenialTaskBoardRepository.OrphanDispositionSettings(
+                EnableUpstreamResolution: _options.EnableUpstreamResolutionCheck,
+                EnableResubmission: _options.EnableResubmissionCheck,
+                PayerValidationReportTable: _options.PayerValidationReportTable,
+                LineLevelTable: _options.LineLevelTable,
+                WriteOffStatusValues: _options.WriteOffStatusValues,
+                AdjustedStatusValues: _options.AdjustedStatusValues);
+
+            var census = await labTaskBoardRepo.ReconcileBeforeWriteAsync(
+                lab.LabId, lab.LabName, runId, lineItemTable, taskRows, reconcileSettings, ct);
             await insightWriter.WriteAsync(insightTable, lab, runId);
             await lineItemWriter.WriteAsync(lineItemTable, lab, runId);
             await taskBoardWriter.WriteAsync(taskBoardTable, lab, runId);
 
             await _stepLogger.LogAsync(lab, "Write Denial insight/line/task-board tables", "Completed", payerPolicySource, claimActionMapperFile, outFile,
                 $"InsightRows={insightTable.Rows.Count}, LineRows={lineItemTable.Rows.Count}, TaskBoardRows={taskBoardTable.Rows.Count}", ct);
+
+            // NF-15: the reconciliation census. An unexpected mass deletion or a mis-mapped status
+            // value is visible here without anyone running a query.
+            var closureCensus = await closureLog.GetRunCensusAsync(lab.LabId, runId, ct);
+            var closureSummary = closureCensus.Count == 0
+                ? "none"
+                : string.Join(", ", closureCensus.Select(kv => $"{kv.Key}={kv.Value}"));
+
+            await _infoLogger.InfoAsync(runId, lab.LabName,
+                $"Reconciliation census: Orphans={census.Orphans}, ResolvedUpstream={census.ResolvedUpstream}, " +
+                $"ReSubmitted={census.ReSubmitted}, RaisedForVerification={census.RaisedForVerification}, " +
+                $"DeletedUnassignedOrphans={census.DeletedOrphanUnassigned}. Archived this run: {closureSummary}. " +
+                $"UpstreamCheck={(census.UpstreamCheckRan ? "ran" : "skipped")}, " +
+                $"ResubmissionCheck={(census.ResubmissionCheckRan ? "ran" : "skipped")}.", ct: ct);
+
+            if (!census.UpstreamCheckRan && _options.EnableUpstreamResolutionCheck)
+                _logger.LogWarning("Lab {LabName}: upstream-resolution check was enabled but its source was unavailable. Orphans fell through to the ordinary rules.", lab.LabName);
+
+            if (!census.ResubmissionCheckRan && _options.EnableResubmissionCheck)
+                _logger.LogWarning("Lab {LabName}: resubmission check was enabled but {Table} was unavailable or missing a required column. Orphans fell through to the ordinary rules.", lab.LabName, _options.LineLevelTable);
+
+            // NF-16: statuses seen on an orphan that matched neither configured list. Catches a
+            // missing spelling on the run that introduces it rather than a month later.
+            if (census.UnmatchedOrphanStatuses.Count > 0)
+            {
+                await _infoLogger.WarningAsync(runId, lab.LabName,
+                    $"Orphan source statuses matching neither WriteOffStatusValues nor AdjustedStatusValues: " +
+                    string.Join(", ", census.UnmatchedOrphanStatuses), ct: ct);
+            }
 
             await _infoLogger.InfoAsync(runId, lab.LabName,
                 $"Denial tables loaded into {TryGetDatabaseName(lab.LabConnectionString)}. " +
@@ -478,60 +561,6 @@ public sealed class DenialDatabaseWorker : BackgroundService
         }
     }
 
-    private static DenialTaskImportRequest BuildWorkflowImportRequest(LabConfig lab, string runId, List<Dictionary<string, string>> taskRows)
-    {
-        return new DenialTaskImportRequest
-        {
-            LabId = lab.LabId,
-            LabName = lab.LabName,
-            RunId = runId,
-            Tasks = taskRows.Select(r => new DenialTaskImportRow
-            {
-                UniqueTrackId = GetValueByAnyKey(r, "UniqueTrackId"),
-                ClaimUid = GetValueByAnyKey(r, "ClaimUID"),
-                ClaimId = GetValueByAnyKey(r, "Claim ID", "ClaimID"),
-                PatientId = GetValueByAnyKey(r, "Patient / Acct #", "PatientId"),
-                CptCode = GetValueByAnyKey(r, "CPT Code", "CPTCode"),
-                DenialCode = GetValueByAnyKey(r, "Denial Code", "DenialCode"),
-                DenialDescription = GetValueByAnyKey(r, "Denial Description", "DenialDescription"),
-                DenialClassification = GetValueByAnyKey(r, "Denial Classification", "DenialClassification"),
-                ActionCode = GetValueByAnyKey(r, "Action Code", "ActionCode"),
-                RecommendedAction = GetValueByAnyKey(r, "Recommended Action", "RecommendedAction"),
-                ActionCategory = GetValueByAnyKey(r, "Action Category", "ActionCategory"),
-                Task = GetValueByAnyKey(r, "Task"),
-                Priority = GetValueByAnyKey(r, "Priority"),
-                InsuranceBalance = TryDecimal(GetValueByAnyKey(r, "Insurance Balance", "InsuranceBalance")),
-                SlaDays = TryInt(GetValueByAnyKey(r, "SLA (Days)", "SLADays")),
-                DateOpened = TryDate(GetValueByAnyKey(r, "Date Opened", "DateOpened")),
-                DueDate = TryDate(GetValueByAnyKey(r, "Due Date", "DueDate")),
-                DateCompleted = TryDate(GetValueByAnyKey(r, "Date Completed", "DateCompleted")),
-                SalesRepname = GetValueByAnyKey(r, "SalesRepname"),
-                ClinicName = GetValueByAnyKey(r, "ClinicName"),
-                ReferringProvider = GetValueByAnyKey(r, "ReferringProvider"),
-                Source = GetValueByAnyKey(r, "Source"),
-                PatName = GetValueByAnyKey(r, "Pat name", "PatName", "Patient Name", "PatientName"),
-                SubscriberId = GetValueByAnyKey(r, "Subscriber Id", "SubscriberId", "Subscriber ID", "SubscriberID"),
-                PayerName = GetValueByAnyKey(r, "Payer Name", "PayerName"),
-                PayerNameNormalized = GetValueByAnyKey(r, "PayerName Normalized", "PayerNameNormalized"),
-                PayerCode = TryInt(GetValueByAnyKey(r, "Payer Code", "PayerCode")),
-                PayerType = GetValueByAnyKey(r, "Payer Type", "PayerType"),
-                FirstBilledDate = TryDate(GetValueByAnyKey(r, "First Billed Date", "FirstBilledDate")),
-                ChargeEnteredDate = TryDate(GetValueByAnyKey(r, "ChargeEnteredDate")),
-                BillingProvider = GetValueByAnyKey(r, "BillingProvider"),
-                PanelName = GetValueByAnyKey(r, "Panel Name", "PanelName"),
-                DateOfService = TryDate(GetValueByAnyKey(r, "Date of Service", "DateOfService")),
-                IcdCodes = GetValueByAnyKey(r, "ICDCodes"),
-                CoverageStatus = GetValueByAnyKey(r, "CoverageStatus"),
-                IcdComplianceStatus = GetValueByAnyKey(r, "ICDComplianceStatus"),
-                DenialValidity = GetValueByAnyKey(r, "DenialValidity")
-            }).Where(x => !string.IsNullOrWhiteSpace(x.UniqueTrackId)).ToList()
-        };
-    }
-
-    private static decimal TryDecimal(string? value) => decimal.TryParse(value, out var parsed) ? parsed : 0;
-    private static int? TryInt(string? value) => int.TryParse(value, out var parsed) ? parsed : null;
-    private static DateTime? TryDate(string? value) => DateTime.TryParse(value, out var parsed) ? parsed : null;
-
     private static DataTable ToDataTable(List<Dictionary<string, string>> rows)
     {
         var table = new DataTable();
@@ -626,7 +655,7 @@ public sealed class DenialDatabaseWorker : BackgroundService
 
     private static void ApplyLabSpecificInsuranceBalanceRule(LabConfig lab, List<Dictionary<string, string>> rows)
     {
-        if (!ShouldUseBilledAmountAsInsuranceBalance(lab) || rows == null || rows.Count == 0)
+        if (lab is not { OverrideInsuranceBalanceWithBilled: true } || rows == null || rows.Count == 0)
             return;
 
         foreach (var row in rows)
@@ -694,23 +723,6 @@ public sealed class DenialDatabaseWorker : BackgroundService
             : text;
     }
 
-    private static bool ShouldUseBilledAmountAsInsuranceBalance(LabConfig lab)
-    {
-        if (lab == null)
-            return false;
-
-        if (lab.LabId is 18 or 19 or 20)
-            return true;
-
-        var labName = lab.LabName?.Trim() ?? string.Empty;
-
-        return labName.Contains("Certus", StringComparison.OrdinalIgnoreCase)
-            || labName.Contains("Augustus", StringComparison.OrdinalIgnoreCase)
-            || labName.Contains("NorthWest", StringComparison.OrdinalIgnoreCase)
-            || labName.Contains("Northwest", StringComparison.OrdinalIgnoreCase)
-            || labName.Contains("North West", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static string GetValueByAnyKey(Dictionary<string, string> row, params string[] keys)
     {
         foreach (var key in keys)
@@ -726,38 +738,4 @@ public sealed class DenialDatabaseWorker : BackgroundService
         return string.Empty;
     }
 
-    private Task NotifyFileSynchronizedAsync(string fileType, string remotePath, string localPath, CancellationToken ct)
-    {
-        var fileName = Path.GetFileName(localPath);
-        var remoteUrl = SharePointWebLinkBuilder.TryBuildFileUrl(_spOpt, remotePath);
-
-        var message = new StringBuilder()
-            .AppendLine("🟢 File synchronized successfully.\n")
-            .AppendLine($"📁 Type: {fileType} \n")
-            .AppendLine(string.IsNullOrWhiteSpace(remoteUrl)
-                ? $"📁 Source: {remotePath}\n"
-                : $"📄 Source: [{fileName}]({remoteUrl})\n")
-            .Append($"Destination: {localPath}")
-            .ToString();
-
-        return _teamsNotifier.SendAsync("🤖 LRN : Denial Database Processor", message, ct);
-    }
-
-    private Task NotifyFileUploadFailedAsync(string fileType, string localFile, string remotePath, Exception ex, CancellationToken ct)
-    {
-        var fileName = Path.GetFileName(localFile);
-        var remoteUrl = SharePointWebLinkBuilder.TryBuildFileUrl(_spOpt, remotePath);
-
-        var message = new StringBuilder()
-            .AppendLine("⚠️ File upload failed.\n")
-            .AppendLine($"Type: {fileType} \n")
-            .AppendLine(string.IsNullOrWhiteSpace(remoteUrl)
-                ? $"📁 SharePoint: {remotePath}\n"
-                : $"📄 SharePoint: [{fileName}]({remoteUrl})\n")
-            .AppendLine($"Source: {localFile} \n")
-            .Append($"Error: {ex.Message}")
-            .ToString();
-
-        return _teamsNotifier.SendAsync("🤖 LRN : Denial Database Processor", message, ct);
-    }
 }

@@ -142,14 +142,27 @@ public class LisSummaryController : Controller
 		}
 		catch (Exception ex)
 		{
-			_logger.LogError(ex, "LIS Summary query failed for lab '{LabName}'.", selectedLabName);
+			// Same distinction as DashboardController.ClinicSummary: cancellationToken here is
+			// HttpContext.RequestAborted, so a browser that refreshed or moved on lands in this
+			// catch as a bare TaskCanceledException. That is not a failure to log as one.
+			var abandoned = ex is OperationCanceledException && cancellationToken.IsCancellationRequested;
+
+			if (abandoned)
+				_logger.LogWarning(
+					"LIS Summary for lab '{LabName}' was abandoned by the client before it finished.", selectedLabName);
+			else
+				_logger.LogError(ex, "LIS Summary query failed for lab '{LabName}'.", selectedLabName);
+
 			return View(new LisSummaryPageViewModel
 			{
 				Filters = filters,
 				LabOptions = labOptions,
 				CurrentLabName = selectedLabOption?.LabName ?? selectedLabName,
 				ConfiguredLabKey = selectedLabName,
-				ErrorMessage = $"Failed to load LIS Summary: {ex.Message}"
+				ErrorMessage = abandoned
+					? $"The LIS Summary query for {selectedLabName} took too long and the page stopped waiting. "
+					  + "Narrow the date range or filters and try again."
+					: $"Failed to load LIS Summary: {ex.Message}"
 			});
 		}
 	}

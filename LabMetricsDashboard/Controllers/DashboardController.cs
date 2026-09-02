@@ -1229,12 +1229,29 @@ public class DashboardController : Controller
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Clinic Summary query failed for lab '{LabName}'.", selectedLab);
+            // A client disconnect is not a server fault. It reaches here as a bare
+            // TaskCanceledException with no SqlException behind it, because `ct` is
+            // HttpContext.RequestAborted and the browser refreshed, changed filters in a way that
+            // superseded this request, or closed the tab. HomeController already draws this line;
+            // this action did not, so every abandoned page view was filed as an Error - twice, once
+            // from the repository and once from here - which is what buries real failures.
+            var abandoned = ex is OperationCanceledException && ct.IsCancellationRequested;
+
+            if (abandoned)
+                _logger.LogWarning(
+                    "Clinic Summary for lab '{LabName}' was abandoned by the client before it finished.", selectedLab);
+            else
+                _logger.LogError(ex, "Clinic Summary query failed for lab '{LabName}'.", selectedLab);
+
             return View(new ClinicSummaryViewModel
             {
                 AvailableLabs = availableLabs,
                 SelectedLab   = selectedLab,
-                ErrorMessage  = $"Failed to load Clinic Summary: {ex.Message}",
+                // Wording matches ClaimLinePageError above, which answers the same question.
+                ErrorMessage  = abandoned
+                    ? $"The Clinic Summary query for {selectedLab} took too long and the page stopped waiting. "
+                      + "Apply filters (date range, payer, clinic) and try again."
+                    : $"Failed to load Clinic Summary: {ex.Message}",
             });
         }
     }

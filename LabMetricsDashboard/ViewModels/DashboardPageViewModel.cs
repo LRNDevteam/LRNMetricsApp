@@ -16,6 +16,13 @@ public class DashboardPageViewModel
     public int RecordsTotalPages { get; set; }
 
     public List<BreakdownItem> StatusBreakdown { get; set; } = new();
+
+    /// <summary>
+    /// Counts by Denial Workflow status (the workflow/escalation axis), so users without access to
+    /// the Denial Workflow application can still see where the work sits. Distinct from
+    /// <see cref="StatusBreakdown"/>, which is task progression.
+    /// </summary>
+    public List<BreakdownItem> WorkflowStatusBreakdown { get; set; } = new();
     public List<BreakdownItem> PriorityBreakdown { get; set; } = new();
     public List<BreakdownItem> ActionCategoryBreakdown { get; set; } = new();
     public List<BreakdownItem> ClassificationBreakdown { get; set; } = new();

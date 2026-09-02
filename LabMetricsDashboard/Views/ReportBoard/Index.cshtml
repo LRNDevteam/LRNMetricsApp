@@ -466,6 +466,7 @@
             <button type="button" class="rcb-chip" data-filter="incomplete" aria-pressed="@(Model.Filter == "incomplete" ? "true" : "false")">Incomplete runs</button>
         </div>
         <div class="rcb-seg" role="group" aria-label="Sort">
+            <a asp-action="Index" asp-route-view="@Model.View" asp-route-sort="order" aria-pressed="@(Model.Sort == "order" ? "true" : "false")" title="The order set for each lab in its configuration">Board order</a>
             <a asp-action="Index" asp-route-view="@Model.View" asp-route-sort="latest" aria-pressed="@(Model.Sort == "latest" ? "true" : "false")">Latest</a>
             <a asp-action="Index" asp-route-view="@Model.View" asp-route-sort="az" aria-pressed="@(Model.Sort == "az" ? "true" : "false")">A–Z</a>
         </div>

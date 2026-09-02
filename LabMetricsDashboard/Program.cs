@@ -1,27 +1,22 @@
+using Azure.Identity;
 using LabMetricsDashboard.Controllers;
 using LabMetricsDashboard.Filters;
 using LabMetricsDashboard.Models;
+using LabMetricsDashboard.Models.DenialWorkflow;
 using LabMetricsDashboard.Services;
-using LabMetricsDashboard.Services.ReimbursementAgent;
 using LabMetricsDashboard.Services.DenialDashboard;
 using LabMetricsDashboard.Services.DenialWorkflow;
-using LabMetricsDashboard.Models.DenialWorkflow;
+using LabMetricsDashboard.Services.ReimbursementAgent;
 using LabMetricsDashboard.Services.Security;
 using LRN.ProductionReports.Services;
-using LRN.ProductionReports.Services;
-using LRN.ProductionReports.Services;
-using Azure.Identity;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.HttpOverrides;
-using Microsoft.Extensions.Configuration;
+using Microsoft.AspNetCore.Mvc.Authorization;
 using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Primitives;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc.Authorization;
-using Microsoft.AspNetCore.RateLimiting;
 using System.Net;
 using System.Security.Cryptography;
 using System.Threading.RateLimiting;
@@ -604,16 +599,26 @@ builder.Services.AddSingleton<ReimbursementChatTokenIssuer>();
 
 // Long timeout by design: one answer is a whole agent run — the model reasons, calls the MCP
 // bridge, and writes a per-lab breakdown — which routinely takes far longer than a data API call.
+//
+// There is a hard ceiling above this one that raising the setting cannot lift: the proxy is an App
+// Service, and its front end drops an inbound request idle for 230 seconds. Past that we stop
+// getting a timeout and start getting the front end's own 502, which is a worse error to explain.
+// So the setting stays under that, and a question that genuinely needs longer needs the answer to
+// arrive incrementally (streaming or poll-for-result), not a bigger number here.
 builder.Services
     .AddHttpClient<IReimbursementAgentApiClient, ReimbursementAgentApiClient>()
     .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(
-        builder.Configuration.GetValue<int?>("ReimbursementAgent:TimeoutSeconds") ?? 120));
+        builder.Configuration.GetValue<int?>("ReimbursementAgent:TimeoutSeconds") ?? 200));
 
 // Which reports the board offers to which labs — the padlocked cells. Bound with IOptionsMonitor
 // (not Get<T>()) so editing the "ReportAvailability" section of appsettings.json takes effect on
 // the next page load, without restarting the site.
 builder.Services.Configure<ReportAvailabilitySettings>(configuration.GetSection("ReportAvailability"));
 builder.Services.AddSingleton<IReportAvailabilityService, ReportAvailabilityService>();
+
+// Lab display order and the labs that never warn about missing reports. Same IOptionsMonitor
+// reasoning as above: edit the "ReportBoard" section and the next page load picks it up.
+builder.Services.Configure<ReportBoardSettings>(configuration.GetSection(ReportBoardSettings.Section));
 
 // Dynamic role-based navbar (Menu Master + Role Menu Mapping via LRN.ReportsApi).
 // Short timeout: this client sits on the hot path of EVERY page (navbar + MenuAccessFilter).

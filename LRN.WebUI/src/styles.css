@@ -1257,6 +1257,8 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .status-chip.recommended{border-color:#14b8a6;background:#ccfbf1;color:#0f766e}
 .status-chip.red{background:#fee2e2;border-color:#fca5a5;color:#991b1b}
 .status-preview-warning{margin-top:8px;color:#92400e;font-size:12px;font-weight:800}
+.status-preview-closure{margin-top:10px;border:1px solid #99f6e4;background:#f0fdfa;color:#0f766e;border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:3px;font-size:12px}
+.status-preview-closure strong{font-size:13px;color:#115e59}
 .status-validation-callout{border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:10px;padding:12px 14px;margin:10px 0 12px;display:flex;flex-direction:column;gap:4px;font-size:13px}
 .status-validation-callout strong{font-size:14px}
 .compact-history{max-height:180px;overflow:auto}
