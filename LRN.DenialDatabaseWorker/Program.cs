@@ -42,6 +42,27 @@ if (!string.IsNullOrWhiteSpace(vaultUri))
 // appsettings.Secrets.example.json for the expected shape.
 builder.Configuration.AddJsonFile("appsettings.Secrets.json", optional: true, reloadOnChange: true);
 
+// Check the one secret everything depends on here, while the configuration sources that were meant
+// to supply it are still in view. Six services resolve ConnectionStrings:DenialDatabase in their
+// constructors and each throws the same bare "Connection string 'DenialDatabase' not found." - which
+// in the Windows event log arrives as a DI stack trace naming whichever service the container
+// happened to build first, and says nothing about the vault. This says where to look instead.
+//
+// Note the failure mode that message calls out: the vault configuration provider silently SKIPS a
+// secret whose "Enabled" attribute is false, so a disabled (or deleted, or renamed) secret is
+// indistinguishable here from one that was never created. Missing access is the louder failure -
+// that throws out of AddAzureKeyVault above, before this line runs.
+if (string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("DenialDatabase")))
+	throw new InvalidOperationException(
+		"Connection string 'DenialDatabase' (the LRNMaster database) was not supplied by any " +
+		"configuration source. " +
+		(string.IsNullOrWhiteSpace(vaultUri)
+			? "KeyVault:VaultUri is empty, so the vault was skipped entirely: either set it, or supply " +
+			  "ConnectionStrings__DenialDatabase as an environment variable - see README.md, " +
+			  "\"Running without the vault\"."
+			: $"Confirm the secret \"ConnectionStrings--DenialDatabase\" exists AND is enabled in {vaultUri}, " +
+			  "and that this service's identity still holds the \"Key Vault Secrets User\" role on that vault."));
+
 // ProcessorOptions
 builder.Services.Configure<ProcessorOptions>(builder.Configuration.GetSection(ProcessorOptions.SectionName));
 

@@ -18,8 +18,12 @@ public sealed class ReimbursementAgentOptions
     /// How long to wait for one question. A single answer is a full agent run — the model reasons,
     /// calls the MCP bridge, then writes a per-lab breakdown — so this is measured in tens of
     /// seconds, not the few seconds a normal API call takes.
+    ///
+    /// Keep it under 230 seconds. That is where the proxy App Service's front end drops an idle
+    /// inbound request, and past it a slow answer stops arriving as our timeout and starts arriving
+    /// as its 502 instead.
     /// </summary>
-    public int TimeoutSeconds { get; set; } = 120;
+    public int TimeoutSeconds { get; set; } = 200;
 
     /// <summary>Turns the Reimbursement Chat screen off without removing the menu entry or redeploying code.</summary>
     public bool Enabled { get; set; } = true;

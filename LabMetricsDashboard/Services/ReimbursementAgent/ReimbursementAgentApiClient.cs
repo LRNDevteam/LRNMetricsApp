@@ -117,8 +117,12 @@ public sealed class ReimbursementAgentApiClient : IReimbursementAgentApiClient
         catch (OperationCanceledException ex)
         {
             // HttpClient surfaces its own timeout as a cancellation, distinguished from the line
-            // above by the request token not being the one that fired.
-            _logger.LogWarning(ex, "Reimbursement chat: the agent did not answer before the timeout elapsed.");
+            // above by the request token not being the one that fired. Naming the user matches the
+            // non-success path below it: without one, a run of these cannot be told apart from one
+            // person retrying the same expensive question.
+            _logger.LogWarning(ex,
+                "Reimbursement chat: the agent did not answer a question from {User} before the timeout elapsed.",
+                user.Identity?.Name);
             return AgentAnswer.Failed(
                 "The agent took too long to answer. Complex questions covering many labs can time out — " +
                 "try narrowing it to one payer or one CPT code.");

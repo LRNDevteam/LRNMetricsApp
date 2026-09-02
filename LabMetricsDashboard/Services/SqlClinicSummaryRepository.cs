@@ -302,6 +302,14 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
                 ReadDeniedByClinic(groupedReader, deniedPanelsByClinic);
             }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The caller's token fired, which on this path means the browser went away mid-query -
+            // a refresh, a filter change superseding this request, or a closed tab. The throw still
+            // has to happen so the action abandons its work, but this is not a fault of ours, and
+            // an Error with a stack trace here is duplicated by the one the controller logs.
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to load clinic summary for lab '{LabName}'.", labName);

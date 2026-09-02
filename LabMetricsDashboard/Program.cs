@@ -603,10 +603,16 @@ builder.Services.AddSingleton<ReimbursementChatTokenIssuer>();
 
 // Long timeout by design: one answer is a whole agent run — the model reasons, calls the MCP
 // bridge, and writes a per-lab breakdown — which routinely takes far longer than a data API call.
+//
+// There is a hard ceiling above this one that raising the setting cannot lift: the proxy is an App
+// Service, and its front end drops an inbound request idle for 230 seconds. Past that we stop
+// getting a timeout and start getting the front end's own 502, which is a worse error to explain.
+// So the setting stays under that, and a question that genuinely needs longer needs the answer to
+// arrive incrementally (streaming or poll-for-result), not a bigger number here.
 builder.Services
     .AddHttpClient<IReimbursementAgentApiClient, ReimbursementAgentApiClient>()
     .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(
-        builder.Configuration.GetValue<int?>("ReimbursementAgent:TimeoutSeconds") ?? 120));
+        builder.Configuration.GetValue<int?>("ReimbursementAgent:TimeoutSeconds") ?? 200));
 
 // Which reports the board offers to which labs — the padlocked cells. Bound with IOptionsMonitor
 // (not Get<T>()) so editing the "ReportAvailability" section of appsettings.json takes effect on
