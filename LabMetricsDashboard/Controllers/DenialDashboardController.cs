@@ -23,6 +23,17 @@ public class DenialDashboardController : Controller
 		"Due This Month"
 	];
 
+	/// <summary>
+	/// Tab ids that no longer render a pane: Task Board, SLA Tracker, Filter Panel, the Dashboard
+	/// task-stat strip, and Denial Input (already disabled before these). <see cref="Normalize"/>
+	/// redirects any of these to the default tab, so an old link or bookmark still lands somewhere
+	/// that renders instead of a blank pane.
+	/// </summary>
+	private static readonly HashSet<string> RetiredTabs = new(StringComparer.OrdinalIgnoreCase)
+	{
+		"dashboard", "task-board", "sla-tracker", "filter-panel", "denial-input"
+	};
+
 	private readonly IDenialDashboardApiClient _dashboardApi;
 	private readonly IUserManagementRepository _userRepository;
 	private readonly LabConfigOptions _labConfig;
@@ -74,40 +85,17 @@ public class DenialDashboardController : Controller
 		var runInfo = await _dashboardApi.GetRunInfoAsync(selectedLabId, cancellationToken);
 		var currentRunId = runInfo.RunId ?? string.Empty;
 
+		// Still needed: gates the reviewer-assignment controls inside Denial Insights (below). The
+		// tab SET itself is the same for every role now - Task Board, SLA Tracker, Filter Panel and
+		// the Dashboard task-stat strip were retired, along with the role-scoped filtering that
+		// used to narrow GetByLabAsync's rows for AR Reviewer sessions.
 		var isArManager = HasAnyRole("AR Manager", "ARManager");
-		var isArReviewer = HasAnyRole("AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer");
-		var currentUserName = User.Identity?.Name?.Trim() ?? string.Empty;
-		if (isArReviewer && !isArManager && normalizedFilters.ActiveTab is not ("task-board" or "line-item"))
-		{
-			normalizedFilters.ActiveTab = "task-board";
-		}
-		else if (isArManager && normalizedFilters.ActiveTab is not ("denial-insight" or "task-board" or "line-item"))
-		{
-			normalizedFilters.ActiveTab = "denial-insight";
-		}
 
-		var allRecords = (await _dashboardApi.GetByLabAsync(selectedLabId, cancellationToken))
-			.OrderBy(x => x.DueDate)
-			.ThenBy(x => x.TaskId)
-			.ToList();
-
-		if (isArReviewer && !isArManager)
-		{
-			allRecords = allRecords
-				.Where(x => string.Equals(x.AssignedTo?.Trim(), currentUserName, StringComparison.OrdinalIgnoreCase))
-				.ToList();
-		}
-
-		var filteredRecords = ApplyFilters(allRecords, normalizedFilters)
-			.OrderBy(x => x.DueDate)
-			.ThenBy(x => x.TaskId)
-			.ToList();
-
-		var recordsPageSize = Math.Clamp(normalizedFilters.PageSize <= 0 ? 100 : normalizedFilters.PageSize, 50, 500);
-		var filteredRecordCount = filteredRecords.Count;
-		var recordsTotalPages = Math.Max(1, (int)Math.Ceiling(filteredRecordCount / (double)recordsPageSize));
-		var recordsPage = Math.Clamp(normalizedFilters.Page <= 0 ? 1 : normalizedFilters.Page, 1, recordsTotalPages);
-		var pagedRecords = filteredRecords.Skip((recordsPage - 1) * recordsPageSize).Take(recordsPageSize).ToList();
+		// The task-board dataset itself is no longer rendered anywhere on this page, but it is
+		// still the only source for the Global filters bar's Status / Priority / Action Category /
+		// Classification option lists - those filters still narrow the Line Item query
+		// server-side, so the dropdowns have to keep working even with the Task Board tab gone.
+		var taskBoardRecords = await _dashboardApi.GetByLabAsync(selectedLabId, cancellationToken);
 
 		var allInsights = (await _dashboardApi.GetInsightTableByLabAsync(selectedLabId, cancellationToken)).ToList();
 		// Distinct code + description list drives the Denial Code filter dropdown (always shows every code,
@@ -155,27 +143,10 @@ public class DenialDashboardController : Controller
 			CurrentSourceFileName = runInfo.SourceFileName ?? string.Empty,
 			CurrentWeekFolder = runInfo.WeekFolder ?? string.Empty,
 			LabOptions = labs,
-			AllRecordCount = allRecords.Count,
-			FilteredRecordCount = filteredRecordCount,
-			PagedRecords = pagedRecords,
-			RecordsPage = recordsPage,
-			RecordsPageSize = recordsPageSize,
-			RecordsTotalPages = recordsTotalPages,
-			Summary = BuildSummary(filteredRecords),
-			StatusBreakdown = BuildBreakdown(filteredRecords, x => x.Status, ["Open", "In Progress", "Completed", "On Hold", "Escalated", "Closed"]),
-			// No seed list: the workflow axis is open-ended (escalation states, "Assigned To AR
-			// Reviewer", and — since the reviewer-closure change — whichever Actual Action /
-			// Outcome was chosen), so seeding it would only invent zero rows for values this lab
-			// may never use while hiding the ones it does.
-			WorkflowStatusBreakdown = BuildBreakdown(filteredRecords, x => x.EffectiveWorkFlowStatus),
-			PriorityBreakdown = BuildBreakdown(filteredRecords, x => x.Priority, ["High", "Medium", "Low"]),
-			ActionCategoryBreakdown = BuildBreakdown(filteredRecords, x => x.EffectiveActionCategory),
-			ClassificationBreakdown = BuildBreakdown(filteredRecords, x => x.DenialClassification),
-			DeadlineBreakdown = BuildDeadlineBreakdown(filteredRecords),
-			StatusOptions = BuildOptions(allRecords.Select(x => x.Status)),
-			PriorityOptions = BuildOptions(allRecords.Select(x => x.Priority)),
-			ActionCategoryOptions = BuildOptions(allRecords.Select(x => x.EffectiveActionCategory)),
-			ClassificationOptions = BuildOptions(allRecords.Select(x => x.DenialClassification)),
+			StatusOptions = BuildOptions(taskBoardRecords.Select(x => x.Status)),
+			PriorityOptions = BuildOptions(taskBoardRecords.Select(x => x.Priority)),
+			ActionCategoryOptions = BuildOptions(taskBoardRecords.Select(x => x.EffectiveActionCategory)),
+			ClassificationOptions = BuildOptions(taskBoardRecords.Select(x => x.DenialClassification)),
 			DeadlineOptions = ["(All)", .. DeadlineBuckets],
 			PagedInsights = pagedInsights,
 			InsightDenialCodeOptions = insightDenialCodeOptions,
@@ -197,12 +168,9 @@ public class DenialDashboardController : Controller
 			WeeklyPivot = weeklyPivot,
 			MonthlyPivot = monthlyPivot,
 			IsArManager = isArManager,
-			IsArReviewer = isArReviewer,
 			ReviewerOptions = reviewerOptions
 		};
 
-		viewModel.Filters.Page = recordsPage;
-		viewModel.Filters.PageSize = recordsPageSize;
 		viewModel.Filters.InsightPage = insightPage;
 		viewModel.Filters.InsightPageSize = insightPageSize;
 		viewModel.Filters.LineItemPage = lineItemPage;
@@ -747,7 +715,7 @@ public class DenialDashboardController : Controller
 		["DateOfServiceTo"] = filters.DateOfServiceTo?.ToString("yyyy-MM-dd"),
 		["DenialDateFrom"] = filters.DenialDateFrom?.ToString("yyyy-MM-dd"),
 		["DenialDateTo"] = filters.DenialDateTo?.ToString("yyyy-MM-dd"),
-		["ActiveTab"] = string.IsNullOrWhiteSpace(filters.ActiveTab) ? "task-board" : filters.ActiveTab,
+		["ActiveTab"] = string.IsNullOrWhiteSpace(filters.ActiveTab) ? "monthly-breakdown" : filters.ActiveTab,
 		["Page"] = filters.Page <= 0 ? 1 : filters.Page,
 		["PageSize"] = filters.PageSize <= 0 ? 100 : filters.PageSize,
 		["InsightPage"] = filters.InsightPage <= 0 ? 1 : filters.InsightPage,
@@ -946,10 +914,13 @@ public class DenialDashboardController : Controller
 
 	public static DenialDashboardFilters Normalize(DenialDashboardFilters filters, int? selectedLabId)
 	{
-		var activeTab = string.IsNullOrWhiteSpace(filters.ActiveTab) ? "dashboard" : filters.ActiveTab.Trim();
+		const string defaultTab = "monthly-breakdown";
+		var activeTab = string.IsNullOrWhiteSpace(filters.ActiveTab) ? defaultTab : filters.ActiveTab.Trim();
 		if (activeTab.Equals("claim-view", StringComparison.OrdinalIgnoreCase)) activeTab = "line-item";
-		// The Denial Input tab is hidden; its pane no longer renders, so send old links to the dashboard.
-		if (activeTab.Equals("denial-input", StringComparison.OrdinalIgnoreCase)) activeTab = "dashboard";
+		// Task Board, SLA Tracker, Filter Panel, the Dashboard task-stat strip and Denial Input are
+		// all retired; none of those panes render any more, so send old links/bookmarks to the
+		// default tab instead of landing on a blank pane.
+		if (RetiredTabs.Contains(activeTab)) activeTab = defaultTab;
 
 		return new DenialDashboardFilters
 		{
@@ -1067,23 +1038,6 @@ public class DenialDashboardController : Controller
 			"Due This Week" => record.DueDate.Date >= today && record.DueDate.Date <= today.AddDays(7),
 			"Due This Month" => record.DueDate.Date >= today && record.DueDate.Date <= today.AddDays(30),
 			_ => true
-		};
-	}
-
-	private static DashboardSummary BuildSummary(List<DenialRecord> records)
-	{
-		var today = DateTime.Today;
-		return new DashboardSummary
-		{
-			TotalTasks = records.Count,
-			OpenTasks = records.Count(x => IsOpenStatus(x.Status)),
-			InProgressTasks = records.Count(x => EqualsIgnoreCase(x.Status, "In Progress")),
-			CompletedTasks = records.Count(x => IsCompletedStatus(x.Status)),
-			OverdueTasks = records.Count(x => !x.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase) && x.DueDate.Date < today),
-			DueInThreeDays = records.Count(x => !x.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase) && x.DueDate.Date >= today && x.DueDate.Date <= today.AddDays(3)),
-			HighPriorityTasks = records.Count(x => EqualsIgnoreCase(x.Priority, "High")),
-			EscalatedTasks = records.Count(x => EqualsIgnoreCase(x.Status, "Escalated")),
-			TotalInsuranceBalance = records.Sum(x => x.InsuranceBalance)
 		};
 	}
 

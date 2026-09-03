@@ -1,4 +1,4 @@
-@using System.Linq
+﻿@using System.Linq
 @using System.Globalization
 @using System.Text.Json
 @model DashboardPageViewModel
@@ -77,11 +77,6 @@
         "Met" => "badge-soft-success",
         _ => "badge-soft-primary"
     };
-    // "Hide the function, don't remove it" - flip these to true to bring the tab / CSV buttons back.
-    var denialInputTabEnabled = false;
-    var taskBoardCsvEnabled = false;
-
-    var recordsPageSizes = new[] { 50, 100, 250, 500 };
     var insightPageSizes = new[] { 10, 25, 50, 100 };
     var lineItemPageSizes = new[] { 25, 50, 100, 250 };
 
@@ -115,9 +110,6 @@
         LineItemPage = lineItemPage,
         LineItemPageSize = lineItemPageSize
     }) ?? "#";
-
-    string RecordsPageUrl(int page, string? tabOverride = null) => DashboardUrl(tabOverride ?? activeTab, page, Model.Filters.PageSize, Model.Filters.InsightPage, Model.Filters.InsightPageSize, Model.Filters.LineItemPage, Model.Filters.LineItemPageSize);
-    string RecordsPageSizeUrl(int pageSize) => DashboardUrl(activeTab, 1, pageSize, Model.Filters.InsightPage, Model.Filters.InsightPageSize, Model.Filters.LineItemPage, Model.Filters.LineItemPageSize);
 
     string InsightPageUrl(int page) => DashboardUrl("denial-insight", Model.Filters.Page, Model.Filters.PageSize, page, Model.Filters.InsightPageSize, Model.Filters.LineItemPage, Model.Filters.LineItemPageSize);
     string InsightPageSizeUrl(int pageSize) => DashboardUrl("denial-insight", Model.Filters.Page, Model.Filters.PageSize, 1, pageSize, Model.Filters.LineItemPage, Model.Filters.LineItemPageSize);
@@ -683,7 +675,7 @@
             <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
                 <div class="text-end me-2">
                     <div class="small text-muted">Data source for selected lab</div>
-                    <div class="fw-semibold">@Model.CurrentLabName · @Model.AllRecordCount.ToString("N0") rows · @Model.FilteredRecordCount.ToString("N0") visible after filtering</div>
+                    <div class="fw-semibold">@Model.CurrentLabName</div>
                 </div>
                 <button class="btn btn-outline-primary rounded-pill px-3" type="button" data-bs-toggle="collapse" data-bs-target="#dashboardFiltersCollapse" aria-expanded="true" aria-controls="dashboardFiltersCollapse" id="filterCollapseToggle">
                     <i class="bi bi-sliders me-1"></i><span class="filter-toggle-text">Hide Filters</span>
@@ -853,698 +845,51 @@
     </div>
 </div>
 <ul class="nav nav-pills dashboard-tabs mb-4" id="dashboardTabs" role="tablist">
-    @if (Model.IsArReviewer && !Model.IsArManager)
-    {
-        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "task-board" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#task-board" type="button"><i class="bi bi-clipboard-data me-2"></i>Task Board</button></li>
-        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "line-item" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#line-item" type="button"><i class="bi bi-list-ul me-2"></i>Line Item</button></li>
-    }
-    else if (Model.IsArManager)
-    {
-        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-insight" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-insight" type="button"><i class="bi bi-lightbulb me-2"></i>Denial Insight</button></li>
-        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "task-board" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#task-board" type="button"><i class="bi bi-clipboard-data me-2"></i>Task Board</button></li>
-        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "line-item" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#line-item" type="button"><i class="bi bi-list-ul me-2"></i>Line Item</button></li>
-    }
-    else
-    {
-        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "dashboard" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#dashboard" type="button"><i class="bi bi-bar-chart me-2"></i>Dashboard</button></li>
-        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "weekly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#weekly-breakdown" type="button"><i class="bi bi-calendar-week me-2"></i>Weekly Breakdown</button></li>
-        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "monthly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#monthly-breakdown" type="button"><i class="bi bi-calendar-month me-2"></i>Monthly Breakdown</button></li>
-        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "filter-panel" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#filter-panel" type="button"><i class="bi bi-search me-2"></i>Filter Panel</button></li>
-        @if (denialInputTabEnabled)
-        {
-            <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-input" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-input" type="button"><i class="bi bi-table me-2"></i>Denial Input</button></li>
-        }
-        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "task-board" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#task-board" type="button"><i class="bi bi-clipboard-data me-2"></i>Task Board</button></li>
-        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "sla-tracker" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#sla-tracker" type="button"><i class="bi bi-alarm me-2"></i>SLA Tracker</button></li>
-        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-insight" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-insight" type="button"><i class="bi bi-lightbulb me-2"></i>Denial Insight</button></li>
-        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "line-item" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#line-item" type="button"><i class="bi bi-list-ul me-2"></i>Line Item</button></li>
-    }
+    @* One tab set for every role. Task Board, SLA Tracker, Filter Panel, the Dashboard task-stat
+       strip and the (already-disabled) Denial Input tab were retired: task tracking now lives in
+       the separate Denial Workflow app, and this page keeps only the reporting views. AR
+       Reviewer / AR Manager no longer get a different tab set - Model.IsArManager still gates
+       the reviewer-assignment controls inside Denial Insights below. *@
+    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "monthly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#monthly-breakdown" type="button"><i class="bi bi-calendar-month me-2"></i>Monthly Summary</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "weekly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#weekly-breakdown" type="button"><i class="bi bi-calendar-week me-2"></i>Weekly Summary</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-insight" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-insight" type="button"><i class="bi bi-lightbulb me-2"></i>Denial Insights</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "line-item" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#line-item" type="button"><i class="bi bi-list-ul me-2"></i>Line Level Data</button></li>
 </ul>
 <div class="tab-content">
-    <div class="tab-pane fade @(activeTab == "filter-panel" ? "show active" : "")" id="filter-panel" role="tabpanel">
-        <div class="card border-0 shadow-sm table-card">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
-                    <div>
-                        <div class="section-title"><i class="bi bi-bar-chart-line-fill me-2"></i>Insights &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-
-
-                    </div>
-
-                    <span class="chip chip-warning">Today: @today.ToString("dd MMM yyyy")</span>
-                </div>
-                <div class="row g-3">
-                    <div class="col-12 col-xl-6">
-                        <div class="mini-panel panel-theme-blue">
-                            <div class="mini-panel-title">Task Status</div>
-                            <div class="table-responsive panel-table-wrap table-frame">
-                                <table class="table table-sm app-table polished-table filter-table zebra-table sortable-table mb-0">
-                                    <thead>
-                                        <tr>
-                                            <th>Label</th>
-                                            <th class="text-end">Claims</th>
-                                            <th class="text-end">Balance</th>
-                                            <th class="text-end">Rate</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach (var item in Model.StatusBreakdown)
-                                        {
-                                            <tr>
-                                                <td>@item.Label</td>
-                                                <td class="text-end fw-semibold">@item.Count.ToString("N0")</td>
-                                                <td class="text-end text-danger-emphasis">@Money(item.InsuranceBalanceSum)</td>
-                                                <td class="text-end">
-                                                    <div class="rate-cell">
-                                                        <div class="rate-value">@item.Percentage.ToString("0.0")%</div>
-                                                        <div class="rate-track"><span style="width:@(PercentWidth(item.Percentage))%;"></span></div>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        }
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-12 col-xl-6">
-                        <div class="mini-panel panel-theme-purple">
-                            <div class="mini-panel-title">Priority</div>
-                            <div class="table-responsive panel-table-wrap table-frame">
-                                <table class="table table-sm app-table polished-table filter-table zebra-table sortable-table mb-0">
-                                    <thead>
-                                        <tr>
-                                            <th>Label</th>
-                                            <th class="text-end">Claims</th>
-                                            <th class="text-end">Balance</th>
-                                            <th class="text-end">Rate</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach (var item in Model.PriorityBreakdown)
-                                        {
-                                            <tr>
-                                                <td>@item.Label</td>
-                                                <td class="text-end fw-semibold">@item.Count.ToString("N0")</td>
-                                                <td class="text-end text-danger-emphasis">@Money(item.InsuranceBalanceSum)</td>
-                                                <td class="text-end">
-                                                    <div class="rate-cell">
-                                                        <div class="rate-value">@item.Percentage.ToString("0.0")%</div>
-                                                        <div class="rate-track"><span style="width:@(PercentWidth(item.Percentage))%;"></span></div>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        }
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-12 col-xl-6">
-                        <div class="mini-panel panel-theme-blue">
-                            <div class="mini-panel-title">Action Category</div>
-                            <div class="table-responsive panel-table-wrap table-frame">
-                                <table class="table table-sm app-table polished-table filter-table zebra-table sortable-table mb-0">
-                                    <thead>
-                                        <tr>
-                                            <th>Label</th>
-                                            <th class="text-end">Claims</th>
-                                            <th class="text-end">Balance</th>
-                                            <th class="text-end">Rate</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach (var item in Model.ActionCategoryBreakdown.Take(12))
-                                        {
-                                            <tr>
-                                                <td>@item.Label</td>
-                                                <td class="text-end fw-semibold">@item.Count.ToString("N0")</td>
-                                                <td class="text-end text-danger-emphasis">@Money(item.InsuranceBalanceSum)</td>
-                                                <td class="text-end">
-                                                    <div class="rate-cell">
-                                                        <div class="rate-value">@item.Percentage.ToString("0.0")%</div>
-                                                        <div class="rate-track"><span style="width:@(PercentWidth(item.Percentage))%;"></span></div>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        }
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-12 col-xl-6">
-                        <div class="mini-panel panel-theme-purple">
-                            <div class="mini-panel-title">Classification & SLA</div>
-                            <div class="table-responsive panel-table-wrap table-frame mb-3">
-                                <table class="table table-sm app-table polished-table filter-table zebra-table sortable-table mb-0">
-                                    <thead>
-                                        <tr>
-                                            <th>Classification</th>
-                                            <th class="text-end">Claims</th>
-                                            <th class="text-end">High Priority</th>
-                                            <th class="text-end">Balance</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach (var item in Model.ClassificationBreakdown.Take(8))
-                                        {
-                                            <tr>
-                                                <td>@item.Label</td>
-                                                <td class="text-end fw-semibold">@item.Count.ToString("N0")</td>
-                                                <td class="text-end">@item.HighPriorityCount.ToString("N0")</td>
-                                                <td class="text-end text-danger-emphasis">@Money(item.InsuranceBalanceSum)</td>
-                                            </tr>
-                                        }
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div class="table-responsive panel-table-wrap table-frame">
-                                <table class="table table-sm app-table polished-table filter-table zebra-table sortable-table mb-0">
-                                    <thead>
-                                        <tr>
-                                            <th>Deadline</th>
-                                            <th class="text-end">Claims</th>
-                                            <th class="text-end">Open</th>
-                                            <th class="text-end">Balance</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach (var item in Model.DeadlineBreakdown)
-                                        {
-                                            <tr>
-                                                <td>@item.Label</td>
-                                                <td class="text-end fw-semibold">@item.Count.ToString("N0")</td>
-                                                <td class="text-end">@item.OpenCount.ToString("N0")</td>
-                                                <td class="text-end text-danger-emphasis">@Money(item.InsuranceBalanceSum)</td>
-                                            </tr>
-                                        }
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    @if (denialInputTabEnabled)
-    {
-    <div class="tab-pane fade @(activeTab == "denial-input" ? "show active" : "")" id="denial-input" role="tabpanel">
+    <div class="tab-pane fade @(activeTab == "monthly-breakdown" ? "show active" : "")" id="monthly-breakdown" role="tabpanel">
         <div class="card border-0 shadow-sm table-card">
             <div class="card-body">
                 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
                     <div>
-                        <div class="section-title">Denial Input &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-                        @*
-            <div class="section-subtitle">This is the raw grid from <code>dbo.DenialTaskBoard</code> for the selected lab.</div>
-            *@
+                        <div class="section-title"><i class="bi bi-calendar-month me-2"></i>Monthly Summary &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+                        <div class="section-subtitle">Pivot-style monthly view from <code>DenialLineItem.DenialDate</code> showing top insurance and top denials.</div>
                     </div>
+                </div>
+                @await Html.PartialAsync("_BreakdownPivotTable", Model.MonthlyPivot)
+            </div>
+        </div>
+    </div>
 
-                    <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search this page..." data-target-table="denialInputTable" /></div>
-                </div>
-                <div class="table-responsive table-frame">
-                    <table class="table table-hover align-middle app-table polished-table line-table zebra-table sortable-table" id="denialInputTable">
-                        <thead>
-                            <tr>
-                                <th>Claim ID</th>
-                                <th>Patient / Acct #</th>
-                                <th>CPT</th>
-                                <th>Denial Code</th>
-                                <th>Description</th>
-                                <th>Classification</th>
-                                <th>Action Code</th>
-                                <th>Recommended Action</th>
-                                <th>Action Category</th>
-                                <th>Assigned To</th>
-                                <th>Task</th>
-                                <th>Priority</th>
-                                <th>Insurance Balance</th>
-                                <th>SLA</th>
-                                <th>Status</th>
-                                <th>Date Opened</th>
-                                <th>Due Date</th>
-                                <th>Date Completed</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var item in Model.PagedRecords)
-                            {
-                                <tr>
-                                    <td class="fw-semibold">@item.ClaimId</td>
-                                    <td>@item.PatientAccountNumber</td>
-                                    <td>@item.CptCode</td>
-                                    <td>@item.DenialCode</td>
-                                    <td class="text-wrap narrow-cell">@item.DenialDescription</td>
-                                    <td>@item.DenialClassification</td>
-                                    <td>@item.ActionCode</td>
-                                    <td class="text-wrap narrow-cell">@item.RecommendedAction</td>
-                                    <td>@item.EffectiveActionCategory</td>
-                                    <td>@(string.IsNullOrWhiteSpace(item.AssignedTo) ? "-" : item.AssignedTo)</td>
-                                    <td>@item.Task</td>
-                                    <td><span class="badge @PriorityBadge(item.Priority)">@item.Priority</span></td>
-                                    <td class="text-end">@Money(item.InsuranceBalance)</td>
-                                    <td>@item.SlaDays days</td>
-                                    <td><span class="badge @StatusBadge(item.Status)">@item.Status</span></td>
-                                    <td>@item.DateOpened.ToString("dd MMM yyyy")</td>
-                                    <td>@item.DueDate.ToString("dd MMM yyyy")</td>
-                                    <td>@(item.DateCompleted?.ToString("dd MMM yyyy") ?? "-")</td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-                @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "denial-input", Page = Model.RecordsPage, TotalPages = Model.RecordsTotalPages, TotalItems = Model.FilteredRecordCount, PageSize = Model.RecordsPageSize, ItemLabel = "rows", BuildUrl = RecordsPageUrl })
-            </div>
-        </div>
-    </div>
-    }
-    <div class="tab-pane fade @(activeTab == "dashboard" ? "show active" : "")" id="dashboard" role="tabpanel">
-        @* Compact summary strips (matches the Denial Insight tab) - the tables below get the spotlight. *@
-        <div class="insight-summary-strip mb-2">
-            <div class="insight-stat stat-blue"><span class="insight-stat-label">Total Tasks</span><span class="insight-stat-value">@Model.Summary.TotalTasks.ToString("N0")</span></div>
-            <div class="insight-stat stat-purple"><span class="insight-stat-label">Open</span><span class="insight-stat-value">@Model.Summary.OpenTasks.ToString("N0")</span></div>
-            <div class="insight-stat stat-green"><span class="insight-stat-label">In Progress</span><span class="insight-stat-value">@Model.Summary.InProgressTasks.ToString("N0")</span></div>
-            <div class="insight-stat stat-red"><span class="insight-stat-label">Completed</span><span class="insight-stat-value">@Model.Summary.CompletedTasks.ToString("N0")</span></div>
-        </div>
-        <div class="insight-summary-strip mb-4">
-            <div class="insight-stat stat-red"><span class="insight-stat-label">Overdue</span><span class="insight-stat-value">@Model.Summary.OverdueTasks.ToString("N0")</span></div>
-            <div class="insight-stat stat-purple"><span class="insight-stat-label">Due in 3 Days</span><span class="insight-stat-value">@Model.Summary.DueInThreeDays.ToString("N0")</span></div>
-            <div class="insight-stat stat-green"><span class="insight-stat-label">High Priority</span><span class="insight-stat-value">@Model.Summary.HighPriorityTasks.ToString("N0")</span></div>
-            <div class="insight-stat stat-orange"><span class="insight-stat-label">Insurance Balance</span><span class="insight-stat-value">@Money(Model.Summary.TotalInsuranceBalance)</span></div>
-        </div>
-        <div class="row g-4">
-            <div class="col-12 col-xl-6">
-                <div class="card border-0 shadow-sm">
-                    <div class="card-body">
-                        <div class="section-title mb-3">Status Summary</div>
-                        <div class="lis-scroll no-fs">
-                            <table class="table table-sm align-middle lis-summary-grid sortable-table mb-0">
-                                <thead>
-                                    <tr>
-                                        <th>Status</th>
-                                        <th class="lis-number-cell">Count</th>
-                                        <th class="lis-number-cell">% Filtered</th>
-                                        <th class="lis-number-cell">SLA Breach</th>
-                                        <th class="lis-number-cell">Insurance Balance</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var item in Model.StatusBreakdown)
-                                    {
-                                        <tr>
-                                            <td>@item.Label</td>
-                                            <td class="lis-number-cell fw-semibold">@item.Count.ToString("N0")</td>
-                                            <td class="lis-number-cell">@item.Percentage.ToString("0.0")%</td>
-                                            <td class="lis-number-cell">@item.OverdueCount.ToString("N0")</td>
-                                            <td class="lis-number-cell">@Money(item.InsuranceBalanceSum)</td>
-                                        </tr>
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            @* Workflow Status Summary. Status Summary above is task progression; this is the
-               workflow/escalation axis the Denial Workflow application writes. Shown here so users
-               without access to that application can still see where the work sits, and so a
-               workflow status change is visible in LRNMetrics. *@
-            <div class="col-12 col-xl-6">
-                <div class="card border-0 shadow-sm">
-                    <div class="card-body">
-                        <div class="section-title mb-3">
-                            Workflow Status Summary
-                            <span class="text-muted fw-normal ms-2" style="font-size:.78rem;">from Denial Workflow</span>
-                        </div>
-                        <div class="lis-scroll no-fs">
-                            <table class="table table-sm align-middle lis-summary-grid sortable-table mb-0">
-                                <thead>
-                                    <tr>
-                                        <th>Workflow Status</th>
-                                        <th class="lis-number-cell">Count</th>
-                                        <th class="lis-number-cell">% Filtered</th>
-                                        <th class="lis-number-cell">SLA Breach</th>
-                                        <th class="lis-number-cell">Insurance Balance</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @if (Model.WorkflowStatusBreakdown.Count == 0)
-                                    {
-                                        <tr><td colspan="5" class="text-muted">No workflow activity for this run yet.</td></tr>
-                                    }
-                                    else
-                                    {
-                                        @foreach (var item in Model.WorkflowStatusBreakdown)
-                                        {
-                                            <tr>
-                                                <td>@item.Label</td>
-                                                <td class="lis-number-cell fw-semibold">@item.Count.ToString("N0")</td>
-                                                <td class="lis-number-cell">@item.Percentage.ToString("0.0")%</td>
-                                                <td class="lis-number-cell">@item.OverdueCount.ToString("N0")</td>
-                                                <td class="lis-number-cell">@Money(item.InsuranceBalanceSum)</td>
-                                            </tr>
-                                        }
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-12 col-xl-6">
-                <div class="card border-0 shadow-sm">
-                    <div class="card-body">
-                        <div class="section-title mb-3">Top Denial Classifications</div>
-                        <div class="lis-scroll no-fs">
-                            <table class="table table-sm align-middle lis-summary-grid sortable-table mb-0">
-                                <thead>
-                                    <tr>
-                                        <th>Classification</th>
-                                        <th class="lis-number-cell">Count</th>
-                                        <th class="lis-number-cell">Open</th>
-                                        <th class="lis-number-cell">Completed</th>
-                                        <th class="lis-number-cell">High Priority</th>
-                                        <th class="lis-number-cell">Insurance Balance</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var item in Model.ClassificationBreakdown.Take(10))
-                                    {
-                                        <tr>
-                                            <td>@item.Label</td>
-                                            <td class="lis-number-cell fw-semibold">@item.Count.ToString("N0")</td>
-                                            <td class="lis-number-cell">@item.OpenCount.ToString("N0")</td>
-                                            <td class="lis-number-cell">@item.CompletedCount.ToString("N0")</td>
-                                            <td class="lis-number-cell">@item.HighPriorityCount.ToString("N0")</td>
-                                            <td class="lis-number-cell">@Money(item.InsuranceBalanceSum)</td>
-                                        </tr>
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="tab-pane fade @(activeTab == "task-board" ? "show active" : "")" id="task-board" role="tabpanel">
+    <div class="tab-pane fade @(activeTab == "weekly-breakdown" ? "show active" : "")" id="weekly-breakdown" role="tabpanel">
         <div class="card border-0 shadow-sm table-card">
             <div class="card-body">
                 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
                     <div>
-                        <div class="section-title">Task Board &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-                        <div class="section-subtitle">Operational work queue for denial follow-up.</div>
-                    </div>
-                    <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
-                        @if (taskBoardCsvEnabled)
-                        {
-                        <a class="btn btn-outline-success rounded-pill px-3 js-loader-link" href="@Url.Action("DownloadTaskBoardCsv", "DenialDashboard", new { lab = Model.CurrentLabName, LabId = Model.Filters.LabId, Status = Model.Filters.Status, Priority = Model.Filters.Priority, ActionCategory = Model.Filters.ActionCategory, Deadline = Model.Filters.Deadline, Classification = Model.Filters.Classification, SalesRepname = Model.Filters.SalesRepname, ClinicName = Model.Filters.ClinicName, ReferringProvider = Model.Filters.ReferringProvider, PayerName = Model.Filters.PayerName, PayerType = Model.Filters.PayerType, PanelName = Model.Filters.PanelName, FirstBilledDateFrom = Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"), FirstBilledDateTo = Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"), DateOfServiceFrom = Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"), DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"), DenialDateFrom = Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"), DenialDateTo = Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"), ActiveTab = "task-board", Page = Model.Filters.Page, PageSize = Model.Filters.PageSize, InsightPage = Model.Filters.InsightPage, InsightPageSize = Model.Filters.InsightPageSize, LineItemPage = Model.Filters.LineItemPage, LineItemPageSize = Model.Filters.LineItemPageSize })">
-                            <i class="bi bi-download me-1"></i>Download CSV
-                        </a>
-                        <form asp-action="UploadTaskBoardCsv" asp-controller="DenialDashboard" method="post" enctype="multipart/form-data" class="d-inline-flex align-items-center gap-2 task-upload-form">
-                            @Html.AntiForgeryToken()
-                            <input type="hidden" name="lab" value="@Model.CurrentLabName" />
-                            <input type="hidden" name="LabId" value="@Model.Filters.LabId" />
-                            <input type="hidden" name="Status" value="@Model.Filters.Status" />
-                            <input type="hidden" name="Priority" value="@Model.Filters.Priority" />
-                            <input type="hidden" name="ActionCategory" value="@Model.Filters.ActionCategory" />
-                            <input type="hidden" name="Deadline" value="@Model.Filters.Deadline" />
-                            <input type="hidden" name="Classification" value="@Model.Filters.Classification" />
-                            <input type="hidden" name="SalesRepname" value="@Model.Filters.SalesRepname" />
-                            <input type="hidden" name="ClinicName" value="@Model.Filters.ClinicName" />
-                            <input type="hidden" name="ReferringProvider" value="@Model.Filters.ReferringProvider" />
-                            <input type="hidden" name="PayerName" value="@Model.Filters.PayerName" />
-                            <input type="hidden" name="PayerType" value="@Model.Filters.PayerType" />
-                            <input type="hidden" name="PanelName" value="@Model.Filters.PanelName" />
-                            <input type="hidden" name="FirstBilledDateFrom" value="@(Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"))" />
-                            <input type="hidden" name="FirstBilledDateTo" value="@(Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"))" />
-                            <input type="hidden" name="DateOfServiceFrom" value="@(Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"))" />
-                            <input type="hidden" name="DateOfServiceTo" value="@(Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"))" />
-                            <input type="hidden" name="DenialDateFrom" value="@(Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"))" />
-                            <input type="hidden" name="DenialDateTo" value="@(Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"))" />
-                            <input type="hidden" name="ActiveTab" value="task-board" />
-                            <input type="hidden" name="Page" value="@Model.Filters.Page" />
-                            <input type="hidden" name="PageSize" value="@Model.Filters.PageSize" />
-                            <input type="hidden" name="InsightPage" value="@Model.Filters.InsightPage" />
-                            <input type="hidden" name="InsightPageSize" value="@Model.Filters.InsightPageSize" />
-                            <input type="hidden" name="LineItemPage" value="@Model.Filters.LineItemPage" />
-                            <input type="hidden" name="LineItemPageSize" value="@Model.Filters.LineItemPageSize" />
-                            <input type="file" name="taskBoardCsv" class="d-none task-upload-input" accept=".csv,text/csv" />
-                            <button type="button" class="btn btn-outline-primary rounded-pill px-3 task-upload-trigger">
-                                <i class="bi bi-upload me-1"></i>Upload CSV
-                            </button>
-                        </form>
-                        }
-                        <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search this page..." data-target-table="taskBoardTable" /></div>
+                        <div class="section-title"><i class="bi bi-calendar-week me-2"></i>Weekly Summary &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+                        <div class="section-subtitle">Pivot-style weekly view from <code>DenialLineItem.DenialDate</code> showing top insurance and top denials.</div>
                     </div>
                 </div>
-                @if (Model.IsArReviewer && !Model.IsArManager)
-                {
-                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-                        <div class="small text-muted">Update multiple assigned tasks, then click <strong>Save All Task Updates</strong>.</div>
-                        <button type="submit" form="reviewerBulkTaskForm" class="btn btn-success rounded-pill px-4">
-                            <i class="bi bi-check2-circle me-1"></i>Save All Task Updates
-                        </button>
-                    </div>
-                }
-                else if (taskBoardCsvEnabled)
-                {
-                    <div class="small text-muted mb-3">Download the task list, update only <strong>Status</strong>, <strong>AssignedTo</strong>, and <strong>DateCompleted</strong> (or Closed Date), then upload the CSV back here.</div>
-                }
-
-                <form id="reviewerBulkTaskForm" asp-action="UpdateReviewerTasksOverall" asp-controller="DenialDashboard" method="post">
-                    @Html.AntiForgeryToken()
-                    <input type="hidden" name="lab" value="@Model.CurrentLabName" />
-                    <input type="hidden" name="labId" value="@Model.Filters.LabId" />
-                    <input type="hidden" name="runId" value="@Model.CurrentRunId" />
-                    <input type="hidden" name="Status" value="@Model.Filters.Status" />
-                    <input type="hidden" name="Priority" value="@Model.Filters.Priority" />
-                    <input type="hidden" name="ActionCategory" value="@Model.Filters.ActionCategory" />
-                    <input type="hidden" name="Deadline" value="@Model.Filters.Deadline" />
-                    <input type="hidden" name="Classification" value="@Model.Filters.Classification" />
-                    <input type="hidden" name="SalesRepname" value="@Model.Filters.SalesRepname" />
-                    <input type="hidden" name="ClinicName" value="@Model.Filters.ClinicName" />
-                    <input type="hidden" name="ReferringProvider" value="@Model.Filters.ReferringProvider" />
-                    <input type="hidden" name="PayerName" value="@Model.Filters.PayerName" />
-                    <input type="hidden" name="PayerType" value="@Model.Filters.PayerType" />
-                    <input type="hidden" name="PanelName" value="@Model.Filters.PanelName" />
-                    <input type="hidden" name="FirstBilledDateFrom" value="@(Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"))" />
-                    <input type="hidden" name="FirstBilledDateTo" value="@(Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"))" />
-                    <input type="hidden" name="DateOfServiceFrom" value="@(Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"))" />
-                    <input type="hidden" name="DateOfServiceTo" value="@(Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"))" />
-                    <input type="hidden" name="DenialDateFrom" value="@(Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"))" />
-                    <input type="hidden" name="DenialDateTo" value="@(Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"))" />
-                    <input type="hidden" name="ActiveTab" value="task-board" />
-                    <input type="hidden" name="Page" value="@Model.Filters.Page" />
-                    <input type="hidden" name="PageSize" value="@Model.Filters.PageSize" />
-                    <input type="hidden" name="InsightPage" value="@Model.Filters.InsightPage" />
-                    <input type="hidden" name="InsightPageSize" value="@Model.Filters.InsightPageSize" />
-                    <input type="hidden" name="LineItemPage" value="@Model.Filters.LineItemPage" />
-                    <input type="hidden" name="LineItemPageSize" value="@Model.Filters.LineItemPageSize" />
-
-                <div class="lis-scroll">
-                    <table class="table table-hover align-middle lis-list-table sortable-table" id="taskBoardTable">
-                        <thead>
-                            <tr>
-                                <th>Task ID</th>
-                                <th>Claim ID</th>
-                                <th>Unique Track ID</th>
-                                <th>Patient / Acct #</th>
-                                <th>CPT Code</th>
-                                <th>Denial Code</th>
-                                <th class="wide-description-cell">Denial Description</th>
-                                <th>Denial Classification</th>
-                                <th>Action Code</th>
-                                <th>Recommended Action</th>
-                                <th>Action Category</th>
-                                <th class="wide-task-cell">Task</th>
-                                <th>Priority</th>
-                                <th class="lis-number-cell">Insurance Balance</th>
-                                <th>Current Denial</th>
-                                <th class="lis-number-cell">SLA Days</th>
-                                <th class="status-edit-cell">Status</th>
-                                @if (Model.IsArReviewer && !Model.IsArManager)
-                                {
-                                    <th class="reviewer-comment-cell">Reviewer Comments</th>
-                                }
-                                <th>Assigned To</th>
-                                <th class="lis-date-cell">Date Opened</th>
-                                <th class="lis-date-cell">Due Date</th>
-                                <th class="lis-date-cell">Date Completed</th>
-                                <th class="lis-number-cell">Days Remaining</th>
-                                <th>SLA Status</th>
-                                <th>Payer Name</th>
-                                <th>Payer Type</th>
-                                <th>Panel Name</th>
-                                <th>Clinic Name</th>
-                                <th>Referring Provider</th>
-                                <th>Sales Rep</th>
-                                <th class="lis-date-cell">First Billed Date</th>
-                                <th class="lis-date-cell">Date of Service</th>
-                                <th>Lab Name</th>
-                                <th class="lis-number-cell">Lab ID</th>
-                                <th>Run ID</th>
-                                <th class="lis-date-cell">Created On</th>
-                                <th class="lis-number-cell">Total Balance</th>
-                                <th>Payer Name Normalized</th>
-                                <th>Responsibility</th>
-                                <th class="lis-date-cell">Discussion Date</th>
-                                <th>ETA</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var item in Model.PagedRecords)
-                            {
-                                <tr>
-                                    <td class="fw-semibold">
-                                        @item.TaskId
-                                        @if (Model.IsArReviewer && !Model.IsArManager)
-                                        {
-                                            <input type="hidden" name="taskIds" value="@item.TaskId" />
-                                        }
-                                    </td>
-                                    <td>@item.ClaimId</td>
-                                    <td>@(string.IsNullOrWhiteSpace(item.UniqueTrackId) ? "-" : item.UniqueTrackId)</td>
-                                    <td>@item.PatientAccountNumber</td>
-                                    <td>@item.CptCode</td>
-                                    <td>@item.DenialCode</td>
-                                    <td class="text-wrap wide-description-cell">@item.DenialDescription</td>
-                                    <td class="lis-wide-cell">@item.DenialClassification</td>
-                                    <td>@item.ActionCode</td>
-                                    <td class="lis-wide-cell">@item.RecommendedAction</td>
-                                    <td class="lis-wide-cell">@item.EffectiveActionCategory</td>
-                                    <td class="text-wrap wide-task-cell">@item.Task</td>
-                                    <td><span class="badge @PriorityBadge(item.Priority)">@item.Priority</span></td>
-                                    <td class="lis-number-cell">@Money(item.InsuranceBalance)</td>
-                                    <td>@(item.IsCurrentDenial ? "Yes" : "No")</td>
-                                    <td class="lis-number-cell">@item.SlaDays</td>
-                                    <td class="status-edit-cell">
-                                        @if (Model.IsArReviewer && !Model.IsArManager)
-                                        {
-                                            var statusValue = string.IsNullOrWhiteSpace(item.Status) ? "Open" : item.Status;
-                                            <select name="statuses" class="form-select form-select-sm">
-                                                <option value="Open" selected="@(statusValue.Equals("Open", StringComparison.OrdinalIgnoreCase))">Open</option>
-                                                <option value="In Progress" selected="@(statusValue.Equals("In Progress", StringComparison.OrdinalIgnoreCase))">In Progress</option>
-                                                <option value="On Hold" selected="@(statusValue.Equals("On Hold", StringComparison.OrdinalIgnoreCase))">On Hold</option>
-                                                <option value="Closed" selected="@(statusValue.Equals("Closed", StringComparison.OrdinalIgnoreCase))">Closed</option>
-                                                <option value="Completed" selected="@(statusValue.Equals("Completed", StringComparison.OrdinalIgnoreCase))">Completed</option>
-                                            </select>
-                                        }
-                                        else
-                                        {
-                                            <span class="badge @StatusBadge(item.Status)">@item.Status</span>
-                                        }
-                                    </td>
-                                    @if (Model.IsArReviewer && !Model.IsArManager)
-                                    {
-                                        <td class="reviewer-comment-cell">
-                                            <textarea name="reviewerComments" class="form-control form-control-sm" placeholder="Add comments">@(string.IsNullOrWhiteSpace(item.Feedback) ? string.Empty : item.Feedback)</textarea>
-                                        </td>
-                                    }
-                                    <td>@(string.IsNullOrWhiteSpace(item.AssignedTo) ? "-" : item.AssignedTo)</td>
-                                    <td class="lis-date-cell">@item.DateOpened.ToString("dd MMM yyyy")</td>
-                                    <td class="lis-date-cell">@item.DueDate.ToString("dd MMM yyyy")</td>
-                                    <td class="lis-date-cell">@(item.DateCompleted?.ToString("dd MMM yyyy") ?? "-")</td>
-                                    <td class="lis-number-cell">@(item.DaysRemaining?.ToString() ?? "Done")</td>
-                                    <td><span class="badge @SlaBadge(item.SlaStatus)">@item.SlaStatus</span></td>
-                                    <td class="lis-wide-cell">@(string.IsNullOrWhiteSpace(item.PayerNameNormalized) ? item.PayerName : item.PayerNameNormalized)</td>
-                                    <td>@item.PayerType</td>
-                                    <td class="lis-wide-cell">@item.PanelName</td>
-                                    <td class="lis-wide-cell">@item.ClinicName</td>
-                                    <td class="lis-wide-cell">@item.ReferringProvider</td>
-                                    <td class="lis-wide-cell">@item.SalesRepname</td>
-                                    <td class="lis-date-cell">@(item.FirstBilledDate?.ToString("dd MMM yyyy") ?? "-")</td>
-                                    <td class="lis-date-cell">@(item.DateOfService?.ToString("dd MMM yyyy") ?? "-")</td>
-                                    <td class="lis-wide-cell">@item.LabName</td>
-                                    <td class="lis-number-cell">@item.LabId</td>
-                                    <td>@item.RunId</td>
-                                    <td class="lis-date-cell">@(item.CreatedOn?.ToString("dd MMM yyyy") ?? "-")</td>
-                                    <td class="lis-number-cell">@Money(item.TotalBalance)</td>
-                                    <td class="lis-wide-cell">@(string.IsNullOrWhiteSpace(item.PayerNameNormalized) ? "-" : item.PayerNameNormalized)</td>
-                                    <td>@(string.IsNullOrWhiteSpace(item.Responsibility) ? "-" : item.Responsibility)</td>
-                                    <td class="lis-date-cell">@(item.DiscussionDate?.ToString("dd MMM yyyy") ?? "-")</td>
-                                    <td>@(string.IsNullOrWhiteSpace(item.ETA) ? "-" : item.ETA)</td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-
-                </form>
-                @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "task-board", Page = Model.RecordsPage, TotalPages = Model.RecordsTotalPages, TotalItems = Model.FilteredRecordCount, PageSize = Model.RecordsPageSize, ItemLabel = "rows", BuildUrl = RecordsPageUrl, PageSizeOptions = recordsPageSizes, BuildPageSizeUrl = RecordsPageSizeUrl })
+                @await Html.PartialAsync("_BreakdownPivotTable", Model.WeeklyPivot)
             </div>
         </div>
     </div>
-    <div class="tab-pane fade @(activeTab == "sla-tracker" ? "show active" : "")" id="sla-tracker" role="tabpanel">
-        <div class="card border-0 shadow-sm table-card">
-            <div class="card-body">
-                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-                    <div>
-                        <div class="section-title">SLA Tracker &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-                        <div class="section-subtitle">Deadline monitor with warning and escalation logic.</div>
-                    </div>
-                    <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search this page..." data-target-table="slaTrackerTable" /></div>
-                </div>
-                <div class="table-responsive table-frame">
-                    <table class="table table-hover align-middle app-table polished-table line-table zebra-table sortable-table" id="slaTrackerTable">
-                        <thead>
-                            <tr>
-                                <th>Task ID</th>
-                                <th>Claim ID</th>
-                                <th>Patient / Acct #</th>
-                                <th>CPT</th>
-                                <th>Task</th>
-                                <th>Priority</th>
-                                <th>Insurance Balance</th>
-                                <th>Status</th>
-                                <th>SLA Days</th>
-                                <th>Due Date</th>
-                                <th>Days Remaining</th>
-                                <th>Escalation Flag</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var item in Model.PagedRecords)
-                            {
-                                <tr>
-                                    <td class="fw-semibold">@item.TaskId</td>
-                                    <td>@item.ClaimId</td>
-                                    <td>@item.PatientAccountNumber</td>
-                                    <td>@item.CptCode</td>
-                                    <td class="text-wrap narrow-cell">@item.Task</td>
-                                    <td><span class="badge @PriorityBadge(item.Priority)">@item.Priority</span></td>
-                                    <td class="text-end">@Money(item.InsuranceBalance)</td>
-                                    <td><span class="badge @StatusBadge(item.Status)">@item.Status</span></td>
-                                    <td>@item.SlaDays</td>
-                                    <td>@item.DueDate.ToString("dd MMM yyyy")</td>
-                                    <td>@(item.DaysRemaining?.ToString() ?? "Done")</td>
-                                    <td>
-                                        @if (string.IsNullOrWhiteSpace(item.EscalationFlag))
-                                        {
-                                            <span class="text-muted">-</span>
-                                        }
-                                        else
-                                        {
 
-                                            <span class="badge @(item.EscalationFlag.Contains("Escalate") ? "badge-soft-danger" : "badge-soft-warning")">@item.EscalationFlag</span>
-                                        }
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-                @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "sla-tracker", Page = Model.RecordsPage, TotalPages = Model.RecordsTotalPages, TotalItems = Model.FilteredRecordCount, PageSize = Model.RecordsPageSize, ItemLabel = "rows", BuildUrl = RecordsPageUrl })
-            </div>
-        </div>
-    </div>
     <div class="tab-pane fade @(activeTab == "denial-insight" ? "show active" : "")" id="denial-insight" role="tabpanel">
         <div class="card border-0 shadow-sm table-card">
             <div class="card-body">
                 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
                     <div>
-                        <div class="section-title">Denial Insight &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+                        <div class="section-title">Denial Insights &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
                         <div class="section-subtitle">Excel-style grid — filter any column, page through every insight row. $ Impact (%) = <code>(InsuranceBalance / TotalBalance) * 100</code>.</div>
                     </div>
                     <div class="d-flex flex-wrap gap-2">
@@ -1606,7 +951,7 @@
             <div class="card-body">
                 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
                     <div>
-                        <div class="section-title">Line Item &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+                        <div class="section-title">Line Level Data &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
                         <div class="section-subtitle">Excel-style grid — filter any column, page through every line item.</div>
                     </div>
                     <div class="d-flex flex-wrap gap-2">
@@ -1625,33 +970,6 @@
                     </div>
                     <div class="grid-loading" hidden><div class="page-loader-spinner"></div></div>
                 </div>
-            </div>
-        </div>
-    </div>
-    <div class="tab-pane fade @(activeTab == "weekly-breakdown" ? "show active" : "")" id="weekly-breakdown" role="tabpanel">
-        <div class="card border-0 shadow-sm table-card">
-            <div class="card-body">
-                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-                    <div>
-                        <div class="section-title"><i class="bi bi-calendar-week me-2"></i>Weekly Breakdown &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-                        <div class="section-subtitle">Pivot-style weekly view from <code>DenialLineItem.DenialDate</code> showing top insurance and top denials.</div>
-                    </div>
-                </div>
-                @await Html.PartialAsync("_BreakdownPivotTable", Model.WeeklyPivot)
-            </div>
-        </div>
-    </div>
-
-    <div class="tab-pane fade @(activeTab == "monthly-breakdown" ? "show active" : "")" id="monthly-breakdown" role="tabpanel">
-        <div class="card border-0 shadow-sm table-card">
-            <div class="card-body">
-                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-                    <div>
-                        <div class="section-title"><i class="bi bi-calendar-month me-2"></i>Monthly Breakdown &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-                        <div class="section-subtitle">Pivot-style monthly view from <code>DenialLineItem.DenialDate</code> showing top insurance and top denials.</div>
-                    </div>
-                </div>
-                @await Html.PartialAsync("_BreakdownPivotTable", Model.MonthlyPivot)
             </div>
         </div>
     </div>
@@ -1827,9 +1145,9 @@
                 }, 3000);
             }
 
-            // Queues a DenialDashboard report; LRN.ReportWorker builds the six-tab workbook
-            // (Monthly/Weekly Breakdown, Filter Panel, SLA Tracker, Denial Insight, Line Item
-            // with the workflow's Assigned To / Status / notes) and the 📄 Reports badge
+            // Queues a DenialDashboard report; LRN.ReportWorker builds the four-tab workbook
+            // (Monthly Breakdown, Weekly Breakdown, Denial Insight, Line Item with the
+            // workflow's Assigned To / Status / notes) and the 📄 Reports badge
             // notifies when it is ready.
             exportButton.addEventListener('click', function () {
                 if (!form) {

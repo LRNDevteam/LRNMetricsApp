@@ -1,4 +1,4 @@
-using ClosedXML.Excel;
+﻿using ClosedXML.Excel;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.ViewModels;
 
@@ -14,9 +14,13 @@ public static class DenialDashboardExcelExportBuilder
 
 	/// <summary>
 	/// One sheet per Denial Dashboard tab that the export covers, in tab order:
-	/// Monthly Breakdown, Weekly Breakdown, Filter Panel, SLA Tracker, Denial Insight,
-	/// Line Item. Every sheet is written even when its tab has no rows, so the workbook
-	/// shape never changes between runs.
+	/// Monthly Breakdown, Weekly Breakdown, Denial Insight, Line Item. Every sheet is written
+	/// even when its tab has no rows, so the workbook shape never changes between runs.
+	///
+	/// Filter Panel and SLA Tracker sheets were retired along with their tabs on the page - see
+	/// <see cref="DenialDashboardExportData"/> for the task-board-derived fields that fed them,
+	/// which BuildExportData still computes (shared with LRN.ReportWorker's queued report) but
+	/// which no sheet reads any more.
 	/// </summary>
 	/// <summary>Line Item sheet name — also the sheet LRN.ReportWorker streams in separately.</summary>
 	public const string LineItemSheetName = "Line Item";
@@ -24,7 +28,7 @@ public static class DenialDashboardExcelExportBuilder
 	/// <param name="includeLineItemSheet">
 	/// False lets a caller append that sheet itself. LRN.ReportWorker does: ClosedXML holds the
 	/// whole sheet in memory while saving and throws "Stream was too long" once the XML passes
-	/// 2 GB, which a wide lab with large ICD code lists reaches. The five summary sheets are
+	/// 2 GB, which a wide lab with large ICD code lists reaches. The three summary sheets are
 	/// small and stay on ClosedXML either way.
 	/// </param>
 	public static XLWorkbook CreateWorkbook(DenialDashboardExportData data, bool includeLineItemSheet = true)
@@ -33,8 +37,6 @@ public static class DenialDashboardExcelExportBuilder
 
 		BuildBreakdownPivotSheet(workbook, "Monthly Breakdown", data.MonthlyPivot);
 		BuildBreakdownPivotSheet(workbook, "Weekly Breakdown", data.WeeklyPivot);
-		BuildFilterPanelSheet(workbook, data);
-		BuildSlaTrackerSheet(workbook, data.TaskRecords);
 		BuildDenialInsightSheet(workbook, data.Insights);
 
 		if (includeLineItemSheet)
@@ -519,197 +521,6 @@ public static class DenialDashboardExcelExportBuilder
 	}
 
 	/// <summary>
-	/// The Filter Panel tab: the five mini-panels (Task Status, Priority, Action Category,
-	/// Classification, Deadline) stacked on one sheet, each with the tab's own
-	/// Label / Claims / Balance / Rate columns over the CURRENTLY FILTERED task rows.
-	/// </summary>
-	private static void BuildFilterPanelSheet(XLWorkbook wb, DenialDashboardExportData data)
-	{
-		var ws = wb.AddWorksheet("Filter Panel");
-		ExcelTheme.ApplyDefaults(ws);
-
-		var row = 1;
-		ws.Cell(row, 1).Value = $"Filter Panel — {data.LabName}";
-		ws.Range(row, 1, row, 4).Merge();
-		var title = ws.Range(row, 1, row, 4);
-		title.Style.Font.Bold = true;
-		title.Style.Font.FontSize = ExcelTheme.FontSizeTitle;
-		title.Style.Font.FontColor = XLColor.White;
-		title.Style.Fill.BackgroundColor = ExcelTheme.TitleBg;
-		title.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-		row++;
-
-		ws.Cell(row, 1).Value = "Run Id";
-		ws.Cell(row, 2).Value = string.IsNullOrWhiteSpace(data.RunId) ? "-" : data.RunId;
-		ws.Cell(row, 1).Style.Font.Bold = true;
-		row++;
-		ws.Cell(row, 1).Value = "Tasks (filtered)";
-		ws.Cell(row, 2).Value = data.TaskRecords.Count;
-		ws.Cell(row, 1).Style.Font.Bold = true;
-		row += 2;
-
-		// Active filters, so a downloaded workbook always says what it was filtered by.
-		if (data.ActiveFilters.Count > 0)
-		{
-			ws.Cell(row, 1).Value = "Active Filters";
-			ws.Range(row, 1, row, 4).Merge();
-			ws.Cell(row, 1).Style.Font.Bold = true;
-			ws.Cell(row, 1).Style.Font.FontColor = XLColor.White;
-			ws.Cell(row, 1).Style.Fill.BackgroundColor = ExcelTheme.SubHeaderBg;
-			row++;
-			foreach (var (label, value) in data.ActiveFilters)
-			{
-				ws.Cell(row, 1).Value = label;
-				ws.Cell(row, 2).Value = value ?? string.Empty;
-				ws.Range(row, 2, row, 4).Merge();
-				ws.Cell(row, 1).Style.Font.Bold = true;
-				row++;
-			}
-			row++;
-		}
-
-		row = WriteBreakdownBlock(ws, row, "Task Status", data.StatusBreakdown);
-		row = WriteBreakdownBlock(ws, row, "Priority", data.PriorityBreakdown);
-		row = WriteBreakdownBlock(ws, row, "Assigned To", data.AssignedToBreakdown);
-		row = WriteBreakdownBlock(ws, row, "Action Category", data.ActionCategoryBreakdown);
-		row = WriteBreakdownBlock(ws, row, "Classification", data.ClassificationBreakdown);
-		_ = WriteBreakdownBlock(ws, row, "Deadline", data.DeadlineBreakdown);
-
-		ws.Column(1).Width = 42;
-		ws.Column(2).Width = 14;
-		ws.Column(3).Width = 18;
-		ws.Column(4).Width = 12;
-	}
-
-	/// <summary>Writes one mini-panel and returns the next free row (blank row included).</summary>
-	private static int WriteBreakdownBlock(IXLWorksheet ws, int startRow, string title, IReadOnlyList<BreakdownItem> items)
-	{
-		var row = startRow;
-		ws.Cell(row, 1).Value = title;
-		ws.Range(row, 1, row, 4).Merge();
-		var header = ws.Range(row, 1, row, 4);
-		header.Style.Font.Bold = true;
-		header.Style.Font.FontColor = XLColor.White;
-		header.Style.Fill.BackgroundColor = ExcelTheme.SubHeaderBg;
-		header.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-		row++;
-
-		var columnRow = row;
-		ws.Cell(row, 1).Value = "Label";
-		ws.Cell(row, 2).Value = "Claims";
-		ws.Cell(row, 3).Value = "Balance";
-		ws.Cell(row, 4).Value = "Rate";
-		var columns = ws.Range(row, 1, row, 4);
-		columns.Style.Font.Bold = true;
-		columns.Style.Fill.BackgroundColor = ExcelTheme.GroupRowBg;
-		columns.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-		columns.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
-		row++;
-
-		if (items.Count == 0)
-		{
-			ws.Cell(row, 1).Value = "No rows for the selected filters.";
-			ws.Range(row, 1, row, 4).Merge();
-			return row + 2;
-		}
-
-		foreach (var item in items)
-		{
-			ws.Cell(row, 1).Value = item.Label;
-			ws.Cell(row, 2).Value = item.Count;
-			ws.Cell(row, 3).Value = item.InsuranceBalanceSum;
-			ws.Cell(row, 3).Style.NumberFormat.Format = "$#,##0.00";
-			ws.Cell(row, 4).Value = item.Percentage / 100m;
-			ws.Cell(row, 4).Style.NumberFormat.Format = "0.0%";
-			row++;
-		}
-
-		var body = ws.Range(columnRow, 1, row - 1, 4);
-		body.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-		body.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
-		return row + 1;
-	}
-
-	/// <summary>The SLA Tracker tab: the deadline monitor, same columns and order as the page.</summary>
-	private static void BuildSlaTrackerSheet(XLWorkbook wb, IReadOnlyList<DenialRecord> records)
-	{
-		var ws = wb.AddWorksheet("SLA Tracker");
-		ExcelTheme.ApplyDefaults(ws);
-
-		var headers = new List<string>
-		{
-			"Task ID", "Claim ID", "Patient / Acct #", "CPT", "Task", "Priority",
-			"Insurance Balance", "Status", "SLA Days", "Due Date", "Days Remaining",
-			"Escalation Flag", "SLA Status", "Assigned To", "Date Opened", "Date Completed"
-		};
-
-		for (var c = 0; c < headers.Count; c++)
-		{
-			var cell = ws.Cell(1, c + 1);
-			cell.Value = headers[c];
-			cell.Style.Font.Bold = true;
-			cell.Style.Font.FontColor = XLColor.White;
-			cell.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
-			cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-			cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-			cell.Style.Border.OutsideBorderColor = XLColor.White;
-		}
-
-		for (var r = 0; r < records.Count; r++)
-		{
-			var item = records[r];
-			var excelRow = r + 2;
-
-			ws.Cell(excelRow, 1).Value = item.TaskId;
-			ws.Cell(excelRow, 2).Value = item.ClaimId;
-			ws.Cell(excelRow, 3).Value = item.PatientAccountNumber;
-			ws.Cell(excelRow, 4).Value = item.CptCode;
-			ws.Cell(excelRow, 5).Value = item.Task;
-			ws.Cell(excelRow, 6).Value = item.Priority;
-			ws.Cell(excelRow, 7).Value = item.InsuranceBalance;
-			ws.Cell(excelRow, 7).Style.NumberFormat.Format = "$#,##0.00";
-			ws.Cell(excelRow, 8).Value = item.Status;
-			ws.Cell(excelRow, 9).Value = item.SlaDays;
-			ws.Cell(excelRow, 10).Value = item.DueDate;
-			ws.Cell(excelRow, 10).Style.NumberFormat.Format = "yyyy-mm-dd";
-			// "Done" mirrors the page, which shows that instead of a number once the task closes.
-			ws.Cell(excelRow, 11).Value = item.DaysRemaining?.ToString() ?? "Done";
-			ws.Cell(excelRow, 12).Value = item.EscalationFlag;
-			ws.Cell(excelRow, 13).Value = item.SlaStatus;
-			ws.Cell(excelRow, 14).Value = item.AssignedTo;
-			ws.Cell(excelRow, 15).Value = item.DateOpened;
-			ws.Cell(excelRow, 15).Style.NumberFormat.Format = "yyyy-mm-dd";
-			if (item.DateCompleted.HasValue)
-			{
-				ws.Cell(excelRow, 16).Value = item.DateCompleted.Value;
-				ws.Cell(excelRow, 16).Style.NumberFormat.Format = "yyyy-mm-dd";
-			}
-
-			ws.Cell(excelRow, 5).Style.Alignment.WrapText = true;
-			ws.Range(excelRow, 1, excelRow, headers.Count).Style.Fill.BackgroundColor = XLColor.White;
-		}
-
-		if (records.Count > 0)
-		{
-			ws.Range(1, 1, records.Count + 1, headers.Count).SetAutoFilter();
-
-			var priorityColumn = ws.Column(6);
-			priorityColumn.AddConditionalFormat().WhenContains("High").Fill.SetBackgroundColor(ExcelTheme.BadBg);
-			priorityColumn.AddConditionalFormat().WhenContains("Medium").Fill.SetBackgroundColor(ExcelTheme.NeutralBg);
-			priorityColumn.AddConditionalFormat().WhenContains("Low").Fill.SetBackgroundColor(ExcelTheme.GoodBg);
-			ws.Column(12).AddConditionalFormat().WhenContains("Escalate").Fill.SetBackgroundColor(ExcelTheme.BadBg);
-		}
-		else
-		{
-			ws.Cell(2, 1).Value = "No tasks matched the selected filters.";
-		}
-
-		ws.SheetView.FreezeRows(1);
-		ws.Columns().AdjustToContents();
-		SetWidth(ws, headers, "Task", 45);
-	}
-
-	/// <summary>
 	/// The Denial Insight tab: the pre-aggregated dbo.DenialInsight rows for the run
 	/// (the same rows and column order the page's insight grid renders).
 	/// </summary>
@@ -797,7 +608,7 @@ public static class DenialDashboardExcelExportBuilder
 		ExcelTheme.ApplyDefaults(ws);
 
 		// The tab renders an empty pivot as "no data"; the sheet must still exist so the
-		// workbook always has the same six tabs.
+		// workbook always has the same four tabs.
 		if (model is null || model.Periods.Count == 0)
 		{
 			ws.Cell(1, 1).Value = sheetName;

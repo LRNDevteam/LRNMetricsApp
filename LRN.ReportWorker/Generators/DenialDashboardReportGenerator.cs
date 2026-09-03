@@ -90,12 +90,13 @@ SELECT CASE WHEN EXISTS (
     /// <summary>
     /// Reports what each denial table actually holds on the connection being used.
     ///
-    /// The SLA Tracker, Filter Panel and Denial Insight sheets ALL derive from
-    /// dbo.DenialTaskBoard (Denial Insight falls back to task-board-derived rows when
-    /// dbo.DenialInsight is empty), so when that one table returns nothing those three sheets
-    /// come out blank while Line Item — which reads dbo.DenialLineItem — is full. This says
-    /// which database was queried and what was in it, so the cause is visible in one run
-    /// instead of being inferred from an empty workbook.
+    /// The Denial Insight sheet derives from dbo.DenialTaskBoard as a fallback (it uses
+    /// task-board-derived rows when dbo.DenialInsight itself is empty), so when
+    /// DenialTaskBoard returns nothing that sheet can come out blank too, while Line Item —
+    /// which reads dbo.DenialLineItem — is full. This says which database was queried and
+    /// what was in it, so the cause is visible in one run instead of being inferred from an
+    /// empty workbook. (SLA Tracker and Filter Panel, which also read DenialTaskBoard, were
+    /// retired along with their Denial Dashboard tabs.)
     /// </summary>
     private async Task LogDenialTableCensusAsync(LabDbConfig lab, int labId, string runId, CancellationToken ct)
     {
@@ -200,7 +201,8 @@ SELECT
         var insights = (await repo.GetInsightTableByLabAsync(labId, ct)).ToList();
         await Progress(30);
 
-        // An empty task board silently empties three of the six sheets — say why, once, here.
+        // An empty task board can silently empty the Denial Insight sheet's fallback rows —
+        // say why, once, here.
         if (taskRecords.Count == 0)
             await LogDenialTableCensusAsync(lab, labId, runId, ct);
 
