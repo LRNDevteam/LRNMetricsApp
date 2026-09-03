@@ -2011,3 +2011,142 @@ body{background:#f5f7fb;color:#101828}
 .jobs-chip.downloaded{background:#fff;border:1px solid #a7f3d0;color:#067647}
 .jobs-chip.downloaded i{font-size:11px}
 @media (prefers-reduced-motion:reduce){.jobs-spin{animation:none}}
+
+/* ============================================================================
+   Denial dashboard tables - readability pass
+   ----------------------------------------------------------------------------
+   Client feedback: the tables "look odd" and the colours are wrong. Three causes,
+   all fixed here rather than per-table so every .role-table picks it up:
+
+   1. NOTHING WAS RIGHT-ALIGNED. Numeric cells inherited the default left align.
+      .role-table-link.numeric set text-align on the BUTTON, which does nothing -
+      an inline-block button is already shrink-wrapped, so the text stayed left.
+      Alignment now lives on the cell (td.num), which is where it belongs.
+   2. EVERY NUMBER WAS A BOLD TEAL LINK. Classification, Claims and Assigned were
+      all #007f73 at weight 800, so the grid read as a wall of links with no
+      hierarchy. Only the row's subject stays link-coloured; clickable numbers are
+      normal ink and reveal themselves on hover.
+   3. NO ROW RHYTHM. Flat white rows with a hairline made long tables hard to
+      track across. Subtle zebra + a firmer hover fixes that without colour noise.
+   ============================================================================ */
+
+/* Numeric columns: right-aligned, tabular figures so digits line up in a column,
+   and never wrapped - a broken "1,367" is unreadable. */
+.role-table th.num,
+.role-table td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.role-table td.num .role-table-link {
+    text-align: right;
+    width: 100%;
+}
+
+/* Currency sits slightly quieter than counts: the eye should land on volume
+   first, amount second. */
+.role-table td.money {
+    color: #334155;
+    font-weight: 600;
+}
+
+/* Status / risk pill columns read best centred under a centred heading. */
+.role-table th.state,
+.role-table td.state {
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* A visible break between the aging buckets and the workload columns, which are
+   two different things sharing one row. */
+.role-table th.divide,
+.role-table td.divide {
+    border-left: 1px solid #e2e8f0;
+}
+
+/* Header: darker ink and a solid base line so it separates from the first row. */
+.role-table thead th {
+    background: #f1f5f9;
+    color: #475569;
+    font-weight: 700;
+    border-bottom: 1px solid #cbd5e1;
+    padding: 9px 12px;
+}
+
+/* Body rhythm. The zebra is deliberately faint (#fafbfc) - enough to guide the
+   eye across a wide row, not enough to read as a coloured band. */
+.role-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid #eef2f7;
+    color: #1f2937;
+}
+
+.role-table tbody tr:nth-child(even) td {
+    background: #fafbfc;
+}
+
+.role-table tbody tr:hover td,
+.role-table tbody tr:nth-child(even):hover td {
+    background: #eef6ff;
+}
+
+.role-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+/* The row subject keeps the brand teal - it is the primary drill-down. */
+.role-table td:first-child .role-table-link {
+    color: #0f766e;
+    font-weight: 700;
+}
+
+/* Clickable NUMBERS are ordinary ink until hovered. This is the single biggest
+   change to how the table reads: counts now look like data, not navigation. */
+.role-table td.num .role-table-link {
+    color: #1f2937;
+    font-weight: 600;
+}
+
+.role-table td.num .role-table-link:hover {
+    color: #0f766e;
+    text-decoration: underline;
+}
+
+/* Pills: same palette, softer borders. The old amber border (#facc15) was the
+   harshest colour on the page and drew the eye to "Medium" rows. */
+.role-flag {
+    padding: 3px 9px;
+    font-weight: 700;
+    letter-spacing: .01em;
+}
+
+.flag-red { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+.flag-amber { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+.flag-blue { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.flag-green { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
+
+/* Card heading: the subtitle was competing with the title at nearly the same
+   weight. */
+.role-card-title {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.role-card-subtitle {
+    font-size: 11px;
+    line-height: 1.45;
+    color: #708096;
+}
+
+/* Keep the header visible when a long table scrolls inside its card. */
+.role-table-wrap {
+    max-height: 620px;
+}
+
+.role-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}

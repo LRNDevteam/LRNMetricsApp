@@ -50,6 +50,7 @@ The `Analytics > CPT & Panel Lookup` screen over `LRNMaster`: `CPTAverage`, `Pan
 | Document | Version | Status | Covers |
 |---|---|---|---|
 | [Denial_Dashboard_Workflow_Requirements_v2.0.pdf](denial-management/Denial_Dashboard_Workflow_Requirements_v2.0.pdf) | Rev 2.0 | **Baseline spec** | The requirements every other denial document builds on. Open items §11.1–§11.3 are live defects. |
+| [Denial_Dashboard_And_Workflow_Requirements.md](denial-management/Denial_Dashboard_And_Workflow_Requirements.md) | 1.0 | **As-built** | What the two screens do today: navigation, per-role tabs and queues, the four access-control layers, write permissions, and known gaps. Read alongside the Rev 2.0 baseline — that states intent, this states the current build. |
 | [Denial_Agentic_AI_Development_Plan.md](denial-management/Denial_Agentic_AI_Development_Plan.md) | 2.0 | Proposal — 19 decisions requested | Agent architecture, .NET/Python split, phases, cost, risks, and the PHI/privacy/security gate (§10) |
 | [Agentic_AI_Implementation_Guideline_v1.0.docx](denial-management/Agentic_AI_Implementation_Guideline_v1.0.docx) | 1.0 | Reference | Microsoft Agent Framework build walkthrough (Python + .NET), SDK setup, Foundry wiring |
 | [Denial_Dashboard_Screens_Captures.docx](denial-management/Denial_Dashboard_Screens_Captures.docx) | — | Reference | Screenshots of the real screens |

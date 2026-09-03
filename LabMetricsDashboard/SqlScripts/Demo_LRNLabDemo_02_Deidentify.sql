@@ -37,6 +37,17 @@
    rewrite, and changes nothing.
    ============================================================================ */
 
+/* Several of these tables carry filtered indexes, and an UPDATE against one fails
+   outright unless QUOTED_IDENTIFIER and ANSI_NULLS are ON. SSMS sets them by
+   default; sqlcmd does NOT, so without this the biggest tables - DenialTaskBoard,
+   DenialLineItem, LineLevelData, ClaimLevelData, the ones actually holding patient
+   data - land in the !! FAILED list while the small ones succeed. The report would
+   look almost clean while the PHI was still there.
+   If you run this through sqlcmd, pass -I as well. */
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+GO
+
 /* Select the demo database explicitly, so the script cannot be run against
    whatever happened to be in the connection's dropdown - which for a fresh SSMS
    window is master. If you cloned to a name other than LRNLabDemo, change it

@@ -46,17 +46,17 @@ function WorkflowStatusSummary({ counts = {}, onKpiClick }) {
     subtitle="Claims by workflow state. A claim sits in exactly one queue — the counts are the same ones behind the sidebar badges.">
     <div className="role-table-wrap">
       <table className="role-table wide">
-        <thead><tr><th>Workflow Status</th><th>Claims</th><th>% of Total</th><th>State</th></tr></thead>
+        <thead><tr><th>Workflow Status</th><th className="num">Claims</th><th className="num">% of Total</th><th className="state">State</th></tr></thead>
         <tbody>
           {rows.length ? rows.map(r => <tr key={r.key}>
             <td>
               <button type="button" className="role-table-link" onClick={() => onKpiClick?.({ taskView: r.taskView })}>{r.label}</button>
             </td>
-            <td>
+            <td className="num">
               <button type="button" className="role-table-link numeric" onClick={() => onKpiClick?.({ taskView: r.taskView })}>{n(r.count)}</button>
             </td>
-            <td>{total > 0 ? `${((r.count / total) * 100).toFixed(1)}%` : '0.0%'}</td>
-            <td><span className={`role-flag ${r.tone}`}>{r.count > 0 ? 'Active' : 'Empty'}</span></td>
+            <td className="num">{total > 0 ? `${((r.count / total) * 100).toFixed(1)}%` : '0.0%'}</td>
+            <td className="state"><span className={`role-flag ${r.tone}`}>{r.count > 0 ? 'Active' : 'Empty'}</span></td>
           </tr>) : <EmptyRow colSpan={4} />}
         </tbody>
       </table>
@@ -97,9 +97,38 @@ function ManagerDashboard({ data, onKpiClick, workflowStatusCounts }) {
     </div>
     <div className="dashboard-overview-grid dashboard-overview-grid-full">
       <RoleCard title="Denial Classification Summary" subtitle="Claims are counted once per classification they carry. A claim with more than one denial classification appears in more than one row, so column totals can exceed Total Open Claims.">
-        <div className="role-table-wrap"><table className="role-table wide"><thead><tr><th>Classification</th><th>Claims</th><th>Balance</th><th>Assigned</th><th>In Progress</th><th>Closed</th><th>SLA Risk</th></tr></thead><tbody>
-          {classifications.length ? classifications.map((r, i) => <tr key={i}><td><button type="button" className="role-table-link" onClick={() => onKpiClick?.({ taskView: 'all', denialClassification: r.classification || '' })}>{r.classification || 'Unclassified'}</button></td><td><button type="button" className="role-table-link numeric" onClick={() => onKpiClick?.({ taskView: 'all', denialClassification: r.classification || '' })}>{n(r.count)}</button></td><td>{money(r.outstanding)}</td><td><button type="button" className="role-table-link numeric" onClick={() => onKpiClick?.({ taskView: 'assigned', denialClassification: r.classification || '' })}>{n(r.assigned ?? r.assignedCount ?? 0)}</button></td><td>{n(r.inProgress ?? r.inProgressCount ?? 0)}</td><td>{n(r.closed ?? r.closedCount ?? 0)}</td><td><RiskPill value={r.slaRisk || r.risk || (Number(r.percentageOfTotal || 0) > 25 ? 'High' : 'Medium')} /></td></tr>) : <EmptyRow colSpan={7} />}
-        </tbody></table></div>
+        <div className="role-table-wrap">
+          <table className="role-table wide">
+            <thead>
+              <tr>
+                <th>Classification</th>
+                <th className="num">Claims</th>
+                <th className="num">Balance</th>
+                <th className="num">Assigned</th>
+                <th className="num">In Progress</th>
+                <th className="num">Closed</th>
+                <th className="state">SLA Risk</th>
+              </tr>
+            </thead>
+            <tbody>
+              {classifications.length ? classifications.map((r, i) => <tr key={i}>
+                <td>
+                  <button type="button" className="role-table-link" onClick={() => onKpiClick?.({ taskView: 'all', denialClassification: r.classification || '' })}>{r.classification || 'Unclassified'}</button>
+                </td>
+                <td className="num">
+                  <button type="button" className="role-table-link numeric" onClick={() => onKpiClick?.({ taskView: 'all', denialClassification: r.classification || '' })}>{n(r.count)}</button>
+                </td>
+                <td className="num money">{money(r.outstanding)}</td>
+                <td className="num">
+                  <button type="button" className="role-table-link numeric" onClick={() => onKpiClick?.({ taskView: 'assigned', denialClassification: r.classification || '' })}>{n(r.assigned ?? r.assignedCount ?? 0)}</button>
+                </td>
+                <td className="num">{n(r.inProgress ?? r.inProgressCount ?? 0)}</td>
+                <td className="num">{n(r.closed ?? r.closedCount ?? 0)}</td>
+                <td className="state"><RiskPill value={r.slaRisk || r.risk || (Number(r.percentageOfTotal || 0) > 25 ? 'High' : 'Medium')} /></td>
+              </tr>) : <EmptyRow colSpan={7} />}
+            </tbody>
+          </table>
+        </div>
       </RoleCard>
     </div>
     <div className="dashboard-overview-grid dashboard-overview-grid-full">
@@ -133,8 +162,8 @@ function AnalystDashboard({ data, user, labName, onKpiClick, workflowStatusCount
     <WorkflowStatusSummary counts={workflowStatusCounts} onKpiClick={onKpiClick} />
     <div className="role-grid two analyst-layout">
       <RoleCard title="Priority Work Queue" subtitle="A claim is listed under every denial classification it carries, so queue claim counts can add up to more than your assigned total.">
-        <div className="role-table-wrap"><table className="role-table wide"><thead><tr><th>Queue</th><th>Claims</th><th>Tasks</th><th>Balance</th><th>Priority</th></tr></thead><tbody>
-          {(data.denialClassifications || []).slice(0, 6).map((r, i) => <tr key={i}><td>{r.classification || 'Unclassified'}</td><td>{n(r.claims || r.count)}</td><td>{n(r.tasks || r.count)}</td><td>{money(r.outstanding)}</td><td><RiskPill value={i < 2 ? 'High' : i < 4 ? 'Medium' : 'Low'} /></td></tr>)}
+        <div className="role-table-wrap"><table className="role-table wide"><thead><tr><th>Queue</th><th className="num">Claims</th><th className="num">Tasks</th><th className="num">Balance</th><th className="state">Priority</th></tr></thead><tbody>
+          {(data.denialClassifications || []).slice(0, 6).map((r, i) => <tr key={i}><td>{r.classification || 'Unclassified'}</td><td className="num">{n(r.claims || r.count)}</td><td className="num">{n(r.tasks || r.count)}</td><td className="num money">{money(r.outstanding)}</td><td className="state"><RiskPill value={i < 2 ? 'High' : i < 4 ? 'Medium' : 'Low'} /></td></tr>)}
           {!(data.denialClassifications || []).length && <EmptyRow colSpan={5} />}
         </tbody></table></div>
       </RoleCard>
@@ -159,13 +188,13 @@ function SingleAccountDashboard({ data, user, labName, mode }) {
     <div className="role-grid two">
       <div>
         <RoleCard title={isClient ? 'Client-Facing Denial Follow-up Summary' : 'Client-Level Revenue Leakage Drivers'}>
-          <div className="role-table-wrap"><table className="role-table wide"><thead><tr><th>Driver</th><th>Claims</th><th>Tasks</th><th>Balance</th><th>Action Needed</th></tr></thead><tbody>
-            {classifications.length ? classifications.map((r, i) => <tr key={i}><td>{r.classification || '-'}</td><td>{n(r.claims || r.count)}</td><td>{n(r.tasks || r.count)}</td><td>{money(r.outstanding)}</td><td><RiskPill value={i < 2 ? 'Client Follow-up' : 'Monitor'} /></td></tr>) : <EmptyRow colSpan={5} />}
+          <div className="role-table-wrap"><table className="role-table wide"><thead><tr><th>Driver</th><th className="num">Claims</th><th className="num">Tasks</th><th className="num">Balance</th><th className="state">Action Needed</th></tr></thead><tbody>
+            {classifications.length ? classifications.map((r, i) => <tr key={i}><td>{r.classification || '-'}</td><td className="num">{n(r.claims || r.count)}</td><td className="num">{n(r.tasks || r.count)}</td><td className="num money">{money(r.outstanding)}</td><td className="state"><RiskPill value={i < 2 ? 'Client Follow-up' : 'Monitor'} /></td></tr>) : <EmptyRow colSpan={5} />}
           </tbody></table></div>
         </RoleCard>
         <RoleCard title={isClient ? 'Revenue Recovery and At-Risk AR' : 'Payer Performance for This Account'}>
-          <div className="role-table-wrap"><table className="role-table"><thead><tr><th>Action / Payer</th><th>Count</th><th>Balance</th><th>Status</th></tr></thead><tbody>
-            {actionCategories.length ? actionCategories.slice(0, 8).map((r, i) => <tr key={i}><td>{r.actionCategory || r.category || '-'}</td><td>{n(r.count)}</td><td>{money(r.outstanding)}</td><td><RiskPill value={i < 2 ? 'High' : 'Medium'} /></td></tr>) : <EmptyRow colSpan={4} />}
+          <div className="role-table-wrap"><table className="role-table"><thead><tr><th>Action / Payer</th><th className="num">Count</th><th className="num">Balance</th><th className="state">Status</th></tr></thead><tbody>
+            {actionCategories.length ? actionCategories.slice(0, 8).map((r, i) => <tr key={i}><td>{r.actionCategory || r.category || '-'}</td><td className="num">{n(r.count)}</td><td className="num money">{money(r.outstanding)}</td><td className="state"><RiskPill value={i < 2 ? 'High' : 'Medium'} /></td></tr>) : <EmptyRow colSpan={4} />}
           </tbody></table></div>
         </RoleCard>
       </div>
@@ -175,8 +204,8 @@ function SingleAccountDashboard({ data, user, labName, mode }) {
 
 function ReviewerAgingTable({ rows = [], title = 'Aging View by AR Reviewer', onReviewerClick }) {
   return <RoleCard title={title}>
-    <div className="role-table-wrap"><table className="role-table reviewer-aging-table"><thead><tr><th>AR Reviewer</th><th>0-30</th><th>31-60</th><th>61-90</th><th>91-120</th><th>120+</th><th>Assigned</th><th>In Progress</th><th>Pending</th><th>Closed</th></tr></thead><tbody>
-      {rows.length ? rows.map((r, i) => <tr key={`${r.reviewerName || 'reviewer'}-${i}`}><td><button type="button" className="role-table-link reviewer-link" onClick={() => onReviewerClick?.(r.reviewerName || '', 'all')}><span className="avatar-sm">{initials(r.reviewerName)}</span>{r.reviewerName || 'Unassigned'}</button></td><td>{n(r.aging0To30 ?? 0)}</td><td>{n(r.aging31To60 ?? 0)}</td><td>{n(r.aging61To90 ?? 0)}</td><td>{n(r.aging91To120 ?? 0)}</td><td>{n(r.agingOver120 ?? 0)}</td><td><button type="button" className="role-table-link numeric" onClick={() => onReviewerClick?.(r.reviewerName || '', 'assigned')}>{n(r.assigned ?? r.totalClaims ?? 0)}</button></td><td>{n(r.inProgress ?? 0)}</td><td>{n(r.pending ?? 0)}</td><td>{n(r.closed ?? 0)}</td></tr>) : <EmptyRow colSpan={10} />}
+    <div className="role-table-wrap"><table className="role-table reviewer-aging-table"><thead><tr><th>AR Reviewer</th><th className="num">0-30</th><th className="num">31-60</th><th className="num">61-90</th><th className="num">91-120</th><th className="num">120+</th><th className="num divide">Assigned</th><th className="num">In Progress</th><th className="num">Pending</th><th className="num">Closed</th></tr></thead><tbody>
+      {rows.length ? rows.map((r, i) => <tr key={`${r.reviewerName || 'reviewer'}-${i}`}><td><button type="button" className="role-table-link reviewer-link" onClick={() => onReviewerClick?.(r.reviewerName || '', 'all')}><span className="avatar-sm">{initials(r.reviewerName)}</span>{r.reviewerName || 'Unassigned'}</button></td><td className="num">{n(r.aging0To30 ?? 0)}</td><td className="num">{n(r.aging31To60 ?? 0)}</td><td className="num">{n(r.aging61To90 ?? 0)}</td><td className="num">{n(r.aging91To120 ?? 0)}</td><td className="num">{n(r.agingOver120 ?? 0)}</td><td className="num divide"><button type="button" className="role-table-link numeric" onClick={() => onReviewerClick?.(r.reviewerName || '', 'assigned')}>{n(r.assigned ?? r.totalClaims ?? 0)}</button></td><td className="num">{n(r.inProgress ?? 0)}</td><td className="num">{n(r.pending ?? 0)}</td><td className="num">{n(r.closed ?? 0)}</td></tr>) : <EmptyRow colSpan={10} />}
     </tbody></table></div>
   </RoleCard>;
 }

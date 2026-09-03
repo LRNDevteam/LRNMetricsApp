@@ -121,6 +121,17 @@ at a demo folder**.
 > demo reads PCR's live CSVs and Excel exports and you are showing production data again — the
 > database scrub does not help you there. Copy the files across once into a demo folder.
 
+### 3b. Re-stamp the cloned data as the demo lab
+
+Run **`Demo_LRNLabDemo_04_RestampLabIdentity.sql`** against `LRNLabDemo` (`@Apply = 0` first).
+
+The clone carries PCR's identity in its own rows — `LabId = 13`, `LabName = 'PCR Labs of
+America'` — but the app registers the demo as LabId 99, and every claim-scoped query filters
+`[LabId] = @LabId`. Skip this and you get the classic half-working demo: task counts, SLA
+counts, balances and classification rows all populate (those queries have no LabId filter),
+while **open claims, assigned, unassigned, escalated and the whole Claim Assignment page read
+zero**. It also removes PCR's name from the demo data.
+
 ### 4. Register the lab
 
 Run **`Demo_LRNLabDemo_03_RegisterLab.sql`** — it opens with `USE LRNMaster;`. It inserts
@@ -133,6 +144,17 @@ table before writing to it: `IDENTITY_INSERT` is toggled only if `LabId` really 
 column, and the audit columns (`CreatedBy` / `CreatedDate` / `ModifiedBy` / `ModifiedDate`) are
 written only if they exist. It prints what it found, so a surprising schema is visible rather
 than silent.
+
+**LRNMaster has two lab registries and both need the row.** `dbo.Labs` is the general one;
+`dbo.LRNMetricsLab` is what the Denial Dashboard and Denial Workflow actually resolve against,
+and it carries the `ConnectionKey`. Without a row there the workflow API cannot open a
+connection for LabId 99 at all — the Claim Assignment page comes up empty. The script writes
+both.
+
+`ConnectionKey` is recorded for documentation only: `LabConnectionResolver` tries
+`{LabConfigFolder}\<LabName>.json` → `DbConnectionString` *before* it tries the key, and
+`LabName` matches that file, so the connection comes from `LRNLabDemo.json`. That is why the
+demo needs no `ConnectionStrings` entry and no Key Vault secret.
 
 ### 5. Demo users
 

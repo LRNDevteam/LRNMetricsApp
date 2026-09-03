@@ -13,10 +13,10 @@
     "loads as a SECOND definition of PCR and the last file wins, repointing the real PCR lab at",
     "the demo database. It must be \"LRNLabDemo\".",
     "",
-    "DbLabName is what makes the demo show data. The cloned database still carries PCR's own",
-    "LabName values in its rows, but the config key is now LRNLabDemo - and almost every query",
-    "filters on `config.DbLabName ?? <config key>`. Without DbLabName the demo would query for",
-    "LabName = 'LRNLabDemo', match nothing, and every page would render empty.",
+    "DbLabName is deliberately ABSENT. Step 4 (Demo_LRNLabDemo_04_RestampLabIdentity.sql)",
+    "rewrites the cloned data from PCR's LabId 13 / 'PCR Labs of America' to 99 / 'LRNLabDemo',",
+    "so the data now matches the config key and no alias is needed. Setting DbLabName back to a",
+    "PCR value after re-stamping would break the lab, not fix it.",
     "",
     "Paths point at demo folders on purpose. Left on PCR's folders the demo reads PCR's live",
     "CSVs, Excel exports and insight JSON - production data again, which the database scrub",
@@ -27,8 +27,7 @@
   ],
 
   "LRNLabDemo": {
-    "//DbLabName": "PCR's LabName as it appears INSIDE the cloned data. Do not change to LRNLabDemo unless you also rewrite LabName in every table of the demo database.",
-    "DbLabName": "PCRLabsofAmerica",
+    "//DbLabName": "Not set on purpose - step 4 re-stamps the demo data to LabName 'LRNLabDemo', so the config key already matches the data. Only add DbLabName if you skip the re-stamp.",
 
     "DbConnectionString": "Server=ReportEngine\\SQLEXPRESS;Database=LRNLabDemo;User Id=sa;Password=<demo-password>;TrustServerCertificate=True;",
 

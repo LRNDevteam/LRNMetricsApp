@@ -126,6 +126,37 @@ BEGIN TRY
         PRINT N'Registered lab "' + @DemoLabName + N'" as LabId ' + CAST(@DemoLabId AS NVARCHAR(10)) + N'.';
     END
 
+    /* ── 1b. dbo.LRNMetricsLab ───────────────────────────────────────────
+       A SECOND lab registry, and the one the Denial Dashboard / Denial Workflow
+       actually resolve against. dbo.Labs alone is not enough: without a row here
+       the workflow API cannot open a connection for LabId 99 at all, which is
+       what left the Claim Assignment page empty.
+
+       ConnectionKey is recorded for documentation only. LabConnectionResolver
+       tries the lab config JSON ({LabConfigFolder}\<LabName>.json -> DbConnectionString)
+       BEFORE it tries the key, and LabName here matches that file name - so the
+       connection resolves from LRNLabDemo.json and needs no ConnectionStrings
+       entry and no Key Vault secret.
+
+       LabId here is the id embedded in the demo database's own rows. Step 4
+       (Demo_LRNLabDemo_04_RestampLabIdentity.sql) rewrites those from PCR's 13
+       to 99 - run it first, or every claim-scoped query returns nothing.      */
+    IF OBJECT_ID(N'dbo.LRNMetricsLab', N'U') IS NULL
+        PRINT N'WARNING: dbo.LRNMetricsLab not found - skipping. The Denial screens will not see the demo lab.';
+    ELSE IF NOT EXISTS (SELECT 1 FROM dbo.LRNMetricsLab WHERE LabId = @DemoLabId)
+    BEGIN
+        INSERT INTO dbo.LRNMetricsLab (LabId, LabName, ConnectionKey, IsActive)
+        VALUES (@DemoLabId, @DemoLabName, N'LRNLabDemoConnection', 1);
+        PRINT N'Registered "' + @DemoLabName + N'" in dbo.LRNMetricsLab as LabId ' + CAST(@DemoLabId AS NVARCHAR(10)) + N'.';
+    END
+    ELSE
+    BEGIN
+        UPDATE dbo.LRNMetricsLab
+        SET LabName = @DemoLabName, IsActive = 1
+        WHERE LabId = @DemoLabId AND (LabName <> @DemoLabName OR ISNULL(IsActive, 0) = 0);
+        PRINT N'dbo.LRNMetricsLab already has LabId ' + CAST(@DemoLabId AS NVARCHAR(10)) + N'.';
+    END
+
     /* ── 2. Assign the lab to the demo user, if one was named ────────────── */
     IF @DemoUserName IS NOT NULL
     BEGIN
