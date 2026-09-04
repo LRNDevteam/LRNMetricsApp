@@ -8,11 +8,20 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.0" />
+    <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="161.8910.0" />
     <PackageReference Include="xunit" Version="2.5.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\LRN.ReportsApi\LRN.ReportsApi.csproj" />
+  </ItemGroup>
+
+  <!-- The DBA-runnable RPT-01 setup script is parse-checked by ArActivityReportTests, so a typo in
+       it is caught at build time rather than in a maintenance window. -->
+  <ItemGroup>
+    <None Include="..\..\LRN.ReportsApi\Sql\ArReports\RPT01_ActivityDetail_Setup.sql"
+          Link="Sql\RPT01_ActivityDetail_Setup.sql"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

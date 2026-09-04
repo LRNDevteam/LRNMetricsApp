@@ -18,9 +18,26 @@ import ContactSupportPage from './pages/ContactSupportPage';
 import DenialCodeMasterPage from './pages/DenialCodeMasterPage';
 import DenialActionVerificationPage from './pages/DenialActionVerificationPage';
 import DenialMapperPage from './pages/DenialMapperPage';
+import ReportCatalogPage from './pages/reports/ReportCatalogPage';
+import Rpt01ActivityDetailPage from './pages/reports/Rpt01ActivityDetailPage';
 import { JobsBadge, JobsPage } from './components/JobsCenter';
 
 function roleIsReviewerOnly(role) { return isArReviewerRole(role); }
+
+// The AR report suite beyond RPT-01. These sit in the Reports submenu as disabled entries so the
+// shape of the suite is visible while only the built report is reachable. The catalog page carries
+// the authoritative status per lab (dbo.DenialReportCatalog); this list is the menu's copy of the
+// roadmap and only ever renders as inactive.
+const REPORT_ROADMAP = [
+  { code: 'RPT-02', label: 'RPT-02 Productivity', badge: 'Inactive', note: 'AR Analyst Productivity Summary — planned. Opening/closing workload needs inventory snapshot history.' },
+  { code: 'RPT-03', label: 'RPT-03 Workload', badge: 'Inactive', note: 'AR Analyst Workload and Capacity — planned. Current-state inventory report.' },
+  { code: 'RPT-04', label: 'RPT-04 Action Completion', badge: 'Blocked', note: 'Blocked until action completion events accrue in DenialActionCompletionEvent.' },
+  { code: 'RPT-05', label: 'RPT-05 Follow-up Due', badge: 'Inactive', note: 'Follow-up Due and Compliance — planned. Needs follow-up schedule history and completion linkage.' },
+  { code: 'RPT-06', label: 'RPT-06 Denial Progress', badge: 'Inactive', note: 'Denial Work Progress — planned. Movement measures need point-in-time snapshots.' },
+  { code: 'RPT-07', label: 'RPT-07 Escalation/Rework', badge: 'Inactive', note: 'Escalation Response and Rework — planned. Needs response-to-escalation linkage.' },
+  { code: 'RPT-08', label: 'RPT-08 Closure/Outcome', badge: 'Inactive', note: 'Closure and Outcome — planned. Operational half first; financial measures await adjudication data.' },
+  { code: 'RPT-09', label: 'RPT-09 Operational SLA', badge: 'Blocked', note: 'Blocked on versioned SLA configuration and per-item measurement instances.' }
+];
 
 // UAT: the role badge showed the raw "AR Reviewer" role string, but the spec calls that role
 // "AR Analyst" in the UI. Only relabel the display text here -- permission checks throughout
@@ -47,7 +64,9 @@ export default function App() {
   const [reviewers, setReviewers] = useState([]);
   const [filterOptions, setFilterOptions] = useState(emptyFilterOptions);
   const [labId, setLabId] = useState(Number(localStorage.getItem('denial.labId') || 0));
-  const workflowViews = ['dashboard', 'aging', 'summary', 'claims', 'myworklist', 'escalations', 'verification', 'denialcodemaster', 'denialmapper', 'denialactionverification', 'exports', 'reports', 'jobs', 'support', 'admin'];
+  // 'reports' is the AR report catalog; 'rpt01' is the first live report under it. Each future
+  // report gets its own view key so it is deep-linkable by hash, the same as every other screen.
+  const workflowViews = ['dashboard', 'aging', 'summary', 'claims', 'myworklist', 'escalations', 'verification', 'denialcodemaster', 'denialmapper', 'denialactionverification', 'exports', 'reports', 'rpt01', 'jobs', 'support', 'admin'];
   const getStoredView = () => {
     const hashView = String(window.location.hash || '').replace('#', '').trim().toLowerCase();
     return workflowViews.includes(hashView) ? hashView : '';
@@ -848,7 +867,7 @@ export default function App() {
   const mapperHeaderActive = denialMapperAdmin && (view === 'denialmapper' || view === 'denialactionverification');
   const headerLabs = mapperHeaderActive && denialMapperLabs.length ? denialMapperLabs : labs;
   const labName = [...denialMapperLabs, ...labs].find(l => Number(l.labId ?? l.LabId) === Number(labId))?.labName || 'Select Lab';
-  const pageTitle = { dashboard: 'Denial Dashboard', aging: 'Aging Dashboard', summary: 'Denial Summary', claims: canAssign ? 'Claim Assignment' : 'Claim View', myworklist: 'My Worklist', escalations: escalationView === 'response' ? 'Escalation Response' : 'Escalation Queue', verification: 'Verification', denialcodemaster: 'Denial Code Master', denialmapper: 'Denial Mapper', denialactionverification: 'Action Change Verification', exports: 'Exports', reports: 'Reports', jobs: 'Uploads & Downloads', support: 'Contact Support', admin: 'Admin Setup' }[view] || 'Denial Workflow';
+  const pageTitle = { dashboard: 'Denial Dashboard', aging: 'Aging Dashboard', summary: 'Denial Summary', claims: canAssign ? 'Claim Assignment' : 'Claim View', myworklist: 'My Worklist', escalations: escalationView === 'response' ? 'Escalation Response' : 'Escalation Queue', verification: 'Verification', denialcodemaster: 'Denial Code Master', denialmapper: 'Denial Mapper', denialactionverification: 'Action Change Verification', exports: 'Exports', reports: 'AR Follow-up Reports', rpt01: 'RPT-01 · AR Follow-up Activity Detail', jobs: 'Uploads & Downloads', support: 'Contact Support', admin: 'Admin Setup' }[view] || 'Denial Workflow';
   // UAT: the browser tab title stayed on the generic static value from index.html and never
   // reflected which page was open.
   useEffect(() => { document.title = `${pageTitle} · LRN Denial Workflow`; }, [pageTitle]);
@@ -1348,7 +1367,25 @@ export default function App() {
             {(denialMapperAdmin || arManagerOnly) && <button className={`lrn-nav-subitem ${view === 'denialactionverification' ? 'active' : ''}`} onClick={() => setView('denialactionverification')}><span className="nav-sub-label">Action Code Verification</span></button>}
           </div>}
         </>}
-        <button className={`lrn-nav-item ${view === 'reports' ? 'active' : ''}`} onClick={() => setView('reports')}><i className="bi bi-bar-chart-line" />Reports</button>
+        {/* Reports is now a parent with a submenu: the catalog plus one entry per report. RPT-01 is
+            live; the rest stay visible but disabled so the suite's shape is obvious and nobody has
+            to guess which reports are coming. The catalog itself is the old Reports landing page,
+            now data-driven from dbo.DenialReportCatalog. */}
+        <button className={`lrn-nav-item ${view === 'reports' || view === 'rpt01' ? 'active' : ''}`} onClick={() => setView('reports', { closeSidebar: false })}><i className="bi bi-bar-chart-line" />Reports</button>
+        {(view === 'reports' || view === 'rpt01') && <div className="lrn-nav-submenu">
+          <button type="button" className={`lrn-nav-subitem ${view === 'reports' ? 'active' : ''}`} onClick={() => setView('reports')}>
+            <span className="nav-sub-label">Report Catalog</span>
+          </button>
+          <button type="button" className={`lrn-nav-subitem ${view === 'rpt01' ? 'active' : ''}`} onClick={() => setView('rpt01')}>
+            <span className="nav-sub-label">RPT-01 Activity Detail</span>
+          </button>
+          {REPORT_ROADMAP.map(item => (
+            <button key={item.code} type="button" className="lrn-nav-subitem disabled" disabled title={item.note}>
+              <span className="nav-sub-label">{item.label}</span>
+              <span className="nav-sub-count">{item.badge}</span>
+            </button>
+          ))}
+        </div>}
         <button className={`lrn-nav-item ${view === 'jobs' ? 'active' : ''}`} onClick={() => setView('jobs')}><i className="bi bi-arrow-down-up" />Uploads &amp; Downloads</button>
         <button className={`lrn-nav-item ${view === 'support' ? 'active' : ''}`} onClick={() => setView('support')}><i className="bi bi-life-preserver" />Contact Support</button>
         {adminRole && <button className={`lrn-nav-item ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}><i className="bi bi-gear" />Admin Setup</button>}
@@ -1387,7 +1424,9 @@ export default function App() {
       </header>
       <main className="lrn-content">
         {mapperNotification&&<div className="lrn-alert warning mapper-login-alert"><div><strong>Denial Code push confirmation is pending.</strong><span>Review it in Denial Action Master before applying the codes to this lab.</span></div><div><button className="wl-btn teal xs" onClick={()=>{setMapperReviewAuditId(mapperNotification.pushAuditId);setView('denialcodemaster');}}>Review Now</button><button className="wl-btn xs" onClick={()=>setMapperNotification(null)}>Later</button></div></div>}
-        {view !== 'denialmapper' && view !== 'jobs' && <div className="claim-filter-toggle-row">
+        {/* The AR report screens carry their own as-of/data-refresh metadata strip, so the global
+            source-file row would only duplicate it. */}
+        {view !== 'denialmapper' && view !== 'jobs' && view !== 'reports' && view !== 'rpt01' && <div className="claim-filter-toggle-row">
           <div className="last-run-reference" title={lastRunReference?.outputFileName || lastRunReference?.OutputFileName || lastRunReference?.runId || lastRunReference?.RunId || ''}>
             <i className="bi bi-file-earmark-text" />
             <span className="last-run-label">Source File</span>
@@ -1395,7 +1434,9 @@ export default function App() {
           </div>
           {(view === 'dashboard' || view === 'claims') && <button type="button" className="wl-btn xs" onClick={() => view === 'dashboard' ? setDashboardFiltersOpen(v => !v) : setClaimFiltersOpen(v => !v)}><i className={`bi ${view === 'dashboard' ? (dashboardFiltersOpen ? 'bi-eye-slash' : 'bi-funnel') : (claimFiltersOpen ? 'bi-eye-slash' : 'bi-funnel')}`} />{view === 'dashboard' ? (dashboardFiltersOpen ? 'Hide Filters' : 'View Filters') : (claimFiltersOpen ? 'Hide Filters' : 'View Filters')}</button>}
         </div>}
-        {view !== 'myworklist' && view !== 'aging' && view !== 'support' && view !== 'denialcodemaster' && view !== 'denialmapper' && view !== 'denialactionverification' && view !== 'jobs' && (
+        {/* RPT-01 and the report catalog own their filter bar (the report's filter set is its own,
+            and its applied-filter summary has to stay visible and match the export). */}
+        {view !== 'myworklist' && view !== 'aging' && view !== 'support' && view !== 'denialcodemaster' && view !== 'denialmapper' && view !== 'denialactionverification' && view !== 'jobs' && view !== 'reports' && view !== 'rpt01' && (
           <div className={(view === 'verification' || view === 'escalations' || (view === 'claims' && !claimFiltersOpen) || (view === 'dashboard' && !dashboardFiltersOpen)) ? 'global-filter-hidden' : ''}>
             <DashboardFilter filter={filter} setFilterValue={setFilterValue} clearFilter={clearFilter} reviewers={reviewers} options={filterOptions} visibleFilters={visibleFilters} />
           </div>
@@ -1441,7 +1482,8 @@ export default function App() {
         {view === 'denialactionverification' && (denialMapperAdmin || arManagerOnly) && <DenialActionVerificationPage labId={labId} setMessage={setWorkflowMessage} initialBatchId={actionVerificationBatchId} />}
         {view === 'exports' && <WorkflowPlaceholder title="Exports">Use Overall Download or per-tab Download from Claim Assignment for claim extracts. Aging Dashboard also includes a Download Excel action.</WorkflowPlaceholder>}
         {view === 'jobs' && <JobsPage key={jobsFocusUploadId || 'jobs'} setMessage={setWorkflowMessage} initialUploadJobId={jobsFocusUploadId} />}
-        {view === 'reports' && <WorkflowPlaceholder title="Reports">Coming soon. Denial trend analysis, payer performance, and SLA compliance reporting will be available here in a future release. In the meantime, the Denial Dashboard, Aging Dashboard, and per-tab Download actions cover current reporting needs.</WorkflowPlaceholder>}
+        {view === 'reports' && <ReportCatalogPage labId={labId} setMessage={setWorkflowMessage} onOpenReport={routeKey => setView(workflowViews.includes(routeKey) ? routeKey : 'reports')} />}
+        {view === 'rpt01' && <Rpt01ActivityDetailPage labId={labId} user={user} setMessage={setWorkflowMessage} />}
         {view === 'support' && <ContactSupportPage user={user} currentPage={pageTitle} setMessage={setWorkflowMessage} />}
         {view === 'admin' && <WorkflowPlaceholder title="Admin Setup">Admin setup is available from the LRN Metrics administration area. This workflow shell keeps the menu entry visible for administrators.</WorkflowPlaceholder>}
       </main>

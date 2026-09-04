@@ -5079,13 +5079,53 @@ ORDER BY CreatedOn DESC, NoteId DESC;";
     public async Task<DenialNoteRow> SaveNoteAsync(SaveDenialNoteRequest request, CancellationToken ct)
     {
         await EnsureClaimSupportTablesAsync(request.LabId, ct);
-        const string sql = @"
-INSERT INTO dbo.DenialClaimNotes(LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,Status,NextFollowUpDate,FollowUpReason,CreatedBy,UpdateSource,UploadBatchId)
-OUTPUT INSERTED.NoteId,INSERTED.LabId,INSERTED.ClaimId,INSERTED.TaskId,INSERTED.CptCode,INSERTED.NoteLevel,INSERTED.NoteText,INSERTED.Status,INSERTED.NextFollowUpDate,INSERTED.CreatedBy,INSERTED.CreatedOn
-VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@NoteLevel,@NoteText,@Status,@NextFollowUpDate,@FollowUpReason,@CreatedBy,@UpdateSource,@UploadBatchId);";
         await using var con = OpenLab(request.LabId);
         await con.OpenAsync(ct);
+
+        // RPT-01 required detail columns. These are added by the AR-report schema pass
+        // (Sql/ArReports/RPT01_ActivityDetail_Setup.sql), which labs receive one at a time, so each
+        // one is written only where it exists - a lab that has not migrated keeps saving notes
+        // exactly as before instead of failing on an unknown column.
+        var noteColumns = await GetColumnSetAsync(con, "dbo.DenialClaimNotes", ct);
+        var insertColumns = new List<string> { "LabId", "ClaimId", "TaskId", "CptCode", "NoteLevel", "NoteText", "Status", "NextFollowUpDate", "FollowUpReason", "CreatedBy", "UpdateSource", "UploadBatchId" };
+        var insertValues = new List<string> { "@LabId", "@ClaimId", "@TaskId", "@CptCode", "@NoteLevel", "@NoteText", "@Status", "@NextFollowUpDate", "@FollowUpReason", "@CreatedBy", "@UpdateSource", "@UploadBatchId" };
+        void AddOptional(string column, string value)
+        {
+            if (!noteColumns.Contains(column)) return;
+            insertColumns.Add(column);
+            insertValues.Add(value);
+        }
+        AddOptional("ContactMethod", "@ContactMethod");
+        AddOptional("FollowUpCategory", "@FollowUpCategory");
+        AddOptional("IsInternalOnly", "@IsInternalOnly");
+        // The outstanding balance AS IT STOOD when the activity happened. Without this the report
+        // can only ever show the CURRENT balance against a historical event, which is not the
+        // snapshot the spec's Financial column group asks for. Captured at write time because it
+        // cannot be reconstructed afterwards - the task board is mutated in place.
+        var taskBoardColumns = await GetColumnSetAsync(con, "dbo.DenialTaskBoard", ct);
+        var balanceClaimMatch = taskBoardColumns.Contains("ClaimIDNormalized")
+            ? "tb.ClaimIDNormalized = @ClaimIdNormalized"
+            : "CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(tb.ClaimID,''))),'CLM-','')) = @ClaimIdNormalized";
+        AddOptional("BalanceSnapshot", $@"(
+            SELECT SUM(tb.InsuranceBalance)
+            FROM dbo.DenialTaskBoard tb WITH (NOLOCK)
+            WHERE tb.LabId = @LabId
+              AND (
+                    (NULLIF(@TaskId,'') IS NOT NULL AND ISNULL(tb.TaskID,'') = @TaskId)
+                 OR (NULLIF(@TaskId,'') IS NULL AND {balanceClaimMatch})
+                  )
+        )");
+
+        var sql = $@"
+INSERT INTO dbo.DenialClaimNotes({string.Join(",", insertColumns)})
+OUTPUT INSERTED.NoteId,INSERTED.LabId,INSERTED.ClaimId,INSERTED.TaskId,INSERTED.CptCode,INSERTED.NoteLevel,INSERTED.NoteText,INSERTED.Status,INSERTED.NextFollowUpDate,INSERTED.CreatedBy,INSERTED.CreatedOn
+VALUES({string.Join(",", insertValues)});";
+
         await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 120 };
+        cmd.Parameters.AddWithValue("@ClaimIdNormalized", NormalizeClaimId(request.ClaimId));
+        cmd.Parameters.AddWithValue("@ContactMethod", string.IsNullOrWhiteSpace(request.ContactMethod) ? (object)DBNull.Value : request.ContactMethod.Trim());
+        cmd.Parameters.AddWithValue("@FollowUpCategory", string.IsNullOrWhiteSpace(request.FollowUpCategory) ? (object)DBNull.Value : request.FollowUpCategory.Trim());
+        cmd.Parameters.AddWithValue("@IsInternalOnly", request.IsInternalOnly);
         cmd.Parameters.AddWithValue("@LabId", request.LabId);
         cmd.Parameters.AddWithValue("@ClaimId", request.ClaimId.Trim());
         cmd.Parameters.AddWithValue("@TaskId", (object?)request.TaskId?.Trim() ?? DBNull.Value);

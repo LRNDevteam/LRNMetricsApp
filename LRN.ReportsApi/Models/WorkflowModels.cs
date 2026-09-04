@@ -741,6 +741,20 @@ public sealed class SaveDenialNoteRequest
     // overrides it to "Excel" and supplies an UploadBatchId.
     public string UpdateSource { get; set; } = "UI";
     public string? UploadBatchId { get; set; }
+
+    // RPT-01 required detail columns (AR Reporting Requirements section 3.1). All optional, so
+    // existing callers are unaffected; a note saved without them reports "Not Recorded" rather
+    // than a fabricated value.
+    /// <summary>Activity > contact method. Values come from dbo.DenialActivityContactMethod.</summary>
+    public string? ContactMethod { get; set; }
+    /// <summary>Follow-up > category. Values come from dbo.DenialFollowUpCategoryMaster.</summary>
+    public string? FollowUpCategory { get; set; }
+    /// <summary>
+    /// Marks the note as restricted internal content, masked for client-facing roles (spec
+    /// section 2.6 role-based visibility). Defaults to false: flipping the default the other way
+    /// would hide every note from Client/Account Managers without anyone having classified it.
+    /// </summary>
+    public bool IsInternalOnly { get; set; }
 }
 
 public sealed class FollowUpNotificationRow

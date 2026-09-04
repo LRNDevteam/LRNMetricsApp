@@ -135,6 +135,22 @@ export const denialWorkflowService = {
   ,getDenialMapperAudit: (labId) => api(`/denial-mapper/audit?${qs({ labId, take: 200 })}`)
   ,getDenialMapperClassifications: (labId) => api(`/denial-mapper/classifications?${qs({ labId })}`)
   ,uploadDenialMapper: (file) => { const form = new FormData(); form.append('file', file); return api('/denial-mapper/upload', { method: 'POST', body: form }); }
+
+  // ── AR follow-up reporting suite ────────────────────────────────────────────
+  // The catalog drives which reports the Reports screen offers and which are shown inactive, so
+  // adding or activating a report is a data change (dbo.DenialReportCatalog), not a UI edit.
+  ,getReportCatalog: (labId) => api(`/reports/catalog?labId=${encodeURIComponent(labId)}`)
+
+  // RPT-01 — AR Follow-up Activity Detail.
+  ,getRpt01FilterOptions: (labId) => api(`/reports/rpt01/filter-options?labId=${encodeURIComponent(labId)}`)
+  ,getRpt01: (query, options = {}) => api(`/reports/rpt01?${qs(query)}`, options)
+  ,getRpt01Timeline: (labId, claimId) => api(`/reports/rpt01/timeline?${qs({ labId, claimId })}`)
+  // apiUrl resolves to a blob URL, so the caller must set a.download itself — a blob carries no
+  // content-disposition and the browser would otherwise save it under a random GUID name.
+  ,getRpt01ExportUrl: (query) => apiUrl(`/reports/rpt01/export?${qs(query)}`)
+  ,getRpt01SavedViews: (labId) => api(`/reports/rpt01/saved-views?labId=${encodeURIComponent(labId)}`)
+  ,saveRpt01View: (payload) => api('/reports/rpt01/saved-views', { method: 'POST', body: JSON.stringify(payload) })
+  ,deleteRpt01View: (savedViewId, labId) => api(`/reports/rpt01/saved-views/${encodeURIComponent(savedViewId)}?labId=${encodeURIComponent(labId)}`, { method: 'DELETE' })
 };
 
 export { qs };

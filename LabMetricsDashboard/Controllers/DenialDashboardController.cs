@@ -1166,7 +1166,7 @@ public class DenialDashboardController : Controller
 			}).ToList()
 			: prepared.GroupBy(x => StartOfWeek(x.DenialDate)).Select(g => new BreakdownPivotPeriod { Key = g.Key.ToString("yyyy-MM-dd"), Label = $"{g.Key:MMM dd} - {g.Key.AddDays(6):MMM dd}", StartDate = g.Key, EndDate = g.Key.AddDays(6), Year = ISOWeek.GetYear(g.Key), Month = g.Key.Month, IsYearTotal = false }).OrderByDescending(x => x.StartDate).Take(4).OrderBy(x => x.StartDate).ToList();
 
-		var model = new BreakdownPivotViewModel { HeaderTitle = monthly ? "All Months | Top 10 Payers | Denial Posted Date" : "Last 4 Weeks | Top 10 Payers | Denial Posted Date", SectionTitle = monthly ? "Monthly Breakdown" : "Weekly Breakdown", GrandTotalTitle = "Grand Total", Periods = periods };
+		var model = new BreakdownPivotViewModel { HeaderTitle = monthly ? "All Months | Top 10 Payers | Denial Posted Date" : "Last 4 Weeks | Top 10 Payers | Denial Posted Date", SectionTitle = monthly ? "Monthly Summary" : "Weekly Summary", GrandTotalTitle = "Grand Total", Periods = periods };
 		if (periods.Count == 0) return model;
 
 		var selectedRows = monthly ? prepared : prepared.Where(x => periods.Any(period => PeriodContains(period, x.DenialDate, monthly))).ToList();
