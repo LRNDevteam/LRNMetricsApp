@@ -1,0 +1,628 @@
+<title>RPT-01 Test Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+
+<style>
+/* Same token system as the other denial-management documents. */
+:root{
+  --navy-900:#0a2342; --navy-700:#1b3f72; --navy-head:#16325c;
+  --blue:#1b64da; --blue-050:#e9f1fd;
+  --teal:#0f9d8e; --teal-050:#e4f7f4;
+  --red:#d64550;   --red-050:#fdecee;
+  --amber:#c47f10; --amber-050:#fdf4e3;
+  --green:#1f9254; --green-050:#e8f6ee;
+  --purple:#7048b6;--purple-050:#f2edfb;
+
+  --doc-bg:#f4f6fa; --doc-card:#ffffff; --doc-ink:#141f33; --doc-ink-2:#485974;
+  --doc-ink-3:#7c8ba3; --doc-line:#dde3ec; --doc-line-2:#eaeef4; --doc-rule:#c9d3e1;
+  --doc-link:#15559c; --doc-quiet:#eef1f7; --doc-code:#f5f7fb;
+
+  --f-doc:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+  --f-ui:"IBM Plex Sans","Segoe UI",system-ui,-apple-system,Helvetica,Arial,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  --wrap:1140px; --prose:70ch;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --doc-bg:#0c1421; --doc-card:#131d2e; --doc-ink:#dce4f0; --doc-ink-2:#9dabc2;
+    --doc-ink-3:#71809a; --doc-line:#22314b; --doc-line-2:#1a2739; --doc-rule:#2c3d5c;
+    --doc-link:#7fb0f0; --doc-quiet:#182437; --doc-code:#101a2a;
+  }
+}
+:root[data-theme="dark"]{
+  --doc-bg:#0c1421; --doc-card:#131d2e; --doc-ink:#dce4f0; --doc-ink-2:#9dabc2;
+  --doc-ink-3:#71809a; --doc-line:#22314b; --doc-line-2:#1a2739; --doc-rule:#2c3d5c;
+  --doc-link:#7fb0f0; --doc-quiet:#182437; --doc-code:#101a2a;
+}
+*{box-sizing:border-box;}
+body{background:var(--doc-bg); color:var(--doc-ink); font-family:var(--f-doc);
+  font-size:16px; line-height:1.62; -webkit-font-smoothing:antialiased;}
+:focus-visible{outline:2px solid var(--blue); outline-offset:2px;}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
+
+.wrap{max-width:var(--wrap); margin:0 auto; padding:0 28px;}
+.prose{max-width:var(--prose);}
+p{margin:0 0 1em;} a{color:var(--doc-link);}
+
+.mast{background:linear-gradient(103deg,var(--navy-900) 0%,var(--navy-700) 62%,#22528f 100%);
+  color:#e4ecf8; border-bottom:3px solid var(--green);}
+.mast .wrap{padding-top:36px; padding-bottom:32px;}
+.mast .kicker{font-family:var(--f-ui); font-size:10.5px; font-weight:700;
+  letter-spacing:.2em; text-transform:uppercase; color:#8fb2df; margin-bottom:14px;}
+.mast h1{font-family:var(--f-ui); font-weight:700; font-size:clamp(30px,4.4vw,44px);
+  line-height:1.06; letter-spacing:-.025em; margin:0 0 14px; color:#fff; text-wrap:balance; max-width:18ch;}
+.mast .standfirst{font-size:17px; color:#c3d5ee; max-width:62ch; margin:0; line-height:1.55;}
+.mast .standfirst em{color:#8fe0d4; font-style:italic;}
+
+.meta{background:var(--doc-card); border-bottom:1px solid var(--doc-line);}
+.meta .wrap{padding-top:20px; padding-bottom:20px;}
+.metagrid{display:grid; gap:2px 30px; grid-template-columns:repeat(auto-fit,minmax(215px,1fr));
+  font-family:var(--f-ui); font-size:13px;}
+.metagrid div{display:flex; gap:8px; padding:5px 0; border-bottom:1px solid var(--doc-line-2);}
+.metagrid dt{flex:0 0 86px; color:var(--doc-ink-3); font-size:10.5px; font-weight:700;
+  letter-spacing:.1em; text-transform:uppercase; padding-top:3px; margin:0;}
+.metagrid dd{margin:0; color:var(--doc-ink-2); font-weight:500;}
+
+section{padding:54px 0 8px;}
+section + section{border-top:1px solid var(--doc-line);}
+.snum{font-family:var(--f-mono); font-size:11px; font-weight:600; letter-spacing:.06em;
+  color:var(--teal); display:block; margin-bottom:9px;}
+h2{font-family:var(--f-ui); font-weight:700; font-size:28px; letter-spacing:-.02em;
+  line-height:1.15; margin:0 0 12px; text-wrap:balance;}
+h3{font-family:var(--f-ui); font-weight:600; font-size:18px; margin:36px 0 10px; letter-spacing:-.01em;}
+.lede{font-size:17.5px; color:var(--doc-ink-2); max-width:64ch; margin-bottom:24px;}
+.rule{height:1px; background:var(--doc-rule); border:0; margin:42px 0;}
+
+ul.doc,ol.doc{margin:0 0 1.1em; padding-left:1.2em; max-width:var(--prose);}
+ul.doc li,ol.doc li{margin-bottom:.5em;}
+ul.doc li::marker{color:var(--teal);}
+ol.doc li::marker{color:var(--teal); font-family:var(--f-mono); font-size:.85em;}
+
+code{font-family:var(--f-mono); font-size:.85em; background:var(--doc-code); padding:1px 5px;
+  border-radius:4px; color:var(--doc-ink); border:1px solid var(--doc-line-2);}
+pre{font-family:var(--f-mono); font-size:12px; line-height:1.6; background:var(--doc-code);
+  border:1px solid var(--doc-line); border-left:3px solid var(--teal); border-radius:0 8px 8px 0;
+  padding:14px 16px; overflow-x:auto; margin:14px 0; color:var(--doc-ink);}
+pre code{background:none;border:0;padding:0;font-size:inherit;}
+pre .c{color:var(--doc-ink-3);} pre .k{color:var(--blue);font-weight:600;}
+
+.callout{border-left:3px solid var(--teal); background:var(--doc-quiet); padding:16px 20px;
+  margin:24px 0; max-width:var(--prose); font-size:15.5px; color:var(--doc-ink-2);}
+.callout b{color:var(--doc-ink);}
+.callout.warn{border-left-color:var(--amber);}
+.callout.stop{border-left-color:var(--red);}
+
+/* result tiles */
+.tiles{display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); margin:24px 0 8px;}
+.tile{background:var(--doc-card); border:1px solid var(--doc-line); border-radius:10px;
+  padding:16px 18px; font-family:var(--f-ui);}
+.tile .n{font-size:34px; font-weight:700; letter-spacing:-.04em; line-height:1; font-variant-numeric:tabular-nums;}
+.tile .l{font-size:12.5px; font-weight:600; color:var(--doc-ink); margin-top:7px;}
+.tile .d{font-size:11.5px; color:var(--doc-ink-3); margin-top:3px; font-family:var(--f-mono);}
+.tile.pass{border-top:3px solid var(--green);} .tile.pass .n{color:var(--green);}
+.tile.zero{border-top:3px solid var(--doc-ink-3);} .tile.zero .n{color:var(--doc-ink-2);}
+.tile.new{border-top:3px solid var(--purple);} .tile.new .n{color:var(--purple);}
+.tile.warn{border-top:3px solid var(--amber);} .tile.warn .n{color:var(--amber);}
+
+.scroller{overflow-x:auto; margin:22px 0 10px; border:1px solid var(--doc-line);
+  border-radius:10px; background:var(--doc-card);}
+table.t{border-collapse:collapse; width:100%; min-width:640px; font-family:var(--f-ui); font-size:13px;}
+table.t th{background:var(--navy-head); color:#e8eff9; font-weight:600; font-size:10.5px;
+  letter-spacing:.05em; text-transform:uppercase; padding:9px 11px; text-align:left; white-space:nowrap;}
+table.t td{padding:9px 11px; border-bottom:1px solid var(--doc-line-2); vertical-align:top;}
+table.t tbody tr:hover td{background:var(--doc-quiet);}
+table.t td.num{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap;}
+table.t td.mono, table.t td code{font-family:var(--f-mono); font-size:11.5px;}
+.ok{color:var(--green); font-weight:700;}
+.no{color:var(--red); font-weight:700;}
+
+.grp{background:var(--doc-card); border:1px solid var(--doc-line); border-radius:11px;
+  margin:18px 0; overflow:hidden;}
+.grp-h{display:flex; flex-wrap:wrap; align-items:center; gap:10px 13px; padding:13px 18px;
+  border-bottom:1px solid var(--doc-line-2); font-family:var(--f-ui);}
+.grp-h h3{margin:0; font-size:16px; font-weight:600;}
+.grp-h .cnt{font-family:var(--f-mono); font-size:11px; color:#fff; background:var(--green);
+  border-radius:5px; padding:3px 9px;}
+.grp-h .what{margin-left:auto; font-size:11.5px; color:var(--doc-ink-3);}
+.grp-b{padding:15px 18px 18px;}
+.grp-b p{font-size:14.5px; color:var(--doc-ink-2); max-width:66ch; margin:0 0 .8em;}
+.grp-b p:last-child{margin-bottom:0;}
+.grp-b ul{margin:0; padding-left:1.05em; font-family:var(--f-mono); font-size:11.5px;
+  color:var(--doc-ink-2); line-height:1.75;}
+.grp-b ul li::marker{color:var(--teal);}
+
+.step{display:grid; grid-template-columns:34px 1fr; gap:0 16px; padding:14px 0;
+  border-top:1px solid var(--doc-line);}
+.step:last-of-type{border-bottom:1px solid var(--doc-line);}
+.step .sn{font-family:var(--f-mono); font-size:12px; font-weight:600; color:#fff;
+  background:var(--navy-700); border-radius:5px; height:26px; display:grid; place-items:center;}
+.step h4{margin:2px 0 5px; font-family:var(--f-ui); font-size:15.5px; font-weight:600; color:var(--doc-ink);}
+.step p{margin:0 0 .5em; font-size:14.5px; color:var(--doc-ink-2); max-width:64ch;}
+.step .exp{font-family:var(--f-ui); font-size:12.5px; background:var(--green-050); color:#12613a;
+  border-radius:6px; padding:7px 11px; display:inline-block; margin-top:4px;}
+:root[data-theme="dark"] .step .exp,
+:root:not([data-theme="light"]) .step .exp{background:color-mix(in srgb,var(--green) 20%, var(--doc-card)); color:#8fe4b4;}
+
+footer{margin-top:54px; border-top:3px solid var(--navy-700); background:var(--doc-card); padding:28px 0 42px;}
+footer .wrap{font-family:var(--f-ui); font-size:12.5px; color:var(--doc-ink-3);}
+footer h4{margin:0 0 10px; font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--doc-ink-2);}
+footer ul{margin:0; padding-left:1.1em;} footer li{margin-bottom:.35em;}
+.foot-cols{display:grid; gap:26px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); margin-bottom:22px;}
+</style>
+
+<header class="mast">
+  <div class="wrap">
+    <div class="kicker">Denial Workflow Management · AR Reporting · RPT-01</div>
+    <h1>RPT-01 Test Report</h1>
+    <p class="standfirst">
+      Full suite run, what the 49 RPT-01 cases actually prove, and the acceptance test that still
+      has to be run against a real lab. <em>320 passed, 0 failed — and none of them touched a
+      database.</em>
+    </p>
+  </div>
+</header>
+
+<div class="meta">
+  <div class="wrap">
+    <dl class="metagrid">
+      <div><dt>Report</dt><dd>RPT-01 AR Follow-up Activity Detail</dd></div>
+      <div><dt>Run date</dt><dd>4 September 2026</dd></div>
+      <div><dt>Machine</dt><dd>ReportEngine · .NET SDK 9.0.317</dd></div>
+      <div><dt>Result</dt><dd><b style="color:#1f9254">320 passed · 0 failed · 0 skipped</b></dd></div>
+      <div><dt>Target lab</dt><dd>LRNLabDemo — <b style="color:#d64550">not yet reachable</b></dd></div>
+      <div><dt>Status</dt><dd>Code verified · acceptance test outstanding</dd></div>
+    </dl>
+  </div>
+</div>
+
+<main>
+
+<!-- ============ 1 ============ -->
+<section>
+  <div class="wrap">
+    <span class="snum">Section 01</span>
+    <h2>Run summary</h2>
+    <p class="lede">
+      Every test project in the solution, run individually. No failures, no skips, no flakes.
+    </p>
+
+    <div class="tiles">
+      <div class="tile pass"><div class="n">320</div><div class="l">Tests passed</div><div class="d">4 projects</div></div>
+      <div class="tile zero"><div class="n">0</div><div class="l">Failed</div><div class="d">0 skipped</div></div>
+      <div class="tile new"><div class="n">49</div><div class="l">RPT-01 cases</div><div class="d">23 methods</div></div>
+      <div class="tile warn"><div class="n">1</div><div class="l">Blocker outstanding</div><div class="d">LRNLabDemo unreachable</div></div>
+    </div>
+
+    <div class="scroller">
+      <table class="t">
+        <thead><tr><th>Project</th><th>Framework</th><th class="num">Passed</th><th class="num">Failed</th><th class="num">Duration</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">LRN.ReportsApi.Tests</td><td class="mono">net8.0</td><td class="num">176</td><td class="num">0</td><td class="num">6.0 s</td><td class="ok">PASS</td></tr>
+          <tr><td class="mono">LabMetricsDashboard.Tests</td><td class="mono">net9.0</td><td class="num">97</td><td class="num">0</td><td class="num">1.0 s</td><td class="ok">PASS</td></tr>
+          <tr><td class="mono">LRN.DenialDatabaseWorker.Tests</td><td class="mono">net8.0</td><td class="num">33</td><td class="num">0</td><td class="num">0.7 s</td><td class="ok">PASS</td></tr>
+          <tr><td class="mono">LRN.PayerPolicyMapper.Tests</td><td class="mono">net8.0</td><td class="num">14</td><td class="num">0</td><td class="num">0.8 s</td><td class="ok">PASS</td></tr>
+          <tr style="font-weight:600;"><td>Total</td><td></td><td class="num">320</td><td class="num">0</td><td class="num">8.5 s</td><td class="ok">PASS</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="prose">
+      The 143 tests outside <code>LRN.ReportsApi.Tests</code> were run to confirm RPT-01 broke
+      nothing that already worked — the dashboard's role and lab-visibility tests, the worker's
+      normalisation and classification tests, and the payer mapper. All were green before and
+      remain green.
+    </p>
+  </div>
+</section>
+
+<!-- ============ 2 ============ -->
+<section>
+  <div class="wrap">
+    <span class="snum">Section 02</span>
+    <h2>What the RPT-01 cases prove</h2>
+    <p class="lede">
+      23 test methods, 49 cases after theory expansion, in two files. Grouped by the claim each
+      group makes.
+    </p>
+
+    <div class="grp">
+      <div class="grp-h"><span class="cnt">16</span><h3>The generated SQL is well-formed</h3>
+        <span class="what">ArActivityReportTests</span></div>
+      <div class="grp-b">
+        <p>
+          Every combination of grain, Latest-Activity-Only, grouping and analyst scope is generated
+          and parsed with the <b>real T-SQL parser</b> — not a regex, not a string check. Run twice
+          over two schemas: a fully migrated lab, and one where every optional column is absent.
+        </p>
+        <p>
+          That second pass is the one that matters operationally. The repository applies its
+          migration per lab on first use, so a lab that has not yet been touched is missing the new
+          columns, and the report has to degrade rather than throw.
+        </p>
+        <ul>
+          <li>GeneratedSql_Parses_OnAFullyMigratedLab — 8 cases</li>
+          <li>GeneratedSql_Parses_WhenEveryOptionalColumnIsMissing — 8 cases</li>
+          <li>grains: Claim, Line · groupBy: none, analyst, action, payer, classification, activityType</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-h"><span class="cnt">2</span><h3>The two counting decisions hold</h3>
+        <span class="what">the arithmetic that gets audited</span></div>
+      <div class="grp-b">
+        <p>
+          These are the assertions the spec's business rules turn on, and both are places where an
+          obvious implementation is wrong.
+        </p>
+        <p>
+          <b>Escalation history rows are excluded from the spine.</b> Raising one escalation writes
+          one escalation row plus one history row per affected task, so counting history rows would
+          inflate "escalations raised" on every multi-line claim. The escalation record is also the
+          only place the reason, recipient and <code>EscalationId</code> live.
+        </p>
+        <p>
+          <b>Balance is aggregated once per claim/analyst/day.</b> Summing a balance snapshot per
+          note event would multiply the same money by the number of notes — the spec calls this out
+          explicitly and it is the single most likely way this report would overstate.
+        </p>
+        <ul>
+          <li>GeneratedSql_ExcludesEscalationHistoryRowsFromTheSpine</li>
+          <li>GeneratedSql_AggregatesBalanceOncePerClaimDay</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-h"><span class="cnt">9</span><h3>Internal notes stay internal</h3>
+        <span class="what">role masking</span></div>
+      <div class="grp-b">
+        <p>
+          Nine roles, each asserted for visibility. Client Manager, Account Manager and Lab User are
+          masked; Admin, AR Manager, AR Reviewer and AR Analyst are not. Role strings are tested in
+          both display and normalised form (<code>Client Manager</code> and
+          <code>client-manager</code>, <code>Lab User</code> and <code>labuser</code>) so the
+          punctuation-stripping match cannot regress.
+        </p>
+        <p>
+          Client-facing roles get <b>masked notes, not missing rows</b> — so a summary count still
+          reconciles to the detail the user can see. Dropping the rows instead would make the
+          summary disagree with the detail for exactly the audience least able to explain it.
+        </p>
+      </div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-h"><span class="cnt">11</span><h3>Filter normalisation</h3>
+        <span class="what">before the query is built</span></div>
+      <div class="grp-b">
+        <p>
+          Date-window handling, page-size clamping and the lab requirement. An inclusive end date
+          becomes an exclusive upper bound; an inverted range is swapped rather than silently
+          returning nothing; a window wider than a year is rejected; a lab is mandatory.
+        </p>
+        <ul>
+          <li>Normalize_TurnsAnInclusiveEndDateIntoAnExclusiveUpperBound</li>
+          <li>Normalize_SwapsAnInvertedRangeRatherThanReturningNothing</li>
+          <li>Normalize_RejectsAWindowWiderThanAYear · Normalize_RequiresALab</li>
+          <li>Normalize_KeepsAnExplicitTimeOnTheUpperBound</li>
+          <li>Normalize_DefaultsToTheLastSevenDaysOfActivity</li>
+          <li>Normalize_ClampsScreenPageSize — 4 cases (0→50, 10→25, 100→100, 5000→200)</li>
+          <li>Normalize_LetsAnExportTakeEveryFilteredRow</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-h"><span class="cnt">8</span><h3>The workbook, and its reconciliation sheet</h3>
+        <span class="what">ArActivityReportExcelTests</span></div>
+      <div class="grp-b">
+        <p>
+          The export is asserted against the spec's own worked example — <b>three same-day notes on
+          one claim by one analyst give 3 activity events and 1 claim-day worked, with balance
+          $1,540 rather than $3,260</b>. Critically, the assertion reads the workbook's
+          Reconciliation sheet, which <b>recomputes every measure from the detail rows</b> rather
+          than echoing the summary. A summary that agreed with itself but not with its detail would
+          fail here.
+        </p>
+        <ul>
+          <li>Reconciliation_RecomputesFromDetailAndAgreesWithTheSummary</li>
+          <li>Reconciliation_ShowsClaimDaysBelowActivityEvents_NotEqualToThem</li>
+          <li>Export_ContainsEverySheetTheSpecRequires</li>
+          <li>Export_WritesOneDetailRowPerActivityEvent</li>
+          <li>Export_CarriesTheRunIdAndGenerationMetadata</li>
+          <li>Export_MarksRowsWhoseBalanceIsCurrentRatherThanASnapshot</li>
+          <li>Export_FlagsAPartialExportSoDifferencesAreNotMistakenForABug</li>
+          <li>Export_SurvivesAnEmptyResult</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-h"><span class="cnt">2</span><h3>The DDL parses too</h3>
+        <span class="what">DBA script + runtime batches</span></div>
+      <div class="grp-b">
+        <p>
+          <code>Sql/ArReports/RPT01_ActivityDetail_Setup.sql</code> and the batches the repository
+          runs at first use are both parse-checked. A migration that fails to parse would take the
+          report down on the first lab that had not been pre-applied, at runtime, in front of a
+          user.
+        </p>
+        <ul>
+          <li>DbaSetupScript_Parses · RuntimeSchemaBatches_Parse</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3 ============ -->
+<section>
+  <div class="wrap">
+    <span class="snum">Section 03</span>
+    <h2>What these tests do not prove</h2>
+    <p class="lede">
+      This is the honest limit of a green run, and it should be read before anyone treats 320/320
+      as sign-off.
+    </p>
+
+    <div class="callout stop">
+      <b>No test in this suite opens a database connection.</b> They prove the SQL is well-formed
+      and the arithmetic is right. They cannot prove that the columns the SQL reads contain
+      anything. A nullable column that is null in every row of a real lab produces a report that
+      renders perfectly and says nothing — and every one of these 320 tests would still pass.
+    </div>
+
+    <ul class="doc">
+      <li><b>Column population is untested.</b> <code>DenialTaskBoard.Task</code>,
+        <code>DateOfService</code> and <code>ClaimUID</code> in particular need checking on the
+        chosen lab before sign-off.</li>
+      <li><b>Query performance is untested.</b> The spec's NFR-001 asks for summary pages within
+        5 seconds. A three-way union over the event tables on a large lab is the obvious risk, and
+        parse-checking says nothing about it. The new <code>(LabId, event date)</code> indexes on
+        all three event tables — which had none — are the mitigation, but they are unmeasured.</li>
+      <li><b>The per-lab migration is untested against a real lab.</b> The ALTERs are
+        metadata-only and the script parses, but neither fact proves it applies cleanly over a
+        lab's actual current schema.</li>
+      <li><b>Role masking is tested at the query layer only.</b> That the UI also hides what it
+        should is a separate check.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 4 ============ -->
+<section>
+  <div class="wrap">
+    <span class="snum">Section 04</span>
+    <h2>Blocker: LRNLabDemo is not reachable</h2>
+    <p class="lede">
+      The acceptance test cannot run against LRNLabDemo today. This has nothing to do with RPT-01 —
+      it is a lab-connection configuration gap that predates it.
+    </p>
+
+    <p class="prose">
+      <code>LabConnectionResolver.Resolve()</code> tries five sources in order. For
+      <code>LRNLabDemo</code>, all five miss and it returns an empty string:
+    </p>
+
+    <div class="scroller">
+      <table class="t">
+        <thead><tr><th class="num">#</th><th>Resolution step</th><th>Result for LRNLabDemo</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1</td><td class="mono">ConnectionStrings:Lab_{labId}</td><td>not configured</td></tr>
+          <tr><td class="num">2</td><td class="mono">{LabConfigFolder}\LRNLabDemo.json</td><td><b class="no">folder does not exist</b> — configured as <code>E:\LRN-Data\…</code>, and this server has no E: drive. Dead for <i>every</i> lab.</td></tr>
+          <tr><td class="num">3</td><td class="mono">LRNMetricsLab.ConnectionKey</td><td>no matching vault secret</td></tr>
+          <tr><td class="num">4</td><td>known-name map</td><td>no <code>LRNLABDEMO</code> case</td></tr>
+          <tr><td class="num">5</td><td>fuzzy scan of ConnectionStrings</td><td>no match among the 25 vault secrets</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="prose">
+      Two independent problems are visible here. The <b>folder path is wrong for every lab</b> —
+      the real files sit at <code>C:\LRN-Files\ApplicationFolder\CodingAutomation\Labs\</code>, and
+      each carries the <code>DbConnectionString</code> the resolver looks for. Labs 1–12 survive
+      only because steps 3–5 rescue them. <b>LRNLabDemo has no rescue</b>: no file, no vault secret,
+      no map entry.
+    </p>
+
+    <h3>Cheapest fix, no code change</h3>
+    <ol class="doc">
+      <li>Create <code>ConnectionStrings--LRNLabDemo</code> in <code>kv-lrnmetrics-prod</code>,
+        pointing at the LRNLabDemo database.</li>
+      <li>Set <code>ConnectionKey = 'LRNLabDemo'</code> on the lab's
+        <code>LRNMaster.dbo.LRNMetricsLab</code> row — step 3 then resolves it.</li>
+      <li>Restart <code>LRN.ReportsApi</code>. Lab connections are resolved once at startup and
+        cached, so a new lab needs a restart.</li>
+    </ol>
+
+    <div class="callout warn">
+      <b>Fix the folder path separately, and deliberately.</b> Pointing
+      <code>LabConfig:LabConfigFolder</code> at the real directory changes how <i>all thirteen</i>
+      labs resolve — step 2 would start winning over the vault. Three filenames also do not match
+      their configured lab names (<code>Augustus.json</code> vs <code>Augustus_Labs</code>,
+      <code>PCRAL.json</code> vs <code>PCR_Dx_AL</code>, <code>PCRCO.json</code> vs
+      <code>PCR_Dx_CO</code>), so those three would keep falling through to the known-name map.
+      Worth doing, but not in the same change as the acceptance test.
+    </div>
+  </div>
+</section>
+
+<!-- ============ 5 ============ -->
+<section>
+  <div class="wrap">
+    <span class="snum">Section 05</span>
+    <h2>Acceptance test</h2>
+    <p class="lede">
+      Run once the lab connection is fixed. This is the spec's own worked example, and it is the
+      test that distinguishes a correct report from a well-formed one.
+    </p>
+
+    <h3>Pre-flight — is this lab's data usable?</h3>
+    <p class="prose">
+      Run first. If any of these is empty, the acceptance test will produce a clean-looking result
+      that means nothing.
+    </p>
+
+<pre><code><span class="c">-- Populated-ness of the columns RPT-01 renders. Anything near 0 is a problem.</span>
+<span class="k">SELECT</span>
+  COUNT_BIG(*)                                                       <span class="k">AS</span> Tasks,
+  SUM(<span class="k">CASE WHEN</span> NULLIF(LTRIM(RTRIM([Task])),<span style="color:#0c7a70">''</span>) <span class="k">IS NOT NULL THEN</span> 1 <span class="k">ELSE</span> 0 <span class="k">END</span>) <span class="k">AS</span> HasTask,
+  SUM(<span class="k">CASE WHEN</span> DateOfService <span class="k">IS NOT NULL THEN</span> 1 <span class="k">ELSE</span> 0 <span class="k">END</span>)          <span class="k">AS</span> HasDOS,
+  SUM(<span class="k">CASE WHEN</span> NULLIF(LTRIM(RTRIM(ClaimUID)),<span style="color:#0c7a70">''</span>) <span class="k">IS NOT NULL THEN</span> 1 <span class="k">ELSE</span> 0 <span class="k">END</span>) <span class="k">AS</span> HasClaimUID,
+  SUM(<span class="k">CASE WHEN</span> AssignedOn    <span class="k">IS NOT NULL THEN</span> 1 <span class="k">ELSE</span> 0 <span class="k">END</span>)          <span class="k">AS</span> HasAssignedOn
+<span class="k">FROM</span> dbo.DenialTaskBoard <span class="k">WHERE</span> LabId = @LabId;
+
+<span class="c">-- Do the three event tables actually hold events for this lab?</span>
+<span class="k">SELECT</span> <span style="color:#0c7a70">'History'</span> <span class="k">AS</span> Src, COUNT_BIG(*) <span class="k">AS</span> Rows_ <span class="k">FROM</span> dbo.DenialTaskHistory     <span class="k">WHERE</span> LabId = @LabId
+<span class="k">UNION ALL SELECT</span> <span style="color:#0c7a70">'Notes'</span>,      COUNT_BIG(*) <span class="k">FROM</span> dbo.DenialClaimNotes       <span class="k">WHERE</span> LabId = @LabId <span class="k">AND</span> IsDeleted = 0
+<span class="k">UNION ALL SELECT</span> <span style="color:#0c7a70">'Escalations'</span>,COUNT_BIG(*) <span class="k">FROM</span> dbo.DenialClaimEscalations <span class="k">WHERE</span> LabId = @LabId <span class="k">AND</span> IsDeleted = 0;</code></pre>
+
+    <h3>The test</h3>
+
+    <div class="step">
+      <div class="sn">1</div>
+      <div>
+        <h4>Pick one claim, one analyst, one day</h4>
+        <p>Choose a claim in LRNLabDemo with a known insurance balance. Note the balance — you
+          will assert on it.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="sn">2</div>
+      <div>
+        <h4>Record five activities as that analyst, same day</h4>
+        <p>Three notes, one status change, one escalation. Use the workflow app, not direct SQL —
+          the point is to test the write path the reviewers use.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="sn">3</div>
+      <div>
+        <h4>Run RPT-01 filtered to that claim and date</h4>
+        <div class="exp">Expect <b>5 activity events</b> and <b>1 distinct claim-day worked</b></div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="sn">4</div>
+      <div>
+        <h4>Check the balance was not multiplied</h4>
+        <p>Outstanding balance worked must equal the claim's balance <b>once</b> — not three times
+          for the three notes.</p>
+        <div class="exp">Expect the claim balance, not 3&times; or 5&times; it</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="sn">5</div>
+      <div>
+        <h4>Check escalations raised is 1, not 5</h4>
+        <p>On a multi-line claim, escalating writes one history row per affected task. If this
+          reads higher than 1, the spine is counting history rows it should be excluding.</p>
+        <div class="exp">Expect <b>escalations raised = 1</b> regardless of line count</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="sn">6</div>
+      <div>
+        <h4>Toggle Latest Activity Only</h4>
+        <div class="exp">Expect exactly <b>1 row</b> — the most recent qualifying activity</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="sn">7</div>
+      <div>
+        <h4>Export to Excel and read the Reconciliation sheet</h4>
+        <p>It recomputes each measure from the detail rows. Every summary figure must match its
+          recomputed counterpart, and the run id and generation metadata must be present.</p>
+        <div class="exp">Expect summary = recomputed, on every measure</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="sn">8</div>
+      <div>
+        <h4>Re-run as a Client Manager</h4>
+        <p>Internal notes must be <b>masked, not absent</b>. The row count must be unchanged, so
+          the summary still reconciles to the visible detail.</p>
+        <div class="exp">Expect same row count, masked note text</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="sn">9</div>
+      <div>
+        <h4>Confirm the balance-snapshot marking</h4>
+        <p>Rows predating snapshot capture fall back to the current balance and are marked
+          <code>*</code> / <i>Current (not snapshot)</i>, and counted on the Summary sheet. On a
+          demo lab most rows will be marked — that is correct, not a defect.</p>
+        <div class="exp">Expect pre-existing rows marked, new activity unmarked</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 6 ============ -->
+<section>
+  <div class="wrap">
+    <span class="snum">Section 06</span>
+    <h2>Sign-off checklist</h2>
+    <ul class="doc">
+      <li>☑ <b>320 unit tests pass</b> across four projects — done, 4 Sep 2026</li>
+      <li>☑ <b>Generated SQL parses</b> on both a migrated and an unmigrated lab schema — done</li>
+      <li>☑ <b>DBA script and runtime batches parse</b> — done</li>
+      <li>☐ <b>LRNLabDemo connection resolves</b> — blocked, see §4</li>
+      <li>☐ <b>Pre-flight data check</b> on the target lab — §5</li>
+      <li>☐ <b>Acceptance test</b>, steps 1–9 — §5</li>
+      <li>☐ <b>Per-lab migration applied cleanly</b> against a real lab schema</li>
+      <li>☐ <b>Summary page returns within 5 seconds</b> on the largest lab (NFR-001)</li>
+      <li>☐ <b>Report Catalog shows RPT-02…RPT-09</b> with their real status, disabled</li>
+    </ul>
+
+    <div class="callout">
+      <b>On the Report Catalog design.</b> Activating a later report being a status change in
+      <code>dbo.DenialReportCatalog</code> rather than a menu edit is the right call — it keeps the
+      readiness state of the suite in one queryable place, and it means the disabled entries carry
+      their real blocking reason instead of quietly not existing. RPT-04 and RPT-09 in particular
+      should show <i>Blocked</i> with the reason, since they cannot be built until the completion
+      event and SLA configuration tables exist.
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-cols">
+      <div>
+        <h4>Sources</h4>
+        <ul>
+          <li>tests/LRN.ReportsApi.Tests/ArActivityReportTests.cs</li>
+          <li>tests/LRN.ReportsApi.Tests/ArActivityReportExcelTests.cs</li>
+          <li>LRN.ReportsApi/Sql/ArReports/RPT01_ActivityDetail_Setup.sql</li>
+          <li>LRN.ReportsApi/Services/LabConnectionResolver.cs</li>
+          <li>docs/denial-management/RPT01_Activity_Detail_Implementation.md</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Related</h4>
+        <ul>
+          <li>Denial Workflow AR Reporting Requirements v1.0</li>
+          <li>Denial AR Reports Readiness v1.0</li>
+          <li>Denial Dashboard &amp; Workflow Requirements v1.0</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Caveats</h4>
+        <ul>
+          <li>No test in this suite opens a database connection.</li>
+          <li>Green here means well-formed and arithmetically right, not populated.</li>
+          <li>Performance is unmeasured.</li>
+          <li>Acceptance test is outstanding and blocked on §4.</li>
+        </ul>
+      </div>
+    </div>
+    <div style="border-top:1px solid var(--doc-line); padding-top:16px; font-size:11.5px;">
+      RPT-01 Test Report · v1.0 · 4 September 2026 · Lab Revenue Navigator
+    </div>
+  </div>
+</footer>

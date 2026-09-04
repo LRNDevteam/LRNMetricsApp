@@ -181,11 +181,18 @@ IF @MaskSalesRep = 1
         (N'SalesRepName',        'STAFF',      'PROVIDER');
 
 /* Belt and braces. Even with precise patterns, never touch a column whose name
-   says it holds money, a count, a date or a code. */
+   says it holds money, a count, a date or a code.
+
+   NOTE the [_] escape on the last pattern. Written as '%Id_%' the underscore is
+   a LIKE single-character wildcard, so it means "Id followed by any character"
+   - which matches Prov-ID-er and silently excluded EVERY ReferringProvider,
+   OrderingProvider and BillingProvider column. The run reported success and the
+   provider names were left in place. '%Id[_]%' means a literal underscore,
+   which is what was intended: keys like Lab_Id_Ref. */
 CREATE TABLE #NeverTouch (Pattern SYSNAME);
 INSERT INTO #NeverTouch (Pattern) VALUES
     (N'%Payment%'), (N'%Balance%'), (N'%Adjust%'), (N'%Amount%'), (N'%Charge%'),
-    (N'%Count%'), (N'%Date%'), (N'%DOB%'), (N'%Npi%'), (N'%Code%'), (N'%Id_%');
+    (N'%Count%'), (N'%Date%'), (N'%DOB%'), (N'%Npi%'), (N'%Code%'), (N'%Id[_]%');
 
 /* ── Optional table filter ────────────────────────────────────────────────── */
 CREATE TABLE #TableScope (TableName SYSNAME);
@@ -326,7 +333,7 @@ END
    never had one would change what the reports say.                          */
 DECLARE @FullTable NVARCHAR(300), @Column SYSNAME, @Treatment VARCHAR(20), @MaxLen INT;
 DECLARE @Fit INT, @sql NVARCHAR(MAX);
-DECLARE @Changed INT = 0, @Failed INT = 0, @TotalRows BIGINT = 0;
+DECLARE @Changed INT = 0, @Failed INT = 0, @TotalRows BIGINT = 0, @Rows BIGINT = 0;
 
 DECLARE @Norm NVARCHAR(MAX) =
     N'UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(400), {COL}))))';
@@ -370,9 +377,14 @@ BEGIN
 
     BEGIN TRY
         EXEC sp_executesql @sql, N'@Salt NVARCHAR(64), @Fit INT', @Salt = @Salt, @Fit = @Fit;
+        /* @@ROWCOUNT must be captured on the very next statement. Incrementing
+           @Changed first would reset it to 1, and the run would report one row
+           per column instead of the rows actually rewritten. */
+        SET @Rows      = @@ROWCOUNT;
         SET @Changed   = @Changed + 1;
-        SET @TotalRows = @TotalRows + @@ROWCOUNT;
-        PRINT N'  masked ' + @FullTable + N'.' + @Column + N' (' + @Treatment + N')';
+        SET @TotalRows = @TotalRows + @Rows;
+        PRINT N'  masked ' + @FullTable + N'.' + @Column
+            + N' (' + @Treatment + N') - ' + CAST(@Rows AS NVARCHAR(20)) + N' rows';
     END TRY
     BEGIN CATCH
         /* Keep going. One awkward column - a unique index the pseudonym
