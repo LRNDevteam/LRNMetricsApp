@@ -1,0 +1,14 @@
+---
+description: Keep deploy zips and packages off the Desktop
+alwaysApply: true
+---
+
+# Deploy package location
+
+Never copy, write, or unzip deployment files to the Desktop (`C:\Users\lrn\Desktop` or `[Environment]::GetFolderPath("Desktop")`).
+
+Put zips, overlays, SQL packs, and `DEPLOY.txt` under the repo, typically:
+
+`publish/zips/`
+
+Do not use `LabMetricsApplication\Zips_*` or other Desktop-style drop folders unless the user names that path in the request.

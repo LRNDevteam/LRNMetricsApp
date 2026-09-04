@@ -1130,6 +1130,13 @@
                 <button type="button" id="lisExportExcelBtn" class="btn btn-outline-success rounded-pill px-4">
                     <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
                 </button>
+                <button type="button" id="riAddInsightBtn" class="btn btn-primary rounded-pill px-4">
+                    <i class="bi bi-plus-lg me-1"></i>Add Insight
+                </button>
+                <a class="btn btn-outline-primary rounded-pill px-4"
+                   href="@Url.Action("Lis", "InsightTemplate", new { lab = string.IsNullOrWhiteSpace(Model.ConfiguredLabKey) ? Model.CurrentLabName : Model.ConfiguredLabKey })">
+                    <i class="bi bi-layout-text-sidebar-reverse me-1"></i>Insight Templates
+                </a>
 
                 <a class="btn btn-outline-secondary rounded-pill px-4"
                    href="@ClearFiltersUrl()">
@@ -1146,6 +1153,14 @@
         </div>
     </div>
 </div>
+
+@await Html.PartialAsync("~/Views/Shared/_ReportInsights.cshtml", new LabMetricsDashboard.Models.Notes.ReportInsightsPanelModel
+{
+    Lab = string.IsNullOrWhiteSpace(Model.ConfiguredLabKey) ? Model.CurrentLabName : Model.ConfiguredLabKey,
+    ReportName = "LIS Report",
+    RunId = Model.RunId,
+    WeekText = Model.WeekLabel
+})
 
 @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
 {

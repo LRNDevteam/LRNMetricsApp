@@ -1,0 +1,8 @@
+@model LRN.ProductionReports.Models.ProductionReportViewModel
+@await Html.PartialAsync("~/Views/Shared/_ReportInsights.cshtml", new LabMetricsDashboard.Models.Notes.ReportInsightsPanelModel
+{
+    Lab = Model.SelectedLab ?? "",
+    ReportName = "Production Report",
+    RunId = Model.ReportRunId,
+    WeekText = Model.ReportWeekFolder
+})

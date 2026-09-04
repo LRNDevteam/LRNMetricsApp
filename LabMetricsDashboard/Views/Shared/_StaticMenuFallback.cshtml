@@ -78,14 +78,14 @@
             </a>
         </li>
 
-        @if (labConfig?.EnableProductionSummaryReport ?? false)
-        {
-            <li>
-                <a class="dropdown-item" asp-controller="Dashboard" asp-action="ProductionSummaryReport">
-                    <i class="bi bi-bar-chart-steps"></i> Production Summary Report
-                </a>
-            </li>
-        }
+                        @if (labConfig?.EnableProductionSummaryReport ?? false)
+                        {
+                            <li>
+                                <a class="dropdown-item" asp-controller="Dashboard" asp-action="ProductionSummaryReport">
+                                    <i class="bi bi-bar-chart-steps"></i> Production Summary Report
+                                </a>
+                            </li>
+                        }
 
         @if (labConfig?.EnableCollectionReport ?? true)
         {

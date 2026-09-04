@@ -73,12 +73,16 @@ public sealed class SqlNotesRepository : INotesRepository
                     result.Statuses.Add(new NotesLookupItem { Id = GetInt(rdr, "StatusId"), Code = GetString(rdr, "StatusCode"), Label = GetString(rdr, "StatusLabel") });
         }
 
-        // Responsible Party master (drives the Add/Edit dropdown)
-        await using (var cmd2 = new SqlCommand("dbo.usp_NotesResponsibleParty_GetAll", conn) { CommandType = CommandType.StoredProcedure, CommandTimeout = CommandTimeoutSeconds })
-        await using (var rdr2 = await cmd2.ExecuteReaderAsync(ct))
+        try
         {
+            await using var cmd2 = new SqlCommand("dbo.usp_NotesResponsibleParty_GetAll", conn) { CommandType = CommandType.StoredProcedure, CommandTimeout = CommandTimeoutSeconds };
+            await using var rdr2 = await cmd2.ExecuteReaderAsync(ct);
             while (await rdr2.ReadAsync(ct))
                 result.ResponsibleParties.Add(GetString(rdr2, "PartyName"));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Notes: responsible-party lookup unavailable; continuing without it.");
         }
 
         return result;
@@ -140,6 +144,7 @@ public sealed class SqlNotesRepository : INotesRepository
         var n = MapListRow(rdr, includeArchive: true);
         n.ReportKeyId  = GetInt(rdr, "ReportKeyId");
         n.DataLink     = GetString(rdr, "DataLink");
+        if (HasColumn(rdr, "TotalCharge")) n.TotalCharge = GetNullableDecimal(rdr, "TotalCharge");
         n.IsEditable   = GetInt(rdr, "IsEditable") == 1;
         return n;
     }
@@ -202,6 +207,7 @@ public sealed class SqlNotesRepository : INotesRepository
         cmd.Parameters.AddWithValue("@ResponsibleParty", (object?)NullIfEmpty(req.ResponsibleParty) ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@Insights", (object?)req.Insights ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@NoOfSamples", (object?)req.NoOfSamples ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@TotalCharge", (object?)req.TotalCharge ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@DataLink", (object?)NullIfEmpty(req.DataLink) ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActionSolution", (object?)req.ActionSolution ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@FeedbackResponse", (object?)req.FeedbackResponse ?? DBNull.Value);
@@ -233,6 +239,7 @@ public sealed class SqlNotesRepository : INotesRepository
         cmd.Parameters.AddWithValue("@ResponsibleParty", (object?)NullIfEmpty(req.ResponsibleParty) ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@Insights", (object?)req.Insights ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@NoOfSamples", (object?)req.NoOfSamples ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@TotalCharge", (object?)req.TotalCharge ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@DataLink", (object?)NullIfEmpty(req.DataLink) ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActionSolution", (object?)req.ActionSolution ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@FeedbackResponse", (object?)req.FeedbackResponse ?? DBNull.Value);
@@ -258,6 +265,141 @@ public sealed class SqlNotesRepository : INotesRepository
         cmd.Parameters.AddWithValue("@DeletedBy", deletedBy);
         await cmd.ExecuteNonQueryAsync(ct);
         return new NotesResult { Success = true, NoteId = noteId, Message = "Note deleted." };
+    }
+
+    // ── Templates ────────────────────────────────────────────────────────
+    public async Task<IReadOnlyList<NotesTemplateBundle>> GetTemplatesByReportAsync(
+        string connectionString, int reportKeyId, CancellationToken ct = default)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand("dbo.usp_NotesTemplate_GetByReport", conn)
+        {
+            CommandType = CommandType.StoredProcedure,
+            CommandTimeout = CommandTimeoutSeconds
+        };
+        cmd.Parameters.AddWithValue("@ReportKeyId", reportKeyId);
+
+        var headers = new Dictionary<int, NotesTemplateBundle>();
+        await using var rdr = await cmd.ExecuteReaderAsync(ct);
+        while (await rdr.ReadAsync(ct))
+        {
+            var id = GetInt(rdr, "TemplateId");
+            headers[id] = new NotesTemplateBundle
+            {
+                TemplateId = id,
+                ReportKeyId = GetInt(rdr, "ReportKeyId"),
+                TemplateName = GetString(rdr, "TemplateName"),
+                IsActive = GetInt(rdr, "IsActive") == 1
+            };
+        }
+
+        if (await rdr.NextResultAsync(ct))
+        {
+            while (await rdr.ReadAsync(ct))
+            {
+                var tid = GetInt(rdr, "TemplateId");
+                if (!headers.TryGetValue(tid, out var bundle)) continue;
+                bundle.Columns.Add(new NotesTemplateColumnDef
+                {
+                    ColumnId = GetInt(rdr, "ColumnId"),
+                    TemplateId = tid,
+                    ColumnName = GetString(rdr, "ColumnName"),
+                    ColumnType = GetString(rdr, "ColumnType"),
+                    IsRequired = GetInt(rdr, "IsRequired") == 1,
+                    SortOrder = GetInt(rdr, "SortOrder"),
+                    FieldKey = HasColumn(rdr, "FieldKey") ? GetString(rdr, "FieldKey") : null
+                });
+            }
+        }
+
+        var valuesByColumn = new Dictionary<int, List<string>>();
+        if (await rdr.NextResultAsync(ct))
+        {
+            while (await rdr.ReadAsync(ct))
+            {
+                var cid = GetInt(rdr, "ColumnId");
+                if (!valuesByColumn.TryGetValue(cid, out var list))
+                {
+                    list = [];
+                    valuesByColumn[cid] = list;
+                }
+                list.Add(GetString(rdr, "DropdownValue"));
+            }
+        }
+
+        foreach (var bundle in headers.Values)
+        {
+            foreach (var col in bundle.Columns)
+            {
+                if (valuesByColumn.TryGetValue(col.ColumnId, out var vals))
+                    col.DropdownValues = vals;
+            }
+        }
+
+        return headers.Values.OrderBy(t => t.TemplateName, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    public async Task<NotesTemplateResult> UpsertTemplateAsync(
+        string connectionString, int reportKeyId, NotesTemplateSaveRequest req, string editedBy, CancellationToken ct = default)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand("dbo.usp_NotesTemplate_Upsert", conn)
+        {
+            CommandType = CommandType.StoredProcedure,
+            CommandTimeout = CommandTimeoutSeconds
+        };
+        cmd.Parameters.AddWithValue("@TemplateId", (object?)req.TemplateId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ReportKeyId", reportKeyId);
+        cmd.Parameters.AddWithValue("@TemplateName", req.TemplateName.Trim());
+        cmd.Parameters.AddWithValue("@IsActive", req.IsActive);
+        cmd.Parameters.AddWithValue("@EditedBy", editedBy);
+        var outId = new SqlParameter("@OutTemplateId", SqlDbType.Int) { Direction = ParameterDirection.Output };
+        cmd.Parameters.Add(outId);
+        await cmd.ExecuteNonQueryAsync(ct);
+        var id = outId.Value == DBNull.Value ? 0 : Convert.ToInt32(outId.Value);
+        return new NotesTemplateResult { Success = id > 0, Id = id, Message = id > 0 ? "Template saved." : "Template save failed." };
+    }
+
+    public async Task<NotesTemplateResult> UpsertTemplateColumnAsync(
+        string connectionString, NotesTemplateColumnSaveRequest req, CancellationToken ct = default)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand("dbo.usp_NotesTemplateColumn_Upsert", conn)
+        {
+            CommandType = CommandType.StoredProcedure,
+            CommandTimeout = CommandTimeoutSeconds
+        };
+        cmd.Parameters.AddWithValue("@ColumnId", (object?)req.ColumnId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@TemplateId", req.TemplateId);
+        cmd.Parameters.AddWithValue("@ColumnName", req.ColumnName.Trim());
+        cmd.Parameters.AddWithValue("@ColumnType", req.ColumnType.Trim());
+        cmd.Parameters.AddWithValue("@IsRequired", req.IsRequired);
+        cmd.Parameters.AddWithValue("@SortOrder", req.SortOrder);
+        cmd.Parameters.AddWithValue("@FieldKey", (object?)NullIfEmpty(req.FieldKey) ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@DropdownValues", (object?)NullIfEmpty(req.DropdownValues) ?? DBNull.Value);
+        var outId = new SqlParameter("@OutColumnId", SqlDbType.Int) { Direction = ParameterDirection.Output };
+        cmd.Parameters.Add(outId);
+        await cmd.ExecuteNonQueryAsync(ct);
+        var id = outId.Value == DBNull.Value ? 0 : Convert.ToInt32(outId.Value);
+        return new NotesTemplateResult { Success = id > 0, Id = id, Message = id > 0 ? "Column saved." : "Column save failed." };
+    }
+
+    public async Task<NotesTemplateResult> DeleteTemplateColumnAsync(
+        string connectionString, int columnId, CancellationToken ct = default)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand("dbo.usp_NotesTemplateColumn_Delete", conn)
+        {
+            CommandType = CommandType.StoredProcedure,
+            CommandTimeout = CommandTimeoutSeconds
+        };
+        cmd.Parameters.AddWithValue("@ColumnId", columnId);
+        await cmd.ExecuteNonQueryAsync(ct);
+        return new NotesTemplateResult { Success = true, Id = columnId, Message = "Column removed." };
     }
 
     // ── Mapping helpers ──────────────────────────────────────────────────
@@ -292,7 +434,10 @@ public sealed class SqlNotesRepository : INotesRepository
             CreatedDateTime = GetDate(r, "CreatedDateTime"),
             LastEditedBy = GetString(r, "LastEditedBy"),
             LastEditedDateTime = GetDate(r, "LastEditedDateTime"),
+            IsEditable = !string.Equals(GetString(r, "ArchiveStatus"), "Archived", StringComparison.OrdinalIgnoreCase)
         };
+        if (HasColumn(r, "TotalCharge")) n.TotalCharge = GetNullableDecimal(r, "TotalCharge");
+        if (HasColumn(r, "DataLink")) n.DataLink = GetString(r, "DataLink");
         if (HasColumn(r, "IsOverdueETA")) n.IsOverdueETA = GetInt(r, "IsOverdueETA") == 1;
         if (includeArchive && HasColumn(r, "ArchivedDate")) n.ArchivedDate = GetDate(r, "ArchivedDate");
         return n;
@@ -308,5 +453,6 @@ public sealed class SqlNotesRepository : INotesRepository
     private static string GetString(IDataRecord r, string n) => r[n] == DBNull.Value ? string.Empty : Convert.ToString(r[n]) ?? string.Empty;
     private static int GetInt(IDataRecord r, string n) => r[n] == DBNull.Value ? 0 : Convert.ToInt32(r[n]);
     private static int? GetNullableInt(IDataRecord r, string n) => r[n] == DBNull.Value ? null : Convert.ToInt32(r[n]);
+    private static decimal? GetNullableDecimal(IDataRecord r, string n) => r[n] == DBNull.Value ? null : Convert.ToDecimal(r[n]);
     private static DateTime? GetDate(IDataRecord r, string n) => r[n] == DBNull.Value ? null : Convert.ToDateTime(r[n]);
 }

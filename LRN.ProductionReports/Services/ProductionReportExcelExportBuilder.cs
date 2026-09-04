@@ -434,6 +434,7 @@ public static class ProductionReportExcelExportBuilder
             ws.Row(row).Style.Font.Bold = true;
             row++;
 
+            int firstChild = row;
             int payerIdx = 0;
             foreach (var payer in panel.TopPayers)
             {
@@ -458,6 +459,7 @@ public static class ProductionReportExcelExportBuilder
                 row++;
                 payerIdx++;
             }
+            ExcelTheme.GroupChildRows(ws, firstChild, row - 1);
             panelIdx++;
         }
 
@@ -501,6 +503,8 @@ public static class ProductionReportExcelExportBuilder
         // Weekly Claim Volume section (same sheet)
         if (vm.WeeklyPanelRows.Count > 0)
             AppendWeeklySection(ws, vm, row + 2);
+
+        ExcelTheme.FinishOutline(ws);
     }
 
     /// <summary>Returns a letter label (A, B, � Z, AA, AB, �) for a zero-based panel index.</summary>
@@ -602,6 +606,7 @@ public static class ProductionReportExcelExportBuilder
             ws.Row(row).Style.Font.Bold = true;
             row++;
 
+            int firstChild = row;
             int payerIdx = 0;
             foreach (var payer in panel.TopPayers)
             {
@@ -619,6 +624,7 @@ public static class ProductionReportExcelExportBuilder
                 row++;
                 payerIdx++;
             }
+            ExcelTheme.GroupChildRows(ws, firstChild, row - 1);
             panelIdx++;
         }
 
@@ -643,48 +649,6 @@ public static class ProductionReportExcelExportBuilder
         // Footer note
         WriteFooterNote(ws, row, colCount,
             "*The above table is based on 'Date of Entry' and the total numbers include 'ALL' claims billed.");
-        row++;
-
-        // Key Insights & Highlights template table
-        AppendKeyInsightsTable(ws, row + 2, colCount);
-    }
-
-    private static void AppendKeyInsightsTable(IXLWorksheet ws, int startRow, int sheetColCount)
-    {
-        // Title bar for Insights section
-        const int insightColCount = 14;
-        int effectiveCols = Math.Max(sheetColCount, insightColCount);
-        int row = startRow;
-
-        ExcelTheme.WriteSectionTitle(ws, row, 1, effectiveCols,
-            "Key Insights & Highlights", ExcelTheme.TitleBg);
-        row++;
-
-        // Header row
-        string[] headers =
-        [
-            "#", "Risk", "Responsible Party", "Insights",
-            "# of Claims", "Total Bill", "Data",
-            "Action / Solution / Suggestions",
-            "Feedback / Response", "Responsibility",
-            "Discussion Date", "ETA", "Closed Date", "Status"
-        ];
-        ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ExcelTheme.HeaderBg);
-        row++;
-
-        // 5 empty template rows with borders
-        for (int r = 0; r < 5; r++)
-        {
-            for (int c = 1; c <= headers.Length; c++)
-            {
-                var cell = ws.Cell(row, c);
-                cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-                cell.Style.Border.OutsideBorderColor = ExcelTheme.BorderColor;
-                cell.Style.Fill.BackgroundColor = r % 2 == 0 ? XLColor.White : ExcelTheme.BandedRowBg;
-                cell.Style.Font.FontSize = 10;
-            }
-            row++;
-        }
     }
 
     // ?? Coding ???????????????????????????????????????????????????????????
@@ -714,6 +678,7 @@ public static class ProductionReportExcelExportBuilder
             ws.Row(row).Style.Font.Bold = true;
             row++;
 
+            int firstChild = row;
             foreach (var cpt in panel.CptRows)
             {
                 dataIdx++;
@@ -723,6 +688,7 @@ public static class ProductionReportExcelExportBuilder
                 WriteCurrencyCell(ws, row, 3, cpt.TotalCharges, bg);
                 row++;
             }
+            ExcelTheme.GroupChildRows(ws, firstChild, row - 1);
             dataIdx++;
         }
 
@@ -734,6 +700,7 @@ public static class ProductionReportExcelExportBuilder
         ws.Cell(row, 3).Style.NumberFormat.Format = "$#,##0";
 
         ExcelTheme.AutoFitColumns(ws, colCount);
+        ExcelTheme.FinishOutline(ws);
     }
 
     // ?? Payer Breakdown ??????????????????????????????????????????????????
@@ -987,6 +954,7 @@ public static class ProductionReportExcelExportBuilder
             ws.Row(row).Style.Font.Bold = true;
             row++;
 
+            int firstChild = row;
             int payerIdx = 0;
             foreach (var payer in panel.ChildRows)
             {
@@ -1009,6 +977,7 @@ public static class ProductionReportExcelExportBuilder
                 row++;
                 payerIdx++;
             }
+            ExcelTheme.GroupChildRows(ws, firstChild, row - 1);
         }
 
         ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
@@ -1037,6 +1006,7 @@ public static class ProductionReportExcelExportBuilder
         ws.Cell(row, gtCol).Style.NumberFormat.Format = "$#,##0";
 
         ExcelTheme.AutoFitColumns(ws, colCount);
+        ExcelTheme.FinishOutline(ws);
     }
 
     // ?? Payer X Panel ????????????????????????????????????????????????????
@@ -1050,72 +1020,55 @@ public static class ProductionReportExcelExportBuilder
         ExcelTheme.ApplyDefaults(ws);
 
         var panels = vm.PayerPanelColumns;
-        int colCount = 1 + panels.Count * 2 + 2;
+        const int colCount = 3;
 
         int row = 1;
         ExcelTheme.WriteTitleBar(ws, row, colCount, "Payer X Panel");
         row++;
+        ExcelTheme.WriteHeaderRow(ws, row, 1,
+            ["Payer / Panel", "No. of Claims", "Total Billed Charges"], ExcelTheme.HeaderBg);
+        row++;
 
-        // ?? Header Row 1 ??
-        int hRow1 = row;
-        WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, "Payer x Panel", ExcelTheme.HeaderBg);
-        int hCol = 2;
-        foreach (var p in panels)
-        {
-            WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1, p, ExcelTheme.HeaderBg);
-            hCol += 2;
-        }
-        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1, "Grand Total", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-
-        // ?? Header Row 2 ??
-        int hRow2 = hRow1 + 1;
-        hCol = 2;
-        foreach (var _ in panels)
-        {
-            WriteHeaderCell(ws, hRow2, hCol++, "No. of Claims", ExcelTheme.SubHeaderBg);
-            WriteHeaderCell(ws, hRow2, hCol++, "Total Billed Charges", ExcelTheme.SubHeaderBg);
-        }
-        WriteHeaderCell(ws, hRow2, hCol++, "No. of Claims", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-        WriteHeaderCell(ws, hRow2, hCol, "Total Billed Charges", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-
-        row = hRow2 + 1;
-
-        // ?? Data rows ??
         int dataIdx = 0;
         foreach (var pr in vm.PayerPanelRows)
         {
-            var bg = ExcelTheme.GetRowBg(dataIdx);
-            int col = 1;
-            WriteCell(ws, row, col++, pr.PayerName, bg, isText: true);
-            foreach (var p in panels)
-            {
-                var cell = GetMonthCell(pr.ByPanel, p);
-                WriteCell(ws, row, col++, cell.ClaimCount, bg);
-                WriteCurrencyCell(ws, row, col++, cell.BilledCharges, bg);
-            }
-            WriteCell(ws, row, col++, pr.GrandTotalClaims, bg);
-            WriteCurrencyCell(ws, row, col++, pr.GrandTotalCharges, bg);
+            var parentBg = ExcelTheme.GetRowBg(dataIdx, isGroupRow: true);
+            WriteCell(ws, row, 1, pr.PayerName, parentBg, isText: true);
+            WriteCell(ws, row, 2, pr.GrandTotalClaims, parentBg);
+            WriteCurrencyCell(ws, row, 3, pr.GrandTotalCharges, parentBg);
+            ws.Row(row).Style.Font.Bold = true;
             row++;
+
+            var childPanels = panels
+                .Select(p => (Name: p, Cell: GetMonthCell(pr.ByPanel, p)))
+                .Where(x => x.Cell.ClaimCount != 0 || x.Cell.BilledCharges != 0m)
+                .ToList();
+
+            int firstChild = row;
+            int childIdx = 0;
+            foreach (var (name, cell) in childPanels)
+            {
+                var bg = ExcelTheme.GetRowBg(childIdx);
+                WriteCell(ws, row, 1, $"    {name}", bg, isText: true);
+                WriteCell(ws, row, 2, cell.ClaimCount, bg);
+                WriteCurrencyCell(ws, row, 3, cell.BilledCharges, bg);
+                row++;
+                childIdx++;
+            }
+            if (childPanels.Count > 1)
+                ExcelTheme.GroupChildRows(ws, firstChild, row - 1);
             dataIdx++;
         }
 
         ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
-        int gtCol = 1;
-        ws.Cell(row, gtCol++).Value = "Grand Total";
-        foreach (var p in panels)
-        {
-            var cell = GetMonthCell(vm.PayerPanelGrandByPanel, p);
-            ws.Cell(row, gtCol).Value = cell.ClaimCount;
-            ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
-            ws.Cell(row, gtCol).Value = cell.BilledCharges;
-            ws.Cell(row, gtCol++).Style.NumberFormat.Format = "$#,##0";
-        }
-        ws.Cell(row, gtCol).Value = vm.PayerPanelGrandTotalClaims;
-        ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
-        ws.Cell(row, gtCol).Value = vm.PayerPanelGrandTotalCharges;
-        ws.Cell(row, gtCol).Style.NumberFormat.Format = "$#,##0";
+        ws.Cell(row, 1).Value = "Grand Total";
+        ws.Cell(row, 2).Value = vm.PayerPanelGrandTotalClaims;
+        ws.Cell(row, 2).Style.NumberFormat.NumberFormatId = 3;
+        ws.Cell(row, 3).Value = vm.PayerPanelGrandTotalCharges;
+        ws.Cell(row, 3).Style.NumberFormat.Format = "$#,##0";
 
         ExcelTheme.AutoFitColumns(ws, colCount);
+        ExcelTheme.FinishOutline(ws);
     }
 
     // ?? Unbilled X Aging ?????????????????????????????????????????????????
@@ -1279,10 +1232,8 @@ public static class ProductionReportExcelExportBuilder
 
         row = hRow3 + 1;
 
-        int dataIdx = 0;
-        foreach (var cptRow in vm.CptBreakdownRows)
+        void WriteCptLine(CptBreakdownRow cptRow, XLColor bg)
         {
-            var bg = ExcelTheme.GetRowBg(dataIdx);
             int col = 1;
             WriteCell(ws, row, col++, cptRow.CptCode, bg, isText: true);
             foreach (var year in cptYears)
@@ -1309,7 +1260,28 @@ public static class ProductionReportExcelExportBuilder
             else
                 WriteDecimalCell(ws, row, col++, cptRow.GrandTotalUnits, bg);
             WriteCurrencyCell(ws, row, col++, cptRow.GrandTotalCharges, bg);
+        }
+
+        int dataIdx = 0;
+        foreach (var cptRow in vm.CptBreakdownRows)
+        {
+            var bg = cptRow.ChildRows.Count > 0
+                ? ExcelTheme.GetRowBg(dataIdx, isGroupRow: true)
+                : ExcelTheme.GetRowBg(dataIdx);
+            WriteCptLine(cptRow, bg);
+            if (cptRow.ChildRows.Count > 0)
+                ws.Row(row).Style.Font.Bold = true;
             row++;
+
+            int firstChild = row;
+            int childIdx = 0;
+            foreach (var child in cptRow.ChildRows)
+            {
+                WriteCptLine(child, ExcelTheme.GetRowBg(childIdx));
+                row++;
+                childIdx++;
+            }
+            ExcelTheme.GroupChildRows(ws, firstChild, row - 1);
             dataIdx++;
         }
 
@@ -1368,6 +1340,7 @@ public static class ProductionReportExcelExportBuilder
         ws.Cell(row, gtCol).Style.NumberFormat.Format = "$#,##0";
 
         ExcelTheme.AutoFitColumns(ws, colCount);
+        ExcelTheme.FinishOutline(ws);
     }
 
     // ?? Filter footer ????????????????????????????????????????????????????

@@ -617,10 +617,20 @@ th.pr-month-data, td.pr-month-data {
                     <button type="button" id="exportExcelBtn" class="btn btn-sm btn-outline-success ms-auto">
                         <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
                     </button>
+                    <button type="button" id="riAddInsightBtn" class="btn btn-sm btn-primary">
+                        <i class="bi bi-plus-lg me-1"></i>Add Insight
+                    </button>
+                    <a class="btn btn-sm btn-outline-primary"
+                       asp-controller="InsightTemplate" asp-action="Production"
+                       asp-route-lab="@Model.SelectedLab">
+                        <i class="bi bi-layout-text-sidebar-reverse me-1"></i>Insight Templates
+                    </a>
                 </div>
             </form>
         </div>
     </div>
+
+    @await Html.PartialAsync("_ProductionInsights", Model)
 }
 
 <!-- Production Report Excel export loading overlay -->
@@ -817,8 +827,9 @@ th.pr-month-data, td.pr-month-data {
                                 @foreach (var panel in Model.PanelRows)
                                 {
                                     var letter = (char)('A' + panelIdx % 26);
-                                    <tr class="pr-panel-row">
-                                        <td>@letter &nbsp; @panel.PanelName</td>
+                                    var mcvGroupId = $"mcv-{panelIdx}";
+                                    <tr class="pr-panel-row pr-hp-toggle" data-hp-group="@mcvGroupId" role="button" aria-expanded="false" title="Open / close payers">
+                                        <td><i class="bi bi-chevron-right pr-hp-chevron" aria-hidden="true"></i>@letter &nbsp; @panel.PanelName</td>
                                         @foreach (var year in validYears)
                                         {
                                             var mons = monthsByYear.ContainsKey(year) ? monthsByYear[year] : new List<string>();
@@ -836,7 +847,7 @@ th.pr-month-data, td.pr-month-data {
 
                                     @foreach (var payer in panel.TopPayers)
                                     {
-                                        <tr class="pr-payer-row">
+                                        <tr class="pr-payer-row pr-hp-child" data-hp-parent="@mcvGroupId">
                                             <td>@payer.PayerName</td>
                                             @foreach (var year in validYears)
                                             {
@@ -1048,8 +1059,9 @@ th.pr-month-data, td.pr-month-data {
                                 @foreach (var panel in Model.WeeklyPanelRows)
                                 {
                                     var wLetter = (char)('A' + wPanelIdx % 26);
-                                    <tr class="pr-panel-row">
-                                        <td>@wLetter &nbsp; @panel.PanelName</td>
+                                    var wcvGroupId = $"wcv-{wPanelIdx}";
+                                    <tr class="pr-panel-row pr-hp-toggle" data-hp-group="@wcvGroupId" role="button" aria-expanded="false" title="Open / close payers">
+                                        <td><i class="bi bi-chevron-right pr-hp-chevron" aria-hidden="true"></i>@wLetter &nbsp; @panel.PanelName</td>
                                         @foreach (var wk in weeks)
                                         {
                                             <td class="pr-month-data">@CellClaims(panel.ByWeek, wk.Key).ToString("N0")</td>
@@ -1061,7 +1073,7 @@ th.pr-month-data, td.pr-month-data {
 
                                     @foreach (var payer in panel.TopPayers)
                                     {
-                                        <tr class="pr-payer-row">
+                                        <tr class="pr-payer-row pr-hp-child" data-hp-parent="@wcvGroupId">
                                             <td>@payer.PayerName</td>
                                             @foreach (var wk in weeks)
                                             {
@@ -1186,8 +1198,9 @@ th.pr-month-data, td.pr-month-data {
                                 @foreach (var panel in Model.CodingPanelRows)
                                 {
                                     var cLetter = (char)('A' + cPanelIdx % 26);
-                                    <tr class="pr-panel-row">
-                                        <td>@cLetter &nbsp; @panel.PanelName</td>
+                                    var codingGroupId = $"coding-{cPanelIdx}";
+                                    <tr class="pr-panel-row pr-hp-toggle" data-hp-group="@codingGroupId" role="button" aria-expanded="false" title="Open / close CPT rows">
+                                        <td><i class="bi bi-chevron-right pr-hp-chevron" aria-hidden="true"></i>@cLetter &nbsp; @panel.PanelName</td>
                                         <td>@panel.ClaimCount.ToString("N0")</td>
                                         <td>@panel.TotalCharges.ToString("C0")</td>
                                     </tr>
@@ -1196,7 +1209,7 @@ th.pr-month-data, td.pr-month-data {
                                     foreach (var cpt in panel.CptRows)
                                     {
                                         cptIdx++;
-                                        <tr class="pr-payer-row">
+                                        <tr class="pr-payer-row pr-hp-child" data-hp-parent="@codingGroupId">
                                             <td>@cptIdx &nbsp; @cpt.CptCodeUnitsModifier</td>
                                             <td>@cpt.ClaimCount.ToString("N0")</td>
                                             <td>@cpt.TotalCharges.ToString("C0")</td>
@@ -2341,14 +2354,17 @@ th.pr-month-data, td.pr-month-data {
             });
         }
 
-        document.querySelectorAll('.pr-hp-toggle').forEach(function (row) {
-            row.addEventListener('click', function () {
-                var group = row.getAttribute('data-hp-group');
-                var open = row.classList.toggle('pr-hp-open');
-                row.setAttribute('aria-expanded', open ? 'true' : 'false');
-                document.querySelectorAll('.pr-hp-child[data-hp-parent="' + group + '"]').forEach(function (child) {
-                    child.classList.toggle('pr-hp-shown', open);
-                });
+        document.addEventListener('click', function (e) {
+            var row = e.target.closest ? e.target.closest('.pr-hp-toggle') : null;
+            if (!row) return;
+            var group = row.getAttribute('data-hp-group');
+            if (!group) return;
+            var table = row.closest('table');
+            var open = row.classList.toggle('pr-hp-open');
+            row.setAttribute('aria-expanded', open ? 'true' : 'false');
+            var children = (table || document).querySelectorAll('.pr-hp-child[data-hp-parent="' + group + '"]');
+            children.forEach(function (child) {
+                child.classList.toggle('pr-hp-shown', open);
             });
         });
 

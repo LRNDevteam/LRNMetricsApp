@@ -4,6 +4,10 @@
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Local deploy dumps live under publish/. The Web SDK would otherwise
+         glob nested *.json (staticwebassets, runtimeconfig) as Content and
+         copy them into bin\, hitting Windows MAX_PATH. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);publish\**;wwwroot\publish\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
@@ -76,6 +80,12 @@
       <None Include="Templates\CodingSummary_CalculationLogic.xlsx" Condition="Exists('Templates\CodingSummary_CalculationLogic.xlsx')">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </None>
+    </ItemGroup>
+
+    <ItemGroup>
+      <Content Remove="publish\**" />
+      <None Remove="publish\**" />
+      <EmbeddedResource Remove="publish\**" />
     </ItemGroup>
 
 </Project>

@@ -1,4 +1,5 @@
 using LabMetricsDashboard.Models;
+using LabMetricsDashboard.Models.Notes;
 using System.Diagnostics;
 using LabMetricsDashboard.Services;
 using LRN.ProductionReports.Models;
@@ -56,6 +57,7 @@ public class DashboardController : Controller
     private readonly IClaimLineRepository _claimLineRepo;
     private readonly IAnalysisRangeService _analysisRange;
     private readonly ILogger<DashboardController> _logger;
+    private readonly INotesRepository _notes;
 
     public DashboardController(
         LabSettings labSettings,
@@ -70,7 +72,8 @@ public class DashboardController : Controller
         IReadOnlyDictionary<string, ILabProductionSummaryRepository> labSummaryRepos,
         IClaimLineRepository claimLineRepo,
         IAnalysisRangeService analysisRange,
-        ILogger<DashboardController> logger)
+        ILogger<DashboardController> logger,
+        INotesRepository notes)
     {
         _labSettings = labSettings;
         _resolver = resolver;
@@ -85,6 +88,7 @@ public class DashboardController : Controller
         _claimLineRepo = claimLineRepo;
         _analysisRange = analysisRange;
         _logger = logger;
+        _notes = notes;
     }
 
     // GET /Dashboard  or  /Dashboard/Index?lab=PCRLabsofAmerica&filterPayerName=...
@@ -2791,6 +2795,23 @@ public class DashboardController : Controller
                     selectedLab,
                     recentReport.FullName);
 
+                var insights = await InsightsExcelBuilder.LoadAsync(_notes, connStr, "Production Report", ct);
+                try
+                {
+                    var bytes = InsightsExcelBuilder.InjectIntoExistingWorkbook(
+                        recentReport.FullName, insights, selectedLab, "Production Report");
+                    return File(
+                        bytes,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        recentReport.Name);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "[ProdExcelExport] Could not inject Insights sheet into pre-generated workbook for {Lab}; serving original file.",
+                        selectedLab);
+                }
+
                 return PhysicalFile(
                     recentReport.FullName,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -3037,6 +3058,9 @@ public class DashboardController : Controller
             using var workbook = ProductionReportExcelExportBuilder.CreateWorkbook(
                 vm, selectedLab, claimSegments, lineSegments,
                 exportWeekFolder, exportRunId, _logger);
+
+            var liveInsights = await InsightsExcelBuilder.LoadAsync(_notes, connStr, "Production Report", ct);
+            InsightsExcelBuilder.InsertAsFirstSheet(workbook, liveInsights, selectedLab, "Production Report");
 
             _logger.LogInformation(
                 "[ProdExcelExport] Phase 4 DONE in {Ms}ms ({Sec:N1}s) — " +
@@ -3299,6 +3323,8 @@ public class DashboardController : Controller
             {
                 using (var workbook = NorthWestProductionSummaryExcelExportBuilder.CreateWorkbook(vm, selectedLab))
                 {
+                    var nwInsights = await InsightsExcelBuilder.LoadAsync(_notes, connStr, "Production Report", ct);
+                    InsightsExcelBuilder.InsertAsFirstSheet(workbook, nwInsights, selectedLab, "Production Report");
                     _logger.LogInformation(
                         "[NWExcelExport] Summary workbook built in {Ms}ms — {Sheets} sheets; streaming Claim/Line next",
                         sw.ElapsedMilliseconds, workbook.Worksheets.Count);

@@ -32,6 +32,7 @@ public sealed class CollectionReportGenerator : IReportGenerator
     private readonly LabSettings _labSettings;
     private readonly ICollectionSummaryRepository _repo;
     private readonly IProductionReportRepository _prodRepo;   // for the shared SP-export streamer
+    private readonly INotesRepository _notes;
     private readonly ILogger<CollectionReportGenerator> _logger;
 
     public CollectionReportGenerator(
@@ -39,12 +40,14 @@ public sealed class CollectionReportGenerator : IReportGenerator
         LabSettings labSettings,
         ICollectionSummaryRepository repo,
         IProductionReportRepository prodRepo,
+        INotesRepository notes,
         ILogger<CollectionReportGenerator> logger)
     {
         _services    = services;
         _labSettings = labSettings;
         _repo        = repo;
         _prodRepo    = prodRepo;
+        _notes       = notes;
         _logger      = logger;
     }
 
@@ -136,6 +139,9 @@ public sealed class CollectionReportGenerator : IReportGenerator
                          .Where(ws => ws.Name is "ClaimLevelData" or "LineLevelData")
                          .ToList())
                 placeholder.Delete();
+
+            await InsightsSheetInjector.InsertAsync(
+                wb, _notes, connStr, job.LabName, "Collection Report", ct);
 
             using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
                 wb.SaveAs(fs);

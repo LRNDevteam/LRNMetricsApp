@@ -14,6 +14,11 @@
     // Menu Master table has no "open in new tab" column to drive it from.
     bool OpensInNewTab(MenuItemVm item) =>
         string.Equals(item.ControllerName, "ReimbursementChat", StringComparison.OrdinalIgnoreCase);
+
+    // Insight Template Master lives as a button on Production / LIS / Collection
+    // report pages, not in the navbar.
+    bool IsInsightTemplateMenu(MenuItemVm item) =>
+        string.Equals(item.ControllerName, "InsightTemplate", StringComparison.OrdinalIgnoreCase);
 }
 @if (Model == null || Model.Count == 0)
 {
@@ -24,7 +29,11 @@ else
 {
     foreach (var menu in Model)
     {
-        if (menu.Children.Any())
+        if (IsInsightTemplateMenu(menu))
+            continue;
+
+        var visibleChildren = menu.Children.Where(c => !IsInsightTemplateMenu(c)).ToList();
+        if (visibleChildren.Count > 0)
         {
             <li class="nav-item dropdown">
                 <a class="nav-link dropdown-toggle @(menu.IsDisabled ? "disabled text-muted" : "")"
@@ -36,7 +45,7 @@ else
                 @if (!menu.IsDisabled)
                 {
                     <ul class="dropdown-menu">
-                        @foreach (var child in menu.Children)
+                        @foreach (var child in visibleChildren)
                         {
                             <li>
                                 @if (child.IsDisabled || !child.HasLink)

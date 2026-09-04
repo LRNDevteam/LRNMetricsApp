@@ -678,10 +678,29 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     <button type="button" id="csExportExcelBtn" class="btn btn-sm btn-outline-success ms-auto">
                         <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
                     </button>
+                    <button type="button" id="riAddInsightBtn" class="btn btn-sm btn-primary">
+                        <i class="bi bi-plus-lg me-1"></i>Add Insight
+                    </button>
+                    <a class="btn btn-sm btn-outline-primary"
+                       asp-controller="InsightTemplate" asp-action="Collection"
+                       asp-route-lab="@Model.SelectedLab">
+                        <i class="bi bi-layout-text-sidebar-reverse me-1"></i>Insight Templates
+                    </a>
                 </div>
             </form>
         </div>
     </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(Model.SelectedLab))
+{
+    @await Html.PartialAsync("~/Views/Shared/_ReportInsights.cshtml", new LabMetricsDashboard.Models.Notes.ReportInsightsPanelModel
+    {
+        Lab = Model.SelectedLab,
+        ReportName = "Collection Report",
+        RunId = Model.AnalysisRange?.RunId,
+        WeekText = Model.AnalysisRange?.WeekFolder
+    })
 }
 
 <!-- Excel export loading overlay -->
@@ -1069,10 +1088,14 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                                 {
                                     mcvIdx++;
                                     var letter = mcvIdx <= 26 ? ((char)('A' + mcvIdx - 1)).ToString() : mcvIdx.ToString();
+                                    var mcvGroupId = $"cs-mcv-{mcvIdx}";
                                     @* Panel row *@
-                                    <tr>
+                                    <tr class="cs-ag-group" data-ag-group="@mcvGroupId" role="button"
+                                        aria-expanded="false" title="Open / close payers">
                                         <td style="font-weight:700">@letter</td>
-                                        <td style="text-align:left;font-weight:700">@panel.PanelName</td>
+                                        <td style="text-align:left;font-weight:700">
+                                            <i class="bi bi-chevron-right cs-ag-chevron" aria-hidden="true"></i>@panel.PanelName
+                                        </td>
                                         @foreach (var year in mcvYears)
                                         {
                                             var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
@@ -1093,7 +1116,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                                     @* Payer drill-down rows (all payers when table1 mode, top 3 otherwise) *@
                                     @foreach (var payer in panel.TopPayers)
                                     {
-                                        <tr class="mcv-drilldown">
+                                        <tr class="mcv-drilldown cs-ag-child" data-ag-parent="@mcvGroupId">
                                             <td style="text-align:center">
                                                 @if (payer.PayerRank > 0)
                                                 {

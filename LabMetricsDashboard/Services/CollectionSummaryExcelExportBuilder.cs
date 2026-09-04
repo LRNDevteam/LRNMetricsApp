@@ -205,7 +205,7 @@ public static class CollectionSummaryExcelExportBuilder
             WriteCell(ws, row, col, panel.TotalAveragePaidAmount, bg, isCurrency: true);
             row++;
 
-            // Payer drill-down
+            int firstChild = row;
             foreach (var payer in panel.TopPayers)
             {
                 col = 1;
@@ -230,6 +230,7 @@ public static class CollectionSummaryExcelExportBuilder
                 WriteCell(ws, row, col, payer.TotalAveragePaidAmount, bg, isCurrency: true);
                 row++;
             }
+            ExcelTheme.GroupChildRows(ws, firstChild, row - 1);
             idx++;
         }
 
@@ -260,6 +261,7 @@ public static class CollectionSummaryExcelExportBuilder
 
         AutoFitColumns(ws);
         ws.SheetView.FreezeRows(hRow3);
+        ExcelTheme.FinishOutline(ws);
     }
 
     // ?? Weekly Claim Volume ?????????????????????????????????????????
@@ -322,6 +324,7 @@ public static class CollectionSummaryExcelExportBuilder
             WriteCell(ws, row, col, panel.TotalAveragePaidAmount, bg, isCurrency: true);
             row++;
 
+            int firstChild = row;
             foreach (var payer in panel.TopPayers)
             {
                 col = 1;
@@ -338,6 +341,7 @@ public static class CollectionSummaryExcelExportBuilder
                 WriteCell(ws, row, col, payer.TotalAveragePaidAmount, bg, isCurrency: true);
                 row++;
             }
+            ExcelTheme.GroupChildRows(ws, firstChild, row - 1);
             idx++;
         }
 
@@ -360,6 +364,7 @@ public static class CollectionSummaryExcelExportBuilder
 
         AutoFitColumns(ws);
         ws.SheetView.FreezeRows(hRow2);
+        ExcelTheme.FinishOutline(ws);
     }
 
     // ?? Top 5 Insurance Reimbursement % ?????????????????????????????
@@ -903,6 +908,7 @@ public static class CollectionSummaryExcelExportBuilder
         ws.Column(3).Width = 20;
         ws.Column(4).Width = 20;
         ws.Column(5).Width = 18;
+        ExcelTheme.FinishOutline(ws);
     }
 
     /// <summary>Writes one Status Summary data row with outline grouping and accounting-style currency.</summary>

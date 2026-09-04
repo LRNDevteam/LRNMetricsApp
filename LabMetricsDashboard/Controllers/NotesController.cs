@@ -6,18 +6,22 @@ using Microsoft.AspNetCore.Mvc;
 namespace LabMetricsDashboard.Controllers;
 
 /// <summary>
-/// JSON API for the generic Notes &amp; Insights component. The Executive
-/// Summary page (and any future report page) drives its Notes callout,
-/// active log, archive, detail modal and revision history through these
-/// endpoints. Notes are scoped by lab (connection) + Report Name + week.
-///
-/// All persistence is delegated to <see cref="INotesRepository"/>, which
-/// invokes stored procedures only.
+/// JSON API for the generic Notes &amp; Insights component. Report pages
+/// (Executive Summary, Production, LIS, Collection) drive the log through
+/// these endpoints. Notes are scoped by lab (connection) + Report Name + week.
+/// All persistence is delegated to <see cref="INotesRepository"/> (SPs only).
 /// </summary>
 [Route("Notes")]
 public sealed class NotesController : Controller
 {
-    private const string ReportName = "Executive Summary";
+    public static readonly string[] AllowedReports =
+    [
+        "Executive Summary",
+        "Production Report",
+        "LIS Report",
+        "Collection Report"
+    ];
+
     private readonly LabSettings _labSettings;
     private readonly INotesRepository _repo;
     private readonly ILogger<NotesController> _logger;
@@ -31,6 +35,21 @@ public sealed class NotesController : Controller
 
     private string CurrentUser => User.Identity?.Name?.Trim() is { Length: > 0 } u ? u : "system";
 
+    internal static bool TryResolveReportName(string? report, out string reportName)
+    {
+        reportName = "Executive Summary";
+        if (string.IsNullOrWhiteSpace(report)) return true;
+        var raw = report.Trim();
+        var match = AllowedReports.FirstOrDefault(r => r.Equals(raw, StringComparison.OrdinalIgnoreCase));
+        if (match is null)
+        {
+            reportName = raw;
+            return false;
+        }
+        reportName = match;
+        return true;
+    }
+
     private bool TryResolveConnection(string? lab, out string connectionString, out string error)
     {
         connectionString = string.Empty;
@@ -43,8 +62,6 @@ public sealed class NotesController : Controller
         return true;
     }
 
-    // GET /Notes/Available?lab=Cove  → { available: true|false }
-    // The feature is only enabled on lab databases where the Insights schema exists.
     [HttpGet("Available")]
     public async Task<IActionResult> Available(string? lab, CancellationToken ct)
     {
@@ -53,7 +70,6 @@ public sealed class NotesController : Controller
         catch { return Json(new { available = false }); }
     }
 
-    // GET /Notes/Lookups?lab=Cove
     [HttpGet("Lookups")]
     public async Task<IActionResult> Lookups(string? lab, CancellationToken ct)
     {
@@ -66,36 +82,35 @@ public sealed class NotesController : Controller
         catch (Exception ex) { return Fail(ex, "load lookups"); }
     }
 
-    // GET /Notes/Active?lab=Cove&status=&risk=&search=
     [HttpGet("Active")]
-    public async Task<IActionResult> Active(string? lab, DateTime? weekStart, string? status, string? risk, string? responsibility, string? search, CancellationToken ct)
+    public async Task<IActionResult> Active(string? lab, string? report, DateTime? weekStart, string? status, string? risk, string? responsibility, string? search, CancellationToken ct)
     {
         if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
+        if (!TryResolveReportName(report, out var reportName)) return BadRequest(new { error = $"Unknown report '{report}'." });
         try
         {
-            var reportKeyId = await _repo.EnsureReportAsync(cs, ReportName, ct);
+            var reportKeyId = await _repo.EnsureReportAsync(cs, reportName, ct);
             var rows = await _repo.GetActiveAsync(cs, reportKeyId, weekStart, status, risk, responsibility, search, ct);
-            return Json(new { reportKeyId, rows });
+            return Json(new { reportKeyId, reportName, rows });
         }
         catch (Exception ex) { return Fail(ex, "load active notes"); }
     }
 
-    // GET /Notes/Archived?lab=Cove&status=&risk=&search=
     [HttpGet("Archived")]
-    public async Task<IActionResult> Archived(string? lab, string? status, string? risk, string? search, CancellationToken ct)
+    public async Task<IActionResult> Archived(string? lab, string? report, string? status, string? risk, string? search, CancellationToken ct)
     {
         if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
+        if (!TryResolveReportName(report, out var reportName)) return BadRequest(new { error = $"Unknown report '{report}'." });
         try
         {
-            var reportKeyId = await _repo.EnsureReportAsync(cs, ReportName, ct);
+            var reportKeyId = await _repo.EnsureReportAsync(cs, reportName, ct);
             var summary = await _repo.GetArchiveSummaryAsync(cs, reportKeyId, ct);
             var rows = await _repo.GetArchivedAsync(cs, reportKeyId, status, risk, search, ct);
-            return Json(new { reportKeyId, summary, rows });
+            return Json(new { reportKeyId, reportName, summary, rows });
         }
         catch (Exception ex) { return Fail(ex, "load archived notes"); }
     }
 
-    // GET /Notes/Detail?lab=Cove&id=123
     [HttpGet("Detail")]
     public async Task<IActionResult> Detail(string? lab, int id, CancellationToken ct)
     {
@@ -109,7 +124,6 @@ public sealed class NotesController : Controller
         catch (Exception ex) { return Fail(ex, "load note detail"); }
     }
 
-    // GET /Notes/Revisions?lab=Cove&id=123
     [HttpGet("Revisions")]
     public async Task<IActionResult> Revisions(string? lab, int id, CancellationToken ct)
     {
@@ -122,20 +136,21 @@ public sealed class NotesController : Controller
         catch (Exception ex) { return Fail(ex, "load revision history"); }
     }
 
-    // POST /Notes/Save?lab=Cove  (body = NoteSaveRequest). Insert when NoteId null, else update.
     [HttpPost("Save")]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Save(string? lab, [FromBody] NoteSaveRequest req, CancellationToken ct)
+    public async Task<IActionResult> Save(string? lab, string? report, [FromBody] NoteSaveRequest req, CancellationToken ct)
     {
         if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
         if (req is null) return BadRequest(new { error = "Missing payload." });
-        req.ReportName = ReportName;
+        var reportRaw = string.IsNullOrWhiteSpace(report) ? req.ReportName : report;
+        if (!TryResolveReportName(reportRaw, out var reportName)) return BadRequest(new { error = $"Unknown report '{reportRaw}'." });
+        req.ReportName = reportName;
         try
         {
             NotesResult result;
             if (req.NoteId is null or <= 0)
             {
-                var reportKeyId = await _repo.EnsureReportAsync(cs, ReportName, ct);
+                var reportKeyId = await _repo.EnsureReportAsync(cs, reportName, ct);
                 result = await _repo.InsertAsync(cs, reportKeyId, req, CurrentUser, ct);
             }
             else
@@ -147,7 +162,6 @@ public sealed class NotesController : Controller
         catch (Exception ex) { return Fail(ex, "save note"); }
     }
 
-    // POST /Notes/Delete?lab=Cove&id=123
     [HttpPost("Delete")]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Delete(string? lab, int id, CancellationToken ct)
@@ -159,6 +173,73 @@ public sealed class NotesController : Controller
             return Json(result);
         }
         catch (Exception ex) { return Fail(ex, "delete note"); }
+    }
+
+    [HttpGet("Templates")]
+    public async Task<IActionResult> Templates(string? lab, string? report, CancellationToken ct)
+    {
+        if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
+        if (!TryResolveReportName(report, out var reportName)) return BadRequest(new { error = $"Unknown report '{report}'." });
+        try
+        {
+            var reportKeyId = await _repo.EnsureReportAsync(cs, reportName, ct);
+            var templates = await _repo.GetTemplatesByReportAsync(cs, reportKeyId, ct);
+            foreach (var t in templates) t.ReportName = reportName;
+            return Json(new { reportKeyId, reportName, templates });
+        }
+        catch (Exception ex) { return Fail(ex, "load templates"); }
+    }
+
+    [HttpPost("TemplateSave")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> TemplateSave(string? lab, [FromBody] NotesTemplateSaveRequest req, CancellationToken ct)
+    {
+        if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
+        if (req is null || string.IsNullOrWhiteSpace(req.TemplateName))
+            return BadRequest(new { error = "Template name is required." });
+        if (!TryResolveReportName(req.ReportName, out var reportName))
+            return BadRequest(new { error = $"Unknown report '{req.ReportName}'." });
+        req.ReportName = reportName;
+        try
+        {
+            var reportKeyId = await _repo.EnsureReportAsync(cs, reportName, ct);
+            var result = await _repo.UpsertTemplateAsync(cs, reportKeyId, req, CurrentUser, ct);
+            return Json(result);
+        }
+        catch (Exception ex) { return Fail(ex, "save template"); }
+    }
+
+    [HttpPost("TemplateColumnSave")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> TemplateColumnSave(string? lab, [FromBody] NotesTemplateColumnSaveRequest req, CancellationToken ct)
+    {
+        if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
+        if (req is null || req.TemplateId <= 0 || string.IsNullOrWhiteSpace(req.ColumnName))
+            return BadRequest(new { error = "Template, column name and type are required." });
+        var type = req.ColumnType?.Trim() ?? "Text";
+        if (type is not ("Text" or "Date" or "Dropdown"))
+            return BadRequest(new { error = "Column type must be Text, Date or Dropdown." });
+        req.ColumnType = type;
+        try
+        {
+            var result = await _repo.UpsertTemplateColumnAsync(cs, req, ct);
+            return Json(result);
+        }
+        catch (Exception ex) { return Fail(ex, "save template column"); }
+    }
+
+    [HttpPost("TemplateColumnDelete")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> TemplateColumnDelete(string? lab, int id, CancellationToken ct)
+    {
+        if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
+        if (id <= 0) return BadRequest(new { error = "Column id is required." });
+        try
+        {
+            var result = await _repo.DeleteTemplateColumnAsync(cs, id, ct);
+            return Json(result);
+        }
+        catch (Exception ex) { return Fail(ex, "delete template column"); }
     }
 
     private IActionResult Fail(Exception ex, string action)

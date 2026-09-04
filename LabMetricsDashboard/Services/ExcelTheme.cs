@@ -335,4 +335,70 @@ public static class ExcelTheme
             .ToList();
         return WriteFilterSummary(ws, startRow, colCount, flat);
     }
+
+    /// <summary>
+    /// Outlines child rows under the parent above them so Excel shows +/- grouping.
+    /// Call <see cref="FinishOutline"/> once after all groups on the sheet are written.
+    /// </summary>
+    public static void GroupChildRows(IXLWorksheet ws, int firstChildRow, int lastChildRow, int level = 1)
+    {
+        if (lastChildRow < firstChildRow) return;
+        for (int r = firstChildRow; r <= lastChildRow; r++)
+            ws.Row(r).OutlineLevel = level;
+    }
+
+    /// <summary>Puts the +/- control on the parent row and collapses child groups by default.</summary>
+    public static void FinishOutline(IXLWorksheet ws)
+    {
+        ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
+        ws.CollapseRows();
+    }
+
+    /// <summary>
+    /// Adds Excel +/- grouping for subcategory rows that are indented in column A
+    /// (leading spaces). Used so pre-generated workbooks pick up the same grouping
+    /// as live exports. Sheets that already have outline levels are left as-is.
+    /// </summary>
+    public static void GroupIndentedChildRows(XLWorkbook workbook, string? skipSheetName = null)
+    {
+        foreach (var ws in workbook.Worksheets)
+        {
+            if (!string.IsNullOrWhiteSpace(skipSheetName)
+                && string.Equals(ws.Name, skipSheetName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var last = ws.LastRowUsed()?.RowNumber() ?? 0;
+            if (last < 2) continue;
+
+            var alreadyOutlined = false;
+            for (int r = 1; r <= last; r++)
+            {
+                if (ws.Row(r).OutlineLevel > 0)
+                {
+                    alreadyOutlined = true;
+                    break;
+                }
+            }
+            if (alreadyOutlined) continue;
+
+            int? firstChild = null;
+            for (int r = 1; r <= last + 1; r++)
+            {
+                var label = r <= last ? ws.Cell(r, 1).GetString() : string.Empty;
+                var isChild = label.StartsWith("  ", StringComparison.Ordinal)
+                    || label.StartsWith('\t');
+                if (isChild)
+                {
+                    firstChild ??= r;
+                    continue;
+                }
+
+                if (firstChild is int start && r - 1 >= start)
+                    GroupChildRows(ws, start, r - 1);
+                firstChild = null;
+            }
+
+            FinishOutline(ws);
+        }
+    }
 }

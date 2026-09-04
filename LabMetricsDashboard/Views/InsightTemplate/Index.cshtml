@@ -1,0 +1,106 @@
+@model LabMetricsDashboard.Controllers.InsightTemplatePageViewModel
+@{
+    ViewData["Title"] = Model.Title;
+    ViewData["SelectedLab"] = Model.SelectedLab;
+    ViewData["PageLabel"] = Model.Title;
+}
+
+<link rel="stylesheet" href="~/css/report-insights.css" asp-append-version="true" />
+
+<div id="itmRoot"
+     class="itm-shell"
+     data-base="@Url.Content("~/")"
+     data-lab="@Model.SelectedLab"
+     data-report-name="@Model.ReportName">
+    @Html.AntiForgeryToken()
+
+    <div class="itm-header">
+        <div class="itm-header-copy">
+            <h2>@Model.Title</h2>
+            <p class="itm-intro">
+                Define the <strong>Key Insights &amp; Highlights</strong> columns for
+                <strong>@Model.ReportName</strong>.
+                Production, LIS, and Collection each keep their own template.
+                Saved insights on the report page follow this layout, including Excel sheet 1.
+            </p>
+        </div>
+        @{
+            var backAction = Model.ReportName.Contains("Collection", StringComparison.OrdinalIgnoreCase)
+                ? Url.Action("Index", "CollectionSummary", new { lab = Model.SelectedLab })
+                : Model.ReportName.Contains("LIS", StringComparison.OrdinalIgnoreCase)
+                    ? Url.Action("Index", "LisSummary", new { lab = Model.SelectedLab })
+                    : Url.Action("ProductionReport", "Dashboard", new { lab = Model.SelectedLab });
+            var backLabel = Model.ReportName.Contains("Collection", StringComparison.OrdinalIgnoreCase)
+                ? "Back to Collection Report"
+                : Model.ReportName.Contains("LIS", StringComparison.OrdinalIgnoreCase)
+                    ? "Back to LIS Report"
+                    : "Back to Production Report";
+        }
+        <a class="btn itm-back" href="@backAction">
+            <i class="bi bi-arrow-left"></i> @backLabel
+        </a>
+    </div>
+
+    <div class="itm-alert" id="itmAlert" hidden></div>
+
+    <div class="itm-grid">
+        <div class="itm-card">
+            <div class="itm-card-head">
+                <span>Templates</span>
+                <button type="button" class="btn btn-sm btn-primary" id="itmNewTpl">＋ New template</button>
+            </div>
+            <div id="itmTplList" class="itm-list">Loading…</div>
+        </div>
+
+        <div class="itm-card itm-card-wide">
+            <div class="itm-card-head">
+                <span id="itmEditorTitle">Columns</span>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="itmSeedBtn" hidden>Seed Key Insights columns</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="itmAddCol" hidden>＋ Add column</button>
+                </div>
+            </div>
+            <div id="itmEditor" class="itm-editor">Select or create a template.</div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="itmPromptModal" tabindex="-1" aria-labelledby="itmPromptTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content itm-modal">
+            <div class="modal-header ri-modal-head">
+                <h5 class="modal-title" id="itmPromptTitle">New template</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label fw-semibold" id="itmPromptLabel" for="itmPromptInput">Template name</label>
+                <input type="text" class="form-control" id="itmPromptInput" maxlength="120" autocomplete="off" />
+                <div class="form-text" id="itmPromptHint">This name appears in the template list and on the report Insights panel.</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="itmPromptOk">Create</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="itmConfirmModal" tabindex="-1" aria-labelledby="itmConfirmTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content itm-modal">
+            <div class="modal-header ri-modal-head">
+                <h5 class="modal-title" id="itmConfirmTitle">Remove column</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-0" id="itmConfirmMessage">Remove this column from the template?</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="itmConfirmOk">Remove</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="~/js/insight-template-master.js" asp-append-version="true" nonce="@Context.Items["CspNonce"]"></script>

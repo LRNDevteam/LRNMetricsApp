@@ -206,10 +206,13 @@ public static class LisSummaryExcelExportBuilder
         {
             WriteDataRow(sheet, rowNumber, row, monthColumns, result.Years, firstDataColumn, includeLogicColumn);
             ApplyRowStyle(sheet, rowNumber, row.Level, lastColumn);
+            if (row.Level > 0)
+                sheet.Row(rowNumber).OutlineLevel = Math.Min(row.Level, 7);
             rowNumber++;
         }
 
         WriteGrandTotalRow(sheet, rowNumber, result, monthColumns, result.Years, firstDataColumn, lastColumn);
+        ExcelTheme.FinishOutline(sheet);
 
         // ONLY the summary table is bordered — the title and note rows above it stay clean.
         var tableRange = sheet.Range(yearHeaderRow, 1, rowNumber, lastColumn);

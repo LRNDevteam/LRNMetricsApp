@@ -1,0 +1,110 @@
+@model LabMetricsDashboard.Models.Notes.ReportInsightsPanelModel
+<link rel="stylesheet" href="~/css/report-insights.css" asp-append-version="true" />
+
+<div id="riRoot"
+     class="ri-panel"
+     data-base="@Url.Content("~/")"
+     data-lab="@Model.Lab"
+     data-report-name="@Model.ReportName"
+     data-run-id="@(Model.RunId ?? "")"
+     data-week-text="@(Model.WeekText ?? "")">
+    @Html.AntiForgeryToken()
+
+    <div class="ri-head">
+        <div class="ri-head-main">
+            <button type="button" class="ri-toggle" id="riToggle" aria-expanded="true" aria-controls="riCollapse" title="Open / close insights">
+                <i class="bi bi-chevron-down ri-toggle-icon" aria-hidden="true"></i>
+            </button>
+            <div>
+                <h3>Key Insights &amp; Highlights</h3>
+                <p>Saved insights are exported as the first sheet of Download Excel. Dates display as 1-Sep.</p>
+            </div>
+        </div>
+        <div class="ri-head-actions">
+            <label class="ri-tpl-label">
+                Template
+                <select id="riTemplate" class="form-select form-select-sm"></select>
+            </label>
+            <button type="button" class="btn btn-sm btn-outline-light" id="riArchiveBtn">
+                Archived Notes
+            </button>
+            <button type="button" class="btn btn-sm btn-primary" id="riAddBtn">
+                <i class="bi bi-plus-lg"></i> Add Insight
+            </button>
+        </div>
+    </div>
+    <div id="riCollapse" class="ri-collapse">
+        <div id="riAlert" class="itm-alert" hidden></div>
+        <div id="riBody" class="ri-body">Loading insights…</div>
+    </div>
+</div>
+
+<div class="modal fade" id="riModal" tabindex="-1" aria-labelledby="riModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable ri-detail-dialog">
+        <div class="modal-content ri-detail-modal">
+            <div class="modal-header ri-detail-head">
+                <div class="ri-detail-title-block">
+                    <div class="ri-detail-title" id="riModalTitle">Active Note Detail</div>
+                    <div class="ri-detail-sub" id="riModalSub">Editable active insight · authorized report users</div>
+                </div>
+                <div class="ri-detail-badges">
+                    <span class="ri-badge" id="riRiskBadge">Risk</span>
+                    <span class="ri-badge" id="riStatusBadge">Status</span>
+                    <span class="ri-badge" id="riActiveBadge">Active</span>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="riForm"></div>
+            <div class="modal-footer ri-detail-footer">
+                <span class="ri-version-note" id="riVersionNote">No unsaved changes.</span>
+                <button type="button" class="btn btn-outline-secondary" id="riHistoryBtn">Revision History</button>
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" id="riCancelBtn">Cancel</button>
+                <button type="button" class="btn btn-success" id="riSaveBtn">Save Changes</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="riHistoryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable ri-detail-dialog">
+        <div class="modal-content ri-detail-modal">
+            <div class="modal-header ri-detail-head">
+                <div class="ri-detail-title-block">
+                    <div class="ri-detail-title">Active Note Revision History</div>
+                    <div class="ri-detail-sub">Audit timeline · restore/edit from history is disabled</div>
+                </div>
+                <div class="ri-detail-badges">
+                    <span class="ri-badge" id="riHistoryNoteBadge">Note</span>
+                    <span class="ri-badge">Audit Only</span>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="ri-lock-note">Active note history is read-only. Edits must be made from the Active Note Detail screen, not from historical versions.</div>
+                <div class="ri-history-summary" id="riHistorySummary"></div>
+                <div class="ri-timeline" id="riHistoryTimeline"></div>
+            </div>
+            <div class="modal-footer ri-detail-footer">
+                <span class="ri-version-note">Allowed actions: Back to Active Note, Close.</span>
+                <button type="button" class="btn btn-outline-secondary" id="riHistoryBackBtn">Back to Active Note</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="riArchiveModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable ri-detail-dialog">
+        <div class="modal-content ri-detail-modal">
+            <div class="modal-header ri-detail-head">
+                <div class="ri-detail-title-block">
+                    <div class="ri-detail-title">Archived Notes</div>
+                    <div class="ri-detail-sub">Closed notes older than 4 weeks · read-only historical reference</div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="riArchiveBody">Loading archive…</div>
+        </div>
+    </div>
+</div>
+
+<script src="~/js/report-insights.js" asp-append-version="true" nonce="@Context.Items["CspNonce"]"></script>

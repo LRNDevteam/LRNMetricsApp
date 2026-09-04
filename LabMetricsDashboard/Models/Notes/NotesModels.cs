@@ -33,6 +33,7 @@ public sealed class NoteInsight
     public string?  ResponsibleParty  { get; set; }
     public string?  Insights          { get; set; }
     public int?     NoOfSamples       { get; set; }
+    public decimal? TotalCharge       { get; set; }
     public string?  DataLink          { get; set; }
     public string?  ActionSolution    { get; set; }
     public string?  FeedbackResponse  { get; set; }
@@ -107,6 +108,7 @@ public sealed class NoteSaveRequest
     public string?  ResponsibleParty { get; set; }
     public string?  Insights         { get; set; }
     public int?     NoOfSamples      { get; set; }
+    public decimal? TotalCharge      { get; set; }
     public string?  DataLink         { get; set; }
     public string?  ActionSolution   { get; set; }
     public string?  FeedbackResponse { get; set; }
@@ -123,4 +125,63 @@ public sealed class NotesResult
     public bool    Success { get; set; }
     public int     NoteId  { get; set; }
     public string? Message { get; set; }
+}
+
+/// <summary>One Insights template (header + columns) for a report.</summary>
+public sealed class NotesTemplateBundle
+{
+    public int    TemplateId   { get; set; }
+    public int    ReportKeyId  { get; set; }
+    public string ReportName   { get; set; } = string.Empty;
+    public string TemplateName { get; set; } = string.Empty;
+    public bool   IsActive     { get; set; } = true;
+    public List<NotesTemplateColumnDef> Columns { get; set; } = [];
+}
+
+public sealed class NotesTemplateColumnDef
+{
+    public int    ColumnId    { get; set; }
+    public int    TemplateId  { get; set; }
+    public string ColumnName  { get; set; } = string.Empty;
+    public string ColumnType  { get; set; } = "Text";
+    public bool   IsRequired  { get; set; }
+    public int    SortOrder   { get; set; }
+    public string? FieldKey   { get; set; }
+    public List<string> DropdownValues { get; set; } = [];
+}
+
+public sealed class NotesTemplateSaveRequest
+{
+    public int?    TemplateId   { get; set; }
+    public string  ReportName   { get; set; } = "Production Report";
+    public string  TemplateName { get; set; } = string.Empty;
+    public bool    IsActive     { get; set; } = true;
+}
+
+public sealed class NotesTemplateColumnSaveRequest
+{
+    public int?    ColumnId        { get; set; }
+    public int     TemplateId      { get; set; }
+    public string  ColumnName      { get; set; } = string.Empty;
+    public string  ColumnType      { get; set; } = "Text";
+    public bool    IsRequired      { get; set; }
+    public int     SortOrder       { get; set; }
+    public string? FieldKey        { get; set; }
+    public string? DropdownValues  { get; set; }
+}
+
+public sealed class NotesTemplateResult
+{
+    public bool    Success { get; set; }
+    public int     Id      { get; set; }
+    public string? Message { get; set; }
+}
+
+/// <summary>Context for the shared Key Insights panel on a report page.</summary>
+public sealed class ReportInsightsPanelModel
+{
+    public string Lab { get; set; } = string.Empty;
+    public string ReportName { get; set; } = "Production Report";
+    public string? RunId { get; set; }
+    public string? WeekText { get; set; }
 }

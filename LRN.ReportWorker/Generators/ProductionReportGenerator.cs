@@ -1,3 +1,4 @@
+using ClosedXML.Excel;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using LRN.ProductionReports.Models;
@@ -32,6 +33,7 @@ public sealed class ProductionReportGenerator : IReportGenerator
     private readonly IAugustusProductionSummaryRepository _augRepo;
     /// <summary>Per-lab generic Production Summary repos, keyed by lab name (Certus, Cove, ...).</summary>
     private readonly IReadOnlyDictionary<string, ILabProductionSummaryRepository> _labSummaryRepos;
+    private readonly INotesRepository _notes;
     private readonly ILogger<ProductionReportGenerator> _logger;
 
     public ProductionReportGenerator(
@@ -40,6 +42,7 @@ public sealed class ProductionReportGenerator : IReportGenerator
         INorthWestProductionSummaryRepository nwRepo,
         IAugustusProductionSummaryRepository augRepo,
         IReadOnlyDictionary<string, ILabProductionSummaryRepository> labSummaryRepos,
+        INotesRepository notes,
         ILogger<ProductionReportGenerator> logger)
     {
         _labSettings     = labSettings;
@@ -47,6 +50,7 @@ public sealed class ProductionReportGenerator : IReportGenerator
         _nwRepo          = nwRepo;
         _augRepo         = augRepo;
         _labSummaryRepos = labSummaryRepos;
+        _notes           = notes;
         _logger          = logger;
     }
 
@@ -249,6 +253,8 @@ public sealed class ProductionReportGenerator : IReportGenerator
         using (var workbook = ProductionReportExcelExportBuilder.CreateWorkbookSummaryOnly(
             vm, job.LabName, weekFolder, runId))
         {
+            await InsightsSheetInjector.InsertAsync(
+                workbook, _notes, connStr, job.LabName, "Production Report", ct);
             using var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None);
             workbook.SaveAs(fs);
         }
@@ -390,6 +396,8 @@ public sealed class ProductionReportGenerator : IReportGenerator
         using (var workbook = ProductionReportExcelExportBuilder.CreateWorkbookSummaryOnly(
             vm, job.LabName, weekFolder, runId))
         {
+            await InsightsSheetInjector.InsertAsync(
+                workbook, _notes, connStr, job.LabName, "Production Report", ct);
             using var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None);
             workbook.SaveAs(fs);
         }
@@ -535,6 +543,8 @@ public sealed class ProductionReportGenerator : IReportGenerator
 
         using (var workbook = NorthWestProductionSummaryExcelExportBuilder.CreateWorkbook(vm, job.LabName))
         {
+            await InsightsSheetInjector.InsertAsync(
+                workbook, _notes, connStr, job.LabName, "Production Report", ct);
             using var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None);
             workbook.SaveAs(fs);
         }

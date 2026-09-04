@@ -18,17 +18,20 @@ public class CollectionSummaryController : Controller
     private readonly LabSettings _labSettings;
     private readonly ICollectionSummaryRepository _repo;
     private readonly IAnalysisRangeService _analysisRange;
+    private readonly INotesRepository _notes;
     private readonly ILogger<CollectionSummaryController> _logger;
 
     public CollectionSummaryController(
         LabSettings labSettings,
         ICollectionSummaryRepository repo,
         IAnalysisRangeService analysisRange,
+        INotesRepository notes,
         ILogger<CollectionSummaryController> logger)
     {
         _labSettings = labSettings;
         _repo = repo;
         _analysisRange = analysisRange;
+        _notes = notes;
         _logger = logger;
     }
 
@@ -751,6 +754,22 @@ public class CollectionSummaryController : Controller
                     MaxAge   = TimeSpan.FromSeconds(30),
                 });
 
+                var insights = await InsightsExcelBuilder.LoadAsync(_notes, connStr, "Collection Report", ct);
+                try
+                {
+                    var bytes = InsightsExcelBuilder.InjectIntoExistingWorkbook(
+                        preGenFile, insights, selectedLab, "Collection Report");
+                    return File(bytes,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        downloadName);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "CollectionSummary ExportExcel '{Lab}': could not inject Insights sheet; serving original file.",
+                        selectedLab);
+                }
+
                 return PhysicalFile(preGenFile,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     downloadName);
@@ -821,6 +840,9 @@ public class CollectionSummaryController : Controller
                 vm, claimRows, lineRows, selectedLab, activeFilters,
                 claimRowsOmitted: !includeClaimRaw ? claimCount : null,
                 lineRowsOmitted:  !includeLineRaw  ? lineCount  : null);
+
+            var liveInsights = await InsightsExcelBuilder.LoadAsync(_notes, connStr, "Collection Report", ct);
+            InsightsExcelBuilder.InsertAsFirstSheet(workbook, liveInsights, selectedLab, "Collection Report");
 
             // Free raw data lists early to reduce peak memory before SaveAs
             claimRows.Clear();

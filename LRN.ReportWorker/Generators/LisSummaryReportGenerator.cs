@@ -28,17 +28,20 @@ public sealed class LisSummaryReportGenerator : IReportGenerator
 
     private readonly LabSettings _labSettings;
     private readonly ILisSummaryRepository _repo;
+    private readonly INotesRepository _notes;
     private readonly ReportStorageOptions _storage;
     private readonly ILogger<LisSummaryReportGenerator> _logger;
 
     public LisSummaryReportGenerator(
         LabSettings labSettings,
         ILisSummaryRepository repo,
+        INotesRepository notes,
         Microsoft.Extensions.Options.IOptions<ReportStorageOptions> storage,
         ILogger<LisSummaryReportGenerator> logger)
     {
         _labSettings = labSettings;
         _repo        = repo;
+        _notes       = notes;
         _storage     = storage.Value;
         _logger      = logger;
     }
@@ -90,7 +93,7 @@ public sealed class LisSummaryReportGenerator : IReportGenerator
         int lineRows;
         try
         {
-            WriteSummarySheet(tempPath, summary, job.LabName, dateType, dateFrom, dateTo, f);
+            await WriteSummarySheetAsync(tempPath, connStr, summary, job.LabName, dateType, dateFrom, dateTo, f, ct);
             await Progress(22);
 
             var total = Math.Max(1, plan.TotalRows);
@@ -122,14 +125,16 @@ public sealed class LisSummaryReportGenerator : IReportGenerator
     /// "LIMS Master" placeholder is dropped so the streamed sheet can take that name —
     /// ClosedXML would hold every line row in memory and OOM on a large lab.
     /// </summary>
-    private static void WriteSummarySheet(
+    private async Task WriteSummarySheetAsync(
         string tempPath,
+        string connStr,
         LisSummaryResult summary,
         string labName,
         string dateType,
         DateOnly? dateFrom,
         DateOnly? dateTo,
-        LisSummaryReportFilters f)
+        LisSummaryReportFilters f,
+        CancellationToken ct)
     {
         using var wb = LisSummaryExcelExportBuilder.CreateWorkbook(
             summary, lineData: null, labName, dateType, dateFrom, dateTo,
@@ -139,6 +144,8 @@ public sealed class LisSummaryReportGenerator : IReportGenerator
                      .Where(ws => ws.Name.Equals(LineSheetName, StringComparison.OrdinalIgnoreCase))
                      .ToList())
             placeholder.Delete();
+
+        await InsightsSheetInjector.InsertAsync(wb, _notes, connStr, labName, "LIS Report", ct);
 
         using var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None);
         wb.SaveAs(fs);

@@ -183,7 +183,7 @@
 
     async function loadActive() {
         try {
-            const data = await getJson(`${apiBase}/Notes/Active?${q({ lab: ctx.lab })}`);
+            const data = await getJson(`${apiBase}/Notes/Active?${q({ lab: ctx.lab, report: ctx.reportName })}`);
             reportKeyId = data.reportKeyId;
             state.rows = (data.rows || []).map(mapServerRow);
             state.filters = {};
@@ -420,8 +420,8 @@
         const btn = el.footer.querySelector('[data-act="save"]');
         if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
         try {
-            for (const r of inserts) await postJson(`${apiBase}/Notes/Save?${q({ lab: ctx.lab })}`, buildPayload(r));
-            for (const r of updates) await postJson(`${apiBase}/Notes/Save?${q({ lab: ctx.lab })}`, buildPayload(r));
+            for (const r of inserts) await postJson(`${apiBase}/Notes/Save?${q({ lab: ctx.lab, report: ctx.reportName })}`, buildPayload(r));
+            for (const r of updates) await postJson(`${apiBase}/Notes/Save?${q({ lab: ctx.lab, report: ctx.reportName })}`, buildPayload(r));
             toast(`Saved ${inserts.length + updates.length} change(s) — new versions recorded.`);
             await loadActive();
         } catch (e) { alert(e.message); }
@@ -457,7 +457,7 @@
         try {
             const sv = (el.toolbar.querySelector("#niSearchA") || {}).value || "";
             const rk = (el.toolbar.querySelector("#niFRiskA") || {}).value || "";
-            const data = await getJson(`${apiBase}/Notes/Archived?${q({ lab: ctx.lab, risk: rk, search: sv })}`);
+            const data = await getJson(`${apiBase}/Notes/Archived?${q({ lab: ctx.lab, report: ctx.reportName, risk: rk, search: sv })}`);
             const s = data.summary || {};
             const cards = `<div class="ni-cards">
                 <div class="ni-card"><div class="ni-card-val">${s.totalArchived || 0}</div><div class="ni-card-lbl">Total Archived</div></div>

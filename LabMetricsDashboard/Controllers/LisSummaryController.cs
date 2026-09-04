@@ -13,17 +13,20 @@ public class LisSummaryController : Controller
 	private readonly ILisSummaryRepository _lisSummaryRepository;
 	private readonly IDenialRecordRepository _labRepository;
 	private readonly LabSettings _labSettings;
+	private readonly INotesRepository _notes;
 	private readonly ILogger<LisSummaryController> _logger;
 
 	public LisSummaryController(
 		ILisSummaryRepository lisSummaryRepository,
 		IDenialRecordRepository labRepository,
 		LabSettings labSettings,
+		INotesRepository notes,
 		ILogger<LisSummaryController> logger)
 	{
 		_lisSummaryRepository = lisSummaryRepository;
 		_labRepository = labRepository;
 		_labSettings = labSettings;
+		_notes = notes;
 		_logger = logger;
 	}
 
@@ -248,6 +251,9 @@ public class LisSummaryController : Controller
 				filters.RefPhy,
 				filters.SalesRep,
 				filters.Collector);
+
+			var lisInsights = await InsightsExcelBuilder.LoadAsync(_notes, config.DbConnectionString, "LIS Report", cancellationToken);
+			InsightsExcelBuilder.InsertAsFirstSheet(workbook, lisInsights, selectedLabName, "LIS Report");
 
 			await using var stream = new MemoryStream();
 			workbook.SaveAs(stream);

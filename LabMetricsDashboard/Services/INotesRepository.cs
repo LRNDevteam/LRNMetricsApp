@@ -48,4 +48,16 @@ public interface INotesRepository
 
     Task<NotesResult> DeleteAsync(
         string connectionString, int noteId, string deletedBy, CancellationToken ct = default);
+
+    Task<IReadOnlyList<NotesTemplateBundle>> GetTemplatesByReportAsync(
+        string connectionString, int reportKeyId, CancellationToken ct = default);
+
+    Task<NotesTemplateResult> UpsertTemplateAsync(
+        string connectionString, int reportKeyId, NotesTemplateSaveRequest req, string editedBy, CancellationToken ct = default);
+
+    Task<NotesTemplateResult> UpsertTemplateColumnAsync(
+        string connectionString, NotesTemplateColumnSaveRequest req, CancellationToken ct = default);
+
+    Task<NotesTemplateResult> DeleteTemplateColumnAsync(
+        string connectionString, int columnId, CancellationToken ct = default);
 }

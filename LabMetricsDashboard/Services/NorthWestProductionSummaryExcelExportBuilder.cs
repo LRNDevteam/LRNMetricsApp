@@ -1119,71 +1119,56 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         ws.TabColor = ExcelTheme.TabGreen;
         ExcelTheme.ApplyDefaults(ws);
 
-        var panels   = vm.PayerPanelColumns;
-        int colCount = 1 + panels.Count * 2 + 2;
+        var panels = vm.PayerPanelColumns;
+        const int colCount = 3;
 
         int row = 1;
-        ExcelTheme.WriteTitleBar(ws, row, colCount, "Payer � Panel");
+        ExcelTheme.WriteTitleBar(ws, row, colCount, "Payer × Panel");
         row++;
-
-        int hRow1 = row;
-        WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, "Payer � Panel", ExcelTheme.HeaderBg);
-        int hCol = 2;
-        foreach (var p in panels)
-        {
-            WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1, p, ExcelTheme.HeaderBg);
-            hCol += 2;
-        }
-        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1,
-            "Grand Total", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-
-        int hRow2 = hRow1 + 1;
-        hCol = 2;
-        foreach (var _ in panels)
-        {
-            WriteHeaderCell(ws, hRow2, hCol++, "No. of Claims",        ExcelTheme.SubHeaderBg);
-            WriteHeaderCell(ws, hRow2, hCol++, "Total Billed Charges", ExcelTheme.SubHeaderBg);
-        }
-        WriteHeaderCell(ws, hRow2, hCol++, "No. of Claims",        ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-        WriteHeaderCell(ws, hRow2, hCol,   "Total Billed Charges", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-
-        row = hRow2 + 1;
+        ExcelTheme.WriteHeaderRow(ws, row, 1,
+            ["Payer / Panel", "No. of Claims", "Total Billed Charges"], ExcelTheme.HeaderBg);
+        row++;
 
         int dataIdx = 0;
         foreach (var pr in vm.PayerPanelRows)
         {
-            var bg = ExcelTheme.GetRowBg(dataIdx);
-            int col = 1;
-            WriteCell(ws, row, col++, pr.PayerName, bg, isText: true);
-            foreach (var p in panels)
-            {
-                var mc = GetMonthCell(pr.ByPanel, p);
-                WriteCell(ws, row, col++, mc.ClaimCount, bg);
-                WriteCurrencyCell(ws, row, col++, mc.BilledCharges, bg);
-            }
-            WriteCell(ws, row, col++, pr.GrandTotalClaims, bg);
-            WriteCurrencyCell(ws, row, col++, pr.GrandTotalCharges, bg);
+            var parentBg = ExcelTheme.GetRowBg(dataIdx, isGroupRow: true);
+            WriteCell(ws, row, 1, pr.PayerName, parentBg, isText: true);
+            WriteCell(ws, row, 2, pr.GrandTotalClaims, parentBg);
+            WriteCurrencyCell(ws, row, 3, pr.GrandTotalCharges, parentBg);
+            ws.Row(row).Style.Font.Bold = true;
             row++;
+
+            var childPanels = panels
+                .Select(p => (Name: p, Cell: GetMonthCell(pr.ByPanel, p)))
+                .Where(x => x.Cell.ClaimCount != 0 || x.Cell.BilledCharges != 0m)
+                .ToList();
+
+            int firstChild = row;
+            int childIdx = 0;
+            foreach (var (name, cell) in childPanels)
+            {
+                var bg = ExcelTheme.GetRowBg(childIdx);
+                WriteCell(ws, row, 1, $"    {name}", bg, isText: true);
+                WriteCell(ws, row, 2, cell.ClaimCount, bg);
+                WriteCurrencyCell(ws, row, 3, cell.BilledCharges, bg);
+                row++;
+                childIdx++;
+            }
+            if (childPanels.Count > 1)
+                GroupChildRows(ws, firstChild, row - 1);
             dataIdx++;
         }
 
         ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
-        int gtCol = 1;
-        ws.Cell(row, gtCol++).Value = "Grand Total";
-        foreach (var p in panels)
-        {
-            var mc = GetMonthCell(vm.PayerPanelGrandByPanel, p);
-            ws.Cell(row, gtCol).Value = mc.ClaimCount;
-            ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
-            ws.Cell(row, gtCol).Value = mc.BilledCharges;
-            ws.Cell(row, gtCol++).Style.NumberFormat.Format = "$#,##0";
-        }
-        ws.Cell(row, gtCol).Value = vm.PayerPanelGrandTotalClaims;
-        ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
-        ws.Cell(row, gtCol).Value = vm.PayerPanelGrandTotalCharges;
-        ws.Cell(row, gtCol).Style.NumberFormat.Format = "$#,##0";
+        ws.Cell(row, 1).Value = "Grand Total";
+        ws.Cell(row, 2).Value = vm.PayerPanelGrandTotalClaims;
+        ws.Cell(row, 2).Style.NumberFormat.NumberFormatId = 3;
+        ws.Cell(row, 3).Value = vm.PayerPanelGrandTotalCharges;
+        ws.Cell(row, 3).Style.NumberFormat.Format = "$#,##0";
 
         ExcelTheme.AutoFitColumns(ws, colCount);
+        FinishOutline(ws);
     }
 
     // ?? Unbilled � Aging ??????????????????????????????????????????????????????

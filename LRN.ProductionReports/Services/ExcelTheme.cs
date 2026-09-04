@@ -335,4 +335,19 @@ public static class ExcelTheme
             .ToList();
         return WriteFilterSummary(ws, startRow, colCount, flat);
     }
+
+    /// <summary>Marks subcategory rows so Excel shows a +/- outline control on the parent.</summary>
+    public static void GroupChildRows(IXLWorksheet ws, int firstChildRow, int lastChildRow, int level = 1)
+    {
+        if (lastChildRow < firstChildRow) return;
+        for (int r = firstChildRow; r <= lastChildRow; r++)
+            ws.Row(r).OutlineLevel = level;
+    }
+
+    /// <summary>Puts the +/- control on the parent row and collapses child groups by default.</summary>
+    public static void FinishOutline(IXLWorksheet ws)
+    {
+        ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
+        ws.CollapseRows();
+    }
 }
