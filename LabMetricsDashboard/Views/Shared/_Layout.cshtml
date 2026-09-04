@@ -1,5 +1,7 @@
 @using LabMetricsDashboard.Models
+@using LabMetricsDashboard.Models.Menu
 @inject LabSettings LabSettingsInstance
+@inject LabConfigOptions LabConfigInstance
 @inject IConfiguration Configuration
 @* Same source of truth the navbar uses, so the Reimbursement Insights shortcuts below are
    hidden from roles that have no mapping for it — otherwise the icon would open a new tab
@@ -114,6 +116,23 @@
 
         .nav-lab-btn:hover {
         background: rgba(255, 255, 255, .22);
+        }
+
+        /* Single assigned lab: same pill as the selector but read-only, and highlighted
+           so it still reads as "the lab you are looking at" rather than dead chrome. */
+        .nav-lab-single {
+        display: flex;
+        align-items: center;
+        gap: .4rem;
+        background: rgba(255, 255, 255, .95);
+        border: 1px solid rgba(255, 255, 255, .95);
+        border-radius: 20px;
+        padding: .25em .85em;
+        color: #1565c0;
+        font-weight: 800;
+        font-size: .8rem;
+        letter-spacing: .02em;
+        white-space: nowrap;
         }
 
         .nav-lab-btn .bi-chevron-down {
@@ -883,9 +902,9 @@
             .Select(c => c.Value)
             .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            var availableLabs = isAdmin
-            ? allLabKeys
-            : allLabKeys.Where(l => userLabClaims.Contains(l)).ToList();
+            // Admins get every lab except a demo lab they were not explicitly assigned —
+            // see LabConfigOptions.DemoLabs.
+            var availableLabs = LabConfigInstance.VisibleLabs(allLabKeys, userLabClaims, isAdmin);
 
             // For the navbar lab selector: priority order:
             //   1. ViewData["SelectedLab"]  — set by most controllers after resolving the lab
@@ -920,9 +939,18 @@
             // Reimbursement Insights opens in its own tab (it renders full-screen with no
             // dashboard chrome). Read once here and shared with _HelpBotWidget through ViewData
             // below, so the permission check runs a single time per page rather than per widget.
+            //
+            // The header icon and the help-bubble shortcut are gated separately: an admin can
+            // Enable/Disable each per role in Admin > Role Menu Mapping. With nothing chosen
+            // there both follow menu access, which is how they behaved before.
             var canUseReimbursementChat = (User?.Identity?.IsAuthenticated ?? false)
                 && await MenuService.CanAccessAsync(User, null, "ReimbursementChat", "Index", Context.RequestAborted);
-            ViewData["CanUseReimbursementChat"] = canUseReimbursementChat;
+            var showReimbursementChatIcon = (User?.Identity?.IsAuthenticated ?? false)
+                && await MenuService.IsFeatureEnabledAsync(User, MenuFeatureKeys.ReimbursementChatHeaderIcon,
+                    canUseReimbursementChat, Context.RequestAborted);
+            ViewData["CanUseReimbursementChat"] = (User?.Identity?.IsAuthenticated ?? false)
+                && await MenuService.IsFeatureEnabledAsync(User, MenuFeatureKeys.ReimbursementChatHelpBubble,
+                    canUseReimbursementChat, Context.RequestAborted);
 
             // Get lab-specific feature toggles
             LabCsvConfig? labConfig = null;
@@ -938,7 +966,16 @@
             </a>
             <div class="brand-spacer"></div>
             <div class="nav-toolbar">
-                @if (!string.IsNullOrEmpty(activeLab) && availableLabs.Count > 0)
+                @if (!string.IsNullOrEmpty(activeLab) && availableLabs.Count == 1)
+                {
+                    @* One lab assigned: there is nothing to switch to, so show the lab name
+                       as a highlighted label instead of a dropdown that can only reselect itself. *@
+                    <span class="nav-lab-single" title="@activeLab">
+                        <i class="bi bi-building"></i>
+                        @activeLab
+                    </span>
+                }
+                else if (!string.IsNullOrEmpty(activeLab) && availableLabs.Count > 1)
                 {
                     <span class="nav-lab-wrap" id="navLabWrap">
                         <span class="nav-lab-btn" id="navLabBtn" tabindex="0" title="Switch lab">
@@ -993,7 +1030,7 @@
                         </div>
                     </span>
                 }
-                @if (canUseReimbursementChat)
+                @if (showReimbursementChatIcon)
                 {
                     @* 🤖 Reimbursement Insights — opens the full-screen agent chat in a new tab so
                        the dashboard the user is working in stays where it is. Unlike the bell and

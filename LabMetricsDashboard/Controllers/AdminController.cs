@@ -640,9 +640,27 @@ public class AdminController : Controller
         try
         {
             await _menuApi.SaveRoleMenusAsync(dto.RoleId, dto.MenuIds ?? new List<int>(), ct);
+            await _menuApi.SaveRoleFeaturesAsync(dto.RoleId, dto.Features ?? new List<RoleFeatureDto>(), ct);
             _menuService.InvalidateCache();
             return Json(new { success = true });
         }
+        catch (InvalidOperationException ex) { return MenuError(ex); }
+    }
+
+    /// <summary>The Enable/Disable rows the Role Menu Mapping screen renders under the menu tree.</summary>
+    [HttpGet]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> MenuFeatures(CancellationToken ct)
+    {
+        try { return Json(await _menuApi.GetFeatureCatalogAsync(ct)); }
+        catch (InvalidOperationException ex) { return MenuError(ex); }
+    }
+
+    [HttpGet]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> RoleFeatures(int roleId, CancellationToken ct)
+    {
+        try { return Json(await _menuApi.GetRoleFeaturesAsync(roleId, ct)); }
         catch (InvalidOperationException ex) { return MenuError(ex); }
     }
 

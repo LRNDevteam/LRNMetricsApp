@@ -123,21 +123,29 @@ public sealed class AnalyticsController : Controller
         var panel = string.Equals(tab, "panel", StringComparison.OrdinalIgnoreCase);
         var labId = int.TryParse(Request.Query["labId"], out var id) ? id : (int?)null;
 
-        // Resolve the lab's display name for the file name; LabId alone would not name the file.
-        string? labName = null;
-        if (labId is not null)
+        // GetLabsAsync is already scoped to the caller by the API, so it serves two purposes:
+        // the display name for the file, and the lab ceiling the worker must honour. The worker
+        // runs with no caller identity, so an unscoped job would export every lab's rates —
+        // exactly what the screen itself no longer allows.
+        List<MasterValueLabOption> allowedLabs = new();
+        try
         {
-            try
-            {
-                labName = (await _api.GetLabsAsync(ct))
-                    .FirstOrDefault(l => l.LabId == labId)?.LabName;
-            }
-            catch (Exception ex)
-            {
-                // Cosmetic only — the export still runs, the file is just named by id.
-                _logger.LogWarning(ex, "Could not resolve lab name for LabId {LabId}; queuing anyway.", labId);
-            }
+            allowedLabs = (await _api.GetLabsAsync(ct)).ToList();
         }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not resolve the caller's labs for a queued CPT/Panel export.");
+            return BadRequest(new { message = "Could not confirm your lab access. Try the direct download instead." });
+        }
+
+        // Admins are not lab-scoped anywhere else either; everyone else is capped at their labs.
+        var isAdmin = User.IsInRole("Admin") || User.IsInRole("LRN Admin") || User.IsInRole("LRNAdmin");
+        var allowedLabIds = isAdmin ? null : allowedLabs.Select(l => l.LabId).Distinct().ToList();
+
+        if (labId is not null && allowedLabIds is not null && !allowedLabIds.Contains(labId.Value))
+            return BadRequest(new { message = "You can export lookup data only for the labs assigned to you." });
+
+        var labName = labId is null ? null : allowedLabs.FirstOrDefault(l => l.LabId == labId)?.LabName;
 
         var filters = new CptLookupReportFilters(
             CptCode:       Blank(Request.Query["cptCode"]),
@@ -147,7 +155,8 @@ public sealed class AnalyticsController : Controller
             LabId:         labId,
             SortColumn:    Blank(Request.Query["sortColumn"]),
             SortDirection: Blank(Request.Query["sortDirection"]),
-            LabName:       labName);
+            LabName:       labName,
+            AllowedLabIds: allowedLabIds);
 
         try
         {

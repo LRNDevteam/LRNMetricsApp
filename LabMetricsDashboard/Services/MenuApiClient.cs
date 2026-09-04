@@ -25,6 +25,11 @@ public interface IMenuApiClient
     Task<IReadOnlyList<MenuRoleOptionDto>> GetRolesAsync(CancellationToken ct);
     Task<IReadOnlyList<int>> GetRoleMenuIdsAsync(int roleId, CancellationToken ct);
     Task SaveRoleMenusAsync(int roleId, IReadOnlyCollection<int> menuIds, CancellationToken ct);
+
+    Task<IReadOnlyList<RoleFeatureDto>> GetMyFeaturesAsync(CancellationToken ct);
+    Task<IReadOnlyList<MenuFeatureDto>> GetFeatureCatalogAsync(CancellationToken ct);
+    Task<IReadOnlyList<RoleFeatureDto>> GetRoleFeaturesAsync(int roleId, CancellationToken ct);
+    Task SaveRoleFeaturesAsync(int roleId, IReadOnlyCollection<RoleFeatureDto> features, CancellationToken ct);
 }
 
 /// <summary>
@@ -90,6 +95,18 @@ public sealed class MenuApiClient : IMenuApiClient
 
     public Task SaveRoleMenusAsync(int roleId, IReadOnlyCollection<int> menuIds, CancellationToken ct)
         => SendJsonAsync<object, CreateResult>(HttpMethod.Put, $"api/menu/roles/{roleId}/menus", new { menuIds }, ct);
+
+    public async Task<IReadOnlyList<RoleFeatureDto>> GetMyFeaturesAsync(CancellationToken ct)
+        => await GetAsync<List<RoleFeatureDto>>("api/menu/my/features", ct) ?? [];
+
+    public async Task<IReadOnlyList<MenuFeatureDto>> GetFeatureCatalogAsync(CancellationToken ct)
+        => await GetAsync<List<MenuFeatureDto>>("api/menu/features", ct) ?? [];
+
+    public async Task<IReadOnlyList<RoleFeatureDto>> GetRoleFeaturesAsync(int roleId, CancellationToken ct)
+        => await GetAsync<List<RoleFeatureDto>>($"api/menu/roles/{roleId}/features", ct) ?? [];
+
+    public Task SaveRoleFeaturesAsync(int roleId, IReadOnlyCollection<RoleFeatureDto> features, CancellationToken ct)
+        => SendJsonAsync<object, CreateResult>(HttpMethod.Put, $"api/menu/roles/{roleId}/features", new { features }, ct);
 
     private sealed class CreateResult
     {

@@ -18,6 +18,7 @@ public sealed class ReportBoardController : Controller
     private readonly IReportBoardApiClient _api;
     private readonly ILabNameResolver _labResolver;
     private readonly LabSettings _labSettings;
+    private readonly LabConfigOptions _labConfig;
     private readonly IMenuService _menuService;
     private readonly IReportAvailabilityService _availability;
     private readonly IOptionsMonitor<ReportBoardSettings> _boardSettings;
@@ -27,6 +28,7 @@ public sealed class ReportBoardController : Controller
         IReportBoardApiClient api,
         ILabNameResolver labResolver,
         LabSettings labSettings,
+        LabConfigOptions labConfig,
         IMenuService menuService,
         IReportAvailabilityService availability,
         IOptionsMonitor<ReportBoardSettings> boardSettings,
@@ -35,6 +37,7 @@ public sealed class ReportBoardController : Controller
         _api = api;
         _labResolver = labResolver;
         _labSettings = labSettings;
+        _labConfig = labConfig;
         _menuService = menuService;
         _availability = availability;
         _boardSettings = boardSettings;
@@ -357,14 +360,16 @@ public sealed class ReportBoardController : Controller
     private HashSet<string> VisibleLabKeys()
     {
         var all = _labSettings.Labs.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (IsAdmin) return all;
-
         var claimed = User.Claims
             .Where(c => c.Type == "LabName")
             .Select(c => c.Value)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        all.IntersectWith(claimed);
-        return all;
+
+        // A demo lab is kept off the board unless the viewer was actually assigned it: its data
+        // is deliberately frozen, so to everyone else the row would read as a stalled pipeline.
+        return _labConfig
+            .VisibleLabs(all, claimed, IsAdmin)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 }
 

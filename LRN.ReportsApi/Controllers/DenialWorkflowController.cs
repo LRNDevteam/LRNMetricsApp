@@ -105,6 +105,7 @@ public sealed class DenialWorkflowController : ControllerBase
     [HttpPost("import")]
     public async Task<ActionResult<DenialWorkflowImportResult>> Import(DenialTaskImportRequest request, CancellationToken ct)
     {
+        if (DenyWriteForLabUser("import workflow tasks") is { } denied) return denied;
         if (request.LabId <= 0) return BadRequest("LabId is required.");
         if (string.IsNullOrWhiteSpace(request.RunId)) return BadRequest("RunId is required.");
         return Ok(await _service.ImportAsync(request, ct));
@@ -134,6 +135,25 @@ public sealed class DenialWorkflowController : ControllerBase
 
         var userName = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? FirstClaim(ClaimTypes.Email, "email") ?? string.Empty;
         return Ok(await _service.GetLabsForUserAsync(userName, ct));
+    }
+
+    /// <summary>
+    /// AR Reporting Requirements GAP-6. Manual/scheduler trigger for the nightly inventory
+    /// snapshot - nothing in this codebase runs a cron job today, so wiring the actual "every
+    /// night at 2am" trigger (Windows Task Scheduler hitting this URL, or a hosted service) is a
+    /// deployment decision outside this endpoint's scope. Safe to call more than once for the same
+    /// date - the capture deletes that date's rows before re-inserting.
+    /// </summary>
+    [HttpPost("snapshot/capture")]
+    public async Task<IActionResult> CaptureSnapshot([FromQuery] int labId, [FromQuery] DateOnly? date, CancellationToken ct)
+    {
+        if (!CanAssignFromToken())
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only AR Manager/Admin can trigger a snapshot capture." });
+        if (labId <= 0) return BadRequest(new { message = "labId is required." });
+
+        var snapshotDate = date ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var rows = await _service.CaptureInventorySnapshotAsync(labId, snapshotDate, ct);
+        return Ok(new { labId, snapshotDate, rowsWritten = rows });
     }
 
     [HttpGet("dashboard")]
@@ -312,13 +332,21 @@ public sealed class DenialWorkflowController : ControllerBase
             return BadRequest(new { message = $"The upload file could not be read: {ex.Message} Please re-download the upload template and try again." });
         }
 
+        // AR Reporting Requirements GAP-8 / FR-012: every DenialTaskHistory / DenialClaimNotes row
+        // this upload writes is stamped with this id, so a report (or a person) can tell an Excel
+        // update from a UI one and group all of one upload's rows together. Generated here, before
+        // StartUpload, because StartUpload's own jobId does not exist yet when this closure is
+        // built - the two ids serve different purposes (job polling vs. audit grouping) and do not
+        // need to match.
+        var uploadBatchId = Guid.NewGuid().ToString("N");
+
         // Fire-and-forget: enqueue the parsed rows for background processing and return a jobId
         // immediately, so a 100-claim upload no longer blocks the user for minutes. Status + the
         // per-row result are available via /claims/upload/{jobId}; the log via /claims/upload/{jobId}/log.
         var startResponse = _uploadJobs.StartUpload(labId, file.FileName, rows.Count, userName,
             (sp, token) => ProcessClaimUploadAsync(
                 sp.GetRequiredService<IDenialWorkflowService>(), _logger,
-                labId, role, userName, managerRole, reviewerOnly, rows, token));
+                labId, role, userName, managerRole, reviewerOnly, rows, uploadBatchId, token));
         return Accepted(startResponse);
     }
 
@@ -327,7 +355,7 @@ public sealed class DenialWorkflowController : ControllerBase
     private static async Task<ClaimCsvUploadResult> ProcessClaimUploadAsync(
         IDenialWorkflowService _service, ILogger _logger,
         int labId, string role, string userName, bool managerRole, bool reviewerOnly,
-        List<Dictionary<string, string>> rows, CancellationToken ct)
+        List<Dictionary<string, string>> rows, string uploadBatchId, CancellationToken ct)
     {
         var errors = new List<string>();
         var rowResults = new List<ClaimCsvRowResult>();
@@ -479,7 +507,8 @@ public sealed class DenialWorkflowController : ControllerBase
                     {
                         LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId, CptCode = cptCode,
                         NoteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim",
-                        NoteText = notes, Status = NormalizeWorkflowStatus(baseTask.Status), CreatedBy = userName
+                        NoteText = notes, Status = NormalizeWorkflowStatus(baseTask.Status), CreatedBy = userName,
+                        UpdateSource = "Excel", UploadBatchId = uploadBatchId
                     }, ct);
                     addedComments++;
                     rowResult.Action = "Comment";
@@ -505,7 +534,8 @@ public sealed class DenialWorkflowController : ControllerBase
                         ClosureReason = CsvValue(item.Row, "ClosureReason"),
                         ValidationStatus = CsvValue(item.Row, "ValidationStatus"),
                         ExpectedResponseDate = CsvNullableDate(item.Row, "ExpectedResponseDate"),
-                        UpdateScope = "Claim", UpdateScopeValue = item.ClaimId
+                        UpdateScope = "Claim", UpdateScopeValue = item.ClaimId,
+                        UpdateSource = "Excel", UploadBatchId = uploadBatchId
                     };
                     var validationError = ValidateTaskStatusUpdate(template, role);
                     if (!string.IsNullOrWhiteSpace(validationError))
@@ -517,7 +547,8 @@ public sealed class DenialWorkflowController : ControllerBase
                     {
                         LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId, CptCode = cptCode,
                         NoteLevel = noteLevel, NoteText = comments,
-                        Status = updateStatus, NextFollowUpDate = template.ExpectedResponseDate, CreatedBy = userName
+                        Status = updateStatus, NextFollowUpDate = template.ExpectedResponseDate, CreatedBy = userName,
+                        UpdateSource = "Excel", UploadBatchId = uploadBatchId
                     }, ct);
                     addedComments++;
                     foreach (var task in claimTasks)
@@ -544,7 +575,8 @@ public sealed class DenialWorkflowController : ControllerBase
                     {
                         LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId, CptCode = cptCode,
                         NoteLevel = noteLevel, NoteText = comments,
-                        Status = NormalizeWorkflowStatus(baseTask.Status), CreatedBy = userName
+                        Status = NormalizeWorkflowStatus(baseTask.Status), CreatedBy = userName,
+                        UpdateSource = "Excel", UploadBatchId = uploadBatchId
                     }, ct);
                     updatedTasks += await _service.UpdateClaimCommentsAsync(labId, item.ClaimId, comments, userName, ct);
                     addedComments++;
@@ -611,7 +643,8 @@ public sealed class DenialWorkflowController : ControllerBase
                         {
                             LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId, CptCode = cptCode,
                             NoteLevel = "Claim", NoteText = $"{finalReason} - {escalationComment}",
-                            Status = isExternalEscalation ? "External Escalation" : "Internal Escalation", CreatedBy = userName
+                            Status = isExternalEscalation ? "External Escalation" : "Internal Escalation", CreatedBy = userName,
+                            UpdateSource = "Excel", UploadBatchId = uploadBatchId
                         }, ct);
                         addedComments++;
                         escalatedClaims++;
@@ -628,7 +661,8 @@ public sealed class DenialWorkflowController : ControllerBase
                             {
                                 LabId = labId, TaskId = task.TaskId, Status = "Escalated to AR Manager",
                                 Comments = $"{finalReason} - {escalationComment}", ActionBy = userName,
-                                UpdateScope = "Claim", UpdateScopeValue = item.ClaimId
+                                UpdateScope = "Claim", UpdateScopeValue = item.ClaimId,
+                                UpdateSource = "Excel", UploadBatchId = uploadBatchId
                             }, ct);
                         }
                     }
@@ -838,6 +872,7 @@ public sealed class DenialWorkflowController : ControllerBase
     public async Task<ActionResult<DenialNoteRow>> SaveNote(SaveDenialNoteRequest request, CancellationToken ct)
     {
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        if (DenyWriteForLabUser("add comments") is { } denied) return denied;
         if (request.LabId <= 0) return BadRequest("LabId is required.");
         if (string.IsNullOrWhiteSpace(request.ClaimId)) return BadRequest("ClaimId is required.");
         if (string.IsNullOrWhiteSpace(request.NoteText)) return BadRequest("Note text is required.");
@@ -893,6 +928,7 @@ public sealed class DenialWorkflowController : ControllerBase
     public async Task<ActionResult<IReadOnlyList<ClaimDocumentRow>>> UploadClaimDocuments([FromForm] int labId, [FromForm] string claimId, [FromForm] string? comment, [FromForm] string? uploadedBy, [FromForm] List<IFormFile> files, CancellationToken ct)
     {
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        if (DenyWriteForLabUser("upload documents") is { } denied) return denied;
         if (labId <= 0) return BadRequest("LabId is required.");
         if (string.IsNullOrWhiteSpace(claimId)) return BadRequest("ClaimId is required.");
         if ((IsClientManagerRole(role) || IsAccountManagerRole(role)) && !await HasExternalManagerDocumentAccessAsync(labId, claimId, null, null, role, ct))
@@ -956,6 +992,7 @@ public sealed class DenialWorkflowController : ControllerBase
     public async Task<IActionResult> DeleteClaimDocument([FromRoute] long documentId, [FromQuery] int labId, CancellationToken ct)
     {
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        if (DenyWriteForLabUser("delete documents") is { } denied) return denied;
         if (labId <= 0) return BadRequest("LabId is required.");
 
         var doc = await _service.GetClaimDocumentAsync(labId, documentId, ct);
@@ -1108,6 +1145,7 @@ public sealed class DenialWorkflowController : ControllerBase
     [HttpPost("verification/decision")]
     public async Task<ActionResult<DenialWorkflowResult>> VerificationDecision(VerificationDecisionRequest request, CancellationToken ct)
     {
+        if (DenyWriteForLabUser("decide verifications") is { } denied) return denied;
         var rows = await _service.DecideVerificationAsync(request, ct);
         return Ok(new DenialWorkflowResult { Success = rows > 0, RowsAffected = rows, Message = rows > 0 ? "Verification saved." : "Verification update failed." });
     }
@@ -1261,6 +1299,11 @@ public sealed class DenialWorkflowController : ControllerBase
         if ((IsClientManagerRole(role) || IsAccountManagerRole(role))
             && (view.Contains("INTERNALESCALATION") || view.Contains("ESCALATIONRESPONSE") || view == "RESPONSE"))
             return false;
+        // A Lab User never acts on an escalation, so no escalation queue is theirs to read
+        // either - they get the plain claim queues only.
+        if (IsLabUserRole(role)
+            && (view.Contains("ESCALATION") || view == "RESPONSE"))
+            return false;
         return true;
     }
 
@@ -1272,12 +1315,31 @@ public sealed class DenialWorkflowController : ControllerBase
             || r.Contains("ARMANAGER")
             || IsReviewerOnly(role)
             || r.Contains("CLIENTMANAGER")
-            || r.Contains("ACCOUNTMANAGER");
+            || r.Contains("ACCOUNTMANAGER")
+            // Exporting is reading: a Lab User may take their lab's claim data to a
+            // spreadsheet even though they cannot change any of it.
+            || IsLabUserRole(role);
     }
 
-    internal static bool IsReadOnlyWorkflowRole(string? role) => IsClientManagerRole(role) || IsAccountManagerRole(role);
+    internal static bool IsReadOnlyWorkflowRole(string? role)
+        => IsClientManagerRole(role) || IsAccountManagerRole(role) || IsLabUserRole(role);
+
     internal static bool IsClientManagerRole(string? role) => NormalizeRoleToken(role).Contains("CLIENTMANAGER");
     internal static bool IsAccountManagerRole(string? role) => NormalizeRoleToken(role).Contains("ACCOUNTMANAGER");
+
+    /// <summary>
+    /// Lab User: a lab's own staff, given the workflow screens to watch their claims but never
+    /// to change them. Stricter than Client/Account Manager, who are read-only on the claim
+    /// queues yet still respond to escalations routed to them - a Lab User has no write path at
+    /// all, so every write endpoint refuses the role outright.
+    /// </summary>
+    internal static bool IsLabUserRole(string? role) => NormalizeRoleToken(role).Contains("LABUSER");
+
+    /// <summary>403 for a Lab User, null for everyone else. Guards each write endpoint.</summary>
+    private ObjectResult? DenyWriteForLabUser(string action)
+        => IsLabUserRole(FirstClaim(ClaimTypes.Role, "role", "roles"))
+            ? StatusCode(StatusCodes.Status403Forbidden, new { message = $"Lab User access is view-only and cannot {action}." })
+            : null;
 
     internal static bool IsReviewerOnly(string? role)
     {

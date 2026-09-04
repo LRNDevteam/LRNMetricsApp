@@ -34,8 +34,17 @@ public sealed class WorkflowJwtIssuer
         var labs = new List<object>();
         if (isAdmin)
         {
+            // A demo lab is excluded from the admin shortcut: it reaches the token only for a
+            // user actually assigned it, so the Denial Workflow app scopes it the same way the
+            // dashboard's lab picker does. See LabConfigOptions.DemoLabs.
+            var assignedLabNames = user.Claims
+                .Where(c => c.Type == "LabName")
+                .Select(c => c.Value)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
             labs = (_labConfig.LabsID ?? new List<LabIdInfo>())
                 .Where(l => l.Id > 0 && !string.IsNullOrWhiteSpace(l.Name))
+                .Where(l => assignedLabNames.Contains(l.Name) || !_labConfig.IsDemoLab(l.Name))
                 .OrderBy(l => l.Name)
                 .DistinctBy(l => l.Id)
                 .Select(l => new { labId = l.Id, labName = l.Name })

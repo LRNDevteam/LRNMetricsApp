@@ -1,0 +1,1972 @@
+<title>Denial Workflow Benchmark</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+
+<style>
+/* ============================================================
+   Denial Workflow Benchmark — LRN Metrics / DWMS
+   Palette carried from Denial_Dashboard_Screens_Mockup_v2.0.html
+   so this document sits in the same family as the other mockups.
+   The DOCUMENT layer is theme-aware. The SCREEN mockups are
+   deliberately always-light: they depict a light product UI, the
+   way a screenshot would.
+   ============================================================ */
+
+:root{
+  /* product palette — do not drift, these are the app's own colours */
+  --navy-900:#0a2342; --navy-700:#1b3f72; --navy-head:#16325c;
+  --blue:#1b64da; --blue-050:#e9f1fd;
+  --teal:#0f9d8e; --teal-050:#e4f7f4;
+  --red:#d64550;   --red-050:#fdecee;
+  --amber:#c47f10; --amber-050:#fdf4e3;
+  --green:#1f9254; --green-050:#e8f6ee;
+  --purple:#7048b6;--purple-050:#f2edfb;
+
+  /* document layer — neutrals biased toward the navy */
+  --doc-bg:#f4f6fa;
+  --doc-card:#ffffff;
+  --doc-ink:#141f33;
+  --doc-ink-2:#485974;
+  --doc-ink-3:#7c8ba3;
+  --doc-line:#dde3ec;
+  --doc-line-2:#eaeef4;
+  --doc-rule:#c9d3e1;
+  --doc-accent:var(--teal);
+  --doc-link:#15559c;
+  --doc-quiet:#eef1f7;
+
+  --f-doc:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+  --f-ui:"IBM Plex Sans","Segoe UI",system-ui,-apple-system,Helvetica,Arial,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  --f-app:"Segoe UI",-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif;
+
+  --wrap:1180px;
+  --prose:70ch;
+}
+
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --doc-bg:#0c1421;
+    --doc-card:#131d2e;
+    --doc-ink:#dce4f0;
+    --doc-ink-2:#9dabc2;
+    --doc-ink-3:#71809a;
+    --doc-line:#22314b;
+    --doc-line-2:#1a2739;
+    --doc-rule:#2c3d5c;
+    --doc-link:#7fb0f0;
+    --doc-quiet:#182437;
+  }
+}
+:root[data-theme="dark"]{
+  --doc-bg:#0c1421;
+  --doc-card:#131d2e;
+  --doc-ink:#dce4f0;
+  --doc-ink-2:#9dabc2;
+  --doc-ink-3:#71809a;
+  --doc-line:#22314b;
+  --doc-line-2:#1a2739;
+  --doc-rule:#2c3d5c;
+  --doc-link:#7fb0f0;
+  --doc-quiet:#182437;
+}
+
+*{box-sizing:border-box;}
+body{
+  background:var(--doc-bg);
+  color:var(--doc-ink);
+  font-family:var(--f-doc);
+  font-size:16px;
+  line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+:focus-visible{outline:2px solid var(--blue); outline-offset:2px;}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
+
+.wrap{max-width:var(--wrap); margin:0 auto; padding:0 28px;}
+.prose{max-width:var(--prose);}
+p{margin:0 0 1em;}
+a{color:var(--doc-link);}
+
+/* ---------- masthead ---------- */
+.mast{
+  background:linear-gradient(103deg,var(--navy-900) 0%,var(--navy-700) 62%,#22528f 100%);
+  color:#e4ecf8;
+  border-bottom:3px solid var(--teal);
+}
+.mast .wrap{padding-top:38px; padding-bottom:34px;}
+.mast .kicker{
+  font-family:var(--f-ui); font-size:10.5px; font-weight:700;
+  letter-spacing:.2em; text-transform:uppercase; color:#8fb2df; margin-bottom:14px;
+}
+.mast h1{
+  font-family:var(--f-ui); font-weight:700; font-size:clamp(30px,4.4vw,46px);
+  line-height:1.06; letter-spacing:-.025em; margin:0 0 14px; color:#fff;
+  text-wrap:balance; max-width:19ch;
+}
+.mast .standfirst{
+  font-size:17px; color:#c3d5ee; max-width:60ch; margin:0; line-height:1.55;
+}
+.mast .standfirst em{color:#8fe0d4; font-style:italic;}
+
+/* ---------- document meta block ---------- */
+.meta{background:var(--doc-card); border-bottom:1px solid var(--doc-line);}
+.meta .wrap{padding-top:20px; padding-bottom:20px;}
+.metagrid{
+  display:grid; gap:2px 30px;
+  grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+  font-family:var(--f-ui); font-size:13px;
+}
+.metagrid div{display:flex; gap:8px; padding:5px 0; border-bottom:1px solid var(--doc-line-2);}
+.metagrid dt{
+  flex:0 0 84px; color:var(--doc-ink-3); font-size:10.5px; font-weight:700;
+  letter-spacing:.1em; text-transform:uppercase; padding-top:3px; margin:0;
+}
+.metagrid dd{margin:0; color:var(--doc-ink-2); font-weight:500;}
+
+/* ---------- section scaffolding ---------- */
+section{padding:56px 0 8px;}
+section + section{border-top:1px solid var(--doc-line);}
+.snum{
+  font-family:var(--f-mono); font-size:11px; font-weight:600; letter-spacing:.06em;
+  color:var(--teal); display:block; margin-bottom:9px;
+}
+h2{
+  font-family:var(--f-ui); font-weight:700; font-size:29px; letter-spacing:-.02em;
+  line-height:1.15; margin:0 0 12px; text-wrap:balance;
+}
+h3{
+  font-family:var(--f-ui); font-weight:600; font-size:18.5px; letter-spacing:-.01em;
+  margin:38px 0 10px;
+}
+h4{
+  font-family:var(--f-ui); font-weight:600; font-size:14px; margin:26px 0 8px;
+  color:var(--doc-ink-2);
+}
+.lede{font-size:17.5px; color:var(--doc-ink-2); max-width:64ch; margin-bottom:26px;}
+.rule{height:1px; background:var(--doc-rule); border:0; margin:44px 0;}
+
+ul.doc{margin:0 0 1.1em; padding-left:1.15em; max-width:var(--prose);}
+ul.doc li{margin-bottom:.5em;}
+ul.doc li::marker{color:var(--teal);}
+
+code, .mono{font-family:var(--f-mono); font-size:.86em;}
+code{
+  background:var(--doc-quiet); padding:1px 5px; border-radius:4px;
+  color:var(--doc-ink); border:1px solid var(--doc-line-2);
+}
+
+.callout{
+  border-left:3px solid var(--teal);
+  background:var(--doc-quiet);
+  padding:16px 20px; margin:26px 0; max-width:var(--prose);
+  font-size:15.5px; color:var(--doc-ink-2);
+}
+.callout b{color:var(--doc-ink);}
+.callout.warn{border-left-color:var(--amber);}
+
+/* ---------- capability matrix ---------- */
+.scroller{
+  overflow-x:auto; margin:26px 0 12px;
+  border:1px solid var(--doc-line); border-radius:10px; background:var(--doc-card);
+}
+table.matrix{border-collapse:collapse; width:100%; min-width:1010px; font-family:var(--f-ui); font-size:13px;}
+table.matrix th, table.matrix td{padding:9px 11px; border-bottom:1px solid var(--doc-line-2); text-align:center;}
+table.matrix thead th{
+  position:sticky; top:0; background:var(--navy-head); color:#e8eff9;
+  font-weight:600; font-size:11px; letter-spacing:.04em; line-height:1.3;
+  border-bottom:0; vertical-align:bottom; padding-top:12px; padding-bottom:11px;
+}
+table.matrix thead th.us{background:var(--teal); color:#fff;}
+table.matrix thead th small{display:block; font-weight:400; font-size:9.5px; color:#a9c2e3; letter-spacing:.02em; margin-top:2px;}
+table.matrix thead th.us small{color:#c6f0e9;}
+table.matrix th.cap, table.matrix td.cap{
+  text-align:left; font-weight:600; color:var(--doc-ink);
+  min-width:266px; position:sticky; left:0; background:var(--doc-card);
+  border-right:1px solid var(--doc-line);
+}
+table.matrix thead th.cap{background:var(--navy-900); color:#e8eff9;}
+table.matrix td.us{background:color-mix(in srgb, var(--teal) 7%, transparent);}
+table.matrix tbody tr:hover td{background:color-mix(in srgb, var(--blue) 5%, transparent);}
+table.matrix tbody tr:hover td.cap{background:var(--doc-quiet);}
+table.matrix tbody tr.band td{
+  background:var(--doc-quiet); font-family:var(--f-ui); font-size:10.5px; font-weight:700;
+  letter-spacing:.13em; text-transform:uppercase; color:var(--doc-ink-3); text-align:left;
+  padding-top:11px; padding-bottom:8px;
+}
+.dot{
+  display:inline-block; width:15px; height:15px; border-radius:50%; vertical-align:-2px;
+  border:1.5px solid currentColor;
+}
+.dot.full{background:currentColor;}
+.dot.part{background:linear-gradient(90deg,currentColor 0 50%,transparent 50% 100%);}
+.dot.none{background:transparent; opacity:.42;}
+.c-yes{color:var(--green);} .c-part{color:var(--amber);} .c-no{color:var(--doc-ink-3);}
+.c-plan{color:var(--purple);}
+
+.legend{
+  display:flex; flex-wrap:wrap; gap:10px 26px; font-family:var(--f-ui); font-size:12.5px;
+  color:var(--doc-ink-2); margin:0 0 8px;
+}
+.legend span{display:inline-flex; align-items:center; gap:7px;}
+
+/* ---------- verdict cards ---------- */
+.verdicts{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); margin:30px 0 8px;}
+.verdict{
+  background:var(--doc-card); border:1px solid var(--doc-line); border-radius:10px;
+  padding:18px 20px 20px; font-family:var(--f-ui);
+}
+.verdict .tag{
+  font-size:10px; font-weight:700; letter-spacing:.13em; text-transform:uppercase;
+  display:inline-block; padding:3px 8px; border-radius:4px; margin-bottom:11px;
+}
+.verdict.win .tag{background:var(--green-050); color:#166b3f;}
+.verdict.par .tag{background:var(--blue-050); color:#144b9e;}
+.verdict.gap .tag{background:var(--red-050); color:#9e2d36;}
+.verdict h4{font-family:var(--f-ui); font-size:16px; margin:0 0 8px; color:var(--doc-ink);}
+.verdict p{font-family:var(--f-doc); font-size:14.5px; color:var(--doc-ink-2); margin:0 0 .7em; line-height:1.55;}
+.verdict p:last-child{margin-bottom:0;}
+.verdict ul{margin:0; padding-left:1.1em; font-size:13.5px; color:var(--doc-ink-2);}
+.verdict ul li{margin-bottom:.35em;}
+
+/* ---------- pipeline diagram ---------- */
+.pipe{
+  overflow-x:auto; background:var(--doc-card); border:1px solid var(--doc-line);
+  border-radius:10px; padding:24px 22px; margin:26px 0;
+}
+.pipe-row{display:flex; align-items:stretch; gap:0; min-width:900px;}
+.node{
+  flex:1 1 0; border:1px solid var(--doc-line); border-radius:8px; padding:11px 13px;
+  font-family:var(--f-ui); background:var(--doc-bg); min-width:140px;
+}
+.node .nlab{font-size:9.5px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--doc-ink-3);}
+.node .nname{font-size:13.5px; font-weight:600; margin-top:3px; color:var(--doc-ink); line-height:1.25;}
+.node .nsub{font-size:11.5px; color:var(--doc-ink-3); margin-top:4px; font-family:var(--f-mono);}
+.node.src{border-left:3px solid var(--doc-ink-3);}
+.node.proc{border-left:3px solid var(--blue);}
+.node.store{border-left:3px solid var(--navy-700);}
+.node.ui{border-left:3px solid var(--teal);}
+.node.future{border-left:3px solid var(--purple); border-style:dashed; background:var(--purple-050);}
+:root[data-theme="dark"] .node.future,
+:root:not([data-theme="light"]) .node.future{background:color-mix(in srgb,var(--purple) 16%, var(--doc-card));}
+.arrow{
+  flex:0 0 34px; display:grid; place-items:center; color:var(--doc-ink-3);
+  font-family:var(--f-ui); font-size:17px;
+}
+.pipe-cap{
+  font-family:var(--f-ui); font-size:11.5px; color:var(--doc-ink-3); margin-top:14px;
+  padding-top:12px; border-top:1px solid var(--doc-line-2);
+}
+
+/* ============================================================
+   SCREEN MOCKUPS — always light, they depict a light product
+   ============================================================ */
+figure.screen{margin:34px 0 44px;}
+.scap{
+  display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 14px;
+  font-family:var(--f-ui); margin-bottom:11px;
+}
+.scap .sid{
+  font-family:var(--f-mono); font-size:11px; font-weight:600; color:#fff;
+  background:var(--navy-700); border-radius:4px; padding:2px 7px; letter-spacing:.04em;
+}
+figure.future .scap .sid{background:var(--purple);}
+.scap .stitle{font-size:16px; font-weight:600; color:var(--doc-ink);}
+.scap .stack{
+  font-family:var(--f-mono); font-size:11px; color:var(--doc-ink-3);
+  margin-left:auto; text-align:right;
+}
+.scap .sflag{
+  font-size:9.5px; font-weight:700; letter-spacing:.12em; text-transform:uppercase;
+  padding:2px 7px; border-radius:3px; background:var(--green-050); color:#166b3f;
+}
+figure.future .scap .sflag{background:var(--purple-050); color:#54318f;}
+.snote{
+  font-size:14.5px; color:var(--doc-ink-2); max-width:var(--prose);
+  margin:13px 0 0; padding-left:13px; border-left:2px solid var(--doc-rule);
+}
+
+/* the frame: a fixed light world regardless of host theme */
+.app{
+  background:#eef2f7; color:#16233a; font-family:var(--f-app); font-size:12.5px;
+  border:1px solid #cbd5e3; border-radius:10px; overflow:hidden;
+  box-shadow:0 1px 2px rgba(13,35,64,.07),0 14px 34px rgba(13,35,64,.09);
+}
+figure.future .app{border-color:#b9a8de;}
+.app *{box-sizing:border-box;}
+.app .num{font-variant-numeric:tabular-nums;}
+.app .code{font-family:var(--f-mono); font-size:11px;}
+
+.app-top{
+  background:linear-gradient(100deg,#0a2342,#1b3f72); color:#dfe8f5;
+  display:flex; align-items:center; gap:12px; padding:9px 14px; font-size:12px;
+}
+.app-top .logo{
+  width:26px;height:26px;border:1.5px solid #7fa6d9;border-radius:5px;display:grid;place-items:center;
+  font-weight:800;font-size:9px;color:#bcd3f0;letter-spacing:-.04em;
+}
+.app-top .brand b{font-size:12.5px;letter-spacing:.1em;color:#fff;display:block;line-height:1.1;}
+.app-top .brand span{font-size:8px;letter-spacing:.28em;color:#8fb0dc;}
+.app-top .chip{
+  background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.22);
+  border-radius:6px;padding:3px 9px;font-size:11px;font-weight:600;color:#fff;
+}
+.app-top .spacer{margin-left:auto;}
+.app-top .who{font-size:11px;color:#b6cbe8;}
+
+.app-nav{background:#fff;border-bottom:1px solid #e2e8f0;display:flex;gap:0;overflow-x:auto;}
+.app-nav a{
+  color:#4a5b74;font-size:11.5px;font-weight:600;padding:8px 12px;white-space:nowrap;
+  text-decoration:none;border-bottom:2.5px solid transparent;
+}
+.app-nav a.on{color:#1b64da;border-bottom-color:#1b64da;}
+figure.future .app-nav a.on{color:#7048b6;border-bottom-color:#7048b6;}
+.app-nav a.new::after{
+  content:"NEW";font-size:7.5px;font-weight:800;letter-spacing:.08em;color:#fff;
+  background:#7048b6;border-radius:3px;padding:1px 4px;margin-left:5px;vertical-align:1px;
+}
+
+.app-head{
+  background:#fff;border-bottom:1px solid #e2e8f0;padding:11px 14px;
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+}
+.app-head h5{margin:0;font-size:15px;font-weight:700;letter-spacing:-.015em;}
+.app-head .crumb{font-size:10.5px;color:#7d8ca4;}
+.app-head .crumb b{color:#0f9d8e;font-weight:600;}
+
+.app-body{padding:14px;}
+.app-split{display:flex; gap:0; align-items:stretch;}
+.side{
+  flex:0 0 176px; background:#fff; border-right:1px solid #e2e8f0; padding:9px 0;
+}
+.side .sgrp{
+  font-size:8.5px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:#a3b0c4;
+  padding:8px 12px 4px;
+}
+.side .q{
+  display:flex;align-items:center;gap:6px;padding:5.5px 12px;font-size:11.5px;color:#4a5b74;
+  border-left:2.5px solid transparent;
+}
+.side .q b{margin-left:auto;font-size:10.5px;color:#7d8ca4;font-variant-numeric:tabular-nums;
+  background:#eef2f7;border-radius:9px;padding:0 6px;min-width:22px;text-align:center;}
+.side .q.on{background:#e9f1fd;color:#1b64da;font-weight:700;border-left-color:#1b64da;}
+.side .q.on b{background:#1b64da;color:#fff;}
+.side .q.alert b{background:#fdecee;color:#d64550;font-weight:700;}
+.side .q.on.alert b{background:#d64550;color:#fff;}
+.main{flex:1 1 auto; min-width:0; padding:12px 14px; background:#eef2f7;}
+
+/* tiles */
+.tiles{display:grid;gap:9px;grid-template-columns:repeat(auto-fit,minmax(124px,1fr));margin-bottom:12px;}
+.tile{background:#fff;border:1px solid #e2e8f0;border-radius:9px;padding:10px 12px;}
+.tile .tl{font-size:8.5px;font-weight:800;letter-spacing:.11em;text-transform:uppercase;color:#7d8ca4;}
+.tile .tv{font-size:21px;font-weight:700;letter-spacing:-.03em;margin-top:3px;font-variant-numeric:tabular-nums;}
+.tile .td{font-size:10.5px;color:#7d8ca4;margin-top:1px;}
+.tile.acc-red{border-top:2.5px solid #d64550;} .tile.acc-red .tv{color:#d64550;}
+.tile.acc-amb{border-top:2.5px solid #c47f10;} .tile.acc-amb .tv{color:#c47f10;}
+.tile.acc-grn{border-top:2.5px solid #1f9254;} .tile.acc-grn .tv{color:#1f9254;}
+.tile.acc-tel{border-top:2.5px solid #0f9d8e;} .tile.acc-tel .tv{color:#0c7a70;}
+.tile.acc-pur{border-top:2.5px solid #7048b6;} .tile.acc-pur .tv{color:#7048b6;}
+
+/* panels + tables inside screens */
+.pan{background:#fff;border:1px solid #e2e8f0;border-radius:9px;overflow:hidden;margin-bottom:11px;}
+.pan-h{
+  padding:8px 12px;border-bottom:1px solid #eef2f7;font-weight:700;font-size:12px;
+  display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+}
+.pan-h .hint{margin-left:auto;font-weight:400;font-size:10.5px;color:#7d8ca4;}
+.pan-b{padding:11px 12px;}
+.tblwrap{overflow-x:auto;}
+table.g{border-collapse:collapse;width:100%;font-size:11px;min-width:100%;}
+table.g th{
+  background:#16325c;color:#e5edf8;font-weight:600;font-size:9.5px;letter-spacing:.05em;
+  text-transform:uppercase;padding:6px 8px;text-align:left;white-space:nowrap;
+}
+table.g td{padding:5.5px 8px;border-bottom:1px solid #eef2f7;white-space:nowrap;}
+table.g tbody tr:nth-child(even) td{background:#fafbfd;}
+table.g td.r, table.g th.r{text-align:right;font-variant-numeric:tabular-nums;}
+table.g td.money{font-variant-numeric:tabular-nums;}
+
+.pill{
+  display:inline-block;font-size:9.5px;font-weight:700;padding:1.5px 7px;border-radius:10px;
+  letter-spacing:.02em;white-space:nowrap;
+}
+.p-new{background:#e9f1fd;color:#144b9e;}
+.p-asg{background:#e4f7f4;color:#0c7a70;}
+.p-risk{background:#fdecee;color:#9e2d36;}
+.p-warn{background:#fdf4e3;color:#8a5a06;}
+.p-done{background:#e8f6ee;color:#166b3f;}
+.p-esc{background:#f2edfb;color:#54318f;}
+.p-grey{background:#eef2f7;color:#4a5b74;}
+
+.btn{
+  display:inline-block;font-size:11px;font-weight:600;border-radius:6px;padding:4.5px 11px;
+  border:1px solid transparent;
+}
+.btn-primary{background:#1b64da;color:#fff;}
+.btn-teal{background:#0f9d8e;color:#fff;}
+.btn-purple{background:#7048b6;color:#fff;}
+.btn-ghost{background:#fff;border-color:#cbd5e3;color:#4a5b74;}
+.btn-danger{background:#fff;border-color:#e9b4b9;color:#c03a45;}
+
+.filters{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;}
+.fld{
+  background:#fff;border:1px solid #cbd5e3;border-radius:6px;padding:4px 9px;font-size:10.5px;color:#4a5b74;
+  display:inline-flex;align-items:center;gap:6px;
+}
+.fld i{font-style:normal;color:#a3b0c4;font-size:9px;}
+.fld b{font-weight:600;color:#16233a;}
+
+/* score / meter bits used by the future screens */
+.meter{display:flex;align-items:center;gap:7px;}
+.meter .bar{width:56px;height:6px;border-radius:3px;background:#e2e8f0;overflow:hidden;flex:0 0 auto;}
+.meter .bar i{display:block;height:100%;border-radius:3px;}
+.meter .v{font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;}
+.hi i{background:#1f9254;} .hi .v{color:#166b3f;}
+.md i{background:#c47f10;} .md .v{color:#8a5a06;}
+.lo i{background:#d64550;} .lo .v{color:#9e2d36;}
+
+.cite{
+  background:#f7f9fc;border:1px solid #e2e8f0;border-left:2.5px solid #0f9d8e;border-radius:0 6px 6px 0;
+  padding:8px 11px;font-size:10.5px;color:#4a5b74;line-height:1.5;
+}
+.cite b{color:#16233a;}
+.cite .src{font-family:var(--f-mono);font-size:9.5px;color:#7d8ca4;display:block;margin-top:4px;}
+
+.letter{
+  background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:14px 16px;
+  font-size:11px;line-height:1.65;color:#2a3a52;max-height:none;
+}
+.letter .lh{font-weight:700;color:#16233a;}
+.letter .redact{background:#fdf4e3;border-bottom:1px dashed #c47f10;padding:0 2px;}
+
+.two{display:grid;gap:11px;grid-template-columns:1.35fr .95fr;}
+@media (max-width:760px){.two{grid-template-columns:1fr;}}
+
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:11px;}
+.kv dt{color:#7d8ca4;font-size:9.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;padding-top:2px;margin:0;}
+.kv dd{margin:0;color:#16233a;font-weight:600;}
+
+.strip{
+  display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:9px 12px;
+  background:#f7f9fc;border-top:1px solid #eef2f7;
+}
+.strip .lbl{font-size:9.5px;font-weight:800;letter-spacing:.11em;text-transform:uppercase;color:#7d8ca4;margin-right:2px;}
+
+.deadline{
+  display:inline-flex;align-items:center;gap:6px;font-size:10.5px;font-weight:700;
+  background:#fdecee;color:#9e2d36;border:1px solid #f3c6ca;border-radius:6px;padding:3px 9px;
+}
+.deadline.ok{background:#e8f6ee;color:#166b3f;border-color:#bfe4cd;}
+
+/* ---------- roadmap ---------- */
+.road{margin:28px 0 10px;}
+.phase{
+  display:grid; grid-template-columns:112px 1fr; gap:0 22px;
+  padding:16px 0; border-top:1px solid var(--doc-line);
+}
+.phase:last-child{border-bottom:1px solid var(--doc-line);}
+.phase .pk{font-family:var(--f-ui);}
+.phase .pk .pn{
+  font-family:var(--f-mono); font-size:11px; font-weight:600; color:#fff;
+  background:var(--navy-700); border-radius:4px; padding:2px 8px; display:inline-block;
+}
+.phase.new .pk .pn{background:var(--purple);}
+.phase .pk .pw{display:block; font-size:11.5px; color:var(--doc-ink-3); margin-top:6px;}
+.phase h4{margin:0 0 5px; font-size:16px; color:var(--doc-ink);}
+.phase p{margin:0 0 .5em; font-size:14.5px; color:var(--doc-ink-2); max-width:64ch;}
+.phase .refs{font-family:var(--f-ui); font-size:11.5px; color:var(--doc-ink-3);}
+.phase .refs span{
+  display:inline-block; background:var(--doc-quiet); border:1px solid var(--doc-line);
+  border-radius:4px; padding:1px 7px; margin-right:5px; font-family:var(--f-mono);
+}
+
+/* ---------- footer ---------- */
+footer{
+  margin-top:56px; border-top:3px solid var(--navy-700);
+  background:var(--doc-card); padding:30px 0 44px;
+}
+footer .wrap{font-family:var(--f-ui); font-size:12.5px; color:var(--doc-ink-3);}
+footer h4{margin:0 0 10px; font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--doc-ink-2);}
+footer ul{margin:0; padding-left:1.1em;}
+footer li{margin-bottom:.35em;}
+.foot-cols{display:grid; gap:26px; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); margin-bottom:24px;}
+</style>
+
+<header class="mast">
+  <div class="wrap">
+    <div class="kicker">Lab Revenue Navigator · DWMS · Denial Management</div>
+    <h1>Denial Workflow Benchmark</h1>
+    <p class="standfirst">
+      Where our denial dashboard and workflow stand against the commercial market, the screens we
+      run today, and the five screens that close the gap. <em>Built on what we already have,
+      not beside it.</em>
+    </p>
+  </div>
+</header>
+
+<div class="meta">
+  <div class="wrap">
+    <dl class="metagrid">
+      <div><dt>Project</dt><dd>Denial Management — Dashboard + Workflow</dd></div>
+      <div><dt>Version</dt><dd>1.0 — for review</dd></div>
+      <div><dt>Date</dt><dd>3 September 2026</dd></div>
+      <div><dt>Baseline</dt><dd>Requirements v1.0 (as-built)</dd></div>
+      <div><dt>Sits with</dt><dd>Screens Mockup v2.0 · Agent Mockup v1.0</dd></div>
+      <div><dt>Screens</dt><dd>6 as-built · 5 proposed</dd></div>
+    </dl>
+  </div>
+</div>
+
+<main>
+
+<!-- ============================= 1 ============================= -->
+<section>
+  <div class="wrap">
+    <span class="snum">Section 01</span>
+    <h2>How we compare</h2>
+    <p class="lede">
+      Denial tooling splits into two jobs — working out <i>why</i> claims are denied, and
+      <i>getting them paid</i>. We have both, on two stacks. The commercial market has largely
+      converged on a third job we do not do at all: deciding <i>which denials are worth the
+      reviewer's next hour</i>.
+    </p>
+
+    <div class="callout warn">
+      <b>Read the vendor columns with care.</b> They are assembled from public product material and
+      analyst summaries gathered in September 2026, not from hands-on evaluation or a signed
+      demo. Treat them as a shortlist for a proper bake-off, not as a scorecard. The LRN column
+      is the only one drawn from the source.
+    </div>
+
+    <div class="legend">
+      <span><i class="dot full c-yes"></i> Built and in use</span>
+      <span><i class="dot part c-part"></i> Partial — exists but incomplete</span>
+      <span><i class="dot part c-plan"></i> Specified, not built <span class="mono" style="color:var(--doc-ink-3)">(LRN only)</span></span>
+      <span><i class="dot none c-no"></i> Not present</span>
+    </div>
+
+    <div class="scroller">
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th class="cap">Capability</th>
+            <th class="us">LRN / DWMS<small>ours, as built</small></th>
+            <th>Waystar<small>Denial + Appeal</small></th>
+            <th>Experian<small>Denial Workflow Mgr</small></th>
+            <th>XIFIN<small>RPM — lab</small></th>
+            <th>TELCOR<small>RCM — lab</small></th>
+            <th>Med-Metrix<small>AI Denials</small></th>
+            <th>Rivet<small>Resolve</small></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="band"><td colspan="8">Analysis — understanding the denial population</td></tr>
+          <tr>
+            <td class="cap">Denial volume &amp; balance analytics by payer, code, period</td>
+            <td class="us"><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">CPT line-level denial detail, not claim-level only</td>
+            <td class="us"><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">Denial → action classification master, editable by the client</td>
+            <td class="us"><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot none c-no"></i></td><td><i class="dot part c-part"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">Payer-behaviour / systemic root-cause analytics</td>
+            <td class="us"><i class="dot part c-part"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+          </tr>
+
+          <tr class="band"><td colspan="8">Action — moving a denial to resolution</td></tr>
+          <tr>
+            <td class="cap">Role-specific work queues (7 roles, distinct queue sets)</td>
+            <td class="us"><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot full c-yes"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">SLA clock, at-risk and breach tracking</td>
+            <td class="us"><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">Internal escalation to AR Manager, with response loop</td>
+            <td class="us"><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot none c-no"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot none c-no"></i></td><td><i class="dot part c-part"></i></td>
+          </tr>
+          <tr>
+            <td class="cap"><b>External escalation to the lab's own Client / Account Manager</b></td>
+            <td class="us"><i class="dot full c-yes"></i></td>
+            <td><i class="dot none c-no"></i></td><td><i class="dot none c-no"></i></td>
+            <td><i class="dot none c-no"></i></td><td><i class="dot none c-no"></i></td>
+            <td><i class="dot none c-no"></i></td><td><i class="dot none c-no"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">Write-off approval gated to a manager</td>
+            <td class="us"><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot none c-no"></i></td><td><i class="dot part c-part"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">Per-claim document upload with role-scoped access</td>
+            <td class="us"><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot part c-part"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">Full audit trail of every status change and actor</td>
+            <td class="us"><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot full c-yes"></i></td>
+          </tr>
+
+          <tr class="band"><td colspan="8">Prioritisation — deciding what to work next</td></tr>
+          <tr>
+            <td class="cap"><b>Overturn-probability scoring per denial</b></td>
+            <td class="us"><i class="dot none c-no"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot none c-no"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot part c-part"></i></td>
+          </tr>
+          <tr>
+            <td class="cap"><b>Worklist ranked by expected recovery, not by date</b></td>
+            <td class="us"><i class="dot none c-no"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot none c-no"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">Auto-routing of a denial to the right work group</td>
+            <td class="us"><i class="dot part c-part"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot part c-part"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">Timely-filing deadline surfaced on the work item</td>
+            <td class="us"><i class="dot part c-plan"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+          </tr>
+
+          <tr class="band"><td colspan="8">Resolution — producing and sending the appeal</td></tr>
+          <tr>
+            <td class="cap"><b>Payer-specific appeal letter generation</b></td>
+            <td class="us"><i class="dot part c-plan"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">Payer policy retrieval with a verifiable citation</td>
+            <td class="us"><i class="dot part c-plan"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot none c-no"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot none c-no"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">Appeal packet assembly (letter + records + cover sheet)</td>
+            <td class="us"><i class="dot none c-no"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">Direct submission to payer / clearinghouse</td>
+            <td class="us"><i class="dot part c-plan"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">Appeal outcome tracked back to the originating denial</td>
+            <td class="us"><i class="dot none c-no"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+          </tr>
+
+          <tr class="band"><td colspan="8">Prevention — stopping the denial happening</td></tr>
+          <tr>
+            <td class="cap"><b>Pre-submission claim edits / predictive scrubbing</b></td>
+            <td class="us"><i class="dot none c-no"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">Medical-necessity / LCD check before billing</td>
+            <td class="us"><i class="dot part c-part"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot none c-no"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">Eligibility &amp; prior-authorisation checking</td>
+            <td class="us"><i class="dot none c-no"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot full c-yes"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot none c-no"></i></td><td><i class="dot none c-no"></i></td>
+          </tr>
+
+          <tr class="band"><td colspan="8">Platform — how it is operated</td></tr>
+          <tr>
+            <td class="cap"><b>Multi-lab tenancy with per-lab database isolation</b></td>
+            <td class="us"><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot none c-no"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">Client-configurable menu &amp; feature grants per role</td>
+            <td class="us"><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot none c-no"></i></td><td><i class="dot part c-part"></i></td>
+          </tr>
+          <tr>
+            <td class="cap">Read-only lab-staff view of their own claims</td>
+            <td class="us"><i class="dot full c-yes"></i></td>
+            <td><i class="dot part c-part"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot full c-yes"></i></td><td><i class="dot part c-part"></i></td>
+            <td><i class="dot none c-no"></i></td><td><i class="dot none c-no"></i></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>What the matrix says</h3>
+
+    <div class="verdicts">
+      <div class="verdict win">
+        <span class="tag">We are ahead</span>
+        <h4>The escalation loop nobody else has</h4>
+        <p>
+          Every vendor above models a denial as a job for the billing organisation. Ours is the
+          only one that routes a claim <i>out</i> to the lab's own Client Manager or Account
+          Manager, holds it in a <code>Respond Escalation</code> queue, accepts their answer and
+          their documents, then returns it to the AR Manager.
+        </p>
+        <p>
+          That loop exists because we serve outsourced lab RCM, where the missing piece of
+          information usually sits with the lab, not the biller. It is a genuine differentiator
+          and it should be on the first slide of any competitive deck.
+        </p>
+      </div>
+      <div class="verdict par">
+        <span class="tag">We are level</span>
+        <h4>Queues, SLA, audit, line-level detail</h4>
+        <p>
+          Seven roles with distinct queue sets, server-side scoping from the JWT, an SLA clock,
+          and a <code>DenialTaskHistory</code> row for every action are all at or above what the
+          mid-market products describe.
+        </p>
+        <p>
+          CPT line-level denial detail with <code>ICDComplianceStatus</code> and
+          <code>DenialValidity</code> puts us with the lab specialists — XIFIN and TELCOR — and
+          ahead of the general hospital tools, which mostly stop at claim level.
+        </p>
+      </div>
+      <div class="verdict gap">
+        <span class="tag">We are behind</span>
+        <h4>Nothing tells a reviewer what to work first</h4>
+        <p>
+          Our queues sort by status and date opened. Every competitor sorts by money it expects
+          to recover. A reviewer with 340 open claims and six hours needs the second thing.
+        </p>
+        <ul>
+          <li>No overturn-probability score</li>
+          <li>No expected-recovery ranking</li>
+          <li>No appeal letter generation</li>
+          <li>No packet assembly or submission</li>
+          <li>Nothing at all before the denial happens</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout">
+      <b>The three lines that matter.</b> Overturn scoring, appeal generation and pre-submission
+      prevention are the only rows where we are behind on capability rather than on polish. The
+      first two are already scoped in the Agentic AI development plan — they are funding and
+      sequencing questions, not design questions. The third is not scoped anywhere, and it is the
+      one the lab specialists lead on: XIFIN markets predictive denial prevention as its headline
+      claim, and prevention is the only intervention with no reviewer cost at all.
+    </div>
+  </div>
+</section>
+
+<!-- ============================= 2 ============================= -->
+<section>
+  <div class="wrap">
+    <span class="snum">Section 02</span>
+    <h2>The process we run today</h2>
+    <p class="lede">
+      Denial management is delivered through two screens on two stacks over one database per lab.
+      The dashboard answers <i>what was denied</i>; the workflow answers <i>who is working it</i>.
+      A change to one does not apply to the other.
+    </p>
+
+    <div class="pipe">
+      <div class="pipe-row">
+        <div class="node src">
+          <div class="nlab">Source</div>
+          <div class="nname">Payer Validation Report</div>
+          <div class="nsub">per lab, per run</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="node proc">
+          <div class="nlab">Worker</div>
+          <div class="nname">DenialDatabaseWorker</div>
+          <div class="nsub">classify · stamp RunId</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="node store">
+          <div class="nlab">Lab database</div>
+          <div class="nname">TaskBoard · LineItem · Insight</div>
+          <div class="nsub">scoped by LabId</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="node ui">
+          <div class="nlab">MVC · analysis</div>
+          <div class="nname">Denial Dashboard</div>
+          <div class="nsub">9 tabs, role-filtered</div>
+        </div>
+        <div class="arrow">＋</div>
+        <div class="node ui">
+          <div class="nlab">React · action</div>
+          <div class="nname">Denial Workflow</div>
+          <div class="nsub">via LRN.ReportsApi</div>
+        </div>
+      </div>
+      <div class="pipe-cap">
+        Both screens read the same tables, so the figures agree. They have different permission
+        models, different navigation and different audiences. Everything downstream of the
+        database is where a reviewer actually spends their day.
+      </div>
+    </div>
+
+    <h3>Claim lifecycle</h3>
+    <p class="prose">
+      A claim sits in exactly one queue at a time. The status set below is canonical — the sidebar
+      badge counts, the SLA tracker and the dashboard's Workflow Status Summary are all the same
+      numbers counted from it.
+    </p>
+
+    <div class="pipe">
+      <div class="pipe-row" style="min-width:960px;">
+        <div class="node src"><div class="nlab">01</div><div class="nname">New</div></div>
+        <div class="arrow">→</div>
+        <div class="node src"><div class="nlab">02</div><div class="nname">Unassigned</div></div>
+        <div class="arrow">→</div>
+        <div class="node proc"><div class="nlab">03</div><div class="nname">Assigned</div><div class="nsub">SLA clock starts</div></div>
+        <div class="arrow">→</div>
+        <div class="node proc"><div class="nlab">04 — any of</div><div class="nname">Payer Follow-up · Pending Payer · Pending Docs</div><div class="nsub">each with required fields</div></div>
+        <div class="arrow">→</div>
+        <div class="node ui"><div class="nlab">05 — or</div><div class="nname">Escalated · External · Write-off Pending</div><div class="nsub">manager or client decides</div></div>
+        <div class="arrow">→</div>
+        <div class="node store"><div class="nlab">06</div><div class="nname">Closed</div></div>
+      </div>
+      <div class="pipe-cap">
+        Rework re-enters at step 03. Every transition writes a <code>DenialTaskHistory</code> row
+        carrying the acting user.
+      </div>
+    </div>
+
+    <hr class="rule">
+    <h3>As-built screens</h3>
+    <p class="prose" style="margin-bottom:6px;">
+      Six screens, in the order a claim passes through them. Figures shown are illustrative
+      sample data, not production numbers.
+    </p>
+  </div>
+
+  <div class="wrap">
+
+    <!-- S1 -->
+    <figure class="screen">
+      <figcaption class="scap">
+        <span class="sid">S1</span>
+        <span class="stitle">Denial Dashboard — Overview</span>
+        <span class="sflag">As built</span>
+        <span class="stack">ASP.NET MVC · /DenialDashboard</span>
+      </figcaption>
+      <div class="app">
+        <div class="app-top">
+          <div class="logo">LRN</div>
+          <div class="brand"><b>LAB REVENUE NAVIGATOR</b><span>METRICS PLATFORM</span></div>
+          <div class="chip">BioReference — MI</div>
+          <div class="spacer"></div>
+          <div class="who">R. Okonkwo · AR Manager</div>
+        </div>
+        <div class="app-nav">
+          <a class="on">Dashboard</a><a>Weekly Breakdown</a><a>Monthly Breakdown</a>
+          <a>Filter Panel</a><a>Denial Input</a><a>Task Board</a><a>SLA Tracker</a>
+          <a>Denial Insight</a><a>Line Item</a>
+        </div>
+        <div class="app-head">
+          <h5>Denial Dashboard</h5>
+          <div class="crumb">Run <b>2026-08-31</b> · 14,208 lines</div>
+          <div style="margin-left:auto;display:flex;gap:6px;">
+            <span class="btn btn-ghost">Export to Excel</span>
+            <span class="btn btn-teal">Open Denial Workflow ↗</span>
+          </div>
+        </div>
+        <div class="app-body">
+          <div class="filters">
+            <span class="fld"><i>Date</i><b>01 Jul – 31 Aug 2026</b></span>
+            <span class="fld"><i>Payer</i><b>All</b></span>
+            <span class="fld"><i>Denial code</i><b>All</b></span>
+            <span class="fld"><i>Classification</i><b>All</b></span>
+            <span class="fld"><i>Action category</i><b>All</b></span>
+            <span class="fld"><i>Priority</i><b>All</b></span>
+            <span class="fld"><i>Clinic</i><b>All</b></span>
+            <span class="fld"><i>Sales rep</i><b>All</b></span>
+          </div>
+          <div class="tiles">
+            <div class="tile"><div class="tl">Denied lines</div><div class="tv num">14,208</div><div class="td">this run</div></div>
+            <div class="tile acc-red"><div class="tl">Denied balance</div><div class="tv num">$3.42M</div><div class="td">insurance</div></div>
+            <div class="tile acc-amb"><div class="tl">Denial rate</div><div class="tv num">18.7%</div><div class="td">of billed lines</div></div>
+            <div class="tile acc-grn"><div class="tl">Recovered</div><div class="tv num">$881K</div><div class="td">closed paid</div></div>
+            <div class="tile"><div class="tl">Open claims</div><div class="tv num">2,940</div><div class="td">in workflow</div></div>
+            <div class="tile acc-red"><div class="tl">SLA breached</div><div class="tv num">312</div><div class="td">past due date</div></div>
+          </div>
+          <div class="two">
+            <div class="pan">
+              <div class="pan-h">Top denial reasons by balance <span class="hint">CARC · rolling 60 days</span></div>
+              <div class="tblwrap">
+                <table class="g">
+                  <thead><tr><th>Code</th><th>Description</th><th>Classification</th><th class="r">Lines</th><th class="r">Balance</th><th class="r">Rate</th></tr></thead>
+                  <tbody>
+                    <tr><td><span class="code">CO-50</span></td><td>Not deemed a medical necessity</td><td>Medical Necessity</td><td class="r num">3,104</td><td class="r num">$946,220</td><td class="r num">27.7%</td></tr>
+                    <tr><td><span class="code">CO-16</span></td><td>Claim lacks information</td><td>Missing Information</td><td class="r num">2,617</td><td class="r num">$612,880</td><td class="r num">17.9%</td></tr>
+                    <tr><td><span class="code">CO-197</span></td><td>Pre-certification absent</td><td>Authorisation</td><td class="r num">1,880</td><td class="r num">$524,110</td><td class="r num">15.3%</td></tr>
+                    <tr><td><span class="code">PR-204</span></td><td>Not covered under the plan</td><td>Non-covered</td><td class="r num">1,455</td><td class="r num">$388,640</td><td class="r num">11.4%</td></tr>
+                    <tr><td><span class="code">CO-97</span></td><td>Included in another service</td><td>Bundling</td><td class="r num">1,209</td><td class="r num">$301,905</td><td class="r num">8.8%</td></tr>
+                    <tr><td><span class="code">CO-29</span></td><td>Time limit for filing expired</td><td>Timely Filing</td><td class="r num">742</td><td class="r num">$194,330</td><td class="r num">5.7%</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="pan">
+              <div class="pan-h">Workflow status summary <span class="hint">written by the React app</span></div>
+              <div class="pan-b">
+                <table class="g" style="min-width:0;">
+                  <tbody>
+                    <tr><td><span class="pill p-new">New</span></td><td class="r num">418</td><td class="r num" style="color:#7d8ca4;">$512K</td></tr>
+                    <tr><td><span class="pill p-grey">Unassigned</span></td><td class="r num">286</td><td class="r num" style="color:#7d8ca4;">$402K</td></tr>
+                    <tr><td><span class="pill p-asg">Assigned</span></td><td class="r num">1,104</td><td class="r num" style="color:#7d8ca4;">$1.29M</td></tr>
+                    <tr><td><span class="pill p-warn">Pending Payer</span></td><td class="r num">497</td><td class="r num" style="color:#7d8ca4;">$588K</td></tr>
+                    <tr><td><span class="pill p-warn">Pending Docs</span></td><td class="r num">301</td><td class="r num" style="color:#7d8ca4;">$344K</td></tr>
+                    <tr><td><span class="pill p-esc">Escalated</span></td><td class="r num">168</td><td class="r num" style="color:#7d8ca4;">$221K</td></tr>
+                    <tr><td><span class="pill p-risk">Write-off pending</span></td><td class="r num">92</td><td class="r num" style="color:#7d8ca4;">$61K</td></tr>
+                    <tr><td><span class="pill p-done">Closed</span></td><td class="r num">2,318</td><td class="r num" style="color:#7d8ca4;">$881K</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="snote">
+        The Workflow Status Summary is sourced from what the React app writes, so a manager
+        without access to the workflow app can still see where work sits. Tab visibility is
+        decided in the view from the user's role — an AR Reviewer sees only Task Board and Line
+        Item.
+      </p>
+    </figure>
+
+    <!-- S2 -->
+    <figure class="screen">
+      <figcaption class="scap">
+        <span class="sid">S2</span>
+        <span class="stitle">Denial Insight — reviewer assignment</span>
+        <span class="sflag">As built</span>
+        <span class="stack">MVC · AR Manager + Admin only</span>
+      </figcaption>
+      <div class="app">
+        <div class="app-nav">
+          <a>Dashboard</a><a>Weekly Breakdown</a><a>Monthly Breakdown</a><a>Filter Panel</a>
+          <a>Task Board</a><a>SLA Tracker</a><a class="on">Denial Insight</a><a>Line Item</a>
+        </div>
+        <div class="app-head">
+          <h5>Denial Insight</h5>
+          <div class="crumb">Assign whole denial-code / payer groups in one action</div>
+          <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
+            <span class="fld"><i>Assign to</i><b>P. Nakamura ▾</b></span>
+            <span class="btn btn-primary">Assign selected (3)</span>
+          </div>
+        </div>
+        <div class="app-body">
+          <div class="pan">
+            <div class="tblwrap">
+              <table class="g">
+                <thead><tr><th style="width:26px;">☑</th><th>Payer</th><th>Denial code</th><th>Classification</th><th>Action category</th><th class="r">Claims</th><th class="r">Lines</th><th class="r">Balance</th><th class="r">Avg age</th><th>Current owner</th></tr></thead>
+                <tbody>
+                  <tr><td>☑</td><td>Aetna</td><td><span class="code">CO-50</span></td><td>Medical Necessity</td><td>Appeal with records</td><td class="r num">412</td><td class="r num">988</td><td class="r num">$284,510</td><td class="r num">37 d</td><td><span class="pill p-grey">Unassigned</span></td></tr>
+                  <tr><td>☑</td><td>UnitedHealthcare</td><td><span class="code">CO-16</span></td><td>Missing Information</td><td>Rebill corrected</td><td class="r num">338</td><td class="r num">701</td><td class="r num">$196,204</td><td class="r num">22 d</td><td><span class="pill p-grey">Unassigned</span></td></tr>
+                  <tr><td>☑</td><td>Cigna</td><td><span class="code">CO-197</span></td><td>Authorisation</td><td>Retro-auth request</td><td class="r num">255</td><td class="r num">509</td><td class="r num">$171,880</td><td class="r num">41 d</td><td><span class="pill p-grey">Unassigned</span></td></tr>
+                  <tr><td>☐</td><td>BCBS Michigan</td><td><span class="code">PR-204</span></td><td>Non-covered</td><td>Patient responsibility</td><td class="r num">190</td><td class="r num">344</td><td class="r num">$88,120</td><td class="r num">15 d</td><td>P. Nakamura</td></tr>
+                  <tr><td>☐</td><td>Medicare Part B</td><td><span class="code">CO-29</span></td><td>Timely Filing</td><td>Write-off review</td><td class="r num">146</td><td class="r num">288</td><td class="r num">$61,340</td><td class="r num">96 d</td><td>D. Alvarez</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="snote">
+        Assignment happens at the <i>group</i> level — payer plus denial code — not claim by claim.
+        This is efficient and it is also why nothing in the current design can rank an individual
+        claim: the unit of decision is the group.
+      </p>
+    </figure>
+
+    <!-- S3 -->
+    <figure class="screen">
+      <figcaption class="scap">
+        <span class="sid">S3</span>
+        <span class="stitle">Claim Assignment — AR Manager</span>
+        <span class="sflag">As built</span>
+        <span class="stack">React · LRN.WebUI · #claims</span>
+      </figcaption>
+      <div class="app">
+        <div class="app-top">
+          <div class="logo">LRN</div>
+          <div class="brand"><b>DENIAL WORKFLOW</b><span>LAB REVENUE NAVIGATOR</span></div>
+          <div class="chip">BioReference — MI</div>
+          <div class="spacer"></div>
+          <div class="who">R. Okonkwo · AR Manager</div>
+        </div>
+        <div class="app-nav">
+          <a>Denial Dashboard</a><a>Aging Dashboard</a><a class="on">Claim Assignment</a>
+          <a>Escalation Queue</a><a>Denial Mapper</a><a>Action Verification</a><a>Reports</a><a>Uploads</a>
+        </div>
+        <div class="app-split">
+          <div class="side">
+            <div class="sgrp">Queues</div>
+            <div class="q"><span>New</span><b>418</b></div>
+            <div class="q on"><span>Unassigned</span><b>286</b></div>
+            <div class="q alert"><span>SLA At Risk</span><b>74</b></div>
+            <div class="q"><span>Assigned</span><b>1,104</b></div>
+            <div class="q"><span>Payer Follow-up</span><b>288</b></div>
+            <div class="q"><span>Pending Documentation</span><b>301</b></div>
+            <div class="q"><span>Pending Payer Response</span><b>497</b></div>
+            <div class="q alert"><span>Internal Escalation</span><b>96</b></div>
+            <div class="q alert"><span>External Escalation</span><b>72</b></div>
+            <div class="q"><span>External Response</span><b>31</b></div>
+            <div class="q alert"><span>Write Off Approval</span><b>92</b></div>
+            <div class="q"><span>Closed</span><b>2,318</b></div>
+            <div class="q"><span>All Claims</span><b>5,184</b></div>
+          </div>
+          <div class="main">
+            <div class="filters">
+              <span class="fld"><i>Reviewer</i><b>Any</b></span>
+              <span class="fld"><i>Aging</i><b>Any</b></span>
+              <span class="fld"><i>Classification</i><b>Any</b></span>
+              <span class="fld"><i>Action category</i><b>Any</b></span>
+              <span class="fld"><i>Payer</i><b>Any</b></span>
+              <span class="fld"><i>Panel</i><b>Any</b></span>
+              <span class="fld"><i>Balance bucket</i><b>Any</b></span>
+              <span class="btn btn-ghost">Export</span>
+              <span class="btn btn-primary">Assign selected (4)</span>
+            </div>
+            <div class="pan">
+              <div class="pan-h">Unassigned <span class="hint">286 claims · $402,118 · sorted by Date Opened</span></div>
+              <div class="tblwrap">
+                <table class="g">
+                  <thead><tr><th style="width:24px;">☑</th><th>Claim</th><th>Patient acct</th><th>Payer</th><th>Denial</th><th>Classification</th><th class="r">Lines</th><th class="r">Balance</th><th class="r">Age</th><th>Opened</th><th>Status</th></tr></thead>
+                  <tbody>
+                    <tr><td>☑</td><td><span class="code">CLM-4471902</span></td><td class="code">A-882014</td><td>Aetna</td><td><span class="code">CO-50</span></td><td>Medical Necessity</td><td class="r num">4</td><td class="r num">$1,284.00</td><td class="r num">61 d</td><td>02 Jul</td><td><span class="pill p-grey">Unassigned</span></td></tr>
+                    <tr><td>☑</td><td><span class="code">CLM-4472118</span></td><td class="code">A-882207</td><td>Cigna</td><td><span class="code">CO-197</span></td><td>Authorisation</td><td class="r num">2</td><td class="r num">$3,940.00</td><td class="r num">58 d</td><td>05 Jul</td><td><span class="pill p-grey">Unassigned</span></td></tr>
+                    <tr><td>☑</td><td><span class="code">CLM-4472540</span></td><td class="code">A-883001</td><td>UnitedHealthcare</td><td><span class="code">CO-16</span></td><td>Missing Information</td><td class="r num">6</td><td class="r num">$412.50</td><td class="r num">54 d</td><td>09 Jul</td><td><span class="pill p-grey">Unassigned</span></td></tr>
+                    <tr><td>☑</td><td><span class="code">CLM-4472883</span></td><td class="code">A-883440</td><td>BCBS Michigan</td><td><span class="code">CO-97</span></td><td>Bundling</td><td class="r num">3</td><td class="r num">$208.75</td><td class="r num">51 d</td><td>12 Jul</td><td><span class="pill p-grey">Unassigned</span></td></tr>
+                    <tr><td>☐</td><td><span class="code">CLM-4473204</span></td><td class="code">A-883911</td><td>Medicare Part B</td><td><span class="code">CO-29</span></td><td>Timely Filing</td><td class="r num">1</td><td class="r num">$96.20</td><td class="r num">49 d</td><td>15 Jul</td><td><span class="pill p-grey">Unassigned</span></td></tr>
+                    <tr><td>☐</td><td><span class="code">CLM-4473677</span></td><td class="code">A-884202</td><td>Aetna</td><td><span class="code">CO-50</span></td><td>Medical Necessity</td><td class="r num">5</td><td class="r num">$6,110.00</td><td class="r num">44 d</td><td>20 Jul</td><td><span class="pill p-grey">Unassigned</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="strip">
+                <span class="lbl">Note</span>
+                <span style="font-size:11px;color:#4a5b74;">
+                  The $6,110 medical-necessity claim sits sixth because it is the newest. The $96
+                  timely-filing claim sits fifth because it is older. Nothing on this screen tells
+                  the manager which is worth assigning.
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="snote">
+        The nav label changes with permission — <b>Claim Assignment</b> for roles that can assign,
+        <b>Claim View</b> for those that cannot. Lab Users get the same grid with every write
+        control removed and every write endpoint refusing the role outright.
+      </p>
+    </figure>
+
+    <!-- S4 -->
+    <figure class="screen">
+      <figcaption class="scap">
+        <span class="sid">S4</span>
+        <span class="stitle">My Worklist — AR Reviewer</span>
+        <span class="sflag">As built</span>
+        <span class="stack">React · #myworklist · scoped from JWT</span>
+      </figcaption>
+      <div class="app">
+        <div class="app-nav">
+          <a>Denial Dashboard</a><a>Aging Dashboard</a><a class="on">My Worklist</a>
+          <a>Denial Mapper</a><a>Reports</a><a>Uploads &amp; Downloads</a><a>Contact Support</a>
+        </div>
+        <div class="app-split">
+          <div class="side">
+            <div class="sgrp">My queues</div>
+            <div class="q on"><span>Worklist</span><b>340</b></div>
+            <div class="q alert"><span>SLA in 3 Days</span><b>18</b></div>
+            <div class="q alert"><span>Follow-ups Due</span><b>26</b></div>
+            <div class="q"><span>Payer Follow-up</span><b>63</b></div>
+            <div class="q"><span>Pending Documentation</span><b>44</b></div>
+            <div class="q"><span>Pending Payer Response</span><b>81</b></div>
+            <div class="q"><span>Escalated Claims</span><b>12</b></div>
+            <div class="q"><span>Escalation Response</span><b>7</b></div>
+            <div class="q"><span>Closed</span><b>612</b></div>
+            <div class="q"><span>All Claims</span><b>1,203</b></div>
+          </div>
+          <div class="main">
+            <div class="filters">
+              <span class="fld"><i>Status</i><b>Any</b></span>
+              <span class="fld"><i>Aging</i><b>Any</b></span>
+              <span class="fld"><i>Classification</i><b>Any</b></span>
+              <span class="fld"><i>Payer</i><b>Any</b></span>
+              <span class="fld"><i>Follow-up due</i><b>Any</b></span>
+              <span class="btn btn-ghost">Download CSV</span>
+              <span class="btn btn-ghost">Upload CSV</span>
+            </div>
+            <div class="pan">
+              <div class="pan-h">Worklist <span class="hint">P. Nakamura · 340 claims · $488,204 · sorted by Due Date</span></div>
+              <div class="tblwrap">
+                <table class="g">
+                  <thead><tr><th>Claim</th><th>Payer</th><th>Denial</th><th>Action category</th><th class="r">Balance</th><th>SLA</th><th>Due</th><th>Status</th><th>Next step</th></tr></thead>
+                  <tbody>
+                    <tr><td><span class="code">CLM-4468110</span></td><td>Aetna</td><td><span class="code">CO-50</span></td><td>Appeal with records</td><td class="r num">$1,284.00</td><td><span class="pill p-risk">Breached</span></td><td>28 Aug</td><td><span class="pill p-asg">Assigned</span></td><td><span class="btn btn-ghost">Update</span></td></tr>
+                    <tr><td><span class="code">CLM-4468442</span></td><td>Cigna</td><td><span class="code">CO-197</span></td><td>Retro-auth request</td><td class="r num">$3,940.00</td><td><span class="pill p-risk">2 days</span></td><td>05 Sep</td><td><span class="pill p-asg">Assigned</span></td><td><span class="btn btn-ghost">Update</span></td></tr>
+                    <tr><td><span class="code">CLM-4468907</span></td><td>UHC</td><td><span class="code">CO-16</span></td><td>Rebill corrected</td><td class="r num">$412.50</td><td><span class="pill p-warn">6 days</span></td><td>09 Sep</td><td><span class="pill p-warn">Pending Docs</span></td><td><span class="btn btn-ghost">Update</span></td></tr>
+                    <tr><td><span class="code">CLM-4469330</span></td><td>BCBS MI</td><td><span class="code">CO-97</span></td><td>Appeal — bundling</td><td class="r num">$208.75</td><td><span class="pill p-done">14 days</span></td><td>17 Sep</td><td><span class="pill p-warn">Pending Payer</span></td><td><span class="btn btn-ghost">Update</span></td></tr>
+                    <tr><td><span class="code">CLM-4469812</span></td><td>Aetna</td><td><span class="code">CO-50</span></td><td>Appeal with records</td><td class="r num">$6,110.00</td><td><span class="pill p-done">19 days</span></td><td>22 Sep</td><td><span class="pill p-asg">Assigned</span></td><td><span class="btn btn-ghost">Update</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="snote">
+        Scope is applied server-side from the JWT — a reviewer cannot widen it by editing the
+        request. The sort is by due date, which is the correct <i>compliance</i> order and the
+        wrong <i>economic</i> order: the $6,110 claim is last on the list.
+      </p>
+    </figure>
+
+    <!-- S5 -->
+    <figure class="screen">
+      <figcaption class="scap">
+        <span class="sid">S5</span>
+        <span class="stitle">Claim drawer — line detail, notes, documents, history</span>
+        <span class="sflag">As built</span>
+        <span class="stack">React · 22-column line grid</span>
+      </figcaption>
+      <div class="app">
+        <div class="app-head">
+          <h5><span class="code" style="font-size:14px;">CLM-4469812</span></h5>
+          <div class="crumb">Aetna · Acct <b>A-884202</b> · 5 lines · $6,110.00 · opened 20 Jul</div>
+          <div style="margin-left:auto;display:flex;gap:6px;">
+            <span class="btn btn-ghost">Add note</span>
+            <span class="btn btn-ghost">Upload document</span>
+            <span class="btn btn-danger">Escalate</span>
+            <span class="btn btn-primary">Update status</span>
+          </div>
+        </div>
+        <div class="app-nav">
+          <a class="on">Lines</a><a>Notes (4)</a><a>Documents (2)</a><a>History (11)</a>
+        </div>
+        <div class="app-body">
+          <div class="pan">
+            <div class="pan-h">Line items <span class="hint">horizontal scroll · CPT and denial columns pinned</span></div>
+            <div class="tblwrap">
+              <table class="g" style="min-width:1240px;">
+                <thead>
+                  <tr>
+                    <th>TaskID</th><th>CPT</th><th>Units</th><th>Mod</th><th>Denial</th>
+                    <th>Denial description</th><th>Classification</th><th>Action code</th>
+                    <th>Action category</th><th>Recommended action</th><th>Priority</th>
+                    <th class="r">Ins. balance</th><th class="r">SLA days</th><th>Status</th>
+                    <th>Due date</th><th>ICD codes</th><th>ICD compliance</th><th>Validity</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td><b>T-91204</b></td><td><span class="code">81479</span></td><td class="num">1</td><td>—</td><td><span class="code">CO-50</span></td><td>Not deemed medically necessary</td><td>Medical Necessity</td><td>A-12</td><td>Appeal with records</td><td>Appeal with clinical documentation</td><td><span class="pill p-risk">High</span></td><td class="r num">$2,480.00</td><td class="r num">19</td><td><span class="pill p-asg">Assigned</span></td><td>22 Sep</td><td class="code">R79.89, E88.89</td><td>Non-compliant</td><td>Valid denial</td></tr>
+                  <tr><td><b>T-91205</b></td><td><span class="code">83520</span></td><td class="num">2</td><td>—</td><td><span class="code">CO-50</span></td><td>Not deemed medically necessary</td><td>Medical Necessity</td><td>A-12</td><td>Appeal with records</td><td>Appeal with clinical documentation</td><td><span class="pill p-risk">High</span></td><td class="r num">$1,910.00</td><td class="r num">19</td><td><span class="pill p-asg">Assigned</span></td><td>22 Sep</td><td class="code">R79.89</td><td>Non-compliant</td><td>Valid denial</td></tr>
+                  <tr><td><b>T-91206</b></td><td><span class="code">82784</span></td><td class="num">1</td><td>59</td><td><span class="code">CO-97</span></td><td>Included in another service</td><td>Bundling</td><td>A-04</td><td>Appeal — unbundle</td><td>Appeal with modifier support</td><td><span class="pill p-warn">Medium</span></td><td class="r num">$980.00</td><td class="r num">19</td><td><span class="pill p-asg">Assigned</span></td><td>22 Sep</td><td class="code">E88.89</td><td>Compliant</td><td>Contestable</td></tr>
+                  <tr><td><b>T-91207</b></td><td><span class="code">84443</span></td><td class="num">1</td><td>—</td><td><span class="code">CO-16</span></td><td>Claim lacks information</td><td>Missing Information</td><td>R-02</td><td>Rebill corrected</td><td>Resubmit with ordering NPI</td><td><span class="pill p-warn">Medium</span></td><td class="r num">$460.00</td><td class="r num">19</td><td><span class="pill p-asg">Assigned</span></td><td>22 Sep</td><td class="code">E03.9</td><td>Compliant</td><td>Invalid denial</td></tr>
+                  <tr><td><b>T-91208</b></td><td><span class="code">80053</span></td><td class="num">1</td><td>—</td><td><span class="code">CO-97</span></td><td>Included in another service</td><td>Bundling</td><td>W-01</td><td>Write-off review</td><td>Below appeal threshold</td><td><span class="pill p-grey">Low</span></td><td class="r num">$280.00</td><td class="r num">19</td><td><span class="pill p-asg">Assigned</span></td><td>22 Sep</td><td class="code">E88.89</td><td>Compliant</td><td>Valid denial</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="strip">
+              <span class="lbl">Status change requires</span>
+              <span class="pill p-grey">Payer Follow-up → reason + expected response date</span>
+              <span class="pill p-grey">Pending Payer → date + action confirmed</span>
+              <span class="pill p-grey">Pending Docs → documentation type + date</span>
+              <span class="pill p-grey">Write-off → actual outcome</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="snote">
+        This is the richest screen we have and the one competitors would struggle to match — five
+        CPT lines under one claim, each with its own denial code, action code, ICD compliance
+        status and validity judgement. It is also entirely descriptive: it says what was denied
+        and what someone decided, never what is likely to succeed.
+      </p>
+    </figure>
+
+    <!-- S6 -->
+    <figure class="screen">
+      <figcaption class="scap">
+        <span class="sid">S6</span>
+        <span class="stitle">Respond Escalation — Client Manager</span>
+        <span class="sflag">As built · our differentiator</span>
+        <span class="stack">React · read-only role with one write path</span>
+      </figcaption>
+      <div class="app">
+        <div class="app-top">
+          <div class="logo">LRN</div>
+          <div class="brand"><b>DENIAL WORKFLOW</b><span>LAB REVENUE NAVIGATOR</span></div>
+          <div class="chip">BioReference — MI</div>
+          <div class="spacer"></div>
+          <div class="who">S. Ferreira · Client Manager</div>
+        </div>
+        <div class="app-nav">
+          <a>Denial Dashboard</a><a>Aging Dashboard</a><a>Claim View</a><a class="on">Respond Escalation</a><a>Denial Mapper</a><a>Reports</a>
+        </div>
+        <div class="app-split">
+          <div class="side">
+            <div class="sgrp">Queues</div>
+            <div class="q"><span>New</span><b>418</b></div>
+            <div class="q"><span>Unassigned</span><b>286</b></div>
+            <div class="q"><span>Assigned</span><b>1,104</b></div>
+            <div class="q on alert"><span>Respond Escalation</span><b>72</b></div>
+            <div class="q"><span>Closed</span><b>2,318</b></div>
+            <div class="q"><span>All Claims</span><b>5,184</b></div>
+          </div>
+          <div class="main">
+            <div class="pan">
+              <div class="pan-h">Escalated to Client Manager <span class="hint">72 claims awaiting your response</span></div>
+              <div class="tblwrap">
+                <table class="g">
+                  <thead><tr><th>Claim</th><th>Escalated by</th><th>Reason</th><th>Needs from you</th><th class="r">Balance</th><th class="r">Waiting</th><th>Status</th><th></th></tr></thead>
+                  <tbody>
+                    <tr><td><span class="code">CLM-4469812</span></td><td>P. Nakamura</td><td>Client Info Pending</td><td>Ordering physician's signed medical necessity note</td><td class="r num">$6,110.00</td><td class="r num">4 d</td><td><span class="pill p-esc">Awaiting you</span></td><td><span class="btn btn-teal">Respond</span></td></tr>
+                    <tr><td><span class="code">CLM-4470233</span></td><td>P. Nakamura</td><td>Client Info Pending</td><td>Confirm the panel billed matches the order</td><td class="r num">$2,204.00</td><td class="r num">2 d</td><td><span class="pill p-esc">Awaiting you</span></td><td><span class="btn btn-teal">Respond</span></td></tr>
+                    <tr><td><span class="code">CLM-4470901</span></td><td>D. Alvarez</td><td>Client Info Pending</td><td>Referring provider NPI missing on the requisition</td><td class="r num">$880.00</td><td class="r num">9 d</td><td><span class="pill p-risk">Overdue</span></td><td><span class="btn btn-teal">Respond</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="pan">
+              <div class="pan-h">Respond · <span class="code">CLM-4469812</span></div>
+              <div class="pan-b">
+                <div class="two">
+                  <div>
+                    <div class="fld" style="display:block;padding:8px 10px;color:#16233a;font-size:11px;line-height:1.6;">
+                      Dr Ellery ordered the panel on 14 Jun for suspected metabolic myopathy.
+                      Signed clinical note is attached. The requisition reference is
+                      <span class="code">REQ-2026-118440</span>.
+                    </div>
+                    <div style="margin-top:8px;display:flex;gap:6px;">
+                      <span class="btn btn-ghost">Attach document</span>
+                      <span class="btn btn-teal">Submit response</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="cite">
+                      <b>What happens next</b><br>
+                      Your response returns the claim to the AR Manager's <b>External Response</b>
+                      queue. It does not go back to the reviewer directly.
+                      <span class="src">Every response writes a DenialTaskHistory row with your user id.</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="snote">
+        No competitor in the comparison has this screen. It is read-only everywhere except the
+        response itself, and the queue disappears entirely for the stricter Lab User role, who
+        never acts on an escalation. Keep it — it is the reason a lab picks us over a generic
+        denial tool.
+      </p>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================= 3 ============================= -->
+<section>
+  <div class="wrap">
+    <span class="snum">Section 03</span>
+    <h2>Five screens that close the gap</h2>
+    <p class="lede">
+      Each proposed screen maps to one row of the matrix where we are behind. Four of the five
+      extend screens we already have rather than adding a new area of the product — the agent
+      plan's principle, applied to the UI.
+    </p>
+
+    <div class="pipe">
+      <div class="pipe-row" style="min-width:940px;">
+        <div class="node store"><div class="nlab">Existing</div><div class="nname">DenialTaskBoard row</div><div class="nsub">the unit of work</div></div>
+        <div class="arrow">→</div>
+        <div class="node future"><div class="nlab">F1</div><div class="nname">Score &amp; rank</div><div class="nsub">overturn × balance</div></div>
+        <div class="arrow">→</div>
+        <div class="node future"><div class="nlab">F2</div><div class="nname">Recommend &amp; approve</div><div class="nsub">human decides</div></div>
+        <div class="arrow">→</div>
+        <div class="node future"><div class="nlab">F3</div><div class="nname">Compose &amp; submit</div><div class="nsub">packet + confirmation</div></div>
+        <div class="arrow">→</div>
+        <div class="node future"><div class="nlab">F4</div><div class="nname">Prevent next time</div><div class="nsub">pre-bill edits</div></div>
+        <div class="arrow">→</div>
+        <div class="node future"><div class="nlab">F5</div><div class="nname">Oversee</div><div class="nsub">override rate · kill switch</div></div>
+      </div>
+      <div class="pipe-cap">
+        F4 is the only one that does not consume a denial — it reads the outcome history and acts
+        before the claim is billed. It is also the only one not scoped anywhere today.
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+
+    <!-- F1 -->
+    <figure class="screen future">
+      <figcaption class="scap">
+        <span class="sid">F1</span>
+        <span class="stitle">Recovery-ranked worklist</span>
+        <span class="sflag">Proposed</span>
+        <span class="stack">extends S4 · one new sort + three columns</span>
+      </figcaption>
+      <div class="app">
+        <div class="app-nav">
+          <a>Denial Dashboard</a><a>Aging Dashboard</a><a class="on">My Worklist</a>
+          <a>Denial Mapper</a><a>Reports</a><a>Uploads &amp; Downloads</a>
+        </div>
+        <div class="app-body">
+          <div class="tiles">
+            <div class="tile acc-pur"><div class="tl">Recoverable today</div><div class="tv num">$41,280</div><div class="td">top 20 by expected value</div></div>
+            <div class="tile"><div class="tl">Your open balance</div><div class="tv num">$488,204</div><div class="td">340 claims</div></div>
+            <div class="tile acc-grn"><div class="tl">High-confidence</div><div class="tv num">38</div><div class="td">overturn ≥ 70%</div></div>
+            <div class="tile acc-red"><div class="tl">Deadline &lt; 14 days</div><div class="tv num">11</div><div class="td">work these first</div></div>
+          </div>
+          <div class="pan">
+            <div class="pan-h">
+              Worklist — ranked by expected recovery
+              <span class="hint">sort: <b style="color:#7048b6;">Expected value ▾</b> · Due date · Balance · Age</span>
+            </div>
+            <div class="tblwrap">
+              <table class="g">
+                <thead>
+                  <tr>
+                    <th style="width:26px;">#</th><th>Claim</th><th>Payer</th><th>Denial</th>
+                    <th>Recommended action</th><th class="r">Balance</th>
+                    <th>Overturn likelihood</th><th class="r">Expected value</th>
+                    <th>Filing deadline</th><th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="num">1</td><td><span class="code">CLM-4469812</span></td><td>Aetna</td><td><span class="code">CO-50</span></td>
+                    <td>Appeal with clinical records</td><td class="r num">$6,110.00</td>
+                    <td><span class="meter hi"><span class="bar"><i style="width:81%"></i></span><span class="v">81%</span></span></td>
+                    <td class="r num"><b>$4,949</b></td>
+                    <td><span class="deadline ok">42 d</span></td><td><span class="pill p-asg">Assigned</span></td>
+                  </tr>
+                  <tr>
+                    <td class="num">2</td><td><span class="code">CLM-4468442</span></td><td>Cigna</td><td><span class="code">CO-197</span></td>
+                    <td>Retro-authorisation request</td><td class="r num">$3,940.00</td>
+                    <td><span class="meter hi"><span class="bar"><i style="width:74%"></i></span><span class="v">74%</span></span></td>
+                    <td class="r num"><b>$2,916</b></td>
+                    <td><span class="deadline">9 d</span></td><td><span class="pill p-asg">Assigned</span></td>
+                  </tr>
+                  <tr>
+                    <td class="num">3</td><td><span class="code">CLM-4471455</span></td><td>UHC</td><td><span class="code">CO-16</span></td>
+                    <td>Rebill with ordering NPI</td><td class="r num">$2,880.00</td>
+                    <td><span class="meter hi"><span class="bar"><i style="width:92%"></i></span><span class="v">92%</span></span></td>
+                    <td class="r num"><b>$2,650</b></td>
+                    <td><span class="deadline ok">67 d</span></td><td><span class="pill p-asg">Assigned</span></td>
+                  </tr>
+                  <tr>
+                    <td class="num">4</td><td><span class="code">CLM-4468110</span></td><td>Aetna</td><td><span class="code">CO-50</span></td>
+                    <td>Appeal with clinical records</td><td class="r num">$1,284.00</td>
+                    <td><span class="meter md"><span class="bar"><i style="width:47%"></i></span><span class="v">47%</span></span></td>
+                    <td class="r num"><b>$603</b></td>
+                    <td><span class="deadline">SLA breached</span></td><td><span class="pill p-asg">Assigned</span></td>
+                  </tr>
+                  <tr>
+                    <td class="num">5</td><td><span class="code">CLM-4469330</span></td><td>BCBS MI</td><td><span class="code">CO-97</span></td>
+                    <td>Appeal — unbundle with mod 59</td><td class="r num">$208.75</td>
+                    <td><span class="meter md"><span class="bar"><i style="width:55%"></i></span><span class="v">55%</span></span></td>
+                    <td class="r num"><b>$115</b></td>
+                    <td><span class="deadline ok">31 d</span></td><td><span class="pill p-warn">Pending Payer</span></td>
+                  </tr>
+                  <tr style="opacity:.6;">
+                    <td class="num">…</td><td><span class="code">CLM-4473204</span></td><td>Medicare B</td><td><span class="code">CO-29</span></td>
+                    <td>Write-off — filing expired</td><td class="r num">$96.20</td>
+                    <td><span class="meter lo"><span class="bar"><i style="width:4%"></i></span><span class="v">4%</span></span></td>
+                    <td class="r num">$4</td>
+                    <td><span class="deadline">Expired</span></td><td><span class="pill p-grey">Low value</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="strip">
+              <span class="lbl">How the score is made</span>
+              <span style="font-size:11px;color:#4a5b74;">
+                Historical overturn rate for this payer × denial code × action category, from our own
+                closed claims. <b>Not a model output</b> — a rate computed from
+                <code style="background:#eef2f7;border:0;padding:1px 4px;">DenialTaskHistory</code>,
+                shown with its sample size on hover.
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="snote">
+        <b>Why this one first.</b> It needs no AI, no new vendor and no PHI gate — the overturn
+        rate is a <code>GROUP BY</code> over closed claims we already store. It is the single
+        highest-leverage change in this document, and it can ship before Phase 0 of the agent plan
+        starts. Expected value is a decision aid, never an automatic write-off: the last row is
+        ranked low, not closed.
+      </p>
+    </figure>
+
+    <!-- F2 -->
+    <figure class="screen future">
+      <figcaption class="scap">
+        <span class="sid">F2</span>
+        <span class="stitle">Recommendation review</span>
+        <span class="sflag">Proposed · agent plan Phase 4</span>
+        <span class="stack">new tab · Admin, AR Manager, AR Reviewer</span>
+      </figcaption>
+      <div class="app">
+        <div class="app-nav">
+          <a>Denial Dashboard</a><a>My Worklist</a><a class="on new">Recommendations</a>
+          <a>Denial Mapper</a><a>Reports</a>
+        </div>
+        <div class="app-head">
+          <h5>Recommendations</h5>
+          <div class="crumb">6 waiting · 2 decided today · <b>shadow mode off</b></div>
+          <div style="margin-left:auto;display:flex;gap:6px;">
+            <span class="btn btn-ghost">Bulk approve ≥ 85% &amp; &lt; $500</span>
+          </div>
+        </div>
+        <div class="app-body">
+          <div class="two">
+            <div class="pan">
+              <div class="pan-h"><span class="code" style="font-size:12px;">CLM-4469812</span> · line <b>T-91204</b> <span class="hint">CPT 81479 · $2,480.00</span></div>
+              <div class="pan-b">
+                <dl class="kv" style="margin-bottom:11px;">
+                  <dt>Proposed</dt><dd>Appeal with clinical records <span class="pill p-esc">A-12</span></dd>
+                  <dt>Confidence</dt><dd><span class="meter hi" style="display:inline-flex;"><span class="bar"><i style="width:88%"></i></span><span class="v">88%</span></span></dd>
+                  <dt>Deadline</dt><dd><span class="deadline ok">42 days remaining · computed in code</span></dd>
+                  <dt>Duplicate</dt><dd style="color:#166b3f;">No prior appeal on this track id</dd>
+                </dl>
+                <div style="font-size:11.5px;line-height:1.6;color:#2a3a52;margin-bottom:11px;">
+                  <b>Rationale.</b> The payer denied CO-50 against a Tier 2 molecular panel. The AR
+                  note records that the ordering physician documented suspected metabolic myopathy,
+                  which the plan's own policy lists as a covered indication. The denial appears to
+                  have been applied without the clinical note, which is on file and attachable.
+                </div>
+                <div class="cite">
+                  <b>Aetna Clinical Policy Bulletin 0140 — Molecular Panels</b>, §4.2: coverage
+                  applies where documented clinical suspicion of an inherited metabolic disorder is
+                  recorded by the ordering physician.
+                  <span class="src">version 2026.03 · effective 01 Apr 2026 · page 11 · verified current</span>
+                </div>
+                <div class="strip">
+                  <span class="btn btn-purple">Approve</span>
+                  <span class="btn btn-ghost">Modify &amp; approve</span>
+                  <span class="btn btn-danger">Reject</span>
+                  <span class="btn btn-ghost">Escalate</span>
+                  <span style="font-size:10.5px;color:#7d8ca4;margin-left:auto;">Reject and Modify require a reason</span>
+                </div>
+              </div>
+            </div>
+            <div class="pan">
+              <div class="pan-h">Proposed change <span class="hint">diff against current task</span></div>
+              <div class="pan-b">
+                <table class="g" style="min-width:0;">
+                  <tbody>
+                    <tr><td style="color:#7d8ca4;">Status</td><td>Assigned</td><td style="color:#7048b6;">→ Pending Payer Response</td></tr>
+                    <tr><td style="color:#7d8ca4;">Action code</td><td>A-12</td><td style="color:#7d8ca4;">unchanged</td></tr>
+                    <tr><td style="color:#7d8ca4;">Expected response</td><td>—</td><td style="color:#7048b6;">→ 15 Oct 2026</td></tr>
+                    <tr><td style="color:#7d8ca4;">Note</td><td>—</td><td style="color:#7048b6;">→ appended, cited</td></tr>
+                    <tr><td style="color:#7d8ca4;">Documents</td><td>2</td><td style="color:#7048b6;">→ 3 (clinical note)</td></tr>
+                  </tbody>
+                </table>
+                <div class="cite" style="margin-top:10px;border-left-color:#7048b6;">
+                  <b>On approval</b> this writes exactly what a reviewer would have written — plus a
+                  <code style="background:#eef2f7;border:0;padding:1px 4px;">DenialTaskHistory</code>
+                  row with <b>ActorType = Agent</b>.
+                  <span class="src">One audit trail, not two. Nothing submits to a payer from this screen.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="snote">
+        Already specified in the Agentic AI development plan §5.5. Two things on this screen are
+        load-bearing and should not be traded away for speed: the <b>citation must be present and
+        currently effective</b> or the recommendation is rejected before a human sees it, and the
+        <b>deadline is computed in code</b>, never by the model. The override reason is the
+        deliverable, not an afterthought — it is the only structured signal about where the
+        recommendation is wrong.
+      </p>
+    </figure>
+
+    <!-- F3 -->
+    <figure class="screen future">
+      <figcaption class="scap">
+        <span class="sid">F3</span>
+        <span class="stitle">Appeal packet composer</span>
+        <span class="sflag">Proposed · agent plan Phase 5</span>
+        <span class="stack">extends S5 · new drawer tab</span>
+      </figcaption>
+      <div class="app">
+        <div class="app-head">
+          <h5><span class="code" style="font-size:14px;">CLM-4469812</span></h5>
+          <div class="crumb">Aetna · Appeal packet · <b>draft</b> · not submitted</div>
+          <div style="margin-left:auto;display:flex;gap:6px;">
+            <span class="btn btn-ghost">Download PDF</span>
+            <span class="btn btn-purple">Submit to payer</span>
+          </div>
+        </div>
+        <div class="app-nav"><a>Lines</a><a>Notes</a><a>Documents</a><a>History</a><a class="on new">Appeal packet</a></div>
+        <div class="app-body">
+          <div class="two">
+            <div class="pan">
+              <div class="pan-h">Letter — draft <span class="hint">Aetna medical-necessity template v3</span></div>
+              <div class="pan-b">
+                <div class="letter">
+                  <div class="lh">Re: Appeal of denial — claim <span class="code">CLM-4469812</span>, CPT 81479, DOS 14 Jun 2026</div>
+                  <br>
+                  To the Aetna Appeals Department,<br><br>
+                  We request reconsideration of the above claim, denied under CARC <b>CO-50</b> as
+                  not medically necessary. The ordering physician,
+                  <span class="redact">[ordering provider]</span>, documented clinical suspicion of
+                  an inherited metabolic disorder prior to the order date.<br><br>
+                  Aetna Clinical Policy Bulletin 0140, §4.2 (version 2026.03, effective 01 Apr 2026)
+                  states that coverage applies where such suspicion is recorded by the ordering
+                  physician. The signed clinical note evidencing this is enclosed at Exhibit A.<br><br>
+                  We therefore ask that the denial be overturned and the claim reprocessed for
+                  payment of <b>$2,480.00</b>.
+                </div>
+                <div class="strip" style="border-radius:0 0 6px 6px;">
+                  <span class="lbl">PHI</span>
+                  <span style="font-size:11px;color:#4a5b74;">
+                    Highlighted fields are merged from the claim record at render time — they are
+                    never sent to a model.
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div class="pan">
+                <div class="pan-h">Packet checklist <span class="hint">Aetna · appeal with records</span></div>
+                <div class="pan-b">
+                  <table class="g" style="min-width:0;">
+                    <tbody>
+                      <tr><td style="color:#1f9254;">✓</td><td>Appeal cover sheet</td><td class="r"><span class="pill p-done">Generated</span></td></tr>
+                      <tr><td style="color:#1f9254;">✓</td><td>Signed clinical note (Exhibit A)</td><td class="r"><span class="pill p-done">On file</span></td></tr>
+                      <tr><td style="color:#1f9254;">✓</td><td>Original EOB / remittance</td><td class="r"><span class="pill p-done">On file</span></td></tr>
+                      <tr><td style="color:#1f9254;">✓</td><td>Policy excerpt, CPB 0140 §4.2</td><td class="r"><span class="pill p-done">Cited</span></td></tr>
+                      <tr><td style="color:#c47f10;">!</td><td>Requisition with ordering NPI</td><td class="r"><span class="pill p-warn">Missing</span></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="pan">
+                <div class="pan-h">Guards <span class="hint">checked before Submit enables</span></div>
+                <div class="pan-b">
+                  <dl class="kv">
+                    <dt>Deadline</dt><dd style="color:#166b3f;">42 days remaining</dd>
+                    <dt>Duplicate</dt><dd style="color:#166b3f;">No prior appeal</dd>
+                    <dt>Citation</dt><dd style="color:#166b3f;">Current version</dd>
+                    <dt>Checklist</dt><dd style="color:#8a5a06;">1 item outstanding</dd>
+                    <dt>Approver</dt><dd>P. Nakamura required</dd>
+                  </dl>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="snote">
+        Submission is the last thing to build and the first thing to gate. The clearinghouse
+        sandbox credential request is already flagged in the agent plan as the most likely cause of
+        schedule slip — it should be raised now regardless of when F3 is scheduled.
+      </p>
+    </figure>
+
+    <!-- F4 -->
+    <figure class="screen future">
+      <figcaption class="scap">
+        <span class="sid">F4</span>
+        <span class="stitle">Pre-bill denial prevention</span>
+        <span class="sflag">Proposed · not currently scoped</span>
+        <span class="stack">new screen · reads outcome history, acts before billing</span>
+      </figcaption>
+      <div class="app">
+        <div class="app-top">
+          <div class="logo">LRN</div>
+          <div class="brand"><b>DENIAL PREVENTION</b><span>LAB REVENUE NAVIGATOR</span></div>
+          <div class="chip">BioReference — MI</div>
+          <div class="spacer"></div>
+          <div class="who">R. Okonkwo · AR Manager</div>
+        </div>
+        <div class="app-nav"><a class="on">Pre-bill review</a><a>Edit rules</a><a>Rule performance</a><a>Suppressed</a></div>
+        <div class="app-head">
+          <h5>Pre-bill review</h5>
+          <div class="crumb">Batch <b>2026-09-03-A</b> · 2,884 claims ready to bill · <b style="color:#c47f10;">147 flagged</b></div>
+          <div style="margin-left:auto;display:flex;gap:6px;">
+            <span class="btn btn-ghost">Release all clean (2,737)</span>
+            <span class="btn btn-teal">Work flagged</span>
+          </div>
+        </div>
+        <div class="app-body">
+          <div class="tiles">
+            <div class="tile acc-amb"><div class="tl">Flagged</div><div class="tv num">147</div><div class="td">5.1% of batch</div></div>
+            <div class="tile acc-red"><div class="tl">Balance at risk</div><div class="tv num">$96,440</div><div class="td">if billed as-is</div></div>
+            <div class="tile acc-grn"><div class="tl">Prevented, 30 d</div><div class="tv num">$412K</div><div class="td">1,908 claims fixed pre-bill</div></div>
+            <div class="tile acc-tel"><div class="tl">Rule precision</div><div class="tv num">88%</div><div class="td">flagged &amp; would have denied</div></div>
+          </div>
+          <div class="pan">
+            <div class="pan-h">Flagged claims <span class="hint">grouped by the denial each edit predicts</span></div>
+            <div class="tblwrap">
+              <table class="g">
+                <thead><tr><th>Predicted denial</th><th>Rule</th><th>Trigger</th><th class="r">Claims</th><th class="r">Balance</th><th>Historic denial rate</th><th>Fix</th><th></th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td><span class="code">CO-16</span> Missing information</td><td>PRE-004</td>
+                    <td>Ordering provider NPI absent on requisition</td>
+                    <td class="r num">62</td><td class="r num">$28,140</td>
+                    <td><span class="meter hi"><span class="bar"><i style="width:96%"></i></span><span class="v">96%</span></span></td>
+                    <td>Request NPI from clinic</td>
+                    <td><span class="btn btn-ghost">Open 62</span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="code">CO-50</span> Medical necessity</td><td>PRE-011</td>
+                    <td>CPT 81479 billed with an ICD outside the payer's covered list</td>
+                    <td class="r num">38</td><td class="r num">$41,880</td>
+                    <td><span class="meter hi"><span class="bar"><i style="width:84%"></i></span><span class="v">84%</span></span></td>
+                    <td>Attach clinical note before billing</td>
+                    <td><span class="btn btn-ghost">Open 38</span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="code">CO-197</span> Authorisation</td><td>PRE-002</td>
+                    <td>Payer requires pre-cert for this panel; none on file</td>
+                    <td class="r num">27</td><td class="r num">$19,220</td>
+                    <td><span class="meter hi"><span class="bar"><i style="width:91%"></i></span><span class="v">91%</span></span></td>
+                    <td>Obtain auth or hold</td>
+                    <td><span class="btn btn-ghost">Open 27</span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="code">CO-97</span> Bundling</td><td>PRE-019</td>
+                    <td>Component CPT billed alongside its panel without modifier 59</td>
+                    <td class="r num">14</td><td class="r num">$5,600</td>
+                    <td><span class="meter md"><span class="bar"><i style="width:62%"></i></span><span class="v">62%</span></span></td>
+                    <td>Add modifier or bill panel only</td>
+                    <td><span class="btn btn-ghost">Open 14</span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="code">CO-29</span> Timely filing</td><td>PRE-021</td>
+                    <td>Charge entered 68 days after DOS; payer limit 90</td>
+                    <td class="r num">6</td><td class="r num">$1,600</td>
+                    <td><span class="meter md"><span class="bar"><i style="width:44%"></i></span><span class="v">44%</span></span></td>
+                    <td>Expedite — 22 days left</td>
+                    <td><span class="btn btn-ghost">Open 6</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="strip">
+              <span class="lbl">Rules come from our own data</span>
+              <span style="font-size:11px;color:#4a5b74;">
+                Each rule is a pattern that already produced denials for this lab — payer, CPT,
+                ICD, modifier and timing combinations mined from
+                <code style="background:#eef2f7;border:0;padding:1px 4px;">DenialLineItem</code>.
+                A rule that stops flagging profitably is retired on the Rule performance tab.
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="snote">
+        <b>The strategic gap.</b> Every other screen in this document makes reviewers faster at
+        recovering money we have already lost. This one stops losing it. It is where XIFIN and
+        TELCOR compete hardest, and it is the only capability that scales without adding reviewer
+        hours. It also requires something we do not have today: a hook into the billing stream
+        <i>before</i> submission, not the payer validation report after it. That dependency is the
+        real cost of this screen, and it should be scoped before it is committed to.
+      </p>
+    </figure>
+
+    <!-- F5 -->
+    <figure class="screen future">
+      <figcaption class="scap">
+        <span class="sid">F5</span>
+        <span class="stitle">Automation oversight</span>
+        <span class="sflag">Proposed · agent plan Phase 4–6</span>
+        <span class="stack">Admin only · per lab</span>
+      </figcaption>
+      <div class="app">
+        <div class="app-nav"><a class="on">Performance</a><a>Runs</a><a>Overrides</a><a>Settings</a></div>
+        <div class="app-head">
+          <h5>Automation oversight</h5>
+          <div class="crumb">Rolling 30 days · BioReference — MI</div>
+          <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
+            <span class="fld"><i>Mode</i><b style="color:#166b3f;">Live · human approval required</b></span>
+            <span class="btn btn-danger">Kill switch</span>
+          </div>
+        </div>
+        <div class="app-body">
+          <div class="tiles">
+            <div class="tile acc-tel"><div class="tl">Recommendations</div><div class="tv num">4,182</div><div class="td">1,904 decided</div></div>
+            <div class="tile acc-grn"><div class="tl">Approved as-is</div><div class="tv num">71%</div><div class="td">1,352 of 1,904</div></div>
+            <div class="tile acc-amb"><div class="tl">Modified</div><div class="tv num">19%</div><div class="td">reason captured</div></div>
+            <div class="tile acc-red"><div class="tl">Rejected</div><div class="tv num">10%</div><div class="td">reason mandatory</div></div>
+            <div class="tile"><div class="tl">Cost / denial</div><div class="tv num">$0.038</div><div class="td">tokens + retrieval</div></div>
+          </div>
+          <div class="two">
+            <div class="pan">
+              <div class="pan-h">Why reviewers overrode <span class="hint">the tuning signal · 552 overrides</span></div>
+              <div class="tblwrap">
+                <table class="g">
+                  <thead><tr><th>Reason</th><th>Denial code most affected</th><th class="r">Count</th><th class="r">Share</th></tr></thead>
+                  <tbody>
+                    <tr><td>Policy citation was outdated</td><td><span class="code">CO-50</span></td><td class="r num">168</td><td class="r num">30.4%</td></tr>
+                    <tr><td>AR note contained information the agent missed</td><td><span class="code">CO-16</span></td><td class="r num">121</td><td class="r num">21.9%</td></tr>
+                    <tr><td>Wrong action category for this payer</td><td><span class="code">CO-197</span></td><td class="r num">98</td><td class="r num">17.8%</td></tr>
+                    <tr><td>Balance below the appeal threshold</td><td><span class="code">CO-97</span></td><td class="r num">86</td><td class="r num">15.6%</td></tr>
+                    <tr><td>Claim already handled outside the system</td><td><span class="code">PR-204</span></td><td class="r num">79</td><td class="r num">14.3%</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="pan">
+              <div class="pan-h">Guardrails <span class="hint">enforced in code, not configuration</span></div>
+              <div class="pan-b">
+                <dl class="kv">
+                  <dt>Write-off cap</dt><dd>$250 — above this, AR Manager approves</dd>
+                  <dt>Bulk approve</dt><dd>≥ 85% confidence and &lt; $500 only</dd>
+                  <dt>Submission</dt><dd style="color:#9e2d36;">Never without a named approver</dd>
+                  <dt>Deadlines</dt><dd>Computed in code, never by the model</dd>
+                  <dt>Uncited</dt><dd>Rejected before a human sees it</dd>
+                  <dt>Per-lab</dt><dd>Enabled for 1 of 9 labs</dd>
+                </dl>
+                <div class="cite" style="margin-top:10px;border-left-color:#d64550;">
+                  <b>Automation bias is the live risk.</b> A 71% straight-approve rate is only
+                  healthy if someone checks a sample of it. Sampled audit of approvals belongs on
+                  this screen, not in a report nobody opens.
+                  <span class="src">Override rate is a tracked metric, reported weekly.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="snote">
+        This screen is what makes the rest defensible to a compliance reviewer. It should be built
+        alongside F2, not after it — an approval UI without an override dashboard produces the
+        rubber-stamping it was meant to prevent.
+      </p>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================= 4 ============================= -->
+<section>
+  <div class="wrap">
+    <span class="snum">Section 04</span>
+    <h2>Sequencing</h2>
+    <p class="lede">
+      Mapped onto the phases already agreed in the Agentic AI development plan, with one addition
+      in front of it and one that does not belong to it at all.
+    </p>
+
+    <div class="road">
+      <div class="phase new">
+        <div class="pk"><span class="pn">F1</span><span class="pw">3–4 weeks<br>no AI, no PHI gate</span></div>
+        <div>
+          <h4>Recovery-ranked worklist</h4>
+          <p>
+            Compute overturn rate per payer × denial code × action category from closed claims.
+            Add three columns and one sort option to My Worklist and Claim Assignment. Ship it
+            before the agent work starts — it is independent of every gate in the agent plan and
+            it is the change a reviewer will feel first.
+          </p>
+          <div class="refs"><span>DenialTaskHistory</span><span>MyWorklistPage.jsx</span><span>ClaimAssignmentPage.jsx</span></div>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="pk"><span class="pn">P0–P1</span><span class="pw">5–6 weeks</span></div>
+        <div>
+          <h4>Foundation and the deterministic tool layer</h4>
+          <p>
+            Unchanged from the agent plan. Close the three pipeline defects first — the
+            verification table naming, the empty task board, the unmapped labs on the Report
+            Control Board. An agent built over those inherits them and gets blamed for them.
+          </p>
+          <div class="refs"><span>Phase 0</span><span>Phase 1</span><span>no model in the loop</span></div>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="pk"><span class="pn">P2–P3</span><span class="pw">6–7 weeks</span></div>
+        <div>
+          <h4>Policy retrieval, then shadow mode</h4>
+          <p>
+            Payer policy corpus with version and effective date as filterable metadata; then the
+            agent runs against real denials writing recommendations nobody sees. The PHI gate sits
+            between these two. Go / no-go on golden-set agreement.
+          </p>
+          <div class="refs"><span>Phase 2</span><span>PHI gate</span><span>Phase 3</span></div>
+        </div>
+      </div>
+
+      <div class="phase new">
+        <div class="pk"><span class="pn">F2 + F5</span><span class="pw">4–5 weeks<br>build together</span></div>
+        <div>
+          <h4>Recommendation review with its oversight screen</h4>
+          <p>
+            The agent plan schedules the approval UI in Phase 4 and the performance view later.
+            Bring them forward together. An approval queue without a visible override rate is how
+            automation bias sets in, and the override reasons are the only tuning signal the next
+            phase has to work with.
+          </p>
+          <div class="refs"><span>Phase 4</span><span>ActorType = Agent</span><span>kill switch</span></div>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="pk"><span class="pn">F3</span><span class="pw">4–6 weeks</span></div>
+        <div>
+          <h4>Appeal packet and submission</h4>
+          <p>
+            Letter rendering, packet assembly, then mock → sandbox → controlled production. Raise
+            the clearinghouse sandbox credential request now; vendor lead time is the schedule
+            risk, not the code.
+          </p>
+          <div class="refs"><span>Phase 5</span><span>sandbox credentials</span></div>
+        </div>
+      </div>
+
+      <div class="phase new">
+        <div class="pk"><span class="pn">F4</span><span class="pw">to be scoped</span></div>
+        <div>
+          <h4>Pre-bill denial prevention</h4>
+          <p>
+            Not in any current plan. Needs a decision before it can be estimated: do we get a hook
+            into the billing stream before submission, or does prevention stay a report the lab
+            acts on manually? The answer changes the size of this by an order of magnitude, and it
+            is the one competitive gap that does not close itself as the agent work lands.
+          </p>
+          <div class="refs"><span>needs a decision</span><span>billing-stream dependency</span></div>
+        </div>
+      </div>
+    </div>
+
+    <h3>What we are asking for</h3>
+    <ul class="doc">
+      <li>
+        <b>Approve F1 as immediate work</b>, ahead of and independent of the agent programme. It
+        needs no model, no BAA and no new spend.
+      </li>
+      <li>
+        <b>Agree that F5 ships with F2</b>, not after it — the oversight screen is a control, not
+        a reporting nicety.
+      </li>
+      <li>
+        <b>Decide whether prevention (F4) is in scope at all.</b> If it is, the billing-stream
+        hook needs scoping now. If it is not, we should say so plainly, because it is the gap a
+        competitor will lead with.
+      </li>
+      <li>
+        <b>Commission a real evaluation</b> of Waystar and XIFIN before the next planning cycle.
+        This document is desk research; two vendor demos would tell us more than another matrix.
+      </li>
+    </ul>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-cols">
+      <div>
+        <h4>Related documents</h4>
+        <ul>
+          <li>Denial Dashboard &amp; Denial Workflow — Requirements v1.0 (as-built)</li>
+          <li>Denial Agentic AI Development Plan v2.0</li>
+          <li>Denial Database Worker Requirements</li>
+          <li>Denial Dashboard Screens Mockup v2.0</li>
+          <li>Denial Agent Mockup v1.0</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Sources for the vendor columns</h4>
+        <ul>
+          <li>Waystar — Denial + Appeal Management, product pages</li>
+          <li>Experian Health — Denial Workflow Manager</li>
+          <li>XIFIN RPM · TELCOR RCM — lab RCM product material</li>
+          <li>Med-Metrix AI Denials · CombineHealth · Rivet Resolve</li>
+          <li>Analyst round-ups, September 2026</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Standing caveats</h4>
+        <ul>
+          <li>All figures in the screens are illustrative sample data.</li>
+          <li>Vendor rows are desk research, not evaluation.</li>
+          <li>Proposed screens are drafts for discussion, not committed scope.</li>
+          <li>Nothing here changes the PHI gate in the agent plan.</li>
+        </ul>
+      </div>
+    </div>
+    <div style="border-top:1px solid var(--doc-line); padding-top:16px; font-size:11.5px;">
+      Denial Workflow Benchmark · v1.0 · 3 September 2026 · Lab Revenue Navigator
+    </div>
+  </div>
+</footer>

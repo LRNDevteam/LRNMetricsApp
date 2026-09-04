@@ -709,7 +709,11 @@ public sealed record CptLookupReportFilters(
     string? SortColumn    = null,
     string? SortDirection = null,
     // Lab name for the file name; LabId alone does not name the file.
-    string? LabName       = null)
+    string? LabName       = null,
+    // The labs the requester may read, captured when the job was queued. The worker runs with
+    // no HTTP identity, so the scope has to travel with the job or the export would return
+    // every lab's rates regardless of who asked for it. null = unrestricted (Admin).
+    List<int>? AllowedLabIds = null)
 {
     private static readonly JsonSerializerOptions JsonOpts = new()
     {

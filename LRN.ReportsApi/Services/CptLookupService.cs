@@ -10,9 +10,10 @@ public interface ICptLookupRepository
     Task<LookupResult<PanelLookupRow>> GetPanelAsync(LookupQuery query, CancellationToken ct);
     Task<byte[]> ExportCptAsync(LookupQuery query, CancellationToken ct);
     Task<byte[]> ExportPanelAsync(LookupQuery query, CancellationToken ct);
-    Task<IReadOnlyList<string>> GetCptOptionsAsync(string? field, string? term, int? labId, CancellationToken ct);
-    Task<IReadOnlyList<string>> GetPanelOptionsAsync(string? field, string? term, int? labId, CancellationToken ct);
-    Task<IReadOnlyList<MasterValueLabOption>> GetLabsAsync(CancellationToken ct);
+    // allowedLabIds mirrors LookupQuery.AllowedLabIds: null = unrestricted, empty = nothing.
+    Task<IReadOnlyList<string>> GetCptOptionsAsync(string? field, string? term, int? labId, IReadOnlyList<int>? allowedLabIds, CancellationToken ct);
+    Task<IReadOnlyList<string>> GetPanelOptionsAsync(string? field, string? term, int? labId, IReadOnlyList<int>? allowedLabIds, CancellationToken ct);
+    Task<IReadOnlyList<MasterValueLabOption>> GetLabsAsync(IReadOnlyList<int>? allowedLabIds, CancellationToken ct);
     /// <summary>Every window a given CPT/panel/payer combination has data for — powers the drill-down comparison.</summary>
     Task<IReadOnlyList<CptLookupRow>> GetCptWindowsAsync(int labId, string cptCode, string? panelName, string? payer, CancellationToken ct);
     Task<IReadOnlyList<PanelLookupRow>> GetPanelWindowsAsync(int labId, string panelName, string? payer, CancellationToken ct);
@@ -425,19 +426,24 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
     public static byte[] BuildPanelExcel(IReadOnlyList<PanelLookupRow> rows)
         => BuildExcel("Panel Lookup", PanelExcelColumns, rows);
 
-    public Task<IReadOnlyList<string>> GetCptOptionsAsync(string? field, string? term, int? labId, CancellationToken ct)
-        => GetOptionsAsync("dbo.CPTAverage", CptFilterFields, "LabID", field, term, labId, ct);
+    public Task<IReadOnlyList<string>> GetCptOptionsAsync(string? field, string? term, int? labId, IReadOnlyList<int>? allowedLabIds, CancellationToken ct)
+        => GetOptionsAsync("dbo.CPTAverage", CptFilterFields, "LabID", field, term, labId, allowedLabIds, ct);
 
-    public Task<IReadOnlyList<string>> GetPanelOptionsAsync(string? field, string? term, int? labId, CancellationToken ct)
-        => GetOptionsAsync("dbo.PanelAverage", PanelFilterFields, "LabId", field, term, labId, ct);
+    public Task<IReadOnlyList<string>> GetPanelOptionsAsync(string? field, string? term, int? labId, IReadOnlyList<int>? allowedLabIds, CancellationToken ct)
+        => GetOptionsAsync("dbo.PanelAverage", PanelFilterFields, "LabId", field, term, labId, allowedLabIds, ct);
 
     /// <summary>
     /// Labs that have averages data. LabName is not unique across the source
     /// tables (two different LabIds both spell themselves "NorthWest"), so the
     /// id stays the value and the name is only the label.
+    ///
+    /// Filtered to <paramref name="allowedLabIds"/> so the screen's lab picker offers only labs
+    /// the user is assigned to - the picker is the first place an over-broad scope would show.
     /// </summary>
-    public async Task<IReadOnlyList<MasterValueLabOption>> GetLabsAsync(CancellationToken ct)
+    public async Task<IReadOnlyList<MasterValueLabOption>> GetLabsAsync(IReadOnlyList<int>? allowedLabIds, CancellationToken ct)
     {
+        if (allowedLabIds is { Count: 0 }) return Array.Empty<MasterValueLabOption>();
+
         var labs = new List<MasterValueLabOption>();
         await using var conn = new SqlConnection(_connectionString);
         await conn.OpenAsync(ct);
@@ -452,11 +458,15 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
             """, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
+        {
+            var labId = reader.GetInt32(0);
+            if (allowedLabIds is not null && !allowedLabIds.Contains(labId)) continue;
             labs.Add(new MasterValueLabOption
             {
-                LabId = reader.GetInt32(0),
-                LabName = reader.IsDBNull(1) ? $"Lab {reader.GetInt32(0)}" : reader.GetString(1)
+                LabId = labId,
+                LabName = reader.IsDBNull(1) ? $"Lab {labId}" : reader.GetString(1)
             });
+        }
         return labs;
     }
 
@@ -496,6 +506,7 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
             parts.Add("a.LabID = @LabId");
             p.Add(new SqlParameter("@LabId", q.LabId.Value));
         }
+        AddLabScope(parts, p, "a.LabID", q.LabId, q.AllowedLabIds);
         return string.Join(" AND ", parts);
     }
 
@@ -511,7 +522,36 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
             parts.Add("p.LabId = @LabId");
             p.Add(new SqlParameter("@LabId", q.LabId.Value));
         }
+        AddLabScope(parts, p, "p.LabId", q.LabId, q.AllowedLabIds);
         return string.Join(" AND ", parts);
+    }
+
+    /// <summary>
+    /// Confines a query to the labs the caller is assigned to. Null <paramref name="allowedLabIds"/>
+    /// leaves the query untouched (Admin); an empty list yields 1=0, because "no labs assigned"
+    /// must mean no rows rather than every row.
+    ///
+    /// When the user picked a lab, that filter is already in the WHERE clause - all this adds is
+    /// 1=0 if the pick was outside their labs, so a hand-edited labId returns nothing instead of
+    /// another lab's rates.
+    /// </summary>
+    /// <remarks>Internal so the scoping contract can be regression-tested — it is a security boundary.</remarks>
+    internal static void AddLabScope(
+        List<string> parts, List<SqlParameter> p, string labColumn, int? requestedLabId, IReadOnlyList<int>? allowedLabIds)
+    {
+        if (allowedLabIds is null) return;
+
+        if (allowedLabIds.Count == 0) { parts.Add("1=0"); return; }
+
+        if (requestedLabId.HasValue)
+        {
+            if (!allowedLabIds.Contains(requestedLabId.Value)) parts.Add("1=0");
+            return;
+        }
+
+        var names = allowedLabIds.Select((_, i) => "@ScopeLab" + i).ToList();
+        parts.Add($"{labColumn} IN ({string.Join(",", names)})");
+        for (var i = 0; i < allowedLabIds.Count; i++) p.Add(new SqlParameter(names[i], allowedLabIds[i]));
     }
 
     private static string BuildOrderBy(LookupQuery q, IReadOnlyDictionary<string, string> columns, string fallback)
@@ -524,7 +564,7 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
 
     private async Task<IReadOnlyList<string>> GetOptionsAsync(
         string table, IReadOnlyDictionary<string, string> fields, string labColumn,
-        string? field, string? term, int? labId, CancellationToken ct)
+        string? field, string? term, int? labId, IReadOnlyList<int>? allowedLabIds, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(field) || !fields.TryGetValue(field.Trim(), out var column))
             return Array.Empty<string>();
@@ -541,6 +581,9 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
             where.Add($"{labColumn} = @LabId");
             parameters.Add(new SqlParameter("@LabId", labId.Value));
         }
+        // The filter dropdowns are a read of the same data: an unscoped CPT-code or payer list
+        // would leak which codes and payers other labs have, even with the grid locked down.
+        AddLabScope(where, parameters, labColumn, labId, allowedLabIds);
 
         var values = new List<string>();
         await using var conn = new SqlConnection(_connectionString);

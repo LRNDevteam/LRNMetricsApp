@@ -260,8 +260,8 @@ ORDER BY FullName, UserName;";
     public async Task<int> CreateUserAsync(LabUser user)
     {
         const string sql = @"INSERT INTO dbo.LabUsers
-            (UserName, PasswordHash, FirstName, LastName, MiddleName, Email, Mobile, IsExternalUser, IsActive, CreatedBy)
-            VALUES (@UserName, @PasswordHash, @FirstName, @LastName, @MiddleName, @Email, @Mobile, @IsExternalUser, @IsActive, @CreatedBy);
+            (UserName, PasswordHash, FirstName, LastName, MiddleName, Email, Mobile, IsExternalUser, IsActive, ManagerUserID, TeamName, CreatedBy)
+            VALUES (@UserName, @PasswordHash, @FirstName, @LastName, @MiddleName, @Email, @Mobile, @IsExternalUser, @IsActive, @ManagerUserID, @TeamName, @CreatedBy);
             SELECT SCOPE_IDENTITY();";
 
         await using var conn = new SqlConnection(_conn);
@@ -276,6 +276,8 @@ ORDER BY FullName, UserName;";
         cmd.Parameters.AddWithValue("@Mobile", (object)user.Mobile ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@IsExternalUser", user.IsExternalUser);
         cmd.Parameters.AddWithValue("@IsActive", user.IsActive);
+        cmd.Parameters.AddWithValue("@ManagerUserID", (object?)user.ManagerUserID ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@TeamName", (object)user.TeamName ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@CreatedBy", (object)user.CreatedBy ?? DBNull.Value);
 
         var result = await cmd.ExecuteScalarAsync();
@@ -322,7 +324,7 @@ ORDER BY FullName, UserName;";
 
     public async Task<IEnumerable<LabUser>> GetAllUsersAsync()
     {
-        const string sql = "SELECT LabUserID, UserName, FirstName, LastName, Email, Mobile, IsExternalUser, IsActive FROM dbo.LabUsers ORDER BY UserName";
+        const string sql = "SELECT LabUserID, UserName, FirstName, LastName, Email, Mobile, IsExternalUser, IsActive, ManagerUserID, TeamName FROM dbo.LabUsers ORDER BY UserName";
         var result = new List<LabUser>();
         await using var conn = new SqlConnection(_conn);
         await conn.OpenAsync();
@@ -339,7 +341,9 @@ ORDER BY FullName, UserName;";
                 Email = r.IsDBNull(r.GetOrdinal("Email")) ? string.Empty : r.GetString(r.GetOrdinal("Email")),
                 Mobile = r.IsDBNull(r.GetOrdinal("Mobile")) ? string.Empty : r.GetString(r.GetOrdinal("Mobile")),
                 IsExternalUser = r.GetBoolean(r.GetOrdinal("IsExternalUser")),
-                IsActive = r.GetBoolean(r.GetOrdinal("IsActive"))
+                IsActive = r.GetBoolean(r.GetOrdinal("IsActive")),
+                ManagerUserID = r.IsDBNull(r.GetOrdinal("ManagerUserID")) ? null : r.GetInt32(r.GetOrdinal("ManagerUserID")),
+                TeamName = r.IsDBNull(r.GetOrdinal("TeamName")) ? string.Empty : r.GetString(r.GetOrdinal("TeamName"))
             });
         }
 
@@ -369,7 +373,7 @@ ORDER BY FullName, UserName;";
 
     public async Task<LabUser?> GetUserByIdAsync(int labUserId)
     {
-        const string sql = "SELECT LabUserID, UserName, FirstName, LastName, MiddleName, Email, Mobile, IsExternalUser, IsActive FROM dbo.LabUsers WHERE LabUserID = @LabUserID";
+        const string sql = "SELECT LabUserID, UserName, FirstName, LastName, MiddleName, Email, Mobile, IsExternalUser, IsActive, ManagerUserID, TeamName FROM dbo.LabUsers WHERE LabUserID = @LabUserID";
         await using var conn = new SqlConnection(_conn);
         await conn.OpenAsync();
         await using var cmd = new SqlCommand(sql, conn);
@@ -387,7 +391,9 @@ ORDER BY FullName, UserName;";
                 Email = r.IsDBNull(r.GetOrdinal("Email")) ? string.Empty : r.GetString(r.GetOrdinal("Email")),
                 Mobile = r.IsDBNull(r.GetOrdinal("Mobile")) ? string.Empty : r.GetString(r.GetOrdinal("Mobile")),
                 IsExternalUser = r.GetBoolean(r.GetOrdinal("IsExternalUser")),
-                IsActive = r.GetBoolean(r.GetOrdinal("IsActive"))
+                IsActive = r.GetBoolean(r.GetOrdinal("IsActive")),
+                ManagerUserID = r.IsDBNull(r.GetOrdinal("ManagerUserID")) ? null : r.GetInt32(r.GetOrdinal("ManagerUserID")),
+                TeamName = r.IsDBNull(r.GetOrdinal("TeamName")) ? string.Empty : r.GetString(r.GetOrdinal("TeamName"))
             };
         }
 
@@ -397,7 +403,7 @@ ORDER BY FullName, UserName;";
     public async Task<LabUser?> GetUserByUserNameAsync(string userName)
     {
         if (string.IsNullOrWhiteSpace(userName)) return null;
-        const string sql = @"SELECT LabUserID, UserName, PasswordHash, FirstName, LastName, MiddleName, Email, Mobile, IsExternalUser, IsActive
+        const string sql = @"SELECT LabUserID, UserName, PasswordHash, FirstName, LastName, MiddleName, Email, Mobile, IsExternalUser, IsActive, ManagerUserID, TeamName
                              FROM dbo.LabUsers WHERE UserName = @UserName";
         await using var conn = new SqlConnection(_conn);
         await conn.OpenAsync();
@@ -417,7 +423,9 @@ ORDER BY FullName, UserName;";
                 Email          = r.IsDBNull(r.GetOrdinal("Email")) ? string.Empty : r.GetString(r.GetOrdinal("Email")),
                 Mobile         = r.IsDBNull(r.GetOrdinal("Mobile")) ? string.Empty : r.GetString(r.GetOrdinal("Mobile")),
                 IsExternalUser = r.GetBoolean(r.GetOrdinal("IsExternalUser")),
-                IsActive       = r.GetBoolean(r.GetOrdinal("IsActive"))
+                IsActive       = r.GetBoolean(r.GetOrdinal("IsActive")),
+                ManagerUserID  = r.IsDBNull(r.GetOrdinal("ManagerUserID")) ? null : r.GetInt32(r.GetOrdinal("ManagerUserID")),
+                TeamName       = r.IsDBNull(r.GetOrdinal("TeamName")) ? string.Empty : r.GetString(r.GetOrdinal("TeamName"))
             };
         }
         return null;
@@ -434,6 +442,8 @@ ORDER BY FullName, UserName;";
             Mobile = @Mobile,
             IsExternalUser = @IsExternalUser,
             IsActive = @IsActive,
+            ManagerUserID = @ManagerUserID,
+            TeamName = @TeamName,
             ModifiedDate = SYSUTCDATETIME(),
             ModifiedBy = @ModifiedBy";
 
@@ -455,6 +465,8 @@ ORDER BY FullName, UserName;";
         cmd.Parameters.AddWithValue("@Mobile", (object)user.Mobile ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@IsExternalUser", user.IsExternalUser);
         cmd.Parameters.AddWithValue("@IsActive", user.IsActive);
+        cmd.Parameters.AddWithValue("@ManagerUserID", (object?)user.ManagerUserID ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@TeamName", (object)user.TeamName ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ModifiedBy", (object)user.ModifiedBy ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@LabUserID", user.LabUserID);
         if (!string.IsNullOrEmpty(passwordHash))
@@ -463,5 +475,31 @@ ORDER BY FullName, UserName;";
         }
 
         await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task<IEnumerable<AnalystManagerTeam>> GetAnalystManagerTeamMapAsync()
+    {
+        const string sql = @"
+            SELECT u.UserName, ISNULL(m.UserName, '') AS ManagerUserName, ISNULL(u.TeamName, '') AS TeamName
+            FROM dbo.LabUsers u
+            LEFT JOIN dbo.LabUsers m ON m.LabUserID = u.ManagerUserID
+            WHERE u.IsActive = 1;";
+
+        var result = new List<AnalystManagerTeam>();
+        await using var conn = new SqlConnection(_conn);
+        await conn.OpenAsync();
+        await using var cmd = new SqlCommand(sql, conn);
+        await using var r = await cmd.ExecuteReaderAsync();
+        while (await r.ReadAsync())
+        {
+            result.Add(new AnalystManagerTeam
+            {
+                UserName = r.GetString(r.GetOrdinal("UserName")),
+                ManagerUserName = r.GetString(r.GetOrdinal("ManagerUserName")),
+                TeamName = r.GetString(r.GetOrdinal("TeamName"))
+            });
+        }
+
+        return result;
     }
 }

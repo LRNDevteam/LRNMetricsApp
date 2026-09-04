@@ -16,6 +16,15 @@ public interface IMenuService
     /// </summary>
     Task<bool> CanAccessAsync(ClaimsPrincipal user, string? area, string? controller, string? action, CancellationToken ct);
 
+    /// <summary>
+    /// Per-role visibility for UI elements that are not navbar menu items (the header
+    /// chat icon, the help-bubble shortcut). An admin's explicit Enable/Disable on the
+    /// Role Menu Mapping screen wins; with nothing set for any of the user's roles the
+    /// <paramref name="fallback"/> applies, which keeps behaviour unchanged until an
+    /// admin actually makes a choice.
+    /// </summary>
+    Task<bool> IsFeatureEnabledAsync(ClaimsPrincipal user, string featureKey, bool fallback, CancellationToken ct);
+
     /// <summary>Invalidate all cached menu data. Call after any Menu Master / Role Menu Mapping save.</summary>
     void InvalidateCache();
 }
@@ -79,7 +88,12 @@ public sealed class MenuService : IMenuService
             if (!managed.Contains(routeKey)) return true; // not menu-managed -> not enforced
 
             var allowed = await GetAllowedRoutesAsync(user, ct);
-            return allowed.Contains(routeKey);
+            if (allowed.Contains(routeKey)) return true;
+
+            // A feature toggle grants its screen too. Without this, an admin who enables the
+            // header chat icon for a role that has no ReimbursementChat menu would publish an
+            // icon that lands on Access Denied.
+            return await IsGrantedByFeatureAsync(user, routeKey, ct);
         }
         catch (Exception ex)
         {
@@ -88,6 +102,63 @@ public sealed class MenuService : IMenuService
             _logger.LogWarning(ex, "Menu access check failed for {Controller}/{Action}; allowing request.", controller, action);
             return true;
         }
+    }
+
+    public async Task<bool> IsFeatureEnabledAsync(ClaimsPrincipal user, string featureKey, bool fallback, CancellationToken ct)
+    {
+        if (user.Identity?.IsAuthenticated != true) return false;
+
+        var settings = await GetFeatureSettingsAsync(user, ct);
+        return settings.TryGetValue(featureKey, out var isEnabled) ? isEnabled : fallback;
+    }
+
+    /// <summary>
+    /// Routes a feature toggle can grant on its own, keyed by <see cref="RouteKey"/>.
+    /// Both reimbursement toggles open the same screen, so enabling either one is enough.
+    /// </summary>
+    private static readonly Dictionary<string, string[]> FeatureGrantedRoutes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["/reimbursementchat/index"] = new[]
+        {
+            MenuFeatureKeys.ReimbursementChatHeaderIcon,
+            MenuFeatureKeys.ReimbursementChatHelpBubble
+        }
+    };
+
+    private async Task<bool> IsGrantedByFeatureAsync(ClaimsPrincipal user, string routeKey, CancellationToken ct)
+    {
+        if (!FeatureGrantedRoutes.TryGetValue(routeKey, out var featureKeys)) return false;
+        var settings = await GetFeatureSettingsAsync(user, ct);
+        return featureKeys.Any(key => settings.TryGetValue(key, out var isEnabled) && isEnabled);
+    }
+
+    /// <summary>
+    /// Explicit role feature settings, already resolved across the user's roles by the API
+    /// (any role that enables a feature wins). Features nobody has decided are absent.
+    /// </summary>
+    private async Task<Dictionary<string, bool>> GetFeatureSettingsAsync(ClaimsPrincipal user, CancellationToken ct)
+    {
+        var key = $"menu:v{Volatile.Read(ref _cacheVersion)}:features:{RoleKey(user)}";
+        var settings = await _cache.GetOrCreateAsync(key, async entry =>
+        {
+            try
+            {
+                var rows = await _api.GetMyFeaturesAsync(ct);
+                entry.AbsoluteExpirationRelativeToNow = CacheDuration;
+                return rows
+                    .GroupBy(r => r.FeatureKey, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.Any(r => r.IsEnabled), StringComparer.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                // Same fail-open contract as the menu itself: an unreachable API must not
+                // change what the user sees, so callers fall back to their own default.
+                _logger.LogWarning(ex, "Role feature API unavailable; using defaults for {Duration}.", FailureCacheDuration);
+                entry.AbsoluteExpirationRelativeToNow = FailureCacheDuration;
+                return new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            }
+        });
+        return settings ?? new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
     }
 
     private async Task<HashSet<string>> GetManagedRoutesAsync(CancellationToken ct)

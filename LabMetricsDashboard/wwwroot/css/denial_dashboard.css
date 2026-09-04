@@ -1881,3 +1881,141 @@ body.fs-lock {
 			flex: 0 0 auto;
 			margin-top: .5rem;
 		}
+
+/* ============================================================================
+   Denial Dashboard - table pass across every tab
+   ----------------------------------------------------------------------------
+   This stylesheet is loaded ONLY by Views/DenialDashboard/Index.cshtml, so these
+   rules are scoped to that page and cannot leak into other screens.
+
+   The page had grown TWO table designs, which is why it read as inconsistent:
+
+     * .lis-list-table / .lis-summary-grid (Dashboard, Task Board, Weekly and
+       Monthly tabs) - navy sticky header, white body, faint zebra. The good one.
+     * .app-table .polished-table .zebra-table (Insights, Denial Input, Line Item,
+       SLA tabs) - light header, and a body washed in blue.
+
+   The blue wash was the main complaint. .zebra-table painted EVERY row #f3f8ff,
+   even rows #ecf4fd and hover #e2eefc - three shades of the same pale blue, so
+   rows blurred together and hover barely registered. (It was also declared twice
+   in this file, at two different blues, which is how it drifted.)
+
+   Everything below pulls the second family onto the first one's design, so all
+   tabs read as one page.
+   ============================================================================ */
+
+/* --- Body: white with a faint zebra, and a hover you can actually see ------ */
+.zebra-table tbody td {
+    background: #fff;
+}
+
+.zebra-table tbody tr:nth-child(even) td {
+    background: #f8fafd;
+}
+
+.zebra-table tbody tr:hover td,
+.zebra-table tbody tr:nth-child(even):hover td {
+    background: #eaf3ff;
+}
+
+/* --- Header: the same navy treatment the main grids already use ----------- */
+.app-table thead th,
+.polished-table thead th,
+.line-table thead th,
+.filter-table thead th {
+    background: linear-gradient(180deg, #17466f 0%, #0f365c 100%);
+    color: #fff;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    font-size: .68rem;
+    font-weight: 800;
+    letter-spacing: .015em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    /* These tables carry deliberate Excel-style grid lines (#e3ebf5 on every
+       td/th, further up this file). Keep the header gridded too, just in a
+       colour that reads on navy instead of the light-table grey. */
+    border: 1px solid rgba(255, 255, 255, .18);
+    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .18);
+    padding: .55rem .65rem;
+}
+
+/* The sort glyph has to read against navy now, not against the old grey. */
+.app-table thead th.sortable-header::after,
+.polished-table thead th.sortable-header::after {
+    color: rgba(255, 255, 255, .72);
+}
+
+/* --- Cells --------------------------------------------------------------- */
+/* Padding and ink only - the cell BORDERS are left to the grid-line rule above,
+   so the Excel-style grid these tables are meant to have stays intact. */
+.polished-table tbody td,
+.app-table tbody td {
+    padding: .5rem .65rem;
+    color: #0a2749;
+    vertical-align: middle;
+}
+
+/* Digits line up in a column only with tabular figures - without this a column
+   of right-aligned numbers still looks ragged because glyph widths differ. */
+.app-table td.text-end,
+.app-table th.text-end,
+.polished-table td.text-end,
+.polished-table th.text-end,
+.lis-summary-grid .lis-number-cell,
+.lis-list-table .lis-number-cell {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Currency was rendered with .text-danger-emphasis, so EVERY balance was red -
+   which spends the alarm colour on ordinary data and leaves nothing to signal a
+   real problem. Balances are now normal ink; red stays for genuine exceptions. */
+.app-table tbody td.text-danger-emphasis,
+.polished-table tbody td.text-danger-emphasis {
+    color: #1f3247;
+    font-weight: 600;
+}
+
+/* --- Badges: one ramp, softer borders ------------------------------------ */
+.badge-soft-primary { background: #eff6ff; color: #1d4ed8; }
+.badge-soft-warning { background: #fffbeb; color: #b45309; }
+.badge-soft-success { background: #f0fdf4; color: #15803d; }
+.badge-soft-secondary { background: #f1f5f9; color: #475569; }
+.badge-soft-danger { background: #fef2f2; color: #b91c1c; }
+.badge-soft-dark { background: #e8eaed; color: #1f2937; }
+.badge-soft-info { background: #ecfeff; color: #0e7490; }
+
+.badge-soft-primary,
+.badge-soft-warning,
+.badge-soft-success,
+.badge-soft-secondary,
+.badge-soft-danger,
+.badge-soft-dark,
+.badge-soft-info {
+    padding: .3rem .6rem;
+    font-size: .72rem;
+    font-weight: 700;
+    border-radius: 999px;
+}
+
+/* --- Panels and frames --------------------------------------------------- */
+/* Deliberately NOT restyling .table-frame / .panel-table-wrap here. They already
+   carry `overflow: auto` (line ~252) and a bottom-only radius that matches the
+   mini-panel title above them; overriding either would clip wide tables out of
+   their horizontal scroll, or round a corner that is meant to butt against the
+   panel header. */
+.table-frame .table,
+.panel-table-wrap .table {
+    margin-bottom: 0;
+}
+
+/* The inline rate bar was the same blue as the old row wash and disappeared into
+   it. On white it needs its own track. */
+.rate-track {
+    background: #e8eef6;
+}
+
+.rate-track span {
+    background: #17466f;
+}

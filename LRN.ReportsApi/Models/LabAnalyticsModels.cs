@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Mvc.ModelBinding;
+
 namespace LRN.ReportsApi.Models;
 
 // ── Analytics: Lab Modes / Lab Medians (Meridian) list pages ─────────────────
@@ -68,6 +70,19 @@ public sealed class LookupQuery
     public string? SortDirection { get; set; }
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 50;
+
+    /// <summary>
+    /// The labs this request may read. Set from the caller's identity, never from the request:
+    /// <see cref="BindNeverAttribute"/> keeps a hand-crafted "?allowedLabIds=..." from widening
+    /// it. <c>null</c> means unrestricted (Admin). An empty list means the user has no lab
+    /// assignments and must see nothing - it is NOT the same as null.
+    ///
+    /// <see cref="LabId"/> above is still the user's own lab picker; this is the ceiling it
+    /// cannot reach past. A LabId outside this list returns no rows rather than silently
+    /// falling back to every lab.
+    /// </summary>
+    [BindNever]
+    public List<int>? AllowedLabIds { get; set; }
 }
 
 /// <summary>

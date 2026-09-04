@@ -33,6 +33,15 @@ public interface IDenialWorkflowRepository
     Task<int> UpdateClaimCommentsAsync(int labId, string claimId, string comments, string actionBy, CancellationToken ct);
     Task<int> DecideVerificationAsync(VerificationDecisionRequest request, bool isClosed, CancellationToken ct);
     Task EnsureClaimSupportTablesAsync(int labId, CancellationToken ct);
+
+    /// <summary>
+    /// AR Reporting Requirements GAP-6: captures today's (or the given date's) inventory as one
+    /// row per (analyst, reporting bucket, denial classification, action) into
+    /// dbo.DenialInventorySnapshot. Deletes that date's existing rows first, so re-running for the
+    /// same date replaces rather than duplicates - the job can be re-triggered safely after a
+    /// failure without an "already ran today" check. Returns the row count written.
+    /// </summary>
+    Task<int> CaptureInventorySnapshotAsync(int labId, DateOnly snapshotDate, CancellationToken ct);
     Task<IReadOnlyList<DenialNoteRow>> GetNotesAsync(int labId, string claimId, string? taskId, string? cptCode, string noteLevel, CancellationToken ct);
     Task<DenialNoteRow> SaveNoteAsync(SaveDenialNoteRequest request, CancellationToken ct);
     Task<IReadOnlyList<FollowUpNotificationRow>> GetFollowUpNotificationsAsync(int labId, string userName, CancellationToken ct);

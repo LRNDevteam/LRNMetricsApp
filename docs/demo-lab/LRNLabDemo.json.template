@@ -1,0 +1,63 @@
+{
+  "//": [
+    "Lab config for the LRNLabDemo demo lab, derived from the real PCRLabsofAmerica.json.",
+    "",
+    "DEPLOY AS LRNLabDemo.json TO:",
+    "  E:\\LRN-Data\\PayerPolicy_v2\\2026\\ReportsDashboard\\Application\\Configs\\",
+    "All three apps (dashboard, ReportsApi, ReportWorker) read this one folder - the dashboard",
+    "and API moved off C:\\LRN-Files\\... onto this path in commit e74e276, so there is one file",
+    "to place, not two.",
+    "",
+    "THE ROOT PROPERTY NAME IS LOad-BEARING. Program.cs binds each lab file by a root section",
+    "matching the lab key. Leaving it as \"PCRLabsofAmerica\" does not create a demo lab - it",
+    "loads as a SECOND definition of PCR and the last file wins, repointing the real PCR lab at",
+    "the demo database. It must be \"LRNLabDemo\".",
+    "",
+    "DbLabName is deliberately ABSENT. Step 4 (Demo_LRNLabDemo_04_RestampLabIdentity.sql)",
+    "rewrites the cloned data from PCR's LabId 13 / 'PCR Labs of America' to 99 / 'LRNLabDemo',",
+    "so the data now matches the config key and no alias is needed. Setting DbLabName back to a",
+    "PCR value after re-stamping would break the lab, not fix it.",
+    "",
+    "Paths point at demo folders on purpose. Left on PCR's folders the demo reads PCR's live",
+    "CSVs, Excel exports and insight JSON - production data again, which the database scrub",
+    "does nothing about. Copy the files across once from PCR's folders.",
+    "",
+    "Flags and rules are copied verbatim from PCRLabsofAmerica.json so the demo behaves",
+    "identically in the UI. Do not tune them here."
+  ],
+
+  "LRNLabDemo": {
+    "//DbLabName": "Not set on purpose - step 4 re-stamps the demo data to LabName 'LRNLabDemo', so the config key already matches the data. Only add DbLabName if you skip the re-stamp.",
+
+    "DbConnectionString": "Server=ReportEngine\\SQLEXPRESS;Database=LRNLabDemo;User Id=sa;Password=<demo-password>;TrustServerCertificate=True;",
+
+    "//paths": "Demo copies, NOT PCR's live folders. Create these and copy PCR's current files in once.",
+    "ProductionMasterCsvPath": "C:\\LRN-Files\\Automation\\LRN-Demo\\LRN-Input\\LRNLabDemo\\",
+    "PayerPolicyValidationReportPath": "C:\\LRN-Files\\Automation\\LRN-Demo\\LRN-Output\\PayerPolicy_Validation_Report\\LRNLabDemo\\",
+    "InsightPath": "C:\\LRN-Files\\Automation\\LRN-Demo\\LRN-Output\\Prediction_Insights\\",
+    "RCMJsonpath": "C:\\LRN-Files\\Automation\\LRN-Demo\\LRN-Output\\RCM_Insights\\LRNLabDemo\\Input\\",
+    "Reports": "C:\\LRN-Files\\Automation\\LRN-Demo\\LRN-Output\\Coding_Validation_Report\\LRNLabDemo",
+    "Avgs": "C:\\LRN-Files\\Automation\\LRN-Demo\\LRN-Output\\Averages\\LRNLabDemo",
+
+    "//flags": "Verbatim from PCRLabsofAmerica.json.",
+    "DBEnabled": true,
+    "LineClaimEnable": true,
+    "CollectionOutput": "table1",
+    "EnableCoding": true,
+    "EnablePrediction": true,
+    "EnableForcast": true,
+    "EnableClinicsummary": false,
+    "EnableSalesRepsummary": false,
+    "EnableProductionReport": true,
+    "EnableCollectionReport": true,
+    "EnableProductionSummaryReport": true,
+    "EnableCollectionSummaryReport": true,
+    "UseDBDashboard": true,
+
+    "ProductionSummary": {
+      "Rule": "Rule1",
+      "weekrule": "Rule1",
+      "WeekRange": "Thu to Wed"
+    }
+  }
+}

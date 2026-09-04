@@ -1,5 +1,6 @@
 @using LabMetricsDashboard.Models
 @inject LabSettings LabSettingsInstance
+@inject LabConfigOptions LabConfigInstance
 @inject IConfiguration Configuration
 @{
     // Legacy hard-coded navbar. Rendered only when the dynamic (database-driven)
@@ -23,7 +24,7 @@
         .Where(c => c.Type == "LabName")
         .Select(c => c.Value)
         .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    var availableLabs = isAdmin ? allLabKeys : allLabKeys.Where(l => userLabClaims.Contains(l)).ToList();
+    var availableLabs = LabConfigInstance.VisibleLabs(allLabKeys, userLabClaims, isAdmin);
 
     var activeLab = ViewData["SelectedLab"] as string;
     if (string.IsNullOrEmpty(activeLab))

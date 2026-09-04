@@ -111,4 +111,32 @@ public sealed class MenuController : ControllerBase
         await _repository.ReplaceRoleMenusAsync(roleId, request.MenuIds ?? new List<int>(), UserName(), ct);
         return Ok(new { success = true });
     }
+
+    // ── Role feature access (header icon / help bubble, admin) ─────────────
+
+    /// <summary>Explicit feature settings for the current user, resolved across their roles.</summary>
+    [HttpGet("my/features")]
+    public async Task<ActionResult<IReadOnlyList<RoleFeatureDto>>> MyFeatures(CancellationToken ct)
+        => Ok(await _repository.GetFeaturesForRolesAsync(PayerMasterRoles.RoleNames(User), ct));
+
+    /// <summary>The togglable features the Role Menu Mapping screen renders.</summary>
+    [HttpGet("features")]
+    public ActionResult<IReadOnlyList<MenuFeatureDto>> Features()
+        => IsAdmin ? Ok(MenuFeatureCatalog.All) : Denied();
+
+    [HttpGet("roles/{roleId:int}/features")]
+    public async Task<ActionResult<IReadOnlyList<RoleFeatureDto>>> RoleFeatures(int roleId, CancellationToken ct)
+        => IsAdmin ? Ok(await _repository.GetRoleFeaturesAsync(roleId, ct)) : Denied();
+
+    [HttpPut("roles/{roleId:int}/features")]
+    public async Task<ActionResult> SaveRoleFeatures(int roleId, RoleFeatureSaveRequest request, CancellationToken ct)
+    {
+        if (!IsAdmin) return Denied();
+        try
+        {
+            await _repository.ReplaceRoleFeaturesAsync(roleId, request.Features ?? new List<RoleFeatureDto>(), UserName(), ct);
+            return Ok(new { success = true });
+        }
+        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+    }
 }

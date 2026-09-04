@@ -3,15 +3,14 @@
    Target database: LRNMaster (DefaultConnection)
 
    Creates:
-     dbo.MenuItems      - menu master (2-level: parent -> submenu)
-     dbo.UserRoleMenu   - role -> menu mapping (FK to dbo.Roles)
+     dbo.MenuItems         - menu master (2-level: parent -> submenu)
+     dbo.UserRoleMenu      - role -> menu mapping (FK to dbo.Roles)
+     dbo.RoleFeatureAccess - role -> screen element toggles (header icons and other
+                             UI that is not a navbar menu item)
      dbo.usp_GetMenusForRole - menu fetch per role (date-window filtered)
 
    Seeds the menu tree matching the current LRN Metrics navbar and grants
    every menu to the Admin role (default script for admin user access).
-
-   Denial Workflow is intentionally NOT seeded - it will be added to the
-   dynamic menu in a later phase.
 
    The script is idempotent - safe to run multiple times.
    ============================================================================ */
@@ -89,6 +88,32 @@ BEGIN
     PRINT 'Created table dbo.UserRoleMenu';
 END
 
+/* ── 2b. dbo.RoleFeatureAccess ────────────────────────────────────────────
+   Screen elements that are NOT navbar menu items (the reimbursement chat icon in
+   the header, the shortcut inside the help chat bubble) and so cannot be granted
+   through dbo.UserRoleMenu. A missing row means "not decided": the application
+   falls back to the role's menu access, which is the pre-existing behaviour.
+   FeatureKey values are defined in LRN.ReportsApi MenuFeatureCatalog.           */
+IF OBJECT_ID(N'dbo.RoleFeatureAccess', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.RoleFeatureAccess
+    (
+        RoleFeatureAccessId INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_RoleFeatureAccess PRIMARY KEY,
+        RoleId              INT               NOT NULL,
+        FeatureKey          NVARCHAR(100)     NOT NULL,
+        IsEnabled           BIT               NOT NULL CONSTRAINT DF_RoleFeatureAccess_Enabled DEFAULT(1),
+        CreatedBy           NVARCHAR(100)     NOT NULL CONSTRAINT DF_RoleFeatureAccess_CreatedBy DEFAULT(N'system'),
+        CreatedOn           DATETIME2(0)      NOT NULL CONSTRAINT DF_RoleFeatureAccess_CreatedOn DEFAULT(SYSDATETIME()),
+        ModifiedBy          NVARCHAR(100)     NULL,
+        ModifiedOn          DATETIME2(0)      NULL,
+
+        CONSTRAINT FK_RoleFeatureAccess_Role FOREIGN KEY (RoleId) REFERENCES dbo.Roles(RoleID),
+        CONSTRAINT UX_RoleFeatureAccess UNIQUE (RoleId, FeatureKey)
+    );
+
+    PRINT 'Created table dbo.RoleFeatureAccess';
+END
+
 /* ── 3. Seed menu items (matches the current LRN Metrics navbar) ─────────── */
 IF NOT EXISTS (SELECT 1 FROM dbo.MenuItems)
 BEGIN
@@ -101,7 +126,6 @@ BEGIN
      (2,  NULL, N'Revenue Dashboard',             N'Dashboard',         N'Index',                       N'bi-speedometer2',               2, 0, N'system'),
      (3,  NULL, N'Standard Reports',              NULL,                 NULL,                           N'bi-file-earmark-bar-graph',     3, 0, N'system'),
      (10, NULL, N'Denial Dashboard',              N'DenialDashboard',   N'Index',                       N'bi-exclamation-triangle-fill',  4, 0, N'system'),
-     -- (Denial Workflow deliberately skipped - to be added in a later phase)
      (11, NULL, N'Analytics',                     NULL,                 NULL,                           N'bi-graph-up-arrow',             5, 0, N'system'),
      (17, NULL, N'Master Values',                 NULL,                 NULL,                           N'bi-database-gear',              6, 0, N'system'),
      (23, NULL, N'Admin',                         NULL,                 NULL,                           N'bi-shield-lock',                7, 0, N'system'),
@@ -180,6 +204,63 @@ BEGIN
     INSERT dbo.MenuItems (ParentMenuItemId, MenuName, ControllerName, ActionName, IconClass, MenuOrder, IsDisabled, CreatedBy)
     VALUES (@MasterValuesId, N'Report Audit Log', N'MasterValues', N'ReportAuditLog', N'bi-journal-text', 6, 0, N'system');
     PRINT 'Added Master Values > Report Audit Log menu item';
+END
+
+/* ── 3c-2. Denial Workflow (idempotent add) ───────────────────────────────
+   The screen itself is the separate React app; the menu row exists so the
+   link can be granted per role in Admin > Role Menu Mapping and so it stops
+   being hard-coded into the navbar for everyone. Placed directly after
+   Denial Dashboard, which is where it has always rendered.
+
+   Role access is seeded from Denial Dashboard so nobody loses the link on
+   upgrade - review it in Admin > Role Menu Mapping afterwards.            */
+DECLARE @DenialDashboardId INT =
+    (SELECT TOP (1) MenuItemId FROM dbo.MenuItems
+     WHERE ParentMenuItemId IS NULL AND ControllerName = N'DenialDashboard'
+       AND ActionName = N'Index' AND IsDeleted = 0
+     ORDER BY MenuItemId);
+
+DECLARE @DenialWorkflowId INT =
+    (SELECT TOP (1) MenuItemId FROM dbo.MenuItems
+     WHERE ParentMenuItemId IS NULL AND ControllerName = N'DenialWorkflow'
+       AND ActionName = N'Index'
+     ORDER BY MenuItemId);
+
+IF @DenialWorkflowId IS NULL
+BEGIN
+    INSERT dbo.MenuItems (ParentMenuItemId, MenuName, ControllerName, ActionName, IconClass, MenuOrder, IsDisabled, CreatedBy)
+    VALUES (NULL, N'Denial Workflow', N'DenialWorkflow', N'Index', N'bi-kanban-fill',
+            ISNULL((SELECT MenuOrder FROM dbo.MenuItems WHERE MenuItemId = @DenialDashboardId), 4), 0, N'system');
+
+    SET @DenialWorkflowId = SCOPE_IDENTITY();
+    PRINT 'Added Denial Workflow menu item';
+END
+ELSE
+BEGIN
+    /* Re-running after a soft delete or a disable should restore the link. */
+    UPDATE dbo.MenuItems
+    SET IsDeleted = 0, IsDisabled = 0, ModifiedBy = N'system', ModifiedOn = SYSDATETIME()
+    WHERE MenuItemId = @DenialWorkflowId AND (IsDeleted = 1 OR IsDisabled = 1);
+END
+
+/* Denial Workflow sorts immediately after Denial Dashboard. Both share a MenuOrder;
+   MenuService breaks the tie on MenuName, and "Denial Dashboard" < "Denial Workflow". */
+IF @DenialDashboardId IS NOT NULL
+BEGIN
+    UPDATE dbo.MenuItems
+    SET MenuOrder = (SELECT MenuOrder FROM dbo.MenuItems WHERE MenuItemId = @DenialDashboardId),
+        ModifiedBy = N'system', ModifiedOn = SYSDATETIME()
+    WHERE MenuItemId = @DenialWorkflowId
+      AND MenuOrder <> (SELECT MenuOrder FROM dbo.MenuItems WHERE MenuItemId = @DenialDashboardId);
+
+    INSERT dbo.UserRoleMenu (RoleId, MenuItemId, CreatedBy)
+    SELECT src.RoleId, @DenialWorkflowId, N'system'
+    FROM dbo.UserRoleMenu src
+    WHERE src.MenuItemId = @DenialDashboardId
+      AND NOT EXISTS (SELECT 1 FROM dbo.UserRoleMenu x
+                      WHERE x.RoleId = src.RoleId AND x.MenuItemId = @DenialWorkflowId);
+
+    PRINT 'Denial Workflow role access seeded from Denial Dashboard';
 END
 
 /* ── 3d. Report Board - the landing/home page (replaces Revenue Dashboard) ──

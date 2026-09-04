@@ -1,0 +1,1278 @@
+<title>Denial AR Reports Readiness</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+
+<style>
+/* ============================================================
+   Denial AR Reports — Data Readiness Audit
+   Same token system as Denial_Workflow_Benchmark_And_Screens_v1.0.html
+   so the denial-management doc set reads as one family.
+   ============================================================ */
+:root{
+  --navy-900:#0a2342; --navy-700:#1b3f72; --navy-head:#16325c;
+  --blue:#1b64da; --blue-050:#e9f1fd;
+  --teal:#0f9d8e; --teal-050:#e4f7f4;
+  --red:#d64550;   --red-050:#fdecee;
+  --amber:#c47f10; --amber-050:#fdf4e3;
+  --green:#1f9254; --green-050:#e8f6ee;
+  --purple:#7048b6;--purple-050:#f2edfb;
+
+  --doc-bg:#f4f6fa;
+  --doc-card:#ffffff;
+  --doc-ink:#141f33;
+  --doc-ink-2:#485974;
+  --doc-ink-3:#7c8ba3;
+  --doc-line:#dde3ec;
+  --doc-line-2:#eaeef4;
+  --doc-rule:#c9d3e1;
+  --doc-link:#15559c;
+  --doc-quiet:#eef1f7;
+  --doc-code:#f5f7fb;
+
+  --f-doc:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+  --f-ui:"IBM Plex Sans","Segoe UI",system-ui,-apple-system,Helvetica,Arial,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+
+  --wrap:1180px;
+  --prose:70ch;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --doc-bg:#0c1421; --doc-card:#131d2e; --doc-ink:#dce4f0; --doc-ink-2:#9dabc2;
+    --doc-ink-3:#71809a; --doc-line:#22314b; --doc-line-2:#1a2739; --doc-rule:#2c3d5c;
+    --doc-link:#7fb0f0; --doc-quiet:#182437; --doc-code:#101a2a;
+  }
+}
+:root[data-theme="dark"]{
+  --doc-bg:#0c1421; --doc-card:#131d2e; --doc-ink:#dce4f0; --doc-ink-2:#9dabc2;
+  --doc-ink-3:#71809a; --doc-line:#22314b; --doc-line-2:#1a2739; --doc-rule:#2c3d5c;
+  --doc-link:#7fb0f0; --doc-quiet:#182437; --doc-code:#101a2a;
+}
+
+*{box-sizing:border-box;}
+body{background:var(--doc-bg); color:var(--doc-ink); font-family:var(--f-doc);
+  font-size:16px; line-height:1.62; -webkit-font-smoothing:antialiased;}
+:focus-visible{outline:2px solid var(--blue); outline-offset:2px;}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
+
+.wrap{max-width:var(--wrap); margin:0 auto; padding:0 28px;}
+.prose{max-width:var(--prose);}
+p{margin:0 0 1em;}
+a{color:var(--doc-link);}
+
+.mast{background:linear-gradient(103deg,var(--navy-900) 0%,var(--navy-700) 62%,#22528f 100%);
+  color:#e4ecf8; border-bottom:3px solid var(--teal);}
+.mast .wrap{padding-top:38px; padding-bottom:34px;}
+.mast .kicker{font-family:var(--f-ui); font-size:10.5px; font-weight:700;
+  letter-spacing:.2em; text-transform:uppercase; color:#8fb2df; margin-bottom:14px;}
+.mast h1{font-family:var(--f-ui); font-weight:700; font-size:clamp(30px,4.4vw,46px);
+  line-height:1.06; letter-spacing:-.025em; margin:0 0 14px; color:#fff;
+  text-wrap:balance; max-width:20ch;}
+.mast .standfirst{font-size:17px; color:#c3d5ee; max-width:62ch; margin:0; line-height:1.55;}
+.mast .standfirst em{color:#8fe0d4; font-style:italic;}
+
+.meta{background:var(--doc-card); border-bottom:1px solid var(--doc-line);}
+.meta .wrap{padding-top:20px; padding-bottom:20px;}
+.metagrid{display:grid; gap:2px 30px; grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+  font-family:var(--f-ui); font-size:13px;}
+.metagrid div{display:flex; gap:8px; padding:5px 0; border-bottom:1px solid var(--doc-line-2);}
+.metagrid dt{flex:0 0 88px; color:var(--doc-ink-3); font-size:10.5px; font-weight:700;
+  letter-spacing:.1em; text-transform:uppercase; padding-top:3px; margin:0;}
+.metagrid dd{margin:0; color:var(--doc-ink-2); font-weight:500;}
+
+section{padding:56px 0 8px;}
+section + section{border-top:1px solid var(--doc-line);}
+.snum{font-family:var(--f-mono); font-size:11px; font-weight:600; letter-spacing:.06em;
+  color:var(--teal); display:block; margin-bottom:9px;}
+h2{font-family:var(--f-ui); font-weight:700; font-size:29px; letter-spacing:-.02em;
+  line-height:1.15; margin:0 0 12px; text-wrap:balance;}
+h3{font-family:var(--f-ui); font-weight:600; font-size:18.5px; letter-spacing:-.01em; margin:38px 0 10px;}
+h4{font-family:var(--f-ui); font-weight:600; font-size:13.5px; margin:22px 0 7px; color:var(--doc-ink-2);
+  letter-spacing:.02em;}
+.lede{font-size:17.5px; color:var(--doc-ink-2); max-width:64ch; margin-bottom:26px;}
+.rule{height:1px; background:var(--doc-rule); border:0; margin:44px 0;}
+
+ul.doc, ol.doc{margin:0 0 1.1em; padding-left:1.2em; max-width:var(--prose);}
+ul.doc li, ol.doc li{margin-bottom:.5em;}
+ul.doc li::marker{color:var(--teal);}
+ol.doc li::marker{color:var(--teal); font-family:var(--f-mono); font-size:.85em;}
+
+code{font-family:var(--f-mono); font-size:.85em; background:var(--doc-code); padding:1px 5px;
+  border-radius:4px; color:var(--doc-ink); border:1px solid var(--doc-line-2);}
+pre{font-family:var(--f-mono); font-size:12px; line-height:1.6; background:var(--doc-code);
+  border:1px solid var(--doc-line); border-left:3px solid var(--teal); border-radius:0 8px 8px 0;
+  padding:14px 16px; overflow-x:auto; margin:14px 0; color:var(--doc-ink);}
+pre code{background:none; border:0; padding:0; font-size:inherit;}
+pre .c{color:var(--doc-ink-3);}
+pre .k{color:var(--blue); font-weight:600;}
+
+.callout{border-left:3px solid var(--teal); background:var(--doc-quiet); padding:16px 20px;
+  margin:26px 0; max-width:var(--prose); font-size:15.5px; color:var(--doc-ink-2);}
+.callout b{color:var(--doc-ink);}
+.callout.warn{border-left-color:var(--amber);}
+.callout.stop{border-left-color:var(--red);}
+
+/* ---------- verdict tiles ---------- */
+.verdict-row{display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); margin:26px 0 8px;}
+.vt{background:var(--doc-card); border:1px solid var(--doc-line); border-radius:10px;
+  padding:16px 18px; font-family:var(--f-ui);}
+.vt .vn{font-size:34px; font-weight:700; letter-spacing:-.04em; line-height:1; font-variant-numeric:tabular-nums;}
+.vt .vl{font-size:12.5px; font-weight:600; color:var(--doc-ink); margin-top:7px;}
+.vt .vd{font-size:12px; color:var(--doc-ink-3); margin-top:3px; line-height:1.45;}
+.vt.ok{border-top:3px solid var(--green);} .vt.ok .vn{color:var(--green);}
+.vt.part{border-top:3px solid var(--amber);} .vt.part .vn{color:var(--amber);}
+.vt.no{border-top:3px solid var(--red);} .vt.no .vn{color:var(--red);}
+.vt.new{border-top:3px solid var(--purple);} .vt.new .vn{color:var(--purple);}
+
+/* ---------- coverage matrix ---------- */
+.scroller{overflow-x:auto; margin:24px 0 10px; border:1px solid var(--doc-line);
+  border-radius:10px; background:var(--doc-card);}
+table.cov{border-collapse:collapse; width:100%; min-width:900px; font-family:var(--f-ui); font-size:12.5px;}
+table.cov th, table.cov td{padding:8px 10px; border-bottom:1px solid var(--doc-line-2); text-align:center;}
+table.cov thead th{background:var(--navy-head); color:#e8eff9; font-weight:600; font-size:10.5px;
+  letter-spacing:.04em; line-height:1.3; vertical-align:bottom; border-bottom:0;}
+table.cov th.rep, table.cov td.rep{text-align:left; min-width:250px; position:sticky; left:0;
+  background:var(--doc-card); border-right:1px solid var(--doc-line);}
+table.cov thead th.rep{background:var(--navy-900); color:#e8eff9;}
+table.cov td.rep b{display:block; color:var(--doc-ink); font-weight:600;}
+table.cov td.rep span{font-size:11px; color:var(--doc-ink-3); font-family:var(--f-mono);}
+table.cov tbody tr:hover td{background:color-mix(in srgb, var(--blue) 5%, transparent);}
+table.cov tbody tr:hover td.rep{background:var(--doc-quiet);}
+.g{display:inline-block; width:15px; height:15px; border-radius:3px; vertical-align:-2px; border:1.5px solid currentColor;}
+.g.full{background:currentColor;}
+.g.part{background:linear-gradient(135deg,currentColor 0 50%,transparent 50% 100%);}
+.g.none{background:transparent; opacity:.4;}
+.cf{color:var(--green);} .cp{color:var(--amber);} .cn{color:var(--red);}
+td.status{font-weight:700; font-size:11px; letter-spacing:.03em; white-space:nowrap;}
+td.status.s-go{color:#166b3f;} td.status.s-part{color:#8a5a06;} td.status.s-block{color:#9e2d36;}
+
+.legend{display:flex; flex-wrap:wrap; gap:10px 26px; font-family:var(--f-ui); font-size:12.5px;
+  color:var(--doc-ink-2); margin:0 0 6px;}
+.legend span{display:inline-flex; align-items:center; gap:7px;}
+
+/* ---------- gap table ---------- */
+.scroller table.gap{border-collapse:collapse; width:100%; min-width:760px; font-family:var(--f-ui); font-size:13px;}
+table.gap th{background:var(--navy-head); color:#e8eff9; font-weight:600; font-size:10.5px;
+  letter-spacing:.05em; text-transform:uppercase; padding:9px 11px; text-align:left;}
+table.gap td{padding:9px 11px; border-bottom:1px solid var(--doc-line-2); vertical-align:top;}
+table.gap td:first-child{font-family:var(--f-mono); font-size:11.5px; color:var(--doc-ink); white-space:nowrap;}
+table.gap tbody tr:hover td{background:var(--doc-quiet);}
+.tag{display:inline-block; font-size:9.5px; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+  padding:2px 7px; border-radius:4px; white-space:nowrap;}
+.tag.small{background:var(--green-050); color:#166b3f;}
+.tag.med{background:var(--amber-050); color:#8a5a06;}
+.tag.big{background:var(--red-050); color:#9e2d36;}
+
+/* ---------- report build cards ---------- */
+.card{background:var(--doc-card); border:1px solid var(--doc-line); border-radius:12px;
+  margin:22px 0; overflow:hidden;}
+.card.blocked{border-color:#e8bcc0;}
+:root[data-theme="dark"] .card.blocked,
+:root:not([data-theme="light"]) .card.blocked{border-color:#5a2f36;}
+.card-h{display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px;
+  padding:14px 20px; border-bottom:1px solid var(--doc-line-2); font-family:var(--f-ui);}
+.card-h .ord{font-family:var(--f-mono); font-size:12px; font-weight:600; color:#fff;
+  background:var(--navy-700); border-radius:5px; padding:3px 9px;}
+.card.blocked .card-h .ord{background:var(--red);}
+.card-h .rid{font-family:var(--f-mono); font-size:12px; color:var(--doc-ink-3); font-weight:600;}
+.card-h h3{margin:0; font-size:18px; font-weight:600; letter-spacing:-.015em;}
+.card-h .verdict{margin-left:auto; font-size:10px; font-weight:700; letter-spacing:.11em;
+  text-transform:uppercase; padding:4px 10px; border-radius:5px;}
+.verdict.go{background:var(--green-050); color:#166b3f;}
+.verdict.reduced{background:var(--amber-050); color:#8a5a06;}
+.verdict.stopped{background:var(--red-050); color:#9e2d36;}
+.card-b{padding:18px 20px 22px;}
+.card-b > p:first-child{margin-top:0;}
+.card-b p{font-size:15px; color:var(--doc-ink-2); max-width:66ch;}
+.card-b p b{color:var(--doc-ink);}
+
+.facts{display:grid; gap:2px 22px; grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  font-family:var(--f-ui); font-size:12.5px; margin:0 0 16px; padding-bottom:14px;
+  border-bottom:1px dashed var(--doc-line);}
+.facts div{display:flex; gap:9px; padding:4px 0;}
+.facts dt{flex:0 0 88px; color:var(--doc-ink-3); font-size:9.5px; font-weight:700;
+  letter-spacing:.1em; text-transform:uppercase; padding-top:3px; margin:0;}
+.facts dd{margin:0; color:var(--doc-ink-2);}
+.facts dd code{font-size:11px;}
+
+.split{display:grid; gap:20px; grid-template-columns:1fr 1fr;}
+@media (max-width:820px){.split{grid-template-columns:1fr;}}
+.have h4, .want h4{margin-top:0;}
+.have h4{color:var(--green);} .want h4{color:var(--red);}
+.have ul, .want ul{margin:0; padding-left:1.05em; font-size:13.5px; color:var(--doc-ink-2);
+  font-family:var(--f-ui); line-height:1.55;}
+.have ul li, .want ul li{margin-bottom:.4em;}
+.have ul li::marker{color:var(--green);} .want ul li::marker{color:var(--red);}
+.have code, .want code{font-size:11px;}
+
+.test{background:var(--doc-quiet); border-radius:8px; padding:14px 17px; margin-top:18px;}
+.test h4{margin:0 0 9px; color:var(--doc-ink); font-size:12px; letter-spacing:.1em; text-transform:uppercase;}
+.test ol{margin:0; padding-left:1.3em; font-family:var(--f-ui); font-size:13.5px; color:var(--doc-ink-2);}
+.test ol li{margin-bottom:.45em;}
+.test ol li::marker{font-family:var(--f-mono); font-size:.85em; color:var(--teal);}
+.test pre{background:var(--doc-card); margin-top:12px; margin-bottom:0;}
+.test .pass{font-family:var(--f-ui); font-size:12.5px; color:var(--doc-ink-2); margin-top:11px;
+  padding-top:10px; border-top:1px solid var(--doc-line);}
+.test .pass b{color:var(--green); font-weight:700; letter-spacing:.04em; font-size:10.5px;
+  text-transform:uppercase; letter-spacing:.1em;}
+
+footer{margin-top:56px; border-top:3px solid var(--navy-700); background:var(--doc-card); padding:30px 0 44px;}
+footer .wrap{font-family:var(--f-ui); font-size:12.5px; color:var(--doc-ink-3);}
+footer h4{margin:0 0 10px; font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--doc-ink-2);}
+footer ul{margin:0; padding-left:1.1em;}
+footer li{margin-bottom:.35em;}
+.foot-cols{display:grid; gap:26px; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); margin-bottom:24px;}
+</style>
+
+<header class="mast">
+  <div class="wrap">
+    <div class="kicker">Denial Workflow Management · AR Reporting · Data audit</div>
+    <h1>Denial AR Reports Readiness</h1>
+    <p class="standfirst">
+      Which of the nine AR reports we can build from the data we capture today, which need
+      schema work first, and the order to build and test them in.
+      <em>Three are ready now. Two cannot be built at all.</em>
+    </p>
+  </div>
+</header>
+
+<div class="meta">
+  <div class="wrap">
+    <dl class="metagrid">
+      <div><dt>Audits</dt><dd>AR Reporting Requirements v1.0 (2 Sep 2026)</dd></div>
+      <div><dt>Against</dt><dd>Lab denial schema, as in source control</dd></div>
+      <div><dt>Version</dt><dd>1.0 — for developer review</dd></div>
+      <div><dt>Date</dt><dd>3 September 2026</dd></div>
+      <div><dt>Method</dt><dd>Static: DDL + repository SQL. No database queried.</dd></div>
+      <div><dt>Reports</dt><dd>3 ready · 4 reduced scope · 2 blocked</dd></div>
+    </dl>
+  </div>
+</div>
+
+<main>
+
+<!-- ================= 1 ================= -->
+<section>
+  <div class="wrap">
+    <span class="snum">Section 01</span>
+    <h2>The answer, first</h2>
+    <p class="lede">
+      No — we do not have all the data. We have most of it. The shortfall is concentrated in four
+      specific places, and it follows one pattern: <b>we record current state well and events
+      poorly.</b>
+    </p>
+
+    <div class="verdict-row">
+      <div class="vt ok">
+        <div class="vn">3</div>
+        <div class="vl">Buildable now, as specified</div>
+        <div class="vd">RPT-03, RPT-01, RPT-08 — no schema change</div>
+      </div>
+      <div class="vt part">
+        <div class="vn">4</div>
+        <div class="vl">Buildable at reduced scope</div>
+        <div class="vd">RPT-02, RPT-05, RPT-06, RPT-07 — ship the working half</div>
+      </div>
+      <div class="vt no">
+        <div class="vn">2</div>
+        <div class="vl">Blocked on missing data</div>
+        <div class="vd">RPT-04, RPT-09 — no completion or SLA events exist</div>
+      </div>
+      <div class="vt new">
+        <div class="vn">7</div>
+        <div class="vl">Objects to add</div>
+        <div class="vd">2 config tables, 3 event tables, 1 snapshot job, 1 dimension</div>
+      </div>
+    </div>
+
+    <h3>The four root causes</h3>
+    <p class="prose">
+      Nearly every gap below traces to one of these. Fix the four and eight of the nine reports
+      become fully buildable.
+    </p>
+
+    <ol class="doc">
+      <li>
+        <b>Completion is a flag, not an event.</b> <code>DenialTaskBoard.ActionCompleted</code> is a
+        bit and <code>DateCompleted</code> is a <code>date</code>, both overwritten in place. There
+        is no completed-by, no timestamp, and no history. RPT-04 is built entirely on this, and
+        RPT-02's completion measures and RPT-09's stop events depend on it too.
+      </li>
+      <li>
+        <b>Escalation responses are not linked to escalations.</b> A response writes a
+        <code>DenialTaskHistory</code> row with
+        <code>ActionType = 'ManagerEscalationResponse'</code>, carrying <code>TaskID</code> but no
+        <code>EscalationId</code>. With one escalation per claim you can infer the pairing by
+        timestamp; with re-escalation — which the spec explicitly requires reporting on — you
+        cannot. RPT-07's whole Response and Rework column groups sit here.
+      </li>
+      <li>
+        <b>There are no point-in-time snapshots.</b> <code>DenialTaskBoard</code> is mutated in
+        place. Opening and closing workload (RPT-02) and the entire Movement group (RPT-06) need
+        inventory as it stood on a past date. The spec anticipates this and says so:
+        <i>"current tables alone cannot reconstruct past inventory accurately."</i>
+      </li>
+      <li>
+        <b>There is no manager or team dimension.</b> <code>AssignedTo</code> is a free-text
+        string. Seven of the nine reports list AR Manager or team as a required filter or column,
+        and every one of them is a management report. This is the cheapest gap to close and the
+        one that affects the most reports.
+      </li>
+    </ol>
+
+    <div class="callout warn">
+      <b>What this audit is.</b> A static read of the DDL in
+      <code>LRN.ReportsApi/Sql/</code> and the SQL embedded in
+      <code>SqlDenialWorkflowRepository.cs</code>. No lab database was queried — connection strings
+      resolve from Key Vault and per-lab config on the application server, and those databases hold
+      PHI. Before build, run the verification script in §4 against one real lab to confirm the
+      columns are actually populated, not merely present. A nullable column that is null in every
+      row fails a report just as hard as a missing one.
+    </div>
+  </div>
+</section>
+
+<!-- ================= 2 ================= -->
+<section>
+  <div class="wrap">
+    <span class="snum">Section 02</span>
+    <h2>Coverage by report</h2>
+    <p class="lede">
+      Each report's required detail-column groups, scored against what the schema actually holds.
+      Group names are the spec's own.
+    </p>
+
+    <div class="legend">
+      <span><i class="g full cf"></i> Available</span>
+      <span><i class="g part cp"></i> Partial — derivable, or one field short</span>
+      <span><i class="g none cn"></i> Not captured</span>
+    </div>
+
+    <div class="scroller">
+      <table class="cov">
+        <thead>
+          <tr>
+            <th class="rep">Report</th>
+            <th>Identity /<br>dimensions</th>
+            <th>Core<br>measures</th>
+            <th>Event<br>timestamps</th>
+            <th>Financial</th>
+            <th>Config /<br>reference</th>
+            <th>Audit /<br>source</th>
+            <th>Verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="rep"><b>AR Analyst Workload and Capacity</b><span>RPT-03 · current state</span></td>
+            <td><i class="g full cf"></i></td><td><i class="g full cf"></i></td>
+            <td><i class="g full cf"></i></td><td><i class="g full cf"></i></td>
+            <td><i class="g part cp"></i></td><td><i class="g full cf"></i></td>
+            <td class="status s-go">Build now</td>
+          </tr>
+          <tr>
+            <td class="rep"><b>AR Follow-up Activity Detail</b><span>RPT-01 · activity events</span></td>
+            <td><i class="g full cf"></i></td><td><i class="g full cf"></i></td>
+            <td><i class="g full cf"></i></td><td><i class="g part cp"></i></td>
+            <td><i class="g part cp"></i></td><td><i class="g part cp"></i></td>
+            <td class="status s-go">Build now</td>
+          </tr>
+          <tr>
+            <td class="rep"><b>Closure and Outcome</b><span>RPT-08 · operational half only</span></td>
+            <td><i class="g full cf"></i></td><td><i class="g full cf"></i></td>
+            <td><i class="g full cf"></i></td><td><i class="g part cp"></i></td>
+            <td><i class="g full cf"></i></td><td><i class="g full cf"></i></td>
+            <td class="status s-go">Build now</td>
+          </tr>
+          <tr>
+            <td class="rep"><b>Denial Work Progress</b><span>RPT-06 · by classification and action</span></td>
+            <td><i class="g full cf"></i></td><td><i class="g part cp"></i></td>
+            <td><i class="g part cp"></i></td><td><i class="g full cf"></i></td>
+            <td><i class="g none cn"></i></td><td><i class="g full cf"></i></td>
+            <td class="status s-part">Reduced</td>
+          </tr>
+          <tr>
+            <td class="rep"><b>AR Analyst Productivity Summary</b><span>RPT-02 · period grain</span></td>
+            <td><i class="g part cp"></i></td><td><i class="g full cf"></i></td>
+            <td><i class="g full cf"></i></td><td><i class="g part cp"></i></td>
+            <td><i class="g none cn"></i></td><td><i class="g part cp"></i></td>
+            <td class="status s-part">Reduced</td>
+          </tr>
+          <tr>
+            <td class="rep"><b>Follow-up Due and Compliance</b><span>RPT-05 · schedule instances</span></td>
+            <td><i class="g part cp"></i></td><td><i class="g part cp"></i></td>
+            <td><i class="g part cp"></i></td><td><i class="g part cp"></i></td>
+            <td><i class="g none cn"></i></td><td><i class="g part cp"></i></td>
+            <td class="status s-part">Reduced</td>
+          </tr>
+          <tr>
+            <td class="rep"><b>Escalation Response and Rework</b><span>RPT-07 · escalation cycles</span></td>
+            <td><i class="g full cf"></i></td><td><i class="g part cp"></i></td>
+            <td><i class="g none cn"></i></td><td><i class="g part cp"></i></td>
+            <td><i class="g part cp"></i></td><td><i class="g full cf"></i></td>
+            <td class="status s-part">Reduced</td>
+          </tr>
+          <tr>
+            <td class="rep"><b>Action Completion</b><span>RPT-04 · completed action events</span></td>
+            <td><i class="g full cf"></i></td><td><i class="g none cn"></i></td>
+            <td><i class="g none cn"></i></td><td><i class="g part cp"></i></td>
+            <td><i class="g part cp"></i></td><td><i class="g none cn"></i></td>
+            <td class="status s-block">Blocked</td>
+          </tr>
+          <tr>
+            <td class="rep"><b>Operational SLA</b><span>RPT-09 · SLA measurement instances</span></td>
+            <td><i class="g full cf"></i></td><td><i class="g none cn"></i></td>
+            <td><i class="g none cn"></i></td><td><i class="g full cf"></i></td>
+            <td><i class="g none cn"></i></td><td><i class="g none cn"></i></td>
+            <td class="status s-block">Blocked</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>What we capture — the reportable surface</h3>
+    <p class="prose">
+      For reference, the tables these reports draw on and what each one contributes.
+    </p>
+
+    <div class="scroller">
+      <table class="gap">
+        <thead><tr><th>Table</th><th>Grain</th><th>What it gives reporting</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>DenialTaskBoard</td><td>Claim + CPT + denial code, keyed on <code>UniqueTrackId</code></td>
+            <td>Current state. Status, WorkFlowStatus, AssignedTo, AssignedOn, DateOpened, DueDate,
+              SLADays, DaysRemaining, SLAStatus, ActionCompleted, ActualOutcome, DocumentationType,
+              FollowUpReason, ClosureReason, ExpectedResponseDate, InsuranceBalance, Priority, and
+              the full classification and payer/clinic/rep dimension set.</td>
+          </tr>
+          <tr>
+            <td>DenialTaskHistory</td><td>One row per workflow action</td>
+            <td>The event spine. ActionType, OldStatus/NewStatus, OldAssignedTo/NewAssignedTo,
+              Comments, ActionBy, ActionDate, SnapshotJson. Observed ActionTypes: Assign,
+              StatusUpdate, Note, Escalation, EscalationUpdate, ManagerEscalationResponse,
+              WriteOffDecision, ClosedByEscalationResponse.</td>
+          </tr>
+          <tr>
+            <td>DenialClaimNotes</td><td>One row per note</td>
+            <td>NoteText, NoteLevel, CreatedBy, CreatedOn, plus <b>NextFollowUpDate</b> and
+              <b>FollowUpReason</b> — this is where the follow-up schedule actually lives.</td>
+          </tr>
+          <tr>
+            <td>DenialClaimEscalations</td><td>One row per escalation</td>
+            <td>EscalationLevel, EscalationReason, EscalatedTo, EscalatedToRole, Status,
+              CreatedBy/On, NextFollowUpDate, EscalationScope, AffectedTaskIds,
+              RecommendedNextAction. <b>No response fields.</b></td>
+          </tr>
+          <tr>
+            <td>DenialClosedClaims<br>+ ...History</td><td>One row per closed claim, plus its actions</td>
+            <td>ClosedOn, ClosedBy, TaskCount, InsuranceBalance at closure, AssignedTo; history
+              gives ActionType, old/new WorkFlowStatus and assignee, ActionBy, ActionDate — which
+              is where reopen is visible.</td>
+          </tr>
+          <tr>
+            <td>DenialLineItem</td><td>One row per denied line, per run</td>
+            <td>AccessionNo, VisitNumber, BilledAmount, AllowedAmount, InsurancePayment,
+              InsuranceAdjustment, PatientBalance, TotalBalance, DateOfService, FirstBilledDate,
+              plus the full coverage/ICD analysis. The only source of <b>original charge</b>.</td>
+          </tr>
+          <tr>
+            <td>DenialStatusMaster</td><td>Reference</td>
+            <td>StatusName, IsClosedStatus, IsVerificationStatus, SortOrder, IsActive. <b>No
+              reporting bucket and no effective dating</b> — see GAP-1.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 3 ================= -->
+<section>
+  <div class="wrap">
+    <span class="snum">Section 03</span>
+    <h2>What has to be added</h2>
+    <p class="lede">
+      Seven objects. Two are configuration tables that take an afternoon; three are event tables
+      that need write-path changes in <code>SqlDenialWorkflowRepository</code>; one is a nightly
+      job; one is a dimension we should have anyway.
+    </p>
+
+    <div class="scroller">
+      <table class="gap">
+        <thead><tr><th>ID</th><th>Object</th><th>Unblocks</th><th>Why it does not exist today</th><th>Size</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>GAP-1</td>
+            <td><b>DenialStatusBucketMap</b><br><span style="font-family:var(--f-doc);font-size:13px;color:var(--doc-ink-3);">status → Open / Active / Pending / Escalated / Closed, effective-dated</span></td>
+            <td>RPT-01, RPT-03, RPT-06</td>
+            <td>Status names are hard-coded in queue logic. The spec forbids that:
+              <i>"Report code must not embed status names."</i></td>
+            <td><span class="tag small">Small</span></td>
+          </tr>
+          <tr>
+            <td>GAP-2</td>
+            <td><b>Manager / team dimension</b><br><span style="font-family:var(--f-doc);font-size:13px;color:var(--doc-ink-3);">analyst → manager → team, in LRNMaster</span></td>
+            <td>RPT-01, 02, 03, 05, 07, 08, 09</td>
+            <td><code>AssignedTo</code> is a free-text string. There is no reporting-to
+              relationship anywhere in the estate.</td>
+            <td><span class="tag small">Small</span></td>
+          </tr>
+          <tr>
+            <td>GAP-3</td>
+            <td><b>DenialActionCompletion</b><br><span style="font-family:var(--f-doc);font-size:13px;color:var(--doc-ink-3);">immutable completion event: action, task, completed by, completed at, note, source</span></td>
+            <td>RPT-04, RPT-02, RPT-09</td>
+            <td>Completion is a bit plus a date on the mutable task row. It cannot answer
+              "who completed it and when", and it is overwritten by the next change.</td>
+            <td><span class="tag med">Medium</span></td>
+          </tr>
+          <tr>
+            <td>GAP-4</td>
+            <td><b>Escalation response + rework fields</b><br><span style="font-family:var(--f-doc);font-size:13px;color:var(--doc-ink-3);">RespondedBy/On, ResponseType, ResponseNote, ReworkAssignedOn, ReworkCompletedOn, EscalationClosedOn — or an EscalationCycleEvent table</span></td>
+            <td>RPT-07</td>
+            <td>Responses land in <code>DenialTaskHistory</code> with no
+              <code>EscalationId</code>. Re-escalation makes timestamp inference unsafe.</td>
+            <td><span class="tag med">Medium</span></td>
+          </tr>
+          <tr>
+            <td>GAP-5</td>
+            <td><b>Follow-up category + completion linkage</b><br><span style="font-family:var(--f-doc);font-size:13px;color:var(--doc-ink-3);">FollowUpCategory on notes; SatisfiedByNoteId back-reference</span></td>
+            <td>RPT-05</td>
+            <td>Payer / escalation / documentation follow-ups are indistinguishable, and nothing
+              records which activity satisfied which schedule.</td>
+            <td><span class="tag med">Medium</span></td>
+          </tr>
+          <tr>
+            <td>GAP-6</td>
+            <td><b>DenialInventorySnapshot</b><br><span style="font-family:var(--f-doc);font-size:13px;color:var(--doc-ink-3);">nightly point-in-time count + balance by lab, analyst, status bucket, classification, action</span></td>
+            <td>RPT-02, RPT-06</td>
+            <td>The task board is mutated in place. Opening/closing workload and inventory
+              movement are not reconstructable after the fact.</td>
+            <td><span class="tag med">Medium</span></td>
+          </tr>
+          <tr>
+            <td>GAP-7</td>
+            <td><b>SLA configuration + instance</b><br><span style="font-family:var(--f-doc);font-size:13px;color:var(--doc-ink-3);">versioned rules (start event, stop event, target, warning, calendar, dimensions) + one measured instance per item</span></td>
+            <td>RPT-09</td>
+            <td>We have one hard SLA: <code>SLADays</code> on the task with a derived
+              <code>DueDate</code>. The spec asks for six configurable SLA types with pause
+              behaviour and reproducible history.</td>
+            <td><span class="tag big">Large</span></td>
+          </tr>
+          <tr>
+            <td>GAP-8</td>
+            <td><b>Update source stamping</b><br><span style="font-family:var(--f-doc);font-size:13px;color:var(--doc-ink-3);">UpdateSource + UploadBatchId on DenialTaskHistory and DenialClaimNotes</span></td>
+            <td>RPT-01, RPT-04</td>
+            <td>FR-012 requires Excel-upload updates to be distinguishable from UI updates. The
+              claim CSV upload path writes the same rows as the UI with no marker.</td>
+            <td><span class="tag small">Small</span></td>
+          </tr>
+          <tr>
+            <td>GAP-9</td>
+            <td><b>Working-day calendar + aging buckets + workload weights</b><br><span style="font-family:var(--f-doc);font-size:13px;color:var(--doc-ink-3);">three small configuration tables</span></td>
+            <td>RPT-02, RPT-03</td>
+            <td>Per-day productivity denominators, the aging dimension, and weighted capacity
+              are all configuration the spec insists must not be constants in code.</td>
+            <td><span class="tag small">Small</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="prose" style="margin-top:20px;">
+      That is nine rows against seven objects in the summary tile — GAP-8 and GAP-9 are small
+      additions to existing tables and configuration rather than new subsystems, so they are
+      counted with the work that consumes them.
+    </p>
+
+    <div class="callout">
+      <b>Do GAP-1 and GAP-2 first, regardless of report order.</b> Between them they touch seven
+      of the nine reports, neither changes a write path, and both are pure additions. Building any
+      report before the bucket map exists means embedding status names in report SQL — exactly what
+      the spec's configuration requirement prohibits, and exactly the thing that will need
+      unpicking later.
+    </div>
+  </div>
+</section>
+
+<!-- ================= 4 ================= -->
+<section>
+  <div class="wrap">
+    <span class="snum">Section 04</span>
+    <h2>Build and test order</h2>
+    <p class="lede">
+      Nine reports, sequenced so each one reuses what the last one built and every one is testable
+      on its own. Build one, test it against its acceptance criteria, sign it off, move on.
+    </p>
+
+    <h3>Before report 1 — verify the columns are populated</h3>
+    <p class="prose">
+      This audit read DDL, not data. Run this against one real lab database first. A column that
+      exists but is null in 90% of rows changes the plan.
+    </p>
+
+<pre><code><span class="c">-- Column presence + fill rate on the reporting-critical fields.</span>
+<span class="c">-- Run per lab. Anything under ~80% populated needs a decision before build.</span>
+<span class="k">SELECT</span>
+  COUNT_BIG(*)                                                    <span class="k">AS</span> Tasks,
+  SUM(<span class="k">CASE WHEN</span> AssignedOn        <span class="k">IS NOT NULL THEN</span> 1 <span class="k">ELSE</span> 0 <span class="k">END</span>) <span class="k">AS</span> HasAssignedOn,
+  SUM(<span class="k">CASE WHEN</span> DateOpened        <span class="k">IS NOT NULL THEN</span> 1 <span class="k">ELSE</span> 0 <span class="k">END</span>) <span class="k">AS</span> HasDateOpened,
+  SUM(<span class="k">CASE WHEN</span> DueDate           <span class="k">IS NOT NULL THEN</span> 1 <span class="k">ELSE</span> 0 <span class="k">END</span>) <span class="k">AS</span> HasDueDate,
+  SUM(<span class="k">CASE WHEN</span> ActionCompleted   <span class="k">IS NOT NULL THEN</span> 1 <span class="k">ELSE</span> 0 <span class="k">END</span>) <span class="k">AS</span> HasActionCompleted,
+  SUM(<span class="k">CASE WHEN</span> DateCompleted     <span class="k">IS NOT NULL THEN</span> 1 <span class="k">ELSE</span> 0 <span class="k">END</span>) <span class="k">AS</span> HasDateCompleted,
+  SUM(<span class="k">CASE WHEN</span> ClosureReason     <span class="k">IS NOT NULL THEN</span> 1 <span class="k">ELSE</span> 0 <span class="k">END</span>) <span class="k">AS</span> HasClosureReason,
+  SUM(<span class="k">CASE WHEN</span> ExpectedResponseDate <span class="k">IS NOT NULL THEN</span> 1 <span class="k">ELSE</span> 0 <span class="k">END</span>) <span class="k">AS</span> HasExpectedResponse,
+  COUNT(<span class="k">DISTINCT</span> AssignedTo)                                  <span class="k">AS</span> DistinctAssignees
+<span class="k">FROM</span> dbo.DenialTaskBoard <span class="k">WHERE</span> LabId = @LabId;
+
+<span class="c">-- Do all operational statuses map to a bucket? Anything listed here is unmapped.</span>
+<span class="k">SELECT</span> Status, COUNT_BIG(*) <span class="k">AS</span> Tasks
+<span class="k">FROM</span> dbo.DenialTaskBoard
+<span class="k">WHERE</span> LabId = @LabId
+  <span class="k">AND</span> ISNULL(Status,<span style="color:#0c7a70">''</span>) <span class="k">NOT IN</span>
+      (<span style="color:#0c7a70">'New'</span>,<span style="color:#0c7a70">'Unassigned'</span>,<span style="color:#0c7a70">'Assigned'</span>,<span style="color:#0c7a70">'Payer Follow-up Required'</span>,
+       <span style="color:#0c7a70">'Pending Payer Response'</span>,<span style="color:#0c7a70">'Pending Documentation'</span>,<span style="color:#0c7a70">'Write-Off Pending Approval'</span>,
+       <span style="color:#0c7a70">'Escalated to AR Manager'</span>,<span style="color:#0c7a70">'Rework'</span>,<span style="color:#0c7a70">'Closed'</span>)
+<span class="k">GROUP BY</span> Status <span class="k">ORDER BY</span> Tasks <span class="k">DESC</span>;
+
+<span class="c">-- Event coverage: are workflow changes actually producing history rows?</span>
+<span class="c">-- A task with status changes but no history rows means the audit trail has holes.</span>
+<span class="k">SELECT</span> h.ActionType, COUNT_BIG(*) <span class="k">AS</span> Events,
+       MIN(h.ActionDate) <span class="k">AS</span> Earliest, MAX(h.ActionDate) <span class="k">AS</span> Latest,
+       COUNT(<span class="k">DISTINCT</span> h.ActionBy) <span class="k">AS</span> DistinctActors
+<span class="k">FROM</span> dbo.DenialTaskHistory h
+<span class="k">WHERE</span> h.LabId = @LabId
+<span class="k">GROUP BY</span> h.ActionType <span class="k">ORDER BY</span> Events <span class="k">DESC</span>;
+
+<span class="c">-- Follow-up schedule reality check: how many open tasks have a live follow-up date?</span>
+<span class="k">SELECT</span> COUNT_BIG(*) <span class="k">AS</span> OpenTasks,
+       SUM(<span class="k">CASE WHEN</span> n.NextFollowUpDate <span class="k">IS NOT NULL THEN</span> 1 <span class="k">ELSE</span> 0 <span class="k">END</span>) <span class="k">AS</span> WithFollowUp
+<span class="k">FROM</span> dbo.DenialTaskBoard t
+<span class="k">OUTER APPLY</span> (
+    <span class="k">SELECT TOP</span> 1 x.NextFollowUpDate
+    <span class="k">FROM</span> dbo.DenialClaimNotes x
+    <span class="k">WHERE</span> x.LabId = t.LabId <span class="k">AND</span> x.ClaimId = t.ClaimID
+      <span class="k">AND</span> x.IsDeleted = 0 <span class="k">AND</span> x.NextFollowUpDate <span class="k">IS NOT NULL</span>
+    <span class="k">ORDER BY</span> x.CreatedOn <span class="k">DESC</span>, x.NoteId <span class="k">DESC</span>
+) n
+<span class="k">WHERE</span> t.LabId = @LabId <span class="k">AND</span> ISNULL(t.Status,<span style="color:#0c7a70">''</span>) &lt;&gt; <span style="color:#0c7a70">'Closed'</span>;</code></pre>
+
+    <hr class="rule">
+
+    <!-- ---------- 1 ---------- -->
+    <div class="card">
+      <div class="card-h">
+        <span class="ord">1</span><span class="rid">RPT-03</span>
+        <h3>AR Analyst Workload and Capacity</h3>
+        <span class="verdict go">Build now</span>
+      </div>
+      <div class="card-b">
+        <p>
+          <b>Start here.</b> Pure current state, every measure comes from the latest task row, and
+          it is verifiable against a screen we already ship — the totals must equal the AR Manager's
+          Claim Assignment sidebar badges. That makes it the cheapest report to prove correct, and
+          proving one report correct establishes the reconciliation pattern for the other eight.
+        </p>
+        <dl class="facts">
+          <div><dt>Grain</dt><dd>One row per analyst, as of the selected date</dd></div>
+          <div><dt>Sources</dt><dd><code>DenialTaskBoard</code>, <code>DenialClaimNotes</code>, <code>DenialTaskHistory</code></dd></div>
+          <div><dt>Needs</dt><dd>GAP-2 (manager/team), GAP-1 (buckets), GAP-9 (aging)</dd></div>
+          <div><dt>Deferred</dt><dd>The Capacity column group</dd></div>
+        </dl>
+        <div class="split">
+          <div class="have">
+            <h4>Have</h4>
+            <ul>
+              <li>Open claims, open denial lines, outstanding balance — direct from the task board</li>
+              <li>Work state split: unworked, active follow-up, pending payer, pending documentation, escalated</li>
+              <li>Unworked = no history or note row since <code>AssignedOn</code></li>
+              <li>Average days since activity, oldest activity age — from <code>MAX(ActionDate)</code></li>
+              <li>Mix by aging, classification, action, task, payer, priority</li>
+            </ul>
+          </div>
+          <div class="want">
+            <h4>Missing</h4>
+            <ul>
+              <li>Manager and team — GAP-2</li>
+              <li>Configured capacity, workload units, utilisation, variance from team average — the whole Capacity group. The spec itself calls weighted workload an <i>"optional MVP enhancement"</i>, so ship without it.</li>
+              <li>Overdue needs a ruling: <code>DenialClaimNotes.NextFollowUpDate</code> and <code>DenialTaskBoard.ExpectedResponseDate</code> are two competing due dates. Pick one as authoritative per status.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="test">
+          <h4>Test — RPT-03</h4>
+          <ol>
+            <li>Pick one lab and one as-of date. Run the report for all analysts.</li>
+            <li>Open Claim Assignment as an AR Manager on the same lab. Compare each analyst's open-claim count to the report.</li>
+            <li>Drill into one analyst's Overdue count and confirm every row returned has a latest follow-up date before the as-of date <b>and</b> a non-closed status.</li>
+            <li>Close one claim in the workflow app, re-run for the same as-of date, confirm it leaves the workload.</li>
+          </ol>
+<pre><code><span class="c">-- Acceptance: closed items excluded, and analyst totals reconcile to detail.</span>
+<span class="k">SELECT</span> AssignedTo, COUNT(<span class="k">DISTINCT</span> ClaimID) <span class="k">AS</span> OpenClaims,
+       COUNT(<span class="k">DISTINCT</span> TaskID) <span class="k">AS</span> OpenLines, SUM(InsuranceBalance) <span class="k">AS</span> Balance
+<span class="k">FROM</span> dbo.DenialTaskBoard
+<span class="k">WHERE</span> LabId = @LabId
+  <span class="k">AND</span> ISNULL(Status,<span style="color:#0c7a70">''</span>) <span class="k">NOT IN</span> (<span style="color:#0c7a70">'Closed'</span>)
+  <span class="k">AND</span> NULLIF(LTRIM(RTRIM(ISNULL(AssignedTo,<span style="color:#0c7a70">''</span>))),<span style="color:#0c7a70">''</span>) <span class="k">IS NOT NULL</span>
+<span class="k">GROUP BY</span> AssignedTo <span class="k">ORDER BY</span> OpenClaims <span class="k">DESC</span>;</code></pre>
+          <p class="pass"><b>Pass when</b> — every analyst total equals its drill-down detail, closed items are absent, and changing a workload weight (if enabled) moves workload units without moving raw counts.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- 2 ---------- -->
+    <div class="card">
+      <div class="card-h">
+        <span class="ord">2</span><span class="rid">RPT-01</span>
+        <h3>AR Follow-up Activity Detail</h3>
+        <span class="verdict go">Build now</span>
+      </div>
+      <div class="card-b">
+        <p>
+          <b>The foundation report.</b> Everything RPT-02 and RPT-05 measure is counted off this
+          one's activity spine, so build it second and get the definition of a qualifying activity
+          settled here rather than three times over.
+        </p>
+        <p>
+          The spine is a <code>UNION ALL</code> of <code>DenialTaskHistory</code> and
+          <code>DenialClaimNotes</code>, with a synthetic activity id (<code>'H:'+HistoryId</code> /
+          <code>'N:'+NoteId</code>) because the two tables have independent identity sequences.
+          Passive navigation creates no row in either, so the spec's exclusion of it is satisfied
+          for free.
+        </p>
+        <dl class="facts">
+          <div><dt>Grain</dt><dd>One row per qualifying activity event</dd></div>
+          <div><dt>Sources</dt><dd><code>DenialTaskHistory</code> + <code>DenialClaimNotes</code>, joined to <code>DenialTaskBoard</code> and <code>DenialLineItem</code></dd></div>
+          <div><dt>Needs</dt><dd>GAP-1, GAP-2, GAP-8 (source stamping)</dd></div>
+          <div><dt>Deliverable</dt><dd>A reusable <code>vw_DenialActivityEvent</code></dd></div>
+        </dl>
+        <div class="split">
+          <div class="have">
+            <h4>Have</h4>
+            <ul>
+              <li>Activity date/time, author, activity type, note text — both sources</li>
+              <li>Previous and new status, old and new assignee</li>
+              <li>Escalation events with reason, recipient and <code>EscalationId</code></li>
+              <li>Accession, DOS and original charge by joining <code>DenialLineItem</code> on claim + CPT</li>
+              <li>Latest Activity Only — a <code>ROW_NUMBER()</code> over the spine</li>
+            </ul>
+          </div>
+          <div class="want">
+            <h4>Missing</h4>
+            <ul>
+              <li><b>Contact method</b> — not captured anywhere. Drop the column or add it to the note form.</li>
+              <li><b>Per-event balance snapshot</b> — only the current balance exists. Either add it to the activity write, or label the column "current balance" and accept it is not a snapshot.</li>
+              <li><b>Update source and upload batch</b> — GAP-8. Without it FR-012 fails.</li>
+              <li>Reporting status bucket — GAP-1</li>
+              <li>Follow-up category — GAP-5</li>
+            </ul>
+          </div>
+        </div>
+        <div class="test">
+          <h4>Test — RPT-01</h4>
+          <ol>
+            <li>On a test claim, as one analyst on one day: add three notes, change status once, raise one escalation.</li>
+            <li>Run the report filtered to that claim and date.</li>
+            <li>Assert <b>5 activity events</b> and <b>1 distinct claim-day worked</b>. This is the spec's own worked example and the single most important assertion in the suite.</li>
+            <li>Toggle Latest Activity Only — expect exactly one row, the escalation.</li>
+            <li>Export to Excel and confirm the summary counts equal the detail row count.</li>
+            <li>Repeat the status change through the claim CSV upload instead of the UI, and confirm the two are distinguishable in the audit columns.</li>
+          </ol>
+          <p class="pass"><b>Pass when</b> — repeated notes inflate the event count but not the claim-day count, and step 6 is distinguishable. If step 6 fails, GAP-8 is not done.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- 3 ---------- -->
+    <div class="card">
+      <div class="card-h">
+        <span class="ord">3</span><span class="rid">RPT-08</span>
+        <h3>Closure and Outcome — operational half</h3>
+        <span class="verdict go">Build now</span>
+      </div>
+      <div class="card-b">
+        <p>
+          <b>Ready, and self-limiting in a useful way.</b> The spec already schedules the financial
+          measures as a later enhancement pending adjudication data, so the reduced version <i>is</i>
+          the specified MVP rather than a compromise. <code>DenialClosedClaims</code> holds a real
+          closure event with actor, timestamp and balance-at-closure.
+        </p>
+        <dl class="facts">
+          <div><dt>Grain</dt><dd>One row per closed claim or line</dd></div>
+          <div><dt>Sources</dt><dd><code>DenialClosedClaims</code>, <code>DenialClosedClaimsHistory</code>, <code>DenialTaskBoard</code></dd></div>
+          <div><dt>Needs</dt><dd>GAP-2. GAP-3 improves first-pass completion.</dd></div>
+          <div><dt>Deferred</dt><dd>Verified outcome group — by design</dd></div>
+        </dl>
+        <div class="split">
+          <div class="have">
+            <h4>Have</h4>
+            <ul>
+              <li>Claims and lines closed, closed by, closed on, <code>ClosureReason</code>, <code>ActualOutcome</code></li>
+              <li>Days to closure = <code>ClosedOn − AssignedOn</code></li>
+              <li>Reopened, from <code>DenialClosedClaimsHistory.ActionType</code> — original closure event is preserved</li>
+              <li>Balance at closure, held on the closed-claim row rather than recomputed</li>
+            </ul>
+          </div>
+          <div class="want">
+            <h4>Missing</h4>
+            <ul>
+              <li><b>Every verified-outcome field</b> — payment received, appeal/rebill result, verification source and date. No adjudication feed reaches the workflow database.</li>
+              <li>Rework cycle count — GAP-4</li>
+              <li>Write-off amount as a distinct figure, separate from balance at closure</li>
+              <li>First-pass completion needs GAP-3 to be exact; approximate it from rework status transitions in the interim and label it as approximate</li>
+            </ul>
+          </div>
+        </div>
+        <div class="test">
+          <h4>Test — RPT-08</h4>
+          <ol>
+            <li>Close a claim. Confirm it appears with a closure timestamp, user and reason — all three, per the spec's rule that a closed status must have all of them.</li>
+            <li>Reopen it, close it again. Confirm both cycles are traceable and the first closure event survives.</li>
+            <li>Confirm every financial-outcome field renders <b>Not Available</b> with its missing dependency named, per FR-011 — not blank, not zero.</li>
+            <li>Confirm no operational KPI is computed from an unverified payment figure.</li>
+          </ol>
+          <p class="pass"><b>Pass when</b> — reopened items trace to prior cycles and nothing on the page implies financial success from operational closure. Label it "Operational Completion" everywhere.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- 4 ---------- -->
+    <div class="card">
+      <div class="card-h">
+        <span class="ord">4</span><span class="rid">RPT-06</span>
+        <h3>Denial Work Progress by Classification and Action</h3>
+        <span class="verdict reduced">Reduced scope</span>
+      </div>
+      <div class="card-b">
+        <p>
+          Current-state inventory by bucket is one small config table away. The <b>Movement</b>
+          column group — opening inventory, moved forward, closing inventory — is not, and cannot be
+          faked: it needs GAP-6 running nightly from the day it ships, because it accrues history
+          rather than reading it.
+        </p>
+        <p>
+          <b>Start the snapshot job before you build the report.</b> Every night it does not run is
+          a night of trend data that can never be recovered.
+        </p>
+        <dl class="facts">
+          <div><dt>Grain</dt><dd>Aggregated by dimension × reporting bucket</dd></div>
+          <div><dt>Sources</dt><dd><code>DenialTaskBoard</code> + GAP-1, later + GAP-6</dd></div>
+          <div><dt>Needs</dt><dd>GAP-1 to ship at all; GAP-6 for Movement</dd></div>
+          <div><dt>Deferred</dt><dd>Movement, and all historical trend</dd></div>
+        </dl>
+        <div class="split">
+          <div class="have">
+            <h4>Have</h4>
+            <ul>
+              <li>Every group dimension: classification, action, task, analyst, payer</li>
+              <li>Counts and balances at both claim and line grain, kept separate</li>
+              <li>Overdue as a cross-cutting overlay that coexists with Active, Pending and Escalated</li>
+              <li>Mix percentages of count and balance</li>
+            </ul>
+          </div>
+          <div class="want">
+            <h4>Missing</h4>
+            <ul>
+              <li><b>The bucket mapping itself</b> — GAP-1, with effective dates</li>
+              <li><b>The entire Movement group</b> — GAP-6</li>
+              <li>Reopened counts depend on <code>DenialClosedClaimsHistory</code> and are claim-grain only</li>
+            </ul>
+          </div>
+        </div>
+        <div class="test">
+          <h4>Test — RPT-06</h4>
+          <ol>
+            <li>Run the unmapped-status query from §4. It must return zero rows before the report is considered testable.</li>
+            <li>Confirm bucket counts sum to total inventory at the selected grain, and that claim and line counts are never added together under one label.</li>
+            <li>Move one claim from Assigned to Pending Payer Response. Re-run: Active down one, Pending up one, total unchanged.</li>
+            <li>Mark that claim overdue. Confirm it stays in Pending <b>and</b> appears in Overdue — overdue is an overlay, not a bucket.</li>
+            <li>Add an effective-dated bucket remap. Confirm historical rows keep their old mapping.</li>
+          </ol>
+          <p class="pass"><b>Pass when</b> — every operational status maps to exactly one bucket for a given effective date, and drill-down retains the clicked dimension and filter context.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- 5 ---------- -->
+    <div class="card">
+      <div class="card-h">
+        <span class="ord">5</span><span class="rid">RPT-02</span>
+        <h3>AR Analyst Productivity Summary</h3>
+        <span class="verdict reduced">Reduced scope</span>
+      </div>
+      <div class="card-b">
+        <p>
+          Reads directly off RPT-01's activity spine, so most of it is aggregation over work already
+          done. Two things hold it back: opening and closing workload need GAP-6 snapshots, and the
+          per-day denominator needs a working-day calendar.
+        </p>
+        <p>
+          <b>Ship it without the workload reconciliation row</b> rather than approximating opening
+          workload from history. A reconstructed opening figure that is quietly wrong is worse than
+          an absent one on a report used to assess people.
+        </p>
+        <dl class="facts">
+          <div><dt>Grain</dt><dd>One row per analyst per period</dd></div>
+          <div><dt>Sources</dt><dd>RPT-01 spine + <code>DenialTaskBoard</code> + <code>DenialClosedClaims</code></dd></div>
+          <div><dt>Needs</dt><dd>GAP-2, GAP-9 (calendar), GAP-6 for workload</dd></div>
+          <div><dt>Deferred</dt><dd>Opening/closing workload; appeal and rebill completion counts</dd></div>
+        </dl>
+        <div class="split">
+          <div class="have">
+            <h4>Have</h4>
+            <ul>
+              <li>Claims worked, both daily distinct and period distinct — the spec's recommendation is to show both</li>
+              <li>New assigned and reassigned in/out, from history assignee transitions</li>
+              <li>Full progression group: moved from Open, to pending payer, to pending documentation, escalated, rework assigned</li>
+              <li>Write-offs and claims closed</li>
+              <li>Escalation rate as distinct claims escalated over distinct claims worked</li>
+              <li>Attribution on reassignment: activity stays with the performing analyst because <code>ActionBy</code> is on the event, not the task</li>
+            </ul>
+          </div>
+          <div class="want">
+            <h4>Missing</h4>
+            <ul>
+              <li><b>Opening and closing workload</b> — GAP-6, and with them the reconciliation acceptance test</li>
+              <li><b>Working-day calendar</b> — GAP-9; without it average claims worked per day has no defensible denominator</li>
+              <li><b>Appeal and rebill completion counts</b> — GAP-3</li>
+              <li>Manager and team grouping — GAP-2</li>
+              <li>Rework rate is approximate until GAP-4 links return events to cycles</li>
+            </ul>
+          </div>
+        </div>
+        <div class="test">
+          <h4>Test — RPT-02</h4>
+          <ol>
+            <li>Reuse the RPT-01 test claim. Confirm three same-day notes give a claims-worked of 1, not 3.</li>
+            <li>Reassign a claim mid-period. Confirm prior activity stays credited to the original analyst while the workload snapshot follows the current assignee.</li>
+            <li>Set a holiday in the calendar. Confirm the per-day denominator drops by one.</li>
+            <li>Confirm no analyst is ranked by raw activity count anywhere in the UI — the spec explicitly warns against it and the report should not make it easy.</li>
+            <li>Once GAP-6 lands: opening + new + reassigned in − reassigned out − closures = closing.</li>
+          </ol>
+          <p class="pass"><b>Pass when</b> — steps 1–4 hold. Step 5 is deferred with the workload group and must be re-run when snapshots exist.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- 6 ---------- -->
+    <div class="card">
+      <div class="card-h">
+        <span class="ord">6</span><span class="rid">RPT-05</span>
+        <h3>Follow-up Due and Compliance</h3>
+        <span class="verdict reduced">Reduced scope</span>
+      </div>
+      <div class="card-b">
+        <p>
+          This report has two halves and only one works. The <b>current work queue</b> — what is
+          due, overdue, due today — is buildable now. The <b>compliance</b> half is not, because
+          nothing records which activity satisfied which schedule, and the spec is explicit that
+          an unrelated note must not count.
+        </p>
+        <p>
+          A useful accident of the design: because each note row carries its own
+          <code>NextFollowUpDate</code>, the note table is already a schedule-instance history.
+          Original due date, revised due date, revised by, revised on and reschedule count are all
+          recoverable by ordering notes per task. What is missing is the <i>category</i> and the
+          <i>completion linkage</i>.
+        </p>
+        <dl class="facts">
+          <div><dt>Grain</dt><dd>One row per follow-up schedule instance</dd></div>
+          <div><dt>Sources</dt><dd><code>DenialClaimNotes</code>, <code>DenialClaimEscalations</code>, <code>DenialTaskBoard</code></dd></div>
+          <div><dt>Needs</dt><dd>GAP-5 for the compliance half</dd></div>
+          <div><dt>Deferred</dt><dd>Completed on time / late, compliance percentage</dd></div>
+        </dl>
+        <div class="split">
+          <div class="have">
+            <h4>Have</h4>
+            <ul>
+              <li>Current overdue, due today, due soon and future from the latest open note per task</li>
+              <li>Original vs revised due date, revised by, revised on, reschedule count — by ordering notes</li>
+              <li><code>FollowUpReason</code> as the reschedule reason</li>
+              <li>Current control group in full: status, days overdue, priority, recommended next action</li>
+              <li>Rescheduling already preserves history — a user cannot erase an overdue date, only add a newer note</li>
+            </ul>
+          </div>
+          <div class="want">
+            <h4>Missing</h4>
+            <ul>
+              <li><b>Follow-up category</b> — payer vs escalation vs documentation cannot be separated, and the spec requires them reported separately</li>
+              <li><b>Completion linkage</b> — no way to say which activity satisfied which schedule, so on-time vs late is not computable</li>
+              <li>Cancelled schedules have no representation, so the compliance denominator is undefined</li>
+              <li>The Due Soon window is not configurable — GAP-9</li>
+            </ul>
+          </div>
+        </div>
+        <div class="test">
+          <h4>Test — RPT-05</h4>
+          <ol>
+            <li>Set a follow-up date in the past. Confirm the claim shows Overdue with the correct day count.</li>
+            <li>Reschedule it into the future. Confirm the original date, the revision, the user, the timestamp and the reason are all still visible — the late history must not be erasable.</li>
+            <li>Confirm reschedule count increments.</li>
+            <li>Confirm current overdue counts use only latest open records and never every historical schedule row — this is the spec's stated implementation principle and the easiest thing to get wrong.</li>
+            <li>Once GAP-5 lands: complete a payer follow-up with a documentation note and confirm it does <b>not</b> satisfy the schedule.</li>
+          </ol>
+          <p class="pass"><b>Pass when</b> — steps 1–4 hold. Do not ship a compliance percentage until step 5 passes; a compliance figure computed from unlinked activity will be wrong and will be believed.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- 7 ---------- -->
+    <div class="card">
+      <div class="card-h">
+        <span class="ord">7</span><span class="rid">RPT-07</span>
+        <h3>Escalation Response and Rework</h3>
+        <span class="verdict reduced">Reduced scope</span>
+      </div>
+      <div class="card-b">
+        <p>
+          The raised side is complete and well modelled — <code>DenialClaimEscalations</code> has
+          level, reason, recipient, role, scope and a follow-up date. The response side does not
+          exist as data. Average response time, the report's headline measure, is not computable
+          safely.
+        </p>
+        <p>
+          It <i>looks</i> computable, which is the trap: a
+          <code>ManagerEscalationResponse</code> history row does follow the escalation in time.
+          But it carries <code>TaskID</code>, not <code>EscalationId</code>, so on any claim with
+          more than one escalation cycle the pairing is a guess — and repeat escalation is
+          precisely what this report exists to measure.
+        </p>
+        <dl class="facts">
+          <div><dt>Grain</dt><dd>One row per escalation cycle</dd></div>
+          <div><dt>Sources</dt><dd><code>DenialClaimEscalations</code>, <code>DenialTaskHistory</code></dd></div>
+          <div><dt>Needs</dt><dd>GAP-4 for the Response and Rework groups</dd></div>
+          <div><dt>Deferred</dt><dd>Response time, rework turnaround, first-pass rate</dd></div>
+        </dl>
+        <div class="split">
+          <div class="have">
+            <h4>Have</h4>
+            <ul>
+              <li>Escalations raised, by period, reason, level, recipient and role</li>
+              <li>Open escalations from the latest status</li>
+              <li>Days awaiting response and overdue flag, from <code>NextFollowUpDate</code></li>
+              <li>Repeat escalation rate — distinct <code>EscalationId</code> per claim, which is exactly the spec's definition</li>
+              <li>Restricted internal escalation notes are already excluded from client-facing roles</li>
+            </ul>
+          </div>
+          <div class="want">
+            <h4>Missing</h4>
+            <ul>
+              <li><b>Responded by, response date, response type, response note</b> — no columns, no link</li>
+              <li><b>The whole Rework group</b> — returned date, assigned analyst, completed date, cycle time</li>
+              <li>Escalation closed date and final resolution</li>
+              <li>Working-hours calendar for response time — GAP-9</li>
+            </ul>
+          </div>
+        </div>
+        <div class="test">
+          <h4>Test — RPT-07</h4>
+          <ol>
+            <li>Raise two escalations on the same claim, respond to the first only.</li>
+            <li>Confirm the report shows two cycles, one open and one responded, and that repeat escalation rate counts the claim once.</li>
+            <li>Confirm the responded cycle attributes the response to the <b>first</b> escalation, not the second. Before GAP-4 this test will fail — that failure is the argument for GAP-4, so run it and record the result.</li>
+            <li>Confirm a response does not close the claim or the escalation.</li>
+            <li>Confirm a manager response returns the claim to the same assigned analyst unless a reassignment event exists.</li>
+          </ol>
+          <p class="pass"><b>Pass when</b> — steps 1, 2, 4 and 5 hold. Step 3 is the acceptance gate for GAP-4 and is expected to fail on the reduced version.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- 8 ---------- -->
+    <div class="card blocked">
+      <div class="card-h">
+        <span class="ord">8</span><span class="rid">RPT-04</span>
+        <h3>Action Completion</h3>
+        <span class="verdict stopped">Blocked — GAP-3</span>
+      </div>
+      <div class="card-b">
+        <p>
+          <b>Do not attempt this before GAP-3.</b> The report's entire premise is that the moment a
+          user marks an action complete becomes that action's business date — the Appeal Date, the
+          Rebill Date, the Write-off Completion Date. We do not store that moment.
+        </p>
+        <p>
+          <code>DenialTaskBoard.ActionCompleted</code> is a bit and <code>DateCompleted</code> is a
+          <code>date</code> with no time, no actor, and no protection from being overwritten by the
+          next status change. The spec additionally requires the completion event be immutable, with
+          corrections recorded as audited amendments. Every one of those properties is absent.
+        </p>
+        <p>
+          A partial version built on the current flag would produce Appeal Dates that silently
+          change and average-days-to-completion figures that drift as claims are re-worked. That is
+          worse than no report.
+        </p>
+        <dl class="facts">
+          <div><dt>Grain</dt><dd>One row per completed action or task event</dd></div>
+          <div><dt>Blocked by</dt><dd>GAP-3 — <code>DenialActionCompletion</code></dd></div>
+          <div><dt>Also needs</dt><dd>GAP-8 (source), GAP-2 (manager)</dd></div>
+          <div><dt>Unblocks</dt><dd>RPT-02 completion measures, RPT-09 stop events</dd></div>
+        </dl>
+        <div class="test">
+          <h4>Test — RPT-04, once GAP-3 exists</h4>
+          <ol>
+            <li>Complete an appeal. Confirm the report shows it with the label <b>Appeal Date</b>; complete a rebill and confirm <b>Rebill Date</b>; a write-off and <b>Write-off Completion Date</b>. Same stored field, three labels.</li>
+            <li>Confirm completed by and a full timestamp are recorded, not just a date.</li>
+            <li>Change the claim's status afterwards. Confirm the completion timestamp does not move.</li>
+            <li>Correct a completion. Confirm an audited amendment appears and the original survives.</li>
+            <li>Complete an action via Excel upload. Confirm it validates identically to a UI update and is separately identifiable.</li>
+            <li>Confirm the completed-action count equals the number of rows carrying a completion timestamp.</li>
+          </ol>
+          <p class="pass"><b>Pass when</b> — step 3 holds. If a later status change moves the completion timestamp, GAP-3 has been implemented as another mutable column and the report is still not trustworthy.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- 9 ---------- -->
+    <div class="card blocked">
+      <div class="card-h">
+        <span class="ord">9</span><span class="rid">RPT-09</span>
+        <h3>Operational SLA</h3>
+        <span class="verdict stopped">Blocked — GAP-7</span>
+      </div>
+      <div class="card-b">
+        <p>
+          <b>Last, and dependent on almost everything before it.</b> We have exactly one SLA: an
+          integer <code>SLADays</code> on the task with a derived <code>DueDate</code>,
+          <code>DaysRemaining</code> and <code>SLAStatus</code>. The spec asks for six configurable
+          SLA types, each with its own start event, stop event, calendar, target, warning threshold
+          and applicable dimensions, versioned so historical results stay reproducible.
+        </p>
+        <p>
+          The dependency chain is the real point: <b>appeal completion and rebill completion SLAs
+          cannot stop their clocks until GAP-3 exists, and escalation response SLA cannot stop until
+          GAP-4 exists.</b> Four of the six initial SLA types are blocked behind other gaps, not
+          behind GAP-7 itself. Sequencing it last is not caution, it is arithmetic.
+        </p>
+        <dl class="facts">
+          <div><dt>Grain</dt><dd>One row per SLA measurement instance</dd></div>
+          <div><dt>Blocked by</dt><dd>GAP-7, and GAP-3 + GAP-4 for four of six SLA types</dd></div>
+          <div><dt>Also needs</dt><dd>GAP-9 (calendar), GAP-2 (manager)</dd></div>
+          <div><dt>Available today</dt><dd>The existing task due-date SLA, reportable as one type</dd></div>
+        </dl>
+        <div class="test">
+          <h4>Test — RPT-09, once GAP-7 exists</h4>
+          <ol>
+            <li>Configure a first-follow-up SLA with a 3-day target and a 1-day warning. Create a claim; confirm an instance is created with explicit start event, due time and threshold.</li>
+            <li>Let it pass the warning threshold. Confirm it reports as <b>Near Breach</b>, not yet Breached.</li>
+            <li>Let it pass the target. Confirm it reports as an <b>active</b> breach, and that active and completed breaches are counted separately.</li>
+            <li>Complete it. Confirm the result traces to explicit start <b>and</b> end events, not to a computed status.</li>
+            <li>Change the target with a new effective date. Confirm historical instances keep their original result and only new instances use the new target.</li>
+            <li>Move an item to a configured pause status. Confirm elapsed, pause and net duration are reported separately and the pause history is preserved.</li>
+            <li>Confirm in-progress instances are excluded from the met-percentage denominator but shown separately.</li>
+          </ol>
+          <p class="pass"><b>Pass when</b> — step 5 holds. A target change that rewrites historical SLA results makes every prior month's reporting unreproducible, which is the failure mode this report exists to avoid.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 5 ================= -->
+<section>
+  <div class="wrap">
+    <span class="snum">Section 05</span>
+    <h2>Recommended sequencing</h2>
+    <p class="lede">Two schema passes, three delivery waves.</p>
+
+    <ol class="doc">
+      <li>
+        <b>Schema pass A — do this first, before any report.</b> GAP-1 status bucket map, GAP-2
+        manager/team dimension, GAP-8 source stamping, GAP-9 calendar and aging buckets. All
+        additive, none touches a write path except GAP-8, and between them they touch every report
+        in the suite. Start the GAP-6 snapshot job in this pass too, even though nothing reads it
+        yet — it only accrues value from the day it starts running.
+      </li>
+      <li>
+        <b>Wave 1 — RPT-03, RPT-01, RPT-08.</b> Three complete reports and the reusable activity
+        view. This proves the reporting architecture end to end: filters, as-of context, grain
+        labels, drill-down, Excel export with reconciliation totals, and role-based masking. Get
+        FR-001 through FR-012 right once, here, and the remaining six inherit them.
+      </li>
+      <li>
+        <b>Wave 2 — RPT-06, RPT-02, RPT-05, RPT-07</b>, each at reduced scope with the deferred
+        measures visibly marked <b>Not Available</b> and their missing dependency named, as FR-011
+        requires. Do not hide a deferred measure; a named gap is a feature request, a hidden one is
+        a surprise in UAT.
+      </li>
+      <li>
+        <b>Schema pass B.</b> GAP-3 action completion events, GAP-4 escalation response and rework,
+        GAP-5 follow-up category and completion linkage. These change write paths in
+        <code>SqlDenialWorkflowRepository</code> and need their own regression pass against the
+        existing workflow screens.
+      </li>
+      <li>
+        <b>Wave 3 — RPT-04, then the upgraded RPT-02, RPT-05 and RPT-07</b>, then GAP-7 and
+        RPT-09 last. By this point RPT-09 has real start and stop events to measure between, which
+        is the only way it will produce numbers anyone should act on.
+      </li>
+    </ol>
+
+    <div class="callout stop">
+      <b>One thing to settle before Wave 1.</b> There are two competing due dates in the system:
+      <code>DenialClaimNotes.NextFollowUpDate</code>, set by the analyst, and
+      <code>DenialTaskBoard.ExpectedResponseDate</code>, required when a claim moves to Pending
+      Payer Response or Pending Documentation. RPT-03, RPT-05 and RPT-06 all report "overdue" and
+      will disagree with each other unless one rule decides which field governs for which status.
+      This is a product decision, not a development one, and it needs an answer before the first
+      overdue figure is shown to a client.
+    </div>
+
+    <h3>Open questions carried from the spec</h3>
+    <p class="prose">
+      The specification's §7 lists seven configuration decisions. Three of them block Wave 1 and
+      should be answered now rather than at build time:
+    </p>
+    <ul class="doc">
+      <li><b>Working-day calendars by client and team</b> — blocks RPT-02's per-day denominator.</li>
+      <li><b>Which statuses require a next follow-up date, and the Due Soon window</b> — blocks the overdue definition above.</li>
+      <li><b>Client-facing note categories to mask or exclude</b> — blocks RPT-01's restricted view, and it is a disclosure question, so it needs answering before anything ships to a client role rather than after.</li>
+    </ul>
+    <p class="prose">
+      The other four — productivity display grain, workload weights, SLA pause statuses, and
+      accepted financial outcome evidence — can wait for the waves that consume them.
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-cols">
+      <div>
+        <h4>Audited against</h4>
+        <ul>
+          <li>Denial Workflow AR Reporting Requirements v1.0</li>
+          <li>DenialWorkflow_NorthWest_AllTables_Create.sql</li>
+          <li>Denial_Lab_Database_Setup_Merged.sql</li>
+          <li>DenialWorkflow_StatusModel_ManagerReview_20260604.sql</li>
+          <li>DenialWorkflow_AssignedDuration_FollowUp.sql</li>
+          <li>SqlDenialWorkflowRepository.cs</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Related documents</h4>
+        <ul>
+          <li>Denial Dashboard &amp; Workflow Requirements v1.0 (as-built)</li>
+          <li>Denial Database Worker Requirements</li>
+          <li>Denial Workflow Benchmark v1.0</li>
+          <li>Denial Agentic AI Development Plan v2.0</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Standing caveats</h4>
+        <ul>
+          <li>Static audit. No lab database was queried.</li>
+          <li>Column presence is not column population — run §4 first.</li>
+          <li>Reduced-scope verdicts assume deferred measures are labelled, not hidden.</li>
+          <li>Test steps are derived from the spec's own acceptance criteria.</li>
+        </ul>
+      </div>
+    </div>
+    <div style="border-top:1px solid var(--doc-line); padding-top:16px; font-size:11.5px;">
+      Denial AR Reports Readiness · v1.0 · 3 September 2026 · Lab Revenue Navigator
+    </div>
+  </div>
+</footer>

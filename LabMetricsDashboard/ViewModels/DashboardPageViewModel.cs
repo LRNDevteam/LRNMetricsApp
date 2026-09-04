@@ -5,28 +5,19 @@ namespace LabMetricsDashboard.ViewModels;
 public class DashboardPageViewModel
 {
     public DenialDashboardFilters Filters { get; set; } = new();
-    public DashboardSummary Summary { get; set; } = new();
-
-    public int AllRecordCount { get; set; }
-    public int FilteredRecordCount { get; set; }
-
-    public List<DenialRecord> PagedRecords { get; set; } = new();
-    public int RecordsPage { get; set; } = 1;
-    public int RecordsPageSize { get; set; } = 100;
-    public int RecordsTotalPages { get; set; }
-
-    public List<BreakdownItem> StatusBreakdown { get; set; } = new();
 
     /// <summary>
-    /// Counts by Denial Workflow status (the workflow/escalation axis), so users without access to
-    /// the Denial Workflow application can still see where the work sits. Distinct from
-    /// <see cref="StatusBreakdown"/>, which is task progression.
+    /// Distinct values for the Global filters bar's Status / Priority / Action Category /
+    /// Classification / Deadline multi-selects. These still filter the Line Item query
+    /// server-side (see SqlDenialDashboardRepository), so they survive even though the tabs
+    /// that used to render task-board rows directly (Task Board, Filter Panel, SLA Tracker,
+    /// Dashboard) do not.
     /// </summary>
-    public List<BreakdownItem> WorkflowStatusBreakdown { get; set; } = new();
-    public List<BreakdownItem> PriorityBreakdown { get; set; } = new();
-    public List<BreakdownItem> ActionCategoryBreakdown { get; set; } = new();
-    public List<BreakdownItem> ClassificationBreakdown { get; set; } = new();
-    public List<BreakdownItem> DeadlineBreakdown { get; set; } = new();
+    public List<string> StatusOptions { get; set; } = new();
+    public List<string> PriorityOptions { get; set; } = new();
+    public List<string> ActionCategoryOptions { get; set; } = new();
+    public List<string> ClassificationOptions { get; set; } = new();
+    public List<string> DeadlineOptions { get; set; } = new();
 
     public List<LabOption> LabOptions { get; set; } = new();
     public string CurrentLabName { get; set; } = string.Empty;
@@ -41,12 +32,6 @@ public class DashboardPageViewModel
     public string CurrentRunId { get; set; } = string.Empty;
     public string CurrentSourceFileName { get; set; } = string.Empty;
     public string CurrentWeekFolder { get; set; } = string.Empty;
-
-    public List<string> StatusOptions { get; set; } = new();
-    public List<string> PriorityOptions { get; set; } = new();
-    public List<string> ActionCategoryOptions { get; set; } = new();
-    public List<string> ClassificationOptions { get; set; } = new();
-    public List<string> DeadlineOptions { get; set; } = new();
 
     public List<DenialInsightRecord> PagedInsights { get; set; } = new();
     /// <summary>Distinct denial codes (with description) present in this lab's insight table, for the Denial Code filter.</summary>
@@ -73,7 +58,6 @@ public class DashboardPageViewModel
     public BreakdownPivotViewModel MonthlyPivot { get; set; } = new();
 
     public bool IsArManager { get; set; }
-    public bool IsArReviewer { get; set; }
     public List<ReviewerOption> ReviewerOptions { get; set; } = new();
 
     /// <summary>Line Item grid payload for the AJAX-swappable partial.</summary>

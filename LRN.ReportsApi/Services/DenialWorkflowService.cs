@@ -7,6 +7,7 @@ namespace LRN.ReportsApi.Services;
 public interface IDenialWorkflowService
 {
     Task<DenialWorkflowImportResult> ImportAsync(DenialTaskImportRequest request, CancellationToken ct);
+    Task<int> CaptureInventorySnapshotAsync(int labId, DateOnly snapshotDate, CancellationToken ct);
     Task<IReadOnlyList<DenialWorkflowLabOption>> GetLabsAsync(CancellationToken ct);
     Task<IReadOnlyList<DenialWorkflowLabOption>> GetLabsForUserAsync(string userName, CancellationToken ct);
     Task<DenialWorkflowRunReference?> GetLastRunReferenceAsync(int labId, CancellationToken ct);
@@ -132,6 +133,8 @@ public sealed class DenialWorkflowService : IDenialWorkflowService
 
         return result;
     }
+
+    public Task<int> CaptureInventorySnapshotAsync(int labId, DateOnly snapshotDate, CancellationToken ct) => _repo.CaptureInventorySnapshotAsync(labId, snapshotDate, ct);
 
     public Task<IReadOnlyList<DenialWorkflowLabOption>> GetLabsAsync(CancellationToken ct) => _repo.GetLabsAsync(ct);
     public Task<IReadOnlyList<DenialWorkflowLabOption>> GetLabsForUserAsync(string userName, CancellationToken ct) => _repo.GetLabsForUserAsync(userName, ct);

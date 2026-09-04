@@ -1,4 +1,4 @@
-import { canAssignRole, isAccountManagerRole, isArReviewerRole, isClientManagerRole } from '../utils/formatters';
+import { canAssignRole, isAccountManagerRole, isArReviewerRole, isClientManagerRole, isLabUserRole } from '../utils/formatters';
 
 const commonManagerFilters = ['reviewer', 'aging', 'denialClassification', 'actionCategory', 'payerName', 'panelName', 'clinic', 'salesRepname'];
 // Client / Account Manager: the SAME claim + line view as the AR Manager (read-only), plus the
@@ -48,7 +48,11 @@ export const workflowQueueConfig = {
     { key: 'all', label: 'All Claims', filters: ['status', 'reviewer', 'aging', 'denialClassification', 'actionCategory', 'payerName', 'panelName'] }
   ],
   accountManager: externalManagerQueues,
-  clientManager: externalManagerQueues
+  clientManager: externalManagerQueues,
+  // Lab User: the external-manager claim queues minus "Respond Escalation" -- they never act
+  // on an escalation, so they get no escalation queue at all. Pure read: the API refuses every
+  // write for this role, and the claim view renders without its action controls.
+  labUser: externalManagerQueues.filter(q => q.key !== 'externalEscalation')
 };
 
 export function normalizeQueueKey(key) {
@@ -80,6 +84,9 @@ export function normalizeQueueKey(key) {
 export function getWorkflowRoleKey(role) {
   if (isClientManagerRole(role)) return 'clientManager';
   if (isAccountManagerRole(role)) return 'accountManager';
+  // Before the arReviewer fallback: without this a Lab User would land on the reviewer
+  // worklist, which is both the wrong data scope and a queue set built around editing.
+  if (isLabUserRole(role)) return 'labUser';
   if (isArReviewerRole(role)) return 'arReviewer';
   if (canAssignRole(role)) return 'arManager';
   return 'arReviewer';
