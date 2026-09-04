@@ -665,36 +665,65 @@
 {
     <div class="alert alert-warning border-0 shadow-sm">@errorMessage</div>
 }
-<div class="filter-shell card border-0 shadow-sm mb-4">
-    <div class="card-body">
-        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-            <div>
-                <div class="section-title">Global filters</div>
-                @* <div class="section-subtitle">Lab options now come from LRNMaster.dbo.LRNMetricsLab. The selected lab resolves its ConnectionKey from appsettings and loads Task Board, Denial Insight, and Line Item from that lab database.</div> *@
-            </div>
-            <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
-                <div class="text-end me-2">
-                    <div class="small text-muted">Data source for selected lab</div>
-                    <div class="fw-semibold">@Model.CurrentLabName</div>
-                </div>
-                <button class="btn btn-outline-primary rounded-pill px-3" type="button" data-bs-toggle="collapse" data-bs-target="#dashboardFiltersCollapse" aria-expanded="true" aria-controls="dashboardFiltersCollapse" id="filterCollapseToggle">
-                    <i class="bi bi-sliders me-1"></i><span class="filter-toggle-text">Hide Filters</span>
-                </button>
-            </div>
-        </div>
+@* Page heading — same layout as the Production Report: report name + lab badge on the left, the
+   report-level action on the right, both OUTSIDE the filter panel. Download Excel lives here
+   rather than in the filter footer so it stays reachable while the filters are collapsed, which
+   is how most users leave this page. *@
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+    <h2 class="mb-0 fw-bold">
+        @ViewData["Title"]
+        <span class="badge bg-primary bg-gradient fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@(string.IsNullOrWhiteSpace(Model.CurrentLabName) ? "-" : Model.CurrentLabName)</span>
+    </h2>
+    <button type="button" id="exportExcelBtn" class="btn btn-sm btn-outline-success js-loader-button">
+        <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+    </button>
+</div>
 
-        <div class="d-flex flex-wrap gap-2 mb-3 dd-run-chips">
-            <span class="chip chip-muted"><i class="bi bi-building me-1"></i>Lab: @(string.IsNullOrWhiteSpace(Model.CurrentLabName) ? "-" : Model.CurrentLabName)</span>
-            <span class="chip chip-muted"><i class="bi bi-hash"></i>Run: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span>
-            <span class="chip chip-muted" title="@Model.CurrentSourceFileName"><i class="bi bi-file-earmark-text me-1"></i>Source File: @(string.IsNullOrWhiteSpace(Model.CurrentSourceFileName) ? "-" : Model.CurrentSourceFileName)</span>
+@* Run context, outside the filter box and styled like _AnalysisRangeBanner on the Production
+   Report. It used to sit inside the panel as chips, so collapsing the filters hid which run and
+   source file the figures below actually came from. *@
+<div class="d-flex flex-wrap gap-3 align-items-center mb-3 px-1 dd-run-meta" style="font-size:.82rem;color:#374151;">
+    <span>
+        <span class="dd-run-meta-label">Lab:</span>
+        <span class="ms-1 fw-semibold dd-run-meta-value">@(string.IsNullOrWhiteSpace(Model.CurrentLabName) ? "-" : Model.CurrentLabName)</span>
+    </span>
+    <span class="vr" style="height:1.1em;align-self:center;opacity:.3;"></span>
+    <span>
+        <span class="dd-run-meta-label">ReportId (RunID):</span>
+        <span class="ms-1 fw-semibold dd-run-meta-value">@(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span>
+    </span>
+    <span class="vr" style="height:1.1em;align-self:center;opacity:.3;"></span>
+    <span class="dd-run-meta-file" title="@Model.CurrentSourceFileName">
+        <span class="dd-run-meta-label">Source File:</span>
+        <span class="ms-1 fw-semibold dd-run-meta-value">@(string.IsNullOrWhiteSpace(Model.CurrentSourceFileName) ? "-" : Model.CurrentSourceFileName)</span>
+    </span>
+    @if (!string.IsNullOrWhiteSpace(Model.CurrentWeekFolder))
+    {
+        <span class="vr" style="height:1.1em;align-self:center;opacity:.3;"></span>
+        <span>
+            <span class="dd-run-meta-label">Analysis Range:</span>
+            <span class="ms-1 fw-semibold dd-run-meta-value">@Model.CurrentWeekFolder</span>
+        </span>
+    }
+</div>
+
+<div class="filter-shell card border-0 shadow-sm mb-4 dd-filter-compact">
+    <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+            <span class="fw-semibold" style="font-size:.9rem">
+                <i class="bi bi-funnel"></i> Filters
+                @if (activeFilters.Any())
+                {
+                    <span class="badge bg-primary ms-1" style="font-size:.62rem;vertical-align:middle">Active</span>
+                }
+            </span>
+            <button class="btn btn-sm btn-link text-muted p-0 text-decoration-none" type="button" data-bs-toggle="collapse" data-bs-target="#dashboardFiltersCollapse" aria-expanded="true" aria-controls="dashboardFiltersCollapse" id="filterCollapseToggle">
+                <i class="bi bi-sliders me-1"></i><span class="filter-toggle-text">Hide Filters</span>
+            </button>
         </div>
 
         <div class="collapse show" id="dashboardFiltersCollapse">
-            <form method="get" class="row g-3 align-items-end filter-form-grid" id="dashboardFilterForm">
-                <div class="col-12">
-                    <div class="filter-group-heading">Workflow filters</div>
-                </div>
-
+            <form method="get" class="row g-2 align-items-end filter-form-grid" id="dashboardFilterForm">
                 <input type="hidden" name="ActiveTab" id="activeTabInput" value="@activeTab" />
                 <input type="hidden" name="Page" value="1" />
                 <input type="hidden" name="InsightPage" value="1" />
@@ -706,7 +735,7 @@
 
                 <input type="hidden" id="labIdHidden" name="LabId" value="@Model.Filters.LabId" />
 
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">Lab <span class="text-danger">*</span></label>
                     <select class="form-select filter-select" id="labSelect" name="lab" required>
                         @if (Model.LabOptions.Any())
@@ -732,56 +761,52 @@
                         }
                     </select>
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">Task Status</label>
                     <div class="multi-select-filter" data-name="Status" data-placeholder="All statuses" data-options='@Html.Raw(JsonSerializer.Serialize(Model.StatusOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Status, true)))'></div>
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">Priority</label>
                     <div class="multi-select-filter" data-name="Priority" data-placeholder="All priorities" data-options='@Html.Raw(JsonSerializer.Serialize(Model.PriorityOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Priority, true)))'></div>
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">Classification</label>
                     <div class="multi-select-filter" data-name="Classification" data-placeholder="All classifications" data-options='@Html.Raw(JsonSerializer.Serialize(Model.ClassificationOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Classification, true)))'></div>
                 </div>
 
-                <div class="col-12">
-                    <div class="filter-group-heading filter-group-heading-secondary">Payer / service filters</div>
-                </div>
-
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">Action Category</label>
                     <div class="multi-select-filter" data-name="ActionCategory" data-placeholder="All action categories" data-options='@Html.Raw(JsonSerializer.Serialize(Model.ActionCategoryOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.ActionCategory, true)))'></div>
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">SLA</label>
                     <div class="multi-select-filter" data-name="Deadline" data-placeholder="All SLA buckets" data-options='@Html.Raw(JsonSerializer.Serialize(Model.DeadlineOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Deadline, true)))'></div>
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">Payer Name</label>
                     <div class="multi-select-filter remote-multi-select" data-name="PayerName" data-placeholder="Select payer names" data-remote-key="payerNames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.PayerName)))'></div>
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">Payer Type</label>
                     <div class="multi-select-filter remote-multi-select" data-name="PayerType" data-placeholder="Select payer types" data-remote-key="payerTypes" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.PayerType)))'></div>
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">Panel Name</label>
                     <div class="multi-select-filter remote-multi-select" data-name="PanelName" data-placeholder="Select panel names" data-remote-key="panelNames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.PanelName)))'></div>
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">Referring Provider</label>
                     <div class="multi-select-filter remote-multi-select" data-name="ReferringProvider" data-placeholder="Select providers" data-remote-key="referringProviders" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.ReferringProvider)))'></div>
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">Clinic Name</label>
                     <div class="multi-select-filter remote-multi-select" data-name="ClinicName" data-placeholder="Select clinics" data-remote-key="clinicNames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.ClinicName)))'></div>
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">Sales Rep</label>
                     <div class="multi-select-filter remote-multi-select" data-name="SalesRepname" data-placeholder="Select sales reps" data-remote-key="salesRepnames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.SalesRepname)))'></div>
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">Denial Code</label>
                     <select class="form-select filter-select" name="DenialCode" aria-label="Filter by denial code">
                         <option value="" selected="@string.IsNullOrWhiteSpace(Model.Filters.DenialCode)">All denial codes</option>
@@ -793,52 +818,48 @@
                     </select>
                 </div>
 
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">Date of Service From</label>
                     <input class="form-control filter-select" type="date" name="DateOfServiceFrom" value="@(Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"))" />
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">Date of Service To</label>
                     <input class="form-control filter-select" type="date" name="DateOfServiceTo" value="@(Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"))" />
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">First Billed From</label>
                     <input class="form-control filter-select" type="date" name="FirstBilledDateFrom" value="@(Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"))" />
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">First Billed To</label>
                     <input class="form-control filter-select" type="date" name="FirstBilledDateTo" value="@(Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"))" />
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">Denial Date From</label>
                     <input class="form-control filter-select" type="date" name="DenialDateFrom" value="@(Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"))" />
                 </div>
-                <div class="col-12 col-md-6 col-xl-3">
+                <div class="col-6 col-md-4 col-xl-3">
                     <label class="form-label">Denial Date To</label>
                     <input class="form-control filter-select" type="date" name="DenialDateTo" value="@(Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"))" />
                 </div>
 
-                <div class="col-12 d-flex flex-wrap justify-content-between align-items-center gap-3 mt-2">
-                    <div class="d-flex flex-wrap gap-2">
-                        @if (activeFilters.Any())
-                        {
+                @* Apply / Clear lead on the left, as on the Production Report, with the active
+                   filter chips trailing them. Download Excel is no longer here — it moved up to
+                   the page heading, above and outside the panel. *@
+                <div class="col-12 d-flex flex-wrap align-items-center gap-2 mt-1">
+                    <button type="submit" class="btn btn-sm btn-primary js-loader-button">
+                        <i class="bi bi-funnel-fill me-1"></i>Apply
+                    </button>
+                    <a class="btn btn-sm btn-outline-secondary js-loader-link" href="@Url.Action("Index", "DenialDashboard", new { lab = Model.CurrentLabName, LabId = Model.Filters.LabId, ActiveTab = activeTab, Page = 1, InsightPage = 1, LineItemPage = 1, PageSize = Model.Filters.PageSize, InsightPageSize = Model.Filters.InsightPageSize, LineItemPageSize = Model.Filters.LineItemPageSize })">Clear</a>
+                    @if (activeFilters.Any())
+                    {
+                        <div class="d-flex flex-wrap gap-2 ms-2">
                             @foreach (var filter in activeFilters)
                             {
                                 <span class="chip">@filter.Key: <strong>@filter.Value</strong></span>
                             }
-                        }
-                    </div>
-                    <div class="d-flex flex-wrap gap-2">
-                        <button type="button" id="exportExcelBtn" class="btn btn-outline-success rounded-pill px-3 js-loader-button">
-                            <i class="bi bi-file-earmark-excel me-1"></i> Download Excel
-                        </button>
-                        <button type="submit" class="btn btn-primary rounded-pill px-4 js-loader-button">
-                            <i class="bi bi-funnel me-1"></i> Apply Filters
-                        </button>
-                        <a class="btn btn-outline-secondary rounded-pill px-3 js-loader-link" href="@Url.Action("Index", "DenialDashboard", new { lab = Model.CurrentLabName, LabId = Model.Filters.LabId, ActiveTab = activeTab, Page = 1, InsightPage = 1, LineItemPage = 1, PageSize = Model.Filters.PageSize, InsightPageSize = Model.Filters.InsightPageSize, LineItemPageSize = Model.Filters.LineItemPageSize })">
-                            <i class="bi bi-arrow-counterclockwise me-1"></i> Reset
-                        </a>
-                    </div>
+                        </div>
+                    }
                 </div>
             </form>
         </div>
@@ -856,29 +877,22 @@
     <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "line-item" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#line-item" type="button"><i class="bi bi-list-ul me-2"></i>Line Level Data</button></li>
 </ul>
 <div class="tab-content">
+    @* The pivot tabs carry no section header any more. "Monthly Summary" / "Weekly Summary" was
+       being said three times over — on the tab, on this heading, and again inside the table's own
+       header band — and each repeat cost vertical space the pivot needed. The tab is the label
+       now; the run id moved to the page-level run-context row above the filters, and the table's
+       band kept the one thing it said that nothing else did (payer coverage). *@
     <div class="tab-pane fade @(activeTab == "monthly-breakdown" ? "show active" : "")" id="monthly-breakdown" role="tabpanel">
-        <div class="card border-0 shadow-sm table-card">
+        <div class="card border-0 shadow-sm table-card dd-pivot-card">
             <div class="card-body">
-                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-                    <div>
-                        <div class="section-title"><i class="bi bi-calendar-month me-2"></i>Monthly Summary &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-                        <div class="section-subtitle">Pivot-style monthly view from <code>DenialLineItem.DenialDate</code> showing top insurance and top denials.</div>
-                    </div>
-                </div>
                 @await Html.PartialAsync("_BreakdownPivotTable", Model.MonthlyPivot)
             </div>
         </div>
     </div>
 
     <div class="tab-pane fade @(activeTab == "weekly-breakdown" ? "show active" : "")" id="weekly-breakdown" role="tabpanel">
-        <div class="card border-0 shadow-sm table-card">
+        <div class="card border-0 shadow-sm table-card dd-pivot-card">
             <div class="card-body">
-                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-                    <div>
-                        <div class="section-title"><i class="bi bi-calendar-week me-2"></i>Weekly Summary &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-                        <div class="section-subtitle">Pivot-style weekly view from <code>DenialLineItem.DenialDate</code> showing top insurance and top denials.</div>
-                    </div>
-                </div>
                 @await Html.PartialAsync("_BreakdownPivotTable", Model.WeeklyPivot)
             </div>
         </div>

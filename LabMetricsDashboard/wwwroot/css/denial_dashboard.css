@@ -2033,3 +2033,104 @@ body.fs-lock {
 .rate-track span {
     background: #17466f;
 }
+
+
+/* ============================================================================
+   Denial Dashboard — filter panel aligned to the Production Report layout
+   ----------------------------------------------------------------------------
+   The panel used to spend its height on structure rather than controls: a
+   "Global filters" title, a data-source block, a row of run chips, and two
+   full-width section-heading pills, before any field appeared. Run context now
+   sits above the panel (.dd-run-meta) and the fields flow as one dense grid, so
+   the same filters occupy roughly half the vertical space.
+   ============================================================================ */
+
+/* Run context row — same visual grammar as _AnalysisRangeBanner on the
+   Production Report, so the two pages read as one family. */
+.dd-run-meta-label {
+	font-weight: 600;
+	color: #6b7a90;
+	font-size: .72rem;
+	letter-spacing: .04em;
+	text-transform: uppercase;
+}
+
+.dd-run-meta-value {
+	color: #0e3460;
+}
+
+/* A source file name is long and is the least useful thing to wrap onto a
+   second line; the full value stays available on hover. */
+.dd-run-meta-file {
+	max-width: min(46ch, 100%);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* ---- Compact filter grid ---- */
+.dd-filter-compact .filter-form-grid {
+	row-gap: .55rem !important;
+}
+
+.dd-filter-compact .form-label {
+	font-size: .72rem;
+	font-weight: 700;
+	letter-spacing: .03em;
+	text-transform: uppercase;
+	color: #4a5c74;
+	margin-bottom: .2rem;
+}
+
+/* Covers the native controls and the multi-select toggle alike: the toggle is
+   rendered as .form-select.filter-select, so one rule keeps every control in
+   the panel on the same 34px baseline. */
+.dd-filter-compact .form-select,
+.dd-filter-compact .form-control,
+.dd-filter-compact .filter-select {
+	min-height: 34px;
+	height: 34px;
+	font-size: .82rem;
+	border-radius: .5rem;
+	padding-top: .25rem;
+	padding-bottom: .25rem;
+}
+
+.dd-filter-compact .card-body {
+	padding: .85rem 1rem;
+}
+
+.dd-filter-compact .chip {
+	font-size: .72rem;
+}
+
+/* The panel is collapsible; when it is open the toggle should read as a quiet
+   link rather than competing with Apply. */
+.dd-filter-compact #filterCollapseToggle {
+	font-size: .8rem;
+	font-weight: 600;
+}
+
+/* ---- Weekly / Monthly pivot ---- */
+/* Two header lines came off the pane (the section title above the table and the
+   repeated "Monthly Summary" band inside it), so the frame can take the space
+   back rather than leaving it as padding. */
+.dd-pivot-card > .card-body {
+	padding: .75rem;
+}
+
+.dd-pivot-card .breakdown-pivot-frame.denial-pivot-scroll {
+	max-height: min(88vh, calc(100vh - 170px));
+}
+
+@media (max-width: 991.98px) {
+	.dd-pivot-card .breakdown-pivot-frame.denial-pivot-scroll {
+		max-height: 76vh;
+	}
+
+	/* Two filters per row is still readable on a tablet; one per row was what
+	   made the old panel scroll for a full screen. */
+	.dd-filter-compact .form-label {
+		font-size: .68rem;
+	}
+}
