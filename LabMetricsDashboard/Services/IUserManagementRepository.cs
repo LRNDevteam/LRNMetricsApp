@@ -24,6 +24,13 @@ public interface IUserManagementRepository
     Task<IEnumerable<LabMetricsDashboard.Models.Lab>> GetAllLabsAsync();
     Task<IEnumerable<ReviewerOption>> GetUsersByRoleNamesAsync(IEnumerable<string> roleNames);
 
+    /// <summary>
+    /// AR Reporting Requirements GAP-2: username -&gt; manager username / team, for reports to
+    /// LEFT JOIN against a lab's free-text DenialTaskBoard.AssignedTo. Matches case-insensitively
+    /// on the report side, the same convention AssignedTo comparisons already use elsewhere.
+    /// </summary>
+    Task<IEnumerable<AnalystManagerTeam>> GetAnalystManagerTeamMapAsync();
+
     // ?? Lab management (LabMaster) ?????????????????????????????????
     Task<LabMetricsDashboard.Models.Lab?> GetLabByIdAsync(int labId);
     Task<LabMetricsDashboard.Models.Lab?> GetLabByNameAsync(string labName);

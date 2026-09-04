@@ -554,13 +554,18 @@ builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();
 // Add services to the container.
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpContextAccessor();
-// Usage audit: requests only enqueue; a background writer performs the SQL INSERTs
-// so a slow/remote audit database never adds latency to page loads.
-builder.Services.AddSingleton<AppUsageAuditQueue>();
-builder.Services.AddHostedService<AppUsageAuditBackgroundWriter>();
-builder.Services.AddScoped<SqlAppUsageAuditService>();
-builder.Services.AddScoped<IAppUsageAuditService>(sp => sp.GetRequiredService<SqlAppUsageAuditService>());
-builder.Services.AddScoped<AppUsageAuditFilter>();
+// Usage page "Active Logged-in Users": tracked in this server's memory only, never written to
+// SQL. Singleton because the dictionary IS the storage - it has to outlive any one request.
+builder.Services.AddSingleton<InMemoryAppUsageService>();
+builder.Services.AddSingleton<IAppUsageAuditService>(sp => sp.GetRequiredService<InMemoryAppUsageService>());
+
+// Usage page "Location" column: resolves a visitor's IP to a City/Region/Country label via
+// ip-api.com's free tier. Short timeout - a slow third-party lookup must never hold up the page.
+builder.Services.AddHttpClient<IIpGeolocationService, IpGeolocationService>(client =>
+{
+    client.BaseAddress = new Uri("http://ip-api.com/");
+    client.Timeout = TimeSpan.FromSeconds(3);
+});
 
 // In-app Help Bot (singleton - loads topic file once at startup)
 builder.Services.AddSingleton<HelpBotService>();
@@ -703,7 +708,6 @@ builder.Services.AddResponseCompression(options =>
 
 builder.Services.AddControllersWithViews(options =>
 {
-    options.Filters.AddService<AppUsageAuditFilter>();
     // Server-side menu enforcement (FR-9): blocks direct URLs to menu-managed
     // routes the user's role has no mapping for. Non-managed routes pass through.
     options.Filters.AddService<MenuAccessFilter>();

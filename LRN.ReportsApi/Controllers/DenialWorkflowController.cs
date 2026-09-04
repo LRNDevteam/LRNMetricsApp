@@ -137,6 +137,25 @@ public sealed class DenialWorkflowController : ControllerBase
         return Ok(await _service.GetLabsForUserAsync(userName, ct));
     }
 
+    /// <summary>
+    /// AR Reporting Requirements GAP-6. Manual/scheduler trigger for the nightly inventory
+    /// snapshot - nothing in this codebase runs a cron job today, so wiring the actual "every
+    /// night at 2am" trigger (Windows Task Scheduler hitting this URL, or a hosted service) is a
+    /// deployment decision outside this endpoint's scope. Safe to call more than once for the same
+    /// date - the capture deletes that date's rows before re-inserting.
+    /// </summary>
+    [HttpPost("snapshot/capture")]
+    public async Task<IActionResult> CaptureSnapshot([FromQuery] int labId, [FromQuery] DateOnly? date, CancellationToken ct)
+    {
+        if (!CanAssignFromToken())
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only AR Manager/Admin can trigger a snapshot capture." });
+        if (labId <= 0) return BadRequest(new { message = "labId is required." });
+
+        var snapshotDate = date ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var rows = await _service.CaptureInventorySnapshotAsync(labId, snapshotDate, ct);
+        return Ok(new { labId, snapshotDate, rowsWritten = rows });
+    }
+
     [HttpGet("dashboard")]
     public async Task<ActionResult<DenialWorkflowDashboardSummary>> Dashboard([FromQuery] DenialWorkflowFilter filter, CancellationToken ct)
         => Ok(await _service.GetDashboardSummaryAsync(Normalize(filter), ct));
@@ -313,13 +332,21 @@ public sealed class DenialWorkflowController : ControllerBase
             return BadRequest(new { message = $"The upload file could not be read: {ex.Message} Please re-download the upload template and try again." });
         }
 
+        // AR Reporting Requirements GAP-8 / FR-012: every DenialTaskHistory / DenialClaimNotes row
+        // this upload writes is stamped with this id, so a report (or a person) can tell an Excel
+        // update from a UI one and group all of one upload's rows together. Generated here, before
+        // StartUpload, because StartUpload's own jobId does not exist yet when this closure is
+        // built - the two ids serve different purposes (job polling vs. audit grouping) and do not
+        // need to match.
+        var uploadBatchId = Guid.NewGuid().ToString("N");
+
         // Fire-and-forget: enqueue the parsed rows for background processing and return a jobId
         // immediately, so a 100-claim upload no longer blocks the user for minutes. Status + the
         // per-row result are available via /claims/upload/{jobId}; the log via /claims/upload/{jobId}/log.
         var startResponse = _uploadJobs.StartUpload(labId, file.FileName, rows.Count, userName,
             (sp, token) => ProcessClaimUploadAsync(
                 sp.GetRequiredService<IDenialWorkflowService>(), _logger,
-                labId, role, userName, managerRole, reviewerOnly, rows, token));
+                labId, role, userName, managerRole, reviewerOnly, rows, uploadBatchId, token));
         return Accepted(startResponse);
     }
 
@@ -328,7 +355,7 @@ public sealed class DenialWorkflowController : ControllerBase
     private static async Task<ClaimCsvUploadResult> ProcessClaimUploadAsync(
         IDenialWorkflowService _service, ILogger _logger,
         int labId, string role, string userName, bool managerRole, bool reviewerOnly,
-        List<Dictionary<string, string>> rows, CancellationToken ct)
+        List<Dictionary<string, string>> rows, string uploadBatchId, CancellationToken ct)
     {
         var errors = new List<string>();
         var rowResults = new List<ClaimCsvRowResult>();
@@ -480,7 +507,8 @@ public sealed class DenialWorkflowController : ControllerBase
                     {
                         LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId, CptCode = cptCode,
                         NoteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim",
-                        NoteText = notes, Status = NormalizeWorkflowStatus(baseTask.Status), CreatedBy = userName
+                        NoteText = notes, Status = NormalizeWorkflowStatus(baseTask.Status), CreatedBy = userName,
+                        UpdateSource = "Excel", UploadBatchId = uploadBatchId
                     }, ct);
                     addedComments++;
                     rowResult.Action = "Comment";
@@ -506,7 +534,8 @@ public sealed class DenialWorkflowController : ControllerBase
                         ClosureReason = CsvValue(item.Row, "ClosureReason"),
                         ValidationStatus = CsvValue(item.Row, "ValidationStatus"),
                         ExpectedResponseDate = CsvNullableDate(item.Row, "ExpectedResponseDate"),
-                        UpdateScope = "Claim", UpdateScopeValue = item.ClaimId
+                        UpdateScope = "Claim", UpdateScopeValue = item.ClaimId,
+                        UpdateSource = "Excel", UploadBatchId = uploadBatchId
                     };
                     var validationError = ValidateTaskStatusUpdate(template, role);
                     if (!string.IsNullOrWhiteSpace(validationError))
@@ -518,7 +547,8 @@ public sealed class DenialWorkflowController : ControllerBase
                     {
                         LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId, CptCode = cptCode,
                         NoteLevel = noteLevel, NoteText = comments,
-                        Status = updateStatus, NextFollowUpDate = template.ExpectedResponseDate, CreatedBy = userName
+                        Status = updateStatus, NextFollowUpDate = template.ExpectedResponseDate, CreatedBy = userName,
+                        UpdateSource = "Excel", UploadBatchId = uploadBatchId
                     }, ct);
                     addedComments++;
                     foreach (var task in claimTasks)
@@ -545,7 +575,8 @@ public sealed class DenialWorkflowController : ControllerBase
                     {
                         LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId, CptCode = cptCode,
                         NoteLevel = noteLevel, NoteText = comments,
-                        Status = NormalizeWorkflowStatus(baseTask.Status), CreatedBy = userName
+                        Status = NormalizeWorkflowStatus(baseTask.Status), CreatedBy = userName,
+                        UpdateSource = "Excel", UploadBatchId = uploadBatchId
                     }, ct);
                     updatedTasks += await _service.UpdateClaimCommentsAsync(labId, item.ClaimId, comments, userName, ct);
                     addedComments++;
@@ -612,7 +643,8 @@ public sealed class DenialWorkflowController : ControllerBase
                         {
                             LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId, CptCode = cptCode,
                             NoteLevel = "Claim", NoteText = $"{finalReason} - {escalationComment}",
-                            Status = isExternalEscalation ? "External Escalation" : "Internal Escalation", CreatedBy = userName
+                            Status = isExternalEscalation ? "External Escalation" : "Internal Escalation", CreatedBy = userName,
+                            UpdateSource = "Excel", UploadBatchId = uploadBatchId
                         }, ct);
                         addedComments++;
                         escalatedClaims++;
@@ -629,7 +661,8 @@ public sealed class DenialWorkflowController : ControllerBase
                             {
                                 LabId = labId, TaskId = task.TaskId, Status = "Escalated to AR Manager",
                                 Comments = $"{finalReason} - {escalationComment}", ActionBy = userName,
-                                UpdateScope = "Claim", UpdateScopeValue = item.ClaimId
+                                UpdateScope = "Claim", UpdateScopeValue = item.ClaimId,
+                                UpdateSource = "Excel", UploadBatchId = uploadBatchId
                             }, ct);
                         }
                     }

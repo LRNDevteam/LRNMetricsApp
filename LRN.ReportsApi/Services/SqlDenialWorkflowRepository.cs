@@ -3458,8 +3458,8 @@ END;
 
 IF OBJECT_ID('dbo.DenialTaskHistory','U') IS NOT NULL
 BEGIN
-    INSERT INTO dbo.DenialTaskHistory(TaskID,UniqueTrackId,LabId,RunId,ActionType,OldStatus,NewStatus,OldAssignedTo,NewAssignedTo,Comments,ActionBy,ActionDate,SnapshotJson)
-    SELECT ISNULL(t.TaskID,''),ISNULL(t.UniqueTrackId,''),ISNULL(t.LabId,@LabId),ISNULL(t.RunId,''),'StatusUpdate',ISNULL(c.OldWorkFlowStatus,''),ISNULL(c.NewWorkFlowStatus,''),ISNULL(c.OldAssignedTo,''),ISNULL(c.NewAssignedTo,''),@Comments,@ActionBy,SYSDATETIME(),@SnapshotJson
+    INSERT INTO dbo.DenialTaskHistory(TaskID,UniqueTrackId,LabId,RunId,ActionType,OldStatus,NewStatus,OldAssignedTo,NewAssignedTo,Comments,ActionBy,ActionDate,SnapshotJson,UpdateSource,UploadBatchId)
+    SELECT ISNULL(t.TaskID,''),ISNULL(t.UniqueTrackId,''),ISNULL(t.LabId,@LabId),ISNULL(t.RunId,''),'StatusUpdate',ISNULL(c.OldWorkFlowStatus,''),ISNULL(c.NewWorkFlowStatus,''),ISNULL(c.OldAssignedTo,''),ISNULL(c.NewAssignedTo,''),@Comments,@ActionBy,SYSDATETIME(),@SnapshotJson,@UpdateSource,@UploadBatchId
     FROM @Changed c
     LEFT JOIN dbo.DenialTaskBoard t ON t.TaskID=c.TaskID;
 END
@@ -3481,6 +3481,8 @@ SELECT COUNT(1) FROM @Changed;";
         cmd.Parameters.AddWithValue("@ValidationStatus", request.ValidationStatus ?? string.Empty);
         cmd.Parameters.AddWithValue("@ExpectedResponseDate", request.ExpectedResponseDate.HasValue ? request.ExpectedResponseDate.Value.Date : (object)DBNull.Value);
         cmd.Parameters.AddWithValue("@SnapshotJson", historySnapshot);
+        cmd.Parameters.AddWithValue("@UpdateSource", string.IsNullOrWhiteSpace(request.UpdateSource) ? "UI" : request.UpdateSource.Trim());
+        cmd.Parameters.AddWithValue("@UploadBatchId", (object?)request.UploadBatchId?.Trim() ?? DBNull.Value);
         var scalar = await cmd.ExecuteScalarAsync(ct);
         var rowsAffected = scalar == DBNull.Value || scalar is null ? 0 : Convert.ToInt32(scalar);
         if (rowsAffected > 0) InvalidateClaimCounts(request.LabId);
@@ -4817,6 +4819,160 @@ IF COL_LENGTH('dbo.DenialClaimEscalations','NextFollowUpDate') IS NULL ALTER TAB
 IF OBJECT_ID('dbo.DenialTaskBoard','U') IS NOT NULL AND COL_LENGTH('dbo.DenialTaskBoard','WorkFlowStatus') IS NULL ALTER TABLE dbo.DenialTaskBoard ADD WorkFlowStatus nvarchar(100) NULL;
 IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL AND COL_LENGTH('dbo.DenialLineItem','AssignedTo') IS NULL ALTER TABLE dbo.DenialLineItem ADD AssignedTo nvarchar(255) NULL;
 IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL AND COL_LENGTH('dbo.DenialLineItem','WorkFlowStatus') IS NULL ALTER TABLE dbo.DenialLineItem ADD WorkFlowStatus nvarchar(100) NULL;
+
+-- ============================================================================================
+-- AR Reporting Requirements v1.0 -- Schema Pass A (GAP-1, GAP-2 lookup, GAP-8, GAP-9, GAP-6 table)
+-- Per the readiness audit: additive, no lock risk on the big tables (plain nullable ALTER ADD
+-- COLUMN with no default expression is metadata-only in SQL Server; nothing here touches
+-- DenialTaskBoard/DenialLineItem, which is where that risk actually lives).
+--
+-- DenialInventorySnapshot (GAP-6, below) carries an index on a computed column, which SQL Server
+-- only allows to be created -- and later written to -- under QUOTED_IDENTIFIER/ANSI_NULLS ON.
+-- SqlClient's SqlConnection already sets both ON by default, so this line changes nothing for the
+-- app; it is here so this batch also runs correctly from sqlcmd or SSMS, whose defaults can
+-- differ (verified against a real instance: the CREATE TABLE below fails without it under
+-- sqlcmd's default session).
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+-- ============================================================================================
+
+-- GAP-1: status -> stable reporting bucket, effective-dated. Reports read this table instead of
+-- embedding status names in report SQL (spec Sec 2.4, ""Report code must not embed status names"").
+IF OBJECT_ID('dbo.DenialStatusBucketMap','U') IS NULL
+BEGIN
+    CREATE TABLE dbo.DenialStatusBucketMap
+    (
+        StatusBucketMapId int IDENTITY(1,1) NOT NULL CONSTRAINT PK_DenialStatusBucketMap PRIMARY KEY,
+        StatusName nvarchar(100) NOT NULL,
+        ReportingBucket nvarchar(30) NOT NULL
+            CONSTRAINT CK_DenialStatusBucketMap_Bucket CHECK (ReportingBucket IN ('Open','Active Follow-up','Pending','Escalated','Closed')),
+        EffectiveFrom datetime2(0) NOT NULL CONSTRAINT DF_DenialStatusBucketMap_From DEFAULT SYSUTCDATETIME(),
+        EffectiveTo datetime2(0) NULL,
+        CreatedBy nvarchar(256) NULL,
+        CreatedOn datetime2(0) NOT NULL CONSTRAINT DF_DenialStatusBucketMap_CreatedOn DEFAULT SYSUTCDATETIME()
+    );
+    CREATE INDEX IX_DenialStatusBucketMap_Status ON dbo.DenialStatusBucketMap(StatusName, EffectiveFrom DESC) INCLUDE(ReportingBucket, EffectiveTo);
+
+    -- Seed from the statuses NormalizeWorkflowStatus() actually produces, plus the two raw
+    -- import-time values it normalizes away (kept defensively -- see the readiness audit's own
+    -- verification query, which checks for the same two). This mapping is a first draft for AR
+    -- operations to review, not a ruling: it lives in a data row precisely so it can be corrected
+    -- without a deploy.
+    INSERT INTO dbo.DenialStatusBucketMap (StatusName, ReportingBucket, CreatedBy)
+    VALUES
+        ('New',                        'Open',             'schema-pass-a'),
+        ('Unassigned',                 'Open',             'schema-pass-a'),
+        ('Assigned',                   'Open',             'schema-pass-a'),
+        ('Payer Follow-up Required',   'Active Follow-up', 'schema-pass-a'),
+        ('Rework',                     'Active Follow-up', 'schema-pass-a'),
+        ('Pending Payer Response',     'Pending',          'schema-pass-a'),
+        ('Pending Documentation',      'Pending',          'schema-pass-a'),
+        ('Write-Off Pending Approval', 'Pending',          'schema-pass-a'),
+        ('Escalated to AR Manager',    'Escalated',        'schema-pass-a'),
+        ('Closed',                     'Closed',           'schema-pass-a');
+END;
+
+-- GAP-8: distinguish UI updates from Excel/CSV upload updates (FR-012). Both nullable columns
+-- with no default expression, so this is a metadata-only ALTER even on a large history table.
+IF OBJECT_ID('dbo.DenialTaskHistory','U') IS NOT NULL
+BEGIN
+    IF COL_LENGTH('dbo.DenialTaskHistory','UpdateSource') IS NULL
+        ALTER TABLE dbo.DenialTaskHistory ADD UpdateSource nvarchar(20) NULL;
+    IF COL_LENGTH('dbo.DenialTaskHistory','UploadBatchId') IS NULL
+        ALTER TABLE dbo.DenialTaskHistory ADD UploadBatchId nvarchar(100) NULL;
+END;
+IF COL_LENGTH('dbo.DenialClaimNotes','UpdateSource') IS NULL
+    ALTER TABLE dbo.DenialClaimNotes ADD UpdateSource nvarchar(20) NULL;
+IF COL_LENGTH('dbo.DenialClaimNotes','UploadBatchId') IS NULL
+    ALTER TABLE dbo.DenialClaimNotes ADD UploadBatchId nvarchar(100) NULL;
+
+-- GAP-9: configuration the spec explicitly requires NOT be hard-coded constants (Sec 2.5, 3.2,
+-- 3.3, Sec 7 open decisions). Three small tables; AR operations edits rows, not code.
+IF OBJECT_ID('dbo.DenialWorkingDayCalendar','U') IS NULL
+BEGIN
+    CREATE TABLE dbo.DenialWorkingDayCalendar
+    (
+        CalendarId int IDENTITY(1,1) NOT NULL CONSTRAINT PK_DenialWorkingDayCalendar PRIMARY KEY,
+        LabId int NOT NULL,
+        NonWorkingDate date NOT NULL,
+        Description nvarchar(200) NULL,
+        CreatedBy nvarchar(256) NULL,
+        CreatedOn datetime2(0) NOT NULL CONSTRAINT DF_DenialWorkingDayCalendar_CreatedOn DEFAULT SYSUTCDATETIME()
+    );
+    CREATE UNIQUE INDEX UX_DenialWorkingDayCalendar_Lab_Date ON dbo.DenialWorkingDayCalendar(LabId, NonWorkingDate);
+END;
+
+IF OBJECT_ID('dbo.DenialAgingBucket','U') IS NULL
+BEGIN
+    CREATE TABLE dbo.DenialAgingBucket
+    (
+        AgingBucketId int IDENTITY(1,1) NOT NULL CONSTRAINT PK_DenialAgingBucket PRIMARY KEY,
+        BucketLabel nvarchar(50) NOT NULL,
+        MinDays int NOT NULL,
+        MaxDays int NULL,
+        SortOrder int NOT NULL CONSTRAINT DF_DenialAgingBucket_SortOrder DEFAULT 100,
+        CreatedOn datetime2(0) NOT NULL CONSTRAINT DF_DenialAgingBucket_CreatedOn DEFAULT SYSUTCDATETIME()
+    );
+    INSERT INTO dbo.DenialAgingBucket (BucketLabel, MinDays, MaxDays, SortOrder) VALUES
+        ('0-30',  0,  30,   10),
+        ('31-60', 31, 60,   20),
+        ('61-90', 61, 90,   30),
+        ('90+',   91, NULL, 40);
+END;
+
+IF OBJECT_ID('dbo.DenialWorkloadWeight','U') IS NULL
+BEGIN
+    CREATE TABLE dbo.DenialWorkloadWeight
+    (
+        WorkloadWeightId int IDENTITY(1,1) NOT NULL CONSTRAINT PK_DenialWorkloadWeight PRIMARY KEY,
+        WorkType nvarchar(100) NOT NULL,
+        Weight decimal(6,2) NOT NULL,
+        EffectiveFrom datetime2(0) NOT NULL CONSTRAINT DF_DenialWorkloadWeight_From DEFAULT SYSUTCDATETIME(),
+        EffectiveTo datetime2(0) NULL,
+        CreatedBy nvarchar(256) NULL
+    );
+    -- The spec's own illustrative defaults (Sec 3.3 business rules). To change one prospectively:
+    -- set EffectiveTo on the old row and insert a new one, rather than updating Weight in place.
+    INSERT INTO dbo.DenialWorkloadWeight (WorkType, Weight, CreatedBy) VALUES
+        ('PayerFollowUp',           1.0, 'schema-pass-a'),
+        ('Rebill',                  1.5, 'schema-pass-a'),
+        ('DocumentationFollowUp',   1.5, 'schema-pass-a'),
+        ('Appeal',                  3.0, 'schema-pass-a'),
+        ('ComplexEscalationRework', 3.0, 'schema-pass-a');
+END;
+
+-- GAP-6: nightly point-in-time inventory snapshot. Table only -- see
+-- DenialInventorySnapshotService for the capture job. Nothing reads this until the job has run at
+-- least once, but it needs to exist and start accruing rows from the day this ships; every day it
+-- does not run is a day of trend data that can never be recovered.
+IF OBJECT_ID('dbo.DenialInventorySnapshot','U') IS NULL
+BEGIN
+    CREATE TABLE dbo.DenialInventorySnapshot
+    (
+        SnapshotId bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_DenialInventorySnapshot PRIMARY KEY,
+        SnapshotDate date NOT NULL,
+        LabId int NOT NULL,
+        AssignedTo nvarchar(255) NOT NULL CONSTRAINT DF_DenialInventorySnapshot_AssignedTo DEFAULT '',
+        ReportingBucket nvarchar(30) NOT NULL,
+        DenialClassification nvarchar(255) NOT NULL CONSTRAINT DF_DenialInventorySnapshot_Classification DEFAULT '',
+        ActionCategory nvarchar(500) NOT NULL CONSTRAINT DF_DenialInventorySnapshot_ActionCategory DEFAULT '',
+        ClaimCount int NOT NULL,
+        LineCount int NOT NULL,
+        InsuranceBalance decimal(18,2) NOT NULL,
+        CreatedOn datetime2(0) NOT NULL CONSTRAINT DF_DenialInventorySnapshot_CreatedOn DEFAULT SYSUTCDATETIME(),
+        -- The natural grain key (AssignedTo + DenialClassification + ActionCategory alone can run
+        -- to 1010 bytes of nvarchar) exceeds SQL Server's 1700-byte nonclustered index key limit,
+        -- so the unique index below is built on this hash instead of the raw columns.
+        GrainHash AS CONVERT(binary(32), HASHBYTES('SHA2_256',
+            CONCAT(SnapshotDate, N'|', LabId, N'|', AssignedTo, N'|', ReportingBucket, N'|', DenialClassification, N'|', ActionCategory)
+        )) PERSISTED
+    );
+    CREATE INDEX IX_DenialInventorySnapshot_Lab_Date ON dbo.DenialInventorySnapshot(LabId, SnapshotDate DESC) INCLUDE(AssignedTo, ReportingBucket, ClaimCount, InsuranceBalance);
+    -- One row per (date, lab, analyst, bucket, classification, action). The capture job deletes
+    -- an existing date's rows before re-inserting, so this index is a safety net against a
+    -- concurrent double-run, not the primary idempotency mechanism.
+    CREATE UNIQUE INDEX UX_DenialInventorySnapshot_Grain ON dbo.DenialInventorySnapshot(GrainHash);
+END;
 ";
         await using var con = OpenLab(labId);
         await con.OpenAsync(ct);
@@ -4828,6 +4984,57 @@ IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL AND COL_LENGTH('dbo.DenialLin
         {
             schemaLock.Release();
         }
+    }
+
+    /// <summary>
+    /// AR Reporting Requirements GAP-6. See <see cref="IDenialWorkflowRepository.CaptureInventorySnapshotAsync"/>.
+    /// An unmapped Status falls back to the "Open" bucket rather than being silently excluded --
+    /// a wrong bucket is visible and correctable in dbo.DenialStatusBucketMap; a row that vanished
+    /// from every bucket total is not.
+    /// </summary>
+    public async Task<int> CaptureInventorySnapshotAsync(int labId, DateOnly snapshotDate, CancellationToken ct)
+    {
+        await EnsureClaimSupportTablesAsync(labId, ct);
+
+        var taskLabScope = LabScopeSql("t.LabId");
+        var sql = $@"
+DECLARE @HasTaskLab bit = CASE WHEN EXISTS (SELECT 1 FROM dbo.DenialTaskBoard WITH (NOLOCK) WHERE {LabScopeSql("LabId")}) THEN 1 ELSE 0 END;
+
+DELETE FROM dbo.DenialInventorySnapshot WHERE LabId=@LabId AND SnapshotDate=@SnapshotDate;
+
+INSERT INTO dbo.DenialInventorySnapshot
+    (SnapshotDate, LabId, AssignedTo, ReportingBucket, DenialClassification, ActionCategory, ClaimCount, LineCount, InsuranceBalance)
+SELECT
+    @SnapshotDate,
+    @LabId,
+    ISNULL(NULLIF(LTRIM(RTRIM(t.AssignedTo)), ''), ''),
+    ISNULL(b.ReportingBucket, 'Open'),
+    ISNULL(NULLIF(LTRIM(RTRIM(t.DenialClassification)), ''), ''),
+    ISNULL(NULLIF(LTRIM(RTRIM(t.ActionCategory)), ''), ''),
+    COUNT(DISTINCT t.ClaimID),
+    COUNT(1),
+    SUM(ISNULL(t.InsuranceBalance, 0))
+FROM dbo.DenialTaskBoard t
+OUTER APPLY (
+    SELECT TOP (1) m.ReportingBucket
+    FROM dbo.DenialStatusBucketMap m
+    WHERE m.StatusName = t.Status
+      AND m.EffectiveFrom <= SYSUTCDATETIME()
+      AND (m.EffectiveTo IS NULL OR m.EffectiveTo > SYSUTCDATETIME())
+    ORDER BY m.EffectiveFrom DESC
+) b
+WHERE (@HasTaskLab = 0 OR {taskLabScope})
+GROUP BY t.AssignedTo, b.ReportingBucket, t.DenialClassification, t.ActionCategory;
+
+SELECT @@ROWCOUNT;";
+
+        await using var con = OpenLab(labId);
+        await con.OpenAsync(ct);
+        await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 };
+        AddLabScopeParams(cmd, labId);
+        cmd.Parameters.AddWithValue("@SnapshotDate", snapshotDate.ToDateTime(TimeOnly.MinValue));
+        var scalar = await cmd.ExecuteScalarAsync(ct);
+        return scalar is null or DBNull ? 0 : Convert.ToInt32(scalar);
     }
 
     public async Task<IReadOnlyList<DenialNoteRow>> GetNotesAsync(int labId, string claimId, string? taskId, string? cptCode, string noteLevel, CancellationToken ct)
@@ -4873,9 +5080,9 @@ ORDER BY CreatedOn DESC, NoteId DESC;";
     {
         await EnsureClaimSupportTablesAsync(request.LabId, ct);
         const string sql = @"
-INSERT INTO dbo.DenialClaimNotes(LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,Status,NextFollowUpDate,FollowUpReason,CreatedBy)
+INSERT INTO dbo.DenialClaimNotes(LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,Status,NextFollowUpDate,FollowUpReason,CreatedBy,UpdateSource,UploadBatchId)
 OUTPUT INSERTED.NoteId,INSERTED.LabId,INSERTED.ClaimId,INSERTED.TaskId,INSERTED.CptCode,INSERTED.NoteLevel,INSERTED.NoteText,INSERTED.Status,INSERTED.NextFollowUpDate,INSERTED.CreatedBy,INSERTED.CreatedOn
-VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@NoteLevel,@NoteText,@Status,@NextFollowUpDate,@FollowUpReason,@CreatedBy);";
+VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@NoteLevel,@NoteText,@Status,@NextFollowUpDate,@FollowUpReason,@CreatedBy,@UpdateSource,@UploadBatchId);";
         await using var con = OpenLab(request.LabId);
         await con.OpenAsync(ct);
         await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 120 };
@@ -4889,6 +5096,8 @@ VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@NoteLevel,@NoteText,@Status,@NextFollow
         cmd.Parameters.AddWithValue("@NextFollowUpDate", request.NextFollowUpDate.HasValue ? request.NextFollowUpDate.Value.Date : (object)DBNull.Value);
         cmd.Parameters.AddWithValue("@FollowUpReason", string.IsNullOrWhiteSpace(request.FollowUpReason) ? (object)DBNull.Value : request.FollowUpReason.Trim());
         cmd.Parameters.AddWithValue("@CreatedBy", string.IsNullOrWhiteSpace(request.CreatedBy) ? "ReactWorkflow" : request.CreatedBy.Trim());
+        cmd.Parameters.AddWithValue("@UpdateSource", string.IsNullOrWhiteSpace(request.UpdateSource) ? "UI" : request.UpdateSource.Trim());
+        cmd.Parameters.AddWithValue("@UploadBatchId", (object?)request.UploadBatchId?.Trim() ?? DBNull.Value);
         await using var rd = await cmd.ExecuteReaderAsync(ct);
         if (await rd.ReadAsync(ct)) return ReadNote(rd);
         throw new InvalidOperationException("Unable to save note.");

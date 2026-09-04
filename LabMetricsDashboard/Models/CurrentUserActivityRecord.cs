@@ -9,6 +9,14 @@ public sealed class CurrentUserActivityRecord
     public string Path { get; set; } = string.Empty;
     public string IpAddress { get; set; } = string.Empty;
     public string LocationText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// "City, Region, Country" resolved server-side from <see cref="IpAddress"/> - see
+    /// <see cref="LabMetricsDashboard.Services.IIpGeolocationService"/>. Populated by
+    /// <c>UsageController</c> after the audit service returns this record; empty for a private
+    /// address or when the lookup failed.
+    /// </summary>
+    public string? IpLocationName { get; set; }
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }
     public string UserAgent { get; set; } = string.Empty;

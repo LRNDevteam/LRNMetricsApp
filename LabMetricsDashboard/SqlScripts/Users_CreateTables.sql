@@ -22,6 +22,16 @@ BEGIN
 END
 GO
 
+-- AR Reporting Requirements GAP-2: analyst -> manager -> team. Self-referencing FK, so it can
+-- only be added once LabUsers itself exists -- safe to run this block every time this script
+-- runs, whether that is the first time or the tenth.
+IF COL_LENGTH('dbo.LabUsers','ManagerUserID') IS NULL
+    ALTER TABLE dbo.LabUsers ADD ManagerUserID INT NULL
+        CONSTRAINT FK_LabUsers_Manager FOREIGN KEY REFERENCES dbo.LabUsers(LabUserID);
+IF COL_LENGTH('dbo.LabUsers','TeamName') IS NULL
+    ALTER TABLE dbo.LabUsers ADD TeamName NVARCHAR(200) NULL;
+GO
+
 IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Roles')
 BEGIN
     CREATE TABLE dbo.Roles (

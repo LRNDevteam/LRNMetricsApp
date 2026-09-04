@@ -682,6 +682,13 @@ public sealed class UpdateTaskRequest
     public DateTime? ExpectedResponseDate { get; set; }
     public string UpdateScope { get; set; } = "Line";
     public string? UpdateScopeValue { get; set; }
+
+    // AR Reporting Requirements GAP-8 / FR-012: distinguishes a UI status update from one written
+    // by the CSV/Excel upload path. Defaults to "UI" so every existing caller that never sets
+    // this - which is every UI call site - needs no change; only the upload controller action
+    // overrides it to "Excel" and supplies an UploadBatchId.
+    public string UpdateSource { get; set; } = "UI";
+    public string? UploadBatchId { get; set; }
 }
 
 public sealed class VerificationDecisionRequest
@@ -727,6 +734,13 @@ public sealed class SaveDenialNoteRequest
     public string? DocumentationType { get; set; }
     public bool ValidateWorkflowFields { get; set; }
     public string? CreatedBy { get; set; }
+
+    // AR Reporting Requirements GAP-8 / FR-012: distinguishes a UI-entered note from one written
+    // by the CSV/Excel upload path. Defaults to "UI" so every existing caller that never sets
+    // this - which is every UI call site - needs no change; only the upload controller action
+    // overrides it to "Excel" and supplies an UploadBatchId.
+    public string UpdateSource { get; set; } = "UI";
+    public string? UploadBatchId { get; set; }
 }
 
 public sealed class FollowUpNotificationRow
