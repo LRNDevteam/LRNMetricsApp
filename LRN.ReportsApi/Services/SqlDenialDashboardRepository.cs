@@ -531,6 +531,19 @@ ORDER BY {orderBy};";
 		var info = new DenialRunInfo { RunId = runId };
 		if (string.IsNullOrWhiteSpace(runId)) return info;
 
+		var lab = await GetLabAsync(labId, cancellationToken);
+
+		// A demo lab is a clone of a real one, so both its RunId and its source file name
+		// identify the lab it was cloned from - LRNLabDemo carries a PCR Labs of America
+		// run id and would otherwise show that lab's production report file name. Printing
+		// it in the dashboard header would undo the de-identification the clone exists for,
+		// so demo labs get a placeholder and never touch LRN_Run_Log.
+		if (IsDemoLab(lab.LabName))
+		{
+			info.SourceFileName = DemoSourceFileName;
+			return info;
+		}
+
 		try
 		{
 			// The source file that produced this run lives in LRNMaster.dbo.LRN_Run_Log
@@ -539,10 +552,34 @@ ORDER BY {orderBy};";
 			await connection.OpenAsync(cancellationToken);
 			if (!await TableExistsAsync(connection, "dbo", "LRN_Run_Log", cancellationToken)) return info;
 
-			await using var command = new SqlCommand(
-				"SELECT LTRIM(RTRIM(ISNULL(InputMasterFileName, ''))) AS SourceFile FROM dbo.LRN_Run_Log WHERE RunID = @RunId;",
-				connection) { CommandType = CommandType.Text, CommandTimeout = 60 };
+			// Two id spaces meet here and they do not overlap. DenialTaskBoard.RunId comes from
+			// the denial pipeline and looks like "R20260814PLA0531"; LRN_Run_Log.RunID comes from
+			// the master file processor and looks like "20260520R0480". An exact match therefore
+			// finds nothing today, which is why the header showed no source file for any lab.
+			//
+			// The exact match is kept first so this starts working by itself if the two are ever
+			// reconciled. The fallback is the most recent master-file run for the same lab, which
+			// is the file the denial run was built from in practice.
+			//
+			// Lab names drift between the two tables ("PCRDx - CO" in LRNMetricsLab vs "PCR_Dx_CO"
+			// in LRN_Run_Log), so the join strips spaces, underscores, hyphens and dots from both
+			// sides rather than comparing them raw.
+			const string sql = @"
+SELECT TOP (1) LTRIM(RTRIM(ISNULL(InputMasterFileName, ''))) AS SourceFile
+FROM dbo.LRN_Run_Log
+WHERE RunID = @RunId
+  AND NULLIF(LTRIM(RTRIM(ISNULL(InputMasterFileName, ''))), '') IS NOT NULL;
+
+IF @@ROWCOUNT = 0
+SELECT TOP (1) LTRIM(RTRIM(ISNULL(InputMasterFileName, ''))) AS SourceFile
+FROM dbo.LRN_Run_Log
+WHERE REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(LabName, ''), ' ', ''), '_', ''), '-', ''), '.', '') = @LabKey
+  AND NULLIF(LTRIM(RTRIM(ISNULL(InputMasterFileName, ''))), '') IS NOT NULL
+ORDER BY RunID DESC;";
+
+			await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 60 };
 			command.Parameters.AddWithValue("@RunId", runId);
+			command.Parameters.AddWithValue("@LabKey", NormalizeLabNameKey(lab.LabName));
 			var result = await command.ExecuteScalarAsync(cancellationToken);
 			info.SourceFileName = result is null || result == DBNull.Value ? string.Empty : Convert.ToString(result) ?? string.Empty;
 		}
@@ -552,6 +589,27 @@ ORDER BY {orderBy};";
 		}
 		return info;
 	}
+
+	/// <summary>Shown instead of the real source file for a demo lab. Deliberately not a real
+	/// file name, and deliberately says "demo" so nobody mistakes it for provenance.</summary>
+	private const string DemoSourceFileName = "LRNLabDemo_Sample Masterfile (demo data).xlsx";
+
+	/// <summary>Demo labs come from LabConfig:DemoLabs, the same setting that hides them from the
+	/// "admins see every lab" shortcut, so one list governs both behaviours. Matching is on the
+	/// stripped name because the lab registries spell the same lab several ways.</summary>
+	private bool IsDemoLab(string labName)
+	{
+		var key = NormalizeLabNameKey(labName);
+		if (key.Length == 0) return false;
+
+		return _configuration.GetSection("LabConfig:DemoLabs")
+			.GetChildren()
+			.Select(x => NormalizeLabNameKey(x.Value ?? string.Empty))
+			.Any(x => x.Length > 0 && string.Equals(x, key, StringComparison.OrdinalIgnoreCase));
+	}
+
+	private static string NormalizeLabNameKey(string value)
+		=> new((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
 
 	public async Task<string?> GetLatestExportFilePathForLabAsync(int labId, CancellationToken cancellationToken = default)
 	{

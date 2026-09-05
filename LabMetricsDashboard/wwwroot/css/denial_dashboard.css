@@ -1003,35 +1003,40 @@ footer {
 	box-shadow: 0 -1px 0 #cbd8e6;
 }
 
+/* Header bands match the Production Summary Report's Monthly Claim Volume table
+   (.pr-table thead tr:nth-child(1/2/3) th) so the two report tables read as one family. */
 .breakdown-pivot-table.denial-pivot-freeze .pivot-grand-title,
 .breakdown-pivot-table.denial-pivot-freeze .pivot-side-title,
 .breakdown-pivot-table.denial-pivot-freeze .pivot-section-title,
 .breakdown-pivot-table.denial-pivot-freeze .pivot-total-title,
 .breakdown-pivot-table.denial-pivot-freeze .pivot-period-title,
 .breakdown-pivot-table.denial-pivot-freeze .pivot-metric-title {
-	background: #123b63;
-	color: #ffffff;
+	color: rgba(255, 255, 255, .92);
 	text-transform: uppercase;
+	font-weight: 700;
 	font-size: .67rem;
-	letter-spacing: .015em;
+	letter-spacing: .04em;
 }
 
-.breakdown-pivot-table.denial-pivot-freeze .pivot-grand-title {
-	background: #08294d;
+.breakdown-pivot-table.denial-pivot-freeze .pivot-grand-title,
+.breakdown-pivot-table.denial-pivot-freeze .pivot-side-title {
+	background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
 	font-size: .72rem;
 }
 
 .breakdown-pivot-table.denial-pivot-freeze .pivot-section-title,
 .breakdown-pivot-table.denial-pivot-freeze .pivot-period-title {
-	background: #174c76;
-}
-
-.breakdown-pivot-table.denial-pivot-freeze .pivot-total-title {
-	background: #a46500;
+	background: linear-gradient(135deg, #162d50 0%, #1b4a6c 100%);
 }
 
 .breakdown-pivot-table.denial-pivot-freeze .pivot-metric-title {
-	background: #0d5f93;
+	background: #1e5a8a;
+	font-weight: 600;
+}
+
+/* The Grand Total column-group header - same amber gradient as .pr-table's th.pr-grand-total. */
+.breakdown-pivot-table.denial-pivot-freeze .pivot-total-title {
+	background: linear-gradient(135deg, #78350f 0%, #92400e 100%);
 }
 
 .breakdown-pivot-table.denial-pivot-freeze .pivot-index,
@@ -1106,16 +1111,22 @@ footer {
 	box-shadow: 2px 0 0 #cbd8e6;
 }
 
+/* Insurance (group/parent) rows match .pr-panel-row - the green-tinted "group" look Production
+   Summary Report uses for its Panel rows. Denial (child) rows match .pr-payer-row - plain white,
+   lighter weight, muted label - so a collapsed group and its children read the same way in both
+   reports. The collapse arrow itself (.pivot-collapse-btn, below) is unchanged. */
 .breakdown-pivot-table.denial-pivot-freeze .pivot-insurance-row td,
 .breakdown-pivot-table.denial-pivot-freeze .pivot-insurance-row .pivot-freeze-1,
 .breakdown-pivot-table.denial-pivot-freeze .pivot-insurance-row .pivot-freeze-2 {
-	background: #ffffff;
-	font-weight: 800;
-	color: #001b44;
+	background: #f0fdf4;
+	font-weight: 700;
+	color: #166534;
 }
 
 .breakdown-pivot-table.denial-pivot-freeze .pivot-denial-row td {
 	background: #ffffff;
+	color: #475569;
+	font-weight: 400;
 }
 
 .breakdown-pivot-table.denial-pivot-freeze .pivot-denial-row .pivot-freeze-1,
@@ -1123,21 +1134,24 @@ footer {
 	background: #ffffff;
 }
 
-.breakdown-pivot-table.denial-pivot-freeze .pivot-child-row:nth-child(even) td,
-.breakdown-pivot-table.denial-pivot-freeze .pivot-child-row:nth-child(even) .pivot-freeze-1,
-.breakdown-pivot-table.denial-pivot-freeze .pivot-child-row:nth-child(even) .pivot-freeze-2 {
-	background: #f9fbfe;
+.breakdown-pivot-table.denial-pivot-freeze .pivot-child-row .pivot-child-label {
+	color: #64748b;
+	font-weight: 500;
 }
 
+/* Totals row matches .pr-total-row: solid navy, white text, heavier top divider - rather than
+   the amber "total column" treatment, which stays on the per-row Grand Total cells below. */
 .breakdown-pivot-table.denial-pivot-freeze .pivot-footer-row th {
-	background: #fff2cc;
-	font-weight: 900;
-	color: #001b44;
+	background: #0e3460;
+	color: #ffffff;
+	font-weight: 800;
+	border-top: 2px solid #0a2a4a;
 }
 
 .breakdown-pivot-table.denial-pivot-freeze .pivot-footer-row .pivot-freeze-both {
 	z-index: 58;
-	background: #fff2cc;
+	background: #0e3460;
+	color: #ffffff;
 	/* match the frozen-column right divider, keep the footer's top divider */
 	box-shadow: 2px 0 0 #cbd8e6, 0 -1px 0 #cbd8e6;
 }
@@ -1150,7 +1164,7 @@ footer {
 .breakdown-pivot-table.denial-pivot-freeze .pivot-child-row:hover td,
 .breakdown-pivot-table.denial-pivot-freeze .pivot-child-row:hover .pivot-freeze-1,
 .breakdown-pivot-table.denial-pivot-freeze .pivot-child-row:hover .pivot-freeze-2 {
-	background: #eef6ff;
+	background: #f8fafc;
 }
 
 .breakdown-pivot-table.denial-pivot-freeze .pivot-insurance-row:hover .total-col,
@@ -2018,4 +2032,105 @@ body.fs-lock {
 
 .rate-track span {
     background: #17466f;
+}
+
+
+/* ============================================================================
+   Denial Dashboard — filter panel aligned to the Production Report layout
+   ----------------------------------------------------------------------------
+   The panel used to spend its height on structure rather than controls: a
+   "Global filters" title, a data-source block, a row of run chips, and two
+   full-width section-heading pills, before any field appeared. Run context now
+   sits above the panel (.dd-run-meta) and the fields flow as one dense grid, so
+   the same filters occupy roughly half the vertical space.
+   ============================================================================ */
+
+/* Run context row — same visual grammar as _AnalysisRangeBanner on the
+   Production Report, so the two pages read as one family. */
+.dd-run-meta-label {
+	font-weight: 600;
+	color: #6b7a90;
+	font-size: .72rem;
+	letter-spacing: .04em;
+	text-transform: uppercase;
+}
+
+.dd-run-meta-value {
+	color: #0e3460;
+}
+
+/* A source file name is long and is the least useful thing to wrap onto a
+   second line; the full value stays available on hover. */
+.dd-run-meta-file {
+	max-width: min(46ch, 100%);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* ---- Compact filter grid ---- */
+.dd-filter-compact .filter-form-grid {
+	row-gap: .55rem !important;
+}
+
+.dd-filter-compact .form-label {
+	font-size: .72rem;
+	font-weight: 700;
+	letter-spacing: .03em;
+	text-transform: uppercase;
+	color: #4a5c74;
+	margin-bottom: .2rem;
+}
+
+/* Covers the native controls and the multi-select toggle alike: the toggle is
+   rendered as .form-select.filter-select, so one rule keeps every control in
+   the panel on the same 34px baseline. */
+.dd-filter-compact .form-select,
+.dd-filter-compact .form-control,
+.dd-filter-compact .filter-select {
+	min-height: 34px;
+	height: 34px;
+	font-size: .82rem;
+	border-radius: .5rem;
+	padding-top: .25rem;
+	padding-bottom: .25rem;
+}
+
+.dd-filter-compact .card-body {
+	padding: .85rem 1rem;
+}
+
+.dd-filter-compact .chip {
+	font-size: .72rem;
+}
+
+/* The panel is collapsible; when it is open the toggle should read as a quiet
+   link rather than competing with Apply. */
+.dd-filter-compact #filterCollapseToggle {
+	font-size: .8rem;
+	font-weight: 600;
+}
+
+/* ---- Weekly / Monthly pivot ---- */
+/* Two header lines came off the pane (the section title above the table and the
+   repeated "Monthly Summary" band inside it), so the frame can take the space
+   back rather than leaving it as padding. */
+.dd-pivot-card > .card-body {
+	padding: .75rem;
+}
+
+.dd-pivot-card .breakdown-pivot-frame.denial-pivot-scroll {
+	max-height: min(88vh, calc(100vh - 170px));
+}
+
+@media (max-width: 991.98px) {
+	.dd-pivot-card .breakdown-pivot-frame.denial-pivot-scroll {
+		max-height: 76vh;
+	}
+
+	/* Two filters per row is still readable on a tablet; one per row was what
+	   made the old panel scroll for a full screen. */
+	.dd-filter-compact .form-label {
+		font-size: .68rem;
+	}
 }

@@ -2,8 +2,7 @@
 @using System.Globalization
 
 @{
-    IHtmlContent Money(decimal amount) => Acct2(amount);
-    var colSpan = 2 + (Model.Periods.Count * 2) + 2;
+    string Money(decimal amount) => amount.ToString("$#,##0.00", CultureInfo.GetCultureInfo("en-US"));
     var tableId = "pivot_" + Guid.NewGuid().ToString("N");
     var groupNumber = 0;
     string? currentGroupKey = null;
@@ -16,12 +15,20 @@
         <div class="table-frame breakdown-pivot-frame denial-pivot-scroll" id="@tableId">
             <table class="table table-sm app-table breakdown-pivot-table denial-pivot-freeze mb-0">
                 <thead>
-                    <tr>
-                        <th class="pivot-grand-title" colspan="@colSpan">@Model.HeaderTitle</th>
-                    </tr>
+                    @* Two header bands were stacked here: a full-width one carrying the coverage
+                       caption ("All Months | Top N Payers | Covering X% of the AR | ..."), and
+                       under it a band that only repeated SectionTitle — "Monthly Summary" /
+                       "Weekly Summary" — which the tab above already says. The repeat is gone and
+                       the caption moved down into the surviving band, so the table keeps the one
+                       piece of information the header actually carried and gets a row of height
+                       back on every scroll.
+
+                       SectionTitle is still set on the view model and still used by the Excel
+                       export (DenialDashboardExcelExportBuilder), where the sheets have no tabs
+                       to name them. *@
                     <tr>
                         <th class="pivot-side-title pivot-freeze-both" colspan="2" rowspan="@(monthly ? 4 : 3)">Insurance &amp; Top Denials</th>
-                        <th class="pivot-section-title" colspan="@(Model.Periods.Count * 2)">@Model.SectionTitle</th>
+                        <th class="pivot-section-title" colspan="@(Model.Periods.Count * 2)" title="@Model.HeaderTitle">@Model.HeaderTitle</th>
                         <th class="pivot-total-title" colspan="2" rowspan="@(monthly ? 3 : 2)">@(monthly ? Model.GrandTotalTitle : "Total")</th>
                     </tr>
                     @if (monthly)

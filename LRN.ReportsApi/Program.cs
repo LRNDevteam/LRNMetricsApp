@@ -84,6 +84,9 @@ builder.Services.AddScoped<ILabAnalyticsRepository, SqlLabAnalyticsRepository>()
 builder.Services.AddScoped<ICptLookupRepository, SqlCptLookupRepository>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IDenialDashboardRepository, SqlDenialDashboardRepository>();
+// AR follow-up reporting suite (RPT-01 AR Follow-up Activity Detail and the shared report catalog).
+builder.Services.AddScoped<LRN.ReportsApi.Services.ArReports.IArActivityReportRepository,
+                           LRN.ReportsApi.Services.ArReports.SqlArActivityReportRepository>();
 builder.Services.AddScoped<IPayerMasterWorkflowService, PayerMasterWorkflowService>();
 builder.Services.AddHostedService<PayerMasterSlaEscalationService>();
 
