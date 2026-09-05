@@ -5,7 +5,7 @@
     var ci = CultureInfo.InvariantCulture;
     string Num(long v) => v.ToString("N0", ci);
     string Pct(decimal? v) => v is { } d ? d.ToString("0.0", ci) + "%" : "—";
-    string Money(decimal v) => v.ToString("C2", CultureInfo.GetCultureInfo("en-US"));
+    IHtmlContent Money(decimal v) => Acct2(v);
     string ShortLbl(string monthLabel)
     {
         // "Jul 2026" → "Jul26"

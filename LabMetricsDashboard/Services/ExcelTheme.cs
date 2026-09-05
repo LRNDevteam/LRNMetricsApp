@@ -38,6 +38,15 @@ public static class ExcelTheme
     /// <summary>Accent 4 (Gold) — used for "Total" column headers and highlights.</summary>
     public static readonly XLColor GoldAccent = XLColor.FromHtml("#FFC000");
 
+    /// <summary>
+    /// Excel Accounting (USD, 0 decimals): $ aligned left, value right,
+    /// negatives in parentheses, zero as a dash. Not Currency (<c>$#,##0</c>).
+    /// </summary>
+    public const string AccountingNumberFormat = @"_($* #,##0_);_($* (#,##0);_($* ""-""??_);_(@_)";
+
+    /// <summary>Excel Accounting (USD, 2 decimals).</summary>
+    public const string AccountingNumberFormat2 = @"_($* #,##0.00_);_($* (#,##0.00);_($* ""-""??_);_(@_)";
+
     /// <summary>Accent 6 Lighter 60 % — used for group / category rows (bold parent rows).</summary>
     public static readonly XLColor GroupRowBg = XLColor.FromHtml("#C5E0B4");
 
@@ -352,6 +361,81 @@ public static class ExcelTheme
     {
         ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
         ws.CollapseRows();
+    }
+
+    /// <summary>
+    /// Drops XML 1.0 illegal control characters. SQL text columns occasionally contain
+    /// them; ClosedXML then writes a workbook Excel has to "repair".
+    /// </summary>
+    public static string SanitizeText(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        int i = 0;
+        for (; i < value.Length; i++)
+        {
+            if (!IsLegalXmlChar(value[i])) break;
+        }
+        if (i == value.Length) return value;
+
+        var sb = new System.Text.StringBuilder(value.Length);
+        if (i > 0) sb.Append(value, 0, i);
+        for (; i < value.Length; i++)
+        {
+            if (IsLegalXmlChar(value[i])) sb.Append(value[i]);
+        }
+        return sb.ToString();
+    }
+
+    private static bool IsLegalXmlChar(char c) =>
+        c == 0x09 || c == 0x0A || c == 0x0D ||
+        (c >= 0x20 && c <= 0xD7FF) ||
+        (c >= 0xE000 && c <= 0xFFFD);
+
+    /// <summary>
+    /// Rewrites Excel Currency number formats (<c>$#,##0</c>) to Accounting
+    /// so pre-generated workbooks match live Download Excel.
+    /// </summary>
+    public static void ConvertCurrencyFormatsToAccounting(XLWorkbook workbook)
+    {
+        ArgumentNullException.ThrowIfNull(workbook);
+        foreach (var ws in workbook.Worksheets)
+        {
+            foreach (var col in ws.ColumnsUsed())
+                ConvertNumberFormat(col.Style.NumberFormat);
+            foreach (var cell in ws.CellsUsed())
+                ConvertNumberFormat(cell.Style.NumberFormat);
+        }
+    }
+
+    public static byte[] LoadWithAccounting(string workbookPath)
+    {
+        using var wb = new XLWorkbook(workbookPath);
+        ConvertCurrencyFormatsToAccounting(wb);
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        return ms.ToArray();
+    }
+
+    private static void ConvertNumberFormat(IXLNumberFormat nf)
+    {
+        var fmt = nf.Format ?? "";
+        if (fmt.Contains("$*", StringComparison.Ordinal))
+            return;
+
+        if (fmt.Length == 0)
+        {
+            var id = nf.NumberFormatId;
+            if (id is 5 or 6) nf.Format = AccountingNumberFormat;
+            else if (id is 7 or 8) nf.Format = AccountingNumberFormat2;
+            return;
+        }
+
+        if (fmt.IndexOf('$') < 0)
+            return;
+
+        nf.Format = fmt.Contains(".00", StringComparison.Ordinal)
+            ? AccountingNumberFormat2
+            : AccountingNumberFormat;
     }
 
     /// <summary>

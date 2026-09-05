@@ -34,17 +34,17 @@
                     string cellClass)
                 {
                     <td class="@cellClass">@cCur.ToString("N0")</td>
-                    <td class="@cellClass">@bCur.ToString("C2")</td>
+                    <td class="@cellClass">@Acct2(bCur)</td>
                     <td class="@cellClass">@c30.ToString("N0")</td>
-                    <td class="@cellClass">@b30.ToString("C2")</td>
+                    <td class="@cellClass">@Acct2(b30)</td>
                     <td class="@cellClass">@c60.ToString("N0")</td>
-                    <td class="@cellClass">@b60.ToString("C2")</td>
+                    <td class="@cellClass">@Acct2(b60)</td>
                     <td class="@cellClass">@c90.ToString("N0")</td>
-                    <td class="@cellClass">@b90.ToString("C2")</td>
+                    <td class="@cellClass">@Acct2(b90)</td>
                     <td class="@cellClass">@c120.ToString("N0")</td>
-                    <td class="@cellClass">@b120.ToString("C2")</td>
+                    <td class="@cellClass">@Acct2(b120)</td>
                     <td class="@cellClass cs-ag-gt">@cTot.ToString("N0")</td>
-                    <td class="@cellClass cs-ag-gt">@bTot.ToString("C2")</td>
+                    <td class="@cellClass cs-ag-gt">@Acct2(bTot)</td>
                 }
 
                 @* Scoped by table id: the shared .cs-rpt-table rules (row striping, the
@@ -186,17 +186,17 @@
                                 <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
                                     <td style="text-align:left;color:#fff">Grand Total</td>
                                     <td style="text-align:right;color:#fff">@grandClaimsCurrent.ToString("N0")</td>
-                                    <td style="text-align:right;color:#fff">@grandBalanceCurrent.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@Acct2(grandBalanceCurrent)</td>
                                     <td style="text-align:right;color:#fff">@grandClaims30.ToString("N0")</td>
-                                    <td style="text-align:right;color:#fff">@grandBalance30.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@Acct2(grandBalance30)</td>
                                     <td style="text-align:right;color:#fff">@grandClaims60.ToString("N0")</td>
-                                    <td style="text-align:right;color:#fff">@grandBalance60.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@Acct2(grandBalance60)</td>
                                     <td style="text-align:right;color:#fff">@grandClaims90.ToString("N0")</td>
-                                    <td style="text-align:right;color:#fff">@grandBalance90.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@Acct2(grandBalance90)</td>
                                     <td style="text-align:right;color:#fff">@grandClaims120.ToString("N0")</td>
-                                    <td style="text-align:right;color:#fff">@grandBalance120.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@Acct2(grandBalance120)</td>
                                     <td style="text-align:right;color:#fff">@grandClaimsTotal.ToString("N0")</td>
-                                    <td style="text-align:right;color:#fff">@grandBalanceTotal.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@Acct2(grandBalanceTotal)</td>
                                 </tr>
                             </tfoot>
                         </table>

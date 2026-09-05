@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace LabMetricsDashboard.Controllers;
 
 /// <summary>
-/// Per-report Insight Template Master. Production is first; LIS and Collection
+/// Per-report Insight Template Master. Production, LIS, Collection, and Executive
 /// reuse the same page with a different report name.
 /// </summary>
 public sealed class InsightTemplateController : Controller
@@ -29,6 +29,10 @@ public sealed class InsightTemplateController : Controller
     [HttpGet]
     public IActionResult Collection(string? lab)
         => Render(lab, "Collection Report", "Collection Insight Templates");
+
+    [HttpGet]
+    public IActionResult Executive(string? lab)
+        => Render(lab, "Executive Summary", "Executive Insight Templates");
 
     private IActionResult Render(string? lab, string? report, string title)
     {

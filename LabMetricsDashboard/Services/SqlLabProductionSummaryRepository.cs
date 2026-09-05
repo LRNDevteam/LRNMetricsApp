@@ -42,33 +42,11 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
     public async Task<(List<string> PayerNames, List<string> PanelNames)> GetFilterOptionsAsync(
         string connectionString, CancellationToken ct = default)
     {
-        const string sql = """
-            SELECT DISTINCT LTRIM(RTRIM(PayerName_Raw))
-            FROM   dbo.ClaimLevelData
-            WHERE  TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
-            ORDER BY 1;
-
-            SELECT DISTINCT LTRIM(RTRIM(Panelname))
-            FROM   dbo.ClaimLevelData
-            WHERE  NULLIF(LTRIM(RTRIM(Panelname)), '') IS NOT NULL
-              AND  TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
-            ORDER BY 1;
-            """;
-
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand(sql, conn) { CommandTimeout = 60 };
-            await using var rdr  = await cmd.ExecuteReaderAsync(ct);
-
-            var payers = new List<string>();
-            while (await rdr.ReadAsync(ct))
-                if (!rdr.IsDBNull(0)) payers.Add(rdr.GetString(0));
-            await rdr.NextResultAsync(ct);
-            var panels = new List<string>();
-            while (await rdr.ReadAsync(ct)) panels.Add(rdr.GetString(0));
-            return (payers, panels);
+            return await ProductionFilterLookup.LoadFastAsync(conn, _cfg.Prefix, _logger, ct);
         }
         catch (Exception ex)
         {

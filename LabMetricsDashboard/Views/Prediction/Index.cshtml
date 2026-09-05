@@ -51,7 +51,7 @@
         v is null ? "" : v >= 0 ? "text-success" : "text-danger";
 
     static string FmtPct(decimal? v) => v.HasValue ? $"{v.Value:N2}%" : "—";
-    static string FmtAmt(decimal? v) => v.HasValue ? $"${v.Value:N2}" : "—";
+    static string FmtAmt(decimal? v) => v.HasValue ? Text(v.Value, 2) : "—";
 
     static string VariancePillClass(decimal? v) =>
         v is null ? "pn-var-neutral" : v >= 0 ? "pn-var-pos" : "pn-var-neg";

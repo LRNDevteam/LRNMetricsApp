@@ -2,6 +2,7 @@ using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
+using System.Diagnostics;
 
 namespace LabMetricsDashboard.Controllers;
 
@@ -148,15 +149,122 @@ public sealed class ExecutiveSummaryController : Controller
         var spName  = SqlPhiExecutiveSummaryRepository.ExecutiveSummaryGetSpName(prefix);
         var connStr = config.DbConnectionString;
 
+        if (string.Equals(export, "excel", StringComparison.OrdinalIgnoreCase))
+        {
+            var excelVm = await LoadExecutiveSummaryPageAsync(
+                availableLabs, labName, prefix, connStr, spName, emptyVm,
+                yearFrom, yearTo, monthFrom, monthTo,
+                dosFrom, dosTo, billedFrom, billedTo,
+                panels, clinics, providers, reps, ct);
+            if (!string.IsNullOrEmpty(excelVm.ErrorMessage) || !excelVm.HasData)
+                return View(excelVm);
+            var excelBuilder = new ExecutiveSummaryExcelBuilder();
+            var fileBytes = excelBuilder.Build(excelVm);
+            return File(fileBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                $"ExecutiveSummary_{labName}_{DateTime.Now:yyyyMMdd}.xlsx");
+        }
+
+        var pageSw = Stopwatch.StartNew();
+        FirstPaintLog.Write(_logger, "Executive", labName, "shell", pageSw.ElapsedMilliseconds, "html-first");
+        ViewData["EsLazy"] = true;
+        return View(emptyVm);
+    }
+
+    /// <summary>
+    /// Table HTML after Executive Summary chrome has landed.
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> GetTable(
+        string? lab,
+        int?    yearFrom,
+        int?    yearTo,
+        int?    monthFrom,
+        int?    monthTo,
+        DateTime? dosFrom      = null,
+        DateTime? dosTo        = null,
+        DateTime? billedFrom   = null,
+        DateTime? billedTo     = null,
+        string[]? panels    = null,
+        string[]? clinics   = null,
+        string[]? providers = null,
+        string[]? reps      = null,
+        CancellationToken ct = default)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var labName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+        var emptyVm = new PhiExecutiveSummaryViewModel
+        {
+            AvailableLabs     = availableLabs,
+            SelectedLab       = labName,
+            SelectedYearFrom  = yearFrom,
+            SelectedYearTo    = yearTo,
+            SelectedMonthFrom = monthFrom,
+            SelectedMonthTo   = monthTo,
+            DosFrom      = dosFrom,
+            DosTo        = dosTo,
+            BilledFrom   = billedFrom,
+            BilledTo     = billedTo,
+            SelectedPanels    = panels    is null ? [] : [.. panels],
+            SelectedClinics   = clinics   is null ? [] : [.. clinics],
+            SelectedProviders = providers is null ? [] : [.. providers],
+            SelectedReps      = reps      is null ? [] : [.. reps],
+        };
+
+        if (!_labSettings.Labs.TryGetValue(labName, out var config)
+            || string.IsNullOrWhiteSpace(config.DbConnectionString)
+            || !LabPrefixMap.TryGetValue(labName, out var prefix))
+        {
+            emptyVm.ErrorMessage = $"Executive Summary is not available for '{labName}'.";
+            ViewData["EsTableOnly"] = true;
+            return PartialView("Index", emptyVm);
+        }
+
+        try
+        {
+            var spName = SqlPhiExecutiveSummaryRepository.ExecutiveSummaryGetSpName(prefix);
+            var tabSw = Stopwatch.StartNew();
+            var vm = await LoadExecutiveSummaryPageAsync(
+                availableLabs, labName, prefix, config.DbConnectionString, spName, emptyVm,
+                yearFrom, yearTo, monthFrom, monthTo,
+                dosFrom, dosTo, billedFrom, billedTo,
+                panels, clinics, providers, reps, ct);
+            FirstPaintLog.Write(_logger, "Executive", labName, "tab-table", tabSw.ElapsedMilliseconds);
+            ViewData["EsTableOnly"] = true;
+            return PartialView("Index", vm);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return Content(string.Empty, "text/html");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Executive GetTable failed for lab '{Lab}'.", labName);
+            emptyVm.ErrorMessage = $"Failed to load Executive Summary: {ex.Message}";
+            ViewData["EsTableOnly"] = true;
+            return PartialView("Index", emptyVm);
+        }
+    }
+
+    private async Task<PhiExecutiveSummaryViewModel> LoadExecutiveSummaryPageAsync(
+        List<string> availableLabs,
+        string labName,
+        string prefix,
+        string connStr,
+        string spName,
+        PhiExecutiveSummaryViewModel emptyVm,
+        int? yearFrom, int? yearTo, int? monthFrom, int? monthTo,
+        DateTime? dosFrom, DateTime? dosTo, DateTime? billedFrom, DateTime? billedTo,
+        string[]? panels, string[]? clinics, string[]? providers, string[]? reps,
+        CancellationToken ct)
+    {
         bool spExists = await _repo.StoredProcedureExistsAsync(connStr, spName, ct);
         if (!spExists)
         {
             emptyVm.ErrorMessage =
                 $"Data not generated for this lab. The stored procedure '{spName}' does not exist.";
-            return View(emptyVm);
+            return emptyVm;
         }
 
-        // Join array params into comma-separated strings for the SP
         var panelsStr    = panels    is { Length: > 0 } ? string.Join(",", panels)    : null;
         var clinicsStr   = clinics   is { Length: > 0 } ? string.Join(",", clinics)   : null;
         var providersStr = providers is { Length: > 0 } ? string.Join(",", providers) : null;
@@ -181,18 +289,11 @@ public sealed class ExecutiveSummaryController : Controller
         if (vm.AvailableYears.Count == 0)
             vm.AvailableYears = availableYears;
 
-        // The repository reconstructs Selected* by splitting the comma-joined
-        // filter strings, which corrupts values that themselves contain commas
-        // (e.g. ReferringProvider = 'LastName,FirstName' → 'ABBOTT,JOEL').
-        // Restore the true selections from the original posted arrays so the
-        // dropdown checkboxes / chips reflect what the user actually selected.
         vm.SelectedPanels    = panels    is null ? [] : [.. panels];
         vm.SelectedClinics   = clinics   is null ? [] : [.. clinics];
         vm.SelectedProviders = providers is null ? [] : [.. providers];
         vm.SelectedReps      = reps      is null ? [] : [.. reps];
 
-        // Run / analysis-range banner: WeekFolder + RunId + InsertedDate from
-        // LineClaimFileLogs (shared AnalysisRangeService), plus LIMSMaster RunId.
         var analysisRange = await _analysisRange.GetAsync(connStr, ct);
         var (_, _, limsRunId) = await _repo.GetRunInfoAsync(connStr, ct);
         vm.ReportWeekFolder        = analysisRange.WeekFolder;
@@ -201,7 +302,6 @@ public sealed class ExecutiveSummaryController : Controller
         vm.LimsRunId               = limsRunId;
         ViewData["AnalysisRange"]  = analysisRange;
 
-        // Pre-populate dimension filter options from the lab's FilterOptions SP (if it exists)
         var filterSpName = $"dbo.usp_Get{prefix}_ExecutiveSummary_FilterOptions";
         bool filterSpExists = await _repo.StoredProcedureExistsAsync(connStr, filterSpName, ct);
         if (filterSpExists)
@@ -216,16 +316,7 @@ public sealed class ExecutiveSummaryController : Controller
         _logger.LogInformation(
             "ExecutiveSummary ready to render for lab='{Lab}' SP='{Sp}' rows={Rows} cols={Cols}",
             labName, spName, vm.Rows.Count, vm.YearMonthColumns.Count);
-
-        if (export == "excel")
-        {
-            var excelBuilder = new ExecutiveSummaryExcelBuilder();
-            var fileBytes = excelBuilder.Build(vm);
-            return File(fileBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                $"ExecutiveSummary_{labName}_{DateTime.Now:yyyyMMdd}.xlsx");
-        }
-
-        return View(vm);
+        return vm;
     }
 
     /// <summary>
@@ -248,20 +339,37 @@ public sealed class ExecutiveSummaryController : Controller
         if (!LabPrefixMap.TryGetValue(labName, out var prefix))
             return Json(new { years = Array.Empty<string>(), panels = Array.Empty<string>(), clinics = Array.Empty<string>(), providers = Array.Empty<string>(), reps = Array.Empty<string>() });
 
-        var filterSpName = $"dbo.usp_Get{prefix}_ExecutiveSummary_FilterOptions";
-        bool filterSpExists = await _repo.StoredProcedureExistsAsync(config.DbConnectionString, filterSpName, ct);
-        if (!filterSpExists)
-            return Json(new { years = Array.Empty<string>(), panels = Array.Empty<string>(), clinics = Array.Empty<string>(), providers = Array.Empty<string>(), reps = Array.Empty<string>() });
-
-        var options = await _repo.GetFilterOptionsAsync(config.DbConnectionString, filterSpName, ct);
-        return Json(new
+        try
         {
-            years     = options.GetValueOrDefault("Year",     []),
-            panels    = options.GetValueOrDefault("Panel",    []),
-            clinics   = options.GetValueOrDefault("Clinic",   []),
-            providers = options.GetValueOrDefault("Provider", []),
-            reps      = options.GetValueOrDefault("Rep",      []),
-        });
+            var filterSpName = $"dbo.usp_Get{prefix}_ExecutiveSummary_FilterOptions";
+            bool filterSpExists = await _repo.StoredProcedureExistsAsync(config.DbConnectionString, filterSpName, ct);
+            if (!filterSpExists)
+                return Json(new { years = Array.Empty<string>(), panels = Array.Empty<string>(), clinics = Array.Empty<string>(), providers = Array.Empty<string>(), reps = Array.Empty<string>() });
+
+            var options = await _repo.GetFilterOptionsAsync(config.DbConnectionString, filterSpName, ct);
+            var analysis = await _analysisRange.GetAsync(config.DbConnectionString, ct);
+            FirstPaintLog.Write(_logger, "Executive", labName, "meta", 0);
+            return Json(new
+            {
+                years     = options.GetValueOrDefault("Year",     []),
+                panels    = options.GetValueOrDefault("Panel",    []),
+                clinics   = options.GetValueOrDefault("Clinic",   []),
+                providers = options.GetValueOrDefault("Provider", []),
+                reps      = options.GetValueOrDefault("Rep",      []),
+                weekFolder = analysis.WeekFolder,
+                runId = analysis.RunId,
+                inserted = analysis.InsertedDateTime?.ToString("MMM d, yyyy h:mm tt")
+            });
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return Json(new { years = Array.Empty<string>(), panels = Array.Empty<string>(), clinics = Array.Empty<string>(), providers = Array.Empty<string>(), reps = Array.Empty<string>() });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Executive FilterOptions failed for lab '{Lab}'.", labName);
+            return Json(new { error = "Failed to load filter options." });
+        }
     }
 
     /// <summary>

@@ -8,10 +8,111 @@
    only for MenuAccessFilter to bounce it to the login page. Fails open exactly as the menu
    does when the Reports API is unavailable. *@
 @inject LabMetricsDashboard.Services.IMenuService MenuService
+@{
+    var bootController = ViewContext.RouteData.Values["controller"]?.ToString() ?? "";
+    var bootAction = ViewContext.RouteData.Values["action"]?.ToString() ?? "";
+    var showReportPageLoader =
+        (string.Equals(bootController, "Dashboard", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(bootAction, "ProductionReport", StringComparison.OrdinalIgnoreCase));
+}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="@(showReportPageLoader ? "lmd-boot" : null)">
 
 <head>
+    @* First bytes of the document on purpose: Production HTML is huge, so the previous
+       document (and its spinner) is gone for seconds while this page parses. This paints
+       a dark overlay as soon as HEAD is ready — it does not wait for the tables. *@
+    <style>
+        html.lmd-boot { background: #0d1b2a; }
+        html.lmd-boot::before {
+            content: "";
+            position: fixed; inset: 0; z-index: 2147483646;
+            background: #0d1b2a;
+        }
+        html.lmd-boot::after {
+            content: "";
+            position: fixed; top: 50%; left: 50%;
+            width: 56px; height: 56px; margin: -28px 0 0 -28px;
+            z-index: 2147483647;
+            border: 5px solid rgba(255,255,255,.2);
+            border-top-color: #64b5f6;
+            border-radius: 50%;
+            animation: lmd-boot-spin .75s linear infinite;
+        }
+        html.lmd-boot #lmd-loader {
+            background: transparent;
+            backdrop-filter: none;
+        }
+    </style>
+    <script nonce='@Context.Items["CspNonce"]'>
+        (function () {
+            var fpUrl = '@Url.Action("FirstPaintClient", "Dashboard")';
+            window.lmdFpLog = function (stage, extra) {
+                var clickAt = 0;
+                try { clickAt = parseInt(sessionStorage.getItem('lmdFpClick') || '0', 10) || 0; } catch (e) { }
+                var ms = clickAt ? (Date.now() - clickAt) : Math.round(performance.now());
+                var nav = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
+                var lab = '';
+                try { lab = new URLSearchParams(location.search).get('lab') || ''; } catch (e2) { }
+                var path = location.pathname || '';
+                var report = 'Production';
+                if (path.indexOf('CollectionSummary') !== -1) report = 'Collection';
+                else if (path.indexOf('LisSummary') !== -1) report = 'LIS';
+                else if (path.indexOf('ExecutiveSummary') !== -1) report = 'Executive';
+                var body = JSON.stringify({
+                    report: report,
+                    lab: lab,
+                    stage: stage,
+                    ms: ms,
+                    ttfbMs: nav ? Math.round(nav.responseStart) : null,
+                    responseEndMs: nav ? Math.round(nav.responseEnd) : null,
+                    extra: extra || ''
+                });
+                if (stage === 'monthly-html') {
+                    try { sessionStorage.removeItem('lmdFpClick'); } catch (e3) { }
+                }
+                try {
+                    fetch(fpUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: body,
+                        credentials: 'same-origin',
+                        keepalive: true
+                    }).catch(function () { });
+                } catch (e4) { }
+            };
+            var path = location.pathname || '';
+            if (path.indexOf('ProductionSummaryReport') !== -1
+                || path.indexOf('CollectionSummary') !== -1
+                || path.indexOf('LisSummary') !== -1
+                || path.indexOf('ExecutiveSummary') !== -1) {
+                window.lmdFpLog('head', 'page HTML landed');
+            }
+        })();
+    </script>
+    @if (showReportPageLoader)
+    {
+        <script nonce='@Context.Items["CspNonce"]'>
+            (function () {
+                var fpStopped = false;
+                function revealBoot() {
+                    document.documentElement.classList.remove('lmd-boot');
+                    var b = document.body;
+                    if (b) b.classList.remove('lmd-report-loading');
+                    var el = document.getElementById('lmd-loader');
+                    if (el) {
+                        el.classList.remove('active');
+                        el.removeAttribute('data-page-load');
+                    }
+                    if (!fpStopped && (location.pathname || '').indexOf('ProductionSummaryReport') !== -1 && window.lmdFpLog) {
+                        fpStopped = true;
+                        window.lmdFpLog('spinner-gone', 'overlay off — blank/spinner stopped');
+                    }
+                }
+                setTimeout(revealBoot, 80);
+            })();
+        </script>
+    }
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@ViewData["Title"] - Lab Revenue Intelligence</title>
@@ -19,6 +120,7 @@
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="~/lib/bootstrap-icons/font/bootstrap-icons.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/report-filters.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/LabMetricsDashboard.styles.css" asp-append-version="true" />
     <style>
         /* ── Global overrides ───────────────────────────────────────── */
@@ -274,6 +376,9 @@
         font-weight: 600;
         letter-spacing: .04em;
         }
+
+        /* Overlay (html.lmd-boot) covers the page. Do not hide chrome with
+           visibility:hidden — that kept a blank screen until the footer script. */
 
         /* ── Footer ──────────────────────────────────────────────────── */
         footer {
@@ -862,19 +967,29 @@
         }
     </style>
 </head>
-
-<body>
 @{
     var denialReactUrl = Configuration["DenialWorkflowReactUrl"] ?? "https://localhost:5173";
     var denialReactAgingUrl = denialReactUrl.Contains('#') ? denialReactUrl : $"{denialReactUrl}#aging";
+    var routeController = bootController;
+    var routeAction = bootAction;
 }
+
+<body>
 
 
     <!-- Full-screen loader overlay -->
-    <div id="lmd-loader" role="status" aria-live="polite" aria-label="Loading">
+    <div id="lmd-loader" class="@(showReportPageLoader ? "active" : null)"
+         data-page-load="@(showReportPageLoader ? "1" : null)"
+         role="status" aria-live="polite" aria-label="Loading">
         <div class="lmd-spinner"></div>
-        <div class="lmd-loader-text" id="lmd-loader-text">Loading lab data…</div>
+        <div class="lmd-loader-text" id="lmd-loader-text">@(showReportPageLoader ? "Loading report…" : "Loading lab data…")</div>
     </div>
+    @if (showReportPageLoader)
+    {
+        @* Send HEAD + the spinner now so Chrome can paint it before the huge tables. *@
+        await ViewContext.Writer.FlushAsync();
+        try { await Context.Response.Body.FlushAsync(); } catch { /* already flushed / completed */ }
+    }
 
     <header>
         @{
@@ -1278,6 +1393,16 @@
                 // do not accumulate orphan forms in the DOM.
                 setTimeout(function () { form.remove(); }, 0);
             };
+            // GET download for queued Excel files (UserReports). Lets Chrome keep the
+            // current page, send Range on resume, and avoid antiforgery POST drops.
+            window.lrnGetDownload = function (url) {
+                var a = document.createElement('a');
+                a.href = url;
+                a.rel = 'noopener';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            };
             function statusChip(s, progress) {
                 var cls = s === 'Ready' ? 'rpt-status-ready'
                         : s === 'Processing' ? 'rpt-status-processing'
@@ -1387,8 +1512,7 @@
                 var b = e.target.closest('button');
                 if (!b) return;
                 if (b.classList.contains('rpt-dl')) {
-                    // Navigates away to the file response; nothing to refresh afterwards.
-                    window.lrnPostDownload(b.getAttribute('data-url'));
+                    window.lrnGetDownload(b.getAttribute('data-url'));
                     return;
                 }
                 if (b.classList.contains('rpt-del')) post(deleteUrl, b.getAttribute('data-lab'), b.getAttribute('data-id'));
@@ -1411,6 +1535,44 @@
     </script>
 
     <script nonce='@Context.Items["CspNonce"]'>
+        // First paint is Monthly only now, so drop the overlay on the first
+        // two animation frames after this script runs. Waiting for window.load
+        // plus requestIdleCallback(8s) left the spinner up long after the table
+        // was already in the DOM.
+        (function () {
+        var loader = document.getElementById('lmd-loader');
+        if (!loader || loader.getAttribute('data-page-load') !== '1') return;
+
+        var revealed = false;
+        function reveal() {
+        if (revealed) return;
+        revealed = true;
+        document.documentElement.classList.remove('lmd-boot');
+        document.body.classList.remove('lmd-report-loading');
+        loader.classList.remove('active');
+        loader.removeAttribute('data-page-load');
+        }
+
+        function revealAfterPaint() {
+        document.body.classList.remove('lmd-report-loading');
+        var table = document.querySelector('#monthly-pane .pr-table, .pr-table, main[role="main"]');
+        if (table) {
+        void table.offsetHeight;
+        void table.getBoundingClientRect();
+        }
+        requestAnimationFrame(function () {
+        requestAnimationFrame(reveal);
+        });
+        }
+
+        if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', revealAfterPaint);
+        } else {
+        revealAfterPaint();
+        }
+        setTimeout(reveal, 2500);
+        })();
+
         // Show the loader whenever a lab-selector dropdown changes.
         // Any <select data-lab-selector> on the page triggers this.
         document.addEventListener('change', function (e) {
@@ -1419,6 +1581,7 @@
         const labName = sel.options[sel.selectedIndex]?.text ?? 'selected lab';
         const text = document.getElementById('lmd-loader-text');
         if (text) text.textContent = 'Loading ' + labName + '…';
+        document.documentElement.classList.add('lmd-boot');
         document.getElementById('lmd-loader').classList.add('active');
         });
 
@@ -1426,6 +1589,15 @@
         document.addEventListener('submit', function (e) {
         const form = e.target;
         if (!form.matches('[data-lab-form]')) return;
+        const action = (form.getAttribute('action') || '') + (form.getAttribute('asp-action') || '');
+        if (form.id === 'prFilterForm' || form.id === 'csRptFilterForm' || form.id === 'lisFilterForm' || form.id === 'esFilterForm'
+            || action.indexOf('ProductionSummaryReport') !== -1
+            || action.indexOf('CollectionSummary') !== -1
+            || action.indexOf('LisSummary') !== -1
+            || action.indexOf('ExecutiveSummary') !== -1) {
+            try { sessionStorage.setItem('lmdFpClick', String(Date.now())); } catch (err) { }
+            return;
+        }
         const labInput = form.querySelector('[name="lab"]');
         const labName = labInput
         ? (labInput.tagName === 'SELECT'
@@ -1434,25 +1606,41 @@
         : '';
         const text = document.getElementById('lmd-loader-text');
         if (text) text.textContent = labName ? 'Loading ' + labName + '…' : 'Loading…';
+        document.documentElement.classList.add('lmd-boot');
         document.getElementById('lmd-loader').classList.add('active');
         });
 
         // Hide loader when navigating back (bfcache restore).
         window.addEventListener('pageshow', function (e) {
         if (e.persisted) {
-        document.getElementById('lmd-loader').classList.remove('active');
+        document.documentElement.classList.remove('lmd-boot');
+        document.body.classList.remove('lmd-report-loading');
+        var el = document.getElementById('lmd-loader');
+        if (el) el.classList.remove('active');
         }
         });
 
         // Show loader when clicking a tagged navigation link (e.g. Collection Summary).
+        // Production Summary lands the page first, then spins inside the monthly tab —
+        // do not cover the previous page while waiting for HTML.
         document.addEventListener('click', function (e) {
-        const a = e.target.closest('a[data-lab-link]');
+        const a = e.target.closest('a[data-lab-link], a[href*="ProductionSummaryReport"], a[href*="CollectionSummary"], a[href*="LisSummary"], a[href*="ExecutiveSummary"]');
         if (!a) return;
         // Allow modifier-clicks (open in new tab) without showing loader.
         if (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1) return;
+        const href = a.getAttribute('href') || '';
         const label = a.getAttribute('data-lab-link') || 'page';
+        if (href.indexOf('ProductionSummaryReport') !== -1 || label.indexOf('Production Summary') !== -1
+            || href.indexOf('CollectionSummary') !== -1 || label.indexOf('Collection Summary') !== -1
+            || href.indexOf('LisSummary') !== -1 || label.indexOf('LIS') !== -1
+            || href.indexOf('ExecutiveSummary') !== -1 || label.indexOf('Executive Summary') !== -1) {
+            try { sessionStorage.setItem('lmdFpClick', String(Date.now())); } catch (err) { }
+            if (window.lmdFpLog) window.lmdFpLog('click', 'menu click — stopwatch start');
+            return;
+        }
         const text = document.getElementById('lmd-loader-text');
         if (text) text.textContent = 'Loading ' + label + '…';
+        document.documentElement.classList.add('lmd-boot');
         document.getElementById('lmd-loader').classList.add('active');
         });
 
@@ -1537,6 +1725,7 @@
         // Show loader
         var text = document.getElementById('lmd-loader-text');
         if (text) text.textContent = 'Loading ' + newLab + '\u2026';
+        document.documentElement.classList.add('lmd-boot');
         document.getElementById('lmd-loader').classList.add('active');
         window.location.href = url.toString();
         });

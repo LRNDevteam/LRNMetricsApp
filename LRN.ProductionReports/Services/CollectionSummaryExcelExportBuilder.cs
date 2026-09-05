@@ -237,7 +237,7 @@ public static class CollectionSummaryExcelExportBuilder
         {
             var header = cell.Worksheet.Cell(3, cell.Address.ColumnNumber).GetString();
             if (header.Contains("Paid", StringComparison.OrdinalIgnoreCase))
-                cell.Style.NumberFormat.Format = "$#,##0";
+                cell.Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
         }
     }
 }

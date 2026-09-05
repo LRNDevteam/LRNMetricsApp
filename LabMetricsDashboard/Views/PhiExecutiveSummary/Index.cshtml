@@ -9,10 +9,10 @@
     static string ColHeader((int Year, int Month) col) =>
         col == (0, 0) ? "Total" : $"{col.Year}<br/><small>{MonthName(col.Month)}</small>";
 
-    string FmtCount(decimal v, string cat) =>
+    IHtmlContent FmtCount(decimal v, string cat) =>
         (cat == "Cash" || cat == "Avg")
-            ? v.ToString("C0")
-            : ((long)v).ToString("N0");
+            ? Acct(v)
+            : new HtmlString(((long)v).ToString("N0"));
 
     bool IsDollar(string cat) => cat is "Cash" or "Avg";
 

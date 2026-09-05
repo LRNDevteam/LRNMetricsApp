@@ -30,9 +30,9 @@
                             <td style="text-align:center;font-weight:700;color:#0d3460">@row.Rank</td>
                             <td style="text-align:left;font-weight:600;color:#1e293b">@row.ReferringProvider</td>
                             <td style="text-align:right;font-weight:700">@row.NoOfClaims.ToString("N0")</td>
-                            <td style="text-align:right">@(row.InsurancePayments == 0 ? "-" : row.InsurancePayments.ToString("C2"))</td>
-                            <td style="text-align:right">@(row.InsuranceBalance  == 0 ? "-" : row.InsuranceBalance.ToString("C2"))</td>
-                            <td style="text-align:right">@(row.PatientBalance    == 0 ? "-" : row.PatientBalance.ToString("C2"))</td>
+                            <td style="text-align:right">@Acct2(row.InsurancePayments)</td>
+                            <td style="text-align:right">@Acct2(row.InsuranceBalance)</td>
+                            <td style="text-align:right">@Acct2(row.PatientBalance)</td>
                             <td style="padding:.4rem .7rem">
                                 <div style="background:#e2e8f0;border-radius:5px;height:20px;overflow:hidden;position:relative;min-width:120px">
                                     <div style="width:@(barPct.ToString("F1"))%;height:100%;border-radius:5px;
@@ -51,12 +51,12 @@
                 </tbody>
                 <tfoot>
                     <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:800">
-                        <td style="text-align:center;color:#fff">—</td>
+                        <td style="text-align:center;color:#fff">ï¿½</td>
                         <td style="text-align:left;color:#fff">Grand Total</td>
                         <td style="text-align:right;color:#fff">@ps.GrandNoClaims.ToString("N0")</td>
-                        <td style="text-align:right;color:#fff">@(ps.GrandInsurancePayments == 0 ? "-" : ps.GrandInsurancePayments.ToString("C2"))</td>
-                        <td style="text-align:right;color:#fff">@(ps.GrandInsuranceBalance  == 0 ? "-" : ps.GrandInsuranceBalance.ToString("C2"))</td>
-                        <td style="text-align:right;color:#fff">@(ps.GrandPatientBalance    == 0 ? "-" : ps.GrandPatientBalance.ToString("C2"))</td>
+                        <td style="text-align:right;color:#fff">@Acct2(ps.GrandInsurancePayments)</td>
+                        <td style="text-align:right;color:#fff">@Acct2(ps.GrandInsuranceBalance)</td>
+                        <td style="text-align:right;color:#fff">@Acct2(ps.GrandPatientBalance)</td>
                         <td style="text-align:center;color:#fff">100%</td>
                     </tr>
                 </tfoot>
@@ -67,9 +67,9 @@
     <div class="mt-2" style="font-size:.68rem;color:#94a3b8">
         <strong>Source:</strong> ClaimLevelData (all rows) &bull;
         <strong>Rows:</strong> ReferringProvider &bull;
-        <strong>Metrics:</strong> COUNT(DISTINCT ClaimID) · SUM(InsurancePayment) · SUM(InsuranceBalance) · SUM(PatientBalance) &bull;
+        <strong>Metrics:</strong> COUNT(DISTINCT ClaimID) ï¿½ SUM(InsurancePayment) ï¿½ SUM(InsuranceBalance) ï¿½ SUM(PatientBalance) &bull;
         <strong>Sorted by:</strong> No. of Claims DESC &bull;
-        <strong>Claim Share:</strong> Row claims / Grand Total claims × 100
+        <strong>Claim Share:</strong> Row claims / Grand Total claims ï¿½ 100
     </div>
 }
 else

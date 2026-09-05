@@ -2,7 +2,7 @@
 @model LabMetricsDashboard.ViewModels.InsightGridViewModel
 @{
     var usd = CultureInfo.GetCultureInfo("en-US");
-    string Money(decimal? amount) => (amount ?? 0m).ToString("C2", usd);
+    IHtmlContent Money(decimal? amount) => Acct2(amount ?? 0m);
 
     var pageSizes = new[] { 50, 100, 250, 500, 1000 };
     var columnFilters = Model.Filters.ColumnFilters ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

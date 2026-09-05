@@ -4,8 +4,8 @@
 @{
     var ci = CultureInfo.InvariantCulture;
     var usd = CultureInfo.GetCultureInfo("en-US");
-    string Money(decimal v) => v.ToString("C0", usd);
-    string MoneyFull(decimal v) => v.ToString("C0", usd);
+    IHtmlContent Money(decimal v) => Acct(v);
+    IHtmlContent MoneyFull(decimal v) => Acct(v);
     string Pct(decimal? v) => v is { } d ? d.ToString("0.0", ci) + "%" : "—";
     string ShortLbl(string monthLabel)
     {

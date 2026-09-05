@@ -632,7 +632,7 @@ builder.Services.Configure<ReportBoardSettings>(configuration.GetSection(ReportB
 builder.Services
     .AddHttpClient<IMenuApiClient, MenuApiClient>()
     .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(
-        builder.Configuration.GetValue<int?>("DenialWorkflowApi:MenuTimeoutSeconds") ?? 5));
+        builder.Configuration.GetValue<int?>("DenialWorkflowApi:MenuTimeoutSeconds") ?? 2));
 builder.Services.AddScoped<IMenuService, MenuService>();
 builder.Services.AddScoped<MenuAccessFilter>();
 
@@ -909,11 +909,12 @@ app.Use(async (context, next) =>
             .CreateLogger("UnhandledException");
 
         logger.LogCritical(ex,
-            "Unhandled exception on {Method} {Path}{Query} | TraceId={TraceId}",
+            "Unhandled exception on {Method} {Path}{Query} | TraceId={TraceId} | RequestId={RequestId}",
             context.Request.Method,
             context.Request.Path,
             context.Request.QueryString,
-            context.TraceIdentifier);
+            context.TraceIdentifier,
+            System.Diagnostics.Activity.Current?.Id ?? context.TraceIdentifier);
 
         throw;
     }
@@ -970,6 +971,34 @@ if (app.Environment.IsDevelopment())
 {
     app.UseHttpsRedirection();
 }
+
+// Production / Collection / LIS HTML is several MB. Gzip buffers the whole page, so the
+// browser throws away the previous spinner and sits on a white screen while it parses.
+// Skip compression and let the layout flush the spinner before the tables.
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value ?? "";
+    if (path.Contains("ProductionSummaryReport", StringComparison.OrdinalIgnoreCase)
+        || (path.Contains("/Dashboard/ProductionReport", StringComparison.OrdinalIgnoreCase))
+        || (path.Contains("CollectionSummary", StringComparison.OrdinalIgnoreCase)
+            && !path.Contains("Export", StringComparison.OrdinalIgnoreCase)
+            && !path.Contains("GetTabPartial", StringComparison.OrdinalIgnoreCase)
+            && !path.Contains("GetMeta", StringComparison.OrdinalIgnoreCase))
+        || (path.Contains("LisSummary", StringComparison.OrdinalIgnoreCase)
+            && !path.Contains("Export", StringComparison.OrdinalIgnoreCase)
+            && !path.Contains("GetSummary", StringComparison.OrdinalIgnoreCase)
+            && !path.Contains("GetMeta", StringComparison.OrdinalIgnoreCase))
+        || (path.Contains("ExecutiveSummary", StringComparison.OrdinalIgnoreCase)
+            && !path.Contains("Export", StringComparison.OrdinalIgnoreCase)
+            && !path.Contains("FilterOptions", StringComparison.OrdinalIgnoreCase)
+            && !path.Contains("GetTable", StringComparison.OrdinalIgnoreCase)))
+    {
+        context.Request.Headers.Remove("Accept-Encoding");
+        context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()
+            ?.DisableBuffering();
+    }
+    await next();
+});
 app.UseResponseCompression();
 app.UseStaticFiles();
 app.UseRouting();

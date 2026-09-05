@@ -111,13 +111,13 @@
                                                     yearCount += count;
                                                     yearPayment += payment;
                                                     <td style="text-align:right">@count.ToString("N0")</td>
-                                                    <td style="text-align:right">@payment.ToString("C2")</td>
+                                                    <td style="text-align:right">@Acct2(payment)</td>
                                                 }
                                                 <td style="text-align:right;font-weight:700">@yearCount.ToString("N0")</td>
-                                                <td style="text-align:right;font-weight:700">@yearPayment.ToString("C2")</td>
+                                                <td style="text-align:right;font-weight:700">@Acct2(yearPayment)</td>
                                             }
                                             <td style="text-align:right;font-weight:700">@row.TotalCount.ToString("N0")</td>
-                                            <td style="text-align:right;font-weight:700">@row.TotalPayment.ToString("C2")</td>
+                                            <td style="text-align:right;font-weight:700">@Acct2(row.TotalPayment)</td>
                                         </tr>
                                     }
                                 }
@@ -133,7 +133,7 @@
                                     <tr>
                                         <td style="text-align:left;font-weight:600">@row.PayerName</td>
                                         <td style="text-align:right">@row.TotalClaims.ToString("N0")</td>
-                                        <td style="text-align:right">@row.InsurancePayments.ToString("C2")</td>
+                                        <td style="text-align:right">@Acct2(row.InsurancePayments)</td>
                                         <td>
                                             <div class="reimb-bar-bg">
                                                 <div class="reimb-bar-fill" style="width:@(barWidth.ToString("F1"))%"></div>
@@ -161,13 +161,13 @@
                                                 yearCount += count;
                                                 yearPayment += payment;
                                                 <td style="text-align:right;color:#fff">@count.ToString("N0")</td>
-                                                <td style="text-align:right;color:#fff">@payment.ToString("C2")</td>
+                                                <td style="text-align:right;color:#fff">@Acct2(payment)</td>
                                             }
                                             <td style="text-align:right;color:#fff">@yearCount.ToString("N0")</td>
-                                            <td style="text-align:right;color:#fff">@yearPayment.ToString("C2")</td>
+                                            <td style="text-align:right;color:#fff">@Acct2(yearPayment)</td>
                                         }
                                         <td style="text-align:right;color:#fff">@nwRows.Sum(r => r.TotalCount).ToString("N0")</td>
-                                        <td style="text-align:right;color:#fff">@nwRows.Sum(r => r.TotalPayment).ToString("C2")</td>
+                                        <td style="text-align:right;color:#fff">@Acct2(nwRows.Sum(r => r.TotalPayment))</td>
                                     </tr>
                                 }
                                 else
@@ -175,7 +175,7 @@
                                 <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
                                     <td style="text-align:left;color:#fff">Grand Total</td>
                                     <td style="text-align:right;color:#fff">@grandTotalClaims.ToString("N0")</td>
-                                    <td style="text-align:right;color:#fff">@grandInsPayments.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@Acct2(grandInsPayments)</td>
                                     <td style="text-align:right;color:#fff">@grandPaymentPct.ToString("F2") %</td>
                                 </tr>
                                 }

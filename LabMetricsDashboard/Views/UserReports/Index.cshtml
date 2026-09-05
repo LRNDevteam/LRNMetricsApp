@@ -292,9 +292,7 @@
                         <div class="ur-actions">
                             @if (r.Status.IsDownloadable())
                             {
-                                @* Download is a POST so the antiforgery token can be sent; a plain
-                                   link cannot carry one. lrnPostDownload (in _Layout) submits a
-                                   hidden form, which keeps the browser's native Save dialog. *@
+                                @* GET + DownloadToken so Chrome can resume large Excel files. *@
                                 <button type="button" class="btn btn-sm btn-success ur-download"
                                         data-url="@Url.Action("Download", "UserReports", new { lab = r.LabName, id = r.ReportId, token = r.DownloadToken })"
                                         title="Download">
@@ -375,9 +373,7 @@
         var b = e.target.closest('button');
         if (!b) return;
         if (b.classList.contains('ur-download')) {
-            // POSTs a hidden form carrying the antiforgery token; navigates to the file
-            // response, so unlike the actions below there is nothing to reload afterwards.
-            window.lrnPostDownload(b.getAttribute('data-url'));
+            window.lrnGetDownload(b.getAttribute('data-url'));
             return;
         }
         if (b.classList.contains('ur-delete')) {

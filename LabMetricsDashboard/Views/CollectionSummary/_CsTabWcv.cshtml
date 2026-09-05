@@ -1,4 +1,4 @@
-﻿@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+@model LabMetricsDashboard.Models.CollectionSummaryViewModel
             @if (Model.WeeklyClaimVolume.HasData)
             {
                 var wcvPivot = Model.WeeklyClaimVolume;
@@ -61,12 +61,12 @@
                                         @foreach (var w in wcvWeeks)
                                         {
                                             <td style="text-align:right;font-weight:600">@WcvCellEnc(panel.ByWeek, w.Key).ToString("N0")</td>
-                                            <td style="text-align:right;font-weight:600">@WcvCellPaid(panel.ByWeek, w.Key).ToString("C0")</td>
-                                            <td style="text-align:right;font-weight:600">@WcvCellAvg(panel.ByWeek, w.Key).ToString("C0")</td>
+                                            <td style="text-align:right;font-weight:600">@Acct(WcvCellPaid(panel.ByWeek, w.Key))</td>
+                                            <td style="text-align:right;font-weight:600">@Acct(WcvCellAvg(panel.ByWeek, w.Key))</td>
                                         }
                                         <td style="text-align:right;font-weight:700">@panel.TotalEncounters.ToString("N0")</td>
-                                        <td style="text-align:right;font-weight:700">@panel.TotalInsurancePaid.ToString("C0")</td>
-                                        <td style="text-align:right;font-weight:700">@panel.TotalAveragePaidAmount.ToString("C0")</td>
+                                        <td style="text-align:right;font-weight:700">@Acct(panel.TotalInsurancePaid)</td>
+                                        <td style="text-align:right;font-weight:700">@Acct(panel.TotalAveragePaidAmount)</td>
                                     </tr>
                                     @foreach (var payer in panel.TopPayers)
                                     {
@@ -81,12 +81,12 @@
                                             @foreach (var w in wcvWeeks)
                                             {
                                                 <td style="text-align:right">@WcvCellEnc(payer.ByWeek, w.Key).ToString("N0")</td>
-                                                <td style="text-align:right">@WcvCellPaid(payer.ByWeek, w.Key).ToString("C0")</td>
-                                                <td style="text-align:right">@WcvCellAvg(payer.ByWeek, w.Key).ToString("C0")</td>
+                                                <td style="text-align:right">@Acct(WcvCellPaid(payer.ByWeek, w.Key))</td>
+                                                <td style="text-align:right">@Acct(WcvCellAvg(payer.ByWeek, w.Key))</td>
                                             }
                                             <td style="text-align:right;font-weight:600">@payer.TotalEncounters.ToString("N0")</td>
-                                            <td style="text-align:right;font-weight:600">@payer.TotalInsurancePaid.ToString("C0")</td>
-                                            <td style="text-align:right;font-weight:600">@payer.TotalAveragePaidAmount.ToString("C0")</td>
+                                            <td style="text-align:right;font-weight:600">@Acct(payer.TotalInsurancePaid)</td>
+                                            <td style="text-align:right;font-weight:600">@Acct(payer.TotalAveragePaidAmount)</td>
                                         </tr>
                                     }
                                 }
@@ -98,12 +98,12 @@
                                     @foreach (var w in wcvWeeks)
                                     {
                                         <td style="text-align:right;color:#fff">@WcvCellEnc(wcvPivot.GrandTotalByWeek, w.Key).ToString("N0")</td>
-                                        <td style="text-align:right;color:#fff">@WcvCellPaid(wcvPivot.GrandTotalByWeek, w.Key).ToString("C0")</td>
-                                        <td style="text-align:right;color:#fff">@WcvCellAvg(wcvPivot.GrandTotalByWeek, w.Key).ToString("C0")</td>
+                                        <td style="text-align:right;color:#fff">@Acct(WcvCellPaid(wcvPivot.GrandTotalByWeek, w.Key))</td>
+                                        <td style="text-align:right;color:#fff">@Acct(WcvCellAvg(wcvPivot.GrandTotalByWeek, w.Key))</td>
                                     }
                                     <td style="text-align:right;color:#fff">@wcvPivot.GrandTotalEncounters.ToString("N0")</td>
-                                    <td style="text-align:right;color:#fff">@wcvPivot.GrandTotalInsurancePaid.ToString("C0")</td>
-                                    <td style="text-align:right;color:#fff">@wcvPivot.GrandTotalAveragePaidAmount.ToString("C0")</td>
+                                    <td style="text-align:right;color:#fff">@Acct(wcvPivot.GrandTotalInsurancePaid)</td>
+                                    <td style="text-align:right;color:#fff">@Acct(wcvPivot.GrandTotalAveragePaidAmount)</td>
                                 </tr>
                             </tfoot>
                         </table>

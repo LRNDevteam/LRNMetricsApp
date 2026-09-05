@@ -950,16 +950,8 @@ public static class CollectionSummaryExcelExportBuilder
     /// </summary>
     private static void WriteSsCurrency(IXLCell cell, decimal value, XLColor bg, XLColor fontColor, bool bold)
     {
-        if (value == 0m)
-        {
-            cell.Value = "-";
-            cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
-        }
-        else
-        {
-            cell.Value = value;
-            cell.Style.NumberFormat.Format = @"_($* #,##0.00_);_($* (#,##0.00);_($* ""-""??_);_(@_)";
-        }
+        cell.Value = value;
+        cell.Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
         cell.Style.Fill.BackgroundColor = bg;
         cell.Style.Font.FontColor = fontColor;
         cell.Style.Font.Bold = bold;
@@ -971,7 +963,7 @@ public static class CollectionSummaryExcelExportBuilder
     {
         var cell = ws.Cell(row, col);
         if (value is int i) cell.Value = i;
-        else if (value is decimal d) { cell.Value = d; if (isCurrency) cell.Style.NumberFormat.Format = "#,##0.00"; }
+        else if (value is decimal d) { cell.Value = d; if (isCurrency) cell.Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2; }
         cell.Style.Fill.BackgroundColor = bg;
         cell.Style.Font.Bold = true;
         cell.Style.Font.FontColor = XLColor.White;
@@ -1189,11 +1181,11 @@ public static class CollectionSummaryExcelExportBuilder
         switch (value)
         {
             case string s:
-                cell.Value = s;
+                cell.Value = ExcelTheme.SanitizeText(s);
                 break;
             case decimal d:
                 cell.Value = d;
-                if (isCurrency) cell.Style.NumberFormat.Format = "#,##0.00";
+                if (isCurrency) cell.Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
                 else if (isPct) cell.Style.NumberFormat.Format = "#,##0.00\"%\"";
                 break;
             case int i:
@@ -1203,7 +1195,7 @@ public static class CollectionSummaryExcelExportBuilder
             case null:
                 break;
             default:
-                cell.Value = value.ToString();
+                cell.Value = ExcelTheme.SanitizeText(value.ToString());
                 break;
         }
 
@@ -1222,6 +1214,7 @@ public static class CollectionSummaryExcelExportBuilder
                 cell.Style.NumberFormat.Format = "#,##0.00";
                 break;
             case double dbl:
+                if (double.IsNaN(dbl) || double.IsInfinity(dbl)) break;
                 cell.Value = dbl;
                 cell.Style.NumberFormat.Format = "#,##0.00";
                 break;
@@ -1232,11 +1225,16 @@ public static class CollectionSummaryExcelExportBuilder
                 cell.Value = l;
                 break;
             case DateTime dt:
-                cell.Value = dt;
-                cell.Style.NumberFormat.Format = "yyyy-MM-dd";
+                if (dt.Year < 1900 || dt.Year > 9999)
+                    cell.Value = dt.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+                else
+                {
+                    cell.Value = dt;
+                    cell.Style.NumberFormat.Format = "yyyy-MM-dd";
+                }
                 break;
             default:
-                cell.Value = val.ToString();
+                cell.Value = ExcelTheme.SanitizeText(val.ToString());
                 break;
         }
     }

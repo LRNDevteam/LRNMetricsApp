@@ -203,11 +203,56 @@ public class HomeController : Controller
         var exFeature = HttpContext.Features.Get<IExceptionHandlerPathFeature>();
         if (exFeature is not null)
         {
-            _logger.LogError(exFeature.Error,
-                "Error page reached | Path={OriginalPath} | RequestId={RequestId}",
-                exFeature.Path, requestId);
+            var canceled = exFeature.Error is OperationCanceledException;
+            if (canceled)
+                _logger.LogWarning(exFeature.Error,
+                    "Request canceled | Path={OriginalPath} | RequestId={RequestId}",
+                    exFeature.Path, requestId);
+            else
+                _logger.LogError(exFeature.Error,
+                    "Error page reached | Path={OriginalPath} | RequestId={RequestId}",
+                    exFeature.Path, requestId);
+
+            if (IsBackgroundDataPath(exFeature.Path))
+            {
+                if (canceled)
+                {
+                    Response.StatusCode = StatusCodes.Status204NoContent;
+                    return new EmptyResult();
+                }
+
+                if (IsJsonDataPath(exFeature.Path))
+                    return Json(new { error = true, requestId });
+
+                Response.StatusCode = StatusCodes.Status500InternalServerError;
+                return Content(
+                    "<div class=\"alert alert-warning border-0 shadow-sm m-3\">Failed to load this section. Please refresh the page.</div>",
+                    "text/html");
+            }
         }
 
         return View(new ErrorViewModel { RequestId = requestId });
+    }
+
+    private static bool IsBackgroundDataPath(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return false;
+        return path.Contains("/GetMeta", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/GetSummary", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/GetTable", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/GetTabPartial", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/FilterOptions", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/ProductionSummaryReportTab", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/ProductionSummaryReportMeta", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/FirstPaintClient", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsJsonDataPath(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return false;
+        return path.Contains("/GetMeta", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/FilterOptions", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/ProductionSummaryReportMeta", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/FirstPaintClient", StringComparison.OrdinalIgnoreCase);
     }
 }

@@ -32,7 +32,7 @@ else if (!hasMonthlyGrain)
                         <tr>
                             <td style="text-align:left;font-weight:600">@row.PanelName</td>
                             <td style="text-align:right">@row.NoOfClaims.ToString("N0")</td>
-                            <td style="text-align:right">@row.InsurancePayments.ToString("C2")</td>
+                            <td style="text-align:right">@Acct2(row.InsurancePayments)</td>
                         </tr>
                     }
                 </tbody>
@@ -40,7 +40,7 @@ else if (!hasMonthlyGrain)
                     <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
                         <td style="text-align:left;color:#fff">Grand Total</td>
                         <td style="text-align:right;color:#fff">@grandClaims.ToString("N0")</td>
-                        <td style="text-align:right;color:#fff">@grandPayments.ToString("C2")</td>
+                        <td style="text-align:right;color:#fff">@Acct2(grandPayments)</td>
                     </tr>
                 </tfoot>
             </table>
@@ -141,13 +141,13 @@ else
                                     yearCount += count;
                                     yearPayment += payment;
                                     <td style="text-align:right">@count.ToString("N0")</td>
-                                    <td style="text-align:right">@payment.ToString("C2")</td>
+                                    <td style="text-align:right">@Acct2(payment)</td>
                                 }
                                 <td style="text-align:right;font-weight:700">@yearCount.ToString("N0")</td>
-                                <td style="text-align:right;font-weight:700">@yearPayment.ToString("C2")</td>
+                                <td style="text-align:right;font-weight:700">@Acct2(yearPayment)</td>
                             }
                             <td style="text-align:right;font-weight:700">@row.TotalCount.ToString("N0")</td>
-                            <td style="text-align:right;font-weight:700">@row.TotalPayment.ToString("C2")</td>
+                            <td style="text-align:right;font-weight:700">@Acct2(row.TotalPayment)</td>
                         </tr>
                     }
                 </tbody>
@@ -166,13 +166,13 @@ else
                                 yearCount += count;
                                 yearPayment += payment;
                                 <td style="text-align:right;color:#fff">@count.ToString("N0")</td>
-                                <td style="text-align:right;color:#fff">@payment.ToString("C2")</td>
+                                <td style="text-align:right;color:#fff">@Acct2(payment)</td>
                             }
                             <td style="text-align:right;color:#fff">@yearCount.ToString("N0")</td>
-                            <td style="text-align:right;color:#fff">@yearPayment.ToString("C2")</td>
+                            <td style="text-align:right;color:#fff">@Acct2(yearPayment)</td>
                         }
                         <td style="text-align:right;color:#fff">@pivotRows.Sum(r => r.TotalCount).ToString("N0")</td>
-                        <td style="text-align:right;color:#fff">@pivotRows.Sum(r => r.TotalPayment).ToString("C2")</td>
+                        <td style="text-align:right;color:#fff">@Acct2(pivotRows.Sum(r => r.TotalPayment))</td>
                     </tr>
                 </tfoot>
             </table>

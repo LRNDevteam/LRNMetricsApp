@@ -1,10 +1,15 @@
 @model LabMetricsDashboard.Models.CollectionSummaryViewModel
 @{
-    ViewData["Title"]       = $"Collection Summary � {Model.SelectedLab}";
+    var csPaneOnly = ViewData["CsPaneOnly"] as string;
+    if (!string.IsNullOrEmpty(csPaneOnly))
+        Layout = null;
+    ViewData["Title"]       = $"Collection Summary - {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Collection Summary";
 }
 
+@if (string.IsNullOrEmpty(csPaneOnly))
+{
 <style>
 /* ?? Export loading overlay ?????????????????????????????????????????? */
 .cs-export-overlay {
@@ -553,39 +558,69 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
 </style>
 
 <!-- Page heading -->
-<div class="d-flex align-items-center justify-content-between mb-3">
-    <h2 class="mb-0 fw-bold">
-        Collection Summary
-        <span class="badge bg-primary bg-gradient fw-semibold"
-              style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">
-            @Model.SelectedLab
-        </span>
-    </h2>
-    <a asp-controller="Dashboard" asp-action="Index" asp-route-lab="@Model.SelectedLab"
-       class="btn btn-sm btn-outline-primary">
-        <i class="bi bi-speedometer2 me-1"></i>Revenue Dashboard
-    </a>
+<div class="rpt-page-head">
+    <div class="rpt-page-head-main">
+        <h2 class="mb-0 fw-bold">
+            Collection Summary
+            <span class="badge bg-primary bg-gradient fw-semibold"
+                  style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">
+                @Model.SelectedLab
+            </span>
+        </h2>
+    </div>
+    <div class="rpt-page-head-right">
+        @if (!string.IsNullOrWhiteSpace(Model.SelectedLab))
+        {
+            <div class="rpt-toolbar">
+                <button type="button" id="csExportExcelBtn" class="btn btn-sm btn-outline-success rpt-toolbar-btn"
+                        title="Download Excel" aria-label="Download Excel">
+                    <i class="bi bi-file-earmark-excel"></i>
+                </button>
+                <button type="button" id="riAddInsightBtn" class="btn btn-sm btn-primary rpt-toolbar-btn"
+                        title="Add Insight" aria-label="Add Insight">
+                    <i class="bi bi-plus-lg"></i>
+                </button>
+                <a class="btn btn-sm btn-outline-primary rpt-toolbar-btn"
+                   asp-controller="InsightTemplate" asp-action="Collection"
+                   asp-route-lab="@Model.SelectedLab"
+                   title="Insight Templates" aria-label="Insight Templates">
+                    <i class="bi bi-layout-text-sidebar-reverse"></i>
+                </a>
+            </div>
+        }
+        <a asp-controller="Dashboard" asp-action="Index" asp-route-lab="@Model.SelectedLab"
+           class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-speedometer2 me-1"></i>Revenue Dashboard
+        </a>
+    </div>
 </div>
 
+<div id="cs-analysis-banner">
 @await Html.PartialAsync("_AnalysisRangeBanner", Model.AnalysisRange)
+</div>
 
 <!-- ?? Collapsible Filter panel ?????????????????????????????????? -->
 @if (!string.IsNullOrWhiteSpace(Model.SelectedLab))
 {
-    <div class="cs-rpt-filter-panel p-3 mb-4">
-        <div class="d-flex align-items-center justify-content-between mb-2">
-            <span class="fw-semibold" style="font-size:.9rem">
+    <div class="rpt-filter-wrap">
+    <div class="cs-rpt-filter-panel rpt-filter-panel p-3">
+        <div class="rpt-filter-head">
+            <span class="rpt-filter-title">
                 <i class="bi bi-funnel"></i> Filters
                 @if (Model.HasFilters)
                 {
-                    <span class="badge bg-primary cs-rpt-filter-badge ms-1">Active</span>
+                    <span class="badge bg-primary rpt-filter-badge ms-1">Active</span>
                 }
             </span>
-            <button class="btn btn-sm btn-link text-muted p-0" type="button"
-                    data-bs-toggle="collapse" data-bs-target="#csRptFilterBody"
-                    aria-expanded="@(Model.HasFilters ? "true" : "false")">
-                @Html.Raw(Model.HasFilters ? "&#9650; Hide" : "&#9660; Show")
-            </button>
+            <div class="rpt-filter-toggle-wrap">
+                <i class="bi bi-lightning-charge-fill rpt-ds-bolt" aria-hidden="true"></i>
+                <button class="rpt-filter-toggle" type="button"
+                        data-rpt-filter-toggle
+                        data-bs-toggle="collapse" data-bs-target="#csRptFilterBody"
+                        aria-expanded="@(Model.HasFilters ? "true" : "false")">
+                    @(Model.HasFilters ? "▲ Hide" : "▼ Show")
+                </button>
+            </div>
         </div>
 
         <div id="csRptFilterBody" class="collapse @(Model.HasFilters ? "show" : "")">
@@ -603,7 +638,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                             </div>
                             <div class="cs-rpt-ms-panel">
                                 <input type="text" class="cs-rpt-ms-search" placeholder="Search payers�" autocomplete="off" />
-                                <div class="cs-rpt-ms-list">
+                                <div class="cs-rpt-ms-list" id="csPayerList">
                                     @foreach (var pn in Model.PayerNames)
                                     {
                                         <label><input type="checkbox" name="filterPayerNames" value="@pn"
@@ -624,7 +659,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                             </div>
                             <div class="cs-rpt-ms-panel">
                                 <input type="text" class="cs-rpt-ms-search" placeholder="Search panels�" autocomplete="off" />
-                                <div class="cs-rpt-ms-list">
+                                <div class="cs-rpt-ms-list" id="csPanelList">
                                     @foreach (var pl in Model.PanelNames)
                                     {
                                         <label><input type="checkbox" name="filterPanelNames" value="@pl"
@@ -668,39 +703,18 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     </div>
                 </div>
 
-                <div class="d-flex gap-2 mt-2">
+                <div class="rpt-filter-actions">
                     <button type="submit" class="btn btn-sm btn-primary">
-                        <i class="bi bi-funnel-fill me-1"></i>Apply
+                        <i class="bi bi-funnel-fill me-1"></i>Apply Filter
                     </button>
                     <a asp-controller="CollectionSummary" asp-action="Index"
                        asp-route-lab="@Model.SelectedLab"
-                       class="btn btn-sm btn-outline-secondary">Clear</a>
-                    <button type="button" id="csExportExcelBtn" class="btn btn-sm btn-outline-success ms-auto">
-                        <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
-                    </button>
-                    <button type="button" id="riAddInsightBtn" class="btn btn-sm btn-primary">
-                        <i class="bi bi-plus-lg me-1"></i>Add Insight
-                    </button>
-                    <a class="btn btn-sm btn-outline-primary"
-                       asp-controller="InsightTemplate" asp-action="Collection"
-                       asp-route-lab="@Model.SelectedLab">
-                        <i class="bi bi-layout-text-sidebar-reverse me-1"></i>Insight Templates
-                    </a>
+                       class="btn btn-sm btn-outline-primary">Clear</a>
                 </div>
             </form>
         </div>
     </div>
-}
-
-@if (!string.IsNullOrWhiteSpace(Model.SelectedLab))
-{
-    @await Html.PartialAsync("~/Views/Shared/_ReportInsights.cshtml", new LabMetricsDashboard.Models.Notes.ReportInsightsPanelModel
-    {
-        Lab = Model.SelectedLab,
-        ReportName = "Collection Report",
-        RunId = Model.AnalysisRange?.RunId,
-        WeekText = Model.AnalysisRange?.WeekFolder
-    })
+    </div>
 }
 
 <!-- Excel export loading overlay -->
@@ -736,10 +750,14 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         <i class="bi bi-exclamation-triangle-fill me-1"></i> @Model.ErrorMessage
     </div>
 }
+}
 
 @if (!string.IsNullOrWhiteSpace(Model.SelectedLab) && string.IsNullOrWhiteSpace(Model.ErrorMessage))
 {
     <!-- ?? Top-5 Insurance Dashboard Cards (always visible) ?????? -->
+    <div id="csTop5Host" data-cs-tab="top5">
+        @if (csPaneOnly == "top5")
+        {
     <div class="top5-cards">
 
         <!-- ?? Reimbursement % card ??????????????????????????????? -->
@@ -772,7 +790,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                         </div>
                         <div class="top5-kpi-box">
                             <div class="top5-kpi-box-label"><i class="bi bi-currency-dollar"></i> Total Paid</div>
-                            <div class="top5-kpi-box-value">@reimbTotalPaid.ToString("C0")</div>
+                            <div class="top5-kpi-box-value">@Acct(reimbTotalPaid)</div>
                         </div>
                     </div>
                     <div class="top5-gauge">
@@ -795,7 +813,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                             <div class="top5-payer-name" title="@row.PayerName">@row.PayerName</div>
                             <div class="top5-payer-detail">
                                 <span title="Visits">@row.UniqueVisitCount.ToString("N0")</span>
-                                <span title="Paid">@row.SumInsurancePayment.ToString("C0")</span>
+                                <span title="Paid">@Acct(row.SumInsurancePayment)</span>
                             </div>
                             <div class="top5-payer-bar-wrap">
                                 <div class="top5-payer-bar-bg">
@@ -857,7 +875,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                         </div>
                         <div class="top5-kpi-box">
                             <div class="top5-kpi-box-label"><i class="bi bi-currency-dollar"></i> Total Paid</div>
-                            <div class="top5-kpi-box-value">@payTotalAmt.ToString("C0")</div>
+                            <div class="top5-kpi-box-value">@Acct(payTotalAmt)</div>
                         </div>
                     </div>
                     <div class="top5-gauge">
@@ -883,7 +901,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                             <div class="top5-payer-bar-wrap">
                                 <div class="top5-payer-bar-bg">
                                     <div class="top5-payer-bar-fill totpay-fill" style="width:@(barW.ToString("F1"))%"></div>
-                                    <div class="top5-payer-bar-label">@row.TotalPayments.ToString("C0")</div>
+                                    <div class="top5-payer-bar-label">@Acct(row.TotalPayments)</div>
                                 </div>
                             </div>
                         </div>
@@ -913,8 +931,16 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         </div>
 
     </div>
+        }
+        else if (string.IsNullOrEmpty(csPaneOnly))
+        {
+            <div class="cs-lazy-pane" data-lazy-tab="top5"></div>
+        }
+    </div>
 
-    <!-- ?? Premium Tabs ???????????????????????????????????????? -->
+    @if (string.IsNullOrEmpty(csPaneOnly))
+    {
+    <!-- Premium Tabs -->
     <ul class="nav nav-pills cs-rpt-tabs mb-3" id="csRptTabs" role="tablist">
         <li class="nav-item" role="presentation">
             <button class="nav-link active" id="mcv-tab" data-bs-toggle="pill"
@@ -1001,14 +1027,17 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
     <div id="csTabLoading" class="cs-tab-loading" aria-hidden="true">
         <div class="cs-tab-loading-card">
             <div class="lmd-spinner"></div>
-            <div class="cs-tab-loading-text">Loading tab�</div>
+            <div class="cs-tab-loading-text">Loading tab...</div>
         </div>
     </div>
+    }
 
-    <div class="tab-content" id="csRptTabContent">
+    <div class="tab-content" id="csRptTabContent" @(string.IsNullOrEmpty(csPaneOnly) || csPaneOnly == "mcv" ? null : Html.Raw("style=\"display:none\""))>
 
         <!-- ?? Monthly Claim Volume tab ???????????????????????? -->
-        <div class="tab-pane fade show active" id="mcv-pane" role="tabpanel" aria-labelledby="mcv-tab">
+        <div class="tab-pane fade show active" id="mcv-pane" role="tabpanel" aria-labelledby="mcv-tab" data-cs-tab="mcv">
+            @if (csPaneOnly == "mcv")
+            {
             @if (Model.MonthlyClaimVolume.HasData)
             {
                 var mcvPivot = Model.MonthlyClaimVolume;
@@ -1102,16 +1131,16 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                                             @foreach (var p in monthsInYear)
                                             {
                                                 <td style="text-align:right;font-weight:600">@McvCellEnc(panel.ByMonth, p.Key).ToString("N0")</td>
-                                                <td style="text-align:right;font-weight:600">@McvCellPaid(panel.ByMonth, p.Key).ToString("C0")</td>
-                                                <td style="text-align:right;font-weight:600">@McvCellAvg(panel.ByMonth, p.Key).ToString("C0")</td>
+                                                <td style="text-align:right;font-weight:600">@Acct(McvCellPaid(panel.ByMonth, p.Key))</td>
+                                                <td style="text-align:right;font-weight:600">@Acct(McvCellAvg(panel.ByMonth, p.Key))</td>
                                             }
                                             <td style="text-align:right;font-weight:700">@McvYearEnc(panel.ByYear, year).ToString("N0")</td>
-                                            <td style="text-align:right;font-weight:700">@McvYearPaid(panel.ByYear, year).ToString("C0")</td>
-                                            <td style="text-align:right;font-weight:700">@McvYearAvg(panel.ByYear, year).ToString("C0")</td>
+                                            <td style="text-align:right;font-weight:700">@Acct(McvYearPaid(panel.ByYear, year))</td>
+                                            <td style="text-align:right;font-weight:700">@Acct(McvYearAvg(panel.ByYear, year))</td>
                                         }
                                         <td style="text-align:right;font-weight:700">@panel.TotalEncounters.ToString("N0")</td>
-                                        <td style="text-align:right;font-weight:700">@panel.TotalInsurancePaid.ToString("C0")</td>
-                                        <td style="text-align:right;font-weight:700">@panel.TotalAveragePaidAmount.ToString("C0")</td>
+                                        <td style="text-align:right;font-weight:700">@Acct(panel.TotalInsurancePaid)</td>
+                                        <td style="text-align:right;font-weight:700">@Acct(panel.TotalAveragePaidAmount)</td>
                                     </tr>
                                     @* Payer drill-down rows (all payers when table1 mode, top 3 otherwise) *@
                                     @foreach (var payer in panel.TopPayers)
@@ -1130,16 +1159,16 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                                                 @foreach (var p in monthsInYear)
                                                 {
                                                     <td style="text-align:right">@McvCellEnc(payer.ByMonth, p.Key).ToString("N0")</td>
-                                                    <td style="text-align:right">@McvCellPaid(payer.ByMonth, p.Key).ToString("C0")</td>
-                                                    <td style="text-align:right">@McvCellAvg(payer.ByMonth, p.Key).ToString("C0")</td>
+                                                    <td style="text-align:right">@Acct(McvCellPaid(payer.ByMonth, p.Key))</td>
+                                                    <td style="text-align:right">@Acct(McvCellAvg(payer.ByMonth, p.Key))</td>
                                                 }
                                                 <td style="text-align:right;font-weight:600">@McvYearEnc(payer.ByYear, year).ToString("N0")</td>
-                                                <td style="text-align:right;font-weight:600">@McvYearPaid(payer.ByYear, year).ToString("C0")</td>
-                                                <td style="text-align:right;font-weight:600">@McvYearAvg(payer.ByYear, year).ToString("C0")</td>
+                                                <td style="text-align:right;font-weight:600">@Acct(McvYearPaid(payer.ByYear, year))</td>
+                                                <td style="text-align:right;font-weight:600">@Acct(McvYearAvg(payer.ByYear, year))</td>
                                             }
                                             <td style="text-align:right;font-weight:600">@payer.TotalEncounters.ToString("N0")</td>
-                                            <td style="text-align:right;font-weight:600">@payer.TotalInsurancePaid.ToString("C0")</td>
-                                            <td style="text-align:right;font-weight:600">@payer.TotalAveragePaidAmount.ToString("C0")</td>
+                                            <td style="text-align:right;font-weight:600">@Acct(payer.TotalInsurancePaid)</td>
+                                            <td style="text-align:right;font-weight:600">@Acct(payer.TotalAveragePaidAmount)</td>
                                         </tr>
                                     }
                                 }
@@ -1154,16 +1183,16 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                                         @foreach (var p in monthsInYear)
                                         {
                                             <td style="text-align:right;color:#fff">@McvCellEnc(mcvPivot.GrandTotalByMonth, p.Key).ToString("N0")</td>
-                                            <td style="text-align:right;color:#fff">@McvCellPaid(mcvPivot.GrandTotalByMonth, p.Key).ToString("C0")</td>
-                                            <td style="text-align:right;color:#fff">@McvCellAvg(mcvPivot.GrandTotalByMonth, p.Key).ToString("C0")</td>
+                                            <td style="text-align:right;color:#fff">@Acct(McvCellPaid(mcvPivot.GrandTotalByMonth, p.Key))</td>
+                                            <td style="text-align:right;color:#fff">@Acct(McvCellAvg(mcvPivot.GrandTotalByMonth, p.Key))</td>
                                         }
                                         <td style="text-align:right;color:#fff">@McvYearEnc(mcvPivot.GrandTotalByYear, year).ToString("N0")</td>
-                                        <td style="text-align:right;color:#fff">@McvYearPaid(mcvPivot.GrandTotalByYear, year).ToString("C0")</td>
-                                        <td style="text-align:right;color:#fff">@McvYearAvg(mcvPivot.GrandTotalByYear, year).ToString("C0")</td>
+                                        <td style="text-align:right;color:#fff">@Acct(McvYearPaid(mcvPivot.GrandTotalByYear, year))</td>
+                                        <td style="text-align:right;color:#fff">@Acct(McvYearAvg(mcvPivot.GrandTotalByYear, year))</td>
                                     }
                                     <td style="text-align:right;color:#fff">@mcvPivot.GrandTotalEncounters.ToString("N0")</td>
-                                    <td style="text-align:right;color:#fff">@mcvPivot.GrandTotalInsurancePaid.ToString("C0")</td>
-                                    <td style="text-align:right;color:#fff">@mcvPivot.GrandTotalAveragePaidAmount.ToString("C0")</td>
+                                    <td style="text-align:right;color:#fff">@Acct(mcvPivot.GrandTotalInsurancePaid)</td>
+                                    <td style="text-align:right;color:#fff">@Acct(mcvPivot.GrandTotalAveragePaidAmount)</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -1189,24 +1218,15 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     <div class="small mt-1"><strong>Reason:</strong> @mcvReason. Try adjusting your filters.</div>
                 </div>
             }
-
-            @* -- Active Collection Summary Rule footer -- *@
-            @{
-            var csActiveRule = string.IsNullOrWhiteSpace(Model.CollectionSummaryRule) ? "Default" : Model.CollectionSummaryRule!;
             }
-            <div class="pr-rule-footer mt-3 small text-muted" style="opacity:.65;line-height:1.45;border-top:1px dashed #cfd6df;padding-top:.5rem">
-                <div><span class="fw-semibold">Active Rule:</span> @csActiveRule</div>
-                <div class="mt-1"><span class="fw-semibold">Monthly Claim Volume Logic:</span></div>
-                <ul class="mb-0 ps-3" style="font-size:.78rem">
-                    <li>Source: <code>ClaimLevelData</code> (all rows)</li>
-                    <li>Rows: <code>PanelName</code> &nbsp;�&nbsp; Drill-down: Top 3 <code>PayerName_Raw</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
-                    <li>Columns: <code>YEAR(CheckDate)</code> / <code>MONTH(CheckDate)</code></li>
-                    <li>Filter (base): <code>InsurancePayment &gt; 0</code> &nbsp;�&nbsp; <code>CheckDate</code> not blank/invalid &nbsp;�&nbsp; <code>PayerName_Raw</code> not blank</li>
-                    <li>Rank by: <code>COUNT(DISTINCT ClaimID)</code> &nbsp;�&nbsp; Sort: Grand Total descending</li>
-                </ul>
-            </div>
+            else if (string.IsNullOrEmpty(csPaneOnly))
+            {
+                <div class="cs-lazy-pane" data-lazy-tab="mcv"></div>
+            }
         </div>
 
+        @if (string.IsNullOrEmpty(csPaneOnly))
+        {
         <!-- Weekly Claim Volume tab -->
         <div class="tab-pane fade" id="wcv-pane"           role="tabpanel" aria-labelledby="wcv-tab"           data-cs-tab="wcv">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabWcv",          Model) } else { <div class="cs-lazy-pane" data-lazy-tab="wcv"></div> }</div>
         <!-- Panel Averages tab -->
@@ -1230,11 +1250,24 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         <div class="tab-pane fade" id="statussummary-pane" role="tabpanel" aria-labelledby="statussummary-tab" data-cs-tab="statussummary">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabStatusSummary", Model) } else { <div class="cs-lazy-pane" data-lazy-tab="statussummary"></div> }</div>
         <!-- Provider tab -->
         <div class="tab-pane fade" id="provider-pane"      role="tabpanel" aria-labelledby="provider-tab"      data-cs-tab="provider">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabProvider",     Model) } else { <div class="cs-lazy-pane" data-lazy-tab="provider"></div> }</div>
-
+        }
     </div>
 }
 
-@* ?? Excel export progress overlay (driven by csExportDone cookie set by ExportExcel) ?? *@
+@if (string.IsNullOrEmpty(csPaneOnly) && !string.IsNullOrWhiteSpace(Model.SelectedLab))
+{
+    @await Html.PartialAsync("~/Views/Shared/_ReportInsights.cshtml", new LabMetricsDashboard.Models.Notes.ReportInsightsPanelModel
+    {
+        Lab = Model.SelectedLab,
+        ReportName = "Collection Report",
+        RunId = Model.AnalysisRange?.RunId,
+        WeekText = Model.AnalysisRange?.WeekFolder
+    })
+}
+
+@if (string.IsNullOrEmpty(csPaneOnly))
+{
+@* Excel export progress overlay (driven by csExportDone cookie set by ExportExcel) *@
 <script nonce='@Context.Items["CspNonce"]'>
 (function () {
     var btn         = document.getElementById('csExportExcelBtn');
@@ -1389,21 +1422,21 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
 
         var original = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing…';
+        window.rptExportBusy(btn, '<span class="spinner-border spinner-border-sm"></span> Queuing…');
 
         fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
             .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
             .then(function (res) {
                 if (res.ok) {
-                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating - watch Reports';
+                    window.rptExportBusy(btn, '<i class="bi bi-check-circle"></i> Generating — watch Reports');
                     if (window.lrnShowReportAlert) window.lrnShowReportAlert('success');
                     if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
-                    setTimeout(function () { btn.disabled = false; btn.innerHTML = original; }, 8000);
+                    setTimeout(function () { window.rptExportIdle(btn, original); }, 8000);
                 } else if (res.status === 400) {
-                    btn.disabled = false; btn.innerHTML = original;
+                    window.rptExportIdle(btn, original);
                     legacyDownload();
                 } else {
-                    btn.disabled = false; btn.innerHTML = original;
+                    window.rptExportIdle(btn, original);
                     var qMsg = res.j && res.j.message ? res.j.message : '';
                     if (window.lrnShowReportAlert) {
                         if (res.status === 409 || /already/i.test(qMsg)) {
@@ -1415,7 +1448,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 }
             })
             .catch(function () {
-                btn.disabled = false; btn.innerHTML = original;
+                window.rptExportIdle(btn, original);
                 legacyDownload();
             });
     });
@@ -1596,9 +1629,21 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                   '?tab=' + encodeURIComponent(tab) +
                   (baseParams ? '&' + baseParams : '');
 
+        if (pane.id === 'mcv-pane' && window.lmdFpLog) {
+            window.lmdFpLog('spinner-on', 'page landed — in-tab spinner on');
+        }
+
         fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
             .then(function (r) { return r.text(); })
-            .then(function (html) { setHtmlAndRunScripts(pane, html); })
+            .then(function (html) {
+                var tmp = document.createElement('div');
+                tmp.innerHTML = html;
+                var inner = tmp.querySelector('#' + pane.id);
+                setHtmlAndRunScripts(pane, inner ? inner.innerHTML : html);
+                if (pane.id === 'mcv-pane' && window.lmdFpLog) {
+                    window.lmdFpLog('monthly-html', 'monthly tab HTML on screen');
+                }
+            })
             .catch(function () {
                 pane.innerHTML =
                     '<div class="alert alert-warning m-3">' +
@@ -1607,6 +1652,79 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     '</div>';
             });
     }
+
+    function fillMsList(listEl, names, inputName) {
+        if (!listEl || !names || !names.length) return;
+        var selected = {};
+        listEl.querySelectorAll('input[type="checkbox"]:checked').forEach(function (cb) {
+            selected[cb.value] = true;
+        });
+        listEl.innerHTML = '';
+        names.forEach(function (name) {
+            var label = document.createElement('label');
+            var input = document.createElement('input');
+            input.type = 'checkbox';
+            input.name = inputName;
+            input.value = name;
+            if (selected[name]) input.checked = true;
+            label.appendChild(input);
+            label.appendChild(document.createTextNode(' ' + name));
+            listEl.appendChild(label);
+        });
+    }
+    function fillBanner(d) {
+        var el = document.getElementById('cs-analysis-banner');
+        if (!el || !d || !(d.weekFolder || d.runId || d.inserted)) return;
+        var wrap = document.createElement('div');
+        wrap.className = 'd-flex flex-wrap gap-3 align-items-center mb-3 px-1';
+        wrap.style.fontSize = '.82rem';
+        wrap.style.color = '#374151';
+        function addPair(label, value) {
+            if (!value) return;
+            var span = document.createElement('span');
+            var lab = document.createElement('span');
+            lab.className = 'fw-semibold text-secondary';
+            lab.style.fontSize = '.72rem';
+            lab.style.letterSpacing = '.04em';
+            lab.style.textTransform = 'uppercase';
+            lab.textContent = label;
+            var val = document.createElement('span');
+            val.className = 'ms-1 fw-semibold';
+            val.style.color = '#0e3460';
+            val.textContent = value;
+            span.appendChild(lab);
+            span.appendChild(val);
+            wrap.appendChild(span);
+        }
+        var range = document.createElement('span');
+        range.innerHTML = '<span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">Analysis Range:</span><span class="ms-1 fw-semibold text-dark">Billed Week Range</span>';
+        if (d.weekFolder) {
+            var dash = document.createElement('span');
+            dash.className = 'ms-1 text-muted';
+            dash.textContent = ' - ';
+            var folder = document.createElement('span');
+            folder.className = 'ms-1 fw-semibold';
+            folder.style.color = '#0e3460';
+            folder.textContent = d.weekFolder;
+            range.appendChild(dash);
+            range.appendChild(folder);
+        }
+        wrap.appendChild(range);
+        addPair('ReportId (RunID):', d.runId);
+        addPair('Inserted Date:', d.inserted);
+        el.innerHTML = '';
+        el.appendChild(wrap);
+    }
+    var metaUrl = '@Url.Action("GetMeta", "CollectionSummary")';
+    fetch(metaUrl + (baseParams ? '?' + baseParams : ''), { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+            if (!d) return;
+            fillMsList(document.getElementById('csPayerList'), d.payers, 'filterPayerNames');
+            fillMsList(document.getElementById('csPanelList'), d.panels, 'filterPanelNames');
+            fillBanner(d);
+        })
+        .catch(function () { });
 
     // Trigger lazy load when a tab is shown.
     var tabList = document.getElementById('csRptTabs');
@@ -1619,6 +1737,10 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             }
         });
     }
+    var mcvPane = document.getElementById('mcv-pane');
+    if (mcvPane) lazyLoadPane(mcvPane);
+    var top5Host = document.getElementById('csTop5Host');
+    if (top5Host) lazyLoadPane(top5Host);
 }());
 </script>
 }
@@ -1704,3 +1826,4 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
     document.addEventListener('click', function () { closeAll(null); });
 }());
 </script>
+}

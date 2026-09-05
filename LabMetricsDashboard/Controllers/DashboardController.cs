@@ -5,6 +5,7 @@ using LabMetricsDashboard.Services;
 using LRN.ProductionReports.Models;
 using LRN.ProductionReports.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 
 
 namespace LabMetricsDashboard.Controllers;
@@ -58,6 +59,7 @@ public class DashboardController : Controller
     private readonly IAnalysisRangeService _analysisRange;
     private readonly ILogger<DashboardController> _logger;
     private readonly INotesRepository _notes;
+    private readonly IMemoryCache _cache;
 
     public DashboardController(
         LabSettings labSettings,
@@ -73,7 +75,8 @@ public class DashboardController : Controller
         IClaimLineRepository claimLineRepo,
         IAnalysisRangeService analysisRange,
         ILogger<DashboardController> logger,
-        INotesRepository notes)
+        INotesRepository notes,
+        IMemoryCache cache)
     {
         _labSettings = labSettings;
         _resolver = resolver;
@@ -89,6 +92,7 @@ public class DashboardController : Controller
         _analysisRange = analysisRange;
         _logger = logger;
         _notes = notes;
+        _cache = cache;
     }
 
     // GET /Dashboard  or  /Dashboard/Index?lab=PCRLabsofAmerica&filterPayerName=...
@@ -2190,6 +2194,8 @@ public class DashboardController : Controller
             availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
 
         var selectedLab = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+        FirstPaintLog.Write(_logger, "Production", selectedLab ?? "", "request", 0,
+            "controller entered (HTML not sent yet)");
 
         filterPayerNames = filterPayerNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
         filterPanelNames = filterPanelNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
@@ -2229,339 +2235,37 @@ public class DashboardController : Controller
                 ErrorMessage  = $"Production Summary Report is currently not available for {selectedLab}.",
             });
 
-        var connStr        = config.DbConnectionString;
         var productionRule = config.ProductionSummary?.Rule;
         var weekRule       = !string.IsNullOrWhiteSpace(config.ProductionSummary?.WeekRule)
                              ? config.ProductionSummary!.WeekRule : productionRule;
         var weekRange      = config.ProductionSummary?.WeekRange;
 
-        DateOnly.TryParse(filterFirstBillFrom, out var fbFrom);
-        DateOnly.TryParse(filterFirstBillTo, out var fbTo);
-        DateOnly.TryParse(filterDosFrom, out var dosFrom);
-        DateOnly.TryParse(filterDosTo, out var dosTo);
-        DateOnly.TryParse(filterFirstBilledFrom, out var fbldFrom);
-        DateOnly.TryParse(filterFirstBilledTo, out var fbldTo);
-
-        var hasFilters = filterPayerNames.Count > 0
-            || filterPanelNames.Count > 0
-            || filterPayerNamesExclude
-            || filterPanelNamesExclude
-            || dosFrom  != default || dosTo  != default
-            || fbFrom   != default || fbTo   != default
-            || fbldFrom != default || fbldTo != default;
-
-        // Prefer aggregate/snapshot tables for filter dropdowns (NW_* / DashboardFilterLookup).
-        // Live ClaimLevelData DISTINCT is only used as a last resort for large labs like NorthWest.
         var isAugustusLab   = selectedLab.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
                            || selectedLab.Equals("Augustus",      StringComparison.OrdinalIgnoreCase);
-        var isNorthWestLab  = selectedLab.Equals("NorthWest",     StringComparison.OrdinalIgnoreCase);
 
         // Generic lab repos (Certus, Cove, Elixir, PCRLabsofAmerica, Beech_Tree, Rising_Tides)
         _labSummaryRepos.TryGetValue(selectedLab, out var genericSummaryRepo);
 
-        var optionsTask = isAugustusLab
-            ? _augSummaryRepo.GetFilterOptionsAsync(connStr, ct)
-            : genericSummaryRepo is not null
-                ? genericSummaryRepo.GetFilterOptionsAsync(connStr, ct)
-                : _nwSummaryRepo.GetFilterOptionsAsync(connStr, ct);
-
         try
         {
-            var (optionPayers, optionPanels) = await optionsTask;
-            ProductionReportResult    monthlyResult;
-            WeeklyClaimVolumeResult   weeklyResult;
-            CodingResult              codingResult;
-            PayerBreakdownResult      pbResult;
-            PayerBreakdownResult      pnlResult = new([], [], [], new Dictionary<string, int>(), 0);
-            PayerBreakdownResult      insightDaqResult = new([], [], [], new Dictionary<string, int>(), 0);
-            PayerBreakdownResult      insightWebResult = new([], [], [], new Dictionary<string, int>(), 0);
-            HighestPayerBreakdownResult hpResult = new([], [], [], new Dictionary<string, ProductionMonthCell>(), 0, 0);
-            PayerPanelResult          pxpResult;
-            UnbilledAgingResult       uaResult;
-            CptBreakdownResult        cptResult;
+            var firstPaintSw = Stopwatch.StartNew();
+            // Do not wait on SQL here. First HTML is chrome only; filters, banner, and
+            // monthly data load after the page is on screen (meta + tab AJAX).
+            ProductionReportResult monthlyResult = new([], [], [], [], [], [], 0, 0);
+            FirstPaintLog.Write(_logger, "Production", selectedLab, "shell", firstPaintSw.ElapsedMilliseconds,
+                $"html-first scheme={Request.Scheme} tid={HttpContext.TraceIdentifier}");
 
-            if (!hasFilters)
-            {
-                // ── No filters: serve from SP aggregate tables ────────────────
-                _logger.LogInformation("ProductionSummaryReport [{Lab}]: loading from aggregate tables.", selectedLab);
+            WeeklyClaimVolumeResult weeklyResult = new([], [], [], 0, 0);
+            CodingResult codingResult = new([], 0, 0);
+            PayerBreakdownResult pbResult = new([], [], [], [], 0);
+            PayerBreakdownResult pnlResult = new([], [], [], [], 0);
+            PayerBreakdownResult insightDaqResult = new([], [], [], [], 0);
+            PayerBreakdownResult insightWebResult = new([], [], [], [], 0);
+            HighestPayerBreakdownResult hpResult = new([], [], [], [], 0, 0);
+            PayerPanelResult pxpResult = new([], [], [], 0, 0);
+            UnbilledAgingResult uaResult = new([], [], 0, 0);
+            CptBreakdownResult cptResult = new([], [], [], [], 0, 0);
 
-                if (isAugustusLab)
-                {
-                    var t1 = _augSummaryRepo.GetMonthlyAsync(connStr,
-                        null, null, null, null, null, null, null, null, ct);
-                    var t2 = _augSummaryRepo.GetWeeklyAsync(connStr,
-                        null, null, null, null, null, null, null, null, ct);
-                    var t3 = _augSummaryRepo.GetCodingAsync(connStr,
-                        null, null, null, null, null, null, null, null, ct);
-                    var t4 = _augSummaryRepo.GetPayerBreakdownAsync(connStr,
-                        null, null, null, null, null, null, null, null, ct);
-                    var t5 = _augSummaryRepo.GetPayerByPanelAsync(connStr,
-                        null, null, null, null, null, null, null, null, ct);
-                    var t6 = _augSummaryRepo.GetUnbilledAgingAsync(connStr,
-                        null, null, null, null, null, null, null, null, ct);
-                    var t7 = _augSummaryRepo.GetCptBreakdownAsync(connStr,
-                        null, null, null, null, null, null, null, null, ct);
-                    var t8 = _augSummaryRepo.GetPanelBreakdownAsync(connStr,
-                        null, null, null, null, null, null, null, null, ct);
-
-                    await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7, t8);
-
-                    monthlyResult = t1.Result;
-                    weeklyResult  = t2.Result;
-                    codingResult  = t3.Result;
-                    pbResult      = t4.Result;
-                    pxpResult     = t5.Result;
-                    uaResult      = t6.Result;
-                    cptResult     = t7.Result;
-                    pnlResult     = t8.Result;
-                }
-                else if (genericSummaryRepo is not null)
-                {
-                    // Generic labs: Certus, Cove, Elixir, PCRLabsofAmerica, Beech_Tree, Rising_Tides, Phi_Life, InHealthDTR.
-                    // CPT breakdown uses genericSummaryRepo when the lab's SupportsFilteredMonthlyWeeklySp flag is true
-                    // (calls usp_Get{Prefix}CPTBreakdown), otherwise falls back to _productionReportRepo (inline SQL).
-                    var t1 = genericSummaryRepo.GetMonthlyAsync(connStr, ct: ct);
-                    var t2 = genericSummaryRepo.GetWeeklyAsync(connStr, ct: ct);
-                    var t3 = genericSummaryRepo.GetCodingAsync(connStr, ct: ct);
-                    var t4 = genericSummaryRepo.GetPayerBreakdownAsync(connStr, ct: ct);
-                    var t5 = genericSummaryRepo.GetPayerByPanelAsync(connStr, ct: ct);
-                    var t6 = genericSummaryRepo.GetUnbilledAgingAsync(connStr, ct: ct);
-                    var t7 = genericSummaryRepo.SupportsFilteredMonthlyWeeklySp
-                        ? genericSummaryRepo.GetCptBreakdownAsync(connStr, ct: ct)
-                        : _productionReportRepo.GetCptBreakdownAsync(connStr,
-                            null, null, null, null, null, null, ct, rule: productionRule);
-                    // Panel Breakdown: usp_Get{Prefix}PanelBreakdownWithPayers snapshot.
-                    var t8 = genericSummaryRepo.GetPanelBreakdownAsync(connStr, ct: ct);
-
-                    await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7, t8);
-
-                    monthlyResult = t1.Result;
-                    weeklyResult  = t2.Result;
-                    codingResult  = t3.Result;
-                    pbResult      = t4.Result;
-                    pxpResult     = t5.Result;
-                    uaResult      = t6.Result;
-                    cptResult     = t7.Result;
-                    pnlResult     = t8.Result;
-                }
-                else
-                {
-                    // NorthWest: always route through its own parameterised SPs (usp_GetNW_*)
-                    var t1 = _nwSummaryRepo.GetMonthlyAsync(connStr, null, null, null, null, null, null, null, null, ct);
-                    var t2 = _nwSummaryRepo.GetWeeklyAsync(connStr, null, null, null, null, null, null, null, null, ct);
-                    var t3 = _nwSummaryRepo.GetCodingAsync(connStr, null, null, null, null, null, null, null, null, ct);
-                    var t4 = _nwSummaryRepo.GetPayerBreakdownAsync(connStr, null, null, null, null, null, null, null, null, ct);
-                    var t5 = _nwSummaryRepo.GetPayerByPanelAsync(connStr, null, null, null, null, null, null, null, null, ct);
-                    var t6 = _nwSummaryRepo.GetUnbilledAgingAsync(connStr, null, null, null, null, null, null, null, null, ct);
-                    var t7 = _nwSummaryRepo.GetCptBreakdownAsync(connStr, null, null, null, null, null, null, null, null, ct);
-                    var t8 = _nwSummaryRepo.GetPanelBreakdownAsync(connStr, null, null, null, null, null, null, null, null, ct);
-                    var t9 = _nwSummaryRepo.GetInsightBreakdownAsync(connStr, "Daq", null, null, null, null, null, null, null, null, ct);
-                    var t10 = _nwSummaryRepo.GetInsightBreakdownAsync(connStr, "Webpm", null, null, null, null, null, null, null, null, ct);
-                    var t11 = _nwSummaryRepo.GetHighestPayerBreakdownAsync(connStr, null, null, null, null, null, null, null, null, ct);
-
-                    await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11);
-
-                    monthlyResult = t1.Result;
-                    weeklyResult  = t2.Result;
-                    codingResult  = t3.Result;
-                    pbResult      = t4.Result;
-                    pxpResult     = t5.Result;
-                    uaResult      = t6.Result;
-                    cptResult     = t7.Result;
-                    pnlResult     = t8.Result;
-                    insightDaqResult = t9.Result;
-                    insightWebResult = t10.Result;
-                    hpResult      = t11.Result;
-                }
-            }
-            else
-            {
-                // ── Filters active: query live tables ─────────────────────────
-                // When exclude=true, we omit that filter from the SQL query and
-                // instead apply the exclusion via post-processing on the results.
-                _logger.LogInformation("ProductionSummaryReport [{Lab}]: filters active, querying live tables.", selectedLab);
-
-                var livePayerFilter  = filterPayerNamesExclude  ? null : (filterPayerNames.Count  > 0 ? filterPayerNames  : null);
-                var livePanelFilter  = filterPanelNamesExclude  ? null : (filterPanelNames.Count  > 0 ? filterPanelNames  : null);
-
-                // Augustus: always route through its own parameterised SPs (usp_GetAug_*)
-                // so the filtered path never reaches the inline SQL that references PanelType.
-                // Generic labs: use their read SP when SupportsFilteredMonthlyWeeklySp=true,
-                // otherwise fall back to the legacy inline query in SqlProductionReportRepository.
-                var useFilteredSp = genericSummaryRepo is not null
-                                    && genericSummaryRepo.SupportsFilteredMonthlyWeeklySp;
-
-                var dosFromArg    = dosFrom   != default ? dosFrom   : (DateOnly?)null;
-                var dosToArg      = dosTo     != default ? dosTo     : (DateOnly?)null;
-                var fbFromArg     = fbFrom    != default ? fbFrom    : (DateOnly?)null;
-                var fbToArg       = fbTo      != default ? fbTo      : (DateOnly?)null;
-                var fbldFromArg   = fbldFrom  != default ? fbldFrom  : (DateOnly?)null;
-                var fbldToArg     = fbldTo    != default ? fbldTo    : (DateOnly?)null;
-
-                var t1 = isAugustusLab
-                    ? _augSummaryRepo.GetMonthlyAsync(connStr,
-                        livePayerFilter, livePanelFilter,
-                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : isNorthWestLab
-                        ? _nwSummaryRepo.GetMonthlyAsync(connStr,
-                            livePayerFilter, livePanelFilter,
-                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                        : useFilteredSp
-                            ? genericSummaryRepo!.GetMonthlyAsync(connStr,
-                                livePayerFilter, livePanelFilter,
-                                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                            : _productionReportRepo.GetMonthlyClaimVolumeAsync(connStr,
-                                livePayerFilter, livePanelFilter,
-                                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
-                                productionRule, ct, panelNewStrict: false);
-
-                var t2 = isAugustusLab
-                    ? _augSummaryRepo.GetWeeklyAsync(connStr,
-                        livePayerFilter, livePanelFilter,
-                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : isNorthWestLab
-                        ? _nwSummaryRepo.GetWeeklyAsync(connStr,
-                            livePayerFilter, livePanelFilter,
-                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                        : useFilteredSp
-                            ? genericSummaryRepo!.GetWeeklyAsync(connStr,
-                                livePayerFilter, livePanelFilter,
-                                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                            : _productionReportRepo.GetWeeklyClaimVolumeAsync(connStr,
-                                livePayerFilter, livePanelFilter,
-                                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
-                                weekRule, weekRange, ct, panelNewStrict: false);
-
-                var t3 = isAugustusLab
-                    ? _augSummaryRepo.GetCodingAsync(connStr,
-                        livePayerFilter, livePanelFilter,
-                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : isNorthWestLab
-                        ? _nwSummaryRepo.GetCodingAsync(connStr,
-                            livePayerFilter, livePanelFilter,
-                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                        : useFilteredSp
-                            ? genericSummaryRepo!.GetCodingAsync(connStr,
-                                livePayerFilter, livePanelFilter,
-                                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                            : _productionReportRepo.GetCodingAsync(connStr, livePanelFilter, ct);
-
-                var t4 = isAugustusLab
-                    ? _augSummaryRepo.GetPayerBreakdownAsync(connStr,
-                        livePayerFilter, livePanelFilter,
-                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : isNorthWestLab
-                        ? _nwSummaryRepo.GetPayerBreakdownAsync(connStr,
-                            livePayerFilter, livePanelFilter,
-                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                        : useFilteredSp
-                            ? genericSummaryRepo!.GetPayerBreakdownAsync(connStr,
-                                livePayerFilter, livePanelFilter,
-                                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                            : _productionReportRepo.GetPayerBreakdownAsync(connStr,
-                                livePayerFilter, livePanelFilter,
-                                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
-                                productionRule, ct, panelNewStrict: false);
-
-                var t5 = isAugustusLab
-                    ? _augSummaryRepo.GetPayerByPanelAsync(connStr,
-                        livePayerFilter, livePanelFilter,
-                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : isNorthWestLab
-                        ? _nwSummaryRepo.GetPayerByPanelAsync(connStr,
-                            livePayerFilter, livePanelFilter,
-                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                        : useFilteredSp
-                            ? genericSummaryRepo!.GetPayerByPanelAsync(connStr,
-                                livePayerFilter, livePanelFilter,
-                                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                            : _productionReportRepo.GetPayerPanelAsync(connStr,
-                                livePayerFilter, livePanelFilter,
-                                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
-                                productionRule, ct, panelNewStrict: false);
-
-                var t6 = isAugustusLab
-                    ? _augSummaryRepo.GetUnbilledAgingAsync(connStr,
-                        livePayerFilter, livePanelFilter,
-                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : isNorthWestLab
-                        ? _nwSummaryRepo.GetUnbilledAgingAsync(connStr,
-                            livePayerFilter, livePanelFilter,
-                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                        : useFilteredSp
-                            ? genericSummaryRepo!.GetUnbilledAgingAsync(connStr,
-                                livePayerFilter, livePanelFilter,
-                                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                            : _productionReportRepo.GetUnbilledAgingAsync(connStr,
-                                livePanelFilter,
-                                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
-                                productionRule, ct);
-
-                var t7 = isAugustusLab
-                    ? _augSummaryRepo.GetCptBreakdownAsync(connStr,
-                        livePayerFilter, livePanelFilter,
-                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : isNorthWestLab
-                        ? _nwSummaryRepo.GetCptBreakdownAsync(connStr,
-                            livePayerFilter, livePanelFilter,
-                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                        : useFilteredSp
-                            ? genericSummaryRepo!.GetCptBreakdownAsync(connStr,
-                                livePayerFilter, livePanelFilter,
-                                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                            : _productionReportRepo.GetCptBreakdownAsync(connStr,
-                                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
-                                ct, rule: productionRule);
-
-                var t8 = isAugustusLab
-                    ? _augSummaryRepo.GetPanelBreakdownAsync(connStr,
-                        livePayerFilter, livePanelFilter,
-                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : isNorthWestLab
-                    ? _nwSummaryRepo.GetPanelBreakdownAsync(connStr,
-                        livePayerFilter, livePanelFilter,
-                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    // Every other lab: usp_Get{Prefix}PanelBreakdownWithPayers
-                    // (Sql/40_AllLabs_PanelBreakdownWithPayers.sql). The repo returns an
-                    // empty result when that SP is not on the lab's database yet.
-                    : genericSummaryRepo is not null
-                    ? genericSummaryRepo.GetPanelBreakdownAsync(connStr,
-                        livePayerFilter, livePanelFilter,
-                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : Task.FromResult(new PayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0));
-
-                var emptyInsight = Task.FromResult(new PayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0));
-                var t9 = isNorthWestLab
-                    ? _nwSummaryRepo.GetInsightBreakdownAsync(connStr, "Daq",
-                        livePayerFilter, livePanelFilter,
-                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : emptyInsight;
-                var t10 = isNorthWestLab
-                    ? _nwSummaryRepo.GetInsightBreakdownAsync(connStr, "Webpm",
-                        livePayerFilter, livePanelFilter,
-                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : emptyInsight;
-                var emptyHp = Task.FromResult(new HighestPayerBreakdownResult([], [], [], new Dictionary<string, ProductionMonthCell>(), 0, 0));
-                var t11 = isNorthWestLab
-                    ? _nwSummaryRepo.GetHighestPayerBreakdownAsync(connStr,
-                        livePayerFilter, livePanelFilter,
-                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : emptyHp;
-
-                await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11);
-
-                monthlyResult = t1.Result;
-                weeklyResult  = t2.Result;
-                codingResult  = t3.Result;
-                pbResult      = t4.Result;
-                pxpResult     = t5.Result;
-                uaResult      = t6.Result;
-                cptResult     = t7.Result;
-                pnlResult     = t8.Result;
-                insightDaqResult = t9.Result;
-                insightWebResult = t10.Result;
-                hpResult      = t11.Result;
-            }
 
             // ── Post-process: apply Exclude logic ─────────────────────────────
             if (filterPayerNamesExclude && filterPayerNames.Count > 0)
@@ -2603,11 +2307,9 @@ public class DashboardController : Controller
                 }
             }
 
-            var analysisRange = await _analysisRange.GetAsync(connStr, ct);
-            var limsRunId = await _productionReportRepo.GetLimsRunIdAsync(connStr, ct);
-            ViewData["AnalysisRange"] = analysisRange;
+            ViewData["AnalysisRange"] = AnalysisRangeInfo.Empty;
 
-            return View(new ProductionReportViewModel
+            var vm = new ProductionReportViewModel
             {
                 AvailableLabs              = availableLabs,
                 SelectedLab                = selectedLab,
@@ -2624,9 +2326,8 @@ public class DashboardController : Controller
                 FilterDosTo                = filterDosTo,
                 FilterFirstBilledFrom      = filterFirstBilledFrom,
                 FilterFirstBilledTo        = filterFirstBilledTo,
-                // Always use the live-queried option lists so dropdowns are never empty
-                PayerNames                 = optionPayers,
-                PanelNames                 = optionPanels,
+                PayerNames                 = [],
+                PanelNames                 = [],
                 Months                     = monthlyResult.Months,
                 Years                      = monthlyResult.Years,
                 PanelRows                  = monthlyResult.PanelRows,
@@ -2693,10 +2394,12 @@ public class DashboardController : Controller
                 CptUnitsLabel                  = isAugustusLab
                     ? "Count of CPT"
                     : genericSummaryRepo?.IsCertus == true ? "Billed Units" : "No. of Claims",
-                ReportWeekFolder               = analysisRange.WeekFolder,
-                ReportRunId                    = analysisRange.RunId,
-                LimsRunId                      = limsRunId,
-            });
+                ReportWeekFolder               = null,
+                ReportRunId                    = null,
+                LimsRunId                      = null,
+            };
+            CacheProductionReport(vm);
+            return View(vm);
         }
         catch (Exception ex)
         {
@@ -2707,6 +2410,502 @@ public class DashboardController : Controller
                 SelectedLab   = selectedLab,
                 ErrorMessage  = $"Failed to load Production Summary Report: {ex.Message}",
             });
+        }
+    }
+
+    /// <summary>
+    /// Returns one Production tab's HTML. The first page load only renders Monthly;
+    /// other tabs call this so the IDE/browser is not blocked parsing 8 huge tables.
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> ProductionSummaryReportTab(string key, string pane, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(pane))
+            return BadRequest();
+        if (!_cache.TryGetValue(key, out CachedProductionReport? entry) || entry is null)
+            return StatusCode(409, "Report expired. Refresh the page.");
+
+        try
+        {
+            var paneSw = Stopwatch.StartNew();
+            await EnsureProductionPaneAsync(entry, pane, ct);
+            FirstPaintLog.Write(_logger, "Production", entry.Vm.SelectedLab, "tab-" + pane,
+                paneSw.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ProductionSummaryReportTab failed for pane {Pane}.", pane);
+            return StatusCode(500, "Could not load this tab.");
+        }
+
+        ViewData["PrPaneOnly"] = pane;
+        return PartialView("ProductionReport", entry.Vm);
+    }
+
+    /// <summary>
+    /// Browser stopwatch for Production Summary: click start, first HTML, spinner off.
+    /// Written to Logs/first-paint.log so we can see how long the page stays blank.
+    /// </summary>
+    [HttpPost]
+    [IgnoreAntiforgeryToken]
+    public IActionResult FirstPaintClient([FromBody] FirstPaintClientRequest? req)
+    {
+        if (req is null || string.IsNullOrWhiteSpace(req.Stage))
+            return Ok();
+
+        var report = string.Equals(req.Report, "Collection", StringComparison.OrdinalIgnoreCase) ? "Collection"
+            : string.Equals(req.Report, "LIS", StringComparison.OrdinalIgnoreCase) ? "LIS"
+            : string.Equals(req.Report, "Executive", StringComparison.OrdinalIgnoreCase) ? "Executive"
+            : "Production";
+        var lab = (req.Lab ?? "").Trim();
+        if (lab.Length > 80) lab = lab[..80];
+        var stage = (req.Stage ?? "").Trim();
+        if (stage.Length > 40) stage = stage[..40];
+        var extra = $"ttfb={req.TtfbMs} respEnd={req.ResponseEndMs} {(req.Extra ?? "").Trim()}";
+        if (extra.Length > 240) extra = extra[..240];
+        var ms = req.Ms < 0 ? 0 : Math.Min(req.Ms, 600_000);
+        FirstPaintLog.Write(_logger, report, lab, stage, ms, extra);
+        return Ok();
+    }
+
+    /// <summary>
+    /// Filter dropdowns and analysis-range banner after the Production page has landed.
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> ProductionSummaryReportMeta(string key, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return BadRequest();
+        if (!_cache.TryGetValue(key, out CachedProductionReport? entry) || entry is null)
+            return StatusCode(409, "Report expired. Refresh the page.");
+
+        var vm = entry.Vm;
+        if (!_labSettings.Labs.TryGetValue(vm.SelectedLab, out var config)
+            || string.IsNullOrWhiteSpace(config.DbConnectionString))
+            return Json(new { payers = Array.Empty<string>(), panels = Array.Empty<string>() });
+
+        var metaSw = Stopwatch.StartNew();
+        var isAugustusLab = vm.SelectedLab.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
+                         || vm.SelectedLab.Equals("Augustus", StringComparison.OrdinalIgnoreCase);
+        _labSummaryRepos.TryGetValue(vm.SelectedLab, out var genericSummaryRepo);
+
+        var optionsTask = GetProductionFilterOptionsCachedAsync(
+            vm.SelectedLab, isAugustusLab, genericSummaryRepo, config.DbConnectionString, ct);
+        var analysisTask = _analysisRange.GetAsync(config.DbConnectionString, ct);
+        await Task.WhenAll(optionsTask, analysisTask);
+        var (payers, panels) = optionsTask.Result;
+        var analysis = analysisTask.Result;
+        FirstPaintLog.Write(_logger, "Production", vm.SelectedLab, "meta", metaSw.ElapsedMilliseconds);
+
+        return Json(new
+        {
+            payers,
+            panels,
+            weekFolder = analysis.WeekFolder,
+            runId = analysis.RunId,
+            inserted = analysis.InsertedDateTime?.ToString("MMM d, yyyy h:mm tt")
+        });
+    }
+
+    private sealed class CachedProductionReport
+    {
+        public required ProductionReportViewModel Vm { get; init; }
+        public HashSet<string> LoadedPanes { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public SemaphoreSlim Gate { get; } = new(1, 1);
+    }
+
+    private void CacheProductionReport(ProductionReportViewModel vm)
+    {
+        var key = $"pr|{User.Identity?.Name}|{vm.SelectedLab}|{Request.QueryString.Value}";
+        _cache.Set(key, new CachedProductionReport { Vm = vm }, new MemoryCacheEntryOptions
+        {
+            SlidingExpiration = TimeSpan.FromMinutes(15),
+        });
+        ViewData["PrCacheKey"] = key;
+        ViewData["PrLazyTabs"] = true;
+    }
+
+    private async Task<(List<string> PayerNames, List<string> PanelNames)> GetProductionFilterOptionsCachedAsync(
+        string selectedLab,
+        bool isAugustusLab,
+        ILabProductionSummaryRepository? genericSummaryRepo,
+        string connStr,
+        CancellationToken ct)
+    {
+        var cacheKey = $"pr-filter-opts|{selectedLab}";
+        if (_cache.TryGetValue(cacheKey, out (List<string> PayerNames, List<string> PanelNames) cached)
+            && (cached.PayerNames.Count > 0 || cached.PanelNames.Count > 0))
+        {
+            return cached;
+        }
+
+        var result = isAugustusLab
+            ? await _augSummaryRepo.GetFilterOptionsAsync(connStr, ct)
+            : genericSummaryRepo is not null
+                ? await genericSummaryRepo.GetFilterOptionsAsync(connStr, ct)
+                : await _nwSummaryRepo.GetFilterOptionsAsync(connStr, ct);
+
+        if (result.PayerNames.Count > 0 || result.PanelNames.Count > 0)
+        {
+            _cache.Set(cacheKey, result, new MemoryCacheEntryOptions
+            {
+                SlidingExpiration = TimeSpan.FromMinutes(20),
+            });
+        }
+
+        return result;
+    }
+
+    private async Task EnsureProductionPaneAsync(CachedProductionReport entry, string pane, CancellationToken ct)
+    {
+        await entry.Gate.WaitAsync(ct);
+        try
+        {
+            if (entry.LoadedPanes.Contains(pane))
+                return;
+
+            var vm = entry.Vm;
+            if (!_labSettings.Labs.TryGetValue(vm.SelectedLab, out var config)
+                || string.IsNullOrWhiteSpace(config.DbConnectionString))
+                return;
+
+            var connStr = config.DbConnectionString;
+            var selectedLab = vm.SelectedLab;
+            var productionRule = vm.ProductionSummaryRule ?? config.ProductionSummary?.Rule;
+            var weekRule = !string.IsNullOrWhiteSpace(vm.ProductionSummaryWeekRule)
+                ? vm.ProductionSummaryWeekRule
+                : (!string.IsNullOrWhiteSpace(config.ProductionSummary?.WeekRule)
+                    ? config.ProductionSummary!.WeekRule
+                    : productionRule);
+            var weekRange = vm.ProductionSummaryWeekRange ?? config.ProductionSummary?.WeekRange;
+            var isAugustusLab = selectedLab.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
+                             || selectedLab.Equals("Augustus", StringComparison.OrdinalIgnoreCase);
+            var isNorthWestLab = selectedLab.Equals("NorthWest", StringComparison.OrdinalIgnoreCase);
+            _labSummaryRepos.TryGetValue(selectedLab, out var genericSummaryRepo);
+            var useFilteredSp = genericSummaryRepo is not null && genericSummaryRepo.SupportsFilteredMonthlyWeeklySp;
+
+            var livePayerFilter = vm.FilterPayerNamesExclude ? null : (vm.FilterPayerNames.Count > 0 ? vm.FilterPayerNames : null);
+            var livePanelFilter = vm.FilterPanelNamesExclude ? null : (vm.FilterPanelNames.Count > 0 ? vm.FilterPanelNames : null);
+            DateOnly.TryParse(vm.FilterDosFrom, out var dosFrom);
+            DateOnly.TryParse(vm.FilterDosTo, out var dosTo);
+            DateOnly.TryParse(vm.FilterFirstBillFrom, out var fbFrom);
+            DateOnly.TryParse(vm.FilterFirstBillTo, out var fbTo);
+            DateOnly.TryParse(vm.FilterFirstBilledFrom, out var fbldFrom);
+            DateOnly.TryParse(vm.FilterFirstBilledTo, out var fbldTo);
+            var dosFromArg = dosFrom != default ? dosFrom : (DateOnly?)null;
+            var dosToArg = dosTo != default ? dosTo : (DateOnly?)null;
+            var fbFromArg = fbFrom != default ? fbFrom : (DateOnly?)null;
+            var fbToArg = fbTo != default ? fbTo : (DateOnly?)null;
+            var fbldFromArg = fbldFrom != default ? fbldFrom : (DateOnly?)null;
+            var fbldToArg = fbldTo != default ? fbldTo : (DateOnly?)null;
+            var hasFilters = vm.HasFilters;
+
+            async Task<T> SnapshotOrLive<T>(
+                Func<Task<T>> aug,
+                Func<Task<T>> nw,
+                Func<Task<T>> genericFiltered,
+                Func<Task<T>> live)
+            {
+                if (isAugustusLab) return await aug();
+                if (!hasFilters)
+                {
+                    if (genericSummaryRepo is not null) return await genericFiltered();
+                    return await nw();
+                }
+                if (isNorthWestLab) return await nw();
+                if (useFilteredSp) return await genericFiltered();
+                return await live();
+            }
+
+            switch (pane)
+            {
+                case "monthly-pane":
+                {
+                    var monthlyResult = await SnapshotOrLive(
+                        () => _augSummaryRepo.GetMonthlyAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => _nwSummaryRepo.GetMonthlyAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => genericSummaryRepo!.GetMonthlyAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => _productionReportRepo.GetMonthlyClaimVolumeAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
+                            productionRule, ct, panelNewStrict: false));
+                    if (vm.FilterPayerNamesExclude && vm.FilterPayerNames.Count > 0)
+                    {
+                        var exc = vm.FilterPayerNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        foreach (var p in monthlyResult.PanelRows)
+                            p.TopPayers.RemoveAll(tp => exc.Contains(tp.PayerName));
+                    }
+                    if (vm.FilterPanelNamesExclude && vm.FilterPanelNames.Count > 0)
+                    {
+                        var exc = vm.FilterPanelNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        monthlyResult.PanelRows.RemoveAll(p => exc.Contains(p.PanelName));
+                    }
+                    vm.Months = monthlyResult.Months;
+                    vm.Years = monthlyResult.Years;
+                    vm.PanelRows = monthlyResult.PanelRows;
+                    vm.GrandTotalByMonth = monthlyResult.GrandTotalByMonth;
+                    vm.GrandTotalClaims = monthlyResult.GrandTotalClaims;
+                    vm.GrandTotalCharges = monthlyResult.GrandTotalCharges;
+                    break;
+                }
+                case "weekly-pane":
+                {
+                    var weeklyResult = await SnapshotOrLive(
+                        () => _augSummaryRepo.GetWeeklyAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => _nwSummaryRepo.GetWeeklyAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => genericSummaryRepo!.GetWeeklyAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => _productionReportRepo.GetWeeklyClaimVolumeAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
+                            weekRule, weekRange, ct, panelNewStrict: false));
+                    if (vm.FilterPayerNamesExclude && vm.FilterPayerNames.Count > 0)
+                    {
+                        var exc = vm.FilterPayerNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        foreach (var p in weeklyResult.PanelRows)
+                            p.TopPayers.RemoveAll(tp => exc.Contains(tp.PayerName));
+                    }
+                    if (vm.FilterPanelNamesExclude && vm.FilterPanelNames.Count > 0)
+                    {
+                        var exc = vm.FilterPanelNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        weeklyResult.PanelRows.RemoveAll(p => exc.Contains(p.PanelName));
+                    }
+                    vm.WeekColumns = weeklyResult.WeekColumns;
+                    vm.WeeklyPanelRows = weeklyResult.PanelRows;
+                    vm.WeeklyGrandTotalByWeek = weeklyResult.GrandTotalByWeek;
+                    vm.WeeklyGrandTotalClaims = weeklyResult.GrandTotalClaims;
+                    vm.WeeklyGrandTotalCharges = weeklyResult.GrandTotalCharges;
+                    break;
+                }
+                case "coding-pane":
+                {
+                    var codingResult = await SnapshotOrLive(
+                        () => _augSummaryRepo.GetCodingAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => _nwSummaryRepo.GetCodingAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => genericSummaryRepo!.GetCodingAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => _productionReportRepo.GetCodingAsync(connStr, livePanelFilter, ct));
+                    if (vm.FilterPanelNamesExclude && vm.FilterPanelNames.Count > 0)
+                    {
+                        var exc = vm.FilterPanelNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        codingResult.PanelRows.RemoveAll(p => exc.Contains(p.PanelName));
+                    }
+                    vm.CodingPanelRows = codingResult.PanelRows;
+                    vm.CodingGrandTotalClaims = codingResult.GrandTotalClaims;
+                    vm.CodingGrandTotalCharges = codingResult.GrandTotalCharges;
+                    break;
+                }
+                case "payer-breakdown-pane":
+                {
+                    var pbResult = await SnapshotOrLive(
+                        () => _augSummaryRepo.GetPayerBreakdownAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => _nwSummaryRepo.GetPayerBreakdownAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => genericSummaryRepo!.GetPayerBreakdownAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => _productionReportRepo.GetPayerBreakdownAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
+                            productionRule, ct, panelNewStrict: false));
+                    if (vm.FilterPayerNamesExclude && vm.FilterPayerNames.Count > 0)
+                    {
+                        var exc = vm.FilterPayerNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        pbResult.PayerRows.RemoveAll(r => exc.Contains(r.PayerName));
+                    }
+                    vm.PayerBreakdownMonths = pbResult.Months;
+                    vm.PayerBreakdownYears = pbResult.Years;
+                    vm.PayerBreakdownRows = pbResult.PayerRows;
+                    vm.PayerBreakdownGrandByMonth = pbResult.GrandTotalByMonth;
+                    vm.PayerBreakdownGrandTotal = pbResult.GrandTotal;
+                    vm.PayerBreakdownGrandChargesByMonth = pbResult.GrandTotalChargesByMonth ?? [];
+                    vm.PayerBreakdownGrandTotalCharges = pbResult.GrandTotalCharges;
+                    break;
+                }
+                case "payer-panel-pane":
+                {
+                    var pxpResult = await SnapshotOrLive(
+                        () => _augSummaryRepo.GetPayerByPanelAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => _nwSummaryRepo.GetPayerByPanelAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => genericSummaryRepo!.GetPayerByPanelAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => _productionReportRepo.GetPayerPanelAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
+                            productionRule, ct, panelNewStrict: false));
+                    if (vm.FilterPayerNamesExclude && vm.FilterPayerNames.Count > 0)
+                    {
+                        var exc = vm.FilterPayerNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        pxpResult.PayerRows.RemoveAll(r => exc.Contains(r.PayerName));
+                    }
+                    if (vm.FilterPanelNamesExclude && vm.FilterPanelNames.Count > 0)
+                    {
+                        var exc = vm.FilterPanelNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        foreach (var r in pxpResult.PayerRows)
+                        {
+                            foreach (var key in exc)
+                                r.ByPanel.Remove(key);
+                        }
+                    }
+                    vm.PayerPanelColumns = pxpResult.PanelColumns;
+                    vm.PayerPanelRows = pxpResult.PayerRows;
+                    vm.PayerPanelGrandByPanel = pxpResult.GrandTotalByPanel;
+                    vm.PayerPanelGrandTotalClaims = pxpResult.GrandTotalClaims;
+                    vm.PayerPanelGrandTotalCharges = pxpResult.GrandTotalCharges;
+                    break;
+                }
+                case "unbilled-aging-pane":
+                {
+                    var uaResult = await SnapshotOrLive(
+                        () => _augSummaryRepo.GetUnbilledAgingAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => _nwSummaryRepo.GetUnbilledAgingAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => genericSummaryRepo!.GetUnbilledAgingAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => _productionReportRepo.GetUnbilledAgingAsync(connStr, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
+                            productionRule, ct));
+                    if (vm.FilterPayerNamesExclude && vm.FilterPayerNames.Count > 0)
+                    {
+                        var exc = vm.FilterPayerNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        uaResult.PanelRows.RemoveAll(r => exc.Contains(r.PanelName));
+                    }
+                    if (vm.FilterPanelNamesExclude && vm.FilterPanelNames.Count > 0)
+                    {
+                        var exc = vm.FilterPanelNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        uaResult.PanelRows.RemoveAll(r => exc.Contains(r.PanelName));
+                    }
+                    vm.UnbilledAgingRows = uaResult.PanelRows;
+                    vm.UnbilledAgingGrandByBucket = uaResult.GrandTotalByBucket;
+                    vm.UnbilledAgingGrandTotalClaims = uaResult.GrandTotalClaims;
+                    vm.UnbilledAgingGrandTotalCharges = uaResult.GrandTotalCharges;
+                    break;
+                }
+                case "cpt-breakdown-pane":
+                {
+                    var cptResult = await SnapshotOrLive(
+                        () => _augSummaryRepo.GetCptBreakdownAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => _nwSummaryRepo.GetCptBreakdownAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => genericSummaryRepo!.GetCptBreakdownAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct),
+                        () => _productionReportRepo.GetCptBreakdownAsync(connStr,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct));
+                    vm.CptBreakdownMonths = cptResult.Months;
+                    vm.CptBreakdownYears = cptResult.Years;
+                    vm.CptBreakdownRows = cptResult.CptRows;
+                    vm.CptBreakdownGrandByMonth = cptResult.GrandTotalByMonth;
+                    vm.CptBreakdownGrandTotalUnits = cptResult.GrandTotalUnits;
+                    vm.CptBreakdownGrandTotalCharges = cptResult.GrandTotalCharges;
+                    break;
+                }
+                case "panel-breakdown-pane":
+                {
+                    PayerBreakdownResult pnlResult;
+                    if (isAugustusLab)
+                    {
+                        pnlResult = await _augSummaryRepo.GetPanelBreakdownAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
+                    }
+                    else if (isNorthWestLab || (!hasFilters && genericSummaryRepo is null))
+                    {
+                        pnlResult = await _nwSummaryRepo.GetPanelBreakdownAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
+                    }
+                    else if (genericSummaryRepo is not null)
+                    {
+                        pnlResult = await genericSummaryRepo.GetPanelBreakdownAsync(connStr, livePayerFilter, livePanelFilter,
+                            dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
+                    }
+                    else
+                    {
+                        pnlResult = new PayerBreakdownResult([], [], [], [], 0);
+                    }
+                    if (vm.FilterPayerNamesExclude && vm.FilterPayerNames.Count > 0)
+                    {
+                        var exc = vm.FilterPayerNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        foreach (var panel in pnlResult.PayerRows)
+                            panel.ChildRows.RemoveAll(c => exc.Contains(c.PayerName));
+                    }
+                    if (vm.FilterPanelNamesExclude && vm.FilterPanelNames.Count > 0)
+                    {
+                        var exc = vm.FilterPanelNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        pnlResult.PayerRows.RemoveAll(r => exc.Contains(r.PayerName));
+                    }
+                    vm.PanelBreakdownMonths = pnlResult.Months;
+                    vm.PanelBreakdownYears = pnlResult.Years;
+                    vm.PanelBreakdownRows = pnlResult.PayerRows;
+                    vm.PanelBreakdownGrandByMonth = pnlResult.GrandTotalByMonth;
+                    vm.PanelBreakdownGrandTotal = pnlResult.GrandTotal;
+                    vm.PanelBreakdownGrandChargesByMonth = pnlResult.GrandTotalChargesByMonth ?? [];
+                    vm.PanelBreakdownGrandTotalCharges = pnlResult.GrandTotalCharges;
+                    break;
+                }
+                case "insight-pane":
+                {
+                    var tDaq = _nwSummaryRepo.GetInsightBreakdownAsync(connStr, "Daq", livePayerFilter, livePanelFilter,
+                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
+                    var tWeb = _nwSummaryRepo.GetInsightBreakdownAsync(connStr, "Webpm", livePayerFilter, livePanelFilter,
+                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
+                    await Task.WhenAll(tDaq, tWeb);
+                    var insightDaqResult = tDaq.Result;
+                    var insightWebResult = tWeb.Result;
+                    if (vm.FilterPayerNamesExclude && vm.FilterPayerNames.Count > 0)
+                    {
+                        var exc = vm.FilterPayerNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        insightDaqResult.PayerRows.RemoveAll(r => exc.Contains(r.PayerName));
+                        insightWebResult.PayerRows.RemoveAll(r => exc.Contains(r.PayerName));
+                    }
+                    vm.InsightDaqMonths = insightDaqResult.Months;
+                    vm.InsightDaqYears = insightDaqResult.Years;
+                    vm.InsightDaqRows = insightDaqResult.PayerRows;
+                    vm.InsightDaqGrandByMonth = insightDaqResult.GrandTotalByMonth;
+                    vm.InsightDaqGrandTotal = insightDaqResult.GrandTotal;
+                    vm.InsightDaqGrandChargesByMonth = insightDaqResult.GrandTotalChargesByMonth ?? [];
+                    vm.InsightDaqGrandTotalCharges = insightDaqResult.GrandTotalCharges;
+                    vm.InsightWebPmMonths = insightWebResult.Months;
+                    vm.InsightWebPmYears = insightWebResult.Years;
+                    vm.InsightWebPmRows = insightWebResult.PayerRows;
+                    vm.InsightWebPmGrandByMonth = insightWebResult.GrandTotalByMonth;
+                    vm.InsightWebPmGrandTotal = insightWebResult.GrandTotal;
+                    vm.InsightWebPmGrandChargesByMonth = insightWebResult.GrandTotalChargesByMonth ?? [];
+                    vm.InsightWebPmGrandTotalCharges = insightWebResult.GrandTotalCharges;
+                    break;
+                }
+                case "highest-payer-pane":
+                {
+                    var hpResult = await _nwSummaryRepo.GetHighestPayerBreakdownAsync(connStr, livePayerFilter, livePanelFilter,
+                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
+                    if (vm.FilterPayerNamesExclude && vm.FilterPayerNames.Count > 0)
+                    {
+                        var exc = vm.FilterPayerNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        foreach (var src in hpResult.SourceRows)
+                            src.TopPayers.RemoveAll(tp => exc.Contains(tp.PayerName));
+                    }
+                    vm.HighestPayerMonths = hpResult.Months;
+                    vm.HighestPayerYears = hpResult.Years;
+                    vm.HighestPayerRows = hpResult.SourceRows;
+                    vm.HighestPayerGrandByMonth = hpResult.GrandTotalByMonth;
+                    vm.HighestPayerGrandTotalClaims = hpResult.GrandTotalClaims;
+                    vm.HighestPayerGrandTotalCharges = hpResult.GrandTotalCharges;
+                    break;
+                }
+                default:
+                    return;
+            }
+
+            entry.LoadedPanes.Add(pane);
+        }
+        finally
+        {
+            entry.Gate.Release();
         }
     }
 
@@ -2812,11 +3011,10 @@ public class DashboardController : Controller
                         selectedLab);
                 }
 
-                return PhysicalFile(
-                    recentReport.FullName,
+                return File(
+                    LabMetricsDashboard.Services.ExcelTheme.LoadWithAccounting(recentReport.FullName),
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    recentReport.Name,
-                    enableRangeProcessing: true);
+                    recentReport.Name);
             }
 
             // ── Master stopwatch + correlation scope ───────────────────────

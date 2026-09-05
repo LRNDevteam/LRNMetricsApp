@@ -131,7 +131,7 @@ public static class PayerPolicyValidationExcelBuilder
         ws.Cell(3, 1).InsertData(data);
 
         foreach (var c in MoneyColumnNumbers)
-            ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+            ws.Column(c).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
 
         ws.SheetView.FreezeRows(2);
         if (rows.Count <= FullStylingMaxRows)

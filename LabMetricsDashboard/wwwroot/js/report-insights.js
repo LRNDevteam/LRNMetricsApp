@@ -9,30 +9,45 @@
     function parseWeekRange(text) {
         const out = { start: "", end: "" };
         if (!text) return out;
-        const parts = String(text).split(/\s*[-–—to]+\s*/i).filter(Boolean);
         const toIso = s => {
-            s = s.trim();
+            s = String(s || "").trim();
             let m = s.match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})$/);
             if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+            m = s.match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{2})$/);
+            if (m) {
+                const yy = parseInt(m[3], 10);
+                const year = yy >= 70 ? 1900 + yy : 2000 + yy;
+                return `${year}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+            }
             m = s.match(/^(\d{4})[-.\/](\d{1,2})[-.\/](\d{1,2})$/);
             if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
             const d = new Date(s);
             return isNaN(d) ? "" : d.toISOString().slice(0, 10);
         };
+        const tokens = String(text).match(/\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[.\/]\d{1,2}[.\/]\d{2,4}/g) || [];
+        if (tokens.length >= 2) {
+            out.start = toIso(tokens[0]);
+            out.end = toIso(tokens[tokens.length - 1]);
+            return out;
+        }
+        if (tokens.length === 1) {
+            out.start = out.end = toIso(tokens[0]);
+            return out;
+        }
+        const parts = String(text).split(/\s+[-–—]\s+|\s+to\s+/i).filter(Boolean);
         if (parts.length >= 2) { out.start = toIso(parts[0]); out.end = toIso(parts[1]); }
         else if (parts.length === 1) out.start = out.end = toIso(parts[0]);
         return out;
     }
 
     const wk = parseWeekRange(root.dataset.weekText || "");
-    const todayIso = new Date().toISOString().slice(0, 10);
     const ctx = {
         lab: root.dataset.lab || "",
         reportName: root.dataset.reportName || "Production Report",
         runId: root.dataset.runId || "",
         weekText: root.dataset.weekText || "",
-        weekStart: root.dataset.weekStart || wk.start || todayIso,
-        weekEnd: root.dataset.weekEnd || wk.end || wk.start || todayIso,
+        weekStart: root.dataset.weekStart || wk.start || "",
+        weekEnd: root.dataset.weekEnd || wk.end || wk.start || "",
         token: (root.querySelector('input[name="__RequestVerificationToken"]') || {}).value || ""
     };
     const apiBase = (root.dataset.base || "/").replace(/\/$/, "");
@@ -98,7 +113,11 @@
         historyTimeline: document.getElementById("riHistoryTimeline"),
         historySummary: document.getElementById("riHistorySummary"),
         historyNoteBadge: document.getElementById("riHistoryNoteBadge"),
-        archiveBody: document.getElementById("riArchiveBody")
+        archiveBody: document.getElementById("riArchiveBody"),
+        expandBtn: document.getElementById("riExpandBtn"),
+        expandBody: document.getElementById("riExpandBody"),
+        floatWin: document.getElementById("riFloat"),
+        minimizeBtn: document.getElementById("riMinimizeBtn")
     };
 
     let lookups = { risks: [], statuses: [], responsibleParties: [] };
@@ -196,7 +215,9 @@
         if (v == null || v === "") return "";
         const n = Number(v);
         if (isNaN(n)) return esc(v);
-        return "$ " + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+        if (n === 0) return "$ -";
+        const abs = Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
+        return n < 0 ? "$ (" + abs + ")" : "$ " + abs;
     }
 
     function partyOptions(sel) {
@@ -222,27 +243,38 @@
         return opts.map(s => `<option value="${esc(s.code)}" ${s.code === sel ? "selected" : ""}>${esc(s.label || s.code)}</option>`).join("");
     }
 
-    function renderRows() {
+    function bindRowActs(container) {
+        if (!container) return;
+        container.querySelectorAll("[data-view]").forEach(btn => {
+            btn.onclick = () => openDetail(rows.find(r => String(r.noteId) === btn.getAttribute("data-view")), false);
+        });
+        container.querySelectorAll("[data-hist]").forEach(btn => {
+            btn.onclick = () => openHistory(+btn.getAttribute("data-hist"));
+        });
+    }
+
+    function buildTableHtml(opts) {
+        const float = !!(opts && opts.float);
         const L = reportLayout();
-        const colCount = 15;
+        const colCount = float ? 14 : 15;
         const thead = `<thead><tr>
             <th>#</th><th>Risk</th><th>Responsible Party</th><th class="ri-insights">Insights</th>
             <th>${esc(L.claims)}</th><th>${esc(L.charge)}</th><th>${esc(L.data)}</th>
             <th class="ri-action">${esc(L.action)}</th>
             <th>Feedback / Response</th><th>${esc(L.owner)}</th>
-            <th>Discussion Date</th><th>ETA</th><th>Closed Date</th><th>Status</th><th></th>
+            <th>Discussion Date</th><th>ETA</th><th>Closed Date</th><th>Status</th>${float ? "" : "<th></th>"}
         </tr></thead>`;
-        const tfoot = `<tfoot><tr class="ri-foot-row"><td colspan="${colCount}"><div class="ri-footer">${esc(L.footer)}<small>${esc(L.footerSub)}</small></div></td></tr></tfoot>`;
-        if (!rows.length) {
-            el.body.innerHTML = `<table class="ri-table">${thead}<tbody><tr><td colspan="${colCount}" class="itm-empty">No insights yet. Click Add Insight to capture the first row.</td></tr></tbody>${tfoot}</table>`;
-            return;
-        }
-        const html = `<table class="ri-table">${thead}<tbody>${rows.map(n => {
+        const tfoot = float ? "" : `<tfoot><tr class="ri-foot-row"><td colspan="${colCount}"><div class="ri-footer">${esc(L.footer)}<small>${esc(L.footerSub)}</small></div></td></tr></tfoot>`;
+        return `<table class="ri-table">${thead}<tbody>${rows.map(n => {
             const risk = riskDisplay(n);
             const st = n.statusLabel || n.statusCode || "";
             const discuss = /yet to discuss|discuss/i.test(st);
             const link = n.dataLink ? `<a class="ri-link" href="${esc(n.dataLink)}" target="_blank" rel="noopener">Link</a>` : "";
             const carry = n.archiveStatus === "Carry Forward" ? `<span class="ri-carry">Carry Forward</span>` : "";
+            const acts = float ? "" : `<td class="ri-row-acts">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-view="${n.noteId}">View</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-hist="${n.noteId}">History</button>
+                </td>`;
             return `<tr>
                 <td>${esc(n.entryNo ?? "")}${carry}</td>
                 <td class="ri-risk-${esc(risk)}">${esc(risk)}</td>
@@ -258,19 +290,59 @@
                 <td>${esc(fmtShort(n.eta))}</td>
                 <td>${esc(fmtShort(n.closedDate))}</td>
                 <td class="${discuss ? "ri-status-discuss" : ""}">${esc(st)}</td>
-                <td class="ri-row-acts">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" data-view="${n.noteId}">View</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" data-hist="${n.noteId}">History</button>
-                </td>
+                ${acts}
             </tr>`;
         }).join("")}</tbody>${tfoot}</table>`;
+    }
+
+    function emptyHtml() {
+        return `<div class="ri-empty">No insights added for the current week range.</div>`;
+    }
+
+    function weekKey(s) {
+        return String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+    }
+
+    function inCurrentWeek(n) {
+        if (!ctx.weekStart && !ctx.weekText) return true;
+        const hasStart = n && n.weekRangeStart != null && String(n.weekRangeStart) !== "";
+        const hasText = !!(n && n.weekRangeText);
+        if (!hasStart && !hasText) return true;
+        if (ctx.weekStart && hasStart) {
+            const raw = String(n.weekRangeStart);
+            const ws = isoDate(n.weekRangeStart) || (raw.length >= 10 ? raw.slice(0, 10) : "");
+            if (ws && ws === ctx.weekStart) return true;
+        }
+        if (ctx.weekText && hasText && weekKey(n.weekRangeText) === weekKey(ctx.weekText)) return true;
+        return false;
+    }
+
+    function renderRows() {
+        if (!rows.length) {
+            const html = emptyHtml();
+            el.body.innerHTML = html;
+            if (el.expandBody) el.expandBody.innerHTML = html;
+            return;
+        }
+        const html = buildTableHtml();
         el.body.innerHTML = html;
-        el.body.querySelectorAll("[data-view]").forEach(btn => {
-            btn.onclick = () => openDetail(rows.find(r => String(r.noteId) === btn.getAttribute("data-view")), false);
-        });
-        el.body.querySelectorAll("[data-hist]").forEach(btn => {
-            btn.onclick = () => openHistory(+btn.getAttribute("data-hist"));
-        });
+        bindRowActs(el.body);
+        if (el.expandBody) el.expandBody.innerHTML = buildTableHtml({ float: true });
+    }
+
+    function setFloatOpen(open) {
+        if (!el.floatWin) return;
+        el.floatWin.classList.toggle("open", !!open);
+        el.floatWin.hidden = !open;
+        if (open) {
+            el.expandBody.innerHTML = rows.length ? buildTableHtml({ float: true }) : emptyHtml();
+            el.floatWin.style.left = "50%";
+            el.floatWin.style.top = "50%";
+            el.floatWin.style.right = "auto";
+            el.floatWin.style.bottom = "auto";
+            el.floatWin.style.width = "";
+            el.floatWin.style.transform = "translate(-50%, -50%)";
+        }
     }
 
     function setDirty(on) {
@@ -650,17 +722,25 @@
     }
 
     async function loadRows() {
-        const data = await getJson(`${apiBase}/Notes/Active?${q({ lab: ctx.lab, report: ctx.reportName })}`);
-        rows = data.rows || [];
+        const params = { lab: ctx.lab, report: ctx.reportName };
+        if (ctx.weekStart) params.weekStart = ctx.weekStart;
+        const data = await getJson(`${apiBase}/Notes/Active?${q(params)}`);
+        const all = data.rows || [];
+        rows = (ctx.weekStart || ctx.weekText) ? all.filter(inCurrentWeek) : all;
         renderRows();
     }
 
+    let loadPromise = null;
+    function showPanelLoading() {
+        if (el.body) el.body.innerHTML = `<div class="ri-empty"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Loading insights…</div>`;
+    }
     async function boot() {
+        showPanelLoading();
         try {
             const avail = await getJson(`${apiBase}/Notes/Available?${q({ lab: ctx.lab })}`);
             if (!avail || !avail.available) {
                 showAlert("Insights are not enabled for this lab yet. Run the NotesInsights SQL scripts on the lab database (CoveLRN), including 07 and 08.", "info");
-                el.body.innerHTML = "";
+                el.body.innerHTML = emptyHtml();
                 el.add.disabled = true;
                 if (el.archiveBtn) el.archiveBtn.disabled = true;
                 return;
@@ -675,26 +755,63 @@
             await loadRows();
         } catch (e) {
             showAlert(e.message, "error");
-            el.body.innerHTML = "";
+            el.body.innerHTML = emptyHtml();
         }
+    }
+    function ensureLoaded() {
+        if (!loadPromise) loadPromise = boot();
+        return loadPromise;
     }
 
     el.tpl.addEventListener("change", () => {
         selectedTpl = templates.find(t => String(t.templateId) === el.tpl.value) || selectedTpl;
     });
-    el.add.addEventListener("click", () => openDetail(null, false));
+    el.add.addEventListener("click", async () => {
+        await ensureLoaded();
+        openDetail(null, false);
+    });
     el.save.addEventListener("click", save);
-    if (el.archiveBtn) el.archiveBtn.addEventListener("click", openArchive);
+    if (el.archiveBtn) el.archiveBtn.addEventListener("click", () => { ensureLoaded().then(openArchive); });
+    if (el.expandBtn) el.expandBtn.addEventListener("click", async () => {
+        setOpen(true);
+        await ensureLoaded();
+        setFloatOpen(true);
+    });
+    if (el.minimizeBtn) el.minimizeBtn.addEventListener("click", () => setFloatOpen(false));
+    (function enableFloatDrag() {
+        const win = el.floatWin;
+        const head = document.getElementById("riFloatHead");
+        if (!win || !head) return;
+        let drag = null;
+        head.addEventListener("mousedown", function (e) {
+            if (e.target.closest("button")) return;
+            const r = win.getBoundingClientRect();
+            drag = { x: e.clientX - r.left, y: e.clientY - r.top, w: r.width, h: r.height };
+            win.style.transform = "none";
+            win.style.left = r.left + "px";
+            win.style.top = r.top + "px";
+            win.style.right = "auto";
+            win.style.bottom = "auto";
+            win.style.width = r.width + "px";
+            e.preventDefault();
+        });
+        document.addEventListener("mousemove", function (e) {
+            if (!drag) return;
+            const left = Math.max(8, Math.min(window.innerWidth - drag.w - 8, e.clientX - drag.x));
+            const top = Math.max(8, Math.min(window.innerHeight - drag.h - 8, e.clientY - drag.y));
+            win.style.left = left + "px";
+            win.style.top = top + "px";
+        });
+        document.addEventListener("mouseup", function () { drag = null; });
+    })();
     if (el.historyBtn) el.historyBtn.addEventListener("click", () => {
         if (editing && editing.noteId) openHistory(editing.noteId);
     });
     const extraAdd = document.getElementById("riAddInsightBtn");
-    if (extraAdd) extraAdd.addEventListener("click", () => {
-        root.classList.remove("ri-collapsed");
-        const tog = document.getElementById("riToggle");
-        if (tog) tog.setAttribute("aria-expanded", "true");
-        try { localStorage.setItem("ri-open-" + ctx.reportName, "1"); } catch { /* ignore */ }
+    if (extraAdd) extraAdd.addEventListener("click", async () => {
+        setOpen(true);
         root.scrollIntoView({ behavior: "smooth", block: "start" });
+        await ensureLoaded();
         openDetail(null, false);
     });
 
@@ -728,18 +845,18 @@
     })();
 
     const toggle = document.getElementById("riToggle");
-    const storageKey = "ri-open-" + ctx.reportName;
     function setOpen(open) {
         root.classList.toggle("ri-collapsed", !open);
         if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
-        try { localStorage.setItem(storageKey, open ? "1" : "0"); } catch { /* ignore */ }
+        if (open) ensureLoaded();
     }
-    try {
-        if (localStorage.getItem(storageKey) === "0") setOpen(false);
-    } catch { /* ignore */ }
+    setOpen(false);
     if (toggle) {
         toggle.addEventListener("click", () => setOpen(root.classList.contains("ri-collapsed")));
     }
-
-    boot();
+    const headMain = root.querySelector(".ri-head-main h3");
+    if (headMain) {
+        headMain.style.cursor = "pointer";
+        headMain.addEventListener("click", () => setOpen(root.classList.contains("ri-collapsed")));
+    }
 })();

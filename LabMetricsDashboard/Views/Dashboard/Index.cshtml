@@ -79,9 +79,9 @@
             sb.Append($"<tr>" +
                 $"<td>{System.Net.WebUtility.HtmlEncode(row.Label)}</td>" +
                 $"<td class=\"text-center\">{row.Claims:N0}</td>" +
-                $"<td class=\"text-end\">{row.Charges:C0}</td>" +
-                $"<td class=\"text-end text-success\">{row.Payments:C0}</td>" +
-                $"<td class=\"text-end text-danger\">{row.Balance:C0}</td>" +
+                $"<td class=\"text-end\">{Text(row.Charges)}</td>" +
+                $"<td class=\"text-end text-success\">{Text(row.Payments)}</td>" +
+                $"<td class=\"text-end text-danger\">{Text(row.Balance)}</td>" +
                 $"<td>" +
                 $"<div style=\"background:#e9ecef;border-radius:4px;height:6px;overflow:hidden;margin-bottom:3px\">" +
                 $"<div style=\"width:{barPct}%;height:6px;border-radius:4px;background:linear-gradient(90deg,#1565c0,#42a5f5)\"></div></div>" +
@@ -514,21 +514,21 @@
             <div class="card border-0 shadow text-center py-4 px-2"
                  style="border-radius:14px;background:linear-gradient(135deg,#6a1b9a,#ab47bc)">
                 <div class="mb-1 fw-semibold text-white-50" style="font-size:.78rem;letter-spacing:.06em">Total Charges</div>
-                <div class="fw-bold text-white" style="font-size:1.9rem;line-height:1.2">@Model.TotalCharges.ToString("C2")</div>
+                <div class="fw-bold text-white" style="font-size:1.9rem;line-height:1.2">@Acct2(Model.TotalCharges)</div>
             </div>
         </div>
         <div class="col-6 col-md-3">
             <div class="card border-0 shadow text-center py-4 px-2"
                  style="border-radius:14px;background:linear-gradient(135deg,#1b5e20,#43a047)">
                 <div class="mb-1 fw-semibold text-white-50" style="font-size:.78rem;letter-spacing:.06em">Total Payments</div>
-                <div class="fw-bold text-white" style="font-size:1.9rem;line-height:1.2">@Model.TotalPayments.ToString("C2")</div>
+                <div class="fw-bold text-white" style="font-size:1.9rem;line-height:1.2">@Acct2(Model.TotalPayments)</div>
             </div>
         </div>
         <div class="col-6 col-md-3">
             <div class="card border-0 shadow text-center py-4 px-2"
                  style="border-radius:14px;background:linear-gradient(135deg,#b71c1c,#ef5350)">
                 <div class="mb-1 fw-semibold text-white-50" style="font-size:.78rem;letter-spacing:.06em">Outstanding Balance</div>
-                <div class="fw-bold text-white" style="font-size:1.9rem;line-height:1.2">@Model.TotalBalance.ToString("C2")</div>
+                <div class="fw-bold text-white" style="font-size:1.9rem;line-height:1.2">@Acct2(Model.TotalBalance)</div>
             </div>
         </div>
     </div>
@@ -561,8 +561,8 @@
                         </div>
                         <div style="font-size:.68rem;color:#6c757d" class="mb-1">@r.NumLabel</div>
                         <div class="d-flex justify-content-between" style="font-size:.7rem">
-                            <span class="fw-semibold text-dark">@r.Numerator.ToString("C0")</span>
-                            <span class="text-muted">/ @Model.TotalCharges.ToString("C0")</span>
+                            <span class="fw-semibold text-dark">@Acct(r.Numerator)</span>
+                            <span class="text-muted">/ @Acct(Model.TotalCharges)</span>
                         </div>
                     </div>
                 </div>
@@ -631,7 +631,7 @@
                             {
                                 <tr>
                                     <td>@kv.Key</td>
-                                    <td class="text-end">@kv.Value.ToString("C")</td>
+                                    <td class="text-end">@Acct2(kv.Value)</td>
                                 </tr>
                             }
                         </tbody>

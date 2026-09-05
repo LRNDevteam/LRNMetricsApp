@@ -1,6 +1,6 @@
 @model LabMetricsDashboard.Models.ExecSummaryDetailRowsViewModel
 @{
-    ViewData["Title"] = "Executive Summary — " + Model.Description.TrimStart();
+    ViewData["Title"] = "Executive Summary - " + Model.Description.TrimStart();
     Layout = "~/Views/Shared/_Layout.cshtml";
 
     string FmtCell(object? v) => v switch

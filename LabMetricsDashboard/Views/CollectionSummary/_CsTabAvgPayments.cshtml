@@ -37,20 +37,20 @@
                                 <i class="bi bi-chevron-right cs-ag-chevron" aria-hidden="true"></i>@panel.PanelName
                             </td>
                             <td style="text-align:right;font-weight:600">@m.ClaimCount.ToString("N0")</td>
-                            <td style="text-align:right;font-weight:600">@m.TotalCharges.ToString("C0")</td>
-                            <td style="text-align:right;font-weight:600">@m.AvgBilled.ToString("C2")</td>
+                            <td style="text-align:right;font-weight:600">@Acct(m.TotalCharges)</td>
+                            <td style="text-align:right;font-weight:600">@Acct2(m.AvgBilled)</td>
                             <td style="text-align:right;font-weight:600">@m.FullyPaidCount.ToString("N0")</td>
-                            <td style="text-align:right;font-weight:600">@m.FullyPaidAmount.ToString("C0")</td>
-                            <td style="text-align:right;font-weight:600">@m.AvgFullyPaid.ToString("C2")</td>
+                            <td style="text-align:right;font-weight:600">@Acct(m.FullyPaidAmount)</td>
+                            <td style="text-align:right;font-weight:600">@Acct2(m.AvgFullyPaid)</td>
                             <td style="text-align:right;font-weight:600">@m.AdjudicatedCount.ToString("N0")</td>
-                            <td style="text-align:right;font-weight:600">@m.AdjudicatedAmount.ToString("C0")</td>
-                            <td style="text-align:right;font-weight:600">@m.AvgAdjudicated.ToString("C2")</td>
+                            <td style="text-align:right;font-weight:600">@Acct(m.AdjudicatedAmount)</td>
+                            <td style="text-align:right;font-weight:600">@Acct2(m.AvgAdjudicated)</td>
                             <td style="text-align:right;font-weight:600">@m.Days30Count.ToString("N0")</td>
-                            <td style="text-align:right;font-weight:600">@m.Days30Amount.ToString("C0")</td>
-                            <td style="text-align:right;font-weight:600">@m.AvgDays30.ToString("C2")</td>
+                            <td style="text-align:right;font-weight:600">@Acct(m.Days30Amount)</td>
+                            <td style="text-align:right;font-weight:600">@Acct2(m.AvgDays30)</td>
                             <td style="text-align:right;font-weight:600">@m.Days60Count.ToString("N0")</td>
-                            <td style="text-align:right;font-weight:600">@m.Days60Amount.ToString("C0")</td>
-                            <td style="text-align:right;font-weight:600">@m.AvgDays60.ToString("C2")</td>
+                            <td style="text-align:right;font-weight:600">@Acct(m.Days60Amount)</td>
+                            <td style="text-align:right;font-weight:600">@Acct2(m.AvgDays60)</td>
                         </tr>
                         @foreach (var payer in panel.Payers)
                         {
@@ -59,20 +59,20 @@
                                 <td></td>
                                 <td style="text-align:left">@payer.PayerName</td>
                                 <td style="text-align:right">@pm.ClaimCount.ToString("N0")</td>
-                                <td style="text-align:right">@pm.TotalCharges.ToString("C0")</td>
-                                <td style="text-align:right">@pm.AvgBilled.ToString("C2")</td>
+                                <td style="text-align:right">@Acct(pm.TotalCharges)</td>
+                                <td style="text-align:right">@Acct2(pm.AvgBilled)</td>
                                 <td style="text-align:right">@pm.FullyPaidCount.ToString("N0")</td>
-                                <td style="text-align:right">@pm.FullyPaidAmount.ToString("C0")</td>
-                                <td style="text-align:right">@pm.AvgFullyPaid.ToString("C2")</td>
+                                <td style="text-align:right">@Acct(pm.FullyPaidAmount)</td>
+                                <td style="text-align:right">@Acct2(pm.AvgFullyPaid)</td>
                                 <td style="text-align:right">@pm.AdjudicatedCount.ToString("N0")</td>
-                                <td style="text-align:right">@pm.AdjudicatedAmount.ToString("C0")</td>
-                                <td style="text-align:right">@pm.AvgAdjudicated.ToString("C2")</td>
+                                <td style="text-align:right">@Acct(pm.AdjudicatedAmount)</td>
+                                <td style="text-align:right">@Acct2(pm.AvgAdjudicated)</td>
                                 <td style="text-align:right">@pm.Days30Count.ToString("N0")</td>
-                                <td style="text-align:right">@pm.Days30Amount.ToString("C0")</td>
-                                <td style="text-align:right">@pm.AvgDays30.ToString("C2")</td>
+                                <td style="text-align:right">@Acct(pm.Days30Amount)</td>
+                                <td style="text-align:right">@Acct2(pm.AvgDays30)</td>
                                 <td style="text-align:right">@pm.Days60Count.ToString("N0")</td>
-                                <td style="text-align:right">@pm.Days60Amount.ToString("C0")</td>
-                                <td style="text-align:right">@pm.AvgDays60.ToString("C2")</td>
+                                <td style="text-align:right">@Acct(pm.Days60Amount)</td>
+                                <td style="text-align:right">@Acct2(pm.AvgDays60)</td>
                             </tr>
                         }
                     }

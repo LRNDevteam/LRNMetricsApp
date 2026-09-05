@@ -1,4 +1,4 @@
-﻿using ClosedXML.Excel;
+using ClosedXML.Excel;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.ViewModels;
 
@@ -461,7 +461,7 @@ public static class DenialDashboardExcelExportBuilder
 
 			if (wrapColumns.Contains(header)) col.Style.Alignment.WrapText = true;
 			if (dateColumns.Contains(header)) col.Style.NumberFormat.Format = "yyyy-mm-dd";
-			if (moneyColumns.Contains(header)) col.Style.NumberFormat.Format = "$#,##0.00";
+			if (moneyColumns.Contains(header)) col.Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
 		}
 
 		for (int c = 0; c < effectiveLineHeaders.Count; c++)
@@ -559,10 +559,10 @@ public static class DenialDashboardExcelExportBuilder
 			ws.Cell(excelRow, 3).Value = item.NoOfDenialCount;
 			ws.Cell(excelRow, 4).Value = item.NoOfClaimsCount;
 			ws.Cell(excelRow, 5).Value = item.TotalBalance;
-			ws.Cell(excelRow, 5).Style.NumberFormat.Format = "$#,##0.00";
+			ws.Cell(excelRow, 5).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
 			ws.Cell(excelRow, 6).Value = item.HighImpactInsurance;
 			ws.Cell(excelRow, 7).Value = item.InsuranceBalance;
-			ws.Cell(excelRow, 7).Style.NumberFormat.Format = "$#,##0.00";
+			ws.Cell(excelRow, 7).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
 			ws.Cell(excelRow, 8).Value = item.ImpactPercentage / 100m;
 			ws.Cell(excelRow, 8).Style.NumberFormat.Format = "0.00%";
 			ws.Cell(excelRow, 9).Value = item.ActionCategory;
@@ -751,7 +751,7 @@ public static class DenialDashboardExcelExportBuilder
 				else
 				{
 					ws.Cell(dataRow, cellCol + 1).Value = cell.DenialBalance;
-					ws.Cell(dataRow, cellCol + 1).Style.NumberFormat.Format = "$#,##0.00";
+					ws.Cell(dataRow, cellCol + 1).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
 				}
 				ws.Cell(dataRow, cellCol).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 				ws.Cell(dataRow, cellCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
@@ -766,7 +766,7 @@ public static class DenialDashboardExcelExportBuilder
 			else
 			{
 				ws.Cell(dataRow, cellCol + 1).Value = row.TotalBalance;
-				ws.Cell(dataRow, cellCol + 1).Style.NumberFormat.Format = "$#,##0.00";
+				ws.Cell(dataRow, cellCol + 1).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
 			}
 			ws.Cell(dataRow, cellCol).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 			ws.Cell(dataRow, cellCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
@@ -792,7 +792,7 @@ public static class DenialDashboardExcelExportBuilder
 			else
 			{
 				ws.Cell(dataRow, totalCol + 1).Value = total.DenialBalance;
-				ws.Cell(dataRow, totalCol + 1).Style.NumberFormat.Format = "$#,##0.00";
+				ws.Cell(dataRow, totalCol + 1).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
 			}
 			totalCol += 2;
 		}
@@ -805,7 +805,7 @@ public static class DenialDashboardExcelExportBuilder
 		else
 		{
 			ws.Cell(dataRow, totalCol + 1).Value = model.GrandTotalBalance;
-			ws.Cell(dataRow, totalCol + 1).Style.NumberFormat.Format = "$#,##0.00";
+			ws.Cell(dataRow, totalCol + 1).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
 		}
 
 		ws.SheetView.FreezeRows(metricsRow);

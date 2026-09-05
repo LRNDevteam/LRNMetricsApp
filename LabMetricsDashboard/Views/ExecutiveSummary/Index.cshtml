@@ -1,9 +1,20 @@
 @model LabMetricsDashboard.Models.PhiExecutiveSummaryViewModel
 @using LabMetricsDashboard.Models
 @{
+    var esTableOnly = ViewData["EsTableOnly"] as bool? == true;
+    var esLazy = ViewData["EsLazy"] as bool? == true;
     ViewData["Title"]       = "Executive Summary";
     ViewData["SelectedLab"] = Model.SelectedLab;
-    Layout = "~/Views/Shared/_Layout.cshtml";
+    Layout = esTableOnly ? null : "~/Views/Shared/_Layout.cshtml";
+
+    bool esShowFilters = esLazy
+        || Model.AvailablePanels.Count > 0 || Model.AvailableClinics.Count > 0
+        || Model.AvailableProviders.Count > 0 || Model.AvailableReps.Count > 0;
+    bool hasFilterOptions = esShowFilters;
+    string ddPlaceholder = hasFilterOptions ? "All" : "N/A";
+    bool isNorthWestLab = Model.SelectedLab.Equals("NorthWest", StringComparison.OrdinalIgnoreCase)
+                       || Model.SelectedLab.Equals("NWL", StringComparison.OrdinalIgnoreCase)
+                       || Model.SelectedLab.Equals("NorthWest_Labs", StringComparison.OrdinalIgnoreCase);
 
     static string MonthName(int m) => m == 0 ? "Total" :
         System.Globalization.CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedMonthName(m);
@@ -15,12 +26,12 @@
     // Aria % rows store Submitted/NotSubmitted as a decimal ratio in MetricValue
     // (e.g. 0.1409). Casting to long truncates every month to 0 — that was why
     // "% of the claim submitted in the last 30 Days" showed all zeros.
-    string FmtCount(decimal v, string cat, string? rowCode = null) =>
+    IHtmlContent FmtCount(decimal v, string cat, string? rowCode = null) =>
         IsAriaPctRow(rowCode)
-            ? v.ToString("0.####")
+            ? new HtmlString(v.ToString("0.####"))
             : (cat == "Cash" || cat == "Avg")
-                ? v.ToString("C0")
-                : (v is >= long.MinValue and <= long.MaxValue
+                ? Acct(v)
+                : new HtmlString(v is >= long.MinValue and <= long.MaxValue
                     ? ((long)v).ToString("N0")
                     : v.ToString("N0"));
 
@@ -112,6 +123,8 @@
     }
 }
 
+@if (!esTableOnly)
+{
 <style>
     /* ── Page header ──────────────────────────────────────────── */
     .page-header {
@@ -365,19 +378,6 @@
 
 </style>
 
-@{
-    bool hasFilterOptions = Model.AvailablePanels.Count > 0 || Model.AvailableClinics.Count > 0
-                         || Model.AvailableProviders.Count > 0 || Model.AvailableReps.Count > 0;
-    string ddPlaceholder = hasFilterOptions ? "All" : "N/A";
-
-    // NorthWest LIMSMaster has no FirstBilledDate column — the "First Billed Date"
-    // range filter is meaningless for this lab, so its calendar controls are
-    // disabled here (server-rendered `disabled`) and re-asserted client-side.
-    bool isNorthWestLab = Model.SelectedLab.Equals("NorthWest", StringComparison.OrdinalIgnoreCase)
-                       || Model.SelectedLab.Equals("NWL", StringComparison.OrdinalIgnoreCase)
-                       || Model.SelectedLab.Equals("NorthWest_Labs", StringComparison.OrdinalIgnoreCase);
-}
-
 <div class="page-header mb-3">
     <h2 class="mb-0 fw-bold" style="font-size:1.15rem">
         <i class="bi bi-grid-3x3-gap-fill me-1"></i>Executive Summary
@@ -392,6 +392,7 @@
 </div>
 
 <!-- ── Analysis-range / RunID banner (shared partial) ───── -->
+<div id="es-analysis-banner">
 @{
     var esBanner = ViewData["AnalysisRange"] as LabMetricsDashboard.Models.AnalysisRangeInfo
         ?? new LabMetricsDashboard.Models.AnalysisRangeInfo
@@ -402,27 +403,55 @@
         };
 }
 @await Html.PartialAsync("_AnalysisRangeBanner", esBanner)
+</div>
 
 <!-- ── Filter panel ─────────────────────────────────────────── -->
-<div class="es-filter-panel mb-4" id="esFilterCard">
+<div class="rpt-filter-wrap">
+<div class="rpt-toolbar">
+    <button type="button" id="esExportExcelBtn" class="btn btn-sm btn-outline-success rpt-toolbar-btn"
+            title="Download Excel" aria-label="Download Excel">
+        <i class="bi bi-file-earmark-excel"></i>
+    </button>
+    @if (Model.SelectedLab.Equals("Beech_Tree", StringComparison.OrdinalIgnoreCase))
+    {
+        <a asp-controller="ExecutiveSummary" asp-action="ThreePillarDiagnostic"
+           asp-route-lab="@Model.SelectedLab" asp-route-months="12"
+           class="btn btn-sm btn-outline-primary rpt-toolbar-btn"
+           title="Three-Pillar Diagnostic" aria-label="Three-Pillar Diagnostic">
+            <i class="bi bi-clipboard2-pulse"></i>
+        </a>
+        <a asp-controller="ExecutiveSummary" asp-action="RevenuePipelineLis"
+           asp-route-lab="@Model.SelectedLab"
+           class="btn btn-sm btn-primary rpt-toolbar-btn"
+           title="Three-Pillar LIS" aria-label="Three-Pillar LIS">
+            <i class="bi bi-bar-chart-line"></i>
+        </a>
+    }
+</div>
+<div class="es-filter-panel rpt-filter-panel p-3" id="esFilterCard">
 
-    <!-- Header row -->
-    <div class="d-flex align-items-center justify-content-between p-3 es-filter-header"
-         id="esFilterToggle" role="button" aria-expanded="true" aria-controls="esFilterBody">
-        <span class="fw-semibold" style="font-size:.88rem">
-            <i class="bi bi-funnel-fill me-1 text-primary"></i>Filters
-            <span id="esActiveCountBadge" class="badge bg-primary ms-1" style="display:none;font-size:.68rem"></span>
+    <div class="rpt-filter-head">
+        <span class="rpt-filter-title">
+            <i class="bi bi-funnel"></i> Filters
+            <span id="esActiveCountBadge" class="badge bg-primary rpt-filter-badge ms-1" style="display:none"></span>
         </span>
-        <i class="bi bi-chevron-up es-filter-chevron"></i>
+        <div class="rpt-filter-toggle-wrap">
+            <i class="bi bi-lightning-charge-fill rpt-ds-bolt" aria-hidden="true"></i>
+            <button class="rpt-filter-toggle" type="button" id="esFilterToggle"
+                    data-rpt-filter-toggle
+                    data-bs-toggle="collapse" data-bs-target="#esFilterBody"
+                    aria-expanded="true" aria-controls="esFilterBody">
+                ▲ Hide
+            </button>
+        </div>
     </div>
 
-    <!-- Body (collapsible) -->
-    <div id="esFilterBody">
-        <form method="get" asp-controller="ExecutiveSummary" asp-action="Index" id="esFilterForm">
+    <div id="esFilterBody" class="collapse show">
+        <form method="get" asp-controller="ExecutiveSummary" asp-action="Index" id="esFilterForm" data-lab-form>
             <input type="hidden" name="lab" value="@Model.SelectedLab" />
 
             <!-- ── Section 1: Date Ranges ───────────────────────────── -->
-            <div class="px-3 pt-2 pb-1">
+            <div class="pt-1 pb-1">
                 <div class="d-flex align-items-center justify-content-between">
                     <div class="es-filter-section-label">Date Ranges</div>
                     <button type="button" id="esResetDates" class="btn btn-sm btn-outline-secondary py-0 px-2"
@@ -491,19 +520,19 @@
                 </div>
             </div>
 
-            <hr class="mx-3 my-1" />
+            <hr class="my-2" />
 
             <!-- ── Section 2: Dimension Multi-selects ──────────────── -->
-            <div class="px-3 pt-2 pb-1">
+            <div class="pt-1 pb-1">
                 <div class="es-filter-section-label">Dimensions</div>
                 <div class="row g-2">
                     <div class="col-12 col-md-6 col-xl-3">
                         <label class="es-filter-label">PANEL</label>
                         <div class="position-relative es-dropdown-wrap">
-                            <button type="button" class="es-dd-btn @(Model.AvailablePanels.Count == 0 ? "es-dd-btn-disabled" : "")"
+                            <button type="button" class="es-dd-btn @(Model.AvailablePanels.Count == 0 && !esLazy ? "es-dd-btn-disabled" : "")"
                                     data-target="selPanels" data-placeholder="All"
-                                    @(Model.AvailablePanels.Count == 0 ? "disabled title=\"No options available\"" : "")>
-                                <span class="es-dd-label es-dd-placeholder">@(Model.AvailablePanels.Count == 0 ? "N/A" : "All")</span>
+                                    @(Model.AvailablePanels.Count == 0 && !esLazy ? "disabled title=\"No options available\"" : "")>
+                                <span class="es-dd-label es-dd-placeholder">@(Model.AvailablePanels.Count == 0 && !esLazy ? "N/A" : "All")</span>
                                 <i class="bi bi-chevron-down es-dd-caret"></i>
                             </button>
                             <div class="es-dd-menu" id="menuPanels">
@@ -544,10 +573,10 @@
                     <div class="col-12 col-md-6 col-xl-3">
                         <label class="es-filter-label">CLINICS</label>
                         <div class="position-relative es-dropdown-wrap">
-                            <button type="button" class="es-dd-btn @(Model.AvailableClinics.Count == 0 ? "es-dd-btn-disabled" : "")"
+                            <button type="button" class="es-dd-btn @(Model.AvailableClinics.Count == 0 && !esLazy ? "es-dd-btn-disabled" : "")"
                                     data-target="selClinics" data-placeholder="All"
-                                    @(Model.AvailableClinics.Count == 0 ? "disabled title=\"No options available\"" : "")>
-                                <span class="es-dd-label es-dd-placeholder">@(Model.AvailableClinics.Count == 0 ? "N/A" : "All")</span>
+                                    @(Model.AvailableClinics.Count == 0 && !esLazy ? "disabled title=\"No options available\"" : "")>
+                                <span class="es-dd-label es-dd-placeholder">@(Model.AvailableClinics.Count == 0 && !esLazy ? "N/A" : "All")</span>
                                 <i class="bi bi-chevron-down es-dd-caret"></i>
                             </button>
                             <div class="es-dd-menu" id="menuClinics">
@@ -588,10 +617,10 @@
                     <div class="col-12 col-md-6 col-xl-3">
                         <label class="es-filter-label">REFERRING PROVIDER</label>
                         <div class="position-relative es-dropdown-wrap">
-                            <button type="button" class="es-dd-btn @(Model.AvailableProviders.Count == 0 ? "es-dd-btn-disabled" : "")"
+                            <button type="button" class="es-dd-btn @(Model.AvailableProviders.Count == 0 && !esLazy ? "es-dd-btn-disabled" : "")"
                                     data-target="selProviders" data-placeholder="All"
-                                    @(Model.AvailableProviders.Count == 0 ? "disabled title=\"No options available\"" : "")>
-                                <span class="es-dd-label es-dd-placeholder">@(Model.AvailableProviders.Count == 0 ? "N/A" : "All")</span>
+                                    @(Model.AvailableProviders.Count == 0 && !esLazy ? "disabled title=\"No options available\"" : "")>
+                                <span class="es-dd-label es-dd-placeholder">@(Model.AvailableProviders.Count == 0 && !esLazy ? "N/A" : "All")</span>
                                 <i class="bi bi-chevron-down es-dd-caret"></i>
                             </button>
                             <div class="es-dd-menu" id="menuProviders">
@@ -632,10 +661,10 @@
                     <div class="col-12 col-md-6 col-xl-3">
                         <label class="es-filter-label">SALES REP</label>
                         <div class="position-relative es-dropdown-wrap">
-                            <button type="button" class="es-dd-btn @(Model.AvailableReps.Count == 0 ? "es-dd-btn-disabled" : "")"
+                            <button type="button" class="es-dd-btn @(Model.AvailableReps.Count == 0 && !esLazy ? "es-dd-btn-disabled" : "")"
                                     data-target="selReps" data-placeholder="All"
-                                    @(Model.AvailableReps.Count == 0 ? "disabled title=\"No options available\"" : "")>
-                                <span class="es-dd-label es-dd-placeholder">@(Model.AvailableReps.Count == 0 ? "N/A" : "All")</span>
+                                    @(Model.AvailableReps.Count == 0 && !esLazy ? "disabled title=\"No options available\"" : "")>
+                                <span class="es-dd-label es-dd-placeholder">@(Model.AvailableReps.Count == 0 && !esLazy ? "N/A" : "All")</span>
                                 <i class="bi bi-chevron-down es-dd-caret"></i>
                             </button>
                             <div class="es-dd-menu" id="menuReps">
@@ -679,7 +708,7 @@
             <hr class="mx-3 my-1" />
 
             <!-- ── Section 3: Description Search ──────────────────── -->
-            <div class="px-3 pt-2 pb-1">
+            <div class="pt-1 pb-1">
                 <div class="es-filter-section-label">Search</div>
                 <div class="row g-2 align-items-end">
                     <div class="col-12 col-md-6">
@@ -702,44 +731,21 @@
             </div>
 
             <!-- Active filter chips -->
-            <div id="esActiveChips" class="px-3 pb-1" style="display:none">
+            <div id="esActiveChips" class="pb-1" style="display:none">
                 <div class="d-flex flex-wrap gap-1 pt-1" id="esChipsContainer"></div>
             </div>
 
             <!-- Actions -->
-            <div class="px-3 pb-3 pt-2 d-flex gap-2 align-items-center flex-wrap">
+            <div class="rpt-filter-actions">
                 <button type="submit" class="btn btn-sm btn-primary">
-                    <i class="bi bi-funnel-fill me-1"></i>Apply Filters
+                    <i class="bi bi-funnel-fill me-1"></i>Apply Filter
                 </button>
                 <a asp-controller="ExecutiveSummary" asp-action="Index" asp-route-lab="@Model.SelectedLab"
-                   class="btn btn-sm btn-outline-secondary">
-                    <i class="bi bi-x-circle me-1"></i>Clear All
-                </a>
-                <div class="ms-auto d-flex gap-2 align-items-center flex-wrap">
-                    <button type="button" id="esExportExcelBtn"
-                            class="btn btn-sm btn-success"
-                            title="Export includes last 4 weeks of Notes in a separate sheet">
-                        <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
-                    </button>
-                    @if (Model.SelectedLab.Equals("Beech_Tree", StringComparison.OrdinalIgnoreCase))
-                    {
-                        <a asp-controller="ExecutiveSummary" asp-action="ThreePillarDiagnostic"
-                           asp-route-lab="@Model.SelectedLab" asp-route-months="12"
-                           class="btn btn-sm btn-outline-primary"
-                           title="Three-Pillar Diagnostic page with charts (not an Excel export)">
-                            <i class="bi bi-clipboard2-pulse me-1"></i>Three-Pillar Diagnostic
-                        </a>
-                        <a asp-controller="ExecutiveSummary" asp-action="RevenuePipelineLis"
-                           asp-route-lab="@Model.SelectedLab"
-                           class="btn btn-sm btn-primary"
-                           title="v1.6 LIS volume and resulting timeliness (VOL-01, VOL-02, RES-01)">
-                            <i class="bi bi-bar-chart-line me-1"></i>Three-Pillar LIS
-                        </a>
-                    }
-                </div>
+                   class="btn btn-sm btn-outline-primary">Clear</a>
             </div>
         </form>
     </div>
+</div>
 </div>
 
 @* Notes & Insights callout (generic, report-agnostic component) *@
@@ -837,7 +843,9 @@
     });
 })();
 </script>
+}
 
+<div id="esTableHost">
 <div class="card">
     <div class="card-body p-0">
         @if (!string.IsNullOrEmpty(Model.ErrorMessage))
@@ -845,6 +853,13 @@
             <div class="alert alert-danger m-3">
                 <i class="bi bi-exclamation-circle-fill"></i>
                 @Model.ErrorMessage
+            </div>
+        }
+        else if (esLazy && !esTableOnly && !Model.HasData)
+        {
+            <div class="text-center p-5" id="esTableSpinner">
+                <div class="lmd-spinner mx-auto mb-2" style="width:2.2rem;height:2.2rem;border:3px solid #e2e8f0;border-top-color:#0d5c74;border-radius:50%;animation:spin .75s linear infinite;"></div>
+                <p class="mt-2 text-muted">Loading Executive Summary...</p>
             </div>
         }
         else if (!Model.HasData)
@@ -1002,7 +1017,7 @@
                                             foreach (var m in mons)
                                             {
                                                 row.ValuesByYearMonth.TryGetValue((year, m), out var v);
-                                                string cellVal = FmtCount(v, row.Category, row.RowCode);
+                                                IHtmlContent cellVal = FmtCount(v, row.Category, row.RowCode);
                                                 // Monthly cells are display-only — drill links live on the
                                                 // Year Total / Grand Total cells of the two LIS rows only.
                                                 <td><span class="es-pill@(dollarRow ? " es-pill-dollar" : "")">@cellVal</span></td>
@@ -1081,7 +1096,10 @@
         }
     </div>
 </div>
+</div>
 
+@if (!esTableOnly)
+{
 <script nonce='@Context.Items["CspNonce"]'>
     // ── Collapsible rows (3-level hierarchy) ───────────────────────────
     // Level 1: es-cat-row  → collapses es-sub-row children
@@ -1090,7 +1108,10 @@
     //          (stops at next es-sub-row OR es-cat-row)
     // State persists per RowCode via localStorage.
     document.addEventListener('DOMContentLoaded', function () {
+        window.lmdInitEsTable = function () {
         document.querySelectorAll('.es-table tbody').forEach(function (tbody) {
+            if (tbody.getAttribute('data-es-wired') === '1') return;
+            tbody.setAttribute('data-es-wired', '1');
             var rows = Array.prototype.slice.call(tbody.children).filter(function (r) {
                 return r.tagName === 'TR';
             });
@@ -1155,6 +1176,8 @@
             wireCollapse('es-sub-row',  'es-sub-sub-row', 'es-cat-row');
             wireCollapse('es-cat-row',  'es-sub-row',     'es-cat-row', 'es-sub-sub-row');
         });
+        };
+        window.lmdInitEsTable();
     });
 
     // ── Description filter (client-side only) ─────────────────────────
@@ -1187,26 +1210,7 @@
         if (clearBtn) { clearBtn.addEventListener('click', function () { input.value = ''; applyDescFilter(); input.focus(); }); }
     });
 
-    // ── Filter panel collapse/expand ───────────────────────────────────
-    document.addEventListener('DOMContentLoaded', function () {
-        var toggle = document.getElementById('esFilterToggle');
-        var body   = document.getElementById('esFilterBody');
-        var card   = document.getElementById('esFilterCard');
-        if (!toggle || !body) return;
-
-        toggle.addEventListener('click', function () {
-            var open = body.style.display !== 'none' && body.style.display !== '';
-            if (open || body.offsetParent !== null) {
-                body.style.display = 'none';
-                card.classList.add('collapsed');
-                toggle.setAttribute('aria-expanded', 'false');
-            } else {
-                body.style.display = '';
-                card.classList.remove('collapsed');
-                toggle.setAttribute('aria-expanded', 'true');
-            }
-        });
-    });
+    // ── Filter panel collapse/expand (shared Show/Hide toggle in site.js) ──
 
     // ── Custom checkbox-dropdown widget ────────────────────────────────
     document.addEventListener('DOMContentLoaded', function () {
@@ -1506,4 +1510,91 @@
             });
         }
     });
+
+    (function () {
+        var host = document.getElementById('esTableHost');
+        if (!host || !document.getElementById('esTableSpinner')) return;
+        if (window.lmdFpLog) window.lmdFpLog('spinner-on', 'page landed — in-page spinner on');
+        var qs = window.location.search || '';
+        fetch('@Url.Action("GetTable", "ExecutiveSummary")' + qs, { credentials: 'same-origin' })
+            .then(function (r) { return r.text(); })
+            .then(function (html) {
+                var tmp = document.createElement('div');
+                tmp.innerHTML = html;
+                var card = tmp.querySelector('.card') || tmp;
+                host.innerHTML = card.outerHTML || html;
+                if (window.lmdInitEsTable) window.lmdInitEsTable();
+                if (window.lmdFpLog) window.lmdFpLog('monthly-html', 'executive table HTML on screen');
+            })
+            .catch(function () {
+                host.innerHTML = '<div class="alert alert-danger m-3">Failed to load Executive Summary. Please refresh the page.</div>';
+            });
+
+        fetch('@Url.Action("FilterOptions", "ExecutiveSummary")' + qs, { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || d.error) return;
+                function fillList(listId, selectId, names, selected) {
+                    var list = document.getElementById(listId);
+                    var sel = document.getElementById(selectId);
+                    if (!list || !names) return;
+                    var selectedSet = {};
+                    (selected || []).forEach(function (v) { selectedSet[v] = true; });
+                    list.innerHTML = '';
+                    if (sel) sel.innerHTML = '';
+                    names.forEach(function (name) {
+                        var label = document.createElement('label');
+                        label.className = 'es-dd-item';
+                        var cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.value = name;
+                        if (selectedSet[name]) cb.checked = true;
+                        label.appendChild(cb);
+                        label.appendChild(document.createTextNode(name));
+                        list.appendChild(label);
+                        if (sel) {
+                            var opt = document.createElement('option');
+                            opt.value = name;
+                            opt.textContent = name;
+                            if (selectedSet[name]) opt.selected = true;
+                            sel.appendChild(opt);
+                        }
+                    });
+                    var btn = list.closest('.es-dropdown-wrap') && list.closest('.es-dropdown-wrap').querySelector('.es-dd-btn');
+                    if (btn) {
+                        btn.disabled = names.length === 0;
+                        btn.classList.toggle('es-dd-btn-disabled', names.length === 0);
+                    }
+                }
+                fillList('listPanels', 'selPanels', d.panels);
+                fillList('listClinics', 'selClinics', d.clinics);
+                fillList('listProviders', 'selProviders', d.providers);
+                fillList('listReps', 'selReps', d.reps);
+                var banner = document.getElementById('es-analysis-banner');
+                if (banner && (d.weekFolder || d.runId || d.inserted)) {
+                    var wrap = document.createElement('div');
+                    wrap.className = 'd-flex flex-wrap gap-3 align-items-center mb-3 px-1';
+                    wrap.style.fontSize = '.82rem';
+                    wrap.style.color = '#374151';
+                    var range = document.createElement('span');
+                    range.innerHTML = '<span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">Analysis Range:</span><span class="ms-1 fw-semibold text-dark">Billed Week Range</span>';
+                    if (d.weekFolder) {
+                        var dash = document.createElement('span');
+                        dash.className = 'ms-1 text-muted';
+                        dash.textContent = ' - ';
+                        var folder = document.createElement('span');
+                        folder.className = 'ms-1 fw-semibold';
+                        folder.style.color = '#0e3460';
+                        folder.textContent = d.weekFolder;
+                        range.appendChild(dash);
+                        range.appendChild(folder);
+                    }
+                    wrap.appendChild(range);
+                    banner.innerHTML = '';
+                    banner.appendChild(wrap);
+                }
+            })
+            .catch(function () { });
+    })();
 </script>
+}

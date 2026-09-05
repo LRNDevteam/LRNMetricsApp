@@ -36,11 +36,11 @@
                                 {
                                     if (row.AvgByMonth.TryGetValue(month, out var avg))
                                     {
-                                        <td class="text-end">@avg.ToString("C0")</td>
+                                        <td class="text-end">@Acct(avg)</td>
                                     }
                                     else
                                     {
-                                        <td class="text-center text-muted">–</td>
+                                        <td class="text-center text-muted">ï¿½</td>
                                     }
                                 }
                             </tr>

@@ -1,7 +1,7 @@
 @model LabMetricsDashboard.Models.ExecSummaryLisDrillViewModel
 @using System.Globalization
 @{
-    ViewData["Title"] = "Insight Drill-Through — " + Model.MetricTitle;
+    ViewData["Title"] = "Insight Drill-Through - " + Model.MetricTitle;
     Layout = "~/Views/Shared/_Layout.cshtml";
 
     // WeekFolder end day → CutoffDate.Day → ComparableDayWindow → 9
@@ -14,9 +14,9 @@
     // Cash drills must show US "$" — InvariantCulture's "C" uses ¤; server culture may use another symbol.
     var usd = CultureInfo.GetCultureInfo("en-US");
     bool isCash = Model.IsCashDrill;
-    string Num(long v)      => isCash ? v.ToString("C0", usd) : v.ToString("N0", ci);
+    string Num(long v)      => isCash ? Text(v) : v.ToString("N0", ci);
     string Dec(decimal? v)  => v is { } d
-        ? (isCash ? d.ToString("C0", usd) : d.ToString("#,##0.###", ci))
+        ? (isCash ? Text(d) : d.ToString("#,##0.###", ci))
         : "—";
     string Pct(decimal? v)  => v is { } d ? (d >= 0 ? "+" : "") + d.ToString("0.0", ci) + "%" : "—";
     string DeltaCls(decimal? v) => v is { } d ? (d >= 0 ? "up" : "down") : "flat";
@@ -456,7 +456,7 @@
             @if (Model.SelectedValue is { } sv && sv != 0)
             {
                 <div class="mt-2" style="font-size:.9rem">
-                    Executive Summary cell showed <strong>@(isCash ? sv.ToString("C0", usd) : ((long)sv).ToString("N0"))</strong>.
+                    Executive Summary cell showed <strong>@(isCash ? Text(sv) : ((long)sv).ToString("N0"))</strong>.
                 </div>
             }
         </div>

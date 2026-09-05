@@ -97,7 +97,7 @@ public static class SalesRepSummaryExcelExportBuilder
         {
             var col = ws.Column(c + 1);
             if (moneyCols.Contains(c) || avgCols.Contains(c))
-                col.Style.NumberFormat.Format = "$#,##0";
+                col.Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
             else if (pctCols.Contains(c))
                 col.Style.NumberFormat.Format = "0\"%\"";
             else if (countCols.Contains(c))
@@ -213,8 +213,8 @@ public static class SalesRepSummaryExcelExportBuilder
             ws.Cell(rowNum, 5).Value = item.CollectionPct;
 
             ws.Cell(rowNum, 2).Style.NumberFormat.Format = "#,##0";
-            ws.Cell(rowNum, 3).Style.NumberFormat.Format = "$#,##0";
-            ws.Cell(rowNum, 4).Style.NumberFormat.Format = "$#,##0";
+            ws.Cell(rowNum, 3).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ws.Cell(rowNum, 4).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
             ws.Cell(rowNum, 5).Style.NumberFormat.Format = "0.0\"%\"";
 
             for (int c = 1; c <= 5; c++)
@@ -269,8 +269,8 @@ public static class SalesRepSummaryExcelExportBuilder
             ws.Cell(rowNum, 5).Value = item.DenialPct;
 
             ws.Cell(rowNum, 2).Style.NumberFormat.Format = "#,##0";
-            ws.Cell(rowNum, 3).Style.NumberFormat.Format = "$#,##0";
-            ws.Cell(rowNum, 4).Style.NumberFormat.Format = "$#,##0";
+            ws.Cell(rowNum, 3).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ws.Cell(rowNum, 4).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
             ws.Cell(rowNum, 5).Style.NumberFormat.Format = "0.0\"%\"";
 
             for (int c = 1; c <= 5; c++)

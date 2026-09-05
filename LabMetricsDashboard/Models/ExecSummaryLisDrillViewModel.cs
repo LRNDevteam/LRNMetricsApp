@@ -217,7 +217,7 @@ public sealed class ExecSummaryLisDrillViewModel
 
     public string SelectedValueFormatted =>
         SelectedValue is not { } v ? string.Empty :
-        IsCashDrill ? v.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US")) :
+        IsCashDrill ? LabMetricsDashboard.Helpers.AccountingHtml.Text(v) :
         ((long)v).ToString("N0");
 
     /// <summary>URL back to the Executive Summary index (preserving filters).</summary>

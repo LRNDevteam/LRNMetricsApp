@@ -74,7 +74,7 @@
     </a>
     <ul class="dropdown-menu">
         <li>
-            <a class="dropdown-item" asp-controller="LisSummary" asp-action="Index">
+            <a class="dropdown-item" asp-controller="LisSummary" asp-action="Index" data-lab-link="LIS Summary">
                 <i class="bi bi-clipboard2-pulse-fill"></i> LIS Summary
             </a>
         </li>
@@ -82,7 +82,7 @@
                         @if (labConfig?.EnableProductionSummaryReport ?? false)
                         {
                             <li>
-                                <a class="dropdown-item" asp-controller="Dashboard" asp-action="ProductionSummaryReport">
+                                <a class="dropdown-item" asp-controller="Dashboard" asp-action="ProductionSummaryReport" data-lab-link="Production Summary Report">
                                     <i class="bi bi-bar-chart-steps"></i> Production Summary Report
                                 </a>
                             </li>

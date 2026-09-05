@@ -38,6 +38,15 @@ public static class ExcelTheme
     /// <summary>Accent 4 (Gold) — used for "Total" column headers and highlights.</summary>
     public static readonly XLColor GoldAccent = XLColor.FromHtml("#FFC000");
 
+    /// <summary>
+    /// Excel Accounting (USD, 0 decimals): $ aligned left, value right,
+    /// negatives in parentheses, zero as a dash. Not Currency (<c>$#,##0</c>).
+    /// </summary>
+    public const string AccountingNumberFormat = @"_($* #,##0_);_($* (#,##0);_($* ""-""??_);_(@_)";
+
+    /// <summary>Excel Accounting (USD, 2 decimals).</summary>
+    public const string AccountingNumberFormat2 = @"_($* #,##0.00_);_($* (#,##0.00);_($* ""-""??_);_(@_)";
+
     /// <summary>Accent 6 Lighter 60 % — used for group / category rows (bold parent rows).</summary>
     public static readonly XLColor GroupRowBg = XLColor.FromHtml("#C5E0B4");
 

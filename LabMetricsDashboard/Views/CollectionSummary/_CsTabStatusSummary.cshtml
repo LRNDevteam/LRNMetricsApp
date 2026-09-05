@@ -1,4 +1,4 @@
-﻿@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+@model LabMetricsDashboard.Models.CollectionSummaryViewModel
 @if (Model.StatusSummary.HasData)
 {
     int ssIdx = 0;
@@ -44,9 +44,9 @@
                             @csRow.ClaimStatus
                         </td>
                         <td style="text-align:right">@csRow.NoClaims.ToString("N0")</td>
-                        <td style="text-align:right">@(csRow.InsurancePayments == 0 ? "-" : csRow.InsurancePayments.ToString("C2"))</td>
-                        <td style="text-align:right">@(csRow.InsuranceBalance  == 0 ? "-" : csRow.InsuranceBalance.ToString("C2"))</td>
-                        <td style="text-align:right">@(csRow.PatientBalance    == 0 ? "-" : csRow.PatientBalance.ToString("C2"))</td>
+                        <td style="text-align:right">@Acct2(csRow.InsurancePayments)</td>
+                        <td style="text-align:right">@Acct2(csRow.InsuranceBalance)</td>
+                        <td style="text-align:right">@Acct2(csRow.PatientBalance)</td>
                     </tr>
                     int panelIdx = 0;
                     foreach (var panelRow in csRow.PanelRows)
@@ -61,9 +61,9 @@
                                 <i class="bi bi-grid-3x3-gap" style="font-size:.7rem;opacity:.55;margin-right:3px"></i>@panelRow.PanelName
                             </td>
                             <td style="text-align:right">@panelRow.NoClaims.ToString("N0")</td>
-                            <td style="text-align:right">@(panelRow.InsurancePayments == 0 ? "-" : panelRow.InsurancePayments.ToString("C2"))</td>
-                            <td style="text-align:right">@(panelRow.InsuranceBalance  == 0 ? "-" : panelRow.InsuranceBalance.ToString("C2"))</td>
-                            <td style="text-align:right">@(panelRow.PatientBalance    == 0 ? "-" : panelRow.PatientBalance.ToString("C2"))</td>
+                            <td style="text-align:right">@Acct2(panelRow.InsurancePayments)</td>
+                            <td style="text-align:right">@Acct2(panelRow.InsuranceBalance)</td>
+                            <td style="text-align:right">@Acct2(panelRow.PatientBalance)</td>
                         </tr>
                         int cptIdx = 0;
                         foreach (var cptRow in panelRow.CptRows)
@@ -78,9 +78,9 @@
                                     <i class="bi bi-tag" style="font-size:.65rem;opacity:.45;margin-right:3px"></i>@cptRow.CptCode
                                 </td>
                                 <td style="text-align:right">@cptRow.NoClaims.ToString("N0")</td>
-                                <td style="text-align:right">@(cptRow.InsurancePayments == 0 ? "-" : cptRow.InsurancePayments.ToString("C2"))</td>
-                                <td style="text-align:right">@(cptRow.InsuranceBalance  == 0 ? "-" : cptRow.InsuranceBalance.ToString("C2"))</td>
-                                <td style="text-align:right">@(cptRow.PatientBalance    == 0 ? "-" : cptRow.PatientBalance.ToString("C2"))</td>
+                                <td style="text-align:right">@Acct2(cptRow.InsurancePayments)</td>
+                                <td style="text-align:right">@Acct2(cptRow.InsuranceBalance)</td>
+                                <td style="text-align:right">@Acct2(cptRow.PatientBalance)</td>
                             </tr>
                             foreach (var payerRow in cptRow.Payers)
                             {
@@ -89,9 +89,9 @@
                                         <i class="bi bi-building" style="font-size:.65rem;opacity:.4;margin-right:3px"></i>@payerRow.PayerName
                                     </td>
                                     <td style="text-align:right">@payerRow.NoClaims.ToString("N0")</td>
-                                    <td style="text-align:right">@(payerRow.InsurancePayments == 0 ? "-" : payerRow.InsurancePayments.ToString("C2"))</td>
-                                    <td style="text-align:right">@(payerRow.InsuranceBalance  == 0 ? "-" : payerRow.InsuranceBalance.ToString("C2"))</td>
-                                    <td style="text-align:right">@(payerRow.PatientBalance    == 0 ? "-" : payerRow.PatientBalance.ToString("C2"))</td>
+                                    <td style="text-align:right">@Acct2(payerRow.InsurancePayments)</td>
+                                    <td style="text-align:right">@Acct2(payerRow.InsuranceBalance)</td>
+                                    <td style="text-align:right">@Acct2(payerRow.PatientBalance)</td>
                                 </tr>
                             }
                         }
@@ -102,9 +102,9 @@
                     <tr style="background:#0d3460;color:#fff;font-weight:600;font-size:.79rem">
                         <td style="text-align:left;padding-left:.5rem">Grand Total</td>
                         <td style="text-align:right">@Model.StatusSummary.GrandNoClaims.ToString("N0")</td>
-                        <td style="text-align:right">@(Model.StatusSummary.GrandInsurancePayments == 0 ? "-" : Model.StatusSummary.GrandInsurancePayments.ToString("C2"))</td>
-                        <td style="text-align:right">@(Model.StatusSummary.GrandInsuranceBalance  == 0 ? "-" : Model.StatusSummary.GrandInsuranceBalance.ToString("C2"))</td>
-                        <td style="text-align:right">@(Model.StatusSummary.GrandPatientBalance    == 0 ? "-" : Model.StatusSummary.GrandPatientBalance.ToString("C2"))</td>
+                        <td style="text-align:right">@Acct2(Model.StatusSummary.GrandInsurancePayments)</td>
+                        <td style="text-align:right">@Acct2(Model.StatusSummary.GrandInsuranceBalance)</td>
+                        <td style="text-align:right">@Acct2(Model.StatusSummary.GrandPatientBalance)</td>
                     </tr>
                 </tfoot>
             </table>

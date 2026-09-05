@@ -44,6 +44,7 @@ public static class InsightsExcelBuilder
     {
         using var wb = new XLWorkbook(workbookPath);
         InsertAsFirstSheet(wb, insights, labName, reportName);
+        ExcelTheme.ConvertCurrencyFormatsToAccounting(wb);
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
         return ms.ToArray();
@@ -132,34 +133,46 @@ public static class InsightsExcelBuilder
         foreach (var n in insights.OrderBy(x => x.EntryNo ?? int.MaxValue).ThenBy(x => x.NoteId))
         {
             ws.Cell(row, 1).Value = n.EntryNo ?? displayNo;
-            ws.Cell(row, 2).Value = DisplayRisk(n);
-            ws.Cell(row, 3).Value = n.ResponsibleParty ?? "";
-            ws.Cell(row, 4).Value = StripHtml(n.Insights);
+            ws.Cell(row, 2).Value = ExcelTheme.SanitizeText(DisplayRisk(n));
+            ws.Cell(row, 3).Value = ExcelTheme.SanitizeText(n.ResponsibleParty ?? "");
+            ws.Cell(row, 4).Value = ExcelTheme.SanitizeText(StripHtml(n.Insights));
             if (n.NoOfSamples.HasValue) ws.Cell(row, 5).Value = n.NoOfSamples.Value;
             if (n.TotalCharge.HasValue)
             {
                 ws.Cell(row, 6).Value = n.TotalCharge.Value;
-                ws.Cell(row, 6).Style.NumberFormat.Format = "\"$\" #,##0";
+                ws.Cell(row, 6).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
                 ws.Cell(row, 6).Style.Font.Bold = true;
             }
 
             if (!string.IsNullOrWhiteSpace(n.DataLink))
             {
                 var dataCell = ws.Cell(row, 7);
-                dataCell.Value = "Link";
-                try { dataCell.SetHyperlink(new XLHyperlink(n.DataLink)); }
-                catch { dataCell.Value = n.DataLink; }
-                dataCell.Style.Font.FontColor = LinkBlue;
-                dataCell.Style.Font.Underline = XLFontUnderlineValues.Single;
+                var link = n.DataLink.Trim();
+                dataCell.Value = ExcelTheme.SanitizeText(link);
+                if (Uri.TryCreate(link, UriKind.Absolute, out var uri)
+                    && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeMailto))
+                {
+                    try
+                    {
+                        dataCell.Value = "Link";
+                        dataCell.SetHyperlink(new XLHyperlink(uri.AbsoluteUri));
+                        dataCell.Style.Font.FontColor = LinkBlue;
+                        dataCell.Style.Font.Underline = XLFontUnderlineValues.Single;
+                    }
+                    catch
+                    {
+                        dataCell.Value = ExcelTheme.SanitizeText(link);
+                    }
+                }
             }
 
-            ws.Cell(row, 8).Value = StripHtml(n.ActionSolution);
-            ws.Cell(row, 9).Value = StripHtml(n.FeedbackResponse);
-            ws.Cell(row, 10).Value = n.Responsibility ?? "";
+            ws.Cell(row, 8).Value = ExcelTheme.SanitizeText(StripHtml(n.ActionSolution));
+            ws.Cell(row, 9).Value = ExcelTheme.SanitizeText(StripHtml(n.FeedbackResponse));
+            ws.Cell(row, 10).Value = ExcelTheme.SanitizeText(n.Responsibility ?? "");
             WriteDate(ws.Cell(row, 11), n.DiscussionDate);
             WriteDate(ws.Cell(row, 12), n.ETA);
             WriteDate(ws.Cell(row, 13), n.ClosedDate);
-            ws.Cell(row, 14).Value = n.StatusLabel ?? n.StatusCode;
+            ws.Cell(row, 14).Value = ExcelTheme.SanitizeText(n.StatusLabel ?? n.StatusCode);
 
             ApplyRiskStyle(ws.Cell(row, 2), n);
             ApplyStatusStyle(ws.Cell(row, 14), n);
@@ -218,7 +231,13 @@ public static class InsightsExcelBuilder
     private static void WriteDate(IXLCell cell, DateTime? value)
     {
         if (!value.HasValue) return;
-        cell.Value = value.Value;
+        var dt = value.Value;
+        if (dt.Year < 1900 || dt.Year > 9999)
+        {
+            cell.Value = dt.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            return;
+        }
+        cell.Value = dt;
         cell.Style.DateFormat.Format = "d-MMM";
     }
 
@@ -277,6 +296,6 @@ public static class InsightsExcelBuilder
                     .Replace("</p>", "\n", StringComparison.OrdinalIgnoreCase)
                     .Replace("</li>", "\n", StringComparison.OrdinalIgnoreCase)
                     .Replace("<li>", "• ", StringComparison.OrdinalIgnoreCase);
-        return System.Text.RegularExpressions.Regex.Replace(s, "<[^>]+>", "").Trim();
+        return ExcelTheme.SanitizeText(System.Text.RegularExpressions.Regex.Replace(s, "<[^>]+>", "").Trim());
     }
 }

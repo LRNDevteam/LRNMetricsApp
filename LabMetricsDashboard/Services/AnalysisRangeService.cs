@@ -21,8 +21,9 @@ public sealed class AnalysisRangeService : IAnalysisRangeService
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
 
-            // Prefer LineClaimFileLogs (same source as Production Report).
-            var fromLogs = await TryReadAsync(conn, @"
+            // LineClaimFileLogs only. A ClaimLevelData ORDER BY RunId scan on a large
+            // lab can add several seconds to Production Summary first paint.
+            return await TryReadAsync(conn, @"
 IF OBJECT_ID('dbo.LineClaimFileLogs','U') IS NULL RETURN;
 SELECT TOP 1
        CAST(WeekFolder AS NVARCHAR(200)),
@@ -30,21 +31,7 @@ SELECT TOP 1
        InsertedDateTime
 FROM dbo.LineClaimFileLogs
 WHERE NULLIF(LTRIM(RTRIM(CAST(RunId AS NVARCHAR(50)))), '') IS NOT NULL
-ORDER BY CAST(RunId AS NVARCHAR(50)) DESC, FileLogId DESC;", ct);
-            if (fromLogs.HasAny)
-                return fromLogs;
-
-            // Fallback: latest ClaimLevelData row.
-            return await TryReadAsync(conn, @"
-IF OBJECT_ID('dbo.ClaimLevelData','U') IS NULL RETURN;
-IF COL_LENGTH('dbo.ClaimLevelData','RunId') IS NULL RETURN;
-SELECT TOP 1
-       CAST(WeekFolder AS NVARCHAR(200)),
-       CAST(RunId AS NVARCHAR(50)),
-       TRY_CONVERT(datetime, InsertedDateTime)
-FROM dbo.ClaimLevelData
-WHERE NULLIF(LTRIM(RTRIM(CAST(RunId AS NVARCHAR(50)))), '') IS NOT NULL
-ORDER BY CAST(RunId AS NVARCHAR(50)) DESC;", ct);
+ORDER BY FileLogId DESC;", ct);
         }
         catch (Exception ex)
         {
@@ -56,7 +43,7 @@ ORDER BY CAST(RunId AS NVARCHAR(50)) DESC;", ct);
     private static async Task<AnalysisRangeInfo> TryReadAsync(
         SqlConnection conn, string sql, CancellationToken ct)
     {
-        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 30 };
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 8 };
         await using var rdr = await cmd.ExecuteReaderAsync(ct);
         if (!await rdr.ReadAsync(ct))
             return AnalysisRangeInfo.Empty;

@@ -46,9 +46,9 @@
                             var nrBg  = cpt.NoResponseRate == 0 ? "#2e7d32" : "#e65100";
                             <tr>
                                 <td class="fw-semibold">@cpt.CPTCode</td>
-                                <td class="text-end">@cpt.Charges.ToString("C0")</td>
-                                <td class="text-end">@cpt.AllowedAmount.ToString("C0")</td>
-                                <td class="text-end">@cpt.InsuranceBalance.ToString("C0")</td>
+                                <td class="text-end">@Acct(cpt.Charges)</td>
+                                <td class="text-end">@Acct(cpt.AllowedAmount)</td>
+                                <td class="text-end">@Acct(cpt.InsuranceBalance)</td>
                                 <td class="text-center">
                                     <span class="badge rounded-pill px-3 py-1 fw-bold"
                                           style="background:@colBg;font-size:.75rem">@cpt.CollectionRate%</span>

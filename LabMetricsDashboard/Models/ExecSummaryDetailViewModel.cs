@@ -45,7 +45,7 @@ public sealed class ExecSummaryDetailViewModel
     /// <summary>Selected value formatted as currency (Cash/Avg categories) or a whole-number count.</summary>
     public string SelectedValueFormatted =>
         SelectedValue is not { } v ? string.Empty :
-        (Category is "Cash" or "Avg") ? v.ToString("C0") : ((long)v).ToString("N0");
+        (Category is "Cash" or "Avg") ? LabMetricsDashboard.Helpers.AccountingHtml.Text(v) : ((long)v).ToString("N0");
 
     /// <summary>URL to return to the Executive Summary index (with original filters).</summary>
     public string BackUrl     { get; set; } = string.Empty;

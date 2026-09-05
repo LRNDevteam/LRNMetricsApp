@@ -476,21 +476,21 @@ public static class ProductionReportExcelExportBuilder
                 ws.Cell(row, gtCol).Value = cell.ClaimCount;
                 ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
                 ws.Cell(row, gtCol).Value = cell.BilledCharges;
-                ws.Cell(row, gtCol++).Style.NumberFormat.Format = "$#,##0";
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
             }
             int yClaims   = vm.GrandTotalByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.ClaimCount);
             decimal yCharges = vm.GrandTotalByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.BilledCharges);
             ws.Cell(row, gtCol).Value = yClaims;
             ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
             ws.Cell(row, gtCol).Value = yCharges;
-            ws.Cell(row, gtCol++).Style.NumberFormat.Format = "$#,##0";
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
         }
         int grandClaims   = vm.GrandTotalByMonth.Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.ClaimCount);
         decimal grandCharges = vm.GrandTotalByMonth.Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.BilledCharges);
         ws.Cell(row, gtCol).Value = grandClaims;
         ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
         ws.Cell(row, gtCol).Value = grandCharges;
-        ws.Cell(row, gtCol).Style.NumberFormat.Format = "$#,##0";
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
         row++;
 
         // Footer note
@@ -638,12 +638,12 @@ public static class ProductionReportExcelExportBuilder
             ws.Cell(row, gtCol).Value = cell.ClaimCount;
             ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
             ws.Cell(row, gtCol).Value = cell.BilledCharges;
-            ws.Cell(row, gtCol++).Style.NumberFormat.Format = "$#,##0";
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
         }
         ws.Cell(row, gtCol).Value = vm.WeeklyGrandTotalClaims;
         ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
         ws.Cell(row, gtCol).Value = vm.WeeklyGrandTotalCharges;
-        ws.Cell(row, gtCol).Style.NumberFormat.Format = "$#,##0";
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
         row++;
 
         // Footer note
@@ -697,7 +697,7 @@ public static class ProductionReportExcelExportBuilder
         ws.Cell(row, 2).Value = vm.CodingGrandTotalClaims;
         ws.Cell(row, 2).Style.NumberFormat.NumberFormatId = 3;
         ws.Cell(row, 3).Value = vm.CodingGrandTotalCharges;
-        ws.Cell(row, 3).Style.NumberFormat.Format = "$#,##0";
+        ws.Cell(row, 3).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
 
         ExcelTheme.AutoFitColumns(ws, colCount);
         ExcelTheme.FinishOutline(ws);
@@ -840,7 +840,7 @@ public static class ProductionReportExcelExportBuilder
                 if (showCharges)
                 {
                     ws.Cell(row, gtCol).Value = vm.PayerBreakdownGrandChargesByMonth.GetValueOrDefault(mk, 0m);
-                    ws.Cell(row, gtCol++).Style.NumberFormat.Format = "$#,##0";
+                    ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
                 }
             }
             int yTotal = vm.PayerBreakdownGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
@@ -850,7 +850,7 @@ public static class ProductionReportExcelExportBuilder
             {
                 decimal yCharges = vm.PayerBreakdownGrandChargesByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
                 ws.Cell(row, gtCol).Value = yCharges;
-                ws.Cell(row, gtCol++).Style.NumberFormat.Format = "$#,##0";
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
             }
         }
         ws.Cell(row, gtCol).Value = vm.PayerBreakdownGrandTotal;
@@ -858,7 +858,7 @@ public static class ProductionReportExcelExportBuilder
         if (showCharges)
         {
             ws.Cell(row, gtCol + 1).Value = vm.PayerBreakdownGrandTotalCharges;
-            ws.Cell(row, gtCol + 1).Style.NumberFormat.Format = "$#,##0";
+            ws.Cell(row, gtCol + 1).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
         }
 
         ExcelTheme.AutoFitColumns(ws, colCount);
@@ -991,19 +991,19 @@ public static class ProductionReportExcelExportBuilder
                 ws.Cell(row, gtCol).Value = vm.PanelBreakdownGrandByMonth.GetValueOrDefault(mk, 0);
                 ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
                 ws.Cell(row, gtCol).Value = vm.PanelBreakdownGrandChargesByMonth.GetValueOrDefault(mk, 0m);
-                ws.Cell(row, gtCol++).Style.NumberFormat.Format = "$#,##0";
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
             }
             int yTotal = vm.PanelBreakdownGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
             decimal yCharges = vm.PanelBreakdownGrandChargesByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
             ws.Cell(row, gtCol).Value = yTotal;
             ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
             ws.Cell(row, gtCol).Value = yCharges;
-            ws.Cell(row, gtCol++).Style.NumberFormat.Format = "$#,##0";
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
         }
         ws.Cell(row, gtCol).Value = vm.PanelBreakdownGrandTotal;
         ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
         ws.Cell(row, gtCol).Value = vm.PanelBreakdownGrandTotalCharges;
-        ws.Cell(row, gtCol).Style.NumberFormat.Format = "$#,##0";
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
 
         ExcelTheme.AutoFitColumns(ws, colCount);
         ExcelTheme.FinishOutline(ws);
@@ -1065,7 +1065,7 @@ public static class ProductionReportExcelExportBuilder
         ws.Cell(row, 2).Value = vm.PayerPanelGrandTotalClaims;
         ws.Cell(row, 2).Style.NumberFormat.NumberFormatId = 3;
         ws.Cell(row, 3).Value = vm.PayerPanelGrandTotalCharges;
-        ws.Cell(row, 3).Style.NumberFormat.Format = "$#,##0";
+        ws.Cell(row, 3).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
 
         ExcelTheme.AutoFitColumns(ws, colCount);
         ExcelTheme.FinishOutline(ws);
@@ -1140,12 +1140,12 @@ public static class ProductionReportExcelExportBuilder
             ws.Cell(row, gtCol).Value = cell.ClaimCount;
             ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
             ws.Cell(row, gtCol).Value = cell.BilledCharges;
-            ws.Cell(row, gtCol++).Style.NumberFormat.Format = "$#,##0";
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
         }
         ws.Cell(row, gtCol).Value = vm.UnbilledAgingGrandTotalClaims;
         ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
         ws.Cell(row, gtCol).Value = vm.UnbilledAgingGrandTotalCharges;
-        ws.Cell(row, gtCol).Style.NumberFormat.Format = "$#,##0";
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
 
         ExcelTheme.AutoFitColumns(ws, colCount);
     }
@@ -1305,7 +1305,7 @@ public static class ProductionReportExcelExportBuilder
                     ws.Cell(row, gtCol++).Style.NumberFormat.Format = "#,##0";
                 }
                 ws.Cell(row, gtCol).Value = cell.BilledCharges;
-                ws.Cell(row, gtCol++).Style.NumberFormat.Format = "$#,##0";
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
             }
             if (showCptCount)
             {
@@ -1321,7 +1321,7 @@ public static class ProductionReportExcelExportBuilder
             }
             decimal yCharges = vm.CptBreakdownGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.BilledCharges);
             ws.Cell(row, gtCol).Value = yCharges;
-            ws.Cell(row, gtCol++).Style.NumberFormat.Format = "$#,##0";
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
         }
         if (showCptCount)
         {
@@ -1337,7 +1337,7 @@ public static class ProductionReportExcelExportBuilder
         }
         decimal cptGrandCharges = vm.CptBreakdownGrandByMonth.Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.BilledCharges);
         ws.Cell(row, gtCol).Value = cptGrandCharges;
-        ws.Cell(row, gtCol).Style.NumberFormat.Format = "$#,##0";
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
 
         ExcelTheme.AutoFitColumns(ws, colCount);
         ExcelTheme.FinishOutline(ws);
@@ -1437,7 +1437,7 @@ public static class ProductionReportExcelExportBuilder
     {
         var cell = ws.Cell(row, col);
         cell.Value = value;
-        cell.Style.NumberFormat.Format = "$#,##0";
+        cell.Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
         ExcelTheme.StyleDataCell(cell, bg);
     }
 

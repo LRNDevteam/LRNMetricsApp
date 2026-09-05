@@ -19,6 +19,28 @@ public sealed class MenuAccessFilter : IAsyncAuthorizationFilter
         "Account", "Home", "Usage", "HelpBot"
     };
 
+    private static readonly HashSet<string> AllowedDashboardActions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "FirstPaintClient",
+        "ProductionSummaryReportTab",
+        "ProductionSummaryReportMeta",
+    };
+
+    private static readonly HashSet<string> AllowedCollectionActions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "GetTabPartial", "GetMeta",
+    };
+
+    private static readonly HashSet<string> AllowedLisActions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "GetSummary", "GetMeta",
+    };
+
+    private static readonly HashSet<string> AllowedExecutiveActions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "GetTable", "FilterOptions",
+    };
+
     private readonly IMenuService _menuService;
 
     public MenuAccessFilter(IMenuService menuService)
@@ -41,9 +63,31 @@ public sealed class MenuAccessFilter : IAsyncAuthorizationFilter
         var action = routeValues["action"] as string;
         if (string.IsNullOrWhiteSpace(controller) || string.IsNullOrWhiteSpace(action)) return;
         if (AllowedControllers.Contains(controller)) return;
+        if (string.Equals(controller, "Dashboard", StringComparison.OrdinalIgnoreCase)
+            && AllowedDashboardActions.Contains(action))
+            return;
+        if (string.Equals(controller, "CollectionSummary", StringComparison.OrdinalIgnoreCase)
+            && AllowedCollectionActions.Contains(action))
+            return;
+        if (string.Equals(controller, "LisSummary", StringComparison.OrdinalIgnoreCase)
+            && AllowedLisActions.Contains(action))
+            return;
+        if (string.Equals(controller, "ExecutiveSummary", StringComparison.OrdinalIgnoreCase)
+            && AllowedExecutiveActions.Contains(action))
+            return;
 
         var area = routeValues["area"] as string;
+        var menuSw = System.Diagnostics.Stopwatch.StartNew();
         var allowed = await _menuService.CanAccessAsync(user, area, controller, action, context.HttpContext.RequestAborted);
+        if (menuSw.ElapsedMilliseconds >= 200)
+        {
+            FirstPaintLog.Write(
+                Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+                "Menu",
+                controller ?? "",
+                $"{controller}/{action}",
+                menuSw.ElapsedMilliseconds);
+        }
         if (!allowed)
         {
             context.Result = new ForbidResult(); // -> Account/AccessDenied

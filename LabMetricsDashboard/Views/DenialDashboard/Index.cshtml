@@ -1,10 +1,10 @@
-﻿@using System.Linq
+@using System.Linq
 @using System.Globalization
 @using System.Text.Json
 @model DashboardPageViewModel
 @{
     var usd = CultureInfo.GetCultureInfo("en-US");
-    string Money(decimal? amount) => (amount ?? 0m).ToString("C2", usd);
+    IHtmlContent Money(decimal? amount) => Acct2(amount ?? 0m);
     string PercentWidth(decimal percentage) => Math.Clamp((double)percentage, 0d, 100d).ToString("0.#", CultureInfo.InvariantCulture);
     IReadOnlyList<string> SelectedValues(string? raw, bool treatAllAsEmpty = false)
     {
@@ -151,7 +151,7 @@
     string Txt(string? value) => string.IsNullOrWhiteSpace(value) ? Dash : value.Trim();
     string Dt(DateTime? value) => value?.ToString("MM/dd/yyyy") ?? Dash;
     string Cnt(int? value) => value?.ToString("N0", usd) ?? Dash;
-    string Amt(decimal? value) => value.HasValue ? value.Value.ToString("C2", usd) : Dash;
+    string Amt(decimal? value) => value.HasValue ? Text(value.Value, 2) : Dash;
     string Dec(decimal? value) => value?.ToString("N2", usd) ?? Dash;
 
     // Every dbo.DenialLineItem column carried by DenialLineItemRecord, in table order.

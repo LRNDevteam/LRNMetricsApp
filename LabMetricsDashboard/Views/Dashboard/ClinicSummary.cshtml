@@ -1,6 +1,6 @@
 @model LabMetricsDashboard.Models.ClinicSummaryViewModel
 @{
-    ViewData["Title"]       = $"Clinic Summary – {Model.SelectedLab}";
+    ViewData["Title"]       = $"Clinic Summary - {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Clinic Summary";
 }
@@ -467,32 +467,32 @@
             <div class="cs-stat">
                 <i class="bi bi-receipt cs-stat-icon" style="color:#d4b8a8"></i>
                 <span class="cs-stat-label">Billed</span>
-                <span class="cs-stat-val v-brown">@Model.Totals.TotalBilledCharges.ToString("C0")</span>
+                <span class="cs-stat-val v-brown">@Acct(Model.Totals.TotalBilledCharges)</span>
             </div>
             <div class="cs-stat">
                 <i class="bi bi-cash-stack cs-stat-icon" style="color:#8fd4a0"></i>
                 <span class="cs-stat-label">Allowed</span>
-                <span class="cs-stat-val v-green">@Model.Totals.TotalAllowedAmount.ToString("C0")</span>
+                <span class="cs-stat-val v-green">@Acct(Model.Totals.TotalAllowedAmount)</span>
             </div>
             <div class="cs-stat">
                 <i class="bi bi-cash-coin cs-stat-icon" style="color:#c8b0d8"></i>
                 <span class="cs-stat-label">Ins. Paid</span>
-                <span class="cs-stat-val v-plum">@Model.Totals.TotalInsurancePaidAmount.ToString("C0")</span>
+                <span class="cs-stat-val v-plum">@Acct(Model.Totals.TotalInsurancePaidAmount)</span>
             </div>
             <div class="cs-stat">
                 <i class="bi bi-person-fill cs-stat-icon" style="color:#8b8da8"></i>
                 <span class="cs-stat-label">Patient Resp.</span>
-                <span class="cs-stat-val v-navy">@Model.Totals.TotalPatientResponsibility.ToString("C0")</span>
+                <span class="cs-stat-val v-navy">@Acct(Model.Totals.TotalPatientResponsibility)</span>
             </div>
             <div class="cs-stat">
                 <i class="bi bi-shield-x cs-stat-icon" style="color:#f8a4a8"></i>
                 <span class="cs-stat-label">Denied</span>
-                <span class="cs-stat-val v-red">@Model.Totals.TotalDeniedCharges.ToString("C0")</span>
+                <span class="cs-stat-val v-red">@Acct(Model.Totals.TotalDeniedCharges)</span>
             </div>
             <div class="cs-stat">
                 <i class="bi bi-clock-history cs-stat-icon" style="color:#b8c4c6"></i>
                 <span class="cs-stat-label">Outstanding</span>
-                <span class="cs-stat-val v-slate">@Model.Totals.TotalOutstandingCharges.ToString("C0")</span>
+                <span class="cs-stat-val v-slate">@Acct(Model.Totals.TotalOutstandingCharges)</span>
             </div>
         </div>
     </div>
@@ -560,15 +560,15 @@
                         <td class="cs-cnt col-grp-count">@row.PaidClaimCount</td>
                         <td class="cs-cnt col-grp-count">@row.DeniedClaimCount</td>
                         <td class="cs-cnt col-grp-count">@row.OutstandingClaimCount</td>
-                        <td class="cs-money col-grp-money">@row.TotalBilledCharges.ToString("C2")</td>
-                        <td class="cs-money col-grp-money">@row.TotalBilledChargeOnPaidClaim.ToString("C2")</td>
-                        <td class="cs-money col-grp-money">@row.TotalAllowedAmount.ToString("C2")</td>
-                        <td class="cs-money col-grp-money">@row.TotalInsurancePaidAmount.ToString("C2")</td>
-                        <td class="cs-money col-grp-money">@row.TotalPatientResponsibility.ToString("C2")</td>
-                        <td class="cs-money col-grp-money">@row.TotalDeniedCharges.ToString("C2")</td>
-                        <td class="cs-money col-grp-money">@row.TotalOutstandingCharges.ToString("C2")</td>
-                        <td class="cs-money col-grp-avg">@row.AverageAllowedAmount.ToString("C2")</td>
-                        <td class="cs-money col-grp-avg">@row.AverageInsurancePaidAmount.ToString("C2")</td>
+                        <td class="cs-money col-grp-money">@Acct2(row.TotalBilledCharges)</td>
+                        <td class="cs-money col-grp-money">@Acct2(row.TotalBilledChargeOnPaidClaim)</td>
+                        <td class="cs-money col-grp-money">@Acct2(row.TotalAllowedAmount)</td>
+                        <td class="cs-money col-grp-money">@Acct2(row.TotalInsurancePaidAmount)</td>
+                        <td class="cs-money col-grp-money">@Acct2(row.TotalPatientResponsibility)</td>
+                        <td class="cs-money col-grp-money">@Acct2(row.TotalDeniedCharges)</td>
+                        <td class="cs-money col-grp-money">@Acct2(row.TotalOutstandingCharges)</td>
+                        <td class="cs-money col-grp-avg">@Acct2(row.AverageAllowedAmount)</td>
+                        <td class="cs-money col-grp-avg">@Acct2(row.AverageInsurancePaidAmount)</td>
                         <td class="cs-pct col-grp-pct">@Html.Raw(PlainPctCell(row.AveragePaymentPct))</td>
                         <td class="cs-pct col-grp-pct">@Html.Raw(PlainPctCell(row.DeniedClaimPct))</td>
                         <td class="cs-pct col-grp-pct">@Html.Raw(PlainPctCell(row.OutstandingClaimPct))</td>
@@ -587,15 +587,15 @@
                     <td class="col-grp-count">@Model.Totals.PaidClaimCount.ToString("N0")</td>
                     <td class="col-grp-count">@Model.Totals.DeniedClaimCount.ToString("N0")</td>
                     <td class="col-grp-count">@Model.Totals.OutstandingClaimCount.ToString("N0")</td>
-                    <td class="col-grp-money">@Model.Totals.TotalBilledCharges.ToString("C2")</td>
-                    <td class="col-grp-money">@Model.Totals.TotalBilledChargeOnPaidClaim.ToString("C2")</td>
-                    <td class="col-grp-money">@Model.Totals.TotalAllowedAmount.ToString("C2")</td>
-                    <td class="col-grp-money">@Model.Totals.TotalInsurancePaidAmount.ToString("C2")</td>
-                    <td class="col-grp-money">@Model.Totals.TotalPatientResponsibility.ToString("C2")</td>
-                    <td class="col-grp-money">@Model.Totals.TotalDeniedCharges.ToString("C2")</td>
-                    <td class="col-grp-money">@Model.Totals.TotalOutstandingCharges.ToString("C2")</td>
-                    <td class="col-grp-avg">@Model.Totals.AverageAllowedAmount.ToString("C2")</td>
-                    <td class="col-grp-avg">@Model.Totals.AverageInsurancePaidAmount.ToString("C2")</td>
+                    <td class="col-grp-money">@Acct2(Model.Totals.TotalBilledCharges)</td>
+                    <td class="col-grp-money">@Acct2(Model.Totals.TotalBilledChargeOnPaidClaim)</td>
+                    <td class="col-grp-money">@Acct2(Model.Totals.TotalAllowedAmount)</td>
+                    <td class="col-grp-money">@Acct2(Model.Totals.TotalInsurancePaidAmount)</td>
+                    <td class="col-grp-money">@Acct2(Model.Totals.TotalPatientResponsibility)</td>
+                    <td class="col-grp-money">@Acct2(Model.Totals.TotalDeniedCharges)</td>
+                    <td class="col-grp-money">@Acct2(Model.Totals.TotalOutstandingCharges)</td>
+                    <td class="col-grp-avg">@Acct2(Model.Totals.AverageAllowedAmount)</td>
+                    <td class="col-grp-avg">@Acct2(Model.Totals.AverageInsurancePaidAmount)</td>
                     <td class="col-grp-pct">@Html.Raw(PlainPctCell(Model.Totals.AveragePaymentPct))</td>
                     <td class="col-grp-pct">@Html.Raw(PlainPctCell(Model.Totals.DeniedClaimPct))</td>
                     <td class="col-grp-pct">@Html.Raw(PlainPctCell(Model.Totals.OutstandingClaimPct))</td>
@@ -650,8 +650,8 @@
                                         <tr>
                                             <td title="@item.Name">@item.Name</td>
                                             <td class="cs-cnt">@item.ClaimCount.ToString("N0")</td>
-                                            <td class="cs-money">@item.TotalBilledCharges.ToString("C0")</td>
-                                            <td class="cs-money">@item.TotalInsurancePaid.ToString("C0")</td>
+                                            <td class="cs-money">@Acct(item.TotalBilledCharges)</td>
+                                            <td class="cs-money">@Acct(item.TotalInsurancePaid)</td>
                                             <td class="cs-pct">@Html.Raw(CollectedPctCell(item.CollectionPct))</td>
                                         </tr>
                                     }
@@ -689,8 +689,8 @@
                                             <tr class="clinic-breakdown-parent" data-clinic-breakdown-target="@detailId">
                                                 <td title="@group.Clinic.Name"><i class="bi bi-chevron-right clinic-breakdown-chevron me-1"></i>@group.Clinic.Name</td>
                                                 <td class="cs-cnt">@group.Clinic.ClaimCount.ToString("N0")</td>
-                                                <td class="cs-money">@group.Clinic.TotalBilledCharges.ToString("C0")</td>
-                                                <td class="cs-money">@group.Clinic.TotalInsurancePaid.ToString("C0")</td>
+                                                <td class="cs-money">@Acct(group.Clinic.TotalBilledCharges)</td>
+                                                <td class="cs-money">@Acct(group.Clinic.TotalInsurancePaid)</td>
                                                 <td class="cs-pct">@Html.Raw(CollectedPctCell(group.Clinic.CollectionPct))</td>
                                             </tr>
                                             <tr class="clinic-breakdown-detail" id="@detailId" style="display:none">
@@ -705,8 +705,8 @@
                                                                 <tr>
                                                                     <td title="@item.Name" style="padding:.3rem .5rem">@item.Name</td>
                                                                     <td class="cs-cnt" style="padding:.3rem .5rem">@item.ClaimCount.ToString("N0")</td>
-                                                                    <td class="cs-money" style="padding:.3rem .5rem">@item.TotalBilledCharges.ToString("C0")</td>
-                                                                    <td class="cs-money" style="padding:.3rem .5rem">@item.TotalInsurancePaid.ToString("C0")</td>
+                                                                    <td class="cs-money" style="padding:.3rem .5rem">@Acct(item.TotalBilledCharges)</td>
+                                                                    <td class="cs-money" style="padding:.3rem .5rem">@Acct(item.TotalInsurancePaid)</td>
                                                                     <td class="cs-pct" style="padding:.3rem .5rem">@Html.Raw(CollectedPctCell(item.CollectionPct))</td>
                                                                 </tr>
                                                             }
@@ -750,8 +750,8 @@
                                         <tr>
                                             <td title="@item.Name">@item.Name</td>
                                             <td class="cs-cnt">@item.DeniedClaimCount.ToString("N0")</td>
-                                            <td class="cs-money">@item.TotalBilledCharges.ToString("C0")</td>
-                                            <td class="cs-money">@item.TotalDeniedCharges.ToString("C0")</td>
+                                            <td class="cs-money">@Acct(item.TotalBilledCharges)</td>
+                                            <td class="cs-money">@Acct(item.TotalDeniedCharges)</td>
                                             <td class="cs-pct">@Html.Raw(DeniedPctCell(item.DenialPct))</td>
                                         </tr>
                                     }
@@ -789,8 +789,8 @@
                                             <tr class="clinic-breakdown-parent" data-clinic-breakdown-target="@detailId">
                                                 <td title="@group.Clinic.Name"><i class="bi bi-chevron-right clinic-breakdown-chevron me-1"></i>@group.Clinic.Name</td>
                                                 <td class="cs-cnt">@group.Clinic.DeniedClaimCount.ToString("N0")</td>
-                                                <td class="cs-money">@group.Clinic.TotalBilledCharges.ToString("C0")</td>
-                                                <td class="cs-money">@group.Clinic.TotalDeniedCharges.ToString("C0")</td>
+                                                <td class="cs-money">@Acct(group.Clinic.TotalBilledCharges)</td>
+                                                <td class="cs-money">@Acct(group.Clinic.TotalDeniedCharges)</td>
                                                 <td class="cs-pct">@Html.Raw(DeniedPctCell(group.Clinic.DenialPct))</td>
                                             </tr>
                                             <tr class="clinic-breakdown-detail" id="@detailId" style="display:none">
@@ -805,8 +805,8 @@
                                                                 <tr>
                                                                     <td title="@item.Name" style="padding:.3rem .5rem">@item.Name</td>
                                                                     <td class="cs-cnt" style="padding:.3rem .5rem">@item.DeniedClaimCount.ToString("N0")</td>
-                                                                    <td class="cs-money" style="padding:.3rem .5rem">@item.TotalBilledCharges.ToString("C0")</td>
-                                                                    <td class="cs-money" style="padding:.3rem .5rem">@item.TotalDeniedCharges.ToString("C0")</td>
+                                                                    <td class="cs-money" style="padding:.3rem .5rem">@Acct(item.TotalBilledCharges)</td>
+                                                                    <td class="cs-money" style="padding:.3rem .5rem">@Acct(item.TotalDeniedCharges)</td>
                                                                     <td class="cs-pct" style="padding:.3rem .5rem">@Html.Raw(DeniedPctCell(item.DenialPct))</td>
                                                                 </tr>
                                                             }

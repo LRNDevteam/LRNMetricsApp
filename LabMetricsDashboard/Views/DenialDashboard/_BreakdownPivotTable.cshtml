@@ -2,7 +2,7 @@
 @using System.Globalization
 
 @{
-    string Money(decimal amount) => amount.ToString("$#,##0.00", CultureInfo.GetCultureInfo("en-US"));
+    IHtmlContent Money(decimal amount) => Acct2(amount);
     var colSpan = 2 + (Model.Periods.Count * 2) + 2;
     var tableId = "pivot_" + Guid.NewGuid().ToString("N");
     var groupNumber = 0;

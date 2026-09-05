@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using LabMetricsDashboard.Services;
 using LRN.ReportQueue.Shared;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LabMetricsDashboard.Controllers;
@@ -267,18 +269,20 @@ public class UserReportsController : Controller
     }
 
     /// <summary>
-    /// POST /UserReports/Download?lab=…&id=…&token=…
+    /// GET or POST /UserReports/Download?lab=…&id=…&token=…
     /// Auth + ownership + token verified against the lab DB; file streamed
     /// (never redirected/exposed), then status → Downloaded.
     ///
-    /// POST rather than GET for two reasons: a GET cannot carry an antiforgery token, and
-    /// this action is not a pure read — MarkDownloadedAsync below flips the row to Downloaded
-    /// and increments DownloadCount, so it must not be reachable by a cross-site request that
-    /// merely causes the browser to navigate. lab/id/token still bind from the query string.
-    /// Trigger it with lrnPostDownload(url) rather than a plain link.
+    /// GET is required for large Excel files: Chrome can resume a dropped GET with
+    /// Range requests. The previous POST+antiforgery download could not resume, so a
+    /// mid-file drop showed "Site wasn't available" and restarted at 0 MB.
+    /// CSRF is covered by the unguessable DownloadToken plus the auth cookie — not by
+    /// antiforgery. POST is still accepted so older clients keep working.
     /// </summary>
+    [HttpGet]
     [HttpPost]
-    [ValidateAntiForgeryToken]
+    [IgnoreAntiforgeryToken]
+    [DisableRequestTimeout]
     public async Task<IActionResult> Download(string lab, long id, Guid token, CancellationToken ct)
     {
         // Whole action wrapped — GetForDownloadAsync/GetFilePathAsync/MarkDownloadedAsync
@@ -303,11 +307,10 @@ public class UserReportsController : Controller
             // file is genuinely gone AND when the IIS app-pool identity merely lacks folder
             // permission, which hides the real problem. Open directly and let the exception
             // type tell us which case it actually is.
-            FileStream stream;
             try
             {
-                stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
-                    bufferSize: 81920, useAsync: true);
+                using var probe = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                    bufferSize: 1, options: FileOptions.SequentialScan);
             }
             catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
             {
@@ -350,9 +353,14 @@ public class UserReportsController : Controller
                 _logger.LogWarning(ex, "Report {ReportId}: could not record download timestamp (lab={Lab}).", id, lab);
             }
 
-            return File(stream,
+            // Kernel sendfile + Range (206) so IIS does not buffer 70+ MB in managed
+            // memory and Chrome can resume after a drop instead of restarting at 0.
+            HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+            return PhysicalFile(
+                filePath,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                row.FileName ?? $"{row.ReportType}.xlsx");
+                fileDownloadName: row.FileName ?? $"{row.ReportType}.xlsx",
+                enableRangeProcessing: true);
         }
         catch (Microsoft.Data.SqlClient.SqlException ex)
         {

@@ -58,119 +58,73 @@ public sealed class ProductionReportViewModel
     public List<string> PanelNames { get; init; } = [];
 
     /// <summary>Ordered list of year/month column keys (e.g. "2025-01").</summary>
-    public List<string> Months { get; init; } = [];
+    public List<string> Months { get; set; } = [];
 
     /// <summary>Ordered list of distinct years found in the data.</summary>
-    public List<int> Years { get; init; } = [];
+    public List<int> Years { get; set; } = [];
 
     /// <summary>Panel rows sorted by grand-total claim count descending.</summary>
-    public List<ProductionPanelRow> PanelRows { get; init; } = [];
+    public List<ProductionPanelRow> PanelRows { get; set; } = [];
 
     /// <summary>Grand total across all panels for each month.</summary>
-    public Dictionary<string, ProductionMonthCell> GrandTotalByMonth { get; init; } = [];
+    public Dictionary<string, ProductionMonthCell> GrandTotalByMonth { get; set; } = [];
 
     /// <summary>Grand total claim count across all panels and months.</summary>
-    public int GrandTotalClaims { get; init; }
+    public int GrandTotalClaims { get; set; }
 
     /// <summary>Grand total billed charges across all panels and months.</summary>
-    public decimal GrandTotalCharges { get; init; }
+    public decimal GrandTotalCharges { get; set; }
 
     // ?? Weekly Claim Volume ??????????????????????????????????????
 
-    /// <summary>Ordered list of week column descriptors for the last 4 weeks.</summary>
-    public List<WeekColumn> WeekColumns { get; init; } = [];
+    public List<WeekColumn> WeekColumns { get; set; } = [];
+    public List<WeeklyPanelRow> WeeklyPanelRows { get; set; } = [];
+    public Dictionary<string, ProductionMonthCell> WeeklyGrandTotalByWeek { get; set; } = [];
+    public int WeeklyGrandTotalClaims { get; set; }
+    public decimal WeeklyGrandTotalCharges { get; set; }
 
-    /// <summary>Panel rows for the Weekly Claim Volume table, sorted by grand total descending.</summary>
-    public List<WeeklyPanelRow> WeeklyPanelRows { get; init; } = [];
+    public List<CodingPanelRow> CodingPanelRows { get; set; } = [];
+    public int CodingGrandTotalClaims { get; set; }
+    public decimal CodingGrandTotalCharges { get; set; }
 
-    /// <summary>Grand total across all panels for each week key.</summary>
-    public Dictionary<string, ProductionMonthCell> WeeklyGrandTotalByWeek { get; init; } = [];
+    public List<string> PayerBreakdownMonths { get; set; } = [];
+    public List<int> PayerBreakdownYears { get; set; } = [];
+    public List<PayerBreakdownRow> PayerBreakdownRows { get; set; } = [];
+    public Dictionary<string, int> PayerBreakdownGrandByMonth { get; set; } = [];
+    public int PayerBreakdownGrandTotal { get; set; }
+    public Dictionary<string, decimal> PayerBreakdownGrandChargesByMonth { get; set; } = [];
+    public decimal PayerBreakdownGrandTotalCharges { get; set; }
 
-    /// <summary>Grand total claim count across all panels and weeks.</summary>
-    public int WeeklyGrandTotalClaims { get; init; }
+    public List<string> PanelBreakdownMonths { get; set; } = [];
+    public List<int> PanelBreakdownYears { get; set; } = [];
+    public List<PayerBreakdownRow> PanelBreakdownRows { get; set; } = [];
+    public Dictionary<string, int> PanelBreakdownGrandByMonth { get; set; } = [];
+    public int PanelBreakdownGrandTotal { get; set; }
+    public Dictionary<string, decimal> PanelBreakdownGrandChargesByMonth { get; set; } = [];
+    public decimal PanelBreakdownGrandTotalCharges { get; set; }
 
-    /// <summary>Grand total billed charges across all panels and weeks.</summary>
-    public decimal WeeklyGrandTotalCharges { get; init; }
+    public List<string> InsightDaqMonths { get; set; } = [];
+    public List<int> InsightDaqYears { get; set; } = [];
+    public List<PayerBreakdownRow> InsightDaqRows { get; set; } = [];
+    public Dictionary<string, int> InsightDaqGrandByMonth { get; set; } = [];
+    public int InsightDaqGrandTotal { get; set; }
+    public Dictionary<string, decimal> InsightDaqGrandChargesByMonth { get; set; } = [];
+    public decimal InsightDaqGrandTotalCharges { get; set; }
 
-    // ?? Coding ???????????????????????????????????????????????????
+    public List<string> InsightWebPmMonths { get; set; } = [];
+    public List<int> InsightWebPmYears { get; set; } = [];
+    public List<PayerBreakdownRow> InsightWebPmRows { get; set; } = [];
+    public Dictionary<string, int> InsightWebPmGrandByMonth { get; set; } = [];
+    public int InsightWebPmGrandTotal { get; set; }
+    public Dictionary<string, decimal> InsightWebPmGrandChargesByMonth { get; set; } = [];
+    public decimal InsightWebPmGrandTotalCharges { get; set; }
 
-    /// <summary>Panel rows for the Coding table (where FirstBilledDate is blank), sorted by grand total descending.</summary>
-    public List<CodingPanelRow> CodingPanelRows { get; init; } = [];
-
-    /// <summary>Grand total claim count across all panels in the Coding table.</summary>
-    public int CodingGrandTotalClaims { get; init; }
-
-    /// <summary>Grand total billed charges across all panels in the Coding table.</summary>
-    public decimal CodingGrandTotalCharges { get; init; }
-
-    // ?? Payer Breakdown ???????????????????????????????????????????
-
-    /// <summary>Ordered list of year/month column keys for Payer Breakdown (ChargeEnteredDate).</summary>
-    public List<string> PayerBreakdownMonths { get; init; } = [];
-
-    /// <summary>Ordered list of distinct years in the Payer Breakdown data.</summary>
-    public List<int> PayerBreakdownYears { get; init; } = [];
-
-    /// <summary>Payer rows for the Payer Breakdown table, sorted by grand total descending.</summary>
-    public List<PayerBreakdownRow> PayerBreakdownRows { get; init; } = [];
-
-    /// <summary>Grand total per month across all payers.</summary>
-    public Dictionary<string, int> PayerBreakdownGrandByMonth { get; init; } = [];
-
-    /// <summary>Grand total claim count across all payers.</summary>
-    public int PayerBreakdownGrandTotal { get; init; }
-
-    /// <summary>Grand total ChargeAmount per month across all payers.</summary>
-    public Dictionary<string, decimal> PayerBreakdownGrandChargesByMonth { get; init; } = [];
-
-    /// <summary>Grand total ChargeAmount across all payers.</summary>
-    public decimal PayerBreakdownGrandTotalCharges { get; init; }
-
-    // ?? Panel Breakdown ???????????????????????????????????????????
-
-    /// <summary>Ordered list of year/month column keys for Panel Breakdown (ChargeEnteredDate).</summary>
-    public List<string> PanelBreakdownMonths { get; init; } = [];
-
-    /// <summary>Ordered list of distinct years in the Panel Breakdown data.</summary>
-    public List<int> PanelBreakdownYears { get; init; } = [];
-
-    /// <summary>Panel rows for the Panel Breakdown table, sorted by grand total descending.</summary>
-    public List<PayerBreakdownRow> PanelBreakdownRows { get; init; } = [];
-
-    /// <summary>Grand total unique ClaimID count per month across all panels.</summary>
-    public Dictionary<string, int> PanelBreakdownGrandByMonth { get; init; } = [];
-
-    /// <summary>Grand total unique ClaimID count across all panels.</summary>
-    public int PanelBreakdownGrandTotal { get; init; }
-
-    /// <summary>Grand total ChargeAmount per month across all panels.</summary>
-    public Dictionary<string, decimal> PanelBreakdownGrandChargesByMonth { get; init; } = [];
-
-    /// <summary>Grand total ChargeAmount across all panels.</summary>
-    public decimal PanelBreakdownGrandTotalCharges { get; init; }
-
-    public List<string> InsightDaqMonths { get; init; } = [];
-    public List<int> InsightDaqYears { get; init; } = [];
-    public List<PayerBreakdownRow> InsightDaqRows { get; init; } = [];
-    public Dictionary<string, int> InsightDaqGrandByMonth { get; init; } = [];
-    public int InsightDaqGrandTotal { get; init; }
-    public Dictionary<string, decimal> InsightDaqGrandChargesByMonth { get; init; } = [];
-    public decimal InsightDaqGrandTotalCharges { get; init; }
-
-    public List<string> InsightWebPmMonths { get; init; } = [];
-    public List<int> InsightWebPmYears { get; init; } = [];
-    public List<PayerBreakdownRow> InsightWebPmRows { get; init; } = [];
-    public Dictionary<string, int> InsightWebPmGrandByMonth { get; init; } = [];
-    public int InsightWebPmGrandTotal { get; init; }
-    public Dictionary<string, decimal> InsightWebPmGrandChargesByMonth { get; init; } = [];
-    public decimal InsightWebPmGrandTotalCharges { get; init; }
-
-    public List<string> HighestPayerMonths { get; init; } = [];
-    public List<int> HighestPayerYears { get; init; } = [];
-    public List<ProductionPanelRow> HighestPayerRows { get; init; } = [];
-    public Dictionary<string, ProductionMonthCell> HighestPayerGrandByMonth { get; init; } = [];
-    public int HighestPayerGrandTotalClaims { get; init; }
-    public decimal HighestPayerGrandTotalCharges { get; init; }
+    public List<string> HighestPayerMonths { get; set; } = [];
+    public List<int> HighestPayerYears { get; set; } = [];
+    public List<ProductionPanelRow> HighestPayerRows { get; set; } = [];
+    public Dictionary<string, ProductionMonthCell> HighestPayerGrandByMonth { get; set; } = [];
+    public int HighestPayerGrandTotalClaims { get; set; }
+    public decimal HighestPayerGrandTotalCharges { get; set; }
 
     /// <summary>True when this page is the NorthWest Production Summary.</summary>
     public bool IsNorthWestLab =>
@@ -185,53 +139,53 @@ public sealed class ProductionReportViewModel
     // ?? Payer X Panel ?????????????????????????????????????????????
 
     /// <summary>Ordered list of distinct panel names used as column headers.</summary>
-    public List<string> PayerPanelColumns { get; init; } = [];
+    public List<string> PayerPanelColumns { get; set; } = [];
 
     /// <summary>Payer rows for the Payer X Panel table, sorted by grand total descending.</summary>
-    public List<PayerPanelRow> PayerPanelRows { get; init; } = [];
+    public List<PayerPanelRow> PayerPanelRows { get; set; } = [];
 
     /// <summary>Grand total per panel across all payers (claims).</summary>
-    public Dictionary<string, ProductionMonthCell> PayerPanelGrandByPanel { get; init; } = [];
+    public Dictionary<string, ProductionMonthCell> PayerPanelGrandByPanel { get; set; } = [];
 
     /// <summary>Grand total claim count across all payers and panels.</summary>
-    public int PayerPanelGrandTotalClaims { get; init; }
+    public int PayerPanelGrandTotalClaims { get; set; }
 
     /// <summary>Grand total billed charges across all payers and panels.</summary>
-    public decimal PayerPanelGrandTotalCharges { get; init; }
+    public decimal PayerPanelGrandTotalCharges { get; set; }
 
     // ?? Unbilled X Aging ?????????????????????????????????????????
 
     /// <summary>Panel rows for the Unbilled X Aging table, sorted by grand total descending.</summary>
-    public List<UnbilledAgingRow> UnbilledAgingRows { get; init; } = [];
+    public List<UnbilledAgingRow> UnbilledAgingRows { get; set; } = [];
 
     /// <summary>Grand total per aging bucket across all panels.</summary>
-    public Dictionary<string, ProductionMonthCell> UnbilledAgingGrandByBucket { get; init; } = [];
+    public Dictionary<string, ProductionMonthCell> UnbilledAgingGrandByBucket { get; set; } = [];
 
     /// <summary>Grand total claim count across all panels and buckets.</summary>
-    public int UnbilledAgingGrandTotalClaims { get; init; }
+    public int UnbilledAgingGrandTotalClaims { get; set; }
 
     /// <summary>Grand total billed charges across all panels and buckets.</summary>
-    public decimal UnbilledAgingGrandTotalCharges { get; init; }
+    public decimal UnbilledAgingGrandTotalCharges { get; set; }
 
     // ?? CPT Breakdown ????????????????????????????????????????????
 
     /// <summary>Ordered list of year/month column keys for CPT Breakdown (FirstBilledDate).</summary>
-    public List<string> CptBreakdownMonths { get; init; } = [];
+    public List<string> CptBreakdownMonths { get; set; } = [];
 
     /// <summary>Ordered list of distinct years in the CPT Breakdown data.</summary>
-    public List<int> CptBreakdownYears { get; init; } = [];
+    public List<int> CptBreakdownYears { get; set; } = [];
 
     /// <summary>CPT rows for the CPT Breakdown table, sorted by grand total descending.</summary>
-    public List<CptBreakdownRow> CptBreakdownRows { get; init; } = [];
+    public List<CptBreakdownRow> CptBreakdownRows { get; set; } = [];
 
     /// <summary>Grand total per month across all CPT codes.</summary>
-    public Dictionary<string, CptBreakdownCell> CptBreakdownGrandByMonth { get; init; } = [];
+    public Dictionary<string, CptBreakdownCell> CptBreakdownGrandByMonth { get; set; } = [];
 
     /// <summary>Grand total units across all CPT codes.</summary>
-    public decimal CptBreakdownGrandTotalUnits { get; init; }
+    public decimal CptBreakdownGrandTotalUnits { get; set; }
 
     /// <summary>Grand total billed charges across all CPT codes.</summary>
-    public decimal CptBreakdownGrandTotalCharges { get; init; }
+    public decimal CptBreakdownGrandTotalCharges { get; set; }
 
     /// <summary>
     /// Column header for the CPT Breakdown units column.

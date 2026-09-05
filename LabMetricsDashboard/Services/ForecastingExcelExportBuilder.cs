@@ -158,7 +158,7 @@ public static class ForecastingExcelExportBuilder
         }
 
         foreach (var c in new[] { 14, 15, 16, 17, 18, 19, 20 })
-            ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+            ws.Column(c).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
 
         ws.SheetView.FreezeRows(2);
         if (rowsToWrite <= FullStylingMaxRows)
@@ -326,7 +326,7 @@ public static class ForecastingExcelExportBuilder
         ws.Cell(row, totalStartCol + 1).Value = t.TotalPaid;
 
         for (int c = 2; c <= colCount; c++)
-            ws.Column(c).Style.NumberFormat.Format = "$#,##0";
+            ws.Column(c).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
 
         ws.SheetView.FreezeRows(3);
         ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 14, firstColMinWidth: 28);

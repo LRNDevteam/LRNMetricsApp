@@ -1,7 +1,7 @@
 @model LabMetricsDashboard.Models.CodingCalculationDetail
 @{
     var en = System.Globalization.CultureInfo.GetCultureInfo("en-US");
-    string Money(decimal v) => v.ToString("C2", en);
+    IHtmlContent Money(decimal v) => Acct2(v);
     string Num(int v) => v.ToString("N0", en);
     string Short(string? s, int max = 80)
     {

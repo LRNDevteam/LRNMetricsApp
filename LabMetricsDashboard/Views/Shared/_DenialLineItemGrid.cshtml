@@ -6,7 +6,7 @@
     string Txt(string? value) => string.IsNullOrWhiteSpace(value) ? Dash : value.Trim();
     string Dt(DateTime? value) => value?.ToString("MM/dd/yyyy") ?? Dash;
     string Cnt(int? value) => value?.ToString("N0", usd) ?? Dash;
-    string Amt(decimal? value) => value.HasValue ? value.Value.ToString("C2", usd) : Dash;
+    string Amt(decimal? value) => value.HasValue ? Text(value.Value, 2) : Dash;
     string Dec(decimal? value) => value?.ToString("N2", usd) ?? Dash;
 
     var pageSizes = new[] { 50, 100, 250, 500, 1000 };

@@ -1002,7 +1002,7 @@ else if (Model.HasData && fin is not null)
     var ringColor  = isGoodComp ? "#0f766e" : "#b54708";
     var pctColor   = isGoodComp ? "#0f766e" : "#b54708";
     var netImpact  = fin.RevenueAtRisk_PotentialRecoup - fin.RevenueLoss_PotentialLoss;
-    string MoneyUs(decimal v) => v.ToString("C2", enUs);
+    IHtmlContent MoneyUs(decimal v) => Acct2(v);
     string NumUs(int? v) => (v ?? 0).ToString("N0", enUs);
 
     <div class="ck-wrap">
@@ -1044,11 +1044,11 @@ else if (Model.HasData && fin is not null)
                         </div>
                         <div class="ck-row">
                             <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">$</span> Total Billed Charges</p></div>
-                            <div class="ck-row-right"><p class="ck-value sm">@fin.TotalBilledCharges.ToString("C2", enUs)</p></div>
+                            <div class="ck-row-right"><p class="ck-value sm">@Acct2(fin.TotalBilledCharges)</p></div>
                         </div>
                         <div class="ck-row">
                             <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">&asymp;</span> Expected Billed Charges</p></div>
-                            <div class="ck-row-right"><p class="ck-value sm ck-info">@fin.ExpectedBilledCharges.ToString("C2", enUs)</p></div>
+                            <div class="ck-row-right"><p class="ck-value sm ck-info">@Acct2(fin.ExpectedBilledCharges)</p></div>
                         </div>
                     </div>
                     <div class="ck-spark" aria-label="sparkline">
@@ -1081,15 +1081,15 @@ else if (Model.HasData && fin is not null)
                         </div>
                         <div class="ck-row">
                             <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">$</span> Total Actual Billed Charges</p></div>
-                            <div class="ck-row-right"><p class="ck-value sm">@fin.RevenueImpact_ActualBilled.ToString("C2", enUs)</p></div>
+                            <div class="ck-row-right"><p class="ck-value sm">@Acct2(fin.RevenueImpact_ActualBilled)</p></div>
                         </div>
                         <div class="ck-row">
                             <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">!</span> Potential Loss in Revenue</p></div>
-                            <div class="ck-row-right"><p class="ck-value sm ck-danger">@fin.RevenueImpact_PotentialLoss.ToString("C2", enUs)</p></div>
+                            <div class="ck-row-right"><p class="ck-value sm ck-danger">@Acct2(fin.RevenueImpact_PotentialLoss)</p></div>
                         </div>
                         <div class="ck-row">
                             <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">&check;</span> Expected Potential Recoupements</p></div>
-                            <div class="ck-row-right"><p class="ck-value sm ck-success">@fin.RevenueImpact_ExpectedRecoup.ToString("C2", enUs)</p></div>
+                            <div class="ck-row-right"><p class="ck-value sm ck-success">@Acct2(fin.RevenueImpact_ExpectedRecoup)</p></div>
                         </div>
                     </div>
                     <div class="ck-spark" aria-label="sparkline">
@@ -1137,11 +1137,11 @@ else if (Model.HasData && fin is not null)
                         </div>
                         <div class="ck-row">
                             <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">$</span> Total Actual Billed Charges</p></div>
-                            <div class="ck-row-right"><p class="ck-value sm">@fin.RevenueLoss_ActualBilled.ToString("C2", enUs)</p></div>
+                            <div class="ck-row-right"><p class="ck-value sm">@Acct2(fin.RevenueLoss_ActualBilled)</p></div>
                         </div>
                         <div class="ck-row">
                             <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">!</span> Potential Loss in Revenue</p></div>
-                            <div class="ck-row-right"><p class="ck-value sm ck-danger">@fin.RevenueLoss_PotentialLoss.ToString("C2", enUs)</p></div>
+                            <div class="ck-row-right"><p class="ck-value sm ck-danger">@Acct2(fin.RevenueLoss_PotentialLoss)</p></div>
                         </div>
                     </div>
                     <div class="ck-spark" aria-label="sparkline">
@@ -1184,11 +1184,11 @@ else if (Model.HasData && fin is not null)
                         </div>
                         <div class="ck-row">
                             <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">$</span> Total Actual Billed Charges</p></div>
-                            <div class="ck-row-right"><p class="ck-value sm">@fin.RevenueAtRisk_ActualBilled.ToString("C2", enUs)</p></div>
+                            <div class="ck-row-right"><p class="ck-value sm">@Acct2(fin.RevenueAtRisk_ActualBilled)</p></div>
                         </div>
                         <div class="ck-row">
                             <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">&check;</span> Potential Recoupment</p></div>
-                            <div class="ck-row-right"><p class="ck-value ck-success">@fin.RevenueAtRisk_PotentialRecoup.ToString("C2", enUs)</p></div>
+                            <div class="ck-row-right"><p class="ck-value ck-success">@Acct2(fin.RevenueAtRisk_PotentialRecoup)</p></div>
                         </div>
                         <div class="ck-row">
                             <div class="ck-row-left">

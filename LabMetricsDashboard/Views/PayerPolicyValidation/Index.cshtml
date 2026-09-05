@@ -29,7 +29,7 @@
     {
         var v = col.Value(r);
         if (v is null) return string.Empty;
-        return col.IsMoney && v is decimal d ? d.ToString("C2") : v.ToString() ?? string.Empty;
+        return col.IsMoney && v is decimal d ? Text(d, 2) : v.ToString() ?? string.Empty;
     }
 }
 

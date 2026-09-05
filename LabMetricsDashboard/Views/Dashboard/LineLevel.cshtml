@@ -286,7 +286,7 @@ else
                             {
                                 if (decimal.TryParse(val, NumberStyles.Any, CultureInfo.InvariantCulture, out var amt))
                                 {
-                                    <td class="amt">@amt.ToString("C")</td>
+                                    <td class="amt">@Acct2(amt)</td>
                                 }
                                 else
                                 {

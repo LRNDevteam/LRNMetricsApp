@@ -148,6 +148,7 @@ public sealed class AllLabsCollectionExcelBuilder
     private static void CopySheetsFromFile(XLWorkbook dest, string sourceFilePath, string labName)
     {
         using var src = new XLWorkbook(sourceFilePath);
+        ExcelTheme.ConvertCurrencyFormatsToAccounting(src);
         var prefix = TruncateLabel(labName, 12) + "_";   // e.g. "PCRLabsofAme_"
 
         foreach (var ws in src.Worksheets)

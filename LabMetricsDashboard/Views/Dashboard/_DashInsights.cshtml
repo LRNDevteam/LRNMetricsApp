@@ -11,7 +11,7 @@
         {
             var barPct    = maxRate > 0 ? Math.Round((double)(row.CollectionRate / maxRate) * 100, 1) : 0;
             var rateColor = row.CollectionRate >= 80 ? "#1565c0" : row.CollectionRate >= 50 ? "#1565c0" : "#e53935";
-            sb.Append($"<tr><td>{System.Net.WebUtility.HtmlEncode(row.Label)}</td><td class=\"text-center\">{row.Claims:N0}</td><td class=\"text-end\">{row.Charges:C0}</td><td class=\"text-end text-success\">{row.Payments:C0}</td><td class=\"text-end text-danger\">{row.Balance:C0}</td><td><div style=\"background:#e9ecef;border-radius:4px;height:6px;overflow:hidden;margin-bottom:3px\"><div style=\"width:{barPct}%;height:6px;border-radius:4px;background:linear-gradient(90deg,#1565c0,#42a5f5)\"></div></div><span style=\"font-size:.72rem;font-weight:700;color:{rateColor}\">{row.CollectionRate}%</span></td></tr>");
+            sb.Append($"<tr><td>{System.Net.WebUtility.HtmlEncode(row.Label)}</td><td class=\"text-center\">{row.Claims:N0}</td><td class=\"text-end\">{Text(row.Charges)}</td><td class=\"text-end text-success\">{Text(row.Payments)}</td><td class=\"text-end text-danger\">{Text(row.Balance)}</td><td><div style=\"background:#e9ecef;border-radius:4px;height:6px;overflow:hidden;margin-bottom:3px\"><div style=\"width:{barPct}%;height:6px;border-radius:4px;background:linear-gradient(90deg,#1565c0,#42a5f5)\"></div></div><span style=\"font-size:.72rem;font-weight:700;color:{rateColor}\">{row.CollectionRate}%</span></td></tr>");
         }
         sb.Append("</tbody></table></div></div></div>");
         return new Microsoft.AspNetCore.Html.HtmlString(sb.ToString());

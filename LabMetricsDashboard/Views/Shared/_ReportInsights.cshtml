@@ -2,7 +2,7 @@
 <link rel="stylesheet" href="~/css/report-insights.css" asp-append-version="true" />
 
 <div id="riRoot"
-     class="ri-panel"
+     class="ri-panel ri-collapsed"
      data-base="@Url.Content("~/")"
      data-lab="@Model.Lab"
      data-report-name="@Model.ReportName"
@@ -12,7 +12,7 @@
 
     <div class="ri-head">
         <div class="ri-head-main">
-            <button type="button" class="ri-toggle" id="riToggle" aria-expanded="true" aria-controls="riCollapse" title="Open / close insights">
+            <button type="button" class="ri-toggle" id="riToggle" aria-expanded="false" aria-controls="riCollapse" title="Open / close insights">
                 <i class="bi bi-chevron-down ri-toggle-icon" aria-hidden="true"></i>
             </button>
             <div>
@@ -31,12 +31,30 @@
             <button type="button" class="btn btn-sm btn-primary" id="riAddBtn">
                 <i class="bi bi-plus-lg"></i> Add Insight
             </button>
+            <button type="button" class="ri-expand-btn" id="riExpandBtn"
+                    title="Maximize insights" aria-label="Maximize insights">
+                <i class="bi bi-arrows-fullscreen" aria-hidden="true"></i>
+            </button>
         </div>
     </div>
     <div id="riCollapse" class="ri-collapse">
         <div id="riAlert" class="itm-alert" hidden></div>
-        <div id="riBody" class="ri-body">Loading insights…</div>
+        <div id="riBody" class="ri-body"></div>
     </div>
+</div>
+
+<div id="riFloat" class="ri-float" hidden>
+    <div class="ri-float-head" id="riFloatHead">
+        <div>
+            <div class="ri-expand-title">Key Insights &amp; Highlights</div>
+            <div class="ri-expand-sub">Refer these numbers with the summary grid</div>
+        </div>
+        <button type="button" class="ri-expand-btn" id="riMinimizeBtn"
+                title="Minimize" aria-label="Minimize">
+            <i class="bi bi-dash-lg" aria-hidden="true"></i>
+        </button>
+    </div>
+    <div class="ri-float-body" id="riExpandBody"></div>
 </div>
 
 <div class="modal fade" id="riModal" tabindex="-1" aria-labelledby="riModalTitle" aria-hidden="true">

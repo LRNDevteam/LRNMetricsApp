@@ -106,3 +106,28 @@
         buildChart("priorityChart", "doughnut", charts.priority);
     }
 })();
+
+(() => {
+    const label = (open) => open ? "\u25B2 Hide" : "\u25BC Show";
+    document.querySelectorAll("[data-rpt-filter-toggle]").forEach((btn) => {
+        const sel = btn.getAttribute("data-bs-target");
+        const target = sel ? document.querySelector(sel) : null;
+        if (!target) return;
+        const sync = () => { btn.textContent = label(target.classList.contains("show")); };
+        target.addEventListener("shown.bs.collapse", sync);
+        target.addEventListener("hidden.bs.collapse", sync);
+        sync();
+    });
+})();
+
+window.rptExportBusy = function (btn, html) {
+    if (!btn) return;
+    btn.classList.add("rpt-toolbar-busy");
+    btn.innerHTML = html;
+};
+window.rptExportIdle = function (btn, originalHtml) {
+    if (!btn) return;
+    btn.classList.remove("rpt-toolbar-busy");
+    if (typeof originalHtml === "string") btn.innerHTML = originalHtml;
+    btn.disabled = false;
+};

@@ -1,7 +1,11 @@
 @using System.Globalization
 @model LabMetricsDashboard.ViewModels.LisSummaryPageViewModel
 @{
-    ViewData["Title"] = $"LIS Summary – {Model.CurrentLabName}";
+    var lisPaneOnly = ViewData["LisPaneOnly"] as string;
+    if (!string.IsNullOrEmpty(lisPaneOnly))
+        Layout = null;
+    var lisLazy = ViewData["LisLazy"] as bool? == true;
+    ViewData["Title"] = $"LIS Summary - {Model.CurrentLabName}";
     ViewData["SelectedLab"] = Model.CurrentLabName;
     ViewData["PageLabel"] = "LIS Summary";
     var result = Model.Result;
@@ -46,6 +50,13 @@
         PageNumber = 1,
         PageSize = filters.PageSize
     }) ?? "#";
+    var lisHasFilters =
+        !string.IsNullOrWhiteSpace(filters.Panel)
+        || !string.IsNullOrWhiteSpace(filters.Clinic)
+        || !string.IsNullOrWhiteSpace(filters.RefPhy)
+        || !string.IsNullOrWhiteSpace(filters.SalesRep)
+        || !string.IsNullOrWhiteSpace(filters.Collector)
+        || !string.Equals(filters.EffectiveDateRange, "this-week", StringComparison.OrdinalIgnoreCase);
     string TabUrl(string tab, int? pageNumber = null) => Url.Action("Index", "LisSummary", new
     {
         lab = Model.CurrentLabName,
@@ -65,10 +76,11 @@
     }) ?? "#";
 }
 
+@if (string.IsNullOrEmpty(lisPaneOnly))
+{
 <style>
-    .lis-filter-shell {
-        border-radius: 1rem;
-        background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+    .lis-filter-shell.rpt-filter-panel {
+        background: #fff;
     }
 
     .section-title {
@@ -572,7 +584,7 @@
     }
 
     .lis-custom-date.is-hidden {
-        display: none;
+        display: none !important;
     }
 
     .lis-filter-row .form-label {
@@ -925,244 +937,255 @@
     <div class="alert alert-warning border-0 shadow-sm">@error</div>
 }
 
-<div class="lis-filter-shell card border-0 shadow-sm mb-4">
-    <div class="card-body">
-        <div class="lis-filter-header d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-            <div>
-                <div class="section-title">LIS Summary</div>
-                @* <div class="section-subtitle">Grouped by collected date and calculated using the lab-specific Excel logic.</div> *@
-            </div>
-            <div class="d-flex flex-wrap gap-2">
-                <span class="chip">Lab: @(string.IsNullOrWhiteSpace(Model.CurrentLabName) ? "-" : Model.CurrentLabName)</span>
-                @if (result is not null)
-                {
-                    <span class="chip">Source File Name: @(string.IsNullOrWhiteSpace(result.SourceFileName) ? "-" : result.SourceFileName)</span>
-                    <span class="chip">Total: @result.GrandTotal.ToString("N0")</span>
-                }
-            </div>
+<div class="rpt-page-head">
+    <div class="rpt-page-head-main">
+        <h2 class="mb-0 fw-bold">
+            LIS Summary
+            <span class="badge bg-primary bg-gradient fw-semibold"
+                  style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">
+                @(string.IsNullOrWhiteSpace(Model.CurrentLabName) ? "-" : Model.CurrentLabName)
+            </span>
+        </h2>
+    </div>
+    <div class="rpt-page-head-right">
+        <div class="rpt-toolbar">
+            <button type="button" id="lisExportExcelBtn" class="btn btn-sm btn-outline-success rpt-toolbar-btn"
+                    title="Download Excel" aria-label="Download Excel">
+                <i class="bi bi-file-earmark-excel"></i>
+            </button>
+            <button type="button" id="riAddInsightBtn" class="btn btn-sm btn-primary rpt-toolbar-btn"
+                    title="Add Insight" aria-label="Add Insight">
+                <i class="bi bi-plus-lg"></i>
+            </button>
+            <a class="btn btn-sm btn-outline-primary rpt-toolbar-btn"
+               href="@Url.Action("Lis", "InsightTemplate", new { lab = string.IsNullOrWhiteSpace(Model.ConfiguredLabKey) ? Model.CurrentLabName : Model.ConfiguredLabKey })"
+               title="Insight Templates" aria-label="Insight Templates">
+                <i class="bi bi-layout-text-sidebar-reverse"></i>
+            </a>
         </div>
+        @if (result is not null)
+        {
+            <span class="chip">Source File Name: @(string.IsNullOrWhiteSpace(result.SourceFileName) ? "-" : result.SourceFileName)</span>
+            <span class="chip">Total: @result.GrandTotal.ToString("N0")</span>
+        }
+    </div>
+</div>
 
-        <form method="get" asp-action="Index" asp-controller="LisSummary" class="lis-filter-row" id="lisFilterForm">
+<div class="rpt-filter-wrap">
+<div class="lis-filter-shell rpt-filter-panel p-3">
+    <div class="rpt-filter-head">
+        <span class="rpt-filter-title">
+            <i class="bi bi-funnel"></i> Filters
+            @if (lisHasFilters)
+            {
+                <span class="badge bg-primary rpt-filter-badge ms-1">Active</span>
+            }
+        </span>
+        <div class="rpt-filter-toggle-wrap">
+            <i class="bi bi-lightning-charge-fill rpt-ds-bolt" aria-hidden="true"></i>
+            <button class="rpt-filter-toggle" type="button"
+                    data-rpt-filter-toggle
+                    data-bs-toggle="collapse" data-bs-target="#lisFilterBody"
+                    aria-expanded="true">
+                ▲ Hide
+            </button>
+        </div>
+    </div>
+
+    <div id="lisFilterBody" class="collapse show">
+        <form method="get" asp-action="Index" asp-controller="LisSummary" id="lisFilterForm" data-lab-form>
             <input type="hidden" name="lab" value="@Model.CurrentLabName" />
-            <input type="hidden" name="LabId" value="@filters.LabId" />
+            <input type="hidden" name="LabId" id="lisLabId" value="@filters.LabId" />
             <input type="hidden" name="ActiveTab" value="@activeTab" />
             <input type="hidden" name="PageNumber" value="1" />
             <input type="hidden" name="PageSize" value="@filters.PageSize" />
 
-            <div class="lis-filter-item-sm">
-                <label class="form-label">Date Type</label>
-                <select class="form-select filter-select" name="DateType">
-                    <option value="Collected" selected="@IsSelected(filters.EffectiveDateType, "Collected")">Collected</option>
-                    @if (!isInHealth)
-                    {
-                    <option value="Received" selected="@IsSelected(filters.EffectiveDateType, "Received")">Received</option>
-                    <option value="Resulted" selected="@IsSelected(filters.EffectiveDateType, "Resulted")">Resulted</option>
-                    }
-                </select>
-            </div>
+            <div class="row g-2 align-items-end mb-2">
+                <div class="col-sm-6 col-md-3">
+                    <label class="form-label">DATE TYPE</label>
+                    <select class="form-select form-select-sm" name="DateType">
+                        <option value="Collected" selected="@IsSelected(filters.EffectiveDateType, "Collected")">Collected</option>
+                        @if (!isInHealth)
+                        {
+                        <option value="Received" selected="@IsSelected(filters.EffectiveDateType, "Received")">Received</option>
+                        <option value="Resulted" selected="@IsSelected(filters.EffectiveDateType, "Resulted")">Resulted</option>
+                        }
+                    </select>
+                </div>
 
-            <div class="lis-filter-item-range">
-                <label class="form-label">Date Range</label>
-                <select class="form-select filter-select" name="DateRange" id="lisDateRange">
-                    <option value="this-week" selected="@IsSelected(filters.EffectiveDateRange, "this-week")">This week</option>
-                    <option value="last-week" selected="@IsSelected(filters.EffectiveDateRange, "last-week")">Last week</option>
-                    <option value="this-month" selected="@IsSelected(filters.EffectiveDateRange, "this-month")">This month</option>
-                    <option value="last-month" selected="@IsSelected(filters.EffectiveDateRange, "last-month")">Last month</option>
-                    <option value="custom" selected="@IsSelected(filters.EffectiveDateRange, "custom")">Custom range</option>
-                </select>
-            </div>
+                <div class="col-sm-6 col-md-3">
+                    <label class="form-label">DATE RANGE</label>
+                    <select class="form-select form-select-sm" name="DateRange" id="lisDateRange">
+                        <option value="this-week" selected="@IsSelected(filters.EffectiveDateRange, "this-week")">This week</option>
+                        <option value="last-week" selected="@IsSelected(filters.EffectiveDateRange, "last-week")">Last week</option>
+                        <option value="this-month" selected="@IsSelected(filters.EffectiveDateRange, "this-month")">This month</option>
+                        <option value="last-month" selected="@IsSelected(filters.EffectiveDateRange, "last-month")">Last month</option>
+                        <option value="custom" selected="@IsSelected(filters.EffectiveDateRange, "custom")">Custom range</option>
+                    </select>
+                </div>
 
-            <div class="lis-custom-date @(filters.EffectiveDateRange == "custom" ? "" : "is-hidden")">
-                <label class="form-label">Date From</label>
-                <input class="form-control filter-select" type="date" name="DateFrom" id="lisDateFrom"
-                       value="@DateValue(filters.EffectiveDateFrom)" />
-            </div>
+                <div class="col-sm-6 col-md-3 lis-custom-date @(filters.EffectiveDateRange == "custom" ? "" : "is-hidden")">
+                    <label class="form-label">DATE FROM</label>
+                    <input class="form-control form-control-sm" type="date" name="DateFrom" id="lisDateFrom"
+                           value="@DateValue(filters.EffectiveDateFrom)" />
+                </div>
 
-            <div class="lis-custom-date @(filters.EffectiveDateRange == "custom" ? "" : "is-hidden")">
-                <label class="form-label">Date To</label>
-                <input class="form-control filter-select" type="date" name="DateTo" id="lisDateTo"
-                       value="@DateValue(filters.EffectiveDateTo)" />
-            </div>
+                <div class="col-sm-6 col-md-3 lis-custom-date @(filters.EffectiveDateRange == "custom" ? "" : "is-hidden")">
+                    <label class="form-label">DATE TO</label>
+                    <input class="form-control form-control-sm" type="date" name="DateTo" id="lisDateTo"
+                           value="@DateValue(filters.EffectiveDateTo)" />
+                </div>
 
-            @if (Model.FilterOptions.Panels.Count > 0)
-            {
-            <div class="lis-filter-item">
-                <label class="form-label">Panel</label>
-                <div class="lis-ms" data-lis-ms>
-                    <input type="hidden" name="Panel" value="@filters.Panel" />
-                    <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
-                        <span class="lis-ms-label">All</span>
-                        <span class="lis-ms-clear" role="button" tabindex="0" aria-label="Clear panel filter" title="Clear panel filter">&times;</span>
-                        <span class="lis-ms-caret">v</span>
-                    </button>
-                    <div class="lis-ms-panel">
-                        <input type="search" class="form-control lis-ms-search" placeholder="Search panel" />
-                        <div class="lis-ms-list">
-                    @foreach (var option in Model.FilterOptions.Panels)
-                    {
-                                <label class="lis-ms-option">
-                                    <input type="checkbox" value="@option" checked="@IsMultiSelected(filters.Panel, option)" />
-                                    <span>@option</span>
-                                </label>
-                    }
+                <div class="col-sm-6 col-md-3" id="lisPanelFilter">
+                    <label class="form-label">PANEL</label>
+                    <div class="lis-ms" data-lis-ms>
+                        <input type="hidden" name="Panel" value="@filters.Panel" />
+                        <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
+                            <span class="lis-ms-label">All</span>
+                            <span class="lis-ms-clear" role="button" tabindex="0" aria-label="Clear panel filter" title="Clear panel filter">&times;</span>
+                            <span class="lis-ms-caret">v</span>
+                        </button>
+                        <div class="lis-ms-panel">
+                            <input type="search" class="form-control lis-ms-search" placeholder="Search panel" />
+                            <div class="lis-ms-list" id="lisPanelList">
+                        @foreach (var option in Model.FilterOptions.Panels)
+                        {
+                                    <label class="lis-ms-option">
+                                        <input type="checkbox" value="@option" checked="@IsMultiSelected(filters.Panel, option)" />
+                                        <span>@option</span>
+                                    </label>
+                        }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-sm-6 col-md-3" id="lisClinicFilter">
+                    <label class="form-label">CLINIC</label>
+                    <div class="lis-ms" data-lis-ms>
+                        <input type="hidden" name="Clinic" value="@filters.Clinic" />
+                        <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
+                            <span class="lis-ms-label">All</span>
+                            <span class="lis-ms-clear" role="button" tabindex="0" aria-label="Clear clinic filter" title="Clear clinic filter">&times;</span>
+                            <span class="lis-ms-caret">v</span>
+                        </button>
+                        <div class="lis-ms-panel">
+                            <input type="search" class="form-control lis-ms-search" placeholder="Search clinic" />
+                            <div class="lis-ms-list" id="lisClinicList">
+                        @foreach (var option in Model.FilterOptions.Clinics)
+                        {
+                                    <label class="lis-ms-option">
+                                        <input type="checkbox" value="@option" checked="@IsMultiSelected(filters.Clinic, option)" />
+                                        <span>@option</span>
+                                    </label>
+                        }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-sm-6 col-md-3" id="lisRefPhyFilter">
+                    <label class="form-label">REFERRING PHYSICIAN</label>
+                    <div class="lis-ms" data-lis-ms>
+                        <input type="hidden" name="RefPhy" value="@filters.RefPhy" />
+                        <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
+                            <span class="lis-ms-label">All</span>
+                            <span class="lis-ms-clear" role="button" tabindex="0" aria-label="Clear referring physician filter" title="Clear referring physician filter">&times;</span>
+                            <span class="lis-ms-caret">v</span>
+                        </button>
+                        <div class="lis-ms-panel">
+                            <input type="search" class="form-control lis-ms-search" placeholder="Search physician" />
+                            <div class="lis-ms-list" id="lisRefPhyList">
+                        @foreach (var option in Model.FilterOptions.RefPhysicians)
+                        {
+                                    <label class="lis-ms-option">
+                                        <input type="checkbox" value="@option" checked="@IsMultiSelected(filters.RefPhy, option)" />
+                                        <span>@option</span>
+                                    </label>
+                        }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-sm-6 col-md-3" id="lisSalesRepFilter">
+                    <label class="form-label">SALES REP</label>
+                    <div class="lis-ms" data-lis-ms>
+                        <input type="hidden" name="SalesRep" value="@filters.SalesRep" />
+                        <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
+                            <span class="lis-ms-label">All</span>
+                            <span class="lis-ms-clear" role="button" tabindex="0" aria-label="Clear sales rep filter" title="Clear sales rep filter">&times;</span>
+                            <span class="lis-ms-caret">v</span>
+                        </button>
+                        <div class="lis-ms-panel">
+                            <input type="search" class="form-control lis-ms-search" placeholder="Search sales rep" />
+                            <div class="lis-ms-list" id="lisSalesRepList">
+                        @foreach (var option in Model.FilterOptions.SalesReps)
+                        {
+                                    <label class="lis-ms-option">
+                                        <input type="checkbox" value="@option" checked="@IsMultiSelected(filters.SalesRep, option)" />
+                                        <span>@option</span>
+                                    </label>
+                        }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-sm-6 col-md-3" id="lisCollectorFilter">
+                    <label class="form-label">COLLECTOR</label>
+                    <div class="lis-ms" data-lis-ms>
+                        <input type="hidden" name="Collector" value="@filters.Collector" />
+                        <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
+                            <span class="lis-ms-label">All</span>
+                            <span class="lis-ms-clear" role="button" tabindex="0" aria-label="Clear collector filter" title="Clear collector filter">&times;</span>
+                            <span class="lis-ms-caret">v</span>
+                        </button>
+                        <div class="lis-ms-panel">
+                            <input type="search" class="form-control lis-ms-search" placeholder="Search collector" />
+                            <div class="lis-ms-list" id="lisCollectorList">
+                        @foreach (var option in Model.FilterOptions.Collectors)
+                        {
+                                    <label class="lis-ms-option">
+                                        <input type="checkbox" value="@option" checked="@IsMultiSelected(filters.Collector, option)" />
+                                        <span>@option</span>
+                                    </label>
+                        }
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
-            }
 
-            @if (Model.FilterOptions.Clinics.Count > 0)
-            {
-            <div class="lis-filter-item">
-                <label class="form-label">Clinic</label>
-                <div class="lis-ms" data-lis-ms>
-                    <input type="hidden" name="Clinic" value="@filters.Clinic" />
-                    <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
-                        <span class="lis-ms-label">All</span>
-                        <span class="lis-ms-clear" role="button" tabindex="0" aria-label="Clear clinic filter" title="Clear clinic filter">&times;</span>
-                        <span class="lis-ms-caret">v</span>
-                    </button>
-                    <div class="lis-ms-panel">
-                        <input type="search" class="form-control lis-ms-search" placeholder="Search clinic" />
-                        <div class="lis-ms-list">
-                    @foreach (var option in Model.FilterOptions.Clinics)
-                    {
-                                <label class="lis-ms-option">
-                                    <input type="checkbox" value="@option" checked="@IsMultiSelected(filters.Clinic, option)" />
-                                    <span>@option</span>
-                                </label>
-                    }
-                        </div>
-                    </div>
-                </div>
-            </div>
-            }
-
-            @if (Model.FilterOptions.RefPhysicians.Count > 0)
-            {
-            <div class="lis-filter-item">
-                <label class="form-label">Referring Physician</label>
-                <div class="lis-ms" data-lis-ms>
-                    <input type="hidden" name="RefPhy" value="@filters.RefPhy" />
-                    <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
-                        <span class="lis-ms-label">All</span>
-                        <span class="lis-ms-clear" role="button" tabindex="0" aria-label="Clear referring physician filter" title="Clear referring physician filter">&times;</span>
-                        <span class="lis-ms-caret">v</span>
-                    </button>
-                    <div class="lis-ms-panel">
-                        <input type="search" class="form-control lis-ms-search" placeholder="Search physician" />
-                        <div class="lis-ms-list">
-                    @foreach (var option in Model.FilterOptions.RefPhysicians)
-                    {
-                                <label class="lis-ms-option">
-                                    <input type="checkbox" value="@option" checked="@IsMultiSelected(filters.RefPhy, option)" />
-                                    <span>@option</span>
-                                </label>
-                    }
-                        </div>
-                    </div>
-                </div>
-            </div>
-            }
-
-            @if (Model.FilterOptions.SalesReps.Count > 0)
-            {
-            <div class="lis-filter-item">
-                <label class="form-label">Sales Rep</label>
-                <div class="lis-ms" data-lis-ms>
-                    <input type="hidden" name="SalesRep" value="@filters.SalesRep" />
-                    <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
-                        <span class="lis-ms-label">All</span>
-                        <span class="lis-ms-clear" role="button" tabindex="0" aria-label="Clear sales rep filter" title="Clear sales rep filter">&times;</span>
-                        <span class="lis-ms-caret">v</span>
-                    </button>
-                    <div class="lis-ms-panel">
-                        <input type="search" class="form-control lis-ms-search" placeholder="Search sales rep" />
-                        <div class="lis-ms-list">
-                    @foreach (var option in Model.FilterOptions.SalesReps)
-                    {
-                                <label class="lis-ms-option">
-                                    <input type="checkbox" value="@option" checked="@IsMultiSelected(filters.SalesRep, option)" />
-                                    <span>@option</span>
-                                </label>
-                    }
-                        </div>
-                    </div>
-                </div>
-            </div>
-            }
-
-            @if (Model.FilterOptions.Collectors.Count > 0)
-            {
-            <div class="lis-filter-item">
-                <label class="form-label">Collector</label>
-                <div class="lis-ms" data-lis-ms>
-                    <input type="hidden" name="Collector" value="@filters.Collector" />
-                    <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
-                        <span class="lis-ms-label">All</span>
-                        <span class="lis-ms-clear" role="button" tabindex="0" aria-label="Clear collector filter" title="Clear collector filter">&times;</span>
-                        <span class="lis-ms-caret">v</span>
-                    </button>
-                    <div class="lis-ms-panel">
-                        <input type="search" class="form-control lis-ms-search" placeholder="Search collector" />
-                        <div class="lis-ms-list">
-                    @foreach (var option in Model.FilterOptions.Collectors)
-                    {
-                                <label class="lis-ms-option">
-                                    <input type="checkbox" value="@option" checked="@IsMultiSelected(filters.Collector, option)" />
-                                    <span>@option</span>
-                                </label>
-                    }
-                        </div>
-                    </div>
-                </div>
-            </div>
-            }
-
-            <div class="lis-filter-actions">
-                <button type="submit" class="btn btn-primary rounded-pill px-4">
-                    <i class="bi bi-funnel me-1"></i>Apply Filters
+            <div class="rpt-filter-actions">
+                <button type="submit" class="btn btn-sm btn-primary">
+                    <i class="bi bi-funnel-fill me-1"></i>Apply Filter
                 </button>
-
-                @* Queues the LIMS Master workbook (LIS Summary + full line-level sheet) on
-                   LRN.ReportWorker; falls back to the synchronous download when the lab has
-                   no report queue. See the script at the bottom of this page. *@
-                <button type="button" id="lisExportExcelBtn" class="btn btn-outline-success rounded-pill px-4">
-                    <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
-                </button>
-                <button type="button" id="riAddInsightBtn" class="btn btn-primary rounded-pill px-4">
-                    <i class="bi bi-plus-lg me-1"></i>Add Insight
-                </button>
-                <a class="btn btn-outline-primary rounded-pill px-4"
-                   href="@Url.Action("Lis", "InsightTemplate", new { lab = string.IsNullOrWhiteSpace(Model.ConfiguredLabKey) ? Model.CurrentLabName : Model.ConfiguredLabKey })">
-                    <i class="bi bi-layout-text-sidebar-reverse me-1"></i>Insight Templates
-                </a>
-
-                <a class="btn btn-outline-secondary rounded-pill px-4"
-                   href="@ClearFiltersUrl()">
-                    <i class="bi bi-x-circle me-1"></i>Clear Filters
-                </a>
+                <a class="btn btn-sm btn-outline-primary" href="@ClearFiltersUrl()">Clear</a>
             </div>
         </form>
-
-        <div class="mt-3">
-            <div class="lis-tabs" role="tablist" aria-label="LIS Summary tabs">
-                <a class="lis-tab @(activeTab == "summary" ? "active" : "")" href="@TabUrl("summary", 1)">LIMS Summary</a>
-                <a class="lis-tab @(activeTab == "line" ? "active" : "")" href="@TabUrl("line", 1)">LIMS Line Data</a>
-            </div>
-        </div>
     </div>
 </div>
+</div>
 
-@await Html.PartialAsync("~/Views/Shared/_ReportInsights.cshtml", new LabMetricsDashboard.Models.Notes.ReportInsightsPanelModel
+<div class="mb-3">
+    <div class="lis-tabs" role="tablist" aria-label="LIS Summary tabs">
+        <a class="lis-tab @(activeTab == "summary" ? "active" : "")" href="@TabUrl("summary", 1)">LIMS Summary</a>
+        <a class="lis-tab @(activeTab == "line" ? "active" : "")" href="@TabUrl("line", 1)">LIMS Line Data</a>
+    </div>
+</div>
+}
+
+<div id="lisResultHost">
+@if (string.IsNullOrEmpty(lisPaneOnly) && lisLazy && string.IsNullOrWhiteSpace(Model.ErrorMessage))
 {
-    Lab = string.IsNullOrWhiteSpace(Model.ConfiguredLabKey) ? Model.CurrentLabName : Model.ConfiguredLabKey,
-    ReportName = "LIS Report",
-    RunId = Model.RunId,
-    WeekText = Model.WeekLabel
-})
-
-@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    <div class="cs-lazy-placeholder text-center py-5" id="lisResultSpinner">
+        <div class="lmd-spinner mx-auto mb-2" style="width:2.2rem;height:2.2rem;border:3px solid #e2e8f0;border-top-color:#0d5c74;border-radius:50%;animation:spin .75s linear infinite;"></div>
+        <div class="text-muted">Loading LIS Summary...</div>
+    </div>
+    <style>@@keyframes spin { to { transform: rotate(360deg); } }</style>
+}
+else if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
 {
     <div class="alert alert-warning border-0 shadow-sm">@Model.ErrorMessage</div>
 }
@@ -1340,11 +1363,21 @@ else
         </div>
     </div>
 }
+</div>
 
+@if (string.IsNullOrEmpty(lisPaneOnly))
+{
+@await Html.PartialAsync("~/Views/Shared/_ReportInsights.cshtml", new LabMetricsDashboard.Models.Notes.ReportInsightsPanelModel
+{
+    Lab = string.IsNullOrWhiteSpace(Model.ConfiguredLabKey) ? Model.CurrentLabName : Model.ConfiguredLabKey,
+    ReportName = "LIS Report",
+    RunId = Model.RunId,
+    WeekText = Model.WeekLabel
+})
 
 <script nonce='@Context.Items["CspNonce"]'>
     (function () {
-        const form = document.querySelector('.lis-filter-row');
+        const form = document.getElementById('lisFilterForm');
         if (!form) return;
 
         const dateRange = document.getElementById('lisDateRange');
@@ -1491,9 +1524,10 @@ else
         document.addEventListener('click', () => closeMultiSelects(null));
     })();
 
-    (function () {
+    window.lmdInitLisFreeze = function () {
         const root = document.getElementById('lisSummaryFreeze');
-        if (!root) return;
+        if (!root || root.getAttribute('data-lis-freeze') === '1') return;
+        root.setAttribute('data-lis-freeze', '1');
 
         const updateLisHeaderOffsets = () => {
             let top = 0;
@@ -1539,6 +1573,59 @@ else
         updateHierarchy();
         requestAnimationFrame(updateLisHeaderOffsets);
         window.addEventListener('resize', updateLisHeaderOffsets, { passive: true });
+    };
+    window.lmdInitLisFreeze();
+
+    (function () {
+        var host = document.getElementById('lisResultHost');
+        if (!host || !document.getElementById('lisResultSpinner')) return;
+        if (window.lmdFpLog) window.lmdFpLog('spinner-on', 'page landed — in-page spinner on');
+        var qs = window.location.search || '';
+        fetch('@Url.Action("GetSummary", "LisSummary")' + qs, { credentials: 'same-origin' })
+            .then(function (r) { return r.text(); })
+            .then(function (html) {
+                host.innerHTML = html;
+                if (window.lmdInitLisFreeze) window.lmdInitLisFreeze();
+                if (window.lmdFpLog) window.lmdFpLog('monthly-html', 'LIS summary HTML on screen');
+            })
+            .catch(function () {
+                host.innerHTML = '<div class="alert alert-warning border-0 shadow-sm">Failed to load LIS Summary. Please refresh the page.</div>';
+            });
+        fetch('@Url.Action("GetMeta", "LisSummary")' + qs, { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                var labId = document.getElementById('lisLabId');
+                if (labId && d.labId) labId.value = d.labId;
+                function fill(listId, names, selectedPipe) {
+                    var list = document.getElementById(listId);
+                    if (!list || !names) return;
+                    var selected = (selectedPipe || '').split('|').filter(Boolean);
+                    list.innerHTML = '';
+                    names.forEach(function (name) {
+                        var label = document.createElement('label');
+                        label.className = 'lis-ms-option';
+                        var input = document.createElement('input');
+                        input.type = 'checkbox';
+                        input.value = name;
+                        if (selected.indexOf(name) !== -1) input.checked = true;
+                        var span = document.createElement('span');
+                        span.textContent = name;
+                        label.appendChild(input);
+                        label.appendChild(span);
+                        list.appendChild(label);
+                    });
+                    var widget = list.closest('[data-lis-ms]');
+                    if (widget) widget.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                var form = document.getElementById('lisFilterForm');
+                fill('lisPanelList', d.panels, form && form.Panel ? form.Panel.value : '');
+                fill('lisClinicList', d.clinics, form && form.Clinic ? form.Clinic.value : '');
+                fill('lisRefPhyList', d.refPhys, form && form.RefPhy ? form.RefPhy.value : '');
+                fill('lisSalesRepList', d.salesReps, form && form.SalesRep ? form.SalesRep.value : '');
+                fill('lisCollectorList', d.collectors, form && form.Collector ? form.Collector.value : '');
+            })
+            .catch(function () { });
     })();
 </script>
 
@@ -1591,21 +1678,21 @@ else
 
         var original = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing\u2026';
+        window.rptExportBusy(btn, '<span class="spinner-border spinner-border-sm"></span> Queuing\u2026');
 
         fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
             .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
             .then(function (res) {
                 if (res.ok) {
-                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating - watch Reports';
+                    window.rptExportBusy(btn, '<i class="bi bi-check-circle"></i> Generating — watch Reports');
                     if (window.lrnShowReportAlert) window.lrnShowReportAlert('success');
                     if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
-                    setTimeout(function () { btn.disabled = false; btn.innerHTML = original; }, 8000);
+                    setTimeout(function () { window.rptExportIdle(btn, original); }, 8000);
                 } else if (res.status === 400) {
-                    btn.disabled = false; btn.innerHTML = original;
+                    window.rptExportIdle(btn, original);
                     legacyDownload();
                 } else {
-                    btn.disabled = false; btn.innerHTML = original;
+                    window.rptExportIdle(btn, original);
                     var qMsg = res.j && res.j.message ? res.j.message : '';
                     if (window.lrnShowReportAlert) {
                         if (res.status === 409 || /already/i.test(qMsg)) {
@@ -1617,9 +1704,10 @@ else
                 }
             })
             .catch(function () {
-                btn.disabled = false; btn.innerHTML = original;
+                window.rptExportIdle(btn, original);
                 legacyDownload();
             });
     });
 })();
 </script>
+}

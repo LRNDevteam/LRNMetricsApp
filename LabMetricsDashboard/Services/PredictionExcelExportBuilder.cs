@@ -112,7 +112,7 @@ public static class PredictionExcelExportBuilder
 
         ws.Column(2).Style.NumberFormat.Format = "#,##0";
         for (int c = 3; c <= colCount; c++)
-            ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+            ws.Column(c).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
 
         row += 2;
         row = WriteRatiosSection(ws, row, vm.SummaryMetrics);
@@ -577,7 +577,7 @@ public static class PredictionExcelExportBuilder
             if ((c - 2) % 4 is 2 or 3)
                 ws.Column(c).Style.NumberFormat.Format = "0.00\"%\"";
             else
-                ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+                ws.Column(c).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
         }
 
         ws.SheetView.FreezeRows(3);
@@ -668,13 +668,13 @@ public static class PredictionExcelExportBuilder
     private static void FormatVarianceColumns(IXLWorksheet ws, int colCount, int firstDataCol = 2)
     {
         for (int c = firstDataCol; c <= colCount; c++)
-            ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+            ws.Column(c).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
     }
 
     private static void WriteCurrency(IXLCell cell, decimal value)
     {
         cell.Value = value;
-        cell.Style.NumberFormat.Format = "$#,##0.00";
+        cell.Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
     }
 
     private static void WriteNullableCurrency(IXLCell cell, decimal? value)

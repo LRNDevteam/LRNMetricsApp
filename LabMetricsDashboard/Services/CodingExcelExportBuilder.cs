@@ -1,4 +1,4 @@
-﻿using ClosedXML.Excel;
+using ClosedXML.Excel;
 using LabMetricsDashboard.Models;
 
 namespace LabMetricsDashboard.Services;
@@ -587,7 +587,7 @@ public static class CodingExcelExportBuilder
         // Number formats
         var countCols = new[] { 3, 6, 10, 13, 16, 17, 19, 20, 21, 22 };
         foreach (int c in countCols) ws.Column(c).Style.NumberFormat.Format = "#,##0";
-        foreach (int c in moneyCols) ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+        foreach (int c in moneyCols) ws.Column(c).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
 
         ws.SheetView.FreezeRows(2);
         ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 14, firstColMinWidth: 16);
@@ -678,7 +678,7 @@ public static class CodingExcelExportBuilder
         // Number formats
         ws.Column(4).Style.NumberFormat.Format = "#,##0";
         foreach (int c in new[] { 5, 8, 9, 11, 12, 13 })
-            ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+            ws.Column(c).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
 
         ws.SheetView.FreezeRows(1);
         ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 14, firstColMinWidth: 12);
@@ -753,7 +753,7 @@ public static class CodingExcelExportBuilder
         }
 
         foreach (int c in new[] { 3, 5, 7 }) ws.Column(c).Style.NumberFormat.Format = "#,##0";
-        foreach (int c in new[] { 4, 6, 8, 9, 10, 11 }) ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+        foreach (int c in new[] { 4, 6, 8, 9, 10, 11 }) ws.Column(c).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
 
         ws.SheetView.FreezeRows(1);
         ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 14, firstColMinWidth: 8);
@@ -831,7 +831,7 @@ public static class CodingExcelExportBuilder
 
         ws.Column(4).Style.NumberFormat.Format = "#,##0";
         foreach (int c in new[] { 5, 8, 9, 11, 12, 13 })
-            ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+            ws.Column(c).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
 
         ws.SheetView.FreezeRows(1);
         ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 14, firstColMinWidth: 16);
@@ -914,7 +914,7 @@ public static class CodingExcelExportBuilder
         }
 
         foreach (int c in new[] { 3, 5, 7 }) ws.Column(c).Style.NumberFormat.Format = "#,##0";
-        foreach (int c in new[] { 4, 6, 8, 9, 10, 11 }) ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+        foreach (int c in new[] { 4, 6, 8, 9, 10, 11 }) ws.Column(c).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
         // <<< END CVTPL-1.4 CHANGE
 
         ws.SheetView.FreezeRows(1);

@@ -258,7 +258,15 @@
     };
     const backgroundExport = @(Model.BackgroundExportEnabled ? "true" : "false");
 
-    const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+    function acct(v, decimals) {
+        if (v === null || v === undefined || v === '') return DASH;
+        const n = Number(v);
+        if (isNaN(n)) return DASH;
+        if (n === 0) return '$ -';
+        const abs = Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+        return n < 0 ? '$ (' + abs + ')' : '$ ' + abs;
+    }
+    const usd = { format: v => acct(v, 2) };
     const num = new Intl.NumberFormat('en-US');
     const DASH = '—';
     const WIN_LABEL = { 'Rolling90': '90d', 'Rolling180': '180d', 'YTD': 'YTD' };

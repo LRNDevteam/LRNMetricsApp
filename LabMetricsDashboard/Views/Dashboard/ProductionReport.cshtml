@@ -1,9 +1,11 @@
 @using LRN.ProductionReports.Models
 @model LRN.ProductionReports.Models.ProductionReportViewModel
 @{
-    ViewData["Title"]       = $"Production Report – {Model.SelectedLab}";
+    ViewData["Title"]       = $"Production Report - {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Production Report";
+    if (ViewData["PrPaneOnly"] is string paneOnly && !string.IsNullOrEmpty(paneOnly))
+        Layout = null;
 
     // Allows ProductionSummaryReport.cshtml to reuse this view by overriding the form target.
     var formAction = ViewData["FormAction"] as string ?? "ProductionSummaryReport";
@@ -180,8 +182,17 @@
         .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.BilledCharges);
     int cptGrandClaims = Model.CptBreakdownGrandByMonth
         .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.ClaimCount);
+
+    // Shell first: no tab HTML until JS fetches ProductionSummaryReportTab.
+    var prPaneOnly = ViewData["PrPaneOnly"] as string;
+    var prChrome = string.IsNullOrEmpty(prPaneOnly);
+    bool PrShow(string paneId) =>
+        !string.IsNullOrEmpty(prPaneOnly)
+            && string.Equals(prPaneOnly, paneId, StringComparison.OrdinalIgnoreCase);
 }
 
+@if (prChrome)
+{
 <style>
 /* ?? Production Report styles ??????????????????????????????? */
 .pr-wrap {
@@ -190,6 +201,17 @@
     box-shadow: 0 2px 12px rgba(0,0,0,.05);
 }
 .pr-scroll { max-height: 78vh; overflow: auto; }
+.pr-tab-loading {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: .75rem; padding: 3.5rem 1rem; color: #6b7280; font-size: .9rem;
+}
+.pr-tab-spinner {
+    width: 40px; height: 40px;
+    border: 4px solid rgba(14,52,96,.15);
+    border-top-color: #0e3460;
+    border-radius: 50%;
+    animation: lmd-boot-spin .75s linear infinite;
+}
 
 .pr-table {
     border-collapse: separate; border-spacing: 0;
@@ -233,7 +255,18 @@
     border-right: 1px solid #e2e8f0;
     border-bottom: 1px solid #e2e8f0;
     overflow: hidden; text-overflow: ellipsis;
+    font-variant-numeric: tabular-nums;
 }
+.pr-acct {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: .2rem;
+    width: 100%;
+    font-variant-numeric: tabular-nums;
+}
+.pr-acct-sym { flex: 0 0 auto; }
+.pr-acct-val { flex: 1 1 auto; text-align: right; }
 
 /* Month data columns — narrowed to ~70% */
 th.pr-month-data, td.pr-month-data {
@@ -423,12 +456,35 @@ th.pr-month-data, td.pr-month-data {
 </style>
 
 <!-- Page heading -->
-<div class="d-flex align-items-center justify-content-between mb-3">
-    <h2 class="mb-0 fw-bold">Production Report <span class="badge bg-primary bg-gradient fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@Model.SelectedLab</span></h2>
-    <a asp-controller="Dashboard" asp-action="ClaimLevel" asp-route-lab="@Model.SelectedLab"
-       class="btn btn-sm btn-outline-primary">
-        <i class="bi bi-clipboard-data me-1"></i>Claim Level Details
-    </a>
+<div class="rpt-page-head">
+    <div class="rpt-page-head-main">
+        <h2 class="mb-0 fw-bold">Production Report <span class="badge bg-primary bg-gradient fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@Model.SelectedLab</span></h2>
+    </div>
+    <div class="rpt-page-head-right">
+        @if (!string.IsNullOrWhiteSpace(Model.SelectedLab))
+        {
+            <div class="rpt-toolbar">
+                <button type="button" id="exportExcelBtn" class="btn btn-sm btn-outline-success rpt-toolbar-btn"
+                        title="Download Excel" aria-label="Download Excel">
+                    <i class="bi bi-file-earmark-excel"></i>
+                </button>
+                <button type="button" id="riAddInsightBtn" class="btn btn-sm btn-primary rpt-toolbar-btn"
+                        title="Add Insight" aria-label="Add Insight">
+                    <i class="bi bi-plus-lg"></i>
+                </button>
+                <a class="btn btn-sm btn-outline-primary rpt-toolbar-btn"
+                   asp-controller="InsightTemplate" asp-action="Production"
+                   asp-route-lab="@Model.SelectedLab"
+                   title="Insight Templates" aria-label="Insight Templates">
+                    <i class="bi bi-layout-text-sidebar-reverse"></i>
+                </a>
+            </div>
+        }
+        <a asp-controller="Dashboard" asp-action="ClaimLevel" asp-route-lab="@Model.SelectedLab"
+           class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-clipboard-data me-1"></i>Claim Level Details
+        </a>
+    </div>
 </div>
 
 @if (string.IsNullOrWhiteSpace(Model.SelectedLab) && string.IsNullOrWhiteSpace(Model.ErrorMessage))
@@ -448,7 +504,9 @@ th.pr-month-data, td.pr-month-data {
             WeekFolder = Model.ReportWeekFolder,
             RunId = Model.ReportRunId,
         };
+    <div id="pr-analysis-banner">
     @await Html.PartialAsync("_AnalysisRangeBanner", banner)
+    </div>
 }
 
 
@@ -456,32 +514,31 @@ th.pr-month-data, td.pr-month-data {
 <!-- ??? Collapsible Filter panel ?????????????????????????????? -->
 @if (!string.IsNullOrWhiteSpace(Model.SelectedLab))
 {
-    <div class="pr-filter-panel p-3 mb-4">
-        <div class="d-flex align-items-center justify-content-between mb-2">
-            <span class="fw-semibold" style="font-size:.9rem">
+    <div class="rpt-filter-wrap">
+    <div class="pr-filter-panel rpt-filter-panel p-3">
+        <div class="rpt-filter-head">
+            <span class="rpt-filter-title">
                 <i class="bi bi-funnel"></i> Filters
                 @if (Model.HasFilters)
                 {
-                    <span class="badge bg-primary pr-filter-badge ms-1">Active</span>
+                    <span class="badge bg-primary rpt-filter-badge ms-1">Active</span>
                 }
             </span>
-            <div class="d-flex align-items-center gap-2">
+            <div class="rpt-filter-toggle-wrap">
                 @{
-                    var dsIcon    = ViewData["DataSourceIcon"]    as string;
-                    var dsColor   = ViewData["DataSourceColor"]   as string;
+                    var dsIcon    = ViewData["DataSourceIcon"]    as string ?? "bi-lightning-charge-fill";
+                    var dsColor   = ViewData["DataSourceColor"]   as string ?? "#3b82f6";
                     var dsTip     = ViewData["DataSourceTooltip"] as string;
                 }
-                @if (!string.IsNullOrEmpty(dsIcon))
-                {
-                    <i class="bi @dsIcon"
-                       title="@dsTip"
-                       style="font-size:1.15rem; color:@dsColor; cursor:default;"
-                       data-bs-toggle="tooltip" data-bs-placement="left" data-bs-title="@dsTip"></i>
-                }
-                <button class="btn btn-sm btn-link text-muted p-0" type="button"
+                <i class="bi @dsIcon rpt-ds-bolt"
+                   title="@dsTip"
+                   style="color:@dsColor;"
+                   data-bs-toggle="tooltip" data-bs-placement="left" data-bs-title="@dsTip"></i>
+                <button class="rpt-filter-toggle" type="button"
+                        data-rpt-filter-toggle
                         data-bs-toggle="collapse" data-bs-target="#prFilterBody"
                         aria-expanded="@(Model.HasFilters ? "true" : "false")">
-                    @Html.Raw(Model.HasFilters ? "&#9650; Hide" : "&#9660; Show")
+                    @(Model.HasFilters ? "▲ Hide" : "▼ Show")
                 </button>
             </div>
         </div>
@@ -501,7 +558,7 @@ th.pr-month-data, td.pr-month-data {
                             </div>
                             <div class="pr-ms-panel">
                                 <input type="text" class="pr-ms-search" placeholder="Search payers…" autocomplete="off" />
-                                <div class="pr-ms-list">
+                                <div class="pr-ms-list" id="prPayerList">
                                     @foreach (var pn in Model.PayerNames)
                                     {
                                         <label><input type="checkbox" name="filterPayerNames" value="@pn"
@@ -533,7 +590,7 @@ th.pr-month-data, td.pr-month-data {
                             </div>
                             <div class="pr-ms-panel">
                                 <input type="text" class="pr-ms-search" placeholder="Search panels…" autocomplete="off" />
-                                <div class="pr-ms-list">
+                                <div class="pr-ms-list" id="prPanelList">
                                     @foreach (var pl in Model.PanelNames)
                                     {
                                         <label><input type="checkbox" name="filterPanelNames" value="@pl"
@@ -607,30 +664,18 @@ th.pr-month-data, td.pr-month-data {
     </div>
                 </div>
 
-                <div class="d-flex gap-2 mt-2">
+                <div class="rpt-filter-actions">
                     <button type="submit" class="btn btn-sm btn-primary">
-                        <i class="bi bi-funnel-fill me-1"></i>Apply
+                        <i class="bi bi-funnel-fill me-1"></i>Apply Filter
                     </button>
                     <a asp-controller="Dashboard" asp-action="@formAction"
                        asp-route-lab="@Model.SelectedLab"
-                       class="btn btn-sm btn-outline-secondary">Clear</a>
-                    <button type="button" id="exportExcelBtn" class="btn btn-sm btn-outline-success ms-auto">
-                        <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
-                    </button>
-                    <button type="button" id="riAddInsightBtn" class="btn btn-sm btn-primary">
-                        <i class="bi bi-plus-lg me-1"></i>Add Insight
-                    </button>
-                    <a class="btn btn-sm btn-outline-primary"
-                       asp-controller="InsightTemplate" asp-action="Production"
-                       asp-route-lab="@Model.SelectedLab">
-                        <i class="bi bi-layout-text-sidebar-reverse me-1"></i>Insight Templates
-                    </a>
+                       class="btn btn-sm btn-outline-primary">Clear</a>
                 </div>
             </form>
         </div>
     </div>
-
-    @await Html.PartialAsync("_ProductionInsights", Model)
+    </div>
 }
 
 <!-- Production Report Excel export loading overlay -->
@@ -669,8 +714,12 @@ th.pr-month-data, td.pr-month-data {
     </div>
 }
 
+}
+
 @if (!string.IsNullOrWhiteSpace(Model.SelectedLab) && string.IsNullOrWhiteSpace(Model.ErrorMessage))
 {
+    @if (prChrome)
+    {
     <!-- ??? Premium Tabs ????????????????????????????????????????? -->
     <ul class="nav nav-pills pr-tabs mb-3" id="prTabs" role="tablist">
         <li class="nav-item" role="presentation">
@@ -722,12 +771,6 @@ th.pr-month-data, td.pr-month-data {
                 <i class="bi bi-list-ol"></i> CPT Breakdown
             </button>
         </li>
-        @* Panel Breakdown is now available to every lab that has
-           usp_Get{Prefix}PanelBreakdownWithPayers deployed
-           (Sql/40_AllLabs_PanelBreakdownWithPayers.sql). Labs without it return no
-           rows, so gating on the data keeps the tab hidden exactly as before. *@
-        @if (Model.PanelBreakdownRows.Count > 0)
-        {
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="panel-breakdown-tab" data-bs-toggle="pill"
                     data-bs-target="#panel-breakdown-pane" type="button" role="tab"
@@ -735,7 +778,6 @@ th.pr-month-data, td.pr-month-data {
                 <i class="bi bi-layers"></i> Panel Breakdown
             </button>
         </li>
-        }
         @if (Model.IsNorthWestLab)
         {
         <li class="nav-item" role="presentation">
@@ -754,11 +796,19 @@ th.pr-month-data, td.pr-month-data {
         </li>
         }
     </ul>
+    }
 
-    <div class="tab-content" id="prTabContent">
+    <div class="tab-content" id="prTabContent"
+         data-pr-key="@ViewData["PrCacheKey"]"
+         data-pr-tab-url="@Url.Action("ProductionSummaryReportTab", "Dashboard")"
+         data-pr-meta-url="@Url.Action("ProductionSummaryReportMeta", "Dashboard")">
 
         <!-- ??? Monthly Claim Volume tab pane ????????????????????? -->
-        <div class="tab-pane fade show active" id="monthly-pane" role="tabpanel" aria-labelledby="monthly-tab">
+        @if (prChrome || PrShow("monthly-pane"))
+        {
+        <div class="tab-pane fade show active" id="monthly-pane" role="tabpanel" aria-labelledby="monthly-tab" data-pr-lazy="monthly-pane">
+            @if (PrShow("monthly-pane"))
+            {
             @if (Model.PanelRows.Count > 0 && validYears.Count > 0)
             {
                 <div class="pr-wrap">
@@ -836,13 +886,13 @@ th.pr-month-data, td.pr-month-data {
                                             foreach (var mk in mons)
                                             {
                                                 <td class="pr-month-data">@CellClaims(panel.ByMonth, mk).ToString("N0")</td>
-                                                <td class="pr-month-data">@CellCharges(panel.ByMonth, mk).ToString("C0")</td>
+                                                <td class="pr-month-data">@Acct(CellCharges(panel.ByMonth, mk))</td>
                                             }
                                             <td class="pr-year-total">@YearClaims(panel.ByYear, year).ToString("N0")</td>
-                                            <td class="pr-year-total">@YearCharges(panel.ByYear, year).ToString("C0")</td>
+                                            <td class="pr-year-total">@Acct(YearCharges(panel.ByYear, year))</td>
                                         }
                                         <td class="pr-grand-total">@panel.TotalClaims.ToString("N0")</td>
-                                        <td class="pr-grand-total">@panel.TotalCharges.ToString("C0")</td>
+                                        <td class="pr-grand-total">@Acct(panel.TotalCharges)</td>
                                     </tr>
 
                                     @foreach (var payer in panel.TopPayers)
@@ -855,13 +905,13 @@ th.pr-month-data, td.pr-month-data {
                                                 foreach (var mk in mons)
                                                 {
                                                     <td class="pr-month-data">@CellClaims(payer.ByMonth, mk).ToString("N0")</td>
-                                                    <td class="pr-month-data">@CellCharges(payer.ByMonth, mk).ToString("C0")</td>
+                                                    <td class="pr-month-data">@Acct(CellCharges(payer.ByMonth, mk))</td>
                                                 }
                                                 <td class="pr-year-total">@YearClaims(payer.ByYear, year).ToString("N0")</td>
-                                                <td class="pr-year-total">@YearCharges(payer.ByYear, year).ToString("C0")</td>
+                                                <td class="pr-year-total">@Acct(YearCharges(payer.ByYear, year))</td>
                                             }
                                             <td class="pr-grand-total">@payer.TotalClaims.ToString("N0")</td>
-                                            <td class="pr-grand-total">@payer.TotalCharges.ToString("C0")</td>
+                                            <td class="pr-grand-total">@Acct(payer.TotalCharges)</td>
                                         </tr>
                                     }
 
@@ -877,13 +927,13 @@ th.pr-month-data, td.pr-month-data {
                                         foreach (var mk in mons)
                                         {
                                             <td class="pr-month-data">@CellClaims(Model.GrandTotalByMonth, mk).ToString("N0")</td>
-                                            <td class="pr-month-data">@CellCharges(Model.GrandTotalByMonth, mk).ToString("C0")</td>
+                                            <td class="pr-month-data">@Acct(CellCharges(Model.GrandTotalByMonth, mk))</td>
                                         }
                                         <td class="pr-year-total">@GrandYearClaims(year).ToString("N0")</td>
-                                        <td class="pr-year-total">@GrandYearCharges(year).ToString("C0")</td>
+                                        <td class="pr-year-total">@Acct(GrandYearCharges(year))</td>
                                     }
                                     <td class="pr-grand-total">@grandClaims.ToString("N0")</td>
-                                    <td class="pr-grand-total">@grandCharges.ToString("C0")</td>
+                                    <td class="pr-grand-total">@Acct(grandCharges)</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -921,16 +971,6 @@ th.pr-month-data, td.pr-month-data {
             }
 
             @* ── Active rule footer (dull) ────────────────────────────── *@
-            @{
-                var activeRule = string.IsNullOrWhiteSpace(Model.ProductionSummaryRule)
-                    ? "Default"
-                    : Model.ProductionSummaryRule!;
-                var isRule1 = string.Equals(Model.ProductionSummaryRule, "Rule1", StringComparison.OrdinalIgnoreCase);
-                var isRule2 = string.Equals(Model.ProductionSummaryRule, "Rule2", StringComparison.OrdinalIgnoreCase);
-                var isRule3 = string.Equals(Model.ProductionSummaryRule, "Rule3", StringComparison.OrdinalIgnoreCase);
-                var isRule4 = string.Equals(Model.ProductionSummaryRule, "Rule4", StringComparison.OrdinalIgnoreCase);
-                var isRule5 = string.Equals(Model.ProductionSummaryRule, "Rule5", StringComparison.OrdinalIgnoreCase);
-            }
             @* <div class="pr-rule-footer mt-3 small text-muted" style="opacity:.65;line-height:1.45;border-top:1px dashed #cfd6df;padding-top:.5rem">
                 <div><span class="fw-semibold">Active Rule:</span> @activeRule</div>
                 @if (isRule1)
@@ -998,10 +1038,16 @@ th.pr-month-data, td.pr-month-data {
                     <div class="mt-1"><span class="fw-semibold">Default Logic:</span> columns grouped by <code>YEAR/MONTH(FirstBilledDate)</code>; rows = <code>PanelName</code> with Top 3 <code>PayerName</code> drill-down by <code>COUNT(DISTINCT ClaimID)</code>; sort by Grand Total.</div>
                 }
             </div> *@
+            }
         </div>
+        }
 
         <!-- ??? Weekly Claim Volume tab pane ?????????????????????? -->
-        <div class="tab-pane fade" id="weekly-pane" role="tabpanel" aria-labelledby="weekly-tab">
+        @if (prChrome || PrShow("weekly-pane"))
+        {
+        <div class="tab-pane fade" id="weekly-pane" role="tabpanel" aria-labelledby="weekly-tab" data-pr-lazy="weekly-pane">
+            @if (PrShow("weekly-pane"))
+            {
             @if (Model.WeeklyPanelRows.Count > 0 && Model.WeekColumns.Count > 0)
             {
                 var weeks = Model.WeekColumns;
@@ -1065,10 +1111,10 @@ th.pr-month-data, td.pr-month-data {
                                         @foreach (var wk in weeks)
                                         {
                                             <td class="pr-month-data">@CellClaims(panel.ByWeek, wk.Key).ToString("N0")</td>
-                                            <td class="pr-month-data">@CellCharges(panel.ByWeek, wk.Key).ToString("C0")</td>
+                                            <td class="pr-month-data">@Acct(CellCharges(panel.ByWeek, wk.Key))</td>
                                         }
                                         <td class="pr-grand-total">@panel.TotalClaims.ToString("N0")</td>
-                                        <td class="pr-grand-total">@panel.TotalCharges.ToString("C0")</td>
+                                        <td class="pr-grand-total">@Acct(panel.TotalCharges)</td>
                                     </tr>
 
                                     @foreach (var payer in panel.TopPayers)
@@ -1078,10 +1124,10 @@ th.pr-month-data, td.pr-month-data {
                                             @foreach (var wk in weeks)
                                             {
                                                 <td class="pr-month-data">@CellClaims(payer.ByWeek, wk.Key).ToString("N0")</td>
-                                                <td class="pr-month-data">@CellCharges(payer.ByWeek, wk.Key).ToString("C0")</td>
+                                                <td class="pr-month-data">@Acct(CellCharges(payer.ByWeek, wk.Key))</td>
                                             }
                                             <td class="pr-grand-total">@payer.TotalClaims.ToString("N0")</td>
-                                            <td class="pr-grand-total">@payer.TotalCharges.ToString("C0")</td>
+                                            <td class="pr-grand-total">@Acct(payer.TotalCharges)</td>
                                         </tr>
                                     }
 
@@ -1094,10 +1140,10 @@ th.pr-month-data, td.pr-month-data {
                                     @foreach (var wk in weeks)
                                     {
                                         <td class="pr-month-data">@CellClaims(Model.WeeklyGrandTotalByWeek, wk.Key).ToString("N0")</td>
-                                        <td class="pr-month-data">@CellCharges(Model.WeeklyGrandTotalByWeek, wk.Key).ToString("C0")</td>
+                                        <td class="pr-month-data">@Acct(CellCharges(Model.WeeklyGrandTotalByWeek, wk.Key))</td>
                                     }
                                     <td class="pr-grand-total">@Model.WeeklyGrandTotalClaims.ToString("N0")</td>
-                                    <td class="pr-grand-total">@Model.WeeklyGrandTotalCharges.ToString("C0")</td>
+                                    <td class="pr-grand-total">@Acct(Model.WeeklyGrandTotalCharges)</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -1131,25 +1177,23 @@ th.pr-month-data, td.pr-month-data {
             }
 
             @* ── Active rule + week-range footer (dull) ────────────────── *@
-            @{
-                var weeklyRule = !string.IsNullOrWhiteSpace(Model.ProductionSummaryWeekRule)
-                    ? Model.ProductionSummaryWeekRule
-                    : Model.ProductionSummaryRule;
-                var weeklyActiveRule = string.IsNullOrWhiteSpace(weeklyRule) ? "Default" : weeklyRule!;
-                var weeklyActiveWeek = string.IsNullOrWhiteSpace(Model.ProductionSummaryWeekRange)
-                    ? "Mon to Sun (default)"
-                    : Model.ProductionSummaryWeekRange!;
-                var weeklyUsesChargeEntered =
-                    string.Equals(weeklyRule, "Rule1", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(weeklyRule, "Rule3", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(weeklyRule, "Rule4", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(weeklyRule, "Rule5", StringComparison.OrdinalIgnoreCase);
-                var weeklyDateColumn = weeklyUsesChargeEntered ? "ChargeEnteredDate" : "FirstBilledDate";
-                var weeklyIsRule5 = string.Equals(weeklyRule, "Rule5", StringComparison.OrdinalIgnoreCase);
-                var weeklyIsRule34 =
-                    string.Equals(weeklyRule, "Rule3", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(weeklyRule, "Rule4", StringComparison.OrdinalIgnoreCase);
-            }
+            var weeklyRule = !string.IsNullOrWhiteSpace(Model.ProductionSummaryWeekRule)
+                ? Model.ProductionSummaryWeekRule
+                : Model.ProductionSummaryRule;
+            var weeklyActiveRule = string.IsNullOrWhiteSpace(weeklyRule) ? "Default" : weeklyRule!;
+            var weeklyActiveWeek = string.IsNullOrWhiteSpace(Model.ProductionSummaryWeekRange)
+                ? "Mon to Sun (default)"
+                : Model.ProductionSummaryWeekRange!;
+            var weeklyUsesChargeEntered =
+                string.Equals(weeklyRule, "Rule1", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(weeklyRule, "Rule3", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(weeklyRule, "Rule4", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(weeklyRule, "Rule5", StringComparison.OrdinalIgnoreCase);
+            var weeklyDateColumn = weeklyUsesChargeEntered ? "ChargeEnteredDate" : "FirstBilledDate";
+            var weeklyIsRule5 = string.Equals(weeklyRule, "Rule5", StringComparison.OrdinalIgnoreCase);
+            var weeklyIsRule34 =
+                string.Equals(weeklyRule, "Rule3", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(weeklyRule, "Rule4", StringComparison.OrdinalIgnoreCase);
             <div class="pr-rule-footer mt-3 small text-muted" style="opacity:.65;line-height:1.45;border-top:1px dashed #cfd6df;padding-top:.5rem">
                 <div><span class="fw-semibold">Week Range:</span> @weeklyActiveWeek</div>
                 <ul class="mb-0 ps-3" style="font-size:.78rem">
@@ -1172,10 +1216,16 @@ th.pr-month-data, td.pr-month-data {
                     <li>Cell metrics: <code>COUNT(DISTINCT ClaimID)</code> + <code>SUM(ChargeAmount)</code></li>
                 </ul>
             </div>
+            }
         </div>
+        }
 
         <!-- ??? Coding tab pane ?????????????????????????????????? -->
-        <div class="tab-pane fade" id="coding-pane" role="tabpanel" aria-labelledby="coding-tab">
+        @if (prChrome || PrShow("coding-pane"))
+        {
+        <div class="tab-pane fade" id="coding-pane" role="tabpanel" aria-labelledby="coding-tab" data-pr-lazy="coding-pane">
+            @if (PrShow("coding-pane"))
+            {
             @if (Model.CodingPanelRows.Count > 0)
             {
                 <div class="pr-wrap">
@@ -1202,7 +1252,7 @@ th.pr-month-data, td.pr-month-data {
                                     <tr class="pr-panel-row pr-hp-toggle" data-hp-group="@codingGroupId" role="button" aria-expanded="false" title="Open / close CPT rows">
                                         <td><i class="bi bi-chevron-right pr-hp-chevron" aria-hidden="true"></i>@cLetter &nbsp; @panel.PanelName</td>
                                         <td>@panel.ClaimCount.ToString("N0")</td>
-                                        <td>@panel.TotalCharges.ToString("C0")</td>
+                                        <td>@Acct(panel.TotalCharges)</td>
                                     </tr>
 
                                     var cptIdx = 0;
@@ -1212,7 +1262,7 @@ th.pr-month-data, td.pr-month-data {
                                         <tr class="pr-payer-row pr-hp-child" data-hp-parent="@codingGroupId">
                                             <td>@cptIdx &nbsp; @cpt.CptCodeUnitsModifier</td>
                                             <td>@cpt.ClaimCount.ToString("N0")</td>
-                                            <td>@cpt.TotalCharges.ToString("C0")</td>
+                                            <td>@Acct(cpt.TotalCharges)</td>
                                         </tr>
                                     }
 
@@ -1223,7 +1273,7 @@ th.pr-month-data, td.pr-month-data {
                                 <tr class="pr-total-row">
                                     <td>Grand Total</td>
                                     <td>@Model.CodingGrandTotalClaims.ToString("N0")</td>
-                                    <td>@Model.CodingGrandTotalCharges.ToString("C0")</td>
+                                    <td>@Acct(Model.CodingGrandTotalCharges)</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -1238,10 +1288,16 @@ th.pr-month-data, td.pr-month-data {
                     <div class="small mt-1"><strong>Reason:</strong> No claims with blank <code>FirstBilledDate</code> found. Try adjusting your filters.</div>
                 </div>
             }
+            }
         </div>
+        }
 
         <!-- ??? Payer Breakdown tab pane ?????????????????????????? -->
-        <div class="tab-pane fade" id="payer-breakdown-pane" role="tabpanel" aria-labelledby="payer-breakdown-tab">
+        @if (prChrome || PrShow("payer-breakdown-pane"))
+        {
+        <div class="tab-pane fade" id="payer-breakdown-pane" role="tabpanel" aria-labelledby="payer-breakdown-tab" data-pr-lazy="payer-breakdown-pane">
+            @if (PrShow("payer-breakdown-pane"))
+            {
             @if (Model.PayerBreakdownRows.Count > 0 && pbYears.Count > 0)
             {
                 <div class="pr-wrap">
@@ -1335,19 +1391,19 @@ th.pr-month-data, td.pr-month-data {
                                                 <td class="pr-month-data">@PbCell(payer.ByMonth, mk).ToString("N0")</td>
                                                 @if (pbShowCharges)
                                                 {
-                                                    <td class="pr-month-data">@PbCharges(payer.ByMonthCharges, mk).ToString("C0")</td>
+                                                    <td class="pr-month-data">@Acct(PbCharges(payer.ByMonthCharges, mk))</td>
                                                 }
                                             }
                                             <td class="pr-year-total">@PbYear(payer.ByYear, year).ToString("N0")</td>
                                             @if (pbShowCharges)
                                             {
-                                                <td class="pr-year-total">@PbYearCharges(payer.ByYearCharges, year).ToString("C0")</td>
+                                                <td class="pr-year-total">@Acct(PbYearCharges(payer.ByYearCharges, year))</td>
                                             }
                                         }
                                         <td class="pr-grand-total">@payer.GrandTotal.ToString("N0")</td>
                                         @if (pbShowCharges)
                                         {
-                                            <td class="pr-grand-total">@payer.GrandTotalCharges.ToString("C0")</td>
+                                            <td class="pr-grand-total">@Acct(payer.GrandTotalCharges)</td>
                                         }
                                     </tr>
                                 }
@@ -1363,19 +1419,19 @@ th.pr-month-data, td.pr-month-data {
                                             <td class="pr-month-data">@PbCell(Model.PayerBreakdownGrandByMonth, mk).ToString("N0")</td>
                                             @if (pbShowCharges)
                                             {
-                                                <td class="pr-month-data">@PbCharges(Model.PayerBreakdownGrandChargesByMonth, mk).ToString("C0")</td>
+                                                <td class="pr-month-data">@Acct(PbCharges(Model.PayerBreakdownGrandChargesByMonth, mk))</td>
                                             }
                                         }
                                         <td class="pr-year-total">@PbGrandYear(year).ToString("N0")</td>
                                         @if (pbShowCharges)
                                         {
-                                            <td class="pr-year-total">@PbGrandYearCharges(year).ToString("C0")</td>
+                                            <td class="pr-year-total">@Acct(PbGrandYearCharges(year))</td>
                                         }
                                     }
                                     <td class="pr-grand-total">@pbGrandTotal.ToString("N0")</td>
                                     @if (pbShowCharges)
                                     {
-                                        <td class="pr-grand-total">@pbGrandTotalCharges.ToString("C0")</td>
+                                        <td class="pr-grand-total">@Acct(pbGrandTotalCharges)</td>
                                     }
                                 </tr>
                             </tfoot>
@@ -1398,10 +1454,16 @@ th.pr-month-data, td.pr-month-data {
                     <div class="small mt-1"><strong>Reason:</strong> @pbReason. Try adjusting your filters or selecting a different lab.</div>
                 </div>
             }
+            }
         </div>
+        }
 
         <!-- ??? Payer X Panel tab pane ??????????????????????????? -->
-        <div class="tab-pane fade" id="payer-panel-pane" role="tabpanel" aria-labelledby="payer-panel-tab">
+        @if (prChrome || PrShow("payer-panel-pane"))
+        {
+        <div class="tab-pane fade" id="payer-panel-pane" role="tabpanel" aria-labelledby="payer-panel-tab" data-pr-lazy="payer-panel-pane">
+            @if (PrShow("payer-panel-pane"))
+            {
             @if (Model.PayerPanelRows.Count > 0 && pxpPanels.Count > 0)
             {
                 <div class="pr-wrap">
@@ -1458,10 +1520,10 @@ th.pr-month-data, td.pr-month-data {
                                         @foreach (var panel in pxpPanels)
                                         {
                                             <td class="pr-month-data">@PxpClaims(payer.ByPanel, panel).ToString("N0")</td>
-                                            <td class="pr-month-data">@PxpCharges(payer.ByPanel, panel).ToString("C0")</td>
+                                            <td class="pr-month-data">@Acct(PxpCharges(payer.ByPanel, panel))</td>
                                         }
                                         <td class="pr-grand-total">@payer.GrandTotalClaims.ToString("N0")</td>
-                                        <td class="pr-grand-total">@payer.GrandTotalCharges.ToString("C0")</td>
+                                        <td class="pr-grand-total">@Acct(payer.GrandTotalCharges)</td>
                                     </tr>
                                 }
                             </tbody>
@@ -1471,10 +1533,10 @@ th.pr-month-data, td.pr-month-data {
                                     @foreach (var panel in pxpPanels)
                                     {
                                         <td class="pr-month-data">@PxpClaims(Model.PayerPanelGrandByPanel, panel).ToString("N0")</td>
-                                        <td class="pr-month-data">@PxpCharges(Model.PayerPanelGrandByPanel, panel).ToString("C0")</td>
+                                        <td class="pr-month-data">@Acct(PxpCharges(Model.PayerPanelGrandByPanel, panel))</td>
                                     }
                                     <td class="pr-grand-total">@Model.PayerPanelGrandTotalClaims.ToString("N0")</td>
-                                    <td class="pr-grand-total">@Model.PayerPanelGrandTotalCharges.ToString("C0")</td>
+                                    <td class="pr-grand-total">@Acct(Model.PayerPanelGrandTotalCharges)</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -1496,10 +1558,16 @@ th.pr-month-data, td.pr-month-data {
                     <div class="small mt-1"><strong>Reason:</strong> @ppReason. Try adjusting your filters or selecting a different lab.</div>
                 </div>
             }
+            }
         </div>
+        }
 
         <!-- ??? Unbilled X Aging tab pane ???????????????????????? -->
-        <div class="tab-pane fade" id="unbilled-aging-pane" role="tabpanel" aria-labelledby="unbilled-aging-tab">
+        @if (prChrome || PrShow("unbilled-aging-pane"))
+        {
+        <div class="tab-pane fade" id="unbilled-aging-pane" role="tabpanel" aria-labelledby="unbilled-aging-tab" data-pr-lazy="unbilled-aging-pane">
+            @if (PrShow("unbilled-aging-pane"))
+            {
             @if (Model.UnbilledAgingRows.Count > 0)
             {
                 <div class="pr-wrap">
@@ -1556,10 +1624,10 @@ th.pr-month-data, td.pr-month-data {
                                         @foreach (var bk in agingBuckets)
                                         {
                                             <td class="pr-month-data">@UaClaims(row.ByBucket, bk).ToString("N0")</td>
-                                            <td class="pr-month-data">@UaCharges(row.ByBucket, bk).ToString("C0")</td>
+                                            <td class="pr-month-data">@Acct(UaCharges(row.ByBucket, bk))</td>
                                         }
                                         <td class="pr-grand-total">@row.GrandTotalClaims.ToString("N0")</td>
-                                        <td class="pr-grand-total">@row.GrandTotalCharges.ToString("C0")</td>
+                                        <td class="pr-grand-total">@Acct(row.GrandTotalCharges)</td>
                                     </tr>
                                 }
                             </tbody>
@@ -1569,10 +1637,10 @@ th.pr-month-data, td.pr-month-data {
                                     @foreach (var bk in agingBuckets)
                                     {
                                         <td class="pr-month-data">@UaClaims(Model.UnbilledAgingGrandByBucket, bk).ToString("N0")</td>
-                                        <td class="pr-month-data">@UaCharges(Model.UnbilledAgingGrandByBucket, bk).ToString("C0")</td>
+                                        <td class="pr-month-data">@Acct(UaCharges(Model.UnbilledAgingGrandByBucket, bk))</td>
                                     }
                                     <td class="pr-grand-total">@Model.UnbilledAgingGrandTotalClaims.ToString("N0")</td>
-                                    <td class="pr-grand-total">@Model.UnbilledAgingGrandTotalCharges.ToString("C0")</td>
+                                    <td class="pr-grand-total">@Acct(Model.UnbilledAgingGrandTotalCharges)</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -1587,16 +1655,20 @@ th.pr-month-data, td.pr-month-data {
                     <div class="small mt-1"><strong>Reason:</strong> No claims with blank <code>FirstBilledDate</code> found (unbilled = FirstBilledDate blank). Try adjusting your filters.</div>
                 </div>
             }
+            }
         </div>
+        }
 
         <!-- ??? CPT Breakdown tab pane ??????????????????????????? -->
-        <div class="tab-pane fade" id="cpt-breakdown-pane" role="tabpanel" aria-labelledby="cpt-breakdown-tab">
-            @{
+        @if (prChrome || PrShow("cpt-breakdown-pane"))
+        {
+        <div class="tab-pane fade" id="cpt-breakdown-pane" role="tabpanel" aria-labelledby="cpt-breakdown-tab" data-pr-lazy="cpt-breakdown-pane">
+            @if (PrShow("cpt-breakdown-pane"))
+            {
                 var cptDaqSrc = Model.CptBreakdownRows.FirstOrDefault(r => r.CptCode.Equals("DAQ", StringComparison.OrdinalIgnoreCase));
                 var cptWebSrc = Model.CptBreakdownRows.FirstOrDefault(r => r.CptCode.Equals("WebPM", StringComparison.OrdinalIgnoreCase));
                 var nwCptBySource = Model.IsNorthWestLab && ((cptDaqSrc?.ChildRows.Count ?? 0) > 0 || (cptWebSrc?.ChildRows.Count ?? 0) > 0);
                 var cptMetricCols = 2;
-            }
             @if (nwCptBySource)
             {
                 <div class="pr-insight-toolbar">
@@ -1712,13 +1784,13 @@ th.pr-month-data, td.pr-month-data {
                                                         foreach (var mk in mons)
                                                         {
                                                             <td class="pr-month-data">@(cptShowCountOfUnits || !cptShowUnits ? CptClaims(row.ByMonth, mk).ToString("N0") : CptUnits(row.ByMonth, mk).ToString("N0"))</td>
-                                                            <td class="pr-month-data">@CptCharges(row.ByMonth, mk).ToString("C0")</td>
+                                                            <td class="pr-month-data">@Acct(CptCharges(row.ByMonth, mk))</td>
                                                         }
                                                         <td class="pr-year-total">@(cptShowCountOfUnits || !cptShowUnits ? CptYearClaims(row.ByYear, year).ToString("N0") : CptYearUnits(row.ByYear, year).ToString("N0"))</td>
-                                                        <td class="pr-year-total">@CptYearCharges(row.ByYear, year).ToString("C0")</td>
+                                                        <td class="pr-year-total">@Acct(CptYearCharges(row.ByYear, year))</td>
                                                     }
                                                     <td class="pr-grand-total">@(cptShowCountOfUnits || !cptShowUnits ? row.GrandTotalClaims.ToString("N0") : row.GrandTotalUnits.ToString("N0"))</td>
-                                                    <td class="pr-grand-total">@row.GrandTotalCharges.ToString("C0")</td>
+                                                    <td class="pr-grand-total">@Acct(row.GrandTotalCharges)</td>
                                                 </tr>
                                             }
                                         </tbody>
@@ -1731,13 +1803,13 @@ th.pr-month-data, td.pr-month-data {
                                                     foreach (var mk in mons)
                                                     {
                                                         <td class="pr-month-data">@(cptShowCountOfUnits || !cptShowUnits ? CptClaims(tab.GrandByMonth, mk).ToString("N0") : CptUnits(tab.GrandByMonth, mk).ToString("N0"))</td>
-                                                        <td class="pr-month-data">@CptCharges(tab.GrandByMonth, mk).ToString("C0")</td>
+                                                        <td class="pr-month-data">@Acct(CptCharges(tab.GrandByMonth, mk))</td>
                                                     }
                                                     <td class="pr-year-total">@(cptShowCountOfUnits || !cptShowUnits ? CptYearClaims(tab.GrandByYear, year).ToString("N0") : CptYearUnits(tab.GrandByYear, year).ToString("N0"))</td>
-                                                    <td class="pr-year-total">@CptYearCharges(tab.GrandByYear, year).ToString("C0")</td>
+                                                    <td class="pr-year-total">@Acct(CptYearCharges(tab.GrandByYear, year))</td>
                                                 }
                                                 <td class="pr-grand-total">@(cptShowCountOfUnits || !cptShowUnits ? tab.GrandClaims.ToString("N0") : tab.GrandUnits.ToString("N0"))</td>
-                                                <td class="pr-grand-total">@tab.GrandCharges.ToString("C0")</td>
+                                                <td class="pr-grand-total">@Acct(tab.GrandCharges)</td>
                                             </tr>
                                         </tfoot>
                                     </table>
@@ -1826,13 +1898,13 @@ th.pr-month-data, td.pr-month-data {
                                             foreach (var mk in mons)
                                             {
                                                 <td class="pr-month-data">@(cptShowCountOfUnits || !cptShowUnits ? CptClaims(row.ByMonth, mk).ToString("N0") : CptUnits(row.ByMonth, mk).ToString("N0"))</td>
-                                                <td class="pr-month-data">@CptCharges(row.ByMonth, mk).ToString("C0")</td>
+                                                <td class="pr-month-data">@Acct(CptCharges(row.ByMonth, mk))</td>
                                             }
                                             <td class="pr-year-total">@(cptShowCountOfUnits || !cptShowUnits ? CptYearClaims(row.ByYear, year).ToString("N0") : CptYearUnits(row.ByYear, year).ToString("N0"))</td>
-                                            <td class="pr-year-total">@CptYearCharges(row.ByYear, year).ToString("C0")</td>
+                                            <td class="pr-year-total">@Acct(CptYearCharges(row.ByYear, year))</td>
                                         }
                                         <td class="pr-grand-total">@(cptShowCountOfUnits || !cptShowUnits ? row.GrandTotalClaims.ToString("N0") : row.GrandTotalUnits.ToString("N0"))</td>
-                                        <td class="pr-grand-total">@row.GrandTotalCharges.ToString("C0")</td>
+                                        <td class="pr-grand-total">@Acct(row.GrandTotalCharges)</td>
                                     </tr>
                                 }
                             </tbody>
@@ -1845,13 +1917,13 @@ th.pr-month-data, td.pr-month-data {
                                         foreach (var mk in mons)
                                         {
                                             <td class="pr-month-data">@(cptShowCountOfUnits || !cptShowUnits ? CptClaims(Model.CptBreakdownGrandByMonth, mk).ToString("N0") : CptUnits(Model.CptBreakdownGrandByMonth, mk).ToString("N0"))</td>
-                                            <td class="pr-month-data">@CptCharges(Model.CptBreakdownGrandByMonth, mk).ToString("C0")</td>
+                                            <td class="pr-month-data">@Acct(CptCharges(Model.CptBreakdownGrandByMonth, mk))</td>
                                         }
                                         <td class="pr-year-total">@(cptShowCountOfUnits || !cptShowUnits ? CptGrandYearClaims(year).ToString("N0") : CptGrandYearUnits(year).ToString("N0"))</td>
-                                        <td class="pr-year-total">@CptGrandYearCharges(year).ToString("C0")</td>
+                                        <td class="pr-year-total">@Acct(CptGrandYearCharges(year))</td>
                                     }
                                     <td class="pr-grand-total">@(cptShowCountOfUnits || !cptShowUnits ? cptGrandClaims.ToString("N0") : cptGrandUnits.ToString("N0"))</td>
-                                    <td class="pr-grand-total">@cptGrandCharges.ToString("C0")</td>
+                                    <td class="pr-grand-total">@Acct(cptGrandCharges)</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -1866,11 +1938,15 @@ th.pr-month-data, td.pr-month-data {
                     <div class="small mt-1"><strong>Reason:</strong> No billed line-level data found. Try adjusting your filters.</div>
                 </div>
             }
+            }
         </div>
+        }
 
-        @if (Model.PanelBreakdownRows.Count > 0)
+        @if (prChrome || PrShow("panel-breakdown-pane"))
         {
-        <div class="tab-pane fade" id="panel-breakdown-pane" role="tabpanel" aria-labelledby="panel-breakdown-tab">
+        <div class="tab-pane fade" id="panel-breakdown-pane" role="tabpanel" aria-labelledby="panel-breakdown-tab" data-pr-lazy="panel-breakdown-pane">
+            @if (PrShow("panel-breakdown-pane"))
+            {
             @if (Model.PanelBreakdownRows.Count > 0 && pnlYears.Count > 0)
             {
                 <div class="pr-wrap">
@@ -1957,13 +2033,13 @@ th.pr-month-data, td.pr-month-data {
                                             foreach (var mk in pnlMons)
                                             {
                                                 <td class="pr-month-data">@PbCell(panel.ByMonth, mk).ToString("N0")</td>
-                                                <td class="pr-month-data">@PbCharges(panel.ByMonthCharges, mk).ToString("C0")</td>
+                                                <td class="pr-month-data">@Acct(PbCharges(panel.ByMonthCharges, mk))</td>
                                             }
                                             <td class="pr-year-total">@PbYear(panel.ByYear, year).ToString("N0")</td>
-                                            <td class="pr-year-total">@PbYearCharges(panel.ByYearCharges, year).ToString("C0")</td>
+                                            <td class="pr-year-total">@Acct(PbYearCharges(panel.ByYearCharges, year))</td>
                                         }
                                         <td class="pr-grand-total">@panel.GrandTotal.ToString("N0")</td>
-                                        <td class="pr-grand-total">@panel.GrandTotalCharges.ToString("C0")</td>
+                                        <td class="pr-grand-total">@Acct(panel.GrandTotalCharges)</td>
                                     </tr>
 
                                     @foreach (var payer in panel.ChildRows)
@@ -1976,13 +2052,13 @@ th.pr-month-data, td.pr-month-data {
                                                 foreach (var mk in pnlMons)
                                                 {
                                                     <td class="pr-month-data">@PbCell(payer.ByMonth, mk).ToString("N0")</td>
-                                                    <td class="pr-month-data">@PbCharges(payer.ByMonthCharges, mk).ToString("C0")</td>
+                                                    <td class="pr-month-data">@Acct(PbCharges(payer.ByMonthCharges, mk))</td>
                                                 }
                                                 <td class="pr-year-total">@PbYear(payer.ByYear, year).ToString("N0")</td>
-                                                <td class="pr-year-total">@PbYearCharges(payer.ByYearCharges, year).ToString("C0")</td>
+                                                <td class="pr-year-total">@Acct(PbYearCharges(payer.ByYearCharges, year))</td>
                                             }
                                             <td class="pr-grand-total">@payer.GrandTotal.ToString("N0")</td>
-                                            <td class="pr-grand-total">@payer.GrandTotalCharges.ToString("C0")</td>
+                                            <td class="pr-grand-total">@Acct(payer.GrandTotalCharges)</td>
                                         </tr>
                                     }
                                 }
@@ -1996,13 +2072,13 @@ th.pr-month-data, td.pr-month-data {
                                         foreach (var mk in pnlMons)
                                         {
                                             <td class="pr-month-data">@PbCell(Model.PanelBreakdownGrandByMonth, mk).ToString("N0")</td>
-                                            <td class="pr-month-data">@PbCharges(Model.PanelBreakdownGrandChargesByMonth, mk).ToString("C0")</td>
+                                            <td class="pr-month-data">@Acct(PbCharges(Model.PanelBreakdownGrandChargesByMonth, mk))</td>
                                         }
                                         <td class="pr-year-total">@PnlGrandYear(year).ToString("N0")</td>
-                                        <td class="pr-year-total">@PnlGrandYearCharges(year).ToString("C0")</td>
+                                        <td class="pr-year-total">@Acct(PnlGrandYearCharges(year))</td>
                                     }
                                     <td class="pr-grand-total">@pnlGrandTotal.ToString("N0")</td>
-                                    <td class="pr-grand-total">@pnlGrandTotalCharges.ToString("C0")</td>
+                                    <td class="pr-grand-total">@Acct(pnlGrandTotalCharges)</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -2017,12 +2093,15 @@ th.pr-month-data, td.pr-month-data {
                     <div class="small mt-1"><strong>Reason:</strong> No billed claim-level data found. Try adjusting your filters.</div>
                 </div>
             }
+            }
         </div>
         }
 
-        @if (Model.IsNorthWestLab)
+        @if ((prChrome || PrShow("insight-pane")) && Model.IsNorthWestLab)
         {
-        <div class="tab-pane fade" id="insight-pane" role="tabpanel" aria-labelledby="insight-tab">
+        <div class="tab-pane fade" id="insight-pane" role="tabpanel" aria-labelledby="insight-tab" data-pr-lazy="insight-pane">
+            @if (PrShow("insight-pane"))
+            {
             <div class="pr-insight-toolbar">
                 <div class="pr-source-toggle" id="insightSourceToggle" role="tablist" aria-label="Billing source">
                     <button class="pr-source-toggle-btn active" id="insight-daq-tab" type="button" role="tab"
@@ -2142,13 +2221,13 @@ th.pr-month-data, td.pr-month-data {
                                                     foreach (var mk in insMons)
                                                     {
                                                         <td class="pr-month-data">@PbCell(payer.ByMonth, mk).ToString("N0")</td>
-                                                        <td class="pr-month-data">@PbCharges(payer.ByMonthCharges, mk).ToString("C0")</td>
+                                                        <td class="pr-month-data">@Acct(PbCharges(payer.ByMonthCharges, mk))</td>
                                                     }
                                                     <td class="pr-year-total">@PbYear(payer.ByYear, year).ToString("N0")</td>
-                                                    <td class="pr-year-total">@PbYearCharges(payer.ByYearCharges, year).ToString("C0")</td>
+                                                    <td class="pr-year-total">@Acct(PbYearCharges(payer.ByYearCharges, year))</td>
                                                 }
                                                 <td class="pr-grand-total">@payer.GrandTotal.ToString("N0")</td>
-                                                <td class="pr-grand-total">@payer.GrandTotalCharges.ToString("C0")</td>
+                                                <td class="pr-grand-total">@Acct(payer.GrandTotalCharges)</td>
                                             </tr>
                                         }
                                     </tbody>
@@ -2161,13 +2240,13 @@ th.pr-month-data, td.pr-month-data {
                                                 foreach (var mk in insMons)
                                                 {
                                                     <td class="pr-month-data">@PbCell(tab.GrandByMonth, mk).ToString("N0")</td>
-                                                    <td class="pr-month-data">@PbCharges(tab.GrandChargesByMonth, mk).ToString("C0")</td>
+                                                    <td class="pr-month-data">@Acct(PbCharges(tab.GrandChargesByMonth, mk))</td>
                                                 }
                                                 <td class="pr-year-total">@InsightGrandYear(tab.GrandByMonth, year).ToString("N0")</td>
-                                                <td class="pr-year-total">@InsightGrandYearCharges(tab.GrandChargesByMonth, year).ToString("C0")</td>
+                                                <td class="pr-year-total">@Acct(InsightGrandYearCharges(tab.GrandChargesByMonth, year))</td>
                                             }
                                             <td class="pr-grand-total">@tab.GrandTotal.ToString("N0")</td>
-                                            <td class="pr-grand-total">@tab.GrandTotalCharges.ToString("C0")</td>
+                                            <td class="pr-grand-total">@Acct(tab.GrandTotalCharges)</td>
                                         </tr>
                                     </tfoot>
                                 </table>
@@ -2185,9 +2264,15 @@ th.pr-month-data, td.pr-month-data {
                 </div>
             }
             </div>
+            }
         </div>
+        }
 
-        <div class="tab-pane fade" id="highest-payer-pane" role="tabpanel" aria-labelledby="highest-payer-tab">
+        @if ((prChrome || PrShow("highest-payer-pane")) && Model.IsNorthWestLab)
+        {
+        <div class="tab-pane fade" id="highest-payer-pane" role="tabpanel" aria-labelledby="highest-payer-tab" data-pr-lazy="highest-payer-pane">
+            @if (PrShow("highest-payer-pane"))
+            {
             @if (Model.HighestPayerRows.Count > 0 && hpYears.Count > 0)
             {
                 <div class="pr-wrap">
@@ -2260,13 +2345,13 @@ th.pr-month-data, td.pr-month-data {
                                             foreach (var mk in hpMons)
                                             {
                                                 <td class="pr-month-data">@CellClaims(src.ByMonth, mk).ToString("N0")</td>
-                                                <td class="pr-month-data">@CellCharges(src.ByMonth, mk).ToString("C0")</td>
+                                                <td class="pr-month-data">@Acct(CellCharges(src.ByMonth, mk))</td>
                                             }
                                             <td class="pr-year-total">@YearClaims(src.ByYear, year).ToString("N0")</td>
-                                            <td class="pr-year-total">@YearCharges(src.ByYear, year).ToString("C0")</td>
+                                            <td class="pr-year-total">@Acct(YearCharges(src.ByYear, year))</td>
                                         }
                                         <td class="pr-grand-total">@src.TotalClaims.ToString("N0")</td>
-                                        <td class="pr-grand-total">@src.TotalCharges.ToString("C0")</td>
+                                        <td class="pr-grand-total">@Acct(src.TotalCharges)</td>
                                     </tr>
                                     @foreach (var payer in src.TopPayers)
                                     {
@@ -2278,13 +2363,13 @@ th.pr-month-data, td.pr-month-data {
                                                 foreach (var mk in hpMons)
                                                 {
                                                     <td class="pr-month-data">@CellClaims(payer.ByMonth, mk).ToString("N0")</td>
-                                                    <td class="pr-month-data">@CellCharges(payer.ByMonth, mk).ToString("C0")</td>
+                                                    <td class="pr-month-data">@Acct(CellCharges(payer.ByMonth, mk))</td>
                                                 }
                                                 <td class="pr-year-total">@YearClaims(payer.ByYear, year).ToString("N0")</td>
-                                                <td class="pr-year-total">@YearCharges(payer.ByYear, year).ToString("C0")</td>
+                                                <td class="pr-year-total">@Acct(YearCharges(payer.ByYear, year))</td>
                                             }
                                             <td class="pr-grand-total">@payer.TotalClaims.ToString("N0")</td>
-                                            <td class="pr-grand-total">@payer.TotalCharges.ToString("C0")</td>
+                                            <td class="pr-grand-total">@Acct(payer.TotalCharges)</td>
                                         </tr>
                                     }
                                 }
@@ -2298,13 +2383,13 @@ th.pr-month-data, td.pr-month-data {
                                         foreach (var mk in hpMons)
                                         {
                                             <td class="pr-month-data">@CellClaims(Model.HighestPayerGrandByMonth, mk).ToString("N0")</td>
-                                            <td class="pr-month-data">@CellCharges(Model.HighestPayerGrandByMonth, mk).ToString("C0")</td>
+                                            <td class="pr-month-data">@Acct(CellCharges(Model.HighestPayerGrandByMonth, mk))</td>
                                         }
                                         <td class="pr-year-total">@HpGrandYearClaims(year).ToString("N0")</td>
-                                        <td class="pr-year-total">@HpGrandYearCharges(year).ToString("C0")</td>
+                                        <td class="pr-year-total">@Acct(HpGrandYearCharges(year))</td>
                                     }
                                     <td class="pr-grand-total">@hpGrandClaims.ToString("N0")</td>
-                                    <td class="pr-grand-total">@hpGrandCharges.ToString("C0")</td>
+                                    <td class="pr-grand-total">@Acct(hpGrandCharges)</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -2319,15 +2404,132 @@ th.pr-month-data, td.pr-month-data {
                     <div class="small mt-1"><strong>Reason:</strong> No billed claim-level data found. Try adjusting your filters.</div>
                 </div>
             }
+            }
         </div>
         }
 
     </div>
 }
 
+@if (prChrome && !string.IsNullOrWhiteSpace(Model.SelectedLab))
+{
+    @await Html.PartialAsync("_ProductionInsights", Model)
+}
+
+@if (prChrome)
+{
 <script nonce='@Context.Items["CspNonce"]'>
     // Multi-select dropdown widget (matches Clinic Summary pattern)
     document.addEventListener('DOMContentLoaded', function () {
+        var tabHost = document.getElementById('prTabContent');
+        if (tabHost) {
+            var tabUrl = tabHost.getAttribute('data-pr-tab-url');
+            var tabKey = tabHost.getAttribute('data-pr-key');
+            var metaUrl = tabHost.getAttribute('data-pr-meta-url');
+            function fillMsList(listEl, names, inputName) {
+                if (!listEl || !names || !names.length) return;
+                listEl.innerHTML = '';
+                names.forEach(function (name) {
+                    var label = document.createElement('label');
+                    var input = document.createElement('input');
+                    input.type = 'checkbox';
+                    input.name = inputName;
+                    input.value = name;
+                    label.appendChild(input);
+                    label.appendChild(document.createTextNode(' ' + name));
+                    listEl.appendChild(label);
+                });
+            }
+            function fillBanner(d) {
+                var el = document.getElementById('pr-analysis-banner');
+                if (!el || !d || !(d.weekFolder || d.runId || d.inserted)) return;
+                var wrap = document.createElement('div');
+                wrap.className = 'd-flex flex-wrap gap-3 align-items-center mb-3 px-1';
+                wrap.style.fontSize = '.82rem';
+                wrap.style.color = '#374151';
+                function addPair(label, value) {
+                    if (!value) return;
+                    var span = document.createElement('span');
+                    var lab = document.createElement('span');
+                    lab.className = 'fw-semibold text-secondary';
+                    lab.style.fontSize = '.72rem';
+                    lab.style.letterSpacing = '.04em';
+                    lab.style.textTransform = 'uppercase';
+                    lab.textContent = label;
+                    var val = document.createElement('span');
+                    val.className = 'ms-1 fw-semibold';
+                    val.style.color = '#0e3460';
+                    val.textContent = value;
+                    span.appendChild(lab);
+                    span.appendChild(val);
+                    wrap.appendChild(span);
+                }
+                var range = document.createElement('span');
+                range.innerHTML = '<span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">Analysis Range:</span><span class="ms-1 fw-semibold text-dark">Billed Week Range</span>';
+                if (d.weekFolder) {
+                    var dash = document.createElement('span');
+                    dash.className = 'ms-1 text-muted';
+                    dash.textContent = ' — ';
+                    var folder = document.createElement('span');
+                    folder.className = 'ms-1 fw-semibold';
+                    folder.style.color = '#0e3460';
+                    folder.textContent = d.weekFolder;
+                    range.appendChild(dash);
+                    range.appendChild(folder);
+                }
+                wrap.appendChild(range);
+                addPair('ReportId (RunID):', d.runId);
+                addPair('Inserted Date:', d.inserted);
+                el.innerHTML = '';
+                el.appendChild(wrap);
+            }
+            if (metaUrl && tabKey) {
+                fetch(metaUrl + '?key=' + encodeURIComponent(tabKey), { credentials: 'same-origin' })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (d) {
+                        if (!d) return;
+                        fillMsList(document.getElementById('prPayerList'), d.payers, 'filterPayerNames');
+                        fillMsList(document.getElementById('prPanelList'), d.panels, 'filterPanelNames');
+                        fillBanner(d);
+                    })
+                    .catch(function () { });
+            }
+            function loadPrPane(pane) {
+                if (!pane || !pane.hasAttribute('data-pr-lazy') || pane.getAttribute('data-pr-loaded') === '1') return;
+                if (!tabUrl || !tabKey) return;
+                pane.setAttribute('data-pr-loaded', '1');
+                pane.innerHTML = '<div class="pr-tab-loading"><div class="pr-tab-spinner" role="status" aria-label="Loading"></div><div>' +
+                    (pane.id === 'monthly-pane' ? 'Loading monthly data\u2026' : 'Loading tab\u2026') + '</div></div>';
+                if (pane.id === 'monthly-pane' && window.lmdFpLog) {
+                    window.lmdFpLog('spinner-on', 'page landed — in-tab spinner on');
+                }
+                fetch(tabUrl + '?key=' + encodeURIComponent(tabKey) + '&pane=' + encodeURIComponent(pane.id), { credentials: 'same-origin' })
+                    .then(function (r) {
+                        if (!r.ok) throw new Error('tab ' + r.status);
+                        return r.text();
+                    })
+                    .then(function (html) {
+                        var tmp = document.createElement('div');
+                        tmp.innerHTML = html;
+                        var inner = tmp.querySelector('#' + pane.id) || tmp;
+                        pane.innerHTML = inner.id === pane.id ? inner.innerHTML : tmp.innerHTML;
+                        if (pane.id === 'monthly-pane' && window.lmdFpLog) {
+                            window.lmdFpLog('monthly-html', 'monthly tab HTML on screen');
+                        }
+                    })
+                    .catch(function () {
+                        pane.setAttribute('data-pr-loaded', '0');
+                        pane.innerHTML = '<div class="text-center py-5 text-danger">Could not load this tab. Refresh the page.</div>';
+                    });
+            }
+            document.getElementById('prTabs')?.addEventListener('show.bs.tab', function (e) {
+                var btn = e.target.closest('[data-bs-target]');
+                var sel = btn && btn.getAttribute('data-bs-target');
+                loadPrPane(sel && document.querySelector(sel));
+            });
+            loadPrPane(document.querySelector('#prTabContent .tab-pane.active[data-pr-lazy]'));
+        }
+
         var sourceToggle = document.getElementById('insightSourceToggle');
         if (sourceToggle) {
             sourceToggle.addEventListener('click', function (e) {
@@ -2355,6 +2557,17 @@ th.pr-month-data, td.pr-month-data {
         }
 
         document.addEventListener('click', function (e) {
+            var srcBtn = e.target.closest ? e.target.closest('.pr-source-toggle-btn') : null;
+            if (srcBtn) {
+                var toggle = srcBtn.closest('.pr-source-toggle');
+                if (toggle) {
+                    toggle.querySelectorAll('.pr-source-toggle-btn').forEach(function (b) {
+                        var on = b === srcBtn;
+                        b.classList.toggle('active', on);
+                        b.setAttribute('aria-selected', on ? 'true' : 'false');
+                    });
+                }
+            }
             var row = e.target.closest ? e.target.closest('.pr-hp-toggle') : null;
             if (!row) return;
             var group = row.getAttribute('data-hp-group');
@@ -2372,9 +2585,9 @@ th.pr-month-data, td.pr-month-data {
             var btn = ms.querySelector('.pr-ms-btn');
             var panel = ms.querySelector('.pr-ms-panel');
             var search = ms.querySelector('.pr-ms-search');
-            var labels = ms.querySelectorAll('.pr-ms-list label');
             var labelEl = ms.querySelector('.pr-ms-label');
             var countEl = ms.querySelector('.pr-ms-count');
+            function liveLabels() { return ms.querySelectorAll('.pr-ms-list label'); }
 
             function updateLabel() {
                 var checked = ms.querySelectorAll('.pr-ms-list input:checked');
@@ -2400,23 +2613,22 @@ th.pr-month-data, td.pr-month-data {
                 if (panel.classList.contains('open') && search) {
                     search.value = '';
                     search.focus();
-                    labels.forEach(function (l) { l.classList.remove('pr-ms-hidden'); });
+                    liveLabels().forEach(function (l) { l.classList.remove('pr-ms-hidden'); });
                 }
             });
 
             if (search) {
                 search.addEventListener('input', function () {
                     var q = this.value.toLowerCase();
-                    labels.forEach(function (l) {
+                    liveLabels().forEach(function (l) {
                         var text = l.textContent.toLowerCase();
                         l.classList.toggle('pr-ms-hidden', q.length > 0 && text.indexOf(q) === -1);
                     });
                 });
             }
 
-            ms.querySelectorAll('.pr-ms-list input').forEach(function (cb) {
-                cb.addEventListener('change', updateLabel);
-            });
+            var list = ms.querySelector('.pr-ms-list');
+            if (list) list.addEventListener('change', updateLabel);
 
             panel.addEventListener('click', function (e) { e.stopPropagation(); });
 
@@ -2500,21 +2712,21 @@ th.pr-month-data, td.pr-month-data {
 
                 var original = exportBtn.innerHTML;
                 exportBtn.disabled = true;
-                exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing…';
+                window.rptExportBusy(exportBtn, '<span class="spinner-border spinner-border-sm"></span> Queuing…');
 
                 fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
                     .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
                     .then(function (res) {
                         if (res.ok) {
-                            exportBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating — watch Reports 📄';
+                            window.rptExportBusy(exportBtn, '<i class="bi bi-check-circle"></i> Generating — watch Reports');
                             if (window.lrnShowReportAlert) window.lrnShowReportAlert('success');
                             if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
-                            setTimeout(function () { exportBtn.disabled = false; exportBtn.innerHTML = original; }, 8000);
+                            setTimeout(function () { window.rptExportIdle(exportBtn, original); }, 8000);
                         } else if (res.status === 400) {
-                            exportBtn.disabled = false; exportBtn.innerHTML = original;
+                            window.rptExportIdle(exportBtn, original);
                             legacySyncExport();
                         } else {
-                            exportBtn.disabled = false; exportBtn.innerHTML = original;
+                            window.rptExportIdle(exportBtn, original);
                             var qMsg = res.j && res.j.message ? res.j.message : '';
                             if (window.lrnShowReportAlert) {
                                 if (res.status === 409 || /already/i.test(qMsg)) {
@@ -2526,7 +2738,7 @@ th.pr-month-data, td.pr-month-data {
                         }
                     })
                     .catch(function () {
-                        exportBtn.disabled = false; exportBtn.innerHTML = original;
+                        window.rptExportIdle(exportBtn, original);
                         legacySyncExport();
                     });
             });
@@ -2614,3 +2826,4 @@ th.pr-month-data, td.pr-month-data {
         }
     });
 </script>
+}

@@ -317,7 +317,7 @@ public sealed class ExecutiveSummaryExcelBuilder
 
     private void SetNumberFormat(IXLCell cell, string category)
     {
-        cell.Style.NumberFormat.Format = IsDollar(category) ? "$#,##0" : "#,##0";
+        cell.Style.NumberFormat.Format = IsDollar(category) ? ExcelTheme.AccountingNumberFormat : "#,##0";
     }
 
     private static bool IsDollar(string cat) => cat is "Cash" or "Avg";

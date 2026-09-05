@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Claims;
 using LabMetricsDashboard.Models.Menu;
 using Microsoft.Extensions.Caching.Memory;
@@ -59,6 +60,7 @@ public sealed class MenuService : IMenuService
         if (user.Identity?.IsAuthenticated != true) return new List<MenuItemVm>();
 
         var key = $"menu:v{Volatile.Read(ref _cacheVersion)}:roles:{RoleKey(user)}";
+        var menuSw = Stopwatch.StartNew();
         var cached = await _cache.GetOrCreateAsync(key, async entry =>
         {
             try
@@ -74,6 +76,7 @@ public sealed class MenuService : IMenuService
                 return new List<MenuItemVm>(); // view falls back to the static navbar
             }
         });
+        FirstPaintLog.Write(_logger, "Menu", "navbar", "GetMyMenus", menuSw.ElapsedMilliseconds);
         return cached ?? new List<MenuItemVm>();
     }
 

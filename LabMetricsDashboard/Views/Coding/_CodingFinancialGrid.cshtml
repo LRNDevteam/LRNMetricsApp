@@ -1,7 +1,7 @@
 @model List<LabMetricsDashboard.Models.CodingFinancialSummaryRow>
 @{
     var en = System.Globalization.CultureInfo.GetCultureInfo("en-US");
-    string Money(decimal? v) => (v ?? 0m).ToString("C2", en);
+    IHtmlContent Money(decimal? v) => Acct2(v ?? 0m);
     string MoneyShort(decimal? v)
     {
         var d = v ?? 0m;

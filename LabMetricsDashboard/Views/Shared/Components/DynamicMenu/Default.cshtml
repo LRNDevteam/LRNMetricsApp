@@ -19,6 +19,11 @@
         string.Equals(item.ControllerName, "ReimbursementChat", StringComparison.OrdinalIgnoreCase)
         || IsDenialWorkflow(item);
 
+    // Reports that stream large HTML: show the full-screen loader as soon as the user clicks.
+    bool NeedsPageLoader(MenuItemVm item) =>
+        (string.Equals(item.ControllerName, "Dashboard", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(item.ActionName, "ProductionReport", StringComparison.OrdinalIgnoreCase));
+
     // Href for a linkable item: the React app for Denial Workflow, the MVC route otherwise.
     string LinkFor(MenuItemVm item) => IsDenialWorkflow(item)
         ? denialReactAgingUrl
@@ -59,7 +64,8 @@ else
                                     <a class="dropdown-item"
                                        href="@LinkFor(child)"
                                        target="@(OpensInNewTab(child) ? "_blank" : null)"
-                                       rel="@(OpensInNewTab(child) ? "noopener" : null)">
+                                       rel="@(OpensInNewTab(child) ? "noopener" : null)"
+                                       @(NeedsPageLoader(child) ? Html.Raw("data-lab-link=\"" + child.MenuName + "\"") : null)>
                                         <i class="bi @child.IconClass"></i> @child.MenuName
                                     </a>
                                 }
@@ -83,7 +89,8 @@ else
                     <a class="nav-link"
                        href="@LinkFor(menu)"
                        target="@(OpensInNewTab(menu) ? "_blank" : null)"
-                       rel="@(OpensInNewTab(menu) ? "noopener" : null)">
+                       rel="@(OpensInNewTab(menu) ? "noopener" : null)"
+                       @(NeedsPageLoader(menu) ? Html.Raw("data-lab-link=\"" + menu.MenuName + "\"") : null)>
                         <i class="bi @menu.IconClass"></i> @menu.MenuName
                     </a>
                 }

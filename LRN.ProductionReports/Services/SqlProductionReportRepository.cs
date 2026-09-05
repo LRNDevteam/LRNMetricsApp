@@ -2188,6 +2188,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 AppendOpenXmlPlaceholderSheet(workbookPart, sheets, placeholderName, tabColor);
                 workbookPart.Workbook.Save();
             }
+            OpenXmlWorkbookRepair.StripRepairTriggers(filePath);
             ForceGc();
             _logger.LogInformation("[SpExportFile] No data � placeholder sheet added: {Sheet}", placeholderName);
             return 0;
@@ -2286,8 +2287,10 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             mergeSw.Stop();
 
             _logger.LogInformation(
-                "[SpExportFile] [Phase2] Merge done � {Count} sheet(s) in {Ms} ms",
+                "[SpExportFile] [Phase2] Merge done — {Count} sheet(s) in {Ms} ms",
                 bucketFiles.Count, mergeSw.ElapsedMilliseconds);
+
+            OpenXmlWorkbookRepair.StripRepairTriggers(filePath);
         }
         finally
         {
@@ -2436,7 +2439,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         }
 
         var relId   = mainWorkbookPart.GetIdOfPart(targetWsPart);
-        var sheetId = (uint)(mainSheets.Elements<Sheet>().Count() + 1);
+        var sheetId = OpenXmlWorkbookRepair.NextSheetId(mainSheets);
         mainSheets.Append(new Sheet { Id = relId, SheetId = sheetId, Name = sheetName });
 
         logger.LogInformation("[SpExportFile] [Phase2] Copied {File} ? main sheet '{Sheet}'",
@@ -2602,7 +2605,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         }
 
         // Register the sheet in workbook.xml
-        var sheetId = (uint)(sheets.Elements<Sheet>().Count() + 1);
+        var sheetId = OpenXmlWorkbookRepair.NextSheetId(sheets);
         sheets.Append(new Sheet
         {
             Id      = relId,
@@ -2634,7 +2637,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             writer.WriteEndElement();
         }
 
-        var sheetId = (uint)(sheets.Elements<Sheet>().Count() + 1);
+        var sheetId = OpenXmlWorkbookRepair.NextSheetId(sheets);
         sheets.Append(new Sheet { Id = relId, SheetId = sheetId, Name = sheetName });
         _ = tabColor;
     }
@@ -2643,9 +2646,17 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
     {
         writer.WriteStartElement(new Cell { CellReference = cellRef, DataType = CellValues.InlineString });
         writer.WriteStartElement(new InlineString());
-        writer.WriteElement(new Text(SanitizeXmlString(value)));
+        writer.WriteElement(XmlText(SanitizeXmlString(value)));
         writer.WriteEndElement();
         writer.WriteEndElement();
+    }
+
+    private static Text XmlText(string value)
+    {
+        var text = new Text(value);
+        if (value.Length > 0 && (char.IsWhiteSpace(value[0]) || char.IsWhiteSpace(value[^1]) || value.Contains('\n')))
+            text.Space = SpaceProcessingModeValues.Preserve;
+        return text;
     }
 
     /// <summary>
@@ -2696,11 +2707,13 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 writer.WriteEndElement();
                 break;
             case double dbl:
+                if (double.IsNaN(dbl) || double.IsInfinity(dbl)) break;
                 writer.WriteStartElement(new Cell { CellReference = cellRef, DataType = CellValues.Number });
                 writer.WriteElement(new CellValue(dbl.ToString("R", CultureInfo.InvariantCulture)));
                 writer.WriteEndElement();
                 break;
             case float f:
+                if (float.IsNaN(f) || float.IsInfinity(f)) break;
                 writer.WriteStartElement(new Cell { CellReference = cellRef, DataType = CellValues.Number });
                 writer.WriteElement(new CellValue(f.ToString("R", CultureInfo.InvariantCulture)));
                 writer.WriteEndElement();

@@ -126,7 +126,7 @@ internal static class OpenXmlRowStreamer
 
                 wsPart = workbookPart.AddNewPart<WorksheetPart>();
                 var relId = workbookPart.GetIdOfPart(wsPart);
-                var sheetId = (uint)(sheets.Elements<Sheet>().Count() + 1);
+                var sheetId = LRN.ProductionReports.Services.OpenXmlWorkbookRepair.NextSheetId(sheets);
                 var sheetName = MakeSheetName(title, sheetIndex, expectedParts);
                 sheets.Append(new Sheet { Id = relId, SheetId = sheetId, Name = sheetName });
 
@@ -573,10 +573,11 @@ internal static class OpenXmlRowStreamer
                         inStream.CopyTo(outStream);
 
                     var relId = mainWb.GetIdOfPart(dstPart);
-                    var sheetId = (uint)(mainSheets.Elements<Sheet>().Count() + 1);
+                    var sheetId = LRN.ProductionReports.Services.OpenXmlWorkbookRepair.NextSheetId(mainSheets);
                     mainSheets.Append(new Sheet { Id = relId, SheetId = sheetId, Name = sheetName });
                 }
 
+                LRN.ProductionReports.Services.OpenXmlWorkbookRepair.StripRepairTriggers(main);
                 mainWb.Workbook.Save();
             }
         }
@@ -815,7 +816,11 @@ internal static class OpenXmlRowStreamer
         if (styleIndex is > 0) cell.StyleIndex = styleIndex.Value;
         writer.WriteStartElement(cell);
         writer.WriteStartElement(new InlineString());
-        writer.WriteElement(new Text(SanitizeXml(value)));
+        var xml = SanitizeXml(value);
+        var text = new Text(xml);
+        if (xml.Length > 0 && (char.IsWhiteSpace(xml[0]) || char.IsWhiteSpace(xml[^1]) || xml.Contains('\n')))
+            text.Space = SpaceProcessingModeValues.Preserve;
+        writer.WriteElement(text);
         writer.WriteEndElement();
         writer.WriteEndElement();
     }
@@ -828,14 +833,17 @@ internal static class OpenXmlRowStreamer
                 WriteInline(writer, cellRef, s);
                 break;
             case DateTime dt:
-                writer.WriteStartElement(new Cell { CellReference = cellRef, DataType = CellValues.Number });
-                writer.WriteElement(new CellValue(dt.ToOADate().ToString(CultureInfo.InvariantCulture)));
-                writer.WriteEndElement();
+                if (dt.Year < 1900 || dt.Year > 9999)
+                    WriteInline(writer, cellRef, dt.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+                else
+                {
+                    writer.WriteStartElement(new Cell { CellReference = cellRef, DataType = CellValues.Number });
+                    writer.WriteElement(new CellValue(dt.ToOADate().ToString(CultureInfo.InvariantCulture)));
+                    writer.WriteEndElement();
+                }
                 break;
             case DateTimeOffset dto:
-                writer.WriteStartElement(new Cell { CellReference = cellRef, DataType = CellValues.Number });
-                writer.WriteElement(new CellValue(dto.DateTime.ToOADate().ToString(CultureInfo.InvariantCulture)));
-                writer.WriteEndElement();
+                WriteValue(writer, cellRef, dto.DateTime);
                 break;
             case decimal d:
                 writer.WriteStartElement(new Cell { CellReference = cellRef, DataType = CellValues.Number });
@@ -843,11 +851,13 @@ internal static class OpenXmlRowStreamer
                 writer.WriteEndElement();
                 break;
             case double dbl:
+                if (double.IsNaN(dbl) || double.IsInfinity(dbl)) break;
                 writer.WriteStartElement(new Cell { CellReference = cellRef, DataType = CellValues.Number });
                 writer.WriteElement(new CellValue(dbl.ToString("R", CultureInfo.InvariantCulture)));
                 writer.WriteEndElement();
                 break;
             case float f:
+                if (float.IsNaN(f) || float.IsInfinity(f)) break;
                 writer.WriteStartElement(new Cell { CellReference = cellRef, DataType = CellValues.Number });
                 writer.WriteElement(new CellValue(f.ToString("R", CultureInfo.InvariantCulture)));
                 writer.WriteEndElement();

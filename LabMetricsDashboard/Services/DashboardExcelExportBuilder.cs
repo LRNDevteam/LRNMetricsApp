@@ -65,23 +65,23 @@ public static class DashboardExcelExportBuilder
         ExcelTheme.WriteHeaderRow(ws, 4, 1, ["Metric", "Value", "Rate %"]);
 
         WriteKpiRow(ws, 5, "Total Claims", vm.TotalClaims, null, "#,##0");
-        WriteKpiRow(ws, 6, "Total Charges", vm.TotalCharges, null, "$#,##0");
-        WriteKpiRow(ws, 7, "Total Payments", vm.TotalPayments, null, "$#,##0");
-        WriteKpiRow(ws, 8, "Total Balance", vm.TotalBalance, null, "$#,##0");
-        WriteKpiRow(ws, 9, "Collection", vm.CollectionNumerator, vm.CollectionRate, "$#,##0");
-        WriteKpiRow(ws, 10, "Denial", vm.DenialNumerator, vm.DenialRate, "$#,##0");
-        WriteKpiRow(ws, 11, "Adjustment", vm.AdjustmentNumerator, vm.AdjustmentRate, "$#,##0");
-        WriteKpiRow(ws, 12, "Outstanding", vm.OutstandingNumerator, vm.OutstandingRate, "$#,##0");
+        WriteKpiRow(ws, 6, "Total Charges", vm.TotalCharges, null, ExcelTheme.AccountingNumberFormat);
+        WriteKpiRow(ws, 7, "Total Payments", vm.TotalPayments, null, ExcelTheme.AccountingNumberFormat);
+        WriteKpiRow(ws, 8, "Total Balance", vm.TotalBalance, null, ExcelTheme.AccountingNumberFormat);
+        WriteKpiRow(ws, 9, "Collection", vm.CollectionNumerator, vm.CollectionRate, ExcelTheme.AccountingNumberFormat);
+        WriteKpiRow(ws, 10, "Denial", vm.DenialNumerator, vm.DenialRate, ExcelTheme.AccountingNumberFormat);
+        WriteKpiRow(ws, 11, "Adjustment", vm.AdjustmentNumerator, vm.AdjustmentRate, ExcelTheme.AccountingNumberFormat);
+        WriteKpiRow(ws, 12, "Outstanding", vm.OutstandingNumerator, vm.OutstandingRate, ExcelTheme.AccountingNumberFormat);
 
         // Line-level KPIs
         ExcelTheme.WriteSectionTitle(ws, 14, 1, 3, "Line Level KPIs");
         ExcelTheme.WriteHeaderRow(ws, 15, 1, ["Metric", "Value", "Rate %"]);
 
         WriteKpiRow(ws, 16, "Total Lines", vm.TotalLines, null, "#,##0");
-        WriteKpiRow(ws, 17, "Line Total Charges", vm.LineTotalCharges, null, "$#,##0");
-        WriteKpiRow(ws, 18, "Line Total Payments", vm.LineTotalPayments, null, "$#,##0");
-        WriteKpiRow(ws, 19, "Line Total Balance", vm.LineTotalBalance, null, "$#,##0");
-        WriteKpiRow(ws, 20, "Line Collection Rate", vm.LineTotalPayments, vm.LineCollectionRate, "$#,##0");
+        WriteKpiRow(ws, 17, "Line Total Charges", vm.LineTotalCharges, null, ExcelTheme.AccountingNumberFormat);
+        WriteKpiRow(ws, 18, "Line Total Payments", vm.LineTotalPayments, null, ExcelTheme.AccountingNumberFormat);
+        WriteKpiRow(ws, 19, "Line Total Balance", vm.LineTotalBalance, null, ExcelTheme.AccountingNumberFormat);
+        WriteKpiRow(ws, 20, "Line Collection Rate", vm.LineTotalPayments, vm.LineCollectionRate, ExcelTheme.AccountingNumberFormat);
 
         // Payer Type Payments
         if (vm.PayerTypePayments.Count > 0)
@@ -96,7 +96,7 @@ public static class DashboardExcelExportBuilder
                 var bg = ExcelTheme.GetRowBg(r - startRow - 2);
                 ws.Cell(r, 1).Value = kvp.Key;
                 ws.Cell(r, 2).Value = kvp.Value;
-                ws.Cell(r, 2).Style.NumberFormat.Format = "$#,##0";
+                ws.Cell(r, 2).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
                 for (int c = 1; c <= 3; c++)
                     ExcelTheme.StyleDataCell(ws.Cell(r, c), bg);
                 r++;
@@ -175,9 +175,9 @@ public static class DashboardExcelExportBuilder
             ws.Cell(rowNum, 6).Value = item.CollectionRate;
 
             ws.Cell(rowNum, 2).Style.NumberFormat.Format = "#,##0";
-            ws.Cell(rowNum, 3).Style.NumberFormat.Format = "$#,##0";
-            ws.Cell(rowNum, 4).Style.NumberFormat.Format = "$#,##0";
-            ws.Cell(rowNum, 5).Style.NumberFormat.Format = "$#,##0";
+            ws.Cell(rowNum, 3).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ws.Cell(rowNum, 4).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ws.Cell(rowNum, 5).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
             ws.Cell(rowNum, 6).Style.NumberFormat.Format = "0.0\"%\"";
 
             for (int c = 1; c <= colCount; c++)
@@ -231,9 +231,9 @@ public static class DashboardExcelExportBuilder
             ws.Cell(rowNum, 6).Value = item.CollectionRate;
 
             ws.Cell(rowNum, 2).Style.NumberFormat.Format = "#,##0";
-            ws.Cell(rowNum, 3).Style.NumberFormat.Format = "$#,##0";
-            ws.Cell(rowNum, 4).Style.NumberFormat.Format = "$#,##0";
-            ws.Cell(rowNum, 5).Style.NumberFormat.Format = "$#,##0";
+            ws.Cell(rowNum, 3).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ws.Cell(rowNum, 4).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ws.Cell(rowNum, 5).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
             ws.Cell(rowNum, 6).Style.NumberFormat.Format = "0.0\"%\"";
 
             for (int c = 1; c <= 6; c++)
@@ -295,7 +295,7 @@ public static class DashboardExcelExportBuilder
 
         int colCount = 1 + vm.AvgAllowedMonths.Count;
 
-        ExcelTheme.WriteTitleBar(ws, 1, colCount, "Average Allowed Amount by Panel × Month");
+        ExcelTheme.WriteTitleBar(ws, 1, colCount, "Average Allowed Amount by Panel ï¿½ Month");
 
         string[] headers = ["Panel", .. vm.AvgAllowedMonths];
         ExcelTheme.WriteHeaderRow(ws, 2, 1, headers);
@@ -317,7 +317,7 @@ public static class DashboardExcelExportBuilder
                     cell.Value = val;
                 else
                     cell.Value = "-";
-                cell.Style.NumberFormat.Format = "$#,##0";
+                cell.Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
                 ExcelTheme.StyleDataCell(cell, bg);
             }
         }
@@ -358,9 +358,9 @@ public static class DashboardExcelExportBuilder
             ws.Cell(rowNum, 6).Value = item.DenialRate;
             ws.Cell(rowNum, 7).Value = item.NoResponseRate;
 
-            ws.Cell(rowNum, 2).Style.NumberFormat.Format = "$#,##0";
-            ws.Cell(rowNum, 3).Style.NumberFormat.Format = "$#,##0";
-            ws.Cell(rowNum, 4).Style.NumberFormat.Format = "$#,##0";
+            ws.Cell(rowNum, 2).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ws.Cell(rowNum, 3).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ws.Cell(rowNum, 4).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
             ws.Cell(rowNum, 5).Style.NumberFormat.Format = "0.0\"%\"";
             ws.Cell(rowNum, 6).Style.NumberFormat.Format = "0.0\"%\"";
             ws.Cell(rowNum, 7).Style.NumberFormat.Format = "0.0\"%\"";

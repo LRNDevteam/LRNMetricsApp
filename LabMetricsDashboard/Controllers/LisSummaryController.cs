@@ -2,6 +2,7 @@ using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using LabMetricsDashboard.ViewModels;
 using Microsoft.AspNetCore.Mvc;
+using System.Diagnostics;
 
 namespace LabMetricsDashboard.Controllers;
 
@@ -37,11 +38,10 @@ public class LisSummaryController : Controller
 			: string.Empty;
 
 	[HttpGet]
-	public async Task<IActionResult> Index(
+	public IActionResult Index(
 		[FromQuery] LisSummaryFilters filters,
 		[FromQuery] string? lab,
-		[FromQuery] string? runId,
-		CancellationToken cancellationToken)
+		[FromQuery] string? runId)
 	{
 		filters ??= new LisSummaryFilters();
 		filters.Normalize();
@@ -62,17 +62,14 @@ public class LisSummaryController : Controller
 			});
 		}
 
-		var labOptions = await GetLabOptionsAsync(availableLabs, cancellationToken);
-		var selectedLabOption = ResolveSelectedLabOption(labOptions, selectedLabName, filters.LabId);
-		filters.LabId = selectedLabOption?.LabId;
-		NormalizeLabDateType(filters, selectedLabOption?.LabName ?? selectedLabName);
+		NormalizeLabDateType(filters, selectedLabName);
 
 		if (!_labSettings.Labs.TryGetValue(selectedLabName, out var config))
 		{
 			return View(new LisSummaryPageViewModel
 			{
 				Filters = filters,
-				LabOptions = labOptions,
+				LabOptions = [],
 				CurrentLabName = selectedLabName,
 				ConfiguredLabKey = selectedLabName,
 				ErrorMessage = $"Configuration not found for {selectedLabName}."
@@ -84,24 +81,75 @@ public class LisSummaryController : Controller
 			return View(new LisSummaryPageViewModel
 			{
 				Filters = filters,
-				LabOptions = labOptions,
+				LabOptions = [],
 				CurrentLabName = selectedLabName,
 				ConfiguredLabKey = selectedLabName,
 				ErrorMessage = $"LIS Summary is currently not available for {selectedLabName}."
 			});
 		}
 
+		NormalizeLabDateType(filters, selectedLabName);
+		var pageSw = Stopwatch.StartNew();
+		FirstPaintLog.Write(_logger, "LIS", selectedLabName, "shell", pageSw.ElapsedMilliseconds,
+			"html-first");
+
+		ViewData["SelectedLab"] = selectedLabName;
+		ViewData["PageLabel"] = "LIS Summary";
+		ViewData["LisLazy"] = true;
+
+		return View(new LisSummaryPageViewModel
+		{
+			Filters = filters,
+			LabOptions = [],
+			CurrentLabName = selectedLabName,
+			ConfiguredLabKey = selectedLabName,
+			RunId = runId?.Trim() ?? string.Empty,
+			WeekLabel = WeekLabel(filters.EffectiveDateFrom, filters.EffectiveDateTo),
+			Result = null,
+			LineData = null,
+			FilterOptions = new([], [], [], [], [])
+		});
+	}
+
+	/// <summary>
+	/// KPI/table HTML after LIS Summary chrome has landed.
+	/// </summary>
+	[HttpGet]
+	public async Task<IActionResult> GetSummary(
+		[FromQuery] LisSummaryFilters filters,
+		[FromQuery] string? lab,
+		[FromQuery] string? runId,
+		CancellationToken cancellationToken)
+	{
+		filters ??= new LisSummaryFilters();
+		filters.Normalize();
+
+		var availableLabs = GetAvailableLisLabs();
+		var selectedLabName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+		selectedLabName = ResolveConfiguredLabKey(selectedLabName, availableLabs);
+
+		if (availableLabs.Count == 0 || string.IsNullOrWhiteSpace(selectedLabName)
+			|| !_labSettings.Labs.TryGetValue(selectedLabName, out var config)
+			|| !config.LineClaimEnable
+			|| string.IsNullOrWhiteSpace(config.DbConnectionString))
+			return Content("<div class=\"alert alert-warning m-3\">LIS Summary is not available.</div>", "text/html");
+
 		try
 		{
-			var filterOptions = await _lisSummaryRepository.GetFilterOptionsAsync(
-				config.DbConnectionString,
-				selectedLabOption?.LabName ?? selectedLabName,
-				cancellationToken);
+			var tabSw = Stopwatch.StartNew();
+			var labOptions = await GetLabOptionsAsync(availableLabs, cancellationToken);
+			var selectedLabOption = ResolveSelectedLabOption(labOptions, selectedLabName, filters.LabId);
+			filters.LabId = selectedLabOption?.LabId;
+			NormalizeLabDateType(filters, selectedLabOption?.LabName ?? selectedLabName);
 
-			var result = await _lisSummaryRepository.GetLisSummaryAsync(
+			var labName = selectedLabOption?.LabName ?? selectedLabName;
+			var labId = selectedLabOption?.LabId ?? 0;
+			var loadLine = string.Equals(filters.EffectiveActiveTab, "line", StringComparison.OrdinalIgnoreCase);
+
+			var summaryTask = _lisSummaryRepository.GetLisSummaryAsync(
 				config.DbConnectionString,
-				selectedLabOption?.LabName ?? selectedLabName,
-				selectedLabOption?.LabId ?? 0,
+				labName,
+				labId,
 				filters.EffectiveDateType,
 				filters.EffectiveDateFrom,
 				filters.EffectiveDateTo,
@@ -111,64 +159,122 @@ public class LisSummaryController : Controller
 				filters.SalesRep,
 				filters.Collector,
 				cancellationToken);
+			async Task<LisLineDataResult?> LineOrNullAsync()
+			{
+				if (!loadLine) return null;
+				return await _lisSummaryRepository.GetLisLineDataAsync(
+					config.DbConnectionString,
+					labName,
+					filters.EffectiveDateType,
+					filters.EffectiveDateFrom,
+					filters.EffectiveDateTo,
+					filters.Panel,
+					filters.Clinic,
+					filters.RefPhy,
+					filters.SalesRep,
+					filters.Collector,
+					filters.PageNumber,
+					filters.PageSize,
+					cancellationToken);
+			}
 
-			var lineData = await _lisSummaryRepository.GetLisLineDataAsync(
-				config.DbConnectionString,
-				selectedLabOption?.LabName ?? selectedLabName,
-				filters.EffectiveDateType,
-				filters.EffectiveDateFrom,
-				filters.EffectiveDateTo,
-				filters.Panel,
-				filters.Clinic,
-				filters.RefPhy,
-				filters.SalesRep,
-				filters.Collector,
-				filters.PageNumber,
-				filters.PageSize,
-				cancellationToken);
+			var lineTask = LineOrNullAsync();
+			await Task.WhenAll(summaryTask, lineTask);
+			FirstPaintLog.Write(_logger, "LIS", selectedLabName, "tab-summary", tabSw.ElapsedMilliseconds,
+				loadLine ? "summary+line" : "summary only");
 
-			ViewData["SelectedLab"] = selectedLabName;
-			ViewData["PageLabel"] = "LIS Summary";
-
-			return View(new LisSummaryPageViewModel
+			ViewData["LisPaneOnly"] = "result";
+			return PartialView("Index", new LisSummaryPageViewModel
 			{
 				Filters = filters,
 				LabOptions = labOptions,
-				CurrentLabName = selectedLabOption?.LabName ?? selectedLabName,
+				CurrentLabName = labName,
 				ConfiguredLabKey = selectedLabName,
 				RunId = runId?.Trim() ?? string.Empty,
 				WeekLabel = WeekLabel(filters.EffectiveDateFrom, filters.EffectiveDateTo),
-				Result = result,
-				LineData = lineData,
-				FilterOptions = filterOptions
+				Result = summaryTask.Result,
+				LineData = lineTask.Result,
+				FilterOptions = new([], [], [], [], [])
 			});
 		}
 		catch (Exception ex)
 		{
-			// Same distinction as DashboardController.ClinicSummary: cancellationToken here is
-			// HttpContext.RequestAborted, so a browser that refreshed or moved on lands in this
-			// catch as a bare TaskCanceledException. That is not a failure to log as one.
 			var abandoned = ex is OperationCanceledException && cancellationToken.IsCancellationRequested;
-
 			if (abandoned)
 				_logger.LogWarning(
 					"LIS Summary for lab '{LabName}' was abandoned by the client before it finished.", selectedLabName);
 			else
 				_logger.LogError(ex, "LIS Summary query failed for lab '{LabName}'.", selectedLabName);
 
-			return View(new LisSummaryPageViewModel
-			{
-				Filters = filters,
-				LabOptions = labOptions,
-				CurrentLabName = selectedLabOption?.LabName ?? selectedLabName,
-				ConfiguredLabKey = selectedLabName,
-				ErrorMessage = abandoned
-					? $"The LIS Summary query for {selectedLabName} took too long and the page stopped waiting. "
-					  + "Narrow the date range or filters and try again."
-					: $"Failed to load LIS Summary: {ex.Message}"
-			});
+			var msg = abandoned
+				? $"The LIS Summary query for {selectedLabName} took too long and the page stopped waiting. Narrow the date range or filters and try again."
+				: $"Failed to load LIS Summary: {ex.Message}";
+			return Content($"<div class=\"alert alert-warning border-0 shadow-sm\">{System.Net.WebUtility.HtmlEncode(msg)}</div>", "text/html");
 		}
 	}
+
+	/// <summary>
+	/// Filter dropdown values after LIS Summary HTML has landed.
+	/// </summary>
+	[HttpGet]
+	public async Task<IActionResult> GetMeta(
+		[FromQuery] LisSummaryFilters filters,
+		[FromQuery] string? lab,
+		CancellationToken cancellationToken)
+	{
+		filters ??= new LisSummaryFilters();
+		filters.Normalize();
+
+		var availableLabs = GetAvailableLisLabs();
+		var selectedLabName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+		selectedLabName = ResolveConfiguredLabKey(selectedLabName, availableLabs);
+
+		if (availableLabs.Count == 0 || string.IsNullOrWhiteSpace(selectedLabName)
+			|| !_labSettings.Labs.TryGetValue(selectedLabName, out var config)
+			|| string.IsNullOrWhiteSpace(config.DbConnectionString))
+			return EmptyLisMeta();
+
+		try
+		{
+			var metaSw = Stopwatch.StartNew();
+			var labOptions = await GetLabOptionsAsync(availableLabs, cancellationToken);
+			var selectedLabOption = ResolveSelectedLabOption(labOptions, selectedLabName, filters.LabId);
+			var labName = selectedLabOption?.LabName ?? selectedLabName;
+			var options = await _lisSummaryRepository.GetFilterOptionsAsync(
+				config.DbConnectionString, labName, cancellationToken);
+			FirstPaintLog.Write(_logger, "LIS", selectedLabName, "meta", metaSw.ElapsedMilliseconds);
+
+			return Json(new
+			{
+				labId = selectedLabOption?.LabId,
+				panels = options.Panels,
+				clinics = options.Clinics,
+				refPhys = options.RefPhysicians,
+				salesReps = options.SalesReps,
+				collectors = options.Collectors
+			});
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			return EmptyLisMeta();
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "LIS GetMeta failed for lab '{LabName}'.", selectedLabName);
+			return EmptyLisMeta();
+		}
+	}
+
+	private static JsonResult EmptyLisMeta()
+		=> new(new
+		{
+			labId = (int?)null,
+			panels = Array.Empty<string>(),
+			clinics = Array.Empty<string>(),
+			refPhys = Array.Empty<string>(),
+			salesReps = Array.Empty<string>(),
+			collectors = Array.Empty<string>()
+		});
 
 	[HttpGet]
 	public async Task<IActionResult> ExportToExcel(
