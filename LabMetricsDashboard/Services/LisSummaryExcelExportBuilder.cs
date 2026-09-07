@@ -8,12 +8,12 @@ public static class LisSummaryExcelExportBuilder
     /// <summary>Sheet holding the filter snapshot, kept off the summary sheet itself.</summary>
     public const string FilterSheetName = "Filtered Values";
 
-    // Green family, shared with the Denial Dashboard workbook via ExcelTheme.
-    private static readonly XLColor HeaderGreen = ExcelTheme.HeaderBg;      // #548235 month headers
-    private static readonly XLColor YearGreen = ExcelTheme.TitleBg;         // #385723 year band
-    private static readonly XLColor TotalGreen = ExcelTheme.GroupRowBg;     // #C5E0B4 total columns
+    // Cove client LIMS Report palette (same tokens as Collection / Executive).
+    private static readonly XLColor HeaderGreen = ExcelTheme.Collection.HeaderBg;
+    private static readonly XLColor YearGreen = ExcelTheme.Collection.HeaderBg;
+    private static readonly XLColor TotalGreen = ExcelTheme.Collection.TotalRowBg;
     private static readonly XLColor BorderColor = ExcelTheme.BorderColor;
-    private static readonly XLColor SectionGreen = ExcelTheme.BandedRowBg;  // #E2EFDA section rows
+    private static readonly XLColor ChildBg = ExcelTheme.Collection.ChildRowBg;
 
     public static XLWorkbook CreateWorkbook(
         LisSummaryResult result,
@@ -61,7 +61,7 @@ public static class LisSummaryExcelExportBuilder
         string? salesRep,
         string? collector)
     {
-        sheet.TabColor = ExcelTheme.TabGreen;
+        sheet.TabColor = ExcelTheme.Collection.TabYellow;
         sheet.ShowGridLines = false;
         ExcelTheme.ApplyDefaults(sheet);
 
@@ -69,9 +69,9 @@ public static class LisSummaryExcelExportBuilder
         sheet.Range(1, 1, 1, 2).Merge();
         var title = sheet.Cell(1, 1);
         title.Style.Font.Bold = true;
-        title.Style.Font.FontSize = ExcelTheme.FontSizeTitle;
+        title.Style.Font.FontSize = ExcelTheme.FontSizeBody;
         title.Style.Font.FontColor = XLColor.White;
-        title.Style.Fill.BackgroundColor = ExcelTheme.TitleBg;
+        title.Style.Fill.BackgroundColor = HeaderGreen;
         title.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 
         var values = new (string Label, string Value)[]
@@ -125,7 +125,7 @@ public static class LisSummaryExcelExportBuilder
         // Gridlines off: only the summary table below carries borders, so the sheet reads as
         // one bordered table on a clean page rather than a grid of empty cells.
         sheet.ShowGridLines = false;
-        sheet.TabColor = ExcelTheme.TabGreen;
+        sheet.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(sheet);
 
         var includeLogicColumn = false;
@@ -144,8 +144,10 @@ public static class LisSummaryExcelExportBuilder
         sheet.Cell(titleRow, 1).Value = $"LIS Summary — {labName}";
         sheet.Range(titleRow, 1, titleRow, lastColumn).Merge();
         sheet.Cell(titleRow, 1).Style.Font.Bold = true;
-        sheet.Cell(titleRow, 1).Style.Font.FontSize = ExcelTheme.FontSizeTitle;
-        sheet.Cell(titleRow, 1).Style.Font.FontColor = ExcelTheme.TitleBg;
+        sheet.Cell(titleRow, 1).Style.Font.FontSize = ExcelTheme.FontSizeBody;
+        sheet.Cell(titleRow, 1).Style.Font.FontColor = XLColor.White;
+        sheet.Cell(titleRow, 1).Style.Fill.BackgroundColor = HeaderGreen;
+        sheet.Cell(titleRow, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 
         sheet.Cell(sampleNoteRow, 1).Value = "Sample Count = Count [Rows]";
         sheet.Range(sampleNoteRow, 1, sampleNoteRow, Math.Min(lastColumn, 6)).Merge();
@@ -198,8 +200,8 @@ public static class LisSummaryExcelExportBuilder
 
         sheet.Range(yearHeaderRow, firstDataColumn, yearHeaderRow, lastColumn).Style.Fill.BackgroundColor = YearGreen;
         var grandTotalHeader = sheet.Range(yearHeaderRow, lastColumn, monthHeaderRow, lastColumn);
-        grandTotalHeader.Style.Fill.BackgroundColor = ExcelTheme.GoldAccent;
-        grandTotalHeader.Style.Font.FontColor = XLColor.Black;
+        grandTotalHeader.Style.Fill.BackgroundColor = HeaderGreen;
+        grandTotalHeader.Style.Font.FontColor = XLColor.White;
 
         var rowNumber = dataStartRow;
         foreach (var row in result.Rows)
@@ -224,7 +226,7 @@ public static class LisSummaryExcelExportBuilder
         // Freeze the label columns AND the two header rows, so months and row names both stay put.
         sheet.SheetView.Freeze(monthHeaderRow, 2);
 
-        sheet.Columns(firstDataColumn, lastColumn).Style.NumberFormat.Format = "#,##0";
+        sheet.Columns(firstDataColumn, lastColumn).Style.NumberFormat.Format = ExcelTheme.Collection.CountNumberFormat;
         sheet.Column(1).Width = 10;
         sheet.Column(2).Width = 36;
         if (includeLogicColumn)
@@ -250,14 +252,14 @@ public static class LisSummaryExcelExportBuilder
 
     private static void BuildLineDataSheet(IXLWorksheet sheet, LisLineDataResult? lineData)
     {
-        sheet.TabColor = ExcelTheme.TabGreen;
+        sheet.TabColor = ExcelTheme.Collection.TabGold;
         ExcelTheme.ApplyDefaults(sheet);
 
         if (lineData is null || lineData.Columns.Count == 0)
         {
             sheet.Cell(1, 1).Value = "No LIMS Master data found for the selected filters.";
             sheet.Cell(1, 1).Style.Font.Bold = true;
-            sheet.Cell(1, 1).Style.Font.FontColor = ExcelTheme.TitleBg;
+            sheet.Cell(1, 1).Style.Font.FontColor = HeaderGreen;
             sheet.Column(1).Width = 52;
             return;
         }
@@ -284,7 +286,7 @@ public static class LisSummaryExcelExportBuilder
         var header = sheet.Range(1, 1, 1, lastColumn);
         header.Style.Font.Bold = true;
         header.Style.Font.FontColor = XLColor.White;
-        header.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
+        header.Style.Fill.BackgroundColor = HeaderGreen;
         header.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         header.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
         header.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
@@ -344,7 +346,6 @@ public static class LisSummaryExcelExportBuilder
             }
 
             sheet.Cell(rowNumber, col).Value = row.ByYear.TryGetValue(year, out var total) ? total : 0;
-            sheet.Cell(rowNumber, col).Style.Fill.BackgroundColor = XLColor.FromHtml("#F8FBFF");
             col++;
         }
 
@@ -378,6 +379,7 @@ public static class LisSummaryExcelExportBuilder
         sheet.Cell(rowNumber, col).Value = result.GrandTotal;
         var range = sheet.Range(rowNumber, 1, rowNumber, lastColumn);
         range.Style.Font.Bold = true;
+        range.Style.Font.FontColor = XLColor.White;
         range.Style.Fill.BackgroundColor = TotalGreen;
     }
 
@@ -387,15 +389,15 @@ public static class LisSummaryExcelExportBuilder
         if (level <= 0)
         {
             range.Style.Font.Bold = true;
-            range.Style.Fill.BackgroundColor = XLColor.FromHtml("#F6F9FC");
-        }
-        else if (level == 1)
-        {
-            sheet.Cell(rowNumber, 2).Style.Font.Bold = true;
+            range.Style.Fill.BackgroundColor = XLColor.White;
         }
         else
         {
-            sheet.Cell(rowNumber, 2).Style.Alignment.Indent = Math.Min(level, 4);
+            range.Style.Fill.BackgroundColor = ChildBg;
+            if (level == 1)
+                sheet.Cell(rowNumber, 2).Style.Font.Bold = true;
+            else
+                sheet.Cell(rowNumber, 2).Style.Alignment.Indent = Math.Min(level, 4);
         }
     }
 

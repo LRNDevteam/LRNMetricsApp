@@ -15,17 +15,20 @@ public sealed class ExecSummaryDetailExcelBuilder
     {
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add(SheetName(vm));
-        sheet.TabColor = ExcelTheme.TabGreen;
+        sheet.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(sheet);
 
-        // Green (Accent 6) theme — same as the Executive Summary / Prediction exports.
-        var headerGreen = ExcelTheme.HeaderBg;
+        var headerGreen = ExcelTheme.Collection.HeaderBg;
 
         // ── Title / meta rows ───────────────────────────────────────
         sheet.Cell(1, 1).Value = vm.Description.Trim();
         sheet.Cell(1, 1).Style.Font.Bold = true;
-        sheet.Cell(1, 1).Style.Font.FontSize = 13;
-        sheet.Cell(1, 1).Style.Font.FontColor = ExcelTheme.TitleBg;
+        sheet.Cell(1, 1).Style.Font.FontSize = ExcelTheme.FontSizeBody;
+        sheet.Cell(1, 1).Style.Font.FontColor = XLColor.White;
+        sheet.Cell(1, 1).Style.Fill.BackgroundColor = headerGreen;
+
+        if (vm.Columns.Count > 1)
+            sheet.Range(1, 1, 1, vm.Columns.Count).Merge();
 
         sheet.Cell(2, 1).Value = $"Category: {vm.Category}    Period: {vm.MonthLabel}" +
             (vm.SelectedValue.HasValue ? $"    Value: {vm.SelectedValueFormatted}" : "") +
@@ -82,19 +85,19 @@ public sealed class ExecSummaryDetailExcelBuilder
                 break;
             case decimal dec:
                 cell.Value = (double)dec;
-                cell.Style.NumberFormat.Format = "#,##0.00";
+                cell.Style.NumberFormat.Format = ExcelTheme.Collection.AccountingNumberFormat;
                 break;
             case double dbl:
                 cell.Value = dbl;
-                cell.Style.NumberFormat.Format = "#,##0.00";
+                cell.Style.NumberFormat.Format = ExcelTheme.Collection.AccountingNumberFormat;
                 break;
             case float flt:
                 cell.Value = (double)flt;
-                cell.Style.NumberFormat.Format = "#,##0.00";
+                cell.Style.NumberFormat.Format = ExcelTheme.Collection.AccountingNumberFormat;
                 break;
             case int or long or short:
                 cell.Value = Convert.ToDouble(value);
-                cell.Style.NumberFormat.Format = "#,##0";
+                cell.Style.NumberFormat.Format = ExcelTheme.Collection.CountNumberFormat;
                 break;
             case bool b:
                 cell.Value = b ? "Yes" : "No";

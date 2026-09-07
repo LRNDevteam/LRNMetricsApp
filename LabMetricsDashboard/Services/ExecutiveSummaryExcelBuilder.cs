@@ -6,22 +6,22 @@ namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// Creates an Excel workbook from an Executive Summary view model.
-/// A metadata block (analysis / week range + applied filters) is written at
-/// the top, followed by all categories (LIS, PMS, Cash, Avg) on a single
-/// sheet, each preceded by a coloured section-heading row.
-/// Uses the Office 2013–2022 green (Accent 6) palette with gold (Accent 4)
-/// year/grand-total highlights — same theme and Calibri fonts as the
-/// Prediction summary export (ExcelTheme green family).
+/// Palette matches the Cove client Executive Summary: Calibri 10, dark green
+/// year headers, mint month headers, white parent / gray child rows, red tab.
 /// </summary>
 public sealed class ExecutiveSummaryExcelBuilder
 {
     private static readonly string[] Sections = ["LIS", "PMS", "Cash", "Avg"];
+    private static readonly XLColor HeaderBg = ExcelTheme.Collection.HeaderBg;
+    private static readonly XLColor MonthBg = ExcelTheme.Collection.MonthHeaderBg;
+    private static readonly XLColor ChildBg = ExcelTheme.Collection.ChildRowBg;
+    private static readonly XLColor MetaBg = ExcelTheme.Collection.ChildRowBg;
 
     public byte[] Build(PhiExecutiveSummaryViewModel vm)
     {
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add("Executive Summary");
-        sheet.TabColor = ExcelTheme.TabGreen;
+        sheet.TabColor = ExcelTheme.Collection.TabRed;
         ExcelTheme.ApplyDefaults(sheet);
 
         // Work out how wide the table is so the info block can span it.
@@ -56,26 +56,27 @@ public sealed class ExecutiveSummaryExcelBuilder
     /// </summary>
     private int WriteInfoBlock(IXLWorksheet sheet, PhiExecutiveSummaryViewModel vm, int grandCol)
     {
-        var darkGreen = ExcelTheme.TitleBg; // Accent 6 Darker 50% — matches Prediction summary
+        var darkGreen = HeaderBg; // Accent 6 Darker 50% — Cove client
         int lastCol  = Math.Max(grandCol, 2);
         int r = 1;
+        int blockStart = 1;
 
         void Line(string text, bool bold, bool title = false, bool sectionHead = false)
         {
             var cell = sheet.Cell(r, 1);
             cell.Value = text;
             cell.Style.Font.Bold = bold;
+            cell.Style.Font.FontName = ExcelTheme.FontName;
+            cell.Style.Font.FontSize = ExcelTheme.FontSizeBody;
             cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
             cell.Style.Alignment.Vertical   = XLAlignmentVerticalValues.Center;
             if (title)
             {
-                cell.Style.Font.FontSize  = ExcelTheme.FontSizeTitle;
                 cell.Style.Font.FontColor = darkGreen;
             }
             if (sectionHead)
             {
                 cell.Style.Font.FontColor = darkGreen;
-                cell.Style.Font.FontSize  = 11;
             }
             sheet.Range(r, 1, r, lastCol).Merge();
             r++;
@@ -114,6 +115,10 @@ public sealed class ExecutiveSummaryExcelBuilder
 
         r++; // blank spacer before the data table
 
+        sheet.Range(blockStart, 1, r - 1, lastCol).Style.Fill.BackgroundColor = MetaBg;
+        sheet.Range(blockStart, 1, r - 1, lastCol).Style.Font.FontName = ExcelTheme.FontName;
+        sheet.Range(blockStart, 1, r - 1, lastCol).Style.Font.FontSize = ExcelTheme.FontSizeBody;
+
         return r;
     }
 
@@ -133,17 +138,9 @@ public sealed class ExecutiveSummaryExcelBuilder
         int hr1 = startRow;
         int hr2 = startRow + 1;
 
-        // Green (Accent 6) theme with gold (Accent 4) totals — same palette as the
-        // Prediction summary / Production Report exports (ExcelTheme green family).
-        var headerGreen = ExcelTheme.HeaderBg;      // #548235 — header rows
-        var monthGreen  = ExcelTheme.SubHeaderBg;   // #70AD47 — month header cells
-        var gold        = ExcelTheme.GoldAccent;    // #FFC000 — year/grand total headers (black text)
-        var yearTint    = XLColor.FromHtml("#FFF2CC");  // Accent 4 Lighter 80% — year total data cells
-        var grandTint   = XLColor.FromHtml("#FFE699");  // Accent 4 Lighter 60% — grand total data cells
-        var catGreen    = ExcelTheme.BandedRowBg;   // #E2EFDA — parent/category rows
-
-        // Section heading rows — dark green across every section (single-theme workbook).
-        var sectionHeadingBg = ExcelTheme.TitleBg;  // #385723
+        var headerGreen = HeaderBg;
+        var monthGreen  = MonthBg;
+        var sectionHeadingBg = HeaderBg;
 
         // ── Header rows (written once at the top of the table) ───────────────
 
@@ -173,14 +170,16 @@ public sealed class ExecutiveSummaryExcelBuilder
             }
             var yt = sheet.Cell(hr2, colIdx);
             yt.Value = $"{year} Total";
-            yt.Style.Fill.BackgroundColor = gold;
-            yt.Style.Font.FontColor = XLColor.Black;
+            yt.Style.Fill.BackgroundColor = headerGreen;
+            yt.Style.Font.FontColor = XLColor.White;
             colIdx++;
         }
 
         // Style the two header rows
         var headerRange = sheet.Range(hr1, 1, hr2, grandCol);
         headerRange.Style.Font.Bold = true;
+        headerRange.Style.Font.FontName = ExcelTheme.FontName;
+        headerRange.Style.Font.FontSize = ExcelTheme.FontSizeBody;
         headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         headerRange.Style.Alignment.Vertical   = XLAlignmentVerticalValues.Center;
 
@@ -188,8 +187,8 @@ public sealed class ExecutiveSummaryExcelBuilder
         {
             sheet.Cell(r, 1).Style.Fill.BackgroundColor = headerGreen;
             sheet.Cell(r, 1).Style.Font.FontColor       = XLColor.White;
-            sheet.Cell(r, grandCol).Style.Fill.BackgroundColor = gold;
-            sheet.Cell(r, grandCol).Style.Font.FontColor       = XLColor.Black;
+            sheet.Cell(r, grandCol).Style.Fill.BackgroundColor = headerGreen;
+            sheet.Cell(r, grandCol).Style.Font.FontColor       = XLColor.White;
         }
         colIdx = 2;
         foreach (var year in years)
@@ -201,7 +200,8 @@ public sealed class ExecutiveSummaryExcelBuilder
             for (int i = 0; i < mons.Count; i++)
             {
                 sheet.Cell(hr2, colIdx + i).Style.Fill.BackgroundColor = monthGreen;
-                sheet.Cell(hr2, colIdx + i).Style.Font.FontColor       = XLColor.White;
+                sheet.Cell(hr2, colIdx + i).Style.Font.FontColor =
+                    ExcelTheme.Collection.ContrastOn(monthGreen);
             }
             colIdx += span;
         }
@@ -224,7 +224,7 @@ public sealed class ExecutiveSummaryExcelBuilder
             headingCell.Style.Fill.BackgroundColor = sectionHeadingBg;
             headingCell.Style.Font.FontColor       = XLColor.White;
             headingCell.Style.Font.Bold            = true;
-            headingCell.Style.Font.FontSize        = 12;
+            headingCell.Style.Font.FontSize        = ExcelTheme.FontSizeBody;
             headingCell.Style.Alignment.Vertical   = XLAlignmentVerticalValues.Center;
             if (grandCol > 1)
                 sheet.Range(rowIdx, 1, rowIdx, grandCol).Merge();
@@ -246,7 +246,7 @@ public sealed class ExecutiveSummaryExcelBuilder
                     {
                         row.ValuesByYearMonth.TryGetValue((year, m), out var val);
                         var cell = sheet.Cell(rowIdx, colIdx);
-                        if (val != 0) cell.Value = (double)val;
+                        cell.Value = (double)val;
                         SetNumberFormat(cell, row.Category);
                         colIdx++;
                     }
@@ -261,9 +261,8 @@ public sealed class ExecutiveSummaryExcelBuilder
                             .Where(kv => kv.Key.Year == year && kv.Key.Month != 0)
                             .Sum(kv => kv.Value);
                     var ytCell = sheet.Cell(rowIdx, colIdx);
-                    if (ytVal != 0) ytCell.Value = (double)ytVal;
+                    ytCell.Value = (double)ytVal;
                     SetNumberFormat(ytCell, row.Category);
-                    ytCell.Style.Fill.BackgroundColor = yearTint;
                     ytCell.Style.Font.Bold = true;
                     colIdx++;
                 }
@@ -284,10 +283,14 @@ public sealed class ExecutiveSummaryExcelBuilder
                         .Where(kv => kv.Key.Year != 0 && kv.Key.Month != 0)
                         .Sum(kv => kv.Value);
                 var grandCell = sheet.Cell(rowIdx, grandCol);
-                if (grandVal != 0) grandCell.Value = (double)grandVal;
+                grandCell.Value = (double)grandVal;
                 SetNumberFormat(grandCell, row.Category);
-                grandCell.Style.Fill.BackgroundColor = grandTint;
                 grandCell.Style.Font.Bold = true;
+
+                var rowFill = outlineLevel > 0 ? ChildBg : XLColor.White;
+                sheet.Range(rowIdx, 1, rowIdx, grandCol).Style.Fill.BackgroundColor = rowFill;
+                sheet.Range(rowIdx, 1, rowIdx, grandCol).Style.Font.FontColor =
+                    ExcelTheme.Collection.ContrastOn(rowFill);
 
                 if (outlineLevel > 0)
                 {
@@ -296,7 +299,6 @@ public sealed class ExecutiveSummaryExcelBuilder
                 }
                 else
                 {
-                    sheet.Cell(rowIdx, 1).Style.Fill.BackgroundColor = catGreen;
                     sheet.Cell(rowIdx, 1).Style.Font.Bold = true;
                 }
 
@@ -317,7 +319,9 @@ public sealed class ExecutiveSummaryExcelBuilder
 
     private void SetNumberFormat(IXLCell cell, string category)
     {
-        cell.Style.NumberFormat.Format = IsDollar(category) ? ExcelTheme.AccountingNumberFormat : "#,##0";
+        cell.Style.NumberFormat.Format = IsDollar(category)
+            ? ExcelTheme.Collection.AccountingNumberFormat
+            : ExcelTheme.Collection.CountNumberFormat;
     }
 
     private static bool IsDollar(string cat) => cat is "Cash" or "Avg";

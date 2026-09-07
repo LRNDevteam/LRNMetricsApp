@@ -17,7 +17,18 @@ var host = Host.CreateDefaultBuilder(args)
         logging.ClearProviders();
         logging.AddConsole();
         if (OperatingSystem.IsWindows())
-            logging.AddEventLog();
+        {
+            try
+            {
+                // Creating / probing an Event Log source can stall LocalSystem long enough
+                // for SCM to raise Error 1053. Never let Event Log block service start.
+                logging.AddEventLog();
+            }
+            catch
+            {
+                // File logger below is the operational source of truth.
+            }
+        }
 
         // Rolling daily file logs (reportworker-YYYY-MM-DD.log).
         var fileSection = context.Configuration.GetSection("Logging:File");

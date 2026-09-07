@@ -431,13 +431,14 @@ else
                         {
                             var row = result.Rows[rowIndex];
                             var hasChildren = rowIndex + 1 < result.Rows.Count && result.Rows[rowIndex + 1].Level > row.Level;
-                            <tr class="@RowCss(row.Level) @(hasChildren ? "lis-summary-has-children" : "")" data-lis-row="true" data-level="@row.Level" data-expanded="true">
+                            var startExpanded = !hasChildren;
+                            <tr class="@RowCss(row.Level) @(hasChildren ? "lis-summary-has-children" : "")" data-lis-row="true" data-level="@row.Level" data-expanded="@(startExpanded ? "true" : "false")">
                                 <td class="lis-code-col sticky-col-1">@row.Code</td>
                                 <td class="desc-col sticky-col-2">
                                     <span class="lis-summary-desc-content" style="--lis-row-level:@row.Level">
                                         @if (hasChildren)
                                         {
-                                            <button type="button" class="lis-toggle-btn" aria-label="Collapse @row.Description" aria-expanded="true">▾</button>
+                                            <button type="button" class="lis-toggle-btn" aria-label="@(startExpanded ? "Collapse" : "Expand") @row.Description" aria-expanded="@(startExpanded ? "true" : "false")">@(startExpanded ? "▾" : "▸")</button>
                                         }
                                         else
                                         {

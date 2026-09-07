@@ -4,63 +4,80 @@
 namespace LRN.ProductionReports.Services;
 
 /// <summary>
-/// Shared Excel styling constants and helper methods using the
-/// Office 2013–2022 color theme — green family (Accent 6 <c>#70AD47</c>).
-/// All page-specific Excel builders should reference this class
-/// for consistent branding.
+/// Shared Excel styling for Production Report workbooks.
+/// Palette matches the Cove Insights Production Report:
+/// dark green titles/year headers, mild mint-green month headers,
+/// light-gray metric headers, Calibri.
 /// </summary>
 public static class ExcelTheme
 {
-    // ── Office 2013–2022 theme palette (Page Layout > Colors > Office 2013 - 2022)
-    //
-    //   Dark 1  (Text 1)        #000000
-    //   Light 1 (Background 1)  #FFFFFF
-    //   Dark 2  (Text 2)        #44546A
-    //   Light 2 (Background 2)  #E7E6E6
-    //   Accent 1  #4472C4   Accent 2  #ED7D31   Accent 3  #A5A5A5
-    //   Accent 4  #FFC000   Accent 5  #5B9BD5   Accent 6  #70AD47
-    //
-    // Green family derived from Accent 6 using Excel's standard tint percentages:
-    //   Darker 50 %  #385723        Darker 25 %  #548235
-    //   Base          #70AD47
-    //   Lighter 40 % #A9D18E        Lighter 60 % #C5E0B4
-    //   Lighter 80 % #E2EFDA
+    /// <summary>Dark forest green — title bars, period headers, and total rows.</summary>
+    public static readonly XLColor TitleBg = XLColor.FromHtml("#385624");
 
-    /// <summary>Accent 6 Darker 50 % — used for top-level title bars.</summary>
-    public static readonly XLColor TitleBg = XLColor.FromHtml("#385723");
-
-    /// <summary>Accent 6 Darker 25 % — used for section headers and column group headers.</summary>
-    public static readonly XLColor HeaderBg = XLColor.FromHtml("#548235");
-
-    /// <summary>Accent 6 base green — used for period / sub-section headers.</summary>
-    public static readonly XLColor SubHeaderBg = XLColor.FromHtml("#70AD47");
-
-    /// <summary>Accent 4 (Gold) — used for "Total" column headers and highlights.</summary>
-    public static readonly XLColor GoldAccent = XLColor.FromHtml("#FFC000");
+    /// <summary>Same forest green — year / column-group headers.</summary>
+    public static readonly XLColor HeaderBg = XLColor.FromHtml("#385624");
 
     /// <summary>
-    /// Excel Accounting (USD, 0 decimals): $ aligned left, value right,
+    /// Insights title / year headers — Office Accent 6 Darker 50% (#70AD47 @ tint -0.5).
+    /// </summary>
+    public static readonly XLColor InsightsHeaderBg = XLColor.FromHtml("#385624");
+
+    /// <summary>
+    /// Insights month / week headers — Office Accent 6 Lighter 80% (mild mint green, black text).
+    /// </summary>
+    public static readonly XLColor MonthHeaderBg = XLColor.FromHtml("#E2EFDA");
+
+    /// <summary>
+    /// Insights metric sub-headers — theme Light 2 Darker 10% (No. of Claims / Total Billed).
+    /// </summary>
+    public static readonly XLColor InsightsMetricHeaderBg = XLColor.FromHtml("#D0CFCF");
+
+    /// <summary>Light gray — period headers on sheets not yet switched to Insights mild green.</summary>
+    public static readonly XLColor SubHeaderBg = XLColor.FromHtml("#D9D9D9");
+
+    /// <summary>Light gray — metric sub-headers (No. of Claims, Total Billed) with black text.</summary>
+    public static readonly XLColor MetricHeaderBg = XLColor.FromHtml("#E7E7E7");
+
+    /// <summary>Kept for call-site compatibility; Production totals use the same forest green as headers (not gold).</summary>
+    public static readonly XLColor GoldAccent = XLColor.FromHtml("#385624");
+
+    /// <summary>
+    /// Insights claim-count format: thousands separator, minus for negatives, dash for zero.
+    /// </summary>
+    public const string CountNumberFormat = @"#,##0;-#,##0;""-"";@";
+
+    /// <summary>
+    /// Excel Accounting (USD, 0 decimals) matching Insights: $ aligned left, value right,
     /// negatives in parentheses, zero as a dash. Not Currency (<c>$#,##0</c>).
     /// </summary>
-    public const string AccountingNumberFormat = @"_($* #,##0_);_($* (#,##0);_($* ""-""??_);_(@_)";
+    public const string AccountingNumberFormat = @"_(""$""* #,##0_);_(""$""* \(#,##0\);_(""$""* ""-""_);_(@_)";
 
     /// <summary>Excel Accounting (USD, 2 decimals).</summary>
     public const string AccountingNumberFormat2 = @"_($* #,##0.00_);_($* (#,##0.00);_($* ""-""??_);_(@_)";
 
-    /// <summary>Accent 6 Lighter 60 % — used for group / category rows (bold parent rows).</summary>
-    public static readonly XLColor GroupRowBg = XLColor.FromHtml("#C5E0B4");
+    /// <summary>Parent / group rows (e.g. A UTI) — Insights uses no fill (white), bold black text.</summary>
+    public static readonly XLColor GroupRowBg = XLColor.White;
 
-    /// <summary>Accent 6 Lighter 80 % — used for alternating banded rows.</summary>
-    public static readonly XLColor BandedRowBg = XLColor.FromHtml("#E2EFDA");
+    /// <summary>Child / subcategory rows (e.g. Medicare FL) — Office Light 2 #E7E6E6, no zebra.</summary>
+    public static readonly XLColor ChildRowBg = XLColor.FromHtml("#E7E6E6");
 
-    /// <summary>Light 2 (Background 2) — used for sub-header labels.</summary>
-    public static readonly XLColor SubLabelBg = XLColor.FromHtml("#E7E6E6");
+    /// <summary>Same as child rows — kept so older call sites do not zebra-stripe payers.</summary>
+    public static readonly XLColor BandedRowBg = XLColor.FromHtml("#E7E6E6");
 
-    /// <summary>Accent 6 Lighter 40 % — used for total row background.</summary>
-    public static readonly XLColor TotalRowBg = XLColor.FromHtml("#A9D18E");
+    /// <summary>Light gray — metric / sub-header labels (black text).</summary>
+    public static readonly XLColor SubLabelBg = XLColor.FromHtml("#D9D9D9");
 
-    /// <summary>Accent 3 (Gray) — standard thin-border colour.</summary>
-    public static readonly XLColor BorderColor = XLColor.FromHtml("#A5A5A5");
+    /// <summary>Top Client Name…Source block — Office Light 2.</summary>
+    public static readonly XLColor MetaHeaderBg = XLColor.FromHtml("#E7E6E6");
+
+    /// <summary>Total row — same forest green as title bars.</summary>
+    public static readonly XLColor TotalRowBg = XLColor.FromHtml("#385624");
+
+    /// <summary>Thin gridline colour.</summary>
+    public static readonly XLColor BorderColor = XLColor.FromHtml("#CCCCCC");
+
+    /// <summary>Dark red — Insights / Active Priorities section headers.</summary>
+    public static readonly XLColor ActionHeaderBg = XLColor.FromHtml("#C00000");
 
     // ── Blue family (Accent 1 #4472C4) — Production Report headers ─────
     //   Darker 50 %  #203864        Darker 25 %  #2F5597
@@ -106,20 +123,52 @@ public static class ExcelTheme
     public static readonly XLColor BadBg = XLColor.FromHtml("#FFC7CE");
     public static readonly XLColor BadFg = XLColor.FromHtml("#9C0006");
 
-    // ── Tab colours for sheet tabs ───────────────────────────────────────
-    public static readonly XLColor TabGreen = XLColor.FromHtml("#70AD47");
-    public static readonly XLColor TabBlue = XLColor.FromHtml("#4472C4");
+    // ── Tab colours (Cove source workbook) ────────────────────────────────
+    /// <summary>Insights / MonthlyAndWeeklyVolume — source Insights tab.</summary>
     public static readonly XLColor TabRed = XLColor.FromHtml("#C00000");
+
+    /// <summary>CPT / Payer / Payor x Panel / Panel Breakdown — source gold.</summary>
+    public static readonly XLColor TabYellow = XLColor.FromHtml("#FFC000");
+
+    /// <summary>Master / Line Level equivalent sheets — Office Accent 2.</summary>
     public static readonly XLColor TabGold = XLColor.FromHtml("#ED7D31");
+
+    public static readonly XLColor TabGreen = XLColor.FromHtml("#385624");
+    public static readonly XLColor TabBlue = XLColor.FromHtml("#4472C4");
 
     // ── Font defaults ────────────────────────────────────────────────────
     public const string FontName = "Calibri";
     public const double FontSizeBody = 10;
     public const double FontSizeHeader = 10;
-    public const double FontSizeTitle = 14;
-    public const double FontSizeSectionTitle = 12;
+    public const double FontSizeTitle = 10;
+    public const double FontSizeSectionTitle = 11;
 
     // ── Worksheet initialisation ─────────────────────────────────────────
+
+    /// <summary>
+    /// White text on dark fills; black text on light gray metric headers.
+    /// </summary>
+    public static XLColor ContrastOn(XLColor background)
+    {
+        if (background.Equals(MetricHeaderBg) || background.Equals(SubLabelBg)
+            || background.Equals(BandedRowBg) || background.Equals(ChildRowBg)
+            || background.Equals(GroupRowBg) || background.Equals(MetaHeaderBg)
+            || background.Equals(SubHeaderBg) || background.Equals(MonthHeaderBg)
+            || background.Equals(InsightsMetricHeaderBg)
+            || background.Equals(XLColor.White))
+            return XLColor.Black;
+
+        try
+        {
+            var c = background.Color;
+            var luminance = 0.299 * c.R + 0.587 * c.G + 0.114 * c.B;
+            return luminance > 160 ? XLColor.Black : XLColor.White;
+        }
+        catch
+        {
+            return XLColor.White;
+        }
+    }
 
     /// <summary>Sets the default font for the entire worksheet.</summary>
     public static void ApplyDefaults(IXLWorksheet ws)
@@ -128,23 +177,85 @@ public static class ExcelTheme
         ws.Style.Font.FontSize = FontSizeBody;
     }
 
+    public const string ConfidentialityNotice =
+        "The information in this report is confidential and intended solely for the use of the intended recipient. If you are not the intended recipient, please inform the sender immediately and delete this report.";
+
+    /// <summary>
+    /// Writes the Client Name…Source block with a solid light-gray fill across
+    /// every column, including the blank row after the last field.
+    /// Returns the first row after the block (title bar).
+    /// </summary>
+    public static int WriteReportMetaHeader(
+        IXLWorksheet ws, int colCount,
+        IReadOnlyList<(string Label, string? Value)> items)
+    {
+        int rows = Math.Max(items.Count, 1);
+        int span = Math.Max(colCount, 2);
+        // Include the blank row after Source so it is not left white.
+        var fill = ws.Range(1, 1, rows + 1, span);
+        fill.Style.Fill.BackgroundColor = MetaHeaderBg;
+        fill.Style.Font.FontName = FontName;
+        fill.Style.Font.FontSize = FontSizeBody;
+        fill.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+
+        int row = 1;
+        foreach (var (label, value) in items)
+        {
+            var labelCell = ws.Cell(row, 1);
+            labelCell.Value = label.EndsWith(":", StringComparison.Ordinal) ? label : label + ":";
+            labelCell.Style.Font.Bold = true;
+            labelCell.Style.Font.FontColor = XLColor.Black;
+            labelCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+
+            var valueCell = ws.Cell(row, 2);
+            valueCell.Value = value ?? "";
+            valueCell.Style.Font.Bold = true;
+            valueCell.Style.Font.FontColor = XLColor.Black;
+            row++;
+        }
+
+        if (span >= 5)
+        {
+            int discCol = Math.Max(4, span - 2);
+            var disc = ws.Range(1, discCol, rows, span);
+            disc.Merge();
+            var dcell = ws.Cell(1, discCol);
+            dcell.Value = ConfidentialityNotice;
+            dcell.Style.Font.FontSize = 7;
+            dcell.Style.Font.Italic = true;
+            dcell.Style.Font.FontColor = XLColor.FromHtml("#595959");
+            dcell.Style.Alignment.WrapText = true;
+            dcell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+            dcell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+            dcell.Style.Fill.BackgroundColor = MetaHeaderBg;
+        }
+
+        for (int r = 1; r <= rows + 1; r++)
+            ws.Row(r).Height = 16;
+
+        return rows + 2;
+    }
+
     // ── Cell / range styling helpers ─────────────────────────────────────
 
     /// <summary>Styles a merged title bar spanning <paramref name="colCount"/> columns.</summary>
-    public static void WriteTitleBar(IXLWorksheet ws, int row, int colCount, string text)
+    public static void WriteTitleBar(IXLWorksheet ws, int row, int colCount, string text,
+        XLColor? background = null)
     {
+        var bg = background ?? TitleBg;
         var range = ws.Range(row, 1, row, colCount);
         range.Merge();
         var cell = ws.Cell(row, 1);
         cell.Value = text;
         cell.Style.Font.Bold = true;
         cell.Style.Font.FontSize = FontSizeTitle;
-        cell.Style.Font.FontColor = XLColor.White;
-        cell.Style.Fill.BackgroundColor = TitleBg;
+        cell.Style.Font.FontColor = ContrastOn(bg);
+        cell.Style.Fill.BackgroundColor = bg;
         cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
         range.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-        range.Style.Border.OutsideBorderColor = TitleBg;
+        range.Style.Border.OutsideBorderColor = BorderColor;
+        ws.Row(row).Height = 20;
     }
 
     /// <summary>Styles a blue-themed merged title bar spanning <paramref name="colCount"/> columns.</summary>
@@ -181,30 +292,33 @@ public static class ExcelTheme
         range.Style.Border.OutsideBorderColor = background ?? HeaderBg;
     }
 
-    /// <summary>Writes a row of column headers using the dark-green style.</summary>
+    /// <summary>Writes a row of column headers. Light fills use black text; dark fills use white.</summary>
     public static void WriteHeaderRow(IXLWorksheet ws, int row, int startCol,
         string[] headers, XLColor? background = null)
     {
         var bg = background ?? HeaderBg;
+        var fg = ContrastOn(bg);
         for (int c = 0; c < headers.Length; c++)
         {
             var cell = ws.Cell(row, startCol + c);
             cell.Value = headers[c];
             cell.Style.Font.Bold = true;
             cell.Style.Font.FontSize = FontSizeHeader;
-            cell.Style.Font.FontColor = XLColor.White;
+            cell.Style.Font.FontColor = fg;
             cell.Style.Fill.BackgroundColor = bg;
             cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
             cell.Style.Alignment.WrapText = true;
             cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-            cell.Style.Border.OutsideBorderColor = XLColor.White;
+            cell.Style.Border.OutsideBorderColor = BorderColor;
         }
     }
 
     /// <summary>Applies standard data-cell styling to a range.</summary>
     public static void StyleDataCell(IXLCell cell, XLColor bg)
     {
+        cell.Style.Font.FontName = FontName;
+        cell.Style.Font.FontSize = FontSizeBody;
         cell.Style.Fill.BackgroundColor = bg;
         cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
         cell.Style.Border.OutsideBorderColor = BorderColor;
@@ -218,9 +332,10 @@ public static class ExcelTheme
         {
             var cell = ws.Cell(row, c);
             cell.Style.Font.Bold = true;
+            cell.Style.Font.FontColor = XLColor.White;
             cell.Style.Fill.BackgroundColor = TotalRowBg;
-            cell.Style.Border.TopBorder = XLBorderStyleValues.Thin;
-            cell.Style.Border.TopBorderColor = HeaderBg;
+            cell.Style.Border.TopBorder = XLBorderStyleValues.Medium;
+            cell.Style.Border.TopBorderColor = TitleBg;
             cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
             cell.Style.Border.OutsideBorderColor = BorderColor;
             cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
@@ -234,6 +349,8 @@ public static class ExcelTheme
         {
             var cell = ws.Cell(row, c);
             cell.Style.Font.Bold = true;
+            cell.Style.Font.FontName = FontName;
+            cell.Style.Font.FontSize = FontSizeBody;
             cell.Style.Font.FontColor = XLColor.White;
             cell.Style.Fill.BackgroundColor = TitleBg;
             cell.Style.Border.TopBorder = XLBorderStyleValues.Medium;
@@ -261,11 +378,11 @@ public static class ExcelTheme
         }
     }
 
-    /// <summary>Returns the standard banded-row background for the given index.</summary>
+    /// <summary>Returns group gray for parent rows; uniform child gray for all other data rows (no zebra).</summary>
     public static XLColor GetRowBg(int rowIndex, bool isGroupRow = false)
     {
         if (isGroupRow) return GroupRowBg;
-        return rowIndex % 2 != 0 ? BandedRowBg : XLColor.White;
+        return ChildRowBg;
     }
 
     /// <summary>Returns the blue-themed banded-row background for the given index.</summary>

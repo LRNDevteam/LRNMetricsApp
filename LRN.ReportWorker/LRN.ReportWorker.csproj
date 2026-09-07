@@ -6,6 +6,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>LRN.ReportWorker</RootNamespace>
     <UserSecretsId>lrn-report-worker</UserSecretsId>
+    <!-- Windows Service Control Manager requires a Windows GUI subsystem exe
+         so the process can call StartServiceCtrlDispatcher within 30s (Error 1053). -->
+    <OutputType>WinExe</OutputType>
     <!-- Worker references LabMetricsDashboard (Web SDK). Prefer this project's
          appsettings / content when both would publish to the same relative path. -->
     <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>

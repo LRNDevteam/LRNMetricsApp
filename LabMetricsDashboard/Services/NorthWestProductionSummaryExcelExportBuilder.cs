@@ -2,6 +2,7 @@ using ClosedXML.Excel;
 using LRN.ProductionReports.Models;
 using LRN.ProductionReports.Services;
 using Microsoft.Extensions.Logging;
+using PrExcel = LRN.ProductionReports.Services.ExcelTheme;
 
 namespace LabMetricsDashboard.Services;
 
@@ -157,7 +158,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         int idx = 0;
         foreach (var seg in claimSegments)
         {
-            BuildRawDataSheet(wb, seg.SheetName, seg.Columns, seg.Rows, labName, ExcelTheme.TabGreen);
+            BuildRawDataSheet(wb, seg.SheetName, seg.Columns, seg.Rows, labName, PrExcel.TabGreen);
             logger?.LogInformation(
                 "[NWExcelExport][Sheet] ClaimLevel {Idx}/{Total} '{Name}' ({Rows:N0} rows)",
                 ++idx, claimSegments.Count, seg.SheetName, seg.Rows.Count);
@@ -166,7 +167,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         idx = 0;
         foreach (var seg in lineSegments)
         {
-            BuildRawDataSheet(wb, seg.SheetName, seg.Columns, seg.Rows, labName, ExcelTheme.TabGold);
+            BuildRawDataSheet(wb, seg.SheetName, seg.Columns, seg.Rows, labName, PrExcel.TabGold);
             logger?.LogInformation(
                 "[NWExcelExport][Sheet] LineLevel {Idx}/{Total} '{Name}' ({Rows:N0} rows)",
                 ++idx, lineSegments.Count, seg.SheetName, seg.Rows.Count);
@@ -184,33 +185,8 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         XLWorkbook wb, ProductionReportViewModel vm, string labName)
     {
         var ws = wb.AddWorksheet("MonthlyAndWeeklyVolume");
-        ws.TabColor = ExcelTheme.TabGreen;
-        ExcelTheme.ApplyDefaults(ws);
-
-        // ?? Report metadata block ?????????????????????????????????????????
-        int metaRow = 1;
-        var metaItems = new[]
-        {
-            ("Client Name",  labName),
-            ("Report Type",  "NorthWest Production Summary"),
-            ("Analysis Range", "Billed Date"),
-        };
-        foreach (var (label, value) in metaItems)
-        {
-            var lbl = ws.Cell(metaRow, 1);
-            lbl.Value = label + ":";
-            lbl.Style.Font.Bold = true;
-            lbl.Style.Font.FontSize = 9;
-            lbl.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
-
-            var val = ws.Cell(metaRow, 2);
-            val.Value = value;
-            val.Style.Font.FontSize = 9;
-            val.Style.Font.Bold = true;
-            val.Style.Font.FontColor = ExcelTheme.TitleBg;
-            metaRow++;
-        }
-        metaRow++; // blank separator
+        ws.TabColor = PrExcel.TabGreen;
+        PrExcel.ApplyDefaults(ws);
 
         var validYears  = vm.Years.Where(y => y > 1900).ToList();
         var validMonths = vm.Months.Where(m => int.Parse(m[..4]) > 1900).ToList();
@@ -219,22 +195,29 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             .OrderBy(g => g.Key)
             .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
 
-        // Column count: 1 (panel label) + per-year(months�2 + 2 year-total) + 2 grand-total
         int colCount = 1;
         foreach (var year in validYears)
             colCount += monthsByYear.GetValueOrDefault(year, []).Count * 2 + 2;
         colCount += 2;
 
-        int row = metaRow;
+        int row = PrExcel.WriteReportMetaHeader(ws, colCount,
+        [
+            ("Client Name", labName),
+            ("Report Date", DateTime.Now.ToString("dddd, MMMM d, yyyy")),
+            ("Report Type", "NorthWest Production Summary"),
+            ("Analysis Range", "Billed Date"),
+            ("Source", "LRN (LIS)"),
+        ]);
 
         // ?? Title bar ?????????????????????????????????????????????????????
-        ExcelTheme.WriteTitleBar(ws, row, colCount, "Production | Date of Entry");
+        PrExcel.WriteTitleBar(ws, row, colCount, "Production | Date of Entry",
+            PrExcel.InsightsHeaderBg);
         row++;
 
         // ?? Header Row 1: "Panel & Top Insurances" + year groups + Grand Total ??
         int hRow1 = row;
         WriteMergedHeader(ws, hRow1, hRow1 + 2, 1, 1,
-            "Panel & Top Insurances", ExcelTheme.HeaderBg);
+            "Panel & Top Insurances", PrExcel.InsightsHeaderBg);
 
         int hCol = 2;
         foreach (var year in validYears)
@@ -242,13 +225,13 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             var mons = monthsByYear.GetValueOrDefault(year, []);
             int span = mons.Count * 2 + 2;
             WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + span - 1,
-                year.ToString(), ExcelTheme.HeaderBg);
+                year.ToString(), PrExcel.InsightsHeaderBg);
             hCol += span;
         }
         WriteMergedHeader(ws, hRow1, hRow1 + 1, hCol, hCol + 1,
-            "Grand Total", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            "Grand Total", PrExcel.InsightsHeaderBg);
 
-        // ?? Header Row 2: month name spans + year-total columns ???????????
+        // ?? Header Row 2: month name spans (mild green) + year-total columns (dark green)
         int hRow2 = hRow1 + 1;
         hCol = 2;
         foreach (var year in validYears)
@@ -257,11 +240,11 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             foreach (var mk in mons)
             {
                 WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1,
-                    MonthLabel(mk), ExcelTheme.SubHeaderBg);
+                    MonthLabel(mk), PrExcel.MonthHeaderBg);
                 hCol += 2;
             }
             WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1,
-                $"{year} Total", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+                $"{year} Total", PrExcel.InsightsHeaderBg);
             hCol += 2;
         }
 
@@ -273,18 +256,18 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             var mons = monthsByYear.GetValueOrDefault(year, []);
             foreach (var _ in mons)
             {
-                WriteHeaderCell(ws, hRow3, hCol++, "No. of Claim", ExcelTheme.SubHeaderBg);
-                WriteHeaderCell(ws, hRow3, hCol++, "Total Billed",  ExcelTheme.SubHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, "No. of Claim", PrExcel.InsightsMetricHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, "Total Billed",  PrExcel.InsightsMetricHeaderBg);
             }
             WriteHeaderCell(ws, hRow3, hCol++, "No. of Claim",
-                ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+                PrExcel.InsightsMetricHeaderBg);
             WriteHeaderCell(ws, hRow3, hCol++, "Total Billed",
-                ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+                PrExcel.InsightsMetricHeaderBg);
         }
         WriteHeaderCell(ws, hRow3, hCol++, "No. of Claim",
-            ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            PrExcel.InsightsMetricHeaderBg);
         WriteHeaderCell(ws, hRow3, hCol, "Total Billed",
-            ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            PrExcel.InsightsMetricHeaderBg);
 
         row = hRow3 + 1;
 
@@ -294,7 +277,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         {
             int col = 1;
             WriteCell(ws, row, col++,
-                $"{PanelLabel(panelIdx)}  {panel.PanelName}", ExcelTheme.GroupRowBg, isText: true);
+                $"{PanelLabel(panelIdx)}  {panel.PanelName}", PrExcel.GroupRowBg, isText: true);
 
             foreach (var year in validYears)
             {
@@ -302,15 +285,15 @@ public static class NorthWestProductionSummaryExcelExportBuilder
                 foreach (var mk in mons)
                 {
                     var mc = GetMonthCell(panel.ByMonth, mk);
-                    WriteCell(ws, row, col++, mc.ClaimCount, ExcelTheme.GroupRowBg);
-                    WriteCurrencyCell(ws, row, col++, mc.BilledCharges, ExcelTheme.GroupRowBg);
+                    WriteCell(ws, row, col++, mc.ClaimCount, PrExcel.GroupRowBg);
+                    WriteCurrencyCell(ws, row, col++, mc.BilledCharges, PrExcel.GroupRowBg);
                 }
                 var yt = GetYearTotal(panel.ByYear, year);
-                WriteCell(ws, row, col++, yt.ClaimCount, ExcelTheme.GroupRowBg);
-                WriteCurrencyCell(ws, row, col++, yt.BilledCharges, ExcelTheme.GroupRowBg);
+                WriteCell(ws, row, col++, yt.ClaimCount, PrExcel.GroupRowBg);
+                WriteCurrencyCell(ws, row, col++, yt.BilledCharges, PrExcel.GroupRowBg);
             }
-            WriteCell(ws, row, col++, panel.TotalClaims, ExcelTheme.GroupRowBg);
-            WriteCurrencyCell(ws, row, col, panel.TotalCharges, ExcelTheme.GroupRowBg);
+            WriteCell(ws, row, col++, panel.TotalClaims, PrExcel.GroupRowBg);
+            WriteCurrencyCell(ws, row, col, panel.TotalCharges, PrExcel.GroupRowBg);
             ws.Row(row).Style.Font.Bold = true;
             row++;
 
@@ -318,7 +301,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             int payerIdx = 0;
             foreach (var payer in panel.TopPayers)
             {
-                var bg = payerIdx % 2 == 0 ? XLColor.White : ExcelTheme.BandedRowBg;
+                var bg = PrExcel.ChildRowBg;
                 col = 1;
                 WriteCell(ws, row, col++, $"    {payer.PayerName}", bg, isText: true);
 
@@ -345,7 +328,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         }
 
         // ?? Total row (dark green, white text) ????????????????????????????
-        ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
+        PrExcel.StyleGreenTotalRow(ws, row, 1, colCount);
         int gtCol = 1;
         ws.Cell(row, gtCol++).Value = "Total";
         foreach (var year in validYears)
@@ -355,30 +338,30 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             {
                 var mc = GetMonthCell(vm.GrandTotalByMonth, mk);
                 ws.Cell(row, gtCol).Value = mc.ClaimCount;
-                ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
                 ws.Cell(row, gtCol).Value = mc.BilledCharges;
-                ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
             }
             int   yClaims  = vm.GrandTotalByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.ClaimCount);
             decimal yCharges = vm.GrandTotalByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.BilledCharges);
             ws.Cell(row, gtCol).Value = yClaims;
-            ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
             ws.Cell(row, gtCol).Value = yCharges;
-            ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
         }
         int   grandClaims  = vm.GrandTotalByMonth.Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.ClaimCount);
         decimal grandCharges = vm.GrandTotalByMonth.Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.BilledCharges);
         ws.Cell(row, gtCol).Value = grandClaims;
-        ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+        ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
         ws.Cell(row, gtCol).Value = grandCharges;
-        ws.Cell(row, gtCol).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
         row++;
 
         WriteFooterNote(ws, row, colCount,
             "*The above table is based on 'Date of Entry' and the total numbers include 'ALL' claims billed.");
         row++;
 
-        ExcelTheme.AutoFitColumns(ws, colCount);
+        PrExcel.AutoFitColumns(ws, colCount);
 
         // Append weekly section on the same sheet
         if (vm.WeeklyPanelRows.Count > 0)
@@ -403,25 +386,25 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         }
 
         int row = startRow;
-        ExcelTheme.WriteTitleBar(ws, row, colCount, weekTitle);
+        PrExcel.WriteTitleBar(ws, row, colCount, weekTitle, PrExcel.InsightsHeaderBg);
         row++;
 
         int hRow1 = row;
         WriteMergedHeader(ws, hRow1, hRow1 + 2, 1, 1,
-            "Panel & Insurance", ExcelTheme.HeaderBg);
+            "Panel & Insurance", PrExcel.InsightsHeaderBg);
 
         int hCol = 2;
         WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + weeks.Count * 2 - 1,
-            "Billed Week", ExcelTheme.HeaderBg);
+            "Billed Week", PrExcel.InsightsHeaderBg);
         WriteMergedHeader(ws, hRow1, hRow1 + 1, hCol + weeks.Count * 2, hCol + weeks.Count * 2 + 1,
-            "Total", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            "Total", PrExcel.InsightsHeaderBg);
 
         int hRow2 = hRow1 + 1;
         hCol = 2;
         foreach (var w in weeks)
         {
             WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1,
-                $"{w.WeekStart:MMM dd} � {w.WeekEnd:MMM dd}", ExcelTheme.SubHeaderBg);
+                $"{w.WeekStart:MMM dd} � {w.WeekEnd:MMM dd}", PrExcel.MonthHeaderBg);
             hCol += 2;
         }
 
@@ -429,13 +412,13 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         hCol = 2;
         foreach (var _ in weeks)
         {
-            WriteHeaderCell(ws, hRow3, hCol++, "No. of Claim", ExcelTheme.SubHeaderBg);
-            WriteHeaderCell(ws, hRow3, hCol++, "Total Billed",  ExcelTheme.SubHeaderBg);
+            WriteHeaderCell(ws, hRow3, hCol++, "No. of Claim", PrExcel.InsightsMetricHeaderBg);
+            WriteHeaderCell(ws, hRow3, hCol++, "Total Billed",  PrExcel.InsightsMetricHeaderBg);
         }
         WriteHeaderCell(ws, hRow3, hCol++, "No. of Claim",
-            ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            PrExcel.InsightsMetricHeaderBg);
         WriteHeaderCell(ws, hRow3, hCol, "Total Billed",
-            ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            PrExcel.InsightsMetricHeaderBg);
 
         row = hRow3 + 1;
 
@@ -444,15 +427,15 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         {
             int col = 1;
             WriteCell(ws, row, col++,
-                $"{PanelLabel(panelIdx)}  {panel.PanelName}", ExcelTheme.GroupRowBg, isText: true);
+                $"{PanelLabel(panelIdx)}  {panel.PanelName}", PrExcel.GroupRowBg, isText: true);
             foreach (var w in weeks)
             {
                 var mc = GetMonthCell(panel.ByWeek, w.Key);
-                WriteCell(ws, row, col++, mc.ClaimCount, ExcelTheme.GroupRowBg);
-                WriteCurrencyCell(ws, row, col++, mc.BilledCharges, ExcelTheme.GroupRowBg);
+                WriteCell(ws, row, col++, mc.ClaimCount, PrExcel.GroupRowBg);
+                WriteCurrencyCell(ws, row, col++, mc.BilledCharges, PrExcel.GroupRowBg);
             }
-            WriteCell(ws, row, col++, panel.TotalClaims, ExcelTheme.GroupRowBg);
-            WriteCurrencyCell(ws, row, col, panel.TotalCharges, ExcelTheme.GroupRowBg);
+            WriteCell(ws, row, col++, panel.TotalClaims, PrExcel.GroupRowBg);
+            WriteCurrencyCell(ws, row, col, panel.TotalCharges, PrExcel.GroupRowBg);
             ws.Row(row).Style.Font.Bold = true;
             row++;
 
@@ -460,7 +443,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             int payerIdx = 0;
             foreach (var payer in panel.TopPayers)
             {
-                var bg = payerIdx % 2 == 0 ? XLColor.White : ExcelTheme.BandedRowBg;
+                var bg = PrExcel.ChildRowBg;
                 col = 1;
                 WriteCell(ws, row, col++, $"    {payer.PayerName}", bg, isText: true);
                 foreach (var w in weeks)
@@ -478,27 +461,27 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             panelIdx++;
         }
 
-        ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
+        PrExcel.StyleGreenTotalRow(ws, row, 1, colCount);
         int gtCol = 1;
         ws.Cell(row, gtCol++).Value = "Total";
         foreach (var w in weeks)
         {
             var mc = GetMonthCell(vm.WeeklyGrandTotalByWeek, w.Key);
             ws.Cell(row, gtCol).Value = mc.ClaimCount;
-            ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
             ws.Cell(row, gtCol).Value = mc.BilledCharges;
-            ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
         }
         ws.Cell(row, gtCol).Value = vm.WeeklyGrandTotalClaims;
-        ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+        ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
         ws.Cell(row, gtCol).Value = vm.WeeklyGrandTotalCharges;
-        ws.Cell(row, gtCol).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
         row++;
 
         WriteFooterNote(ws, row, colCount,
             "*The above table is based on 'Date of Entry' and the total numbers include 'ALL' claims billed.");
 
-        ExcelTheme.AutoFitColumns(ws, colCount);
+        PrExcel.AutoFitColumns(ws, colCount);
     }
 
     // ?? Coding (Unbilled) ?????????????????????????????????????????????????????
@@ -508,22 +491,22 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         if (vm.CodingPanelRows.Count == 0) return;
 
         var ws = wb.AddWorksheet("Coding");
-        ws.TabColor = ExcelTheme.TabGreen;
-        ExcelTheme.ApplyDefaults(ws);
+        ws.TabColor = PrExcel.TabGreen;
+        PrExcel.ApplyDefaults(ws);
 
         const int colCount = 3;
         int row = 1;
 
-        ExcelTheme.WriteTitleBar(ws, row, colCount, "Coding (Unbilled)");
+        PrExcel.WriteTitleBar(ws, row, colCount, "Coding (Unbilled)");
         row++;
-        ExcelTheme.WriteHeaderRow(ws, row, 1,
-            ["Panel Name", "Claim Count", "Total Charge"], ExcelTheme.HeaderBg);
+        PrExcel.WriteHeaderRow(ws, row, 1,
+            ["Panel Name", "Claim Count", "Total Charge"], PrExcel.MetricHeaderBg);
         row++;
 
         int dataIdx = 0;
         foreach (var panel in vm.CodingPanelRows)
         {
-            var bg = ExcelTheme.GetRowBg(dataIdx, isGroupRow: true);
+            var bg = PrExcel.GetRowBg(dataIdx, isGroupRow: true);
             WriteCell(ws, row, 1, panel.PanelName, bg, isText: true);
             WriteCell(ws, row, 2, panel.ClaimCount, bg);
             WriteCurrencyCell(ws, row, 3, panel.TotalCharges, bg);
@@ -534,7 +517,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             foreach (var cpt in panel.CptRows)
             {
                 dataIdx++;
-                bg = ExcelTheme.GetRowBg(dataIdx);
+                bg = PrExcel.GetRowBg(dataIdx);
                 WriteCell(ws, row, 1, $"  {cpt.CptCodeUnitsModifier}", bg, isText: true);
                 WriteCell(ws, row, 2, cpt.ClaimCount, bg);
                 WriteCurrencyCell(ws, row, 3, cpt.TotalCharges, bg);
@@ -544,14 +527,14 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             dataIdx++;
         }
 
-        ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
+        PrExcel.StyleGreenTotalRow(ws, row, 1, colCount);
         ws.Cell(row, 1).Value = "Grand Total";
         ws.Cell(row, 2).Value = vm.CodingGrandTotalClaims;
-        ws.Cell(row, 2).Style.NumberFormat.NumberFormatId = 3;
+        ws.Cell(row, 2).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
         ws.Cell(row, 3).Value = vm.CodingGrandTotalCharges;
-        ws.Cell(row, 3).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+        ws.Cell(row, 3).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
 
-        ExcelTheme.AutoFitColumns(ws, colCount);
+        PrExcel.AutoFitColumns(ws, colCount);
         FinishOutline(ws);
     }
 
@@ -562,8 +545,8 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         if (vm.PayerBreakdownRows.Count == 0) return;
 
         var ws = wb.AddWorksheet("Payer Breakdown");
-        ws.TabColor = ExcelTheme.TabGreen;
-        ExcelTheme.ApplyDefaults(ws);
+        ws.TabColor = PrExcel.TabGreen;
+        PrExcel.ApplyDefaults(ws);
 
         var pbYears = vm.PayerBreakdownYears.Where(y => y > 1900).ToList();
         var pbMonths = vm.PayerBreakdownMonths.Where(m => int.Parse(m[..4]) > 1900).ToList();
@@ -579,21 +562,21 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         colCount += metrics;
 
         int row = 1;
-        ExcelTheme.WriteTitleBar(ws, row, colCount, "Payer Breakdown (Charge Entered Date)");
+        PrExcel.WriteTitleBar(ws, row, colCount, "Payer Breakdown (Charge Entered Date)");
         row++;
 
         int hRow1 = row;
-        WriteMergedHeader(ws, hRow1, hRow1 + 2, 1, 1, "Payer", ExcelTheme.HeaderBg);
+        WriteMergedHeader(ws, hRow1, hRow1 + 2, 1, 1, "Payer", PrExcel.HeaderBg);
         int hCol = 2;
         foreach (var year in pbYears)
         {
             var mons = pbMonthsByYear.GetValueOrDefault(year, []);
             int span = (mons.Count + 1) * metrics;
             WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + span - 1,
-                year.ToString(), ExcelTheme.HeaderBg);
+                year.ToString(), PrExcel.HeaderBg);
             hCol += span;
         }
-        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + metrics - 1, "Grand Total", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + metrics - 1, "Grand Total", PrExcel.HeaderBg);
 
         int hRow2 = hRow1 + 1;
         hCol = 2;
@@ -602,13 +585,13 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             var mons = pbMonthsByYear.GetValueOrDefault(year, []);
             foreach (var mk in mons)
             {
-                WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, MonthLabel(mk), ExcelTheme.SubHeaderBg);
+                WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, MonthLabel(mk), PrExcel.SubHeaderBg);
                 hCol += 2;
             }
-            WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, $"Year {year} Total", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, $"Year {year} Total", PrExcel.SubHeaderBg);
             hCol += 2;
         }
-        WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, "", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+        WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, "", PrExcel.HeaderBg);
 
         int hRow3 = hRow1 + 2;
         hCol = 2;
@@ -617,21 +600,21 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             var mons = pbMonthsByYear.GetValueOrDefault(year, []);
             foreach (var _ in mons)
             {
-                WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.SubHeaderBg);
-                WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", ExcelTheme.SubHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", PrExcel.MetricHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", PrExcel.MetricHeaderBg);
             }
-            WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-            WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", PrExcel.MetricHeaderBg);
+            WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", PrExcel.MetricHeaderBg);
         }
-        WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-        WriteHeaderCell(ws, hRow3, hCol, "Charge Amount", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+        WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", PrExcel.MetricHeaderBg);
+        WriteHeaderCell(ws, hRow3, hCol, "Charge Amount", PrExcel.MetricHeaderBg);
 
         row = hRow3 + 1;
 
         int dataIdx = 0;
         foreach (var pr in vm.PayerBreakdownRows)
         {
-            var bg = ExcelTheme.GetRowBg(dataIdx);
+            var bg = PrExcel.GetRowBg(dataIdx);
             int col = 1;
             WriteCell(ws, row, col++, pr.PayerName, bg, isText: true);
             foreach (var year in pbYears)
@@ -651,7 +634,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             dataIdx++;
         }
 
-        ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
+        PrExcel.StyleGreenTotalRow(ws, row, 1, colCount);
         int gtCol = 1;
         ws.Cell(row, gtCol++).Value = "Grand Total";
         foreach (var year in pbYears)
@@ -660,25 +643,25 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             foreach (var mk in mons)
             {
                 ws.Cell(row, gtCol).Value = vm.PayerBreakdownGrandByMonth.GetValueOrDefault(mk, 0);
-                ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
                 ws.Cell(row, gtCol).Value = vm.PayerBreakdownGrandChargesByMonth.GetValueOrDefault(mk, 0m);
-                ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
             }
             int yTotal = vm.PayerBreakdownGrandByMonth
                 .Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
             decimal yCharges = vm.PayerBreakdownGrandChargesByMonth
                 .Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
             ws.Cell(row, gtCol).Value = yTotal;
-            ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
             ws.Cell(row, gtCol).Value = yCharges;
-            ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
         }
         ws.Cell(row, gtCol).Value = vm.PayerBreakdownGrandTotal;
-        ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+        ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
         ws.Cell(row, gtCol).Value = vm.PayerBreakdownGrandTotalCharges;
-        ws.Cell(row, gtCol).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
 
-        ExcelTheme.AutoFitColumns(ws, colCount);
+        PrExcel.AutoFitColumns(ws, colCount);
     }
 
     private static void BuildPanelBreakdownSheet(XLWorkbook wb, ProductionReportViewModel vm)
@@ -686,8 +669,8 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         if (vm.PanelBreakdownRows.Count == 0) return;
 
         var ws = wb.AddWorksheet("Panel Breakdown");
-        ws.TabColor = ExcelTheme.TabGreen;
-        ExcelTheme.ApplyDefaults(ws);
+        ws.TabColor = PrExcel.TabGreen;
+        PrExcel.ApplyDefaults(ws);
 
         var years = vm.PanelBreakdownYears.Where(y => y > 1900).ToList();
         var months = vm.PanelBreakdownMonths.Where(m => int.Parse(m[..4]) > 1900).ToList();
@@ -703,21 +686,21 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         colCount += metrics;
 
         int row = 1;
-        ExcelTheme.WriteTitleBar(ws, row, colCount, "Panel Breakdown (Charge Entered Date)");
+        PrExcel.WriteTitleBar(ws, row, colCount, "Panel Breakdown (Charge Entered Date)");
         row++;
 
         int hRow1 = row;
-        WriteMergedHeader(ws, hRow1, hRow1 + 2, 1, 1, "Panel", ExcelTheme.HeaderBg);
+        WriteMergedHeader(ws, hRow1, hRow1 + 2, 1, 1, "Panel", PrExcel.HeaderBg);
         int hCol = 2;
         foreach (var year in years)
         {
             var mons = monthsByYear.GetValueOrDefault(year, []);
             int span = (mons.Count + 1) * metrics;
             WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + span - 1,
-                year.ToString(), ExcelTheme.HeaderBg);
+                year.ToString(), PrExcel.HeaderBg);
             hCol += span;
         }
-        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + metrics - 1, "Grand Total", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + metrics - 1, "Grand Total", PrExcel.HeaderBg);
 
         int hRow2 = hRow1 + 1;
         hCol = 2;
@@ -726,13 +709,13 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             var mons = monthsByYear.GetValueOrDefault(year, []);
             foreach (var mk in mons)
             {
-                WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, MonthLabel(mk), ExcelTheme.SubHeaderBg);
+                WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, MonthLabel(mk), PrExcel.SubHeaderBg);
                 hCol += 2;
             }
-            WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, $"Year {year} Total", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, $"Year {year} Total", PrExcel.SubHeaderBg);
             hCol += 2;
         }
-        WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, "", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+        WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, "", PrExcel.HeaderBg);
 
         int hRow3 = hRow1 + 2;
         hCol = 2;
@@ -741,34 +724,34 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             var mons = monthsByYear.GetValueOrDefault(year, []);
             foreach (var _ in mons)
             {
-                WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.SubHeaderBg);
-                WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", ExcelTheme.SubHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", PrExcel.MetricHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", PrExcel.MetricHeaderBg);
             }
-            WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-            WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", PrExcel.MetricHeaderBg);
+            WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", PrExcel.MetricHeaderBg);
         }
-        WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-        WriteHeaderCell(ws, hRow3, hCol, "Charge Amount", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+        WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", PrExcel.MetricHeaderBg);
+        WriteHeaderCell(ws, hRow3, hCol, "Charge Amount", PrExcel.MetricHeaderBg);
 
         row = hRow3 + 1;
 
         foreach (var panel in vm.PanelBreakdownRows)
         {
             int col = 1;
-            WriteCell(ws, row, col++, panel.PayerName, ExcelTheme.GroupRowBg, isText: true);
+            WriteCell(ws, row, col++, panel.PayerName, PrExcel.GroupRowBg, isText: true);
             foreach (var year in years)
             {
                 var mons = monthsByYear.GetValueOrDefault(year, []);
                 foreach (var mk in mons)
                 {
-                    WriteCell(ws, row, col++, panel.ByMonth.GetValueOrDefault(mk, 0), ExcelTheme.GroupRowBg);
-                    WriteCurrencyCell(ws, row, col++, panel.ByMonthCharges.GetValueOrDefault(mk, 0m), ExcelTheme.GroupRowBg);
+                    WriteCell(ws, row, col++, panel.ByMonth.GetValueOrDefault(mk, 0), PrExcel.GroupRowBg);
+                    WriteCurrencyCell(ws, row, col++, panel.ByMonthCharges.GetValueOrDefault(mk, 0m), PrExcel.GroupRowBg);
                 }
-                WriteCell(ws, row, col++, panel.ByYear.GetValueOrDefault(year, 0), ExcelTheme.GroupRowBg);
-                WriteCurrencyCell(ws, row, col++, panel.ByYearCharges.GetValueOrDefault(year, 0m), ExcelTheme.GroupRowBg);
+                WriteCell(ws, row, col++, panel.ByYear.GetValueOrDefault(year, 0), PrExcel.GroupRowBg);
+                WriteCurrencyCell(ws, row, col++, panel.ByYearCharges.GetValueOrDefault(year, 0m), PrExcel.GroupRowBg);
             }
-            WriteCell(ws, row, col++, panel.GrandTotal, ExcelTheme.GroupRowBg);
-            WriteCurrencyCell(ws, row, col, panel.GrandTotalCharges, ExcelTheme.GroupRowBg);
+            WriteCell(ws, row, col++, panel.GrandTotal, PrExcel.GroupRowBg);
+            WriteCurrencyCell(ws, row, col, panel.GrandTotalCharges, PrExcel.GroupRowBg);
             ws.Row(row).Style.Font.Bold = true;
             row++;
 
@@ -776,7 +759,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             int payerIdx = 0;
             foreach (var payer in panel.ChildRows)
             {
-                var bg = payerIdx % 2 == 0 ? XLColor.White : ExcelTheme.BandedRowBg;
+                var bg = PrExcel.ChildRowBg;
                 col = 1;
                 WriteCell(ws, row, col++, $"    {payer.PayerName}", bg, isText: true);
                 foreach (var year in years)
@@ -798,7 +781,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             GroupChildRows(ws, firstChild, row - 1);
         }
 
-        ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
+        PrExcel.StyleGreenTotalRow(ws, row, 1, colCount);
         int gtCol = 1;
         ws.Cell(row, gtCol++).Value = "Grand Total";
         foreach (var year in years)
@@ -807,25 +790,25 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             foreach (var mk in mons)
             {
                 ws.Cell(row, gtCol).Value = vm.PanelBreakdownGrandByMonth.GetValueOrDefault(mk, 0);
-                ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
                 ws.Cell(row, gtCol).Value = vm.PanelBreakdownGrandChargesByMonth.GetValueOrDefault(mk, 0m);
-                ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
             }
             int yTotal = vm.PanelBreakdownGrandByMonth
                 .Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
             decimal yCharges = vm.PanelBreakdownGrandChargesByMonth
                 .Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
             ws.Cell(row, gtCol).Value = yTotal;
-            ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
             ws.Cell(row, gtCol).Value = yCharges;
-            ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
         }
         ws.Cell(row, gtCol).Value = vm.PanelBreakdownGrandTotal;
-        ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+        ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
         ws.Cell(row, gtCol).Value = vm.PanelBreakdownGrandTotalCharges;
-        ws.Cell(row, gtCol).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
 
-        ExcelTheme.AutoFitColumns(ws, colCount);
+        PrExcel.AutoFitColumns(ws, colCount);
         FinishOutline(ws);
     }
 
@@ -845,8 +828,8 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         if (rows.Count == 0) return;
 
         var ws = wb.AddWorksheet(sheetName);
-        ws.TabColor = ExcelTheme.TabGreen;
-        ExcelTheme.ApplyDefaults(ws);
+        ws.TabColor = PrExcel.TabGreen;
+        PrExcel.ApplyDefaults(ws);
 
         var years = yearsAll.Where(y => y > 1900).ToList();
         var months = monthsAll.Where(m => int.Parse(m[..4]) > 1900).ToList();
@@ -862,20 +845,20 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         colCount += metrics;
 
         int row = 1;
-        ExcelTheme.WriteTitleBar(ws, row, colCount, title);
+        PrExcel.WriteTitleBar(ws, row, colCount, title);
         row++;
 
         int hRow1 = row;
-        WriteMergedHeader(ws, hRow1, hRow1 + 2, 1, 1, rowHeader, ExcelTheme.HeaderBg);
+        WriteMergedHeader(ws, hRow1, hRow1 + 2, 1, 1, rowHeader, PrExcel.HeaderBg);
         int hCol = 2;
         foreach (var year in years)
         {
             var mons = monthsByYear.GetValueOrDefault(year, []);
             int span = (mons.Count + 1) * metrics;
-            WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + span - 1, year.ToString(), ExcelTheme.HeaderBg);
+            WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + span - 1, year.ToString(), PrExcel.HeaderBg);
             hCol += span;
         }
-        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + metrics - 1, "Grand Total", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + metrics - 1, "Grand Total", PrExcel.HeaderBg);
 
         int hRow2 = hRow1 + 1;
         hCol = 2;
@@ -884,13 +867,13 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             var mons = monthsByYear.GetValueOrDefault(year, []);
             foreach (var mk in mons)
             {
-                WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, MonthLabel(mk), ExcelTheme.SubHeaderBg);
+                WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, MonthLabel(mk), PrExcel.SubHeaderBg);
                 hCol += 2;
             }
-            WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, $"Year {year} Total", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, $"Year {year} Total", PrExcel.SubHeaderBg);
             hCol += 2;
         }
-        WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, "", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+        WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, "", PrExcel.HeaderBg);
 
         int hRow3 = hRow1 + 2;
         hCol = 2;
@@ -899,20 +882,20 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             var mons = monthsByYear.GetValueOrDefault(year, []);
             foreach (var _ in mons)
             {
-                WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.SubHeaderBg);
-                WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", ExcelTheme.SubHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", PrExcel.MetricHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", PrExcel.MetricHeaderBg);
             }
-            WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-            WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", PrExcel.MetricHeaderBg);
+            WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", PrExcel.MetricHeaderBg);
         }
-        WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-        WriteHeaderCell(ws, hRow3, hCol, "Charge Amount", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+        WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", PrExcel.MetricHeaderBg);
+        WriteHeaderCell(ws, hRow3, hCol, "Charge Amount", PrExcel.MetricHeaderBg);
 
         row = hRow3 + 1;
         int dataIdx = 0;
         foreach (var pr in rows)
         {
-            var bg = ExcelTheme.GetRowBg(dataIdx);
+            var bg = PrExcel.GetRowBg(dataIdx);
             int col = 1;
             WriteCell(ws, row, col++, pr.PayerName, bg, isText: true);
             foreach (var year in years)
@@ -932,7 +915,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             dataIdx++;
         }
 
-        ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
+        PrExcel.StyleGreenTotalRow(ws, row, 1, colCount);
         int gtCol = 1;
         ws.Cell(row, gtCol++).Value = "Grand Total";
         foreach (var year in years)
@@ -941,23 +924,23 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             foreach (var mk in mons)
             {
                 ws.Cell(row, gtCol).Value = grandByMonth.GetValueOrDefault(mk, 0);
-                ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
                 ws.Cell(row, gtCol).Value = grandChargesByMonth.GetValueOrDefault(mk, 0m);
-                ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
             }
             int yTotal = grandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
             decimal yCharges = grandChargesByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
             ws.Cell(row, gtCol).Value = yTotal;
-            ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
             ws.Cell(row, gtCol).Value = yCharges;
-            ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
         }
         ws.Cell(row, gtCol).Value = grandTotal;
-        ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+        ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
         ws.Cell(row, gtCol).Value = grandTotalCharges;
-        ws.Cell(row, gtCol).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
 
-        ExcelTheme.AutoFitColumns(ws, colCount);
+        PrExcel.AutoFitColumns(ws, colCount);
     }
 
     private static void BuildHighestPayerSheet(XLWorkbook wb, ProductionReportViewModel vm)
@@ -965,8 +948,8 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         if (vm.HighestPayerRows.Count == 0) return;
 
         var ws = wb.AddWorksheet("Highest Payer Breakdown");
-        ws.TabColor = ExcelTheme.TabGreen;
-        ExcelTheme.ApplyDefaults(ws);
+        ws.TabColor = PrExcel.TabGreen;
+        PrExcel.ApplyDefaults(ws);
 
         var years = vm.HighestPayerYears.Where(y => y > 1900).ToList();
         var months = vm.HighestPayerMonths.Where(m => int.Parse(m[..4]) > 1900).ToList();
@@ -982,20 +965,20 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         colCount += metrics;
 
         int row = 1;
-        ExcelTheme.WriteTitleBar(ws, row, colCount, "Highest Payer Breakdown — Source / Payer (Charge Entered Date)");
+        PrExcel.WriteTitleBar(ws, row, colCount, "Highest Payer Breakdown — Source / Payer (Charge Entered Date)");
         row++;
 
         int hRow1 = row;
-        WriteMergedHeader(ws, hRow1, hRow1 + 2, 1, 1, "Source & Payer", ExcelTheme.HeaderBg);
+        WriteMergedHeader(ws, hRow1, hRow1 + 2, 1, 1, "Source & Payer", PrExcel.HeaderBg);
         int hCol = 2;
         foreach (var year in years)
         {
             var mons = monthsByYear.GetValueOrDefault(year, []);
             int span = (mons.Count + 1) * metrics;
-            WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + span - 1, year.ToString(), ExcelTheme.HeaderBg);
+            WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + span - 1, year.ToString(), PrExcel.HeaderBg);
             hCol += span;
         }
-        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + metrics - 1, "Grand Total", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + metrics - 1, "Grand Total", PrExcel.HeaderBg);
 
         int hRow2 = hRow1 + 1;
         hCol = 2;
@@ -1004,13 +987,13 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             var mons = monthsByYear.GetValueOrDefault(year, []);
             foreach (var mk in mons)
             {
-                WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, MonthLabel(mk), ExcelTheme.SubHeaderBg);
+                WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, MonthLabel(mk), PrExcel.SubHeaderBg);
                 hCol += 2;
             }
-            WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, $"Year {year} Total", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, $"Year {year} Total", PrExcel.SubHeaderBg);
             hCol += 2;
         }
-        WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, "", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+        WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, "", PrExcel.HeaderBg);
 
         int hRow3 = hRow1 + 2;
         hCol = 2;
@@ -1019,35 +1002,35 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             var mons = monthsByYear.GetValueOrDefault(year, []);
             foreach (var _ in mons)
             {
-                WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.SubHeaderBg);
-                WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", ExcelTheme.SubHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", PrExcel.MetricHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", PrExcel.MetricHeaderBg);
             }
-            WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-            WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", PrExcel.MetricHeaderBg);
+            WriteHeaderCell(ws, hRow3, hCol++, "Charge Amount", PrExcel.MetricHeaderBg);
         }
-        WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-        WriteHeaderCell(ws, hRow3, hCol, "Charge Amount", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+        WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", PrExcel.MetricHeaderBg);
+        WriteHeaderCell(ws, hRow3, hCol, "Charge Amount", PrExcel.MetricHeaderBg);
 
         row = hRow3 + 1;
         foreach (var src in vm.HighestPayerRows)
         {
             int col = 1;
-            WriteCell(ws, row, col++, src.PanelName, ExcelTheme.GroupRowBg, isText: true);
+            WriteCell(ws, row, col++, src.PanelName, PrExcel.GroupRowBg, isText: true);
             foreach (var year in years)
             {
                 var mons = monthsByYear.GetValueOrDefault(year, []);
                 foreach (var mk in mons)
                 {
                     var mc = GetMonthCell(src.ByMonth, mk);
-                    WriteCell(ws, row, col++, mc.ClaimCount, ExcelTheme.GroupRowBg);
-                    WriteCurrencyCell(ws, row, col++, mc.BilledCharges, ExcelTheme.GroupRowBg);
+                    WriteCell(ws, row, col++, mc.ClaimCount, PrExcel.GroupRowBg);
+                    WriteCurrencyCell(ws, row, col++, mc.BilledCharges, PrExcel.GroupRowBg);
                 }
                 var yt = GetYearTotal(src.ByYear, year);
-                WriteCell(ws, row, col++, yt.ClaimCount, ExcelTheme.GroupRowBg);
-                WriteCurrencyCell(ws, row, col++, yt.BilledCharges, ExcelTheme.GroupRowBg);
+                WriteCell(ws, row, col++, yt.ClaimCount, PrExcel.GroupRowBg);
+                WriteCurrencyCell(ws, row, col++, yt.BilledCharges, PrExcel.GroupRowBg);
             }
-            WriteCell(ws, row, col++, src.TotalClaims, ExcelTheme.GroupRowBg);
-            WriteCurrencyCell(ws, row, col, src.TotalCharges, ExcelTheme.GroupRowBg);
+            WriteCell(ws, row, col++, src.TotalClaims, PrExcel.GroupRowBg);
+            WriteCurrencyCell(ws, row, col, src.TotalCharges, PrExcel.GroupRowBg);
             ws.Row(row).Style.Font.Bold = true;
             row++;
 
@@ -1055,7 +1038,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             int payerIdx = 0;
             foreach (var payer in src.TopPayers)
             {
-                var bg = payerIdx % 2 == 0 ? XLColor.White : ExcelTheme.BandedRowBg;
+                var bg = PrExcel.ChildRowBg;
                 col = 1;
                 WriteCell(ws, row, col++, $"    {payer.PayerName}", bg, isText: true);
                 foreach (var year in years)
@@ -1079,7 +1062,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             GroupChildRows(ws, firstChild, row - 1);
         }
 
-        ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
+        PrExcel.StyleGreenTotalRow(ws, row, 1, colCount);
         int gtCol = 1;
         ws.Cell(row, gtCol++).Value = "Grand Total";
         foreach (var year in years)
@@ -1089,23 +1072,23 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             {
                 var mc = GetMonthCell(vm.HighestPayerGrandByMonth, mk);
                 ws.Cell(row, gtCol).Value = mc.ClaimCount;
-                ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
                 ws.Cell(row, gtCol).Value = mc.BilledCharges;
-                ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
             }
             int yClaims = vm.HighestPayerGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.ClaimCount);
             decimal yCharges = vm.HighestPayerGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.BilledCharges);
             ws.Cell(row, gtCol).Value = yClaims;
-            ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
             ws.Cell(row, gtCol).Value = yCharges;
-            ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
         }
         ws.Cell(row, gtCol).Value = vm.HighestPayerGrandTotalClaims;
-        ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+        ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
         ws.Cell(row, gtCol).Value = vm.HighestPayerGrandTotalCharges;
-        ws.Cell(row, gtCol).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
 
-        ExcelTheme.AutoFitColumns(ws, colCount);
+        PrExcel.AutoFitColumns(ws, colCount);
         FinishOutline(ws);
     }
 
@@ -1116,23 +1099,23 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         if (vm.PayerPanelRows.Count == 0) return;
 
         var ws = wb.AddWorksheet("Payer X Panel");
-        ws.TabColor = ExcelTheme.TabGreen;
-        ExcelTheme.ApplyDefaults(ws);
+        ws.TabColor = PrExcel.TabGreen;
+        PrExcel.ApplyDefaults(ws);
 
         var panels = vm.PayerPanelColumns;
         const int colCount = 3;
 
         int row = 1;
-        ExcelTheme.WriteTitleBar(ws, row, colCount, "Payer × Panel");
+        PrExcel.WriteTitleBar(ws, row, colCount, "Payer × Panel");
         row++;
-        ExcelTheme.WriteHeaderRow(ws, row, 1,
-            ["Payer / Panel", "No. of Claims", "Total Billed Charges"], ExcelTheme.HeaderBg);
+        PrExcel.WriteHeaderRow(ws, row, 1,
+            ["Payer / Panel", "No. of Claims", "Total Billed Charges"], PrExcel.MetricHeaderBg);
         row++;
 
         int dataIdx = 0;
         foreach (var pr in vm.PayerPanelRows)
         {
-            var parentBg = ExcelTheme.GetRowBg(dataIdx, isGroupRow: true);
+            var parentBg = PrExcel.GetRowBg(dataIdx, isGroupRow: true);
             WriteCell(ws, row, 1, pr.PayerName, parentBg, isText: true);
             WriteCell(ws, row, 2, pr.GrandTotalClaims, parentBg);
             WriteCurrencyCell(ws, row, 3, pr.GrandTotalCharges, parentBg);
@@ -1148,7 +1131,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             int childIdx = 0;
             foreach (var (name, cell) in childPanels)
             {
-                var bg = ExcelTheme.GetRowBg(childIdx);
+                var bg = PrExcel.GetRowBg(childIdx);
                 WriteCell(ws, row, 1, $"    {name}", bg, isText: true);
                 WriteCell(ws, row, 2, cell.ClaimCount, bg);
                 WriteCurrencyCell(ws, row, 3, cell.BilledCharges, bg);
@@ -1160,14 +1143,14 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             dataIdx++;
         }
 
-        ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
+        PrExcel.StyleGreenTotalRow(ws, row, 1, colCount);
         ws.Cell(row, 1).Value = "Grand Total";
         ws.Cell(row, 2).Value = vm.PayerPanelGrandTotalClaims;
-        ws.Cell(row, 2).Style.NumberFormat.NumberFormatId = 3;
+        ws.Cell(row, 2).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
         ws.Cell(row, 3).Value = vm.PayerPanelGrandTotalCharges;
-        ws.Cell(row, 3).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+        ws.Cell(row, 3).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
 
-        ExcelTheme.AutoFitColumns(ws, colCount);
+        PrExcel.AutoFitColumns(ws, colCount);
         FinishOutline(ws);
     }
 
@@ -1178,43 +1161,43 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         if (vm.UnbilledAgingRows.Count == 0) return;
 
         var ws = wb.AddWorksheet("Unbilled X Aging");
-        ws.TabColor = ExcelTheme.TabGreen;
-        ExcelTheme.ApplyDefaults(ws);
+        ws.TabColor = PrExcel.TabGreen;
+        PrExcel.ApplyDefaults(ws);
 
         var buckets  = AgingBuckets.All;
         int colCount = 1 + buckets.Count * 2 + 2;
 
         int row = 1;
-        ExcelTheme.WriteTitleBar(ws, row, colCount, "Unbilled � Aging");
+        PrExcel.WriteTitleBar(ws, row, colCount, "Unbilled � Aging");
         row++;
 
         int hRow1 = row;
-        WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, "Unbilled � Aging", ExcelTheme.HeaderBg);
+        WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, "Unbilled � Aging", PrExcel.HeaderBg);
         int hCol = 2;
         foreach (var b in buckets)
         {
-            WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1, b, ExcelTheme.HeaderBg);
+            WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1, b, PrExcel.HeaderBg);
             hCol += 2;
         }
         WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1,
-            "Grand Total", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            "Grand Total", PrExcel.HeaderBg);
 
         int hRow2 = hRow1 + 1;
         hCol = 2;
         foreach (var _ in buckets)
         {
-            WriteHeaderCell(ws, hRow2, hCol++, "No. of Claims",        ExcelTheme.SubHeaderBg);
-            WriteHeaderCell(ws, hRow2, hCol++, "Total Billed Charges", ExcelTheme.SubHeaderBg);
+            WriteHeaderCell(ws, hRow2, hCol++, "No. of Claims",        PrExcel.MetricHeaderBg);
+            WriteHeaderCell(ws, hRow2, hCol++, "Total Billed Charges", PrExcel.MetricHeaderBg);
         }
-        WriteHeaderCell(ws, hRow2, hCol++, "No. of Claims",        ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-        WriteHeaderCell(ws, hRow2, hCol,   "Total Billed Charges", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+        WriteHeaderCell(ws, hRow2, hCol++, "No. of Claims",        PrExcel.MetricHeaderBg);
+        WriteHeaderCell(ws, hRow2, hCol,   "Total Billed Charges", PrExcel.MetricHeaderBg);
 
         row = hRow2 + 1;
 
         int dataIdx = 0;
         foreach (var pr in vm.UnbilledAgingRows)
         {
-            var bg = ExcelTheme.GetRowBg(dataIdx);
+            var bg = XLColor.White;
             int col = 1;
             WriteCell(ws, row, col++, pr.PanelName, bg, isText: true);
             foreach (var b in buckets)
@@ -1229,23 +1212,23 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             dataIdx++;
         }
 
-        ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
+        PrExcel.StyleGreenTotalRow(ws, row, 1, colCount);
         int gtCol = 1;
         ws.Cell(row, gtCol++).Value = "Grand Total";
         foreach (var b in buckets)
         {
             var mc = GetMonthCell(vm.UnbilledAgingGrandByBucket, b);
             ws.Cell(row, gtCol).Value = mc.ClaimCount;
-            ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
             ws.Cell(row, gtCol).Value = mc.BilledCharges;
-            ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
         }
         ws.Cell(row, gtCol).Value = vm.UnbilledAgingGrandTotalClaims;
-        ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+        ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
         ws.Cell(row, gtCol).Value = vm.UnbilledAgingGrandTotalCharges;
-        ws.Cell(row, gtCol).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
 
-        ExcelTheme.AutoFitColumns(ws, colCount);
+        PrExcel.AutoFitColumns(ws, colCount);
     }
 
     // ?? CPT Breakdown ?????????????????????????????????????????????????????????
@@ -1300,8 +1283,8 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         if (rows.Count == 0) return;
 
         var ws = wb.AddWorksheet(sheetName);
-        ws.TabColor = ExcelTheme.TabGreen;
-        ExcelTheme.ApplyDefaults(ws);
+        ws.TabColor = PrExcel.TabGreen;
+        PrExcel.ApplyDefaults(ws);
 
         var cptYears = yearsAll.Where(y => y > 1900).ToList();
         var cptMonths = monthsAll.Where(m => int.Parse(m[..4]) > 1900).ToList();
@@ -1316,22 +1299,22 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         colCount += 2;
 
         int row = 1;
-        ExcelTheme.WriteTitleBar(ws, row, colCount, title);
+        PrExcel.WriteTitleBar(ws, row, colCount, title);
         row++;
 
         int hRow1 = row;
-        WriteMergedHeader(ws, hRow1, hRow1 + 2, 1, 1, "CPT Codes", ExcelTheme.HeaderBg);
+        WriteMergedHeader(ws, hRow1, hRow1 + 2, 1, 1, "CPT Codes", PrExcel.HeaderBg);
         int hCol = 2;
         foreach (var year in cptYears)
         {
             var mons = cptMonthsByYear.GetValueOrDefault(year, []);
             int span = mons.Count * 2 + 2;
             WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + span - 1,
-                year.ToString(), ExcelTheme.HeaderBg);
+                year.ToString(), PrExcel.HeaderBg);
             hCol += span;
         }
         WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1,
-            "Grand Total", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            "Grand Total", PrExcel.HeaderBg);
 
         int hRow2 = hRow1 + 1;
         hCol = 2;
@@ -1341,14 +1324,14 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             foreach (var mk in mons)
             {
                 WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1,
-                    MonthLabel(mk), ExcelTheme.SubHeaderBg);
+                    MonthLabel(mk), PrExcel.SubHeaderBg);
                 hCol += 2;
             }
             WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1,
-                $"Year {year} Total", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+                $"Year {year} Total", PrExcel.SubHeaderBg);
             hCol += 2;
         }
-        WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, "", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+        WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, "", PrExcel.HeaderBg);
 
         int hRow3 = hRow1 + 2;
         hCol = 2;
@@ -1357,21 +1340,21 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             var mons = cptMonthsByYear.GetValueOrDefault(year, []);
             foreach (var _ in mons)
             {
-                WriteHeaderCell(ws, hRow3, hCol++, "Count of Units", ExcelTheme.SubHeaderBg);
-                WriteHeaderCell(ws, hRow3, hCol++, "Billed Amount", ExcelTheme.SubHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, "Count of Units", PrExcel.MetricHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, "Billed Amount", PrExcel.MetricHeaderBg);
             }
-            WriteHeaderCell(ws, hRow3, hCol++, "Count of Units", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-            WriteHeaderCell(ws, hRow3, hCol++, "Billed Amount", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+            WriteHeaderCell(ws, hRow3, hCol++, "Count of Units", PrExcel.MetricHeaderBg);
+            WriteHeaderCell(ws, hRow3, hCol++, "Billed Amount", PrExcel.MetricHeaderBg);
         }
-        WriteHeaderCell(ws, hRow3, hCol++, "Count of Units", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
-        WriteHeaderCell(ws, hRow3, hCol,   "Billed Amount", ExcelTheme.GoldAccent, fontColor: XLColor.Black);
+        WriteHeaderCell(ws, hRow3, hCol++, "Count of Units", PrExcel.MetricHeaderBg);
+        WriteHeaderCell(ws, hRow3, hCol,   "Billed Amount", PrExcel.MetricHeaderBg);
 
         row = hRow3 + 1;
 
         int dataIdx = 0;
         foreach (var cptRow in rows)
         {
-            var bg = ExcelTheme.GetRowBg(dataIdx);
+            var bg = PrExcel.GetRowBg(dataIdx);
             int col = 1;
             WriteCell(ws, row, col++, cptRow.CptCode, bg, isText: true);
             foreach (var year in cptYears)
@@ -1393,7 +1376,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             dataIdx++;
         }
 
-        ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
+        PrExcel.StyleGreenTotalRow(ws, row, 1, colCount);
         int gtCol = 1;
         ws.Cell(row, gtCol++).Value = "Grand Total";
         foreach (var year in cptYears)
@@ -1403,25 +1386,25 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             {
                 var mc = GetCptCell(grandByMonth, mk);
                 ws.Cell(row, gtCol).Value = mc.ClaimCount;
-                ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
                 ws.Cell(row, gtCol).Value = mc.BilledCharges;
-                ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+                ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
             }
             int yClaims = grandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.ClaimCount);
             decimal yCharges = grandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.BilledCharges);
             ws.Cell(row, gtCol).Value = yClaims;
-            ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
             ws.Cell(row, gtCol).Value = yCharges;
-            ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
         }
         int grandClaims = grandByMonth.Where(kv => kv.Key.Length >= 4 && int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.ClaimCount);
         decimal grandCharges = grandByMonth.Where(kv => kv.Key.Length >= 4 && int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.BilledCharges);
         ws.Cell(row, gtCol).Value = grandClaims;
-        ws.Cell(row, gtCol++).Style.NumberFormat.NumberFormatId = 3;
+        ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
         ws.Cell(row, gtCol).Value = grandCharges;
-        ws.Cell(row, gtCol).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
 
-        ExcelTheme.AutoFitColumns(ws, colCount);
+        PrExcel.AutoFitColumns(ws, colCount);
     }
 
     // ?? Filter footer ?????????????????????????????????????????????????????????
@@ -1439,7 +1422,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             ("First Bill To",   string.IsNullOrWhiteSpace(vm.FilterFirstBillTo)   ? null : [vm.FilterFirstBillTo]),
         };
 
-        ExcelTheme.WriteFilterSummary(ws, lastRow + 1, 3, filters);
+        PrExcel.WriteFilterSummary(ws, lastRow + 1, 3, filters);
     }
 
     // ?? Shared helpers ????????????????????????????????????????????????????????
@@ -1491,14 +1474,14 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         var cell = ws.Cell(row1, col1);
         cell.Value = text;
         cell.Style.Font.Bold = true;
-        cell.Style.Font.FontSize = ExcelTheme.FontSizeHeader;
-        cell.Style.Font.FontColor = fontColor ?? XLColor.White;
+        cell.Style.Font.FontSize = PrExcel.FontSizeHeader;
+        cell.Style.Font.FontColor = fontColor ?? PrExcel.ContrastOn(bg);
         cell.Style.Fill.BackgroundColor = bg;
         cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
         cell.Style.Alignment.WrapText = true;
         range.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-        range.Style.Border.OutsideBorderColor = XLColor.White;
+        range.Style.Border.OutsideBorderColor = PrExcel.BorderColor;
     }
 
     private static void WriteHeaderCell(IXLWorksheet ws, int row, int col,
@@ -1507,14 +1490,14 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         var cell = ws.Cell(row, col);
         cell.Value = text;
         cell.Style.Font.Bold = true;
-        cell.Style.Font.FontSize = ExcelTheme.FontSizeHeader;
-        cell.Style.Font.FontColor = fontColor ?? XLColor.White;
+        cell.Style.Font.FontSize = PrExcel.FontSizeHeader;
+        cell.Style.Font.FontColor = fontColor ?? PrExcel.ContrastOn(bg);
         cell.Style.Fill.BackgroundColor = bg;
         cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
         cell.Style.Alignment.WrapText = true;
         cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-        cell.Style.Border.OutsideBorderColor = XLColor.White;
+        cell.Style.Border.OutsideBorderColor = PrExcel.BorderColor;
     }
 
     private static void WriteCell(IXLWorksheet ws, int row, int col,
@@ -1522,7 +1505,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
     {
         var cell = ws.Cell(row, col);
         cell.Value = value;
-        ExcelTheme.StyleDataCell(cell, bg);
+        PrExcel.StyleDataCell(cell, bg);
         if (isText) cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
     }
 
@@ -1530,16 +1513,18 @@ public static class NorthWestProductionSummaryExcelExportBuilder
     {
         var cell = ws.Cell(row, col);
         cell.Value = value;
-        cell.Style.NumberFormat.NumberFormatId = 3;
-        ExcelTheme.StyleDataCell(cell, bg);
+        cell.Style.NumberFormat.Format = PrExcel.CountNumberFormat;
+        PrExcel.StyleDataCell(cell, bg);
+        cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
     }
 
     private static void WriteCurrencyCell(IXLWorksheet ws, int row, int col, decimal value, XLColor bg)
     {
         var cell = ws.Cell(row, col);
         cell.Value = value;
-        cell.Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
-        ExcelTheme.StyleDataCell(cell, bg);
+        cell.Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
+        PrExcel.StyleDataCell(cell, bg);
+        cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
     }
 
     private static void WriteDecimalCell(IXLWorksheet ws, int row, int col, decimal value, XLColor bg)
@@ -1547,7 +1532,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         var cell = ws.Cell(row, col);
         cell.Value = value;
         cell.Style.NumberFormat.Format = "#,##0";
-        ExcelTheme.StyleDataCell(cell, bg);
+        PrExcel.StyleDataCell(cell, bg);
     }
 
     // ?? Raw data sheets (ClaimLevelData / LineLevelData) ??????????????????????
@@ -1558,7 +1543,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
     {
         var ws = wb.AddWorksheet(sheetName);
         ws.TabColor = tabColor;
-        ExcelTheme.ApplyDefaults(ws);
+        PrExcel.ApplyDefaults(ws);
 
         if (rows.Count == 0)
         {
@@ -1577,10 +1562,10 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             : $"{sheetName} � {labName}  ({rows.Count:N0} rows)";
 
         // Green title bar (NW brand colour)
-        ExcelTheme.WriteTitleBar(ws, row, colCount, titleText);
+        PrExcel.WriteTitleBar(ws, row, colCount, titleText);
         row++;
 
-        ExcelTheme.WriteHeaderRow(ws, row, 1, columns, ExcelTheme.HeaderBg);
+        PrExcel.WriteHeaderRow(ws, row, 1, columns, PrExcel.MetricHeaderBg);
         row++;
 
         // Write raw values � skip per-cell styling on large datasets for performance
@@ -1603,8 +1588,8 @@ public static class NorthWestProductionSummaryExcelExportBuilder
                 $"? Export truncated at {MaxRawDataRows:N0} rows. " +
                 $"Total rows: {rows.Count:N0}. Apply filters to reduce the dataset.";
             warnCell.Style.Font.Bold = true;
-            warnCell.Style.Font.FontColor = ExcelTheme.BadFg;
-            warnCell.Style.Fill.BackgroundColor = ExcelTheme.BadBg;
+            warnCell.Style.Font.FontColor = PrExcel.BadFg;
+            warnCell.Style.Fill.BackgroundColor = PrExcel.BadBg;
             ws.Range(row, 1, row, colCount).Merge();
         }
 
@@ -1614,7 +1599,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             int dataStart = 3;
             int dataEnd   = dataStart + rowsToWrite - 1;
             for (int r = dataStart + 1; r <= dataEnd; r += 2)
-                ws.Range(r, 1, r, colCount).Style.Fill.BackgroundColor = ExcelTheme.BandedRowBg;
+                ws.Range(r, 1, r, colCount).Style.Fill.BackgroundColor = PrExcel.BandedRowBg;
 
             var dataRange = ws.Range(dataStart, 1, dataEnd, colCount);
             dataRange.Style.Border.InsideBorder       = XLBorderStyleValues.Thin;

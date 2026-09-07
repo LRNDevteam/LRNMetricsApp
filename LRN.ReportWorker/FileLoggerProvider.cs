@@ -100,8 +100,11 @@ internal sealed class FileLogWriter : IDisposable
             {
                 _writer?.Dispose();
                 _writer = new StreamWriter(
-                    Path.Combine(_directory, $"reportworker-{today}.log"),
-                    append: true,
+                    new FileStream(
+                        Path.Combine(_directory, $"reportworker-{today}.log"),
+                        FileMode.Append,
+                        FileAccess.Write,
+                        FileShare.ReadWrite),
                     encoding: System.Text.Encoding.UTF8)
                 {
                     AutoFlush = true,

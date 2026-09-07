@@ -119,6 +119,97 @@ public static class ExcelTheme
     public const double FontSizeTitle = 14;
     public const double FontSizeSectionTitle = 12;
 
+    /// <summary>
+    /// Cove Collection Report palette from the client workbook.
+    /// Isolated from the lime/gold Prediction / LIS / Executive theme above.
+    /// </summary>
+    public static class Collection
+    {
+        /// <summary>Accent 6 Darker 50% — titles, year headers, list headers, totals.</summary>
+        public static readonly XLColor HeaderBg = XLColor.FromHtml("#385624");
+
+        /// <summary>Accent 6 Lighter 80% — month / week headers on volume sheets.</summary>
+        public static readonly XLColor MonthHeaderBg = XLColor.FromHtml("#E2EFDA");
+
+        /// <summary>Light 2 Darker 10% — metric sub-headers (Encounters / Insurance Paid).</summary>
+        public static readonly XLColor MetricHeaderBg = XLColor.FromHtml("#D0CFCF");
+
+        /// <summary>Parent / panel rows — no fill.</summary>
+        public static readonly XLColor GroupRowBg = XLColor.White;
+
+        /// <summary>Child payer rows — Office Light 2.</summary>
+        public static readonly XLColor ChildRowBg = XLColor.FromHtml("#E7E6E6");
+
+        /// <summary>Grand-total row — same forest green as headers.</summary>
+        public static readonly XLColor TotalRowBg = XLColor.FromHtml("#385624");
+
+        /// <summary>Avg Payments group: Fully Paid (client purple).</summary>
+        public static readonly XLColor GroupFullyPaid = XLColor.FromHtml("#E7D8F4");
+
+        /// <summary>Avg Payments group: Adjudicated (Accent 1 Lighter 80%).</summary>
+        public static readonly XLColor GroupAdjudicated = XLColor.FromHtml("#D6DCE4");
+
+        /// <summary>Avg Payments group: 30 Days (Accent 4 Lighter 80%).</summary>
+        public static readonly XLColor Group30Day = XLColor.FromHtml("#FFF2CC");
+
+        /// <summary>Avg Payments group: 60 Days (Accent 2 Lighter 80%).</summary>
+        public static readonly XLColor Group60Day = XLColor.FromHtml("#FCE4D6");
+
+        /// <summary>Monthly / Weekly Claim Volume — client Insights tab.</summary>
+        public static readonly XLColor TabRed = XLColor.FromHtml("#C00000");
+
+        /// <summary>Insurance / Panel / CPT / Aging / Rep sheets — client gold.</summary>
+        public static readonly XLColor TabYellow = XLColor.FromHtml("#FFC000");
+
+        /// <summary>Avg payments tab — Accent 2 Lighter 60%.</summary>
+        public static readonly XLColor TabPeach = XLColor.FromHtml("#F8CBAD");
+
+        /// <summary>ClaimLevelData / LineLevelData — Accent 2.</summary>
+        public static readonly XLColor TabGold = XLColor.FromHtml("#ED7D31");
+
+        public const string CountNumberFormat = @"#,##0;-#,##0;""-"";@";
+        public const string AccountingNumberFormat = @"_(""$""* #,##0_);_(""$""* \(#,##0\);_(""$""* ""-""_);_(@_)";
+
+        public static XLColor ContrastOn(XLColor background)
+        {
+            if (background.Equals(MetricHeaderBg) || background.Equals(MonthHeaderBg)
+                || background.Equals(ChildRowBg) || background.Equals(GroupRowBg)
+                || background.Equals(GroupFullyPaid) || background.Equals(GroupAdjudicated)
+                || background.Equals(Group30Day) || background.Equals(Group60Day)
+                || background.Equals(XLColor.White))
+                return XLColor.Black;
+
+            try
+            {
+                var c = background.Color;
+                var luminance = 0.299 * c.R + 0.587 * c.G + 0.114 * c.B;
+                return luminance > 160 ? XLColor.Black : XLColor.White;
+            }
+            catch
+            {
+                return XLColor.White;
+            }
+        }
+
+        public static void WriteTitleBar(IXLWorksheet ws, int row, int colCount, string text)
+        {
+            var range = ws.Range(row, 1, row, colCount);
+            range.Merge();
+            var cell = ws.Cell(row, 1);
+            cell.Value = text;
+            cell.Style.Font.Bold = true;
+            cell.Style.Font.FontName = FontName;
+            cell.Style.Font.FontSize = FontSizeBody;
+            cell.Style.Font.FontColor = XLColor.White;
+            cell.Style.Fill.BackgroundColor = HeaderBg;
+            cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+            range.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            range.Style.Border.OutsideBorderColor = BorderColor;
+            ws.Row(row).Height = 18;
+        }
+    }
+
     // ── Worksheet initialisation ─────────────────────────────────────────
 
     /// <summary>Sets the default font for the entire worksheet.</summary>

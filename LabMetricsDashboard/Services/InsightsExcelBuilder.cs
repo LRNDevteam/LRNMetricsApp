@@ -5,11 +5,12 @@ namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// Builds the Key Insights &amp; Highlights worksheet (mockup layout) and
-/// inserts it as sheet 1 of a Production / LIS / Collection workbook.
+/// inserts it as sheet 2 of a Production workbook (after MonthlyAndWeeklyVolume),
+/// or as sheet 1 of LIS / Collection workbooks.
 /// </summary>
 public static class InsightsExcelBuilder
 {
-    private static readonly XLColor HeaderGreen = XLColor.FromHtml("#1F5C3A");
+    private static readonly XLColor HeaderGreen = XLColor.FromHtml("#385624");
     private static readonly XLColor ActionRed = XLColor.FromHtml("#C00000");
     private static readonly XLColor RiskRed = XLColor.FromHtml("#C00000");
     private static readonly XLColor StatusPeach = XLColor.FromHtml("#FCE4D6");
@@ -31,7 +32,10 @@ public static class InsightsExcelBuilder
             existing.Delete();
 
         var ws = workbook.Worksheets.Add(SheetName);
-        ws.Position = 1;
+        var isProduction = (reportName ?? "").Contains("Production", StringComparison.OrdinalIgnoreCase);
+        var hasMonthly = workbook.Worksheets.Any(w =>
+            string.Equals(w.Name, "MonthlyAndWeeklyVolume", StringComparison.OrdinalIgnoreCase));
+        ws.Position = isProduction && hasMonthly ? 2 : 1;
         WriteSheet(ws, insights, labName, reportName);
         ExcelTheme.GroupIndentedChildRows(workbook, skipSheetName: SheetName);
     }
@@ -101,17 +105,48 @@ public static class InsightsExcelBuilder
     {
         var layout = LayoutFor(reportName);
         const int colCount = 14;
+        var isProduction = (reportName ?? "").Contains("Production", StringComparison.OrdinalIgnoreCase);
+        ws.Style.Font.FontName = "Calibri";
+        ws.Style.Font.FontSize = 10;
         ws.SheetView.FreezeRows(2);
 
-        ws.Range(1, 1, 1, colCount).Merge();
-        var title = ws.Cell(1, 1);
-        title.Value = "Key Insights & Highlights";
-        title.Style.Font.Bold = true;
-        title.Style.Font.FontSize = 14;
-        title.Style.Font.FontColor = XLColor.White;
-        title.Style.Fill.BackgroundColor = HeaderGreen;
-        title.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
-        title.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        if (isProduction)
+        {
+            var leftTitle = ws.Range(1, 1, 1, 7);
+            leftTitle.Merge();
+            ws.Cell(1, 1).Value = "Key Insights & Highlights";
+            ws.Cell(1, 1).Style.Font.Bold = true;
+            ws.Cell(1, 1).Style.Font.FontSize = 12;
+            ws.Cell(1, 1).Style.Font.FontColor = XLColor.White;
+            leftTitle.Style.Fill.BackgroundColor = HeaderGreen;
+            leftTitle.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            leftTitle.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+
+            var rightTitle = ws.Range(1, 8, 1, colCount);
+            rightTitle.Merge();
+            ws.Cell(1, 8).Value = "Active Priorities / Suggestions";
+            ws.Cell(1, 8).Style.Font.Bold = true;
+            ws.Cell(1, 8).Style.Font.FontSize = 12;
+            ws.Cell(1, 8).Style.Font.FontColor = XLColor.White;
+            rightTitle.Style.Fill.BackgroundColor = ActionRed;
+            rightTitle.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            rightTitle.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        }
+        else
+        {
+            ws.Range(1, 1, 1, colCount).Merge();
+            var title = ws.Cell(1, 1);
+            title.Value = "Key Insights & Highlights";
+            title.Style.Font.Bold = true;
+            title.Style.Font.FontSize =
+                (reportName ?? "").Contains("Collection", StringComparison.OrdinalIgnoreCase)
+                || (reportName ?? "").Contains("LIS", StringComparison.OrdinalIgnoreCase)
+                    ? 10 : 14;
+            title.Style.Font.FontColor = XLColor.White;
+            title.Style.Fill.BackgroundColor = HeaderGreen;
+            title.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+            title.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        }
         ws.Row(1).Height = 22;
 
         for (var c = 1; c <= colCount; c++)
@@ -120,11 +155,14 @@ public static class InsightsExcelBuilder
             cell.Value = layout.Headers[c - 1];
             cell.Style.Font.Bold = true;
             cell.Style.Font.FontColor = XLColor.White;
-            cell.Style.Fill.BackgroundColor = c == 8 ? ActionRed : HeaderGreen;
+            cell.Style.Fill.BackgroundColor = isProduction
+                ? (c >= 8 ? ActionRed : HeaderGreen)
+                : (c == 8 ? ActionRed : HeaderGreen);
             cell.Style.Alignment.WrapText = true;
             cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
             cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            cell.Style.Border.OutsideBorderColor = XLColor.FromHtml("#CCCCCC");
         }
         ws.Row(2).Height = 32;
 
@@ -174,15 +212,22 @@ public static class InsightsExcelBuilder
             WriteDate(ws.Cell(row, 13), n.ClosedDate);
             ws.Cell(row, 14).Value = ExcelTheme.SanitizeText(n.StatusLabel ?? n.StatusCode);
 
-            ApplyRiskStyle(ws.Cell(row, 2), n);
-            ApplyStatusStyle(ws.Cell(row, 14), n);
-
+            var rowBg = isProduction && row % 2 == 0
+                ? XLColor.FromHtml("#F2F2F2")
+                : XLColor.White;
             for (var c = 1; c <= colCount; c++)
             {
-                ws.Cell(row, c).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-                ws.Cell(row, c).Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
-                ws.Cell(row, c).Style.Alignment.WrapText = c is 4 or 8 or 9;
+                var cell = ws.Cell(row, c);
+                if (isProduction)
+                    cell.Style.Fill.BackgroundColor = rowBg;
+                cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+                cell.Style.Border.OutsideBorderColor = XLColor.FromHtml("#CCCCCC");
+                cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
+                cell.Style.Alignment.WrapText = c is 4 or 8 or 9;
             }
+
+            ApplyRiskStyle(ws.Cell(row, 2), n);
+            ApplyStatusStyle(ws.Cell(row, 14), n);
 
             row++;
             displayNo++;
@@ -224,8 +269,7 @@ public static class InsightsExcelBuilder
         ws.Column(13).Width = 14;
         ws.Column(14).Width = 16;
 
-        if (!string.IsNullOrWhiteSpace(labName))
-            ws.TabColor = HeaderGreen;
+        ws.TabColor = ActionRed;
     }
 
     private static void WriteDate(IXLCell cell, DateTime? value)
