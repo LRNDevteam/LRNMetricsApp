@@ -17,22 +17,34 @@ These are committed; they ship with the next deploy.
 | Lab registered in the dashboard | `LabMetricsDashboard/appsettings.json` — `LabConfig.Labs`, `LabConfig.LabsID` |
 | Lab registered in the API | `LRN.ReportsApi/appsettings.json` — same two keys |
 | Lab registered in the report worker | `LRN.ReportWorker/appsettings.json` — `ReportWorker.Labs` |
-| Demo lab hidden from admins by default | new `LabConfig.DemoLabs` key + `LabConfigOptions.VisibleLabs()` |
+| Demo-lab hiding mechanism (now switched off — see below) | `LabConfig.DemoLabs` key + `LabConfigOptions.VisibleLabs()` |
 | No "report not generated" alerts | `ReportBoard.NoMissingReportWarning` |
 | Same reports offered as PCR | `ReportAvailability.Reports."Coding Validation"` |
 | Clone / de-identify / register scripts | `LabMetricsDashboard/SqlScripts/Demo_LRNLabDemo_0*.sql` |
 | Lab config template | `docs/demo-lab/LRNLabDemo.json.template` |
 
-### About the "hidden" behaviour
+### About the "hidden" behaviour — off as of September 2026
 
-`LabConfig.DemoLabs` takes any lab out of the *"admins see every lab"* shortcut. A demo lab
-now shows up **only for users explicitly assigned it** in Admin → Assign User Labs — admins
-included. Applied in four places, which is everywhere the shortcut existed: the navbar lab
-picker, the static menu fallback, the Report Control Board, and the JWT handed to the Denial
-Workflow React app.
+`LabConfig.DemoLabs` takes any lab out of the *"admins see every lab"* shortcut, so a lab
+listed there shows up **only for users explicitly assigned it** in Admin → Assign User Labs,
+admins included. It is applied in four places, which is everywhere the shortcut existed: the
+navbar lab picker, the static menu fallback, the Report Control Board, and the JWT handed to
+the Denial Workflow React app.
 
-To retire the demo lab later, delete `"LRNLabDemo"` from `DemoLabs` to make it a normal lab,
-or from `LabConfig.Labs` / `LabsID` to remove it entirely.
+**`LabConfig.DemoLabs` in `LabMetricsDashboard/appsettings.json` is now empty.** LRNLabDemo
+was listed there, and the visible symptom was the one the setting was always going to cause:
+it was missing from the navbar lab picker, so an admin could not switch to it to run a demo
+without first assigning it to themselves. It is a normal lab again. The reason it was hidden
+— a frozen lab reading as a stalled pipeline on the Report Control Board — is covered on its
+own terms by `ReportBoard.NoMissingReportWarning`, which already lists LRNLabDemo and turns
+its stale cells into a gear rather than a warning.
+
+De-identification is unaffected. The Denial Dashboard's placeholder source file name is driven
+by **`LRN.ReportsApi`'s own** `LabConfig:DemoLabs`, which still lists LRNLabDemo. Do not empty
+that one — the real file name would name the lab this demo was cloned from.
+
+To hide the demo lab from admins again, put `"LRNLabDemo"` back in the dashboard's `DemoLabs`
+list. To remove it entirely, delete it from `LabConfig.Labs` / `LabsID`.
 
 ---
 

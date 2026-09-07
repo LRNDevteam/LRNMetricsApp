@@ -54,7 +54,7 @@ public sealed class ReportBoardController : Controller
     private bool IsAdmin => User.IsInRole("Admin") || User.IsInRole("LRN Admin") || User.IsInRole("LRNAdmin");
 
     [HttpGet]
-    public async Task<IActionResult> Index(string? view, string? sort, string? filter, bool refresh = false, CancellationToken ct = default)
+    public async Task<IActionResult> Index(string? view, string? sort, string? filter, string? lab, bool refresh = false, CancellationToken ct = default)
     {
         var resolvedView = string.Equals(view, "cards", StringComparison.OrdinalIgnoreCase) ? "cards" : "matrix";
         // "order" — the sequence admins set per lab — is the default; the other two stay opt-in.
@@ -84,6 +84,23 @@ public sealed class ReportBoardController : Controller
         }
 
         var visibleLabs = VisibleLabKeys();
+
+        // The board shows every lab at once, so it has no lab of its own — but the navbar lab
+        // picker is still on screen here, and picking a lab reloads the CURRENT page with ?lab=.
+        // Without this the choice died on arrival: the board ignored the parameter, so the
+        // lmd_selected_lab cookie still held the previous lab and the next report opened on it,
+        // with the header snapping back to match. Resolving here writes the cookie the same way
+        // every content controller does, so a lab chosen on the landing page carries forward.
+        //
+        // Only a lab this user can actually see is accepted; anything else leaves the previous
+        // selection alone rather than switching them to a lab they cannot open.
+        if (!string.IsNullOrWhiteSpace(lab) && visibleLabs.TryGetValue(lab, out var chosenLab))
+        {
+            // TryGetValue returns the configured spelling, so the cookie never records a
+            // differently-cased variant of a lab key.
+            LabSelectionHelper.Resolve(HttpContext, chosenLab, visibleLabs.ToList());
+        }
+
         // Read the monitored section ONCE: an edit landing mid-loop must not order half the board
         // by the old list and half by the new one.
         var board = _boardSettings.CurrentValue ?? new ReportBoardSettings();

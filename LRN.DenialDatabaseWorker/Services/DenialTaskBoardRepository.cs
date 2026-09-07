@@ -188,6 +188,14 @@ WHERE LabId = @LabId";
 		// lab where it was never set up is missing them; substituting a typed NULL keeps one
 		// statement working everywhere instead of failing the lab on a column name.
 		var boardColumns = await GetColumnSetAsync(conn, null, "dbo.DenialTaskBoard", cancellationToken).ConfigureAwait(false);
+
+		// Same treatment for the verification table, and for the same reason. Its canonical DDL
+		// never had DenialClassification or ActionCode - the reconcile INSERT started naming them
+		// without a migration behind it, so every lab failed on "Invalid column name" at the point
+		// the board is written. The OBJECT_ID / COL_LENGTH guard on that statement did not catch it
+		// because it only tested UniqueTrackId and MissingDetectedRunId, which do exist.
+		var verificationColumns = await GetColumnSetAsync(conn, null, "dbo.DenialVerificationTask", cancellationToken).ConfigureAwait(false);
+
 		var probe = await ProbeSourcesAsync(conn, null, settings, cancellationToken).ConfigureAwait(false);
 
 		await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
@@ -220,7 +228,7 @@ WHERE LabId = @LabId";
 				resubmissionRan = true;
 			}
 
-			await ExecuteAsync(conn, tx, BuildReconcileSql(boardColumns), cancellationToken, labId, labName, runId).ConfigureAwait(false);
+			await ExecuteAsync(conn, tx, BuildReconcileSql(boardColumns, verificationColumns), cancellationToken, labId, labName, runId).ConfigureAwait(false);
 
 			var census = await ReadCensusAsync(conn, tx, upstreamRan, resubmissionRan, cancellationToken).ConfigureAwait(false);
 
@@ -706,8 +714,20 @@ WHERE o.FirstBilledDate IS NOT NULL
 	/// the first match wins (RC-07): Closed is exempt from everything else, and a denial the source
 	/// already resolved is stale regardless of who owns it.
 	/// </summary>
-	private static string BuildReconcileSql(HashSet<string> cols)
+	private static string BuildReconcileSql(HashSet<string> cols, HashSet<string> verificationCols)
 	{
+		// DenialClassification and ActionCode are absent from the verification table's canonical
+		// DDL, so they are emitted only where a lab actually has them. Both the destination list
+		// and the SELECT have to move together or the column counts stop matching.
+		var vtClassification = verificationCols.Contains("DenialClassification");
+		var vtActionCode = verificationCols.Contains("ActionCode");
+		var vtOptionalTargets =
+			(vtClassification ? "DenialClassification, " : string.Empty) +
+			(vtActionCode ? "ActionCode, " : string.Empty);
+		var vtOptionalValues =
+			(vtClassification ? "tb.DenialClassification, " : string.Empty) +
+			(vtActionCode ? "tb.ActionCode, " : string.Empty);
+
 		var claimUid = Col(cols, "ClaimUID", "NVARCHAR(600)");
 		var claimId = Col(cols, "ClaimID", "NVARCHAR(150)");
 		var dos = Col(cols, "DateOfService", "NVARCHAR(50)");
@@ -860,7 +880,7 @@ BEGIN
 	INSERT INTO dbo.DenialVerificationTask
 	(
 		TaskID, UniqueTrackId, ClaimID, PatientId, CPTCode, DenialCode, DenialDescription,
-		DenialClassification, ActionCode, RecommendedAction, ActionCategory, Task, Priority,
+		{vtOptionalTargets}RecommendedAction, ActionCategory, Task, Priority,
 		InsuranceBalance, Status, AssignedTo, DateOpened, DueDate, ReviewerComments,
 		LabId, LabName, OriginalRunId, MissingDetectedRunId, RunId,
 		VerificationStatus, VerificationComments, MovedOn
@@ -870,7 +890,7 @@ BEGIN
 		{BoardKeySql},
 		CONVERT(NVARCHAR(100), {claimId}),
 		tb.PatientId, tb.CPTCode, tb.DenialCode, tb.DenialDescription,
-		tb.DenialClassification, tb.ActionCode, tb.RecommendedAction, tb.ActionCategory, tb.Task, tb.Priority,
+		{vtOptionalValues}tb.RecommendedAction, tb.ActionCategory, tb.Task, tb.Priority,
 		ISNULL({balance}, 0),
 		'Verification Pending',
 		tb.AssignedTo,

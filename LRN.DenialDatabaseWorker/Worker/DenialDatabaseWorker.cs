@@ -86,21 +86,44 @@ public sealed class DenialDatabaseWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // ProcessLabAsync handles its own exceptions so one bad lab does not stop the pass. That
+        // makes the cancellation check here load-bearing: without it, a shutdown part-way through
+        // would still walk the rest of the list, and every remaining lab would be recorded against
+        // an already-cancelled token.
         if (_options.RunOnceOnStartup)
         {
             foreach (var lab in _labs)
+            {
+                if (stoppingToken.IsCancellationRequested) break;
                 await ProcessLabAsync(lab, stoppingToken);
+            }
 
-            _logger.LogInformation("RunOnceOnStartup=true. Worker completed.");
+            _logger.LogInformation(
+                stoppingToken.IsCancellationRequested
+                    ? "RunOnceOnStartup=true. Worker stopped early: host shutdown requested."
+                    : "RunOnceOnStartup=true. Worker completed.");
         }
         else
         {
             while (!stoppingToken.IsCancellationRequested)
             {
                 foreach (var lab in _labs)
+                {
+                    if (stoppingToken.IsCancellationRequested) break;
                     await ProcessLabAsync(lab, stoppingToken);
+                }
 
-                await Task.Delay(TimeSpan.FromMinutes(_options.IntervalMinutes), stoppingToken);
+                if (stoppingToken.IsCancellationRequested) break;
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(_options.IntervalMinutes), stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected on shutdown: leave the loop quietly rather than faulting the host.
+                    break;
+                }
             }
         }
     }
@@ -454,6 +477,40 @@ public sealed class DenialDatabaseWorker : BackgroundService
 
             await _infoLogger.EndAsync(runId, lab.LabName,
                 $"Denial report processing ended for lab {lab.LabName}.", ct: ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // A host shutdown, not a failure - stopping the service mid-run cancels whatever
+            // query is in flight, which surfaces here as TaskCanceledException.
+            //
+            // This has to be separated from the catch below for two reasons. It would record a
+            // red Failed row for work that was merely interrupted; and because that catch handles
+            // the exception rather than rethrowing it, the foreach in ExecuteAsync would carry on
+            // to the next lab, whose first query fails on the same cancelled token - writing one
+            // false Failed row per remaining lab. One stop would light up the whole board.
+            //
+            // Skipped is the honest status: step 2 of ProcessLabAsync retries anything that is not
+            // Success, so the run is picked up again on the next start.
+            _logger.LogInformation(
+                "Lab {LabName}: cancelled by host shutdown during RunId {RunId}. Recorded as Skipped and left retryable.",
+                lab.LabName, runId);
+
+            if (!string.IsNullOrWhiteSpace(runId))
+            {
+                // CancellationToken.None throughout: the token that got us here is already
+                // cancelled, so passing it on would lose the record of why we stopped.
+                await _workflowTracker.UpsertAsync(
+                    runId,
+                    WorkflowStatus.Skipped,
+                    startedOn: startedOn,
+                    completedOn: DateTime.Now,
+                    remarks: "Cancelled by host shutdown before the run completed.",
+                    ct: CancellationToken.None);
+
+                await _infoLogger.EndAsync(runId, lab.LabName,
+                    $"Denial report processing cancelled by shutdown for lab {lab.LabName}.",
+                    ct: CancellationToken.None);
+            }
         }
         catch (Exception ex)
         {

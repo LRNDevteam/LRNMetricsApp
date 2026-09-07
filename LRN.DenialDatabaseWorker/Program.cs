@@ -42,25 +42,42 @@ if (!string.IsNullOrWhiteSpace(vaultUri))
 // appsettings.Secrets.example.json for the expected shape.
 builder.Configuration.AddJsonFile("appsettings.Secrets.json", optional: true, reloadOnChange: true);
 
+// DenialDatabase and DefaultConnection are the same database - LRNMaster. The sibling services
+// all reach it as ConnectionStrings:DefaultConnection (see LRN.MasterFileProcessorWorker, whose
+// ImportDiagnostics labels that key "3. LRNMaster"), and the vault holds exactly one secret for
+// it: ConnectionStrings--DefaultConnection. This service alone asks for a second name that was
+// never provisioned, which is why it crashed at startup with a DI stack trace.
+//
+// Rather than create a duplicate secret that can drift from the first, fall back to the name the
+// rest of the estate already uses. An explicit ConnectionStrings:DenialDatabase still wins where
+// someone has set one, so nothing that works today changes.
+var denialDb = builder.Configuration.GetConnectionString("DenialDatabase");
+if (string.IsNullOrWhiteSpace(denialDb))
+{
+	denialDb = builder.Configuration.GetConnectionString("DefaultConnection");
+	if (!string.IsNullOrWhiteSpace(denialDb))
+		builder.Configuration["ConnectionStrings:DenialDatabase"] = denialDb;
+}
+
 // Check the one secret everything depends on here, while the configuration sources that were meant
 // to supply it are still in view. Six services resolve ConnectionStrings:DenialDatabase in their
 // constructors and each throws the same bare "Connection string 'DenialDatabase' not found." - which
 // in the Windows event log arrives as a DI stack trace naming whichever service the container
 // happened to build first, and says nothing about the vault. This says where to look instead.
 //
-// Note the failure mode that message calls out: the vault configuration provider silently SKIPS a
-// secret whose "Enabled" attribute is false, so a disabled (or deleted, or renamed) secret is
-// indistinguishable here from one that was never created. Missing access is the louder failure -
-// that throws out of AddAzureKeyVault above, before this line runs.
-if (string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("DenialDatabase")))
+// Two failure modes this message has to separate. The vault configuration provider silently SKIPS
+// a secret whose "Enabled" attribute is false, so a disabled (or deleted, or renamed) secret looks
+// identical to one that was never created. Missing ACCESS is the louder failure - that throws out
+// of AddAzureKeyVault above, before this line runs.
+if (string.IsNullOrWhiteSpace(denialDb))
 	throw new InvalidOperationException(
-		"Connection string 'DenialDatabase' (the LRNMaster database) was not supplied by any " +
-		"configuration source. " +
+		"Neither 'DenialDatabase' nor 'DefaultConnection' (both the LRNMaster database) was " +
+		"supplied by any configuration source. " +
 		(string.IsNullOrWhiteSpace(vaultUri)
 			? "KeyVault:VaultUri is empty, so the vault was skipped entirely: either set it, or supply " +
-			  "ConnectionStrings__DenialDatabase as an environment variable - see README.md, " +
+			  "ConnectionStrings__DefaultConnection as an environment variable - see README.md, " +
 			  "\"Running without the vault\"."
-			: $"Confirm the secret \"ConnectionStrings--DenialDatabase\" exists AND is enabled in {vaultUri}, " +
+			: $"Confirm the secret \"ConnectionStrings--DefaultConnection\" exists AND is enabled in {vaultUri}, " +
 			  "and that this service's identity still holds the \"Key Vault Secrets User\" role on that vault."));
 
 // ProcessorOptions

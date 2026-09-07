@@ -22,11 +22,13 @@
    RE-RUNNABLE. It only inserts what is missing, and never touches the lab's
    data - so re-running after a step 1 refresh is safe and quick.
 
-   Access model: LRNLabDemo is listed under LabConfig:DemoLabs in appsettings,
-   which keeps it OUT of the "admins see every lab" shortcut. It appears only
-   for users explicitly assigned it below - admins included. That is deliberate:
-   a lab whose data is deliberately frozen reads as a stalled pipeline on the
-   Report Control Board for anyone who is not expecting it.
+   Access model: LRNLabDemo is a normal lab. It used to be listed under
+   LabConfig:DemoLabs in the dashboard's appsettings, which kept it OUT of the
+   "admins see every lab" shortcut - and so out of the navbar lab picker, where
+   an admin needs it to run a demo. That list is now empty; the assignments below
+   still matter for non-admin demo users, who see only their assigned labs.
+   The "frozen lab looks stalled" concern is handled by ReportBoard:NoMissingReportWarning.
+   See docs/demo-lab/DemoLab_Setup.md.
    ============================================================================ */
 
 USE LRNMaster;

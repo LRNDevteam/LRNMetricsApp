@@ -42,7 +42,9 @@ public static class ReportCatalog
         // Sales Rep Summary is only produced for Cove and Elixir; everywhere else it is greyed
         // out as "not produced for this lab" rather than sitting empty as if it had failed.
         new("Sales Rep Summary",       "Sales Rep Summary",       "Sales",    "bi-people-fill",          GroupSummary,   "Dashboard",              "SalesRepSummary",         "EnableSalesRepsummary", null, null, SalesRepSummaryLabs),
-        new("Denial Report",           "Denial Report",           "Denial",   "bi-exclamation-triangle", GroupSummary,   "DenialDashboard",        "Index",                   null),
+        // A claim form with a cross, not a warning triangle: on this board a triangle is the
+        // glyph for a run that went wrong, so a report whose subject is denials must not wear it.
+        new("Denial Report",           "Denial Report",           "Denial",   "bi-clipboard2-x",         GroupSummary,   "DenialDashboard",        "Index",                   null),
 
         new("Coding Validation",       "Coding Validation",       "Coding",   "bi-pencil-square",        GroupAnalytics, "Coding",                 "Summary",                 "EnableCoding"),
         new("Payer Policy Validation", "Payer Policy Validation", "Policy",   "bi-shield-check",         GroupAnalytics, "PayerPolicyValidation",  "Index",                   "EnablePrediction"),
