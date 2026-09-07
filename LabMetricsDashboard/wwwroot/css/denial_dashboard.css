@@ -2059,13 +2059,16 @@ body.fs-lock {
 	color: #0e3460;
 }
 
-/* A source file name is long and is the least useful thing to wrap onto a
-   second line; the full value stays available on hover. */
+/* The source file name is shown in full. Clipping it to an ellipsis cut off exactly
+   the tail - the week and run stamp - that tells one master file from another, and
+   hovering for a tooltip is not how anyone reads a value they came here to check.
+   It wraps within its own box instead of widening the row, and a long unbroken name
+   breaks mid-word rather than overflowing. */
 .dd-run-meta-file {
-	max-width: min(46ch, 100%);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	max-width: 100%;
+	min-width: 0;
+	white-space: normal;
+	overflow-wrap: anywhere;
 }
 
 /* ---- Compact filter grid ---- */

@@ -125,7 +125,7 @@ BEGIN
      (1,  NULL, N'Home',                          N'Home',              N'Index',                       N'bi-house-door-fill',            1, 0, N'system'),
      (2,  NULL, N'Revenue Dashboard',             N'Dashboard',         N'Index',                       N'bi-speedometer2',               2, 0, N'system'),
      (3,  NULL, N'Standard Reports',              NULL,                 NULL,                           N'bi-file-earmark-bar-graph',     3, 0, N'system'),
-     (10, NULL, N'Denial Dashboard',              N'DenialDashboard',   N'Index',                       N'bi-exclamation-triangle-fill',  4, 0, N'system'),
+     (10, NULL, N'Denial Dashboard',              N'DenialDashboard',   N'Index',                       N'bi-clipboard2-x-fill',          4, 0, N'system'),
      (11, NULL, N'Analytics',                     NULL,                 NULL,                           N'bi-graph-up-arrow',             5, 0, N'system'),
      (17, NULL, N'Master Values',                 NULL,                 NULL,                           N'bi-database-gear',              6, 0, N'system'),
      (23, NULL, N'Admin',                         NULL,                 NULL,                           N'bi-shield-lock',                7, 0, N'system'),
