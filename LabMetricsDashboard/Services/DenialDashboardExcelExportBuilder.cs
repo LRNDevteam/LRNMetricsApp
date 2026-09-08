@@ -1,4 +1,4 @@
-using ClosedXML.Excel;
+﻿using ClosedXML.Excel;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.ViewModels;
 
@@ -361,6 +361,7 @@ public static class DenialDashboardExcelExportBuilder
 		var effectiveLineHeaders = BuildHeadersWithOverflow(baseHeaders, overflow);
 
 		var ws1 = wb.AddWorksheet("Line Item");
+		ws1.TabColor = ExcelTheme.TabGold;
 		ExcelTheme.ApplyDefaults(ws1);
 
 		for (int c = 0; c < effectiveLineHeaders.Count; c++)
@@ -527,6 +528,7 @@ public static class DenialDashboardExcelExportBuilder
 	private static void BuildDenialInsightSheet(XLWorkbook wb, IReadOnlyList<DenialInsightRecord> insights)
 	{
 		var ws = wb.AddWorksheet("Denial Insight");
+		ws.TabColor = ExcelTheme.TabGreen;
 		ExcelTheme.ApplyDefaults(ws);
 
 		var headers = new List<string>
@@ -605,6 +607,7 @@ public static class DenialDashboardExcelExportBuilder
 	private static void BuildBreakdownPivotSheet(XLWorkbook wb, string sheetName, BreakdownPivotViewModel? model)
 	{
 		var ws = wb.AddWorksheet(sheetName);
+		ws.TabColor = ExcelTheme.TabGreen;
 		ExcelTheme.ApplyDefaults(ws);
 
 		// The tab renders an empty pivot as "no data"; the sheet must still exist so the

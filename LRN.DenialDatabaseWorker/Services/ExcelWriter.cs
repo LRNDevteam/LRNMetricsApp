@@ -1,4 +1,4 @@
-using ClosedXML.Excel;
+﻿using ClosedXML.Excel;
 using System.IO.Compression;
 using System.Text;
 
@@ -70,6 +70,8 @@ public sealed class ExcelWriter
         List<Dictionary<string, string>> taskRows)
     {
         var ws = wb.AddWorksheet("Task Board");
+        ws.TabColor = DenialExcelTheme.TabGold;
+        DenialExcelTheme.ApplyDefaults(ws);
 
         if (taskRows.Count == 0)
         {
@@ -84,11 +86,7 @@ public sealed class ExcelWriter
         {
             var cell = ws.Cell(1, c + 1);
             cell.Value = taskHeaders[c];
-            cell.Style.Font.Bold = true;
-            cell.Style.Font.FontColor = XLColor.White;
-            cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#34495E");
-            cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-            cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+            DenialExcelTheme.StyleHeaderCell(cell);
             cell.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
         }
 
@@ -118,7 +116,7 @@ public sealed class ExcelWriter
                 else if (key == "Insurance Balance" && decimal.TryParse(val, out var amt))
                 {
                     cell.Value = amt;
-                    cell.Style.NumberFormat.Format = "$#,##0.00";
+                    cell.Style.NumberFormat.Format = DenialExcelTheme.AccountingNumberFormat2;
                 }
                 else
                 {
@@ -146,6 +144,8 @@ public sealed class ExcelWriter
         List<Dictionary<string, string>> insightRows)
     {
         var ws = wb.AddWorksheet("Denial Insights");
+        ws.TabColor = DenialExcelTheme.TabGreen;
+        DenialExcelTheme.ApplyDefaults(ws);
 
         int rowOffset = 3;
         int colOffset = 2;
@@ -155,9 +155,9 @@ public sealed class ExcelWriter
         ws.Range(rowOffset, colOffset, rowOffset, colOffset + insightHeaders.Count - 1).Merge();
         titleCell.Style.Font.Bold = true;
         titleCell.Style.Font.FontColor = XLColor.White;
-        titleCell.Style.Font.FontSize = 18;
+        titleCell.Style.Font.FontSize = DenialExcelTheme.FontSizeTitle;
         titleCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-        titleCell.Style.Fill.BackgroundColor = XLColor.FromHtml("#1E3D2F");
+        titleCell.Style.Fill.BackgroundColor = DenialExcelTheme.TitleBg;
         titleCell.Style.Border.BottomBorder = XLBorderStyleValues.Thick;
 
         int headerRow = rowOffset + 2;
@@ -166,11 +166,7 @@ public sealed class ExcelWriter
         {
             var cell = ws.Cell(headerRow, colOffset + c);
             cell.Value = insightHeaders[c];
-            cell.Style.Font.Bold = true;
-            cell.Style.Font.FontColor = XLColor.White;
-            cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#6B8E23");
-            cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-            cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            DenialExcelTheme.StyleHeaderCell(cell);
         }
 
         for (int r = 0; r < insightRows.Count; r++)
@@ -184,7 +180,7 @@ public sealed class ExcelWriter
                 row.TryGetValue(key, out var val);
                 var cell = ws.Cell(headerRow + 1 + r, colOffset + c);
 
-                cell.Style.Fill.BackgroundColor = isEven ? XLColor.FromHtml("#E8F5E9") : XLColor.White;
+                cell.Style.Fill.BackgroundColor = isEven ? DenialExcelTheme.BandedRowBg : XLColor.White;
 
                 if (key.Equals("Data", StringComparison.OrdinalIgnoreCase))
                 {
@@ -197,7 +193,7 @@ public sealed class ExcelWriter
                          decimal.TryParse(val, out var d))
                 {
                     cell.Value = d;
-                    cell.Style.NumberFormat.Format = "$#,##0.00";
+                    cell.Style.NumberFormat.Format = DenialExcelTheme.AccountingNumberFormat2;
                 }
                 else
                 {
@@ -229,6 +225,8 @@ public sealed class ExcelWriter
     private static void BuildBreakdownSheet(XLWorkbook wb, string sheetName, BreakdownSheetModel model)
     {
         var ws = wb.AddWorksheet(sheetName);
+        ws.TabColor = DenialExcelTheme.TabGreen;
+        DenialExcelTheme.ApplyDefaults(ws);
         var totalColumns = 2 + (model.Periods.Count * 2) + 2;
 
         ws.Cell(1, 1).Value = model.HeaderTitle;
@@ -239,7 +237,7 @@ public sealed class ExcelWriter
         titleRange.Style.Font.FontSize = 14;
         titleRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         titleRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-        titleRange.Style.Fill.BackgroundColor = XLColor.FromHtml("#1F5E16");
+        titleRange.Style.Fill.BackgroundColor = DenialExcelTheme.TitleBg;
         titleRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 
         ws.Cell(2, 1).Value = "Insurance & Top Denials";
@@ -249,7 +247,7 @@ public sealed class ExcelWriter
         leftHeader.Style.Font.FontColor = XLColor.White;
         leftHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         leftHeader.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-        leftHeader.Style.Fill.BackgroundColor = XLColor.FromHtml("#245B14");
+        leftHeader.Style.Fill.BackgroundColor = DenialExcelTheme.HeaderBg;
         leftHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 
         if (model.Periods.Count > 0)
@@ -261,7 +259,7 @@ public sealed class ExcelWriter
             sectionHeader.Style.Font.FontColor = XLColor.White;
             sectionHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             sectionHeader.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-            sectionHeader.Style.Fill.BackgroundColor = XLColor.FromHtml("#245B14");
+            sectionHeader.Style.Fill.BackgroundColor = DenialExcelTheme.HeaderBg;
             sectionHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
         }
 
@@ -272,7 +270,7 @@ public sealed class ExcelWriter
         totalHeader.Style.Font.FontColor = XLColor.White;
         totalHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         totalHeader.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-        totalHeader.Style.Fill.BackgroundColor = XLColor.FromHtml("#245B14");
+        totalHeader.Style.Fill.BackgroundColor = DenialExcelTheme.HeaderBg;
         totalHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 
         var periodCol = 3;
@@ -284,14 +282,15 @@ public sealed class ExcelWriter
             periodHeader.Style.Font.Bold = true;
             periodHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             periodHeader.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-            periodHeader.Style.Fill.BackgroundColor = XLColor.FromHtml("#DDE8D2");
+            periodHeader.Style.Fill.BackgroundColor = DenialExcelTheme.SubHeaderBg;
+            periodHeader.Style.Font.FontColor = XLColor.White;
             periodHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 
             ws.Cell(4, periodCol).Value = "No. of Claims";
             ws.Cell(4, periodCol + 1).Value = "Denial Bal";
             ws.Range(4, periodCol, 4, periodCol + 1).Style.Font.Bold = true;
             ws.Range(4, periodCol, 4, periodCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-            ws.Range(4, periodCol, 4, periodCol + 1).Style.Fill.BackgroundColor = XLColor.FromHtml("#F3F3F3");
+            ws.Range(4, periodCol, 4, periodCol + 1).Style.Fill.BackgroundColor = DenialExcelTheme.SubLabelBg;
             ws.Range(4, periodCol, 4, periodCol + 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
             ws.Range(4, periodCol, 4, periodCol + 1).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
 
@@ -302,7 +301,7 @@ public sealed class ExcelWriter
         ws.Cell(4, periodCol + 1).Value = "Denial Bal";
         ws.Range(4, periodCol, 4, periodCol + 1).Style.Font.Bold = true;
         ws.Range(4, periodCol, 4, periodCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-        ws.Range(4, periodCol, 4, periodCol + 1).Style.Fill.BackgroundColor = XLColor.FromHtml("#F3F3F3");
+        ws.Range(4, periodCol, 4, periodCol + 1).Style.Fill.BackgroundColor = DenialExcelTheme.SubLabelBg;
         ws.Range(4, periodCol, 4, periodCol + 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
         ws.Range(4, periodCol, 4, periodCol + 1).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
 
@@ -313,7 +312,7 @@ public sealed class ExcelWriter
             ws.Cell(dataRow, 2).Value = row.Label;
 
             var rowRange = ws.Range(dataRow, 1, dataRow, totalColumns);
-            rowRange.Style.Fill.BackgroundColor = row.IsInsuranceRow ? XLColor.FromHtml("#E7ECE3") : XLColor.White;
+            rowRange.Style.Fill.BackgroundColor = row.IsInsuranceRow ? DenialExcelTheme.GroupRowBg : XLColor.White;
             rowRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
             rowRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
 
@@ -327,33 +326,20 @@ public sealed class ExcelWriter
             {
                 var cell = i < row.Cells.Count ? row.Cells[i] : new BreakdownCellModel();
 
-                ws.Cell(dataRow, cellCol).Value = cell.ClaimCount == 0 ? "-" : cell.ClaimCount;
-
-                if (cell.DenialBalance == 0)
-                {
-                    ws.Cell(dataRow, cellCol + 1).Value = "$ -";
-                }
-                else
-                {
-                    ws.Cell(dataRow, cellCol + 1).Value = cell.DenialBalance;
-                    ws.Cell(dataRow, cellCol + 1).Style.NumberFormat.Format = "$#,##0.00";
-                }
+                ws.Cell(dataRow, cellCol).Value = cell.ClaimCount;
+                ws.Cell(dataRow, cellCol).Style.NumberFormat.Format = DenialExcelTheme.CountNumberFormat;
+                ws.Cell(dataRow, cellCol + 1).Value = cell.DenialBalance;
+                ws.Cell(dataRow, cellCol + 1).Style.NumberFormat.Format = DenialExcelTheme.AccountingNumberFormat2;
 
                 ws.Cell(dataRow, cellCol).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
                 ws.Cell(dataRow, cellCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
                 cellCol += 2;
             }
 
-            ws.Cell(dataRow, cellCol).Value = row.TotalClaimCount == 0 ? "-" : row.TotalClaimCount;
-            if (row.TotalBalance == 0)
-            {
-                ws.Cell(dataRow, cellCol + 1).Value = "$ -";
-            }
-            else
-            {
-                ws.Cell(dataRow, cellCol + 1).Value = row.TotalBalance;
-                ws.Cell(dataRow, cellCol + 1).Style.NumberFormat.Format = "$#,##0.00";
-            }
+            ws.Cell(dataRow, cellCol).Value = row.TotalClaimCount;
+            ws.Cell(dataRow, cellCol).Style.NumberFormat.Format = DenialExcelTheme.CountNumberFormat;
+            ws.Cell(dataRow, cellCol + 1).Value = row.TotalBalance;
+            ws.Cell(dataRow, cellCol + 1).Style.NumberFormat.Format = DenialExcelTheme.AccountingNumberFormat2;
 
             ws.Cell(dataRow, cellCol).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             ws.Cell(dataRow, cellCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
@@ -364,7 +350,7 @@ public sealed class ExcelWriter
         ws.Cell(dataRow, 1).Value = "";
         ws.Cell(dataRow, 2).Value = "Total";
         ws.Range(dataRow, 1, dataRow, totalColumns).Style.Font.Bold = true;
-        ws.Range(dataRow, 1, dataRow, totalColumns).Style.Fill.BackgroundColor = XLColor.FromHtml("#E1E9D9");
+        ws.Range(dataRow, 1, dataRow, totalColumns).Style.Fill.BackgroundColor = DenialExcelTheme.TotalRowBg;
         ws.Range(dataRow, 1, dataRow, totalColumns).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
         ws.Range(dataRow, 1, dataRow, totalColumns).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
 
@@ -372,29 +358,17 @@ public sealed class ExcelWriter
         for (var i = 0; i < model.TotalsByPeriod.Count; i++)
         {
             var total = model.TotalsByPeriod[i];
-            ws.Cell(dataRow, totalCol).Value = total.ClaimCount == 0 ? "-" : total.ClaimCount;
-            if (total.DenialBalance == 0)
-            {
-                ws.Cell(dataRow, totalCol + 1).Value = "$ -";
-            }
-            else
-            {
-                ws.Cell(dataRow, totalCol + 1).Value = total.DenialBalance;
-                ws.Cell(dataRow, totalCol + 1).Style.NumberFormat.Format = "$#,##0.00";
-            }
+            ws.Cell(dataRow, totalCol).Value = total.ClaimCount;
+            ws.Cell(dataRow, totalCol).Style.NumberFormat.Format = DenialExcelTheme.CountNumberFormat;
+            ws.Cell(dataRow, totalCol + 1).Value = total.DenialBalance;
+            ws.Cell(dataRow, totalCol + 1).Style.NumberFormat.Format = DenialExcelTheme.AccountingNumberFormat2;
             totalCol += 2;
         }
 
-        ws.Cell(dataRow, totalCol).Value = model.GrandTotalClaimCount == 0 ? "-" : model.GrandTotalClaimCount;
-        if (model.GrandTotalBalance == 0)
-        {
-            ws.Cell(dataRow, totalCol + 1).Value = "$ -";
-        }
-        else
-        {
-            ws.Cell(dataRow, totalCol + 1).Value = model.GrandTotalBalance;
-            ws.Cell(dataRow, totalCol + 1).Style.NumberFormat.Format = "$#,##0.00";
-        }
+        ws.Cell(dataRow, totalCol).Value = model.GrandTotalClaimCount;
+        ws.Cell(dataRow, totalCol).Style.NumberFormat.Format = DenialExcelTheme.CountNumberFormat;
+        ws.Cell(dataRow, totalCol + 1).Value = model.GrandTotalBalance;
+        ws.Cell(dataRow, totalCol + 1).Style.NumberFormat.Format = DenialExcelTheme.AccountingNumberFormat2;
 
         ws.SheetView.FreezeRows(4);
         ws.SheetView.FreezeColumns(2);

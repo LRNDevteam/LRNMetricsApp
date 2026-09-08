@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { denialWorkflowService } from '../services/denialWorkflowService';
+import { accounting } from '../utils/formatters';
 
 const statuses = ['Pending', 'Confirmed', 'Ignored'];
 const blankQuery = { search: '', batchId: '', denialCode: '', icdComplianceStatus: '', coverageStatus: '', assignedTo: '', status: 'Pending', page: 1, pageSize: 50 };
@@ -21,8 +22,9 @@ function shortDate(value) {
 }
 
 function money(value) {
+  // Keep the "no value at all" dash distinct from accounting's zero dash ("$ -").
   const n = Number(value);
-  return Number.isFinite(n) ? n.toLocaleString(undefined, { style: 'currency', currency: 'USD' }) : '-';
+  return Number.isFinite(n) ? accounting(n, 2) : '-';
 }
 
 function list(values) {

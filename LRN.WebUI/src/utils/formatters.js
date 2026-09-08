@@ -1,4 +1,18 @@
-export const money = (v) => `$${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// Accounting layout, not Currency — matching Helpers/AccountingHtml.cs on the LRN Metrics MVC
+// pages so both halves of the product read the same: the symbol is separated from the figure,
+// negatives are parenthesised rather than signed, and a zero shows as a dash instead of "$0.00".
+// Returns a plain string on purpose: money() is rendered inline in places (claim drawer subtitle,
+// KPI values) as well as in table cells, and an element that laid the symbol out flush-left would
+// have to be a full-width flex box, which would break onto its own line in those inline spots.
+export const accounting = (value, decimals = 2) => {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n) || n === 0) return '$ -';
+  const opts = { minimumFractionDigits: decimals, maximumFractionDigits: decimals };
+  return n < 0
+    ? `$ (${Math.abs(n).toLocaleString(undefined, opts)})`
+    : `$ ${n.toLocaleString(undefined, opts)}`;
+};
+export const money = (v) => accounting(v, 2);
 export const date = (v) => v ? new Date(v).toLocaleDateString() : '';
 export const initials = (name) => String(name || 'NA').split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(x => x[0]?.toUpperCase()).join('') || 'NA';
 export const statusClass = (v) => {

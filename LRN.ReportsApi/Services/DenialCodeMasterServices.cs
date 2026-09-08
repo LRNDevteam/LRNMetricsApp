@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using ClosedXML.Excel;
 using LRN.ReportsApi.Models;
 using Microsoft.Data.SqlClient;
@@ -1212,15 +1212,16 @@ public sealed class DenialCodeMasterExcelService : IDenialCodeMasterExcelService
 
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add(SheetName);
+        DenialExcelTheme.ApplyDefaults(sheet);
+        sheet.TabColor = DenialExcelTheme.TabGreen;
         sheet.Cell(1, 1).Value = TitleText;
-        sheet.Range(1, 1, 1, TemplateHeaders.Length).Merge().Style.Font.SetBold();
+        var titleRange = sheet.Range(1, 1, 1, TemplateHeaders.Length).Merge();
+        titleRange.Style.Font.SetBold().Font.SetFontColor(XLColor.White).Font.SetFontSize(DenialExcelTheme.FontSizeTitle);
+        titleRange.Style.Fill.SetBackgroundColor(DenialExcelTheme.TitleBg);
+        titleRange.Style.Alignment.SetVertical(XLAlignmentVerticalValues.Center);
 
         for (var i = 0; i < TemplateHeaders.Length; i++)
-        {
-            var cell = sheet.Cell(2, i + 1);
-            cell.Value = TemplateHeaders[i];
-            cell.Style.Font.Bold = true;
-        }
+            DenialExcelTheme.StyleHeaderCell(sheet.Cell(2, i + 1).SetValue(TemplateHeaders[i]));
 
         var row = 3;
         foreach (var record in records)
@@ -1252,15 +1253,16 @@ public sealed class DenialCodeMasterExcelService : IDenialCodeMasterExcelService
     {
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add(SheetName);
+        DenialExcelTheme.ApplyDefaults(sheet);
+        sheet.TabColor = DenialExcelTheme.TabGreen;
         sheet.Cell(1, 1).Value = TitleText;
-        sheet.Range(1, 1, 1, TemplateHeaders.Length).Merge().Style.Font.SetBold();
+        var titleRange = sheet.Range(1, 1, 1, TemplateHeaders.Length).Merge();
+        titleRange.Style.Font.SetBold().Font.SetFontColor(XLColor.White).Font.SetFontSize(DenialExcelTheme.FontSizeTitle);
+        titleRange.Style.Fill.SetBackgroundColor(DenialExcelTheme.TitleBg);
+        titleRange.Style.Alignment.SetVertical(XLAlignmentVerticalValues.Center);
 
         for (var i = 0; i < TemplateHeaders.Length; i++)
-        {
-            var cell = sheet.Cell(2, i + 1);
-            cell.Value = TemplateHeaders[i];
-            cell.Style.Font.Bold = true;
-        }
+            DenialExcelTheme.StyleHeaderCell(sheet.Cell(2, i + 1).SetValue(TemplateHeaders[i]));
 
         // One illustrative sample row so users see the expected shape. Row 3 == first data row,
         // matching ImportAsync (which starts reading at row 3 and skips rows with a blank Denial Code).
@@ -1425,7 +1427,10 @@ public sealed class SqlDenialActionChangeVerificationRepository : IDenialActionC
             ("OldShortCategory", x => x.OldShortCategory), ("NewShortCategory", x => x.NewShortCategory),
             ("VerificationStatus", x => x.VerificationStatus), ("VerifiedBy", x => x.VerifiedBy), ("VerifiedOn", x => x.VerifiedOn), ("CreatedOn", x => x.CreatedOn)
         ];
-        for (var i = 0; i < columns.Length; i++) sheet.Cell(1, i + 1).Value = columns[i].Header;
+        DenialExcelTheme.ApplyDefaults(sheet);
+        sheet.TabColor = DenialExcelTheme.TabGreen;
+        for (var i = 0; i < columns.Length; i++)
+            DenialExcelTheme.StyleHeaderCell(sheet.Cell(1, i + 1).SetValue(columns[i].Header));
         var r = 2;
         foreach (var x in rows.Items)
         {
@@ -1440,7 +1445,11 @@ public sealed class SqlDenialActionChangeVerificationRepository : IDenialActionC
             }
             r++;
         }
-        sheet.Range(1, 1, 1, columns.Length).Style.Font.SetBold();
+        // InsuranceBalance is the one money column on this sheet.
+        var balanceColumn = Array.FindIndex(columns, x => x.Header == "InsuranceBalance") + 1;
+        if (balanceColumn > 0 && r > 2)
+            sheet.Range(2, balanceColumn, r - 1, balanceColumn).Style.NumberFormat.Format = DenialExcelTheme.AccountingNumberFormat2;
+        sheet.SheetView.FreezeRows(1);
         sheet.Columns().AdjustToContents();
         using var ms = new MemoryStream();
         workbook.SaveAs(ms);

@@ -2302,3 +2302,30 @@ body{background:#f5f7fb;color:#101828}
   .rpt-meta-strip,.rpt-kpi-grid,.rpt-filter-grid{grid-template-columns:1fr}
   .rpt-filter-actions{grid-column:span 1;justify-content:flex-start}
 }
+
+/* ============================================================================
+   Accounting-format amounts
+   ----------------------------------------------------------------------------
+   Amount columns render in Accounting layout (see accounting() in
+   utils/formatters.js and Helpers/AccountingHtml.cs on the MVC side): symbol
+   separated from the figure, negatives in parentheses, zero as a dash.
+
+   Parenthesised negatives only read as a column when the digits line up, so
+   every money cell gets tabular figures and is kept off a second line — a
+   wrapped "(1,367.00)" is worse than useless.
+   ============================================================================ */
+.claim-assign-table .claim-money,
+.claim-assign-table td.text-right,
+.claim-list-amt,
+.cpt-tbl td.r,
+.claim-task-table td.r,
+.wl-main-table .money,
+.wl-line-table .money,
+.lrn-table td.money,
+.role-table td.money,
+.rpt-table td.r,
+.drill-table td.r,
+.aging-total-cell {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}

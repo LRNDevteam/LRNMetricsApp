@@ -18,11 +18,14 @@ const priorityMap = {
   low: { label: 'L', cls: 'pl' }
 };
 
+// Abbreviated for the aging tiles, but still Accounting rather than Currency: symbol separated,
+// negatives parenthesised, zero as a dash. Below 1K it falls through to the full accounting form.
 function compactMoney(value) {
   const n = Number(value || 0);
-  if (Math.abs(n) >= 1000000) return `$${(n / 1000000).toFixed(1)}M`;
-  if (Math.abs(n) >= 1000) return `$${(n / 1000).toFixed(1)}K`;
-  return money(n);
+  const abs = Math.abs(n);
+  if (abs < 1000) return money(n);
+  const short = abs >= 1000000 ? `${(abs / 1000000).toFixed(1)}M` : `${(abs / 1000).toFixed(1)}K`;
+  return n < 0 ? `$ (${short})` : `$ ${short}`;
 }
 
 function compactCount(value) {
