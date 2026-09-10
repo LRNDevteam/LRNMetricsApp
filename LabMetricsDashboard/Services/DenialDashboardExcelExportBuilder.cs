@@ -31,11 +31,14 @@ public static class DenialDashboardExcelExportBuilder
 	public const string LineItemSheetName = "Denial Masterfile";
 
 	/// <summary>
-	/// The single narrative sheet the client template leads with: report header block, the
-	/// monthly pivot, the weekly pivot, then Key Observations &amp; Highlights — in that order,
-	/// on one sheet, rather than the four separate tabs this export used to produce.
+	/// The summary tabs, in workbook order. The client template puts all three sections on one
+	/// sheet; this export keeps them apart so each is scrollable and printable on its own, and
+	/// so a wide monthly pivot cannot push the observations table off to the right.
+	/// The template's styling is unchanged - only the split differs.
 	/// </summary>
-	public const string DenialInsightsSheetName = "Denial Insights";
+	public const string MonthlySummarySheetName = "Monthly Summary";
+	public const string WeeklySummarySheetName = "Weekly Summary";
+	public const string DenialInsightSheetName = "Denial Insight";
 
 	/// <param name="includeLineItemSheet">
 	/// False lets a caller append that sheet itself. LRN.ReportWorker does: ClosedXML holds the
@@ -51,7 +54,13 @@ public static class DenialDashboardExcelExportBuilder
 	{
 		var workbook = new XLWorkbook();
 
-		BuildDenialInsightsSheet(workbook, data, fileName);
+		// The report header block rides on the first sheet only: it is report-level context
+		// (client, ranges, run), not something each tab restates.
+		BuildPivotSheet(workbook, MonthlySummarySheetName, data.MonthlyPivot, data, fileName,
+			includeHeaderBlock: true, emptyMessage: "No denial-dated rows for the selected filters.");
+		BuildPivotSheet(workbook, WeeklySummarySheetName, data.WeeklyPivot, data, fileName,
+			includeHeaderBlock: false, emptyMessage: "No denial-dated rows in the last four weeks.");
+		BuildInsightSheet(workbook, data.Insights);
 
 		if (includeLineItemSheet)
 		{
@@ -582,26 +591,53 @@ public static class DenialDashboardExcelExportBuilder
 	/// Key Observations &amp; Highlights — one sheet, in that order. This export previously spread
 	/// the same content over three tabs with no header block at all.
 	/// </summary>
-	private static void BuildDenialInsightsSheet(XLWorkbook wb, DenialDashboardExportData data, string? fileName)
+	/// <summary>One pivot per sheet, styled as the client template styles it.</summary>
+	private static void BuildPivotSheet(
+		XLWorkbook wb,
+		string sheetName,
+		BreakdownPivotViewModel? model,
+		DenialDashboardExportData data,
+		string? fileName,
+		bool includeHeaderBlock,
+		string emptyMessage)
 	{
-		var ws = wb.AddWorksheet(DenialInsightsSheetName);
-		ws.TabColor = TemplateRedBg;
+		var ws = wb.AddWorksheet(sheetName);
+		ws.TabColor = ExcelTheme.TabGreen;
 		ExcelTheme.ApplyDefaults(ws);
 
-		var lastColumn = Math.Max(
-			Math.Max(PivotLastColumn(data.MonthlyPivot), PivotLastColumn(data.WeeklyPivot)),
-			ObservationsLastCol);
+		// The header block's disclaimer is right-aligned to the last column, so a narrow pivot
+		// (or none at all) still needs room for it.
+		var lastColumn = Math.Max(PivotLastColumn(model), LabelCol + 8);
 
-		var row = WriteReportHeaderBlock(ws, data, fileName, lastColumn);
-		row = WritePivotSection(ws, data.MonthlyPivot, row, "No denial-dated rows for the selected filters.");
-		row = WritePivotSection(ws, data.WeeklyPivot, row, "No denial-dated rows in the last four weeks.");
-		WriteKeyObservations(ws, data.Insights, row);
+		var row = includeHeaderBlock ? WriteReportHeaderBlock(ws, data, fileName, lastColumn) : 2;
+		WritePivotSection(ws, model, row, emptyMessage);
 
 		ws.Column(GutterCol).Width = 4.5;
 		ws.Column(IndexCol).Width = 4;
-		ws.Column(LabelCol).Width = 13;
+		ws.Column(LabelCol).Width = 42;
 		for (var c = LabelCol + 1; c <= lastColumn; c++)
 			ws.Column(c).Width = 13;
+	}
+
+	/// <summary>Key Observations &amp; Highlights on its own sheet, keeping the template's red tab.</summary>
+	private static void BuildInsightSheet(XLWorkbook wb, IReadOnlyList<DenialInsightRecord> insights)
+	{
+		var ws = wb.AddWorksheet(DenialInsightSheetName);
+		ws.TabColor = TemplateRedBg;
+		ExcelTheme.ApplyDefaults(ws);
+
+		WriteKeyObservations(ws, insights, 2);
+
+		ws.Column(GutterCol).Width = 4.5;
+		ws.Column(IndexCol).Width = 4;
+		ws.Column(LabelCol).Width = 14;
+		for (var c = LabelCol + 1; c <= ObservationsLastCol; c++)
+			ws.Column(c).Width = 13;
+
+		// The prose columns carry sentences, not codes, so they get the room the rest do not:
+		// Descriptions (D:E), Observation (M:O), Action (R:U), Feedback / Response (V:W).
+		foreach (var c in new[] { 4, 5, 13, 14, 15, 18, 19, 20, 21, 22, 23 })
+			ws.Column(c).Width = 18;
 	}
 
 	/// <summary>

@@ -1,4 +1,4 @@
-// This test project does not enable ImplicitUsings, so the BCL namespaces are spelled out.
+﻿// This test project does not enable ImplicitUsings, so the BCL namespaces are spelled out.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -12,9 +12,9 @@ using Xunit;
 namespace LabMetricsDashboard.Tests;
 
 /// <summary>
-/// Locks the Denial Report workbook to the shape of the client template
-/// (Template/01. Cove Dx_Denial Report_*.xlsx): two sheets, with the report header block, the
-/// monthly pivot, the weekly pivot and Key Observations all on "Denial Insights", in that order.
+/// Locks the Denial Report workbook to its agreed shape: the client template's styling
+/// (Template/01. Cove Dx_Denial Report_*.xlsx) applied across four sheets - Monthly Summary,
+/// Weekly Summary, Denial Insight, Denial Masterfile - with the report header block on the first.
 ///
 /// These are structural assertions on purpose. The thing that broke before was the workbook
 /// quietly drifting away from the deliverable the client actually reads, and that is not
@@ -128,23 +128,40 @@ public sealed class DenialReportWorkbookShapeTests
             ActiveFilters: new List<(string, string?)>());
     }
 
+    private static IXLWorksheet Monthly(XLWorkbook wb) =>
+        wb.Worksheet(DenialDashboardExcelExportBuilder.MonthlySummarySheetName);
+
+    private static IXLWorksheet Weekly(XLWorkbook wb) =>
+        wb.Worksheet(DenialDashboardExcelExportBuilder.WeeklySummarySheetName);
+
     private static IXLWorksheet Insights(XLWorkbook wb) =>
-        wb.Worksheet(DenialDashboardExcelExportBuilder.DenialInsightsSheetName);
+        wb.Worksheet(DenialDashboardExcelExportBuilder.DenialInsightSheetName);
+
+    /// <summary>Row of the first cell in column B whose text starts with <paramref name="prefix"/>.</summary>
+    private static int FindRow(IXLWorksheet ws, string prefix)
+    {
+        var last = ws.LastRowUsed()?.RowNumber() ?? 0;
+        for (var r = 1; r <= last; r++)
+        {
+            if (ws.Cell(r, 2).GetString().StartsWith(prefix, StringComparison.Ordinal)) return r;
+        }
+        return 0;
+    }
 
     [Fact]
-    public void Workbook_has_the_template_two_sheets_in_order()
+    public void Workbook_has_the_four_sheets_in_order()
     {
         using var wb = DenialDashboardExcelExportBuilder.CreateWorkbook(BuildSampleData(), fileName: "Cove Dx_Denial Report.xlsx");
 
         var names = wb.Worksheets.Select(x => x.Name).ToArray();
-        Assert.Equal(new[] { "Denial Insights", "Denial Masterfile" }, names);
+        Assert.Equal(new[] { "Monthly Summary", "Weekly Summary", "Denial Insight", "Denial Masterfile" }, names);
     }
 
     [Fact]
     public void Report_header_block_matches_the_template_rows()
     {
         using var wb = DenialDashboardExcelExportBuilder.CreateWorkbook(BuildSampleData(), fileName: "Cove Dx_Denial Report.xlsx");
-        var ws = Insights(wb);
+        var ws = Monthly(wb);
 
         // Labels in column C, values in column D — the template's rows 2..7.
         Assert.Equal("Client Name: ", ws.Cell(2, 3).GetString());
@@ -158,31 +175,37 @@ public sealed class DenialReportWorkbookShapeTests
     }
 
     [Fact]
-    public void Both_pivots_and_the_observations_share_one_sheet_in_template_order()
+    public void Each_section_sits_on_its_own_sheet()
     {
         using var wb = DenialDashboardExcelExportBuilder.CreateWorkbook(BuildSampleData());
-        var ws = Insights(wb);
 
-        var titles = new List<(int Row, string Text)>();
-        for (var r = 1; r <= ws.LastRowUsed()!.RowNumber(); r++)
-        {
-            var text = ws.Cell(r, 2).GetString();
-            if (text.StartsWith("All Months") || text.StartsWith("Last 4 Weeks") || text.StartsWith("Key Observations"))
-                titles.Add((r, text));
-        }
+        // Each summary title appears on its own sheet, and on no other.
+        Assert.True(FindRow(Monthly(wb), "All Months") > 0);
+        Assert.Equal(0, FindRow(Monthly(wb), "Last 4 Weeks"));
+        Assert.Equal(0, FindRow(Monthly(wb), "Key Observations"));
 
-        Assert.Equal(3, titles.Count);
-        Assert.StartsWith("All Months", titles[0].Text);
-        Assert.StartsWith("Last 4 Weeks", titles[1].Text);
-        Assert.StartsWith("Key Observations", titles[2].Text);
-        Assert.True(titles[0].Row < titles[1].Row && titles[1].Row < titles[2].Row);
+        Assert.True(FindRow(Weekly(wb), "Last 4 Weeks") > 0);
+        Assert.Equal(0, FindRow(Weekly(wb), "All Months"));
+
+        Assert.True(FindRow(Insights(wb), "Key Observations") > 0);
+        Assert.Equal(0, FindRow(Insights(wb), "All Months"));
+    }
+
+    [Fact]
+    public void Header_block_is_on_the_first_sheet_only()
+    {
+        using var wb = DenialDashboardExcelExportBuilder.CreateWorkbook(BuildSampleData(), fileName: "x.xlsx");
+
+        Assert.Equal("Client Name: ", Monthly(wb).Cell(2, 3).GetString());
+        Assert.Equal(string.Empty, Weekly(wb).Cell(2, 3).GetString());
+        Assert.Equal(string.Empty, Insights(wb).Cell(2, 3).GetString());
     }
 
     [Fact]
     public void Pivot_fill_is_inverted_the_template_way_payer_clear_denial_grey()
     {
         using var wb = DenialDashboardExcelExportBuilder.CreateWorkbook(BuildSampleData());
-        var ws = Insights(wb);
+        var ws = Monthly(wb);
 
         // Find the monthly payer row and the denial row beneath it.
         var payerRow = 0;
@@ -201,7 +224,7 @@ public sealed class DenialReportWorkbookShapeTests
     public void Balances_are_numeric_accounting_and_counts_dash_on_zero()
     {
         using var wb = DenialDashboardExcelExportBuilder.CreateWorkbook(BuildSampleData());
-        var ws = Insights(wb);
+        var ws = Monthly(wb);
 
         var payerRow = 0;
         for (var r = 1; r <= ws.LastRowUsed()!.RowNumber(); r++)
@@ -225,11 +248,7 @@ public sealed class DenialReportWorkbookShapeTests
         using var wb = DenialDashboardExcelExportBuilder.CreateWorkbook(BuildSampleData());
         var ws = Insights(wb);
 
-        var headerRow = 0;
-        for (var r = 1; r <= ws.LastRowUsed()!.RowNumber(); r++)
-        {
-            if (ws.Cell(r, 2).GetString().StartsWith("Key Observations")) { headerRow = r + 1; break; }
-        }
+        var headerRow = FindRow(ws, "Key Observations") + 1;
         Assert.True(headerRow > 1, "observations header not found");
 
         Assert.Equal("#", ws.Cell(headerRow, 2).GetString());
