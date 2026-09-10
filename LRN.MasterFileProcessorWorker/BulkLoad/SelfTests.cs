@@ -41,6 +41,12 @@ public static class SelfTests
         AugustusPanelNewComesFromSourceColumn();
         EmptyRowsAreNotImported();
         RowsWithoutIdentityAreImportedAndCounted();
+        LabDatabaseTableNameQuoting();
+        LabDatabaseSchemaMatching();
+        LabDatabaseCsvFormattingMatchesWorkbookPath();
+        LabDatabaseLimsSourceRouting();
+        LabDatabaseLimsSchemaMatching();
+        LabDatabaseSourceRunDecisions();
 
         Console.WriteLine(new string('-', 70));
 
@@ -800,6 +806,298 @@ public static class SelfTests
     }
 
     // ---------------- helpers ----------------
+
+    // ---------------- LabDatabase source (MasterDataSource = "LabDatabase") ----------------
+
+    /// <summary>
+    /// The source table name is the one part of the SELECT that comes from configuration rather
+    /// than a parameter, so it has to be quoted, and anything that is not a plain one- or two-part
+    /// identifier has to be refused outright.
+    /// </summary>
+    private static void LabDatabaseTableNameQuoting()
+    {
+        Console.WriteLine("\nLabDatabase - table name quoting");
+
+        Check("schema.table is quoted",
+            LRN.MasterFileProcessorWorker.Database.LabDatabaseMasterReader
+                .QuoteTableName("dbo.Cove_Claim_Level_Billing_Master")
+            == "[dbo].[Cove_Claim_Level_Billing_Master]");
+
+        Check("bare table is quoted",
+            LRN.MasterFileProcessorWorker.Database.LabDatabaseMasterReader
+                .QuoteTableName("Cove_Line_Level_Billing_Master")
+            == "[Cove_Line_Level_Billing_Master]");
+
+        Check("already-bracketed name is not double-bracketed",
+            LRN.MasterFileProcessorWorker.Database.LabDatabaseMasterReader
+                .QuoteTableName("[dbo].[Cove_Claim_Level_Billing_Master]")
+            == "[dbo].[Cove_Claim_Level_Billing_Master]");
+
+        Check("surrounding whitespace is tolerated",
+            LRN.MasterFileProcessorWorker.Database.LabDatabaseMasterReader
+                .QuoteTableName(" dbo . Cove_Claim_Level_Billing_Master ")
+            == "[dbo].[Cove_Claim_Level_Billing_Master]");
+
+        foreach (var bad in new[]
+                 {
+                     "",
+                     "   ",
+                     "a.b.c.d",
+                     "dbo.Claims; DROP TABLE Claims--",
+                     "dbo.Claims]--",
+                     "dbo.O'Brien"
+                 })
+        {
+            var rejected = false;
+            try
+            {
+                LRN.MasterFileProcessorWorker.Database.LabDatabaseMasterReader.QuoteTableName(bad);
+            }
+            catch (ArgumentException)
+            {
+                rejected = true;
+            }
+
+            Check($"rejects unsafe table name: \"{bad}\"", rejected);
+        }
+    }
+
+    /// <summary>
+    /// The Cove tables and the Cove schema JSONs disagree on spacing - the schema says "TotalWO"
+    /// and "Total Balance", the table says "Total WO" and "TotalBalance". Both sides normalise to
+    /// the same token, so those must count as present; a genuinely absent column must not.
+    /// </summary>
+    private static void LabDatabaseSchemaMatching()
+    {
+        Console.WriteLine("\nLabDatabase - schema matching");
+
+        static string Norm(string value) =>
+            new string((value ?? "").Trim().ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+
+        Check("'TotalWO' matches table 'Total WO'", Norm("TotalWO") == Norm("Total WO"));
+        Check("'Total Balance' matches table 'TotalBalance'", Norm("Total Balance") == Norm("TotalBalance"));
+        Check("'Claim Level CPT' matches 'ClaimLevelCPT'", Norm("Claim Level CPT") == Norm("ClaimLevelCPT"));
+        Check("'Payment %' matches 'Payment%'", Norm("Payment %") == Norm("Payment%"));
+
+        // Different columns must still be different - the normalisation strips punctuation, so this
+        // is the check that it has not been loosened into matching everything.
+        Check("'CarrierBalance' does not match 'PatientBalance'",
+            Norm("CarrierBalance") != Norm("PatientBalance"));
+        Check("'CarrierWO' does not match 'PatientWO'",
+            Norm("CarrierWO") != Norm("PatientWO"));
+        Check("'TotalCharge' does not match 'TotalAllowed'",
+            Norm("TotalCharge") != Norm("TotalAllowed"));
+    }
+
+    /// <summary>
+    /// A row read from SQL has to become the same CSV text the workbook path would have written,
+    /// or the same lab's dates and amounts would parse differently depending on which source fed
+    /// it. Both paths run through ExcelCsvExporter, so this pins the behaviour that matters.
+    /// </summary>
+    private static void LabDatabaseCsvFormattingMatchesWorkbookPath()
+    {
+        Console.WriteLine("\nLabDatabase - CSV value formatting");
+
+        Check("null becomes empty",
+            ExcelCsvExporter.ConvertCellToString(null, "Carrier") == "");
+
+        Check("DBNull becomes empty",
+            ExcelCsvExporter.ConvertCellToString(DBNull.Value, "Carrier") == "");
+
+        Check("date uses yyyy-MM-dd HH:mm:ss",
+            ExcelCsvExporter.ConvertCellToString(new DateTime(2026, 9, 1, 13, 45, 7), "BeginDOS")
+            == "2026-09-01 13:45:07");
+
+        // Amount-style headers keep two decimals; identifier-style numbers must not gain ".00",
+        // which would turn a CPT or a visit number into something that no longer joins.
+        Check("amount column keeps 2 decimals",
+            ExcelCsvExporter.ConvertCellToString(420m, "CarrierBalance") == "420.00");
+
+        Check("charge column keeps 2 decimals",
+            ExcelCsvExporter.ConvertCellToString(1234.5m, "TotalCharge") == "1234.50");
+
+        Check("identifier-style integer has no decimals",
+            ExcelCsvExporter.ConvertCellToString(87801m, "Claim Level CPT") == "87801");
+
+        Check("non-integer, non-amount value keeps its precision",
+            ExcelCsvExporter.ConvertCellToString(0.5849d, "Ratio") == "0.5849");
+
+        Check("bool is lower-case",
+            ExcelCsvExporter.ConvertCellToString(false, "T/F") == "false");
+
+        // Escaping: a payer name with a comma is the everyday case that breaks a naive writer.
+        Check("value with a comma is quoted",
+            ExcelCsvExporter.CsvEscape("MERCY CARE PLAN, AHCCCS") == "\"MERCY CARE PLAN, AHCCCS\"");
+
+        Check("embedded quote is doubled and wrapped",
+            ExcelCsvExporter.CsvEscape("O\"Brien") == "\"O\"\"Brien\"");
+
+        Check("newline is quoted",
+            ExcelCsvExporter.CsvEscape("line1\nline2") == "\"line1\nline2\"");
+
+        Check("plain value is not quoted",
+            ExcelCsvExporter.CsvEscape("HUMANA") == "HUMANA");
+    }
+
+    /// <summary>
+    /// LimsImportRequest routes on SourceTable alone. Getting this wrong in either direction is
+    /// silent: a workbook lab reading an empty table, or a table lab looking for a file that is
+    /// no longer published.
+    /// </summary>
+    private static void LabDatabaseLimsSourceRouting()
+    {
+        Console.WriteLine("\nLabDatabase - LIMS source routing");
+
+        var workbook = new LimsImportRequest { ExcelPath = @"C:\lims\Cove_LIMS.xlsx" };
+        Check("no SourceTable -> workbook path", !workbook.UsesSqlSource);
+
+        var table = new LimsImportRequest { SourceTable = "dbo.Cove_LIS_Master" };
+        Check("SourceTable set -> SQL path", table.UsesSqlSource);
+
+        var blank = new LimsImportRequest { SourceTable = "   " };
+        Check("whitespace SourceTable is not a SQL source", !blank.UsesSqlSource);
+
+        // A table lab has no workbook, so the request must not need one to be considered valid.
+        var tableOnly = new LimsImportRequest { SourceTable = "dbo.Cove_LIS_Master", ExcelPath = "" };
+        Check("SQL source needs no ExcelPath", tableOnly.UsesSqlSource && tableOnly.ExcelPath.Length == 0);
+
+        // Both set: the table wins, so a stale workbook beside the data cannot quietly take over.
+        var both = new LimsImportRequest { SourceTable = "dbo.Cove_LIS_Master", ExcelPath = @"C:\lims\old.xlsx" };
+        Check("SourceTable wins when both are set", both.UsesSqlSource);
+    }
+
+    /// <summary>
+    /// The LIMS schema JSON maps ExcelColName -> SQLColName, and Cove's has a trailing space in
+    /// "New Status " on BOTH sides. The source table spells it without one, so the normalisation
+    /// has to bridge that - otherwise the column silently lands empty.
+    /// </summary>
+    private static void LabDatabaseLimsSchemaMatching()
+    {
+        Console.WriteLine("\nLabDatabase - LIMS schema matching");
+
+        static string Norm(string value) =>
+            new string((value ?? "").Trim().ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+
+        Check("schema 'New Status ' matches table 'New Status'", Norm("New Status ") == Norm("New Status"));
+        Check("'Panel type' matches 'Paneltype'", Norm("Panel type") == Norm("Paneltype"));
+        Check("'Collection Week' matches 'CollectionWeek'", Norm("Collection Week") == Norm("CollectionWeek"));
+        Check("'Policy_Holder_DOB' matches 'PolicyHolderDOB'", Norm("Policy_Holder_DOB") == Norm("PolicyHolderDOB"));
+        Check("'Time to Result' matches 'TimetoResult'", Norm("Time to Result") == Norm("TimetoResult"));
+
+        // Near-miss pairs that must stay distinct.
+        Check("'Status' does not match 'New Status'", Norm("Status") != Norm("New Status"));
+        Check("'Status' does not match 'Sub Status'", Norm("Status") != Norm("Sub Status"));
+        Check("'Client Status' does not match 'New Status'", Norm("Client Status") != Norm("New Status"));
+        Check("'DOB' does not match 'Policy_Holder_DOB'", Norm("DOB") != Norm("Policy_Holder_DOB"));
+        Check("'Time to Result' does not match 'Time to Bill'", Norm("Time to Result") != Norm("Time to Bill"));
+        Check("'FacilityCity' does not match 'FacilityState'", Norm("FacilityCity") != Norm("FacilityState"));
+    }
+
+    /// <summary>
+    /// The gate in front of a LabDatabase lab. These rules decide whether a week's data moves at
+    /// all, and every one of them fails silently if it is wrong - either nothing ever loads, or
+    /// half a refresh gets published as final.
+    /// </summary>
+    private static void LabDatabaseSourceRunDecisions()
+    {
+        Console.WriteLine("\nLabDatabase - source run gate");
+
+        // Mirrors LabSourceRunGate.DecideAsync without needing a database: same inputs, same rules.
+        static (bool Ingest, string Reason) Decide(
+            (string FileType, string RunId, string Status)[] latest,
+            Dictionary<string, string> lastIngested)
+        {
+            foreach (var (fileType, runId, status) in latest)
+            {
+                if (runId is null)
+                    return (false, $"no {fileType} row");
+                if (!string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase))
+                    return (false, $"latest {fileType} run {runId} is '{status}'");
+            }
+
+            var distinct = latest.Select(x => x.RunId).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (distinct.Count != 1)
+                return (false, "runs disagree across file types");
+
+            foreach (var (fileType, runId, _) in latest)
+            {
+                lastIngested.TryGetValue(fileType, out var last);
+                if (!string.Equals(last, runId, StringComparison.OrdinalIgnoreCase))
+                    return (true, $"{fileType} last saw '{last ?? "nothing"}'");
+            }
+
+            return (false, "already ingested for every file type");
+        }
+
+        var completed = new[]
+        {
+            ("LINELEVEL",  "R20260902COV1487", "Completed"),
+            ("CLAIMLEVEL", "R20260902COV1487", "Completed")
+        };
+
+        Check("a new Completed run is ingested",
+            Decide(completed, new Dictionary<string, string>()).Ingest);
+
+        Check("the same run is not ingested twice",
+            !Decide(completed, new Dictionary<string, string>
+            {
+                ["LINELEVEL"] = "R20260902COV1487",
+                ["CLAIMLEVEL"] = "R20260902COV1487"
+            }).Ingest);
+
+        Check("a newer Completed run is ingested",
+            Decide(completed, new Dictionary<string, string>
+            {
+                ["LINELEVEL"] = "R20260826COV1450",
+                ["CLAIMLEVEL"] = "R20260826COV1450"
+            }).Ingest);
+
+        // One level behind is still work to do: it is how a partial failure gets retried.
+        Check("one level behind still triggers a run",
+            Decide(completed, new Dictionary<string, string>
+            {
+                ["LINELEVEL"] = "R20260902COV1487",
+                ["CLAIMLEVEL"] = "R20260826COV1450"
+            }).Ingest);
+
+        Check("Inprogress is not consumed",
+            !Decide(new[]
+            {
+                ("LINELEVEL",  "R20260902COV1487", "Inprogress"),
+                ("CLAIMLEVEL", "R20260902COV1487", "Completed")
+            }, new Dictionary<string, string>()).Ingest);
+
+        Check("Failed is not consumed",
+            !Decide(new[]
+            {
+                ("LINELEVEL",  "R20260902COV1487", "Failed"),
+                ("CLAIMLEVEL", "R20260902COV1487", "Failed")
+            }, new Dictionary<string, string>()).Ingest);
+
+        // The three tables are refreshed together. Halves from different runs would produce a
+        // workbook whose line level and claim level do not reconcile.
+        Check("mismatched run ids across file types are refused",
+            !Decide(new[]
+            {
+                ("LINELEVEL",  "R20260902COV1487", "Completed"),
+                ("CLAIMLEVEL", "R20260826COV1450", "Completed")
+            }, new Dictionary<string, string>()).Ingest);
+
+        Check("status match is case-insensitive",
+            Decide(new[]
+            {
+                ("LINELEVEL",  "R20260902COV1487", "COMPLETED"),
+                ("CLAIMLEVEL", "R20260902COV1487", "completed")
+            }, new Dictionary<string, string>()).Ingest);
+
+        Check("LIS is gated alongside the billing levels",
+            !Decide(new[]
+            {
+                ("LINELEVEL",  "R20260902COV1487", "Completed"),
+                ("CLAIMLEVEL", "R20260902COV1487", "Completed"),
+                ("LIS",        "R20260902COV1487", "Inprogress")
+            }, new Dictionary<string, string>()).Ingest);
+    }
 
     private static void Check(string name, bool condition, string? detail = null)
     {

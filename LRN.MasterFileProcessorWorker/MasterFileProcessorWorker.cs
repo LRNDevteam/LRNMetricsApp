@@ -39,6 +39,8 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 	private readonly LineClaimImportOptions _lineClaimOptions;
 	private readonly LabRegistry _labRegistry;
 	private readonly LineClaimImportService _lineClaimImport;
+	private readonly LRN.MasterFileProcessorWorker.Database.LabDatabaseMasterReader _labDbReader;
+	private readonly LRN.MasterFileProcessorWorker.Database.LabSourceRunGate _labRunGate;
 	private readonly ReportRunIdInfoLogger _runInfo;
 	private readonly ReportsWorkflowTrackerRepository _workflowTracker;
 
@@ -63,6 +65,8 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		IOptions<LineClaimImportOptions> lineClaimOptions,
 		LabRegistry labRegistry,
 		LineClaimImportService lineClaimImport,
+		LRN.MasterFileProcessorWorker.Database.LabDatabaseMasterReader labDbReader,
+		LRN.MasterFileProcessorWorker.Database.LabSourceRunGate labRunGate,
 		ReportRunIdInfoLogger runInfo,
 		ReportsWorkflowTrackerRepository workflowTracker)
 	{
@@ -81,6 +85,8 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		_lineClaimOptions = lineClaimOptions.Value;
 		_labRegistry = labRegistry;
 		_lineClaimImport = lineClaimImport;
+		_labDbReader = labDbReader;
+		_labRunGate = labRunGate;
 		_runInfo = runInfo;
 		_workflowTracker = workflowTracker;
 
@@ -236,8 +242,35 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 			// into the week folder by then.
 			string? stagingFolder = null;
 
+			// The upstream run that fills this lab's tables has to have finished, and its RunID has
+			// to be one we have not already taken. Checked BEFORE the SharePoint lookup: there is
+			// no point downloading a workbook for a lab whose data has not moved.
+			string? sourceRunId = null;
+
 			try
 			{
+				if (lab.UsesLabDatabaseSource)
+				{
+					var gate = await EvaluateLabDatabaseGateAsync(lab, ct);
+
+					if (!gate.ShouldIngest)
+					{
+						_logger.LogInformation("Lab {LabId}: skipping - {Reason}", lab.LabId, gate.Reason);
+						_fileLog.Info($"Lab {lab.LabId}: skipping - {gate.Reason}");
+
+						runRow.OverallStatus = "SKIPPED";
+						runRow.Notes = gate.Reason;
+						await _processLog.CompleteRunAsync(runCtx, runRow, ct);
+						continue;
+					}
+
+					sourceRunId = gate.RunId;
+
+					_logger.LogInformation("Lab {LabId}: ingesting source run {RunId} - {Reason}",
+						lab.LabId, sourceRunId, gate.Reason);
+					_fileLog.Info($"Lab {lab.LabId}: ingesting source run {sourceRunId} - {gate.Reason}");
+				}
+
 				// STEP 10: Find latest eligible SharePoint file
 				stepSeq = 10;
 				var step10 = new StepLogRow
@@ -511,7 +544,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 
 				_fileLog.Info($"Lab {lab.LabId}: Production raw master copied to WatchFolder week folder -> {productionRawMasterPath}");
 
-				if (!await TryDownloadSiblingRawMasterAsync(lab, selected, rawMasterFolder, runCtx.RunId, weekFolder, ct))
+				if (!await TryDownloadSiblingRawMasterAsync(lab, selected, rawMasterFolder, runCtx.RunId, weekFolder, ct, sourceRunId))
 					throw new InvalidOperationException("Required LIMS master file was not available in the same SharePoint week folder as the production master file.");
 
 				await TrySyncClientPaidFileAsync(lab, selected, processedOutFolder, runCtx.RunId, ct);
@@ -578,8 +611,23 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				await _processLog.StepStartAsync(runCtx, step40, ct);
 
 				var effectiveLineCandidates = GetEffectiveLineSheetCandidates(lab, stagingPath);
-				var lineValidation = _schemaValidator.Validate(stagingPath, effectiveLineCandidates, lineSchemaPath);
-				var claimValidation = _schemaValidator.Validate(stagingPath, _opt.ClaimSheetName, claimSchemaPath);
+
+				// A LabDatabase lab still has a SharePoint week folder - the LIMS master and the
+				// client-paid file live there - but its claim/line DATA comes from its own tables,
+				// so those two are validated against the tables' columns, not the workbook's sheets.
+				SchemaValidationResult lineValidation;
+				SchemaValidationResult claimValidation;
+
+				if (lab.UsesLabDatabaseSource)
+				{
+					(lineValidation, claimValidation) =
+						await ValidateLabDatabaseSourceTablesAsync(lab, lineSchemaPath, claimSchemaPath, ct);
+				}
+				else
+				{
+					lineValidation = _schemaValidator.Validate(stagingPath, effectiveLineCandidates, lineSchemaPath);
+					claimValidation = _schemaValidator.Validate(stagingPath, _opt.ClaimSheetName, claimSchemaPath);
+				}
 
 				if (!lineValidation.IsValid || !claimValidation.IsValid)
 				{
@@ -708,7 +756,15 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				var lineSheetNames = effectiveLineCandidates
 					.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-				if (lineSheetNames.Length > 1)
+				if (lab.UsesLabDatabaseSource)
+				{
+					var rows = await ExportLabDatabaseTableAsync(lab, lab.LineLevelSourceTable, "LineLevel", lineRawPath, ct);
+					step50.SourceSystem = "LabDatabase";
+					step50.FileNameIn = lab.LineLevelSourceTable;
+					step50.PathIn = lab.LineLevelSourceTable;
+					step50.RecordsIn = rows;
+				}
+				else if (lineSheetNames.Length > 1)
 				{
 					var sheetSourcePairs = BuildLineSheetSourcePairs(lab, lineSheetNames);
 					await ExcelCsvExporter.ExportMultiSheetCombinedToCsvAsync(stagingPath, sheetSourcePairs, AuditColumns.SourceStamp, lineRawPath, ct);
@@ -821,7 +877,18 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				};
 				activeStep = step70;
 				await _processLog.StepStartAsync(runCtx, step70, ct);
-				await ExcelCsvExporter.ExportSingleSheetToCsvAsync(stagingPath, _opt.ClaimSheetName, claimRawPath, ct);
+				if (lab.UsesLabDatabaseSource)
+				{
+					var claimRows = await ExportLabDatabaseTableAsync(lab, lab.ClaimLevelSourceTable, "ClaimLevel", claimRawPath, ct);
+					step70.SourceSystem = "LabDatabase";
+					step70.FileNameIn = lab.ClaimLevelSourceTable;
+					step70.PathIn = lab.ClaimLevelSourceTable;
+					step70.RecordsIn = claimRows;
+				}
+				else
+				{
+					await ExcelCsvExporter.ExportSingleSheetToCsvAsync(stagingPath, _opt.ClaimSheetName, claimRawPath, ct);
+				}
 				step70.EndTimeIST = _processLog.NowIST();
 				step70.Status = "SUCCESS";
 				await _processLog.StepEndAsync(runCtx, step70, ct);
@@ -944,6 +1011,23 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				step85.ErrorDetail = string.IsNullOrEmpty(bulkErrors) ? null : bulkErrors;
 				await _processLog.StepEndAsync(runCtx, step85, ct);
 				activeStep = null;
+
+				// Only now, with the rows committed, is the upstream run recorded as taken. Marking
+				// earlier would let a failed load look ingested and the next poll would skip it, so
+				// the data would never arrive and nothing would say so.
+				//
+				// Only the levels that genuinely loaded are marked: a skipped or failed level stays
+				// behind and keeps the run eligible next poll.
+				var ingested = bulkOutcomes
+					.Where(o => o.Succeeded && !o.Skipped)
+					.Select(o => (
+						FileType: string.Equals(o.FileType, FileTypes.LineLevel, StringComparison.OrdinalIgnoreCase)
+							? LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.FileTypes.LineLevel
+							: LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.FileTypes.ClaimLevel,
+						Rows: o.RowsCopied))
+					.ToList();
+
+				await TryMarkSourceRunIngestedAsync(lab, sourceRunId, runCtx.RunId, ingested, ct);
 
 				// The load has finished with the staged files, so the folder can go now rather than
 				// waiting for the finally - the rest of this run has no use for it.
@@ -2044,6 +2128,210 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		return value[..(maxLength - suffix.Length)] + suffix;
 	}
 
+	// ======================================================================================
+	// LabDatabase source (MasterDataSource = "LabDatabase")
+	// ======================================================================================
+
+	/// <summary>
+	/// Asks the gate whether this lab has a new, Completed upstream run to ingest.
+	/// <para>
+	/// A gate failure is a SKIP, never a load. If LrnFileStatus cannot be read we do not know
+	/// whether the tables are mid-refresh, and loading on that basis is exactly the case the gate
+	/// exists to prevent - the destination truncates first, so a half-written source becomes a
+	/// half-published week.
+	/// </para>
+	/// </summary>
+	private async Task<LRN.MasterFileProcessorWorker.Database.SourceRunDecision> EvaluateLabDatabaseGateAsync(
+		LabFileMap lab, CancellationToken ct)
+	{
+		try
+		{
+			var connectionString = ResolveLabConnectionStringOrThrow(lab);
+
+			// Only the levels this lab actually sources from its database are gated.
+			var fileTypes = new List<string>();
+			if (!string.IsNullOrWhiteSpace(lab.LineLevelSourceTable))
+				fileTypes.Add(LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.FileTypes.LineLevel);
+			if (!string.IsNullOrWhiteSpace(lab.ClaimLevelSourceTable))
+				fileTypes.Add(LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.FileTypes.ClaimLevel);
+			if (!string.IsNullOrWhiteSpace(lab.LimsSourceTable))
+				fileTypes.Add(LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.FileTypes.Lis);
+
+			if (fileTypes.Count == 0)
+			{
+				return LRN.MasterFileProcessorWorker.Database.SourceRunDecision.Skip(
+					$"MasterDataSource is LabDatabase but no source tables are configured for lab {lab.LabId}.");
+			}
+
+			return await _labRunGate.DecideAsync(lab.LabId, connectionString, fileTypes, ct);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "Lab {LabId}: could not read the source run status; skipping this poll.", lab.LabId);
+			_fileLog.Error($"Lab {lab.LabId}: could not read the source run status; skipping this poll.", ex);
+
+			return LRN.MasterFileProcessorWorker.Database.SourceRunDecision.Skip(
+				$"could not read LrnFileStatus: {ex.Message}");
+		}
+	}
+
+	/// <summary>
+	/// Records the upstream run as ingested, once its rows are committed.
+	/// <para>
+	/// Never throws. The data is already in by this point; failing the run over a marker write
+	/// would turn a successful load into a reported failure. The cost of losing the marker is one
+	/// repeated load on the next poll, which the truncate makes harmless.
+	/// </para>
+	/// </summary>
+	private async Task TryMarkSourceRunIngestedAsync(
+		LabFileMap lab, string? sourceRunId, string? workerRunId,
+		IReadOnlyList<(string FileType, long Rows)> loaded, CancellationToken ct)
+	{
+		if (!lab.UsesLabDatabaseSource || string.IsNullOrWhiteSpace(sourceRunId))
+			return;
+
+		try
+		{
+			var connectionString = ResolveLabConnectionStringOrThrow(lab);
+
+			foreach (var (fileType, rows) in loaded)
+			{
+				await _labRunGate.MarkIngestedAsync(
+					connectionString, lab.LabId, fileType, sourceRunId!, workerRunId, rows, ct);
+			}
+		}
+		catch (Exception ex)
+		{
+			_logger.LogWarning(ex,
+				"Lab {LabId}: loaded source run {RunId} but could not record it as ingested; " +
+				"the next poll will load it again.", lab.LabId, sourceRunId);
+
+			_fileLog.Warn($"Lab {lab.LabId}: loaded source run {sourceRunId} but could not record it as ingested.");
+		}
+	}
+
+	/// <summary>
+	/// This lab's own database connection, resolved exactly the way the bulk-copy step resolves it:
+	/// a literal LabDbConnectionString wins, otherwise the named LabDbConnectionKey. Kept as one
+	/// method so the tables are always read from the same database the rows are later written to -
+	/// two different resolutions here would be a silent cross-lab data leak.
+	/// </summary>
+	private string ResolveLabConnectionStringOrThrow(LabFileMap lab)
+	{
+		var connectionString = GetLabConfigValue(lab, "LabDbConnectionString")
+			?? _configuration.GetConnectionString(GetLabConfigValue(lab, "LabDbConnectionKey") ?? string.Empty);
+
+		if (string.IsNullOrWhiteSpace(connectionString))
+		{
+			throw new InvalidOperationException(
+				$"Lab {lab.LabId} ({lab.LabName}) has MasterDataSource=LabDatabase but no database connection. " +
+				"Set LabDbConnectionKey (or LabDbConnectionString) on its Labs[] entry.");
+		}
+
+		return connectionString;
+	}
+
+	/// <summary>
+	/// Validates both source tables against the same schema JSONs the workbook would be validated
+	/// against, and reports the result through the existing <see cref="SchemaValidationResult"/> so
+	/// the caller's failure path, error message and file-status handling are untouched.
+	/// </summary>
+	private async Task<(SchemaValidationResult Line, SchemaValidationResult Claim)>
+		ValidateLabDatabaseSourceTablesAsync(LabFileMap lab, string lineSchemaPath, string claimSchemaPath, CancellationToken ct)
+	{
+		var connectionString = ResolveLabConnectionStringOrThrow(lab);
+
+		if (string.IsNullOrWhiteSpace(lab.LineLevelSourceTable) || string.IsNullOrWhiteSpace(lab.ClaimLevelSourceTable))
+		{
+			throw new InvalidOperationException(
+				$"Lab {lab.LabId} ({lab.LabName}) has MasterDataSource=LabDatabase but is missing " +
+				"LineLevelSourceTable and/or ClaimLevelSourceTable on its Labs[] entry.");
+		}
+
+		var line = await _labDbReader.ValidateTableAsync(connectionString, lab.LineLevelSourceTable!, lineSchemaPath, ct);
+		var claim = await _labDbReader.ValidateTableAsync(connectionString, lab.ClaimLevelSourceTable!, claimSchemaPath, ct);
+
+		LogTableValidation(lab, "LineLevel", line);
+		LogTableValidation(lab, "ClaimLevel", claim);
+
+		// SheetUsed doubles as "the source was found" in SchemaValidationResult.IsValid. For a table
+		// there is no sheet, so it carries the table name - which is also what the caller's error
+		// message prints when something is missing.
+		return (ToSchemaValidationResult(line), ToSchemaValidationResult(claim));
+	}
+
+	private void LogTableValidation(LabFileMap lab, string level, LRN.MasterFileProcessorWorker.Database.TableSchemaValidationResult result)
+	{
+		_logger.LogInformation(
+			"Lab {LabId} [{Level}]: source table {Table} has {Count} columns; schema '{Schema}' -> {Verdict}.",
+			lab.LabId, level, result.TableName, result.FoundColumns.Count, result.SchemaName,
+			result.IsValid ? "OK" : "MISSING REQUIRED COLUMNS");
+
+		_fileLog.Info($"Lab {lab.LabId} [{level}]: source table {result.TableName}, {result.FoundColumns.Count} columns, "
+					+ (result.IsValid ? "schema OK." : $"missing required: {string.Join(", ", result.MissingRequiredColumns)}"));
+
+		// Spacing/case differences are matched away by the shared normalisation, but a reader
+		// comparing the schema JSON to the table by eye would otherwise think a column was absent.
+		foreach (var (schemaColumn, tableColumn) in result.LooseMatches)
+		{
+			_logger.LogInformation(
+				"Lab {LabId} [{Level}]: schema column '{SchemaColumn}' matched table column '{TableColumn}'.",
+				lab.LabId, level, schemaColumn, tableColumn);
+		}
+
+		if (result.MissingOptionalColumns.Count > 0)
+		{
+			_logger.LogInformation(
+				"Lab {LabId} [{Level}]: optional schema columns not in {Table}: {Columns}",
+				lab.LabId, level, result.TableName, string.Join(", ", result.MissingOptionalColumns));
+		}
+	}
+
+	private static SchemaValidationResult ToSchemaValidationResult(LRN.MasterFileProcessorWorker.Database.TableSchemaValidationResult source)
+	{
+		var result = new SchemaValidationResult
+		{
+			SheetUsed = source.FoundColumns.Count > 0 ? source.TableName : null,
+			FoundHeaders = source.FoundColumns.ToList()
+		};
+		result.MissingRequiredColumns.AddRange(source.MissingRequiredColumns);
+		return result;
+	}
+
+	/// <summary>
+	/// Exports one source table to the raw CSV the workbook sheet would have produced, and returns
+	/// the row count. An empty table throws: the destination is truncated before the load, so
+	/// letting zero rows through would quietly wipe the lab's data for the week.
+	/// </summary>
+	private async Task<int> ExportLabDatabaseTableAsync(
+		LabFileMap lab, string? tableName, string level, string rawCsvPath, CancellationToken ct)
+	{
+		if (string.IsNullOrWhiteSpace(tableName))
+		{
+			throw new InvalidOperationException(
+				$"Lab {lab.LabId} ({lab.LabName}): {level}SourceTable is not configured, but MasterDataSource is LabDatabase.");
+		}
+
+		var connectionString = ResolveLabConnectionStringOrThrow(lab);
+
+		_logger.LogInformation("Lab {LabId} [{Level}]: reading {Table} -> {Path}", lab.LabId, level, tableName, rawCsvPath);
+		_fileLog.Info($"Lab {lab.LabId} [{level}]: reading {tableName} -> {rawCsvPath}");
+
+		var rows = await _labDbReader.ExportTableToCsvAsync(connectionString, tableName!, rawCsvPath, ct);
+
+		if (rows == 0)
+		{
+			throw new InvalidOperationException(
+				$"Lab {lab.LabId} ({lab.LabName}): source table {tableName} returned no rows. " +
+				"The load truncates before inserting, so an empty source would clear this lab's data.");
+		}
+
+		_logger.LogInformation("Lab {LabId} [{Level}]: {Rows:N0} rows read from {Table}.", lab.LabId, level, rows, tableName);
+		_fileLog.Info($"Lab {lab.LabId} [{level}]: {rows:N0} rows read from {tableName}.");
+
+		return rows > int.MaxValue ? int.MaxValue : (int)rows;
+	}
+
 	/// <summary>
 	/// Bulk copies this lab's standardized line-level and claim-level CSVs into its database.
 	/// <para>
@@ -2355,14 +2643,27 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			?? true;
 	}
 
+	/// <param name="sourceRunId">
+	/// The upstream LrnFileStatus RunID being ingested, for a LabDatabase lab. Null elsewhere.
+	/// </param>
 	private async Task<bool> TryDownloadSiblingRawMasterAsync(
 		LabFileMap lab,
 		SharePointDownloader.SelectedFile selected,
 		string rawMasterFolder,
 		string? runId,
 		string? weekFolder,
-		CancellationToken ct)
+		CancellationToken ct,
+		string? sourceRunId = null)
 	{
+		// A LabDatabase lab takes its LIMS master from a table, so there is no sibling workbook to
+		// look for. Returning true is the point: the caller treats false as "the required LIMS
+		// master was not available" and aborts the run.
+		if (lab.UsesLabDatabaseSource && !string.IsNullOrWhiteSpace(lab.LimsSourceTable))
+		{
+			await TryImportLimsMasterAsync(lab, limsRawMasterPath: null, runId, weekFolder, ct, sourceRunId);
+			return true;
+		}
+
 		var limsPattern = GetLabConfigValue(lab, "LimsMasterFilePattern");
 
 		if (string.IsNullOrWhiteSpace(limsPattern))
@@ -2393,7 +2694,7 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 			_fileLog.Info($"Lab {lab.LabId}: LIMS raw master downloaded -> {limsRawMasterPath}");
 
-			await TryImportLimsMasterAsync(lab, limsRawMasterPath, runId, weekFolder, ct);
+			await TryImportLimsMasterAsync(lab, limsRawMasterPath, runId, weekFolder, ct, sourceRunId);
 			return true;
 		}
 		catch (Exception ex)
@@ -2463,15 +2764,26 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 	/// failures, so tracking can never be what breaks a load.
 	/// </para>
 	/// </summary>
+	/// <param name="limsRawMasterPath">
+	/// The downloaded LIMS workbook, or null for a lab that reads its LIMS master from a table
+	/// (MasterDataSource = "LabDatabase" with LimsSourceTable set).
+	/// </param>
 	private async Task TryImportLimsMasterAsync(
 		LabFileMap lab,
-		string limsRawMasterPath,
+		string? limsRawMasterPath,
 		string? runId,
 		string? weekFolder,
-		CancellationToken ct)
+		CancellationToken ct,
+		string? sourceRunIdForLims = null)
 	{
 		var startedOn = ReportRunIdInfoLogger.IstNow();
-		var sourceFileName = Path.GetFileName(limsRawMasterPath);
+		var useSqlSource = lab.UsesLabDatabaseSource && !string.IsNullOrWhiteSpace(lab.LimsSourceTable);
+
+		// Whatever the run is reading FROM is what the logs should name, so a reader can tell at a
+		// glance which source a lab's LIS Summary was built on.
+		var sourceFileName = useSqlSource
+			? lab.LimsSourceTable!
+			: Path.GetFileName(limsRawMasterPath ?? string.Empty);
 		var enabled = _configuration.GetValue<bool?>("MasterFileProcessor:LimsSqlImportEnabled") ?? true;
 
 		if (!enabled)
@@ -2522,7 +2834,8 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 			var result = await importer.ImportAsync(new LimsImportRequest
 			{
-				ExcelPath = limsRawMasterPath,
+				ExcelPath = limsRawMasterPath ?? string.Empty,
+				SourceTable = useSqlSource ? lab.LimsSourceTable : null,
 				ConnectionString = connectionString,
 				DestinationTable = _configuration["MasterFileProcessor:LimsDestinationTable"] ?? "dbo.LIMSMaster",
 				SchemaJsonPath = schemaPath,
@@ -2547,6 +2860,16 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 				result.CreatedOn);
 
 			_fileLog.Info($"Lab {lab.LabId}: LIMS SQL import completed. Sheet={result.SheetName}, RowsCopied={result.TotalRowsCopied}, CreatedOn={result.CreatedOn:yyyy-MM-dd HH:mm:ss.fffffff}");
+
+			// LIS is gated on the same upstream run as the two billing levels, so it records its
+			// own progress against that run once its rows are committed.
+			if (useSqlSource)
+			{
+				await TryMarkSourceRunIngestedAsync(
+					lab, sourceRunIdForLims, runId,
+					new[] { (LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.FileTypes.Lis, (long)result.TotalRowsCopied) },
+					ct);
+			}
 
 			await _runInfo.InfoAsync(runId ?? string.Empty, WorkflowReportNames.LisSummary, lab.LabName,
 				$"LIMS master import completed. Sheet={result.SheetName}, RowsRead={result.TotalRowsRead}, " +

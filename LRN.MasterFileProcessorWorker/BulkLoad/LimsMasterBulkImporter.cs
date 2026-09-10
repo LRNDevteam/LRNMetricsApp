@@ -1,4 +1,4 @@
-using DocumentFormat.OpenXml;
+﻿using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using LRN.MasterFileProcessorWorker.BulkLoad;
@@ -26,9 +26,12 @@ public sealed class LimsMasterBulkImporter
 		_logger = logger;
 	}
 
+	/// <summary>A full read of a wide LIMS source table; once per lab per run.</summary>
+	private const int SourceReadTimeoutSeconds = 900;
+
 	public async Task<LimsImportResult> ImportAsync(LimsImportRequest request, CancellationToken ct)
 	{
-		if (string.IsNullOrWhiteSpace(request.ExcelPath) || !File.Exists(request.ExcelPath))
+		if (!request.UsesSqlSource && (string.IsNullOrWhiteSpace(request.ExcelPath) || !File.Exists(request.ExcelPath)))
 			throw new FileNotFoundException("LIMS Excel file not found.", request.ExcelPath);
 
 		if (string.IsNullOrWhiteSpace(request.ConnectionString))
@@ -71,15 +74,11 @@ public sealed class LimsMasterBulkImporter
 					_logger.LogInformation("LIMS import: disabled {Count} non-clustered indexes on {TableName}", disabledIndexes.Count, tableName);
 			}
 
-			var result = await StreamExcelToSqlAsync(
-				request,
-				connection,
-				tableName,
-				destinationColumns,
-				mappingsFromSchema,
-				batchSize,
-				runCreatedOn,
-				ct);
+			var result = request.UsesSqlSource
+				? await StreamSqlSourceToSqlAsync(
+					request, connection, tableName, destinationColumns, mappingsFromSchema, batchSize, runCreatedOn, ct)
+				: await StreamExcelToSqlAsync(
+					request, connection, tableName, destinationColumns, mappingsFromSchema, batchSize, runCreatedOn, ct);
 
 			return result;
 		}
@@ -234,6 +233,170 @@ public sealed class LimsMasterBulkImporter
 			FilePath = request.ExcelPath,
 			SheetName = selectedSheet.SheetName,
 			HeaderRowNumber = selectedSheet.HeaderRowNumber,
+			TotalRowsRead = totalRows,
+			TotalRowsCopied = copiedRows,
+			CreatedOn = runCreatedOn,
+			DestinationTable = tableName,
+			AdditionalFieldNames = plan.AdditionalHeaders.Select(h => h.Value).ToList(),
+			ExcludedSensitiveColumns = plan.ExcludedSensitiveHeaders
+		};
+	}
+
+	/// <summary>
+	/// Streams the LIMS master out of a table in the lab's own database and into the destination,
+	/// for labs sourced from <c>LabDatabase</c> rather than a SharePoint workbook.
+	///
+	/// <para>
+	/// Everything that decides WHAT lands where is shared with the workbook path:
+	/// <see cref="BuildLoadPlan"/>, the sensitive-column policy, AdditionalFields capture,
+	/// <c>ConvertValue</c> and the bulk-copy batching. Only the source of the header list and the
+	/// row values differs - a <see cref="SqlDataReader"/>'s ordinals stand in for sheet column
+	/// indexes, which is exactly the shape the load plan already works in.
+	/// </para>
+	/// <para>
+	/// Values are read as text and handed to the same <c>ConvertValue</c> the sheet path uses,
+	/// rather than passed through as their SQL types. It looks like a detour, but it is what keeps
+	/// the two sources landing identical rows: the destination column decides the type, not the
+	/// source, so a column typed differently between the source table and LIMSMaster cannot change
+	/// what gets stored depending on which way the data arrived.
+	/// </para>
+	/// </summary>
+	private async Task<LimsImportResult> StreamSqlSourceToSqlAsync(
+		LimsImportRequest request,
+		SqlConnection connection,
+		string tableName,
+		List<SqlDestinationColumn> destinationColumns,
+		List<LimsColumnMapping> schemaMappings,
+		int batchSize,
+		DateTime runCreatedOn,
+		CancellationToken ct)
+	{
+		var sourceTable = request.SourceTable!;
+
+		_logger.LogInformation("LIMS import: reading source table {SourceTable}", sourceTable);
+
+		// A second connection: the first is mid-load on the destination (triggers disabled, indexes
+		// dropped), and SqlBulkCopy on it cannot share a connection with an open reader.
+		await using var readConnection = new SqlConnection(request.ConnectionString);
+		await readConnection.OpenAsync(ct);
+
+		await using var command = new SqlCommand($"SELECT * FROM {QuoteTableName(sourceTable)};", readConnection)
+		{
+			CommandTimeout = SourceReadTimeoutSeconds
+		};
+
+		await using var reader = await command.ExecuteReaderAsync(ct);
+
+		if (reader.FieldCount == 0)
+			throw new InvalidOperationException($"LIMS source table '{sourceTable}' has no columns.");
+
+		var headers = new List<ExcelHeaderInfo>(reader.FieldCount);
+		for (var i = 0; i < reader.FieldCount; i++)
+			headers.Add(new ExcelHeaderInfo(i, reader.GetName(i)));
+
+		var headerMap = headers
+			.Where(h => !string.IsNullOrWhiteSpace(h.Value))
+			.GroupBy(h => NormalizeName(h.Value))
+			.ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+		var plan = BuildLoadPlan(destinationColumns, schemaMappings, headerMap, request);
+		var columnsToLoad = plan.LoadColumns;
+
+		if (columnsToLoad.Count == 0)
+			throw new InvalidOperationException(
+				$"No matching LIMS columns found between source table '{sourceTable}' and destination '{tableName}'.");
+
+		if (plan.ExcludedSensitiveHeaders.Count > 0)
+		{
+			_logger.LogWarning(
+				"LIMS import: {Count} source column(s) were DROPPED and not captured, per the sensitive-column policy: {Columns}",
+				plan.ExcludedSensitiveHeaders.Count, string.Join(", ", plan.ExcludedSensitiveHeaders));
+		}
+
+		if (plan.AdditionalHeaders.Count > 0)
+		{
+			_logger.LogInformation(
+				"LIMS import: {Count} source column(s) are not in the schema JSON and will be captured as JSON in {Column}: {Columns}",
+				plan.AdditionalHeaders.Count, plan.AdditionalFieldsColumn!.Name,
+				string.Join(", ", plan.AdditionalHeaders.Select(h => h.Value)));
+		}
+
+		var table = CreateDataTable(columnsToLoad);
+		var totalRows = 0;
+		var copiedRows = 0;
+
+		while (await reader.ReadAsync(ct))
+		{
+			ct.ThrowIfCancellationRequested();
+
+			var valuesByColumnIndex = new Dictionary<int, string>(reader.FieldCount);
+			for (var i = 0; i < reader.FieldCount; i++)
+			{
+				if (await reader.IsDBNullAsync(i, ct)) continue;
+				var text = Convert.ToString(reader.GetValue(i), CultureInfo.InvariantCulture);
+				if (!string.IsNullOrWhiteSpace(text)) valuesByColumnIndex[i] = text!;
+			}
+
+			if (IsBlankDataRow(valuesByColumnIndex))
+				continue;
+
+			var dataRow = table.NewRow();
+			var hasAnyMappedValue = false;
+
+			foreach (var loadColumn in columnsToLoad)
+			{
+				object? value = null;
+
+				if (loadColumn.SpecialColumn == LimsSpecialColumn.CreatedOn)
+					value = runCreatedOn;
+				else if (loadColumn.SpecialColumn == LimsSpecialColumn.LabId)
+					value = request.LabId;
+				else if (loadColumn.SpecialColumn == LimsSpecialColumn.LabName)
+					value = request.LabName;
+				else if (loadColumn.SpecialColumn == LimsSpecialColumn.SourceFileName)
+					value = sourceTable;   // the table IS the source; naming it keeps the audit trail honest
+				else if (loadColumn.SpecialColumn == LimsSpecialColumn.RunId)
+					value = request.RunId;
+				else if (loadColumn.SpecialColumn == LimsSpecialColumn.AdditionalFields)
+				{
+					value = BuildAdditionalFieldsJson(plan.AdditionalHeaders, valuesByColumnIndex, loadColumn.DestinationColumn.MaxLength);
+					if (value != null)
+						hasAnyMappedValue = true;
+				}
+				else if (loadColumn.ExcelColumnIndex.HasValue && valuesByColumnIndex.TryGetValue(loadColumn.ExcelColumnIndex.Value, out var text))
+				{
+					value = ConvertValue(text, loadColumn.DestinationColumn);
+					if (!string.IsNullOrWhiteSpace(text))
+						hasAnyMappedValue = true;
+				}
+
+				dataRow[loadColumn.DestinationColumn.Name] = value ?? DBNull.Value;
+			}
+
+			if (!hasAnyMappedValue)
+				continue;
+
+			table.Rows.Add(dataRow);
+			totalRows++;
+
+			if (table.Rows.Count >= batchSize)
+			{
+				copiedRows += await BulkCopyAsync(connection, tableName, table, batchSize, ct);
+				table.Clear();
+			}
+		}
+
+		if (table.Rows.Count > 0)
+		{
+			copiedRows += await BulkCopyAsync(connection, tableName, table, batchSize, ct);
+			table.Clear();
+		}
+
+		return new LimsImportResult
+		{
+			FilePath = sourceTable,
+			SheetName = sourceTable,
+			HeaderRowNumber = 0,
 			TotalRowsRead = totalRows,
 			TotalRowsCopied = copiedRows,
 			CreatedOn = runCreatedOn,
@@ -893,6 +1056,20 @@ ORDER BY c.column_id;";
 public sealed class LimsImportRequest
 {
 	public string ExcelPath { get; set; } = string.Empty;
+
+	/// <summary>
+	/// Read the LIMS master from this table in the lab's own database instead of from an Excel
+	/// file. Set for labs whose MasterDataSource is "LabDatabase"; leave null to read the workbook.
+	/// <para>
+	/// The rows still go through the same load plan the workbook path uses - schema-JSON column
+	/// mapping, the sensitive-column policy and AdditionalFields capture all apply unchanged, so
+	/// the destination ends up identical whichever side the rows came in from.
+	/// </para>
+	/// </summary>
+	public string? SourceTable { get; set; }
+
+	/// <summary>True when this request reads from a table rather than a workbook.</summary>
+	public bool UsesSqlSource => !string.IsNullOrWhiteSpace(SourceTable);
 	public string ConnectionString { get; set; } = string.Empty;
 	public string DestinationTable { get; set; } = "dbo.LIMSMaster";
 	public string? SchemaJsonPath { get; set; }

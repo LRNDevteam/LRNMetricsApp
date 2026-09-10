@@ -1,4 +1,4 @@
-using Azure.Identity;
+﻿using Azure.Identity;
 using LRN.MasterFileProcessorWorker.BulkLoad;
 using LRN.MasterFileProcessorWorker.ExcelValidation;
 using LRN.MasterFileProcessorWorker.Logging;
@@ -81,6 +81,14 @@ var host = Host.CreateDefaultBuilder(args)
 		services.AddSingleton<ReportRunIdInfoLogger>();
 		services.AddSingleton<ReportsWorkflowTrackerRepository>();
 		services.AddSingleton<LineClaimImportService>();
+
+		// Reads claim/line master data out of a lab's own database for labs whose
+		// MasterDataSource is "LabDatabase" (Cove), in place of the SharePoint workbook.
+		services.AddSingleton<LRN.MasterFileProcessorWorker.Database.LabDatabaseMasterReader>();
+
+		// Read-only gate over LRNMaster.dbo.LrnFileStatus: only ingest a lab's tables once the
+		// upstream run that filled them reports Completed, and only once per run.
+		services.AddSingleton<LRN.MasterFileProcessorWorker.Database.LabSourceRunGate>();
 
 		services.AddHostedService<MasterFileProcessorWorker>();
 	})

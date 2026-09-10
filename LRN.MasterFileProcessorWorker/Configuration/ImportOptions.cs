@@ -166,4 +166,33 @@ public sealed class LabFileMap
 	// Leave unset (null) to inherit the section-level default.
 	public bool? CreateLineLevelCsv { get; set; }
 	public bool? CreateClaimLevelCsv { get; set; }
+
+	// ---- Where this lab's master data comes from -------------------------------------------
+	// "SharePoint" (default) keeps the original behaviour: find the week's workbook on
+	// SharePoint, validate its sheets, export raw CSVs from them.
+	//
+	// "LabDatabase" reads the two master tables out of the lab's own database instead, and skips
+	// SharePoint entirely for this lab. Everything downstream is unchanged - the tables are
+	// exported to the same raw CSVs the workbook would have produced, so standardization, field
+	// mapping, row hashing, bulk load and the run/step logs all run exactly as before.
+	//
+	//   { "LabId": 4, "LabName": "Cove",
+	//     "MasterDataSource": "LabDatabase",
+	//     "ClaimLevelSourceTable": "dbo.Cove_Claim_Level_Billing_Master",
+	//     "LineLevelSourceTable":  "dbo.Cove_Line_Level_Billing_Master" }
+	//
+	// Both table names are required when MasterDataSource is LabDatabase; the run fails fast if
+	// either is missing, rather than silently loading one level.
+	public string? MasterDataSource { get; set; }
+
+	public string? ClaimLevelSourceTable { get; set; }
+	public string? LineLevelSourceTable { get; set; }
+
+	// The LIMS master, same idea. When set alongside MasterDataSource=LabDatabase the run no
+	// longer looks for a LIMS workbook beside the master file on SharePoint.
+	public string? LimsSourceTable { get; set; }
+
+	/// <summary>True when this lab reads its master data from its own database, not SharePoint.</summary>
+	public bool UsesLabDatabaseSource =>
+		string.Equals(MasterDataSource?.Trim(), "LabDatabase", StringComparison.OrdinalIgnoreCase);
 }

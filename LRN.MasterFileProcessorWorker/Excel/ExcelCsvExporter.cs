@@ -1,4 +1,4 @@
-using ExcelDataReader;
+﻿using ExcelDataReader;
 using System.Globalization;
 using System.Text;
 
@@ -330,7 +330,7 @@ public static class ExcelCsvExporter
 		await sw.FlushAsync();
     }
 
-	private static string ConvertCellToString(object? val, string? headerName = null, bool isHeaderRow = false)
+	internal static string ConvertCellToString(object? val, string? headerName = null, bool isHeaderRow = false)
 	{
 		if (val == null || val == DBNull.Value)
 			return "";
@@ -351,7 +351,7 @@ public static class ExcelCsvExporter
 		};
 	}
 
-	private static string FormatNumericCell(double value, string? headerName)
+	internal static string FormatNumericCell(double value, string? headerName)
 	{
 		// Keep amount / payment / balance / charge style columns as decimal
 		if (IsDecimalAmountColumn(headerName))
@@ -387,7 +387,7 @@ public static class ExcelCsvExporter
 			|| h.Contains("fee")
 			|| h.Contains("billed");
 	}
-	private static string CsvEscape(string value)
+	internal static string CsvEscape(string value)
     {
 		if (string.IsNullOrEmpty(value))
 			return "";
