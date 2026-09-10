@@ -1,4 +1,4 @@
-using Microsoft.Data.SqlClient;
+﻿using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -55,6 +55,9 @@ public sealed class LabSourceRunGate
     /// <summary>What the upstream pipeline calls a finished, consumable run.</summary>
     private const string CompletedStatus = "Completed";
 
+    /// <summary>Still running. A later poll picks it up; nothing is wrong.</summary>
+    private const string InProgressStatus = "Inprogress";
+
     /// <summary>Marker table, in the LAB database beside the data it describes.</summary>
     private const string MarkerTable = "dbo.LrnSourceRunMarker";
 
@@ -71,15 +74,19 @@ public sealed class LabSourceRunGate
     /// </summary>
     public async Task<UpstreamRun?> GetLatestRunAsync(int labId, string fileType, CancellationToken ct)
     {
-        // Ordered by CompletedOn then StartedOn then the key: a run still Inprogress has no
-        // CompletedOn, and ordering on that alone would rank it above everything.
+        // Ordered by the identity, which is insertion order and therefore literally "the latest
+        // entry". Ordering on the timestamps instead looked reasonable but is wrong: an Inprogress
+        // row has no CompletedOn, so it falls back to StartedOn, and a run that started before an
+        // earlier run finished would then rank BELOW that finished run - the gate would ingest
+        // while the newer run was still rewriting the tables, which is the one thing it exists to
+        // prevent.
         const string sql = @"
 SELECT TOP (1)
-    RunID, FileType, ProcessStatus, WeekRange, [Source], [Output], CompletedOn, ExecutionId
+    LrnFileId, RunID, FileType, ProcessStatus, WeekRange, [Source], [Output], CompletedOn, ExecutionId
 FROM dbo.LrnFileStatus
 WHERE LabID = @LabId
   AND UPPER(LTRIM(RTRIM(FileType))) = @FileType
-ORDER BY COALESCE(CompletedOn, StartedOn, InsertedOn) DESC, LrnFileId DESC;";
+ORDER BY LrnFileId DESC;";
 
         await using var con = new SqlConnection(_masterConnectionString);
         await con.OpenAsync(ct);
@@ -102,27 +109,56 @@ ORDER BY COALESCE(CompletedOn, StartedOn, InsertedOn) DESC, LrnFileId DESC;";
     }
 
     /// <summary>
-    /// Decides whether this lab should ingest now, for every file type it needs. All of them must
-    /// point at the SAME Completed RunID: the three tables are refreshed together as one run, and
-    /// loading line level from one run beside claim level from another would produce a workbook
-    /// whose halves do not reconcile.
+    /// Decides whether this lab should ingest now.
+    ///
+    /// <para>
+    /// Readiness and progress are deliberately two different sets:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><paramref name="requiredFileTypes"/> - every file type that must read Completed on
+    ///   the SAME RunID before anything moves. That is <see cref="AllFileTypes"/>: an upstream run
+    ///   is not finished until LIS, LINELEVEL and CLAIMLEVEL have all finished, and the three
+    ///   tables are refreshed together, so a run half-done is a run whose tables are still
+    ///   changing.</item>
+    ///   <item><paramref name="ingestFileTypes"/> - what this lab actually loads, and therefore
+    ///   what its marker tracks. Checking readiness and progress against one list would mean a lab
+    ///   that does not load some file type could never advance that file type's marker, and would
+    ///   re-ingest on every single poll for ever.</item>
+    /// </list>
     /// </summary>
     public async Task<SourceRunDecision> DecideAsync(
-        int labId, string labConnectionString, IReadOnlyList<string> fileTypes, CancellationToken ct)
+        int labId,
+        string labConnectionString,
+        IReadOnlyList<string> requiredFileTypes,
+        IReadOnlyList<string> ingestFileTypes,
+        CancellationToken ct)
     {
         var runs = new List<UpstreamRun>();
 
-        foreach (var fileType in fileTypes)
+        foreach (var fileType in requiredFileTypes)
         {
             var run = await GetLatestRunAsync(labId, fileType, ct);
 
             if (run is null)
                 return SourceRunDecision.Skip($"no {fileType} row in LrnFileStatus for lab {labId}.");
 
-            if (!string.Equals(run.ProcessStatus?.Trim(), CompletedStatus, StringComparison.OrdinalIgnoreCase))
+            var status = run.ProcessStatus?.Trim() ?? string.Empty;
+
+            if (!string.Equals(status, CompletedStatus, StringComparison.OrdinalIgnoreCase))
             {
-                return SourceRunDecision.Skip(
-                    $"latest {fileType} run {run.RunId} is '{run.ProcessStatus}', not '{CompletedStatus}'.");
+                // Both are a skip, but they are different situations and the log should say which:
+                // Inprogress resolves itself on a later poll, Failed needs somebody to look at it.
+                //
+                // A Failed latest run is deliberately NOT rolled back to the last Completed one.
+                // The RunID gates but does not filter - the tables hold whatever the most recent
+                // attempt left behind - so loading them under an older Completed RunID would
+                // publish a failed run's contents labelled as a good one.
+                var reason = string.Equals(status, InProgressStatus, StringComparison.OrdinalIgnoreCase)
+                    ? $"latest {fileType} run {run.RunId} is still {InProgressStatus}; waiting for it to finish."
+                    : $"latest {fileType} run {run.RunId} is '{status}', not '{CompletedStatus}'; "
+                      + "waiting for a new Completed run rather than reading a failed one's tables.";
+
+                return SourceRunDecision.Skip(reason);
             }
 
             runs.Add(run);
@@ -142,13 +178,17 @@ ORDER BY COALESCE(CompletedOn, StartedOn, InsertedOn) DESC, LrnFileId DESC;";
 
         await EnsureMarkerTableAsync(labConnectionString, ct);
 
-        foreach (var fileType in fileTypes)
+        foreach (var fileType in ingestFileTypes)
         {
             var last = await GetLastIngestedRunIdAsync(labConnectionString, labId, fileType, ct);
 
             // Any file type still behind means there is work to do, so the run goes ahead.
             if (!string.Equals(last, runId, StringComparison.OrdinalIgnoreCase))
-                return SourceRunDecision.Ingest(runId, $"run {runId} is Completed and not yet ingested ({fileType} last saw '{last ?? "nothing"}').");
+            {
+                return SourceRunDecision.Ingest(runId,
+                    $"run {runId} is Completed for {string.Join(", ", requiredFileTypes)} "
+                    + $"and not yet ingested ({fileType} last saw '{last ?? "nothing"}').");
+            }
         }
 
         return SourceRunDecision.Skip($"run {runId} has already been ingested for every file type.");
@@ -251,4 +291,16 @@ END;";
         public const string ClaimLevel = "CLAIMLEVEL";
         public const string Lis = "LIS";
     }
+
+    /// <summary>
+    /// The three file types one upstream run produces. All must be Completed on the same RunID
+    /// before the master file processor starts on it - the run is not finished until they are, and
+    /// the tables the run fills are still being written while any of them is outstanding.
+    /// </summary>
+    public static readonly IReadOnlyList<string> AllFileTypes = new[]
+    {
+        FileTypes.Lis,
+        FileTypes.LineLevel,
+        FileTypes.ClaimLevel
+    };
 }

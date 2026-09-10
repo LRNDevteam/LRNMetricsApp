@@ -2148,22 +2148,29 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		{
 			var connectionString = ResolveLabConnectionStringOrThrow(lab);
 
-			// Only the levels this lab actually sources from its database are gated.
-			var fileTypes = new List<string>();
-			if (!string.IsNullOrWhiteSpace(lab.LineLevelSourceTable))
-				fileTypes.Add(LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.FileTypes.LineLevel);
-			if (!string.IsNullOrWhiteSpace(lab.ClaimLevelSourceTable))
-				fileTypes.Add(LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.FileTypes.ClaimLevel);
-			if (!string.IsNullOrWhiteSpace(lab.LimsSourceTable))
-				fileTypes.Add(LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.FileTypes.Lis);
+			// Readiness is all three, always: the processor starts on a RunID only once LIS,
+			// LINELEVEL and CLAIMLEVEL have all completed for it. Which tables THIS lab happens to
+			// read does not change when the upstream run is finished.
+			var requiredFileTypes = LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.AllFileTypes;
 
-			if (fileTypes.Count == 0)
+			// Progress is tracked only for what this lab actually loads. Marking a file type it
+			// never loads would leave that marker permanently behind and re-trigger every poll.
+			var ingestFileTypes = new List<string>();
+			if (!string.IsNullOrWhiteSpace(lab.LineLevelSourceTable))
+				ingestFileTypes.Add(LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.FileTypes.LineLevel);
+			if (!string.IsNullOrWhiteSpace(lab.ClaimLevelSourceTable))
+				ingestFileTypes.Add(LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.FileTypes.ClaimLevel);
+			if (!string.IsNullOrWhiteSpace(lab.LimsSourceTable))
+				ingestFileTypes.Add(LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.FileTypes.Lis);
+
+			if (ingestFileTypes.Count == 0)
 			{
 				return LRN.MasterFileProcessorWorker.Database.SourceRunDecision.Skip(
 					$"MasterDataSource is LabDatabase but no source tables are configured for lab {lab.LabId}.");
 			}
 
-			return await _labRunGate.DecideAsync(lab.LabId, connectionString, fileTypes, ct);
+			return await _labRunGate.DecideAsync(
+				lab.LabId, connectionString, requiredFileTypes, ingestFileTypes, ct);
 		}
 		catch (Exception ex)
 		{

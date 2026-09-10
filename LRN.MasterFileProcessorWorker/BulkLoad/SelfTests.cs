@@ -47,6 +47,8 @@ public static class SelfTests
         LabDatabaseLimsSourceRouting();
         LabDatabaseLimsSchemaMatching();
         LabDatabaseSourceRunDecisions();
+        LabDatabaseGateAgainstRealLrnFileStatusRows();
+        LabDatabaseGateRequiresAllThreeFileTypes();
 
         Console.WriteLine(new string('-', 70));
 
@@ -1097,6 +1099,220 @@ public static class SelfTests
                 ("CLAIMLEVEL", "R20260902COV1487", "Completed"),
                 ("LIS",        "R20260902COV1487", "Inprogress")
             }, new Dictionary<string, string>()).Ingest);
+    }
+
+    /// <summary>
+    /// Replays the real Cove rows from LRNMaster.dbo.LrnFileStatus - 21 rows, three per run, seven
+    /// runs across two week ranges, ending Completed -> Failed -> Failed -> Inprogress.
+    ///
+    /// <para>
+    /// The point of using the real shape is the ordering. "Latest" has to mean the last row
+    /// inserted (LrnFileId), not the newest timestamp: an Inprogress row has no CompletedOn, so a
+    /// timestamp sort falls back to StartedOn and can rank a finished older run ABOVE a running
+    /// newer one - which is exactly when the tables are being rewritten underneath us.
+    /// </para>
+    /// </summary>
+    private static void LabDatabaseGateAgainstRealLrnFileStatusRows()
+    {
+        Console.WriteLine("\nLabDatabase - gate against real LrnFileStatus rows");
+
+        // (LrnFileId, FileType, RunId, Status) exactly as the table holds them.
+        var rows = new (int Id, string FileType, string RunId, string Status)[]
+        {
+            (1,  "LIS",        "COVE_20260909_A", "Inprogress"),
+            (2,  "LINELEVEL",  "COVE_20260909_A", "Inprogress"),
+            (3,  "CLAIMLEVEL", "COVE_20260909_A", "Inprogress"),
+            (4,  "LIS",        "COVE_20260909_A", "Completed"),
+            (5,  "LINELEVEL",  "COVE_20260909_A", "Completed"),
+            (6,  "CLAIMLEVEL", "COVE_20260909_A", "Completed"),
+            (7,  "LIS",        "COVE_20260909_B", "Completed"),
+            (8,  "LINELEVEL",  "COVE_20260909_B", "Completed"),
+            (9,  "CLAIMLEVEL", "COVE_20260909_B", "Completed"),
+            (10, "LIS",        "COVE_20260910_A", "Completed"),
+            (11, "LINELEVEL",  "COVE_20260910_A", "Completed"),
+            (12, "CLAIMLEVEL", "COVE_20260910_A", "Completed"),
+            (13, "LIS",        "COVE_20260910_B", "Failed"),
+            (14, "LINELEVEL",  "COVE_20260910_B", "Failed"),
+            (15, "CLAIMLEVEL", "COVE_20260910_B", "Failed"),
+            (16, "LIS",        "COVE_20260910_C", "Failed"),
+            (17, "LINELEVEL",  "COVE_20260910_C", "Failed"),
+            (18, "CLAIMLEVEL", "COVE_20260910_C", "Failed"),
+            (19, "LIS",        "COVE_20260910_D", "Inprogress"),
+            (20, "LINELEVEL",  "COVE_20260910_D", "Inprogress"),
+            (21, "CLAIMLEVEL", "COVE_20260910_D", "Inprogress")
+        };
+
+        // Mirrors GetLatestRunAsync's ORDER BY LrnFileId DESC.
+        static (string RunId, string Status)? Latest(
+            (int Id, string FileType, string RunId, string Status)[] all, string fileType)
+        {
+            var row = all.Where(r => string.Equals(r.FileType, fileType, StringComparison.OrdinalIgnoreCase))
+                         .OrderByDescending(r => r.Id)
+                         .FirstOrDefault();
+            return row.FileType is null ? null : (row.RunId, row.Status);
+        }
+
+        // Mirrors DecideAsync.
+        static (bool Ingest, string RunId) Decide(
+            (int Id, string FileType, string RunId, string Status)[] all,
+            string[] fileTypes,
+            Dictionary<string, string> lastIngested)
+        {
+            var found = new List<(string RunId, string Status)>();
+            foreach (var fileType in fileTypes)
+            {
+                var latest = Latest(all, fileType);
+                if (latest is null) return (false, "");
+                if (!string.Equals(latest.Value.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+                    return (false, "");
+                found.Add(latest.Value);
+            }
+
+            var distinct = found.Select(f => f.RunId).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (distinct.Count != 1) return (false, "");
+
+            foreach (var fileType in fileTypes)
+            {
+                lastIngested.TryGetValue(fileType, out var last);
+                if (!string.Equals(last, distinct[0], StringComparison.OrdinalIgnoreCase))
+                    return (true, distinct[0]);
+            }
+
+            return (false, distinct[0]);
+        }
+
+        var allTypes = new[] { "LINELEVEL", "CLAIMLEVEL", "LIS" };
+
+        // As the table stands, the newest rows (19-21) are Inprogress -> wait.
+        Check("table as-is: latest LINELEVEL is the Inprogress run",
+            Latest(rows, "LINELEVEL")!.Value.RunId == "COVE_20260910_D"
+            && Latest(rows, "LINELEVEL")!.Value.Status == "Inprogress");
+
+        Check("table as-is: gate waits, nothing is ingested",
+            !Decide(rows, allTypes, new Dictionary<string, string>()).Ingest);
+
+        // The earlier Completed run is NOT reached back for: the tables now hold whatever the
+        // failed and in-progress attempts left behind.
+        Check("does not fall back to the last Completed run",
+            Decide(rows, allTypes, new Dictionary<string, string>()).RunId != "COVE_20260910_A");
+
+        // Once that in-progress run finishes, it becomes the one to take.
+        var completed = rows.Select(r => r.Id >= 19 ? (r.Id, r.FileType, r.RunId, "Completed") : r).ToArray();
+        var decision = Decide(completed, allTypes, new Dictionary<string, string>());
+        Check("once it completes, that run is ingested", decision.Ingest && decision.RunId == "COVE_20260910_D");
+
+        // And only once.
+        Check("and not a second time",
+            !Decide(completed, allTypes, new Dictionary<string, string>
+            {
+                ["LINELEVEL"] = "COVE_20260910_D",
+                ["CLAIMLEVEL"] = "COVE_20260910_D",
+                ["LIS"] = "COVE_20260910_D"
+            }).Ingest);
+
+        // A run that ends Failed is never consumed, even though an older run Completed.
+        var failedLatest = rows.Where(r => r.Id <= 18).ToArray();
+        Check("latest run Failed -> wait, do not consume",
+            !Decide(failedLatest, allTypes, new Dictionary<string, string>()).Ingest);
+
+        // Rows 4-6 replace the Inprogress rows 1-3 for the same run: the later rows win.
+        var firstRunOnly = rows.Where(r => r.Id <= 6).ToArray();
+        Check("a later row supersedes the same run's earlier Inprogress row",
+            Decide(firstRunOnly, allTypes, new Dictionary<string, string>()).Ingest);
+    }
+
+    /// <summary>
+    /// The processor starts on a RunID only when LIS, LINELEVEL and CLAIMLEVEL have ALL completed
+    /// for it. A run with two of three done is a run whose tables are still being written.
+    ///
+    /// <para>
+    /// Readiness and progress are separate sets here, and the last two checks are why: a lab that
+    /// does not load some file type must still WAIT for it, but must not TRACK it - tracking a
+    /// file type that never loads leaves its marker permanently behind and re-triggers the load on
+    /// every poll for ever.
+    /// </para>
+    /// </summary>
+    private static void LabDatabaseGateRequiresAllThreeFileTypes()
+    {
+        Console.WriteLine("\nLabDatabase - all three file types must be Completed");
+
+        static (bool Ingest, string Reason) Decide(
+            Dictionary<string, (string RunId, string Status)> latest,
+            string[] required,
+            string[] ingest,
+            Dictionary<string, string> lastIngested)
+        {
+            var runs = new List<string>();
+            foreach (var fileType in required)
+            {
+                if (!latest.TryGetValue(fileType, out var row))
+                    return (false, $"no {fileType} row");
+                if (!string.Equals(row.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+                    return (false, $"{fileType} is {row.Status}");
+                runs.Add(row.RunId);
+            }
+
+            if (runs.Distinct(StringComparer.OrdinalIgnoreCase).Count() != 1)
+                return (false, "run ids disagree");
+
+            foreach (var fileType in ingest)
+            {
+                lastIngested.TryGetValue(fileType, out var last);
+                if (!string.Equals(last, runs[0], StringComparison.OrdinalIgnoreCase))
+                    return (true, "work to do");
+            }
+
+            return (false, "already ingested");
+        }
+
+        var all = new[] { "LIS", "LINELEVEL", "CLAIMLEVEL" };
+        const string run = "COVE_20260910_D";
+
+        static Dictionary<string, (string, string)> Rows(string lis, string line, string claim, string runId) =>
+            new()
+            {
+                ["LIS"] = (runId, lis),
+                ["LINELEVEL"] = (runId, line),
+                ["CLAIMLEVEL"] = (runId, claim)
+            };
+
+        Check("all three Completed -> start",
+            Decide(Rows("Completed", "Completed", "Completed", run), all, all, new()).Ingest);
+
+        Check("LIS still Inprogress -> wait",
+            !Decide(Rows("Inprogress", "Completed", "Completed", run), all, all, new()).Ingest);
+
+        Check("LINELEVEL still Inprogress -> wait",
+            !Decide(Rows("Completed", "Inprogress", "Completed", run), all, all, new()).Ingest);
+
+        Check("CLAIMLEVEL still Inprogress -> wait",
+            !Decide(Rows("Completed", "Completed", "Inprogress", run), all, all, new()).Ingest);
+
+        Check("one Failed among three -> wait",
+            !Decide(Rows("Completed", "Failed", "Completed", run), all, all, new()).Ingest);
+
+        Check("a missing file type row -> wait",
+            !Decide(new Dictionary<string, (string, string)>
+            {
+                ["LINELEVEL"] = (run, "Completed"),
+                ["CLAIMLEVEL"] = (run, "Completed")
+            }, all, all, new()).Ingest);
+
+        // Readiness still spans all three even when the lab loads only two of them...
+        var twoOnly = new[] { "LINELEVEL", "CLAIMLEVEL" };
+
+        Check("a lab loading two levels still waits for LIS",
+            !Decide(Rows("Inprogress", "Completed", "Completed", run), all, twoOnly, new()).Ingest);
+
+        // ...and once everything is ready, only the loaded two decide "already done", so the run
+        // settles instead of re-triggering because LIS has no marker.
+        Check("progress is judged only on what the lab loads",
+            !Decide(Rows("Completed", "Completed", "Completed", run), all, twoOnly,
+                new Dictionary<string, string>
+                {
+                    ["LINELEVEL"] = run,
+                    ["CLAIMLEVEL"] = run
+                }).Ingest);
     }
 
     private static void Check(string name, bool condition, string? detail = null)
