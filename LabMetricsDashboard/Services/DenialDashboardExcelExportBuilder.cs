@@ -22,8 +22,20 @@ public static class DenialDashboardExcelExportBuilder
 	/// which BuildExportData still computes (shared with LRN.ReportWorker's queued report) but
 	/// which no sheet reads any more.
 	/// </summary>
-	/// <summary>Line Item sheet name — also the sheet LRN.ReportWorker streams in separately.</summary>
-	public const string LineItemSheetName = "Line Item";
+	/// <summary>
+	/// Raw-data sheet name — also the sheet LRN.ReportWorker streams in separately. Named
+	/// "Denial Masterfile" to match the client's Denial Report workbook
+	/// (Template/01. Cove Dx_Denial Report_*.xlsx); it still carries our own DenialLineItem
+	/// columns plus the workflow columns, not the source system's column set.
+	/// </summary>
+	public const string LineItemSheetName = "Denial Masterfile";
+
+	/// <summary>
+	/// The single narrative sheet the client template leads with: report header block, the
+	/// monthly pivot, the weekly pivot, then Key Observations &amp; Highlights — in that order,
+	/// on one sheet, rather than the four separate tabs this export used to produce.
+	/// </summary>
+	public const string DenialInsightsSheetName = "Denial Insights";
 
 	/// <param name="includeLineItemSheet">
 	/// False lets a caller append that sheet itself. LRN.ReportWorker does: ClosedXML holds the
@@ -31,13 +43,15 @@ public static class DenialDashboardExcelExportBuilder
 	/// 2 GB, which a wide lab with large ICD code lists reaches. The three summary sheets are
 	/// small and stay on ClosedXML either way.
 	/// </param>
-	public static XLWorkbook CreateWorkbook(DenialDashboardExportData data, bool includeLineItemSheet = true)
+	/// <param name="fileName">
+	/// Shown in the report header block's "File Name" row, as the client template does. Optional:
+	/// the builder does not name the file, its callers do, and neither is obliged to tell it.
+	/// </param>
+	public static XLWorkbook CreateWorkbook(DenialDashboardExportData data, bool includeLineItemSheet = true, string? fileName = null)
 	{
 		var workbook = new XLWorkbook();
 
-		BuildBreakdownPivotSheet(workbook, "Monthly Breakdown", data.MonthlyPivot);
-		BuildBreakdownPivotSheet(workbook, "Weekly Breakdown", data.WeeklyPivot);
-		BuildDenialInsightSheet(workbook, data.Insights);
+		BuildDenialInsightsSheet(workbook, data, fileName);
 
 		if (includeLineItemSheet)
 		{
@@ -360,7 +374,7 @@ public static class DenialDashboardExcelExportBuilder
 		var overflow = MeasureOverflow(baseHeaders, lineRows);
 		var effectiveLineHeaders = BuildHeadersWithOverflow(baseHeaders, overflow);
 
-		var ws1 = wb.AddWorksheet("Line Item");
+		var ws1 = wb.AddWorksheet(LineItemSheetName);
 		ws1.TabColor = ExcelTheme.TabGold;
 		ExcelTheme.ApplyDefaults(ws1);
 
@@ -525,302 +539,475 @@ public static class DenialDashboardExcelExportBuilder
 	/// The Denial Insight tab: the pre-aggregated dbo.DenialInsight rows for the run
 	/// (the same rows and column order the page's insight grid renders).
 	/// </summary>
-	private static void BuildDenialInsightSheet(XLWorkbook wb, IReadOnlyList<DenialInsightRecord> insights)
+	// ── Client template palette ────────────────────────────────────────────────────────────
+	// Sampled from Template/01. Cove Dx_Denial Report_08.26.2026 - 09.01.2026 (1).xlsx. Its fills
+	// resolve to the standard Office 2013-2022 scheme, so they are the same Accent 6 family
+	// ExcelTheme already carries — but the template assigns the bands differently from how this
+	// export used to, and those assignments are what make the workbook recognisable:
+	//   header + title bands  Accent 6 Darker 50%  (#385723) — BOTH bands, not Darker 25%
+	//   period labels         Accent 6 Lighter 80% (#E2EFDA) with BLACK text
+	//   metric + Total rows   Light 2 Darker 10%   (#D0CFCF)
+	//   denial child rows     Light 2              (#E7E6E6)
+	//   payer group rows      no fill
+	private static readonly XLColor TemplateBandBg = ExcelTheme.TitleBg;
+	private static readonly XLColor TemplatePeriodBg = ExcelTheme.BandedRowBg;
+	private static readonly XLColor TemplateMetricBg = XLColor.FromHtml("#D0CFCF");
+	private static readonly XLColor TemplateChildBg = ExcelTheme.SubLabelBg;
+
+	/// <summary>The template's own gold on the "Highest $ Impact" column group.</summary>
+	private static readonly XLColor TemplateGoldBg = XLColor.FromHtml("#D09E00");
+
+	/// <summary>The template's own red on Category / Action, and on the sheet tab.</summary>
+	private static readonly XLColor TemplateRedBg = XLColor.FromHtml("#C00000");
+
+	// The template writes whole dollars, not cents, in the pivots and the observations table.
+	private const string TemplateAccounting = @"_(""$""* #,##0_);_(""$""* \(#,##0\);_(""$""* ""-""??_);_(@_)";
+	private const string TemplateCount = @"#,##0;-#,##0;""-""";
+
+	// Column map, matching the template cell-for-cell. Column A is a narrow gutter; the pivot and
+	// the observations table both start at B, and both let a long label in C spill across D:F.
+	private const int GutterCol = 1;
+	private const int IndexCol = 2;   // B
+	private const int LabelCol = 3;   // C
+	private const int FirstDataCol = 7;   // G — first period column
+	private const int ObservationsLastCol = 27;  // AA — Closed Date
+
+	private static int PivotLastColumn(BreakdownPivotViewModel? model) =>
+		model is null || model.Periods.Count == 0
+			? FirstDataCol + 1
+			: FirstDataCol + (model.Periods.Count * 2) + 2 - 1;
+
+	/// <summary>
+	/// The client template's lead sheet: report header block, monthly pivot, weekly pivot, then
+	/// Key Observations &amp; Highlights — one sheet, in that order. This export previously spread
+	/// the same content over three tabs with no header block at all.
+	/// </summary>
+	private static void BuildDenialInsightsSheet(XLWorkbook wb, DenialDashboardExportData data, string? fileName)
 	{
-		var ws = wb.AddWorksheet("Denial Insight");
-		ws.TabColor = ExcelTheme.TabGreen;
+		var ws = wb.AddWorksheet(DenialInsightsSheetName);
+		ws.TabColor = TemplateRedBg;
 		ExcelTheme.ApplyDefaults(ws);
 
-		var headers = new List<string>
+		var lastColumn = Math.Max(
+			Math.Max(PivotLastColumn(data.MonthlyPivot), PivotLastColumn(data.WeeklyPivot)),
+			ObservationsLastCol);
+
+		var row = WriteReportHeaderBlock(ws, data, fileName, lastColumn);
+		row = WritePivotSection(ws, data.MonthlyPivot, row, "No denial-dated rows for the selected filters.");
+		row = WritePivotSection(ws, data.WeeklyPivot, row, "No denial-dated rows in the last four weeks.");
+		WriteKeyObservations(ws, data.Insights, row);
+
+		ws.Column(GutterCol).Width = 4.5;
+		ws.Column(IndexCol).Width = 4;
+		ws.Column(LabelCol).Width = 13;
+		for (var c = LabelCol + 1; c <= lastColumn; c++)
+			ws.Column(c).Width = 13;
+	}
+
+	/// <summary>
+	/// Client Name / Report Type / Data Range / Analysis Range / File Name / Source, with the
+	/// disclaimer block on the right — the template's rows 2-7. Returns the first free row.
+	/// </summary>
+	private static int WriteReportHeaderBlock(
+		IXLWorksheet ws, DenialDashboardExportData data, string? fileName, int lastColumn)
+	{
+		var fields = new (string Label, string Value)[]
 		{
-			"Denial Codes", "Description", "# of Denial", "# of Claims", "Total Balance",
-			"High Impact Insurance", "Insurance Balance", "$ Impact (%)", "Action Category",
-			"Action Code", "Action", "Task", "Feedback", "Responsibility",
-			"Responsibility Reviewer", "Discussion Date", "ETA"
+			("Client Name: ", data.LabName),
+			("Report Type: ", "Denial Report"),
+			("Data Range:", DescribeRange(data.MonthlyPivot, "Denial Posted Date")),
+			("Analysis Range:", DescribeRange(data.WeeklyPivot, "Date Posted")),
+			("File Name: ", string.IsNullOrWhiteSpace(fileName) ? "-" : Path.GetFileNameWithoutExtension(fileName)),
+			("Source:", string.IsNullOrWhiteSpace(data.RunId) ? "-" : data.RunId)
 		};
 
-		for (var c = 0; c < headers.Count; c++)
+		var row = 2;
+		foreach (var (label, value) in fields)
 		{
-			var cell = ws.Cell(1, c + 1);
-			cell.Value = headers[c];
-			cell.Style.Font.Bold = true;
-			cell.Style.Font.FontColor = XLColor.White;
-			cell.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
-			cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-			cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-			cell.Style.Border.OutsideBorderColor = XLColor.White;
+			ws.Cell(row, LabelCol).Value = label;
+			ws.Cell(row, LabelCol).Style.Font.Bold = true;
+			ws.Cell(row, LabelCol + 1).Value = string.IsNullOrWhiteSpace(value) ? "-" : value;
+			ws.Cell(row, LabelCol + 1).Style.Font.Bold = true;
+			row++;
 		}
 
-		for (var r = 0; r < insights.Count; r++)
-		{
-			var item = insights[r];
-			var excelRow = r + 2;
+		// Disclaimer, right-aligned with the pivot's last column like the template's AC2:AH7.
+		var noticeCol = Math.Max(LabelCol + 3, lastColumn - 5);
+		ws.Range(2, noticeCol, 7, noticeCol).Merge();
+		ws.Cell(2, noticeCol).Value = "Notice / Disclaimer: ";
+		ws.Cell(2, noticeCol).Style.Font.Bold = true;
+		ws.Cell(2, noticeCol).Style.Alignment.SetVertical(XLAlignmentVerticalValues.Top).Alignment.SetWrapText();
 
-			ws.Cell(excelRow, 1).Value = item.DenialCodes;
-			ws.Cell(excelRow, 2).Value = item.Descriptions;
-			ws.Cell(excelRow, 3).Value = item.NoOfDenialCount;
-			ws.Cell(excelRow, 4).Value = item.NoOfClaimsCount;
-			ws.Cell(excelRow, 5).Value = item.TotalBalance;
-			ws.Cell(excelRow, 5).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
-			ws.Cell(excelRow, 6).Value = item.HighImpactInsurance;
-			ws.Cell(excelRow, 7).Value = item.InsuranceBalance;
-			ws.Cell(excelRow, 7).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
-			ws.Cell(excelRow, 8).Value = item.ImpactPercentage / 100m;
-			ws.Cell(excelRow, 8).Style.NumberFormat.Format = "0.00%";
-			ws.Cell(excelRow, 9).Value = item.ActionCategory;
-			ws.Cell(excelRow, 10).Value = item.ActionCode;
-			ws.Cell(excelRow, 11).Value = item.Action;
-			ws.Cell(excelRow, 12).Value = item.Task;
-			ws.Cell(excelRow, 13).Value = item.Feedback;
-			ws.Cell(excelRow, 14).Value = item.Responsibility;
-			ws.Cell(excelRow, 15).Value = item.ResponsibilityReviewer;
-			if (item.DiscussionDate.HasValue)
+		ws.Range(2, noticeCol + 1, 7, lastColumn).Merge();
+		ws.Cell(2, noticeCol + 1).Value =
+			"The following analysis and insights pertain exclusively to the denial data supplied for "
+			+ "the stated period. Figures reflect claims denied within that window only and may change "
+			+ "as payers reprocess or as later remittance is posted.";
+		ws.Cell(2, noticeCol + 1).Style.Alignment.SetVertical(XLAlignmentVerticalValues.Top).Alignment.SetWrapText();
+
+		return row + 2;   // one blank spacer row, as in the template
+	}
+
+	/// <summary>Human-readable period span for the header block, e.g. "Denial Posted Date | 01.01.2025 - 09.01.2026".</summary>
+	private static string DescribeRange(BreakdownPivotViewModel? model, string basis)
+	{
+		var periods = model?.Periods.Where(x => !x.IsYearTotal).ToList();
+		if (periods is not { Count: > 0 }) return $"{basis} | -";
+		return $"{basis} | {periods.Min(x => x.StartDate):MM.dd.yyyy} - {periods.Max(x => x.EndDate):MM.dd.yyyy}";
+	}
+
+	/// <summary>
+	/// One pivot block - title, header bands, payer/denial rows, Total, footnotes - written at
+	/// <paramref name="startRow"/>. Returns the first free row after it.
+	///
+	/// The band layout follows the client template exactly, and differs from the old per-tab
+	/// sheets in three ways that are easy to miss: the monthly block has NO separate section-title
+	/// row (the year groups sit on the same row as the "Insurance and Top Denials" corner), a
+	/// year-total column's label spans both header rows instead of getting a period label, and the
+	/// fill is inverted - payer rows are unfilled and the denial rows beneath them carry the grey.
+	/// </summary>
+	private static int WritePivotSection(
+		IXLWorksheet ws, BreakdownPivotViewModel? model, int startRow, string emptyMessage)
+	{
+		if (model is null || model.Periods.Count == 0)
+		{
+			ws.Cell(startRow, IndexCol).Value = emptyMessage;
+			ws.Cell(startRow, IndexCol).Style.Font.Italic = true;
+			return startRow + 2;
+		}
+
+		var lastCol = PivotLastColumn(model);
+		var monthly = model.Periods.Any(x => x.IsYearTotal);
+
+		var titleRow = startRow;
+		ws.Range(titleRow, IndexCol, titleRow, lastCol).Merge();
+		var title = ws.Cell(titleRow, IndexCol);
+		title.Value = model.HeaderTitle;
+		title.Style.Font.SetBold().Font.SetFontColor(XLColor.White);
+		title.Style.Fill.SetBackgroundColor(TemplateBandBg);
+		title.Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center)
+			.Alignment.SetVertical(XLAlignmentVerticalValues.Center);
+		ws.Range(titleRow, IndexCol, titleRow, lastCol).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+
+		var groupRow = titleRow + 1;    // year groups (monthly) or the section title (weekly)
+		var periodRow = groupRow + 1;   // month / week labels
+		var metricRow = periodRow + 1;  // No. of Claims | Denial Bal
+
+		ws.Range(groupRow, IndexCol, metricRow, LabelCol + 3).Merge();
+		var corner = ws.Cell(groupRow, IndexCol);
+		corner.Value = "Insurance & Top Denials";
+		corner.Style.Font.SetBold().Font.SetFontColor(XLColor.White);
+		corner.Style.Fill.SetBackgroundColor(TemplateBandBg);
+		corner.Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center)
+			.Alignment.SetVertical(XLAlignmentVerticalValues.Center);
+		ws.Range(groupRow, IndexCol, metricRow, LabelCol + 3).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+
+		var grandCol = FirstDataCol + (model.Periods.Count * 2);
+		ws.Range(groupRow, grandCol, periodRow, lastCol).Merge();
+		var grand = ws.Cell(groupRow, grandCol);
+		grand.Value = monthly ? model.GrandTotalTitle : "Total";
+		grand.Style.Font.SetBold().Font.SetFontColor(XLColor.White);
+		grand.Style.Fill.SetBackgroundColor(TemplateBandBg);
+		grand.Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center)
+			.Alignment.SetVertical(XLAlignmentVerticalValues.Center);
+		ws.Range(groupRow, grandCol, periodRow, lastCol).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+
+		if (monthly)
+		{
+			// Walk the periods and band each run of consecutive months that share a year. A
+			// year-total period ends the run: its own header spans the group and period rows
+			// instead (written in the period loop below), exactly as the template lays it out.
+			var runStartCol = 0;
+			var runYear = 0;
+			var col = FirstDataCol;
+			foreach (var period in model.Periods)
 			{
-				ws.Cell(excelRow, 16).Value = item.DiscussionDate.Value;
-				ws.Cell(excelRow, 16).Style.NumberFormat.Format = "yyyy-mm-dd";
+				if (period.IsYearTotal)
+				{
+					if (runStartCol > 0) WriteYearBand(ws, groupRow, runStartCol, col - 1, runYear);
+					runStartCol = 0;
+				}
+				else if (runStartCol == 0)
+				{
+					runStartCol = col;
+					runYear = period.Year;
+				}
+				else if (period.Year != runYear)
+				{
+					WriteYearBand(ws, groupRow, runStartCol, col - 1, runYear);
+					runStartCol = col;
+					runYear = period.Year;
+				}
+				col += 2;
 			}
-			ws.Cell(excelRow, 17).Value = item.ETA;
-
-			foreach (var wrapColumn in new[] { 2, 11, 12, 13 })
-				ws.Cell(excelRow, wrapColumn).Style.Alignment.WrapText = true;
-
-			ws.Range(excelRow, 1, excelRow, headers.Count).Style.Fill.BackgroundColor = XLColor.White;
-		}
-
-		if (insights.Count > 0)
-		{
-			ws.Range(1, 1, insights.Count + 1, headers.Count).SetAutoFilter();
+			if (runStartCol > 0) WriteYearBand(ws, groupRow, runStartCol, col - 1, runYear);
 		}
 		else
 		{
-			ws.Cell(2, 1).Value = "No denial insights for the selected filters.";
+			ws.Range(groupRow, FirstDataCol, groupRow, grandCol - 1).Merge();
+			var band = ws.Cell(groupRow, FirstDataCol);
+			band.Value = model.SectionTitle;
+			band.Style.Font.SetBold().Font.SetFontColor(XLColor.White);
+			band.Style.Fill.SetBackgroundColor(TemplateBandBg);
+			band.Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center)
+				.Alignment.SetVertical(XLAlignmentVerticalValues.Center);
+			ws.Range(groupRow, FirstDataCol, groupRow, grandCol - 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 		}
 
-		ws.SheetView.FreezeRows(1);
-		ws.Columns().AdjustToContents();
-		SetWidth(ws, headers, "Description", 45);
-		SetWidth(ws, headers, "Action", 40);
-		SetWidth(ws, headers, "Task", 30);
-		SetWidth(ws, headers, "Feedback", 35);
-	}
-
-	private static void BuildBreakdownPivotSheet(XLWorkbook wb, string sheetName, BreakdownPivotViewModel? model)
-	{
-		var ws = wb.AddWorksheet(sheetName);
-		ws.TabColor = ExcelTheme.TabGreen;
-		ExcelTheme.ApplyDefaults(ws);
-
-		// The tab renders an empty pivot as "no data"; the sheet must still exist so the
-		// workbook always has the same four tabs.
-		if (model is null || model.Periods.Count == 0)
-		{
-			ws.Cell(1, 1).Value = sheetName;
-			ws.Cell(1, 1).Style.Font.Bold = true;
-			ws.Cell(1, 1).Style.Font.FontSize = ExcelTheme.FontSizeTitle;
-			ws.Cell(2, 1).Value = "No denial-dated rows for the selected filters.";
-			ws.Column(1).Width = 52;
-			return;
-		}
-
-		BuildBreakdownPivotSheetCore(ws, model);
-	}
-
-	private static void BuildBreakdownPivotSheetCore(IXLWorksheet ws, BreakdownPivotViewModel model)
-	{
-		var totalColumns = 2 + (model.Periods.Count * 2) + 2;
-		var monthly = model.Periods.Any(x => x.IsYearTotal);
-
-		ws.Cell(1, 1).Value = model.HeaderTitle;
-		ws.Range(1, 1, 1, totalColumns).Merge();
-		var titleRange = ws.Range(1, 1, 1, totalColumns);
-		titleRange.Style.Font.Bold = true;
-		titleRange.Style.Font.FontColor = XLColor.White;
-		titleRange.Style.Font.FontSize = ExcelTheme.FontSizeTitle;
-		titleRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-		titleRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-		titleRange.Style.Fill.BackgroundColor = ExcelTheme.TitleBg;
-		titleRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-
-		var leftEndRow = monthly ? 4 : 3;
-		ws.Cell(2, 1).Value = "Insurance & Top Denials";
-		ws.Range(2, 1, leftEndRow, 2).Merge();
-		var leftHeader = ws.Range(2, 1, leftEndRow, 2);
-		leftHeader.Style.Font.Bold = true;
-		leftHeader.Style.Font.FontColor = XLColor.White;
-		leftHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-		leftHeader.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-		leftHeader.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
-		leftHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-
-		if (model.Periods.Count > 0)
-		{
-			ws.Cell(2, 3).Value = model.SectionTitle;
-			ws.Range(2, 3, 2, 2 + (model.Periods.Count * 2)).Merge();
-			var sectionHeader = ws.Range(2, 3, 2, 2 + (model.Periods.Count * 2));
-			sectionHeader.Style.Font.Bold = true;
-			sectionHeader.Style.Font.FontColor = XLColor.White;
-			sectionHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-			sectionHeader.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-			sectionHeader.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
-			sectionHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-		}
-
-		var grandHeaderStart = 3 + (model.Periods.Count * 2);
-		ws.Cell(2, grandHeaderStart).Value = monthly ? model.GrandTotalTitle : "Total";
-		ws.Range(2, grandHeaderStart, monthly ? 4 : 3, totalColumns).Merge();
-		var totalHeader = ws.Range(2, grandHeaderStart, monthly ? 4 : 3, totalColumns);
-		totalHeader.Style.Font.Bold = true;
-		totalHeader.Style.Font.FontColor = XLColor.White;
-		totalHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-		totalHeader.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-		totalHeader.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
-		totalHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-
-		var metricsRow = monthly ? 5 : 4;
-		var periodHeaderRow = monthly ? 4 : 3;
-		if (monthly)
-		{
-			var col = 3;
-			foreach (var group in model.ColumnGroups.Where(x => !string.Equals(x.Label, model.GrandTotalTitle, StringComparison.OrdinalIgnoreCase)))
-			{
-				ws.Cell(3, col).Value = group.Label;
-				ws.Range(3, col, 3, col + group.ColumnSpan - 1).Merge();
-				var yearHeader = ws.Range(3, col, 3, col + group.ColumnSpan - 1);
-				yearHeader.Style.Font.Bold = true;
-				yearHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-				yearHeader.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-				yearHeader.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
-				yearHeader.Style.Font.FontColor = XLColor.White;
-				yearHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-				col += group.ColumnSpan;
-			}
-		}
-
-		var periodCol = 3;
+		// A year-total column has no month name of its own, so its label spans the group and
+		// period rows instead - "2025 | Total" in the template.
+		var periodCol = FirstDataCol;
 		foreach (var period in model.Periods)
 		{
-			ws.Cell(periodHeaderRow, periodCol).Value = period.Label;
-			ws.Range(periodHeaderRow, periodCol, periodHeaderRow, periodCol + 1).Merge();
-			var periodHeader = ws.Range(periodHeaderRow, periodCol, periodHeaderRow, periodCol + 1);
-			periodHeader.Style.Font.Bold = true;
-			periodHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-			periodHeader.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-			periodHeader.Style.Fill.BackgroundColor = ExcelTheme.GroupRowBg;
-			periodHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-
-			ws.Cell(metricsRow, periodCol).Value = "No. of Claims";
-			ws.Cell(metricsRow, periodCol + 1).Value = "Insurance Balance";
-			ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Font.Bold = true;
-			ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-			ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Fill.BackgroundColor = ExcelTheme.SubLabelBg;
-			ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-			ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
-			periodCol += 2;
-		}
-
-		ws.Cell(metricsRow, periodCol).Value = "No. of Claims";
-		ws.Cell(metricsRow, periodCol + 1).Value = "Insurance Balance";
-		ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Font.Bold = true;
-		ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-		ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Fill.BackgroundColor = ExcelTheme.SubLabelBg;
-		ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-		ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
-
-		var dataRow = metricsRow + 1;
-		foreach (var row in model.Rows)
-		{
-			ws.Cell(dataRow, 1).Value = row.IndexLabel;
-			ws.Cell(dataRow, 2).Value = row.Label;
-
-			var rowRange = ws.Range(dataRow, 1, dataRow, totalColumns);
-			rowRange.Style.Fill.BackgroundColor = row.IsInsuranceRow ? ExcelTheme.GroupRowBg : XLColor.White;
-			rowRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-			rowRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
-
-			ws.Cell(dataRow, 1).Style.Font.Bold = true;
-			ws.Cell(dataRow, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-			ws.Cell(dataRow, 2).Style.Alignment.WrapText = true;
-			ws.Cell(dataRow, 2).Style.Font.Bold = row.IsInsuranceRow;
-
-			var cellCol = 3;
-			for (var i = 0; i < model.Periods.Count; i++)
+			if (period.IsYearTotal)
 			{
-				var cell = i < row.Cells.Count ? row.Cells[i] : new BreakdownPivotCell();
-				ws.Cell(dataRow, cellCol).Value = cell.ClaimCount == 0 ? "-" : cell.ClaimCount;
-				if (cell.DenialBalance == 0)
-				{
-					ws.Cell(dataRow, cellCol + 1).Value = "$ -";
-				}
-				else
-				{
-					ws.Cell(dataRow, cellCol + 1).Value = cell.DenialBalance;
-					ws.Cell(dataRow, cellCol + 1).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
-				}
-				ws.Cell(dataRow, cellCol).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-				ws.Cell(dataRow, cellCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
-				cellCol += 2;
-			}
-
-			ws.Cell(dataRow, cellCol).Value = row.TotalClaimCount == 0 ? "-" : row.TotalClaimCount;
-			if (row.TotalBalance == 0)
-			{
-				ws.Cell(dataRow, cellCol + 1).Value = "$ -";
+				ws.Range(groupRow, periodCol, periodRow, periodCol + 1).Merge();
+				var yearTotal = ws.Cell(groupRow, periodCol);
+				yearTotal.Value = period.Label;
+				yearTotal.Style.Font.SetBold().Font.SetFontColor(XLColor.White);
+				yearTotal.Style.Fill.SetBackgroundColor(TemplateBandBg);
+				yearTotal.Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center)
+					.Alignment.SetVertical(XLAlignmentVerticalValues.Center);
+				ws.Range(groupRow, periodCol, periodRow, periodCol + 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 			}
 			else
 			{
-				ws.Cell(dataRow, cellCol + 1).Value = row.TotalBalance;
-				ws.Cell(dataRow, cellCol + 1).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
+				ws.Range(periodRow, periodCol, periodRow, periodCol + 1).Merge();
+				var label = ws.Cell(periodRow, periodCol);
+				label.Value = period.Label;
+				label.Style.Font.Bold = true;
+				label.Style.Fill.SetBackgroundColor(TemplatePeriodBg);
+				label.Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center)
+					.Alignment.SetVertical(XLAlignmentVerticalValues.Center);
+				ws.Range(periodRow, periodCol, periodRow, periodCol + 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 			}
-			ws.Cell(dataRow, cellCol).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-			ws.Cell(dataRow, cellCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+			WriteMetricPair(ws, metricRow, periodCol);
+			periodCol += 2;
+		}
+		WriteMetricPair(ws, metricRow, grandCol);
+
+		var dataRow = metricRow + 1;
+		var firstDataRow = dataRow;
+		foreach (var pivotRow in model.Rows)
+		{
+			ws.Cell(dataRow, IndexCol).Value = pivotRow.IndexLabel;
+			ws.Cell(dataRow, IndexCol).Style.Font.Bold = true;
+			ws.Cell(dataRow, IndexCol).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+			ws.Cell(dataRow, LabelCol).Value = pivotRow.Label;
+			ws.Cell(dataRow, LabelCol).Style.Font.Bold = pivotRow.IsInsuranceRow;
+
+			var range = ws.Range(dataRow, IndexCol, dataRow, lastCol);
+			if (!pivotRow.IsInsuranceRow) range.Style.Fill.SetBackgroundColor(TemplateChildBg);
+			range.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+			range.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+
+			var cellCol = FirstDataCol;
+			for (var i = 0; i < model.Periods.Count; i++)
+			{
+				var cell = i < pivotRow.Cells.Count ? pivotRow.Cells[i] : new BreakdownPivotCell();
+				WriteCountAndBalance(ws, dataRow, cellCol, cell.ClaimCount, cell.DenialBalance);
+				cellCol += 2;
+			}
+			WriteCountAndBalance(ws, dataRow, grandCol, pivotRow.TotalClaimCount, pivotRow.TotalBalance);
 			dataRow++;
 		}
 
-		ws.Cell(dataRow, 1).Value = "";
-		ws.Cell(dataRow, 2).Value = "Total";
-		ws.Range(dataRow, 1, dataRow, totalColumns).Style.Font.Bold = true;
-		ws.Range(dataRow, 1, dataRow, totalColumns).Style.Fill.BackgroundColor = ExcelTheme.TotalRowBg;
-		ws.Range(dataRow, 1, dataRow, totalColumns).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-		ws.Range(dataRow, 1, dataRow, totalColumns).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+		ws.Range(dataRow, IndexCol, dataRow, LabelCol + 3).Merge();
+		ws.Cell(dataRow, IndexCol).Value = "Total";
+		ws.Cell(dataRow, IndexCol).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+		var totalRange = ws.Range(dataRow, IndexCol, dataRow, lastCol);
+		totalRange.Style.Font.Bold = true;
+		totalRange.Style.Fill.SetBackgroundColor(TemplateMetricBg);
+		totalRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+		totalRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
 
-		var totalCol = 3;
-		for (var i = 0; i < model.TotalsByPeriod.Count; i++)
+		var totalCol = FirstDataCol;
+		foreach (var total in model.TotalsByPeriod)
 		{
-			var total = model.TotalsByPeriod[i];
-			ws.Cell(dataRow, totalCol).Value = total.ClaimCount == 0 ? "-" : total.ClaimCount;
-			if (total.DenialBalance == 0)
-			{
-				ws.Cell(dataRow, totalCol + 1).Value = "$ -";
-			}
-			else
-			{
-				ws.Cell(dataRow, totalCol + 1).Value = total.DenialBalance;
-				ws.Cell(dataRow, totalCol + 1).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
-			}
+			WriteCountAndBalance(ws, dataRow, totalCol, total.ClaimCount, total.DenialBalance);
 			totalCol += 2;
 		}
+		WriteCountAndBalance(ws, dataRow, grandCol, model.GrandTotalClaimCount, model.GrandTotalBalance);
 
-		ws.Cell(dataRow, totalCol).Value = model.GrandTotalClaimCount == 0 ? "-" : model.GrandTotalClaimCount;
-		if (model.GrandTotalBalance == 0)
+		// Outline the denial rows under their payer, so the (+) control the footnote points at
+		// actually exists.
+		for (var r = firstDataRow; r < dataRow; r++)
 		{
-			ws.Cell(dataRow, totalCol + 1).Value = "$ -";
-		}
-		else
-		{
-			ws.Cell(dataRow, totalCol + 1).Value = model.GrandTotalBalance;
-			ws.Cell(dataRow, totalCol + 1).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
+			if (!model.Rows[r - firstDataRow].IsInsuranceRow) ws.Row(r).OutlineLevel = 1;
 		}
 
-		ws.SheetView.FreezeRows(metricsRow);
-		ws.SheetView.FreezeColumns(2);
-		ws.Column(1).Width = 6;
-		ws.Column(2).Width = 56;
-		for (var c = 3; c <= totalColumns; c++)
-		{
-			ws.Column(c).Width = 16;
-		}
+		var footRow = dataRow + 1;
+		ws.Cell(footRow, IndexCol).Value =
+			"* The above totals includes only denied claims during the mentioned period of time.";
+		ws.Cell(footRow, IndexCol).Style.Font.Italic = true;
+		footRow++;
+		ws.Cell(footRow, IndexCol).Value =
+			"* Use the (+) sign on the left bar to view the top denials per payor.";
+		ws.Cell(footRow, IndexCol).Style.Font.Italic = true;
+
+		return footRow + 2;
 	}
 
+	/// <summary>One year band over the month columns it covers, excluding that year's total column.</summary>
+	private static void WriteYearBand(IXLWorksheet ws, int row, int firstCol, int lastCol, int year)
+	{
+		if (lastCol < firstCol) return;
+		if (lastCol > firstCol) ws.Range(row, firstCol, row, lastCol).Merge();
+		var band = ws.Cell(row, firstCol);
+		band.Value = year.ToString(System.Globalization.CultureInfo.InvariantCulture);
+		band.Style.Font.SetBold().Font.SetFontColor(XLColor.White);
+		band.Style.Fill.SetBackgroundColor(TemplateBandBg);
+		band.Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center)
+			.Alignment.SetVertical(XLAlignmentVerticalValues.Center);
+		ws.Range(row, firstCol, row, lastCol).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+	}
+
+	/// <summary>The "No. of Claims" / "Denial Bal" pair under one period column.</summary>
+	private static void WriteMetricPair(IXLWorksheet ws, int row, int col)
+	{
+		ws.Cell(row, col).Value = "No. of Claims";
+		ws.Cell(row, col + 1).Value = "Denial Bal";
+		var range = ws.Range(row, col, row, col + 1);
+		range.Style.Font.Bold = true;
+		range.Style.Fill.SetBackgroundColor(TemplateMetricBg);
+		range.Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center)
+			.Alignment.SetVertical(XLAlignmentVerticalValues.Center).Alignment.SetWrapText();
+		range.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+		range.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+	}
+
+	/// <summary>
+	/// A claim count and its balance. Both stay numeric - the count format renders zero as a dash
+	/// and Accounting does the same for the balance, so the cells are still summable in Excel.
+	/// </summary>
+	private static void WriteCountAndBalance(IXLWorksheet ws, int row, int col, int count, decimal balance)
+	{
+		ws.Cell(row, col).Value = count;
+		ws.Cell(row, col).Style.NumberFormat.Format = TemplateCount;
+		ws.Cell(row, col).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+		ws.Cell(row, col + 1).Value = balance;
+		ws.Cell(row, col + 1).Style.NumberFormat.Format = TemplateAccounting;
+		ws.Cell(row, col + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+	}
+
+	/// <summary>
+	/// "Key Observations &amp; Highlights" - the dbo.DenialInsight rows laid out in the client
+	/// template's column groups, including its two colour-coded bands: gold over the highest-impact
+	/// insurance columns, red over Category / Action.
+	///
+	/// Observation and Closed Date are written as empty, styled columns. Neither has a source in
+	/// dbo.DenialInsight: in the client's workbook the AR analyst types them after the numbers are
+	/// produced, and leaving the columns in place keeps this generated file a drop-in replacement
+	/// for the hand-built one rather than something that has to be re-shaped before use.
+	/// </summary>
+	private static int WriteKeyObservations(IXLWorksheet ws, IReadOnlyList<DenialInsightRecord> insights, int startRow)
+	{
+		var titleRow = startRow;
+		ws.Range(titleRow, IndexCol, titleRow, ObservationsLastCol).Merge();
+		var title = ws.Cell(titleRow, IndexCol);
+		title.Value = "Key Observations & Highlights";
+		title.Style.Font.SetBold().Font.SetFontColor(XLColor.White);
+		title.Style.Fill.SetBackgroundColor(TemplateBandBg);
+		title.Style.Alignment.SetVertical(XLAlignmentVerticalValues.Center);
+		ws.Range(titleRow, IndexCol, titleRow, ObservationsLastCol).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+
+		// (first column, last column, heading, fill) - the template's exact column map, B..AA.
+		var columns = new (int First, int Last, string Header, XLColor Fill)[]
+		{
+			(2,  2,  "#",                            TemplateBandBg),
+			(3,  3,  "Denial Codes",                 TemplateBandBg),
+			(4,  5,  "Descriptions",                 TemplateBandBg),
+			(6,  6,  "# of Denial",                  TemplateBandBg),
+			(7,  7,  "Total Balance ($)",            TemplateBandBg),
+			(8,  10, "Highest $ Impact - Insurance", TemplateGoldBg),
+			(11, 11, "Ins. Balance ($)",             TemplateGoldBg),
+			(12, 12, "$ Impact (%)",                 TemplateGoldBg),
+			(13, 15, "Observation",                  TemplateBandBg),
+			(16, 16, "Data",                         TemplateBandBg),
+			(17, 17, "Category",                     TemplateRedBg),
+			(18, 21, "Action",                       TemplateRedBg),
+			(22, 23, "Feedback / Response",          TemplateBandBg),
+			(24, 24, "Responsibility",               TemplateBandBg),
+			(25, 25, "Discussion Date",              TemplateBandBg),
+			(26, 26, "ETA",                          TemplateBandBg),
+			(27, 27, "Closed Date",                  TemplateBandBg)
+		};
+
+		var headerRow = titleRow + 1;
+		foreach (var (first, last, header, fillColor) in columns)
+		{
+			if (last > first) ws.Range(headerRow, first, headerRow, last).Merge();
+			var cell = ws.Cell(headerRow, first);
+			cell.Value = header;
+			cell.Style.Font.SetBold().Font.SetFontColor(XLColor.White);
+			cell.Style.Fill.SetBackgroundColor(fillColor);
+			cell.Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center)
+				.Alignment.SetVertical(XLAlignmentVerticalValues.Center).Alignment.SetWrapText();
+			ws.Range(headerRow, first, headerRow, last).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+			ws.Range(headerRow, first, headerRow, last).Style.Border.OutsideBorderColor = XLColor.White;
+		}
+		ws.Row(headerRow).Height = 28;
+
+		if (insights.Count == 0)
+		{
+			ws.Cell(headerRow + 1, IndexCol).Value = "No denial insights for the selected filters.";
+			ws.Cell(headerRow + 1, IndexCol).Style.Font.Italic = true;
+			return headerRow + 3;
+		}
+
+		var row = headerRow + 1;
+		for (var i = 0; i < insights.Count; i++)
+		{
+			var item = insights[i];
+
+			// Merge every multi-column group on the data row too, so a long description or action
+			// occupies the same block its heading spans instead of spilling under the next group.
+			foreach (var (first, last, _, _) in columns.Where(x => x.Last > x.First))
+				ws.Range(row, first, row, last).Merge();
+
+			ws.Cell(row, 2).Value = i + 1;
+			ws.Cell(row, 2).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+			ws.Cell(row, 3).Value = item.DenialCodes;
+			ws.Cell(row, 4).Value = item.Descriptions;
+			ws.Cell(row, 6).Value = item.NoOfDenialCount;
+			ws.Cell(row, 6).Style.NumberFormat.Format = TemplateCount;
+			ws.Cell(row, 7).Value = item.TotalBalance;
+			ws.Cell(row, 7).Style.NumberFormat.Format = TemplateAccounting;
+			ws.Cell(row, 8).Value = item.HighImpactInsurance;
+			ws.Cell(row, 11).Value = item.InsuranceBalance;
+			ws.Cell(row, 11).Style.NumberFormat.Format = TemplateAccounting;
+			ws.Cell(row, 12).Value = item.ImpactPercentage / 100m;
+			ws.Cell(row, 12).Style.NumberFormat.Format = "0%";
+			// 13-15 Observation: intentionally blank - analyst-authored, see the method remarks.
+			ws.Cell(row, 16).Value = "Link";
+			ws.Cell(row, 17).Value = item.ActionCategory;
+			ws.Cell(row, 18).Value = item.Action;
+			ws.Cell(row, 22).Value = item.Feedback;
+			ws.Cell(row, 24).Value = string.IsNullOrWhiteSpace(item.Responsibility)
+				? item.ResponsibilityReviewer
+				: item.Responsibility;
+			if (item.DiscussionDate.HasValue)
+			{
+				ws.Cell(row, 25).Value = item.DiscussionDate.Value;
+				ws.Cell(row, 25).Style.NumberFormat.Format = "d-mmm";
+			}
+			ws.Cell(row, 26).Value = item.ETA;
+			// 27 Closed Date: intentionally blank - analyst-authored.
+
+			foreach (var wrapCol in new[] { 4, 13, 18, 22 })
+				ws.Cell(row, wrapCol).Style.Alignment.WrapText = true;
+
+			var range = ws.Range(row, IndexCol, row, ObservationsLastCol);
+			range.Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
+			range.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+			range.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+			range.Style.Border.OutsideBorderColor = ExcelTheme.BorderColor;
+			range.Style.Border.InsideBorderColor = ExcelTheme.BorderColor;
+			row++;
+		}
+
+		return row + 1;
+	}
 	/// <summary>Suffix for a spill column holding part <paramref name="part"/> of an oversized value.</summary>
 	private static string OverflowHeader(string header, int part) => $"{header} (cont. {part})";
 

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Security.Claims;
 using CsvHelper;
 using CsvHelper.Configuration;
@@ -391,14 +391,16 @@ public class DenialDashboardController : Controller
 			selectedLab.LabName, currentRunId, normalizedFilters,
 			allRecords, lineItems, insights, breakdownSource);
 
-		using var workbook = DenialDashboardExcelExportBuilder.CreateWorkbook(exportData);
+		// Name the file first: the workbook's report header block prints it, as the client
+		// template does, so the builder has to be told what it will be served as.
+		var safeLabName = string.Join("_", selectedLab.LabName.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim('_');
+		var fileNameFiltered = $"{safeLabName}_DenialDashboard_Filtered_{(string.IsNullOrWhiteSpace(currentRunId) ? DateTime.Now : currentRunId)}_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
+
+		using var workbook = DenialDashboardExcelExportBuilder.CreateWorkbook(exportData, fileName: fileNameFiltered);
 
 		await using var stream = new MemoryStream();
 		workbook.SaveAs(stream);
 		stream.Position = 0;
-
-		var safeLabName = string.Join("_", selectedLab.LabName.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim('_');
-		var fileNameFiltered = $"{safeLabName}_DenialDashboard_Filtered_{(string.IsNullOrWhiteSpace(currentRunId) ? DateTime.Now : currentRunId)}_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
 		return File(stream.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileNameFiltered);
 	}
 
