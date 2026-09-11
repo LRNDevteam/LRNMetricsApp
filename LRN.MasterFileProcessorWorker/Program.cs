@@ -89,6 +89,7 @@ var host = Host.CreateDefaultBuilder(args)
 		// Read-only gate over LRNMaster.dbo.LrnFileStatus: only ingest a lab's tables once the
 		// upstream run that filled them reports Completed, and only once per run.
 		services.AddSingleton<LRN.MasterFileProcessorWorker.Database.LabSourceRunGate>();
+		services.AddSingleton<LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequestStore>();
 
 		services.AddHostedService<MasterFileProcessorWorker>();
 	})

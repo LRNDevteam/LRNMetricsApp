@@ -43,6 +43,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 	private readonly LRN.MasterFileProcessorWorker.Database.LabSourceRunGate _labRunGate;
 	private readonly ReportRunIdInfoLogger _runInfo;
 	private readonly ReportsWorkflowTrackerRepository _workflowTracker;
+	private readonly LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequestStore _rerunRequests;
 
 	private ColumnSchema? _commonLineSchema;
 	private ColumnSchema? _commonClaimSchema;
@@ -68,7 +69,8 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		LRN.MasterFileProcessorWorker.Database.LabDatabaseMasterReader labDbReader,
 		LRN.MasterFileProcessorWorker.Database.LabSourceRunGate labRunGate,
 		ReportRunIdInfoLogger runInfo,
-		ReportsWorkflowTrackerRepository workflowTracker)
+		ReportsWorkflowTrackerRepository workflowTracker,
+		LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequestStore rerunRequests)
 	{
 		_logger = logger;
 		_fileLog = fileLog;
@@ -89,6 +91,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		_labRunGate = labRunGate;
 		_runInfo = runInfo;
 		_workflowTracker = workflowTracker;
+		_rerunRequests = rerunRequests;
 
 	}
 
@@ -187,6 +190,14 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 			}
 		}
 
+		// Re-runs asked for from the Report Audit Log screen. Claimed once per poll and BEFORE the
+		// lab loop, so a request that arrives mid-poll waits for the next one rather than being
+		// half-applied to a lab the loop has already passed.
+		var rerunByLab = new Dictionary<int, LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequest>();
+
+		foreach (var request in await _rerunRequests.ClaimPendingAsync(ct))
+			rerunByLab[request.LabId] = request;
+
 		// Resolve driveId once (needed for status log upload even when selected is null)
 		string? siteDriveId = null;
 		try
@@ -202,13 +213,24 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		{
 			ct.ThrowIfCancellationRequested();
 
+			// A re-run asked for from the Report Audit Log screen, or null for the normal schedule.
+			// The run log records WHO asked rather than the service account, so the audit trail on
+			// the screen and the audit trail in LRN_Run_Log name the same person.
+			rerunByLab.TryGetValue(lab.LabId, out var rerun);
+
+			var triggerType = rerun is null ? "Schedule" : "Rerun";
+			var triggeredBy = rerun?.RequestedBy ?? Environment.UserName;
+
 			// One unique RunID per lab-run: R<YYYYMMDD><SHORT><NNNN>, e.g. R20260803CRT0001
+			// A re-run takes a NEW RunID rather than reusing the old one: the previous run's logs,
+			// tracker rows and error entries stay exactly as they were, and the two runs can be
+			// compared. Nothing about a re-run rewrites history.
 			var runCtx = await _processLog.StartRunAsync(
 				labId: lab.LabId,
 				labName: lab.LabName,
 				pipelineName: "LRN.MasterFileProcessor",
-				triggerType: "Schedule",
-				triggeredBy: Environment.UserName,
+				triggerType: triggerType,
+				triggeredBy: triggeredBy,
 				ct: ct);
 
 			var runRow = new RunLogRow
@@ -216,8 +238,8 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				RunID = runCtx.RunId,
 				LabName = lab.LabName,
 				PipelineName = "LRN.MasterFileProcessor",
-				TriggerType = "Schedule",
-				TriggeredBy = Environment.UserName,
+				TriggerType = triggerType,
+				TriggeredBy = triggeredBy,
 				StartTimeIST = runCtx.StartTimeIST,
 				OverallStatus = "IN_PROGRESS",
 				LatestMasterFileFound = "NO",
@@ -251,7 +273,12 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 			{
 				if (lab.UsesLabDatabaseSource)
 				{
-					var gate = await EvaluateLabDatabaseGateAsync(lab, ct);
+					// A re-run ignores the "already ingested" marker - that is the whole point of
+					// asking for one - but NOT the readiness check. LIS, LINELEVEL and CLAIMLEVEL
+					// must still all read Completed on the same RunID: re-running against tables a
+					// half-finished upstream run is still writing would publish a torn week, and
+					// nobody clicking a button in a browser is asking for that.
+					var gate = await EvaluateLabDatabaseGateAsync(lab, ct, ignoreAlreadyIngested: rerun is not null);
 
 					if (!gate.ShouldIngest)
 					{
@@ -399,16 +426,22 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				activeStep = step15;
 				await _processLog.StepStartAsync(runCtx, step15, ct);
 
-				var alreadyProcessed = await _status.IsProcessedAsync(
-					selected.LabId,
-					selected.DriveId,
-					selected.ItemId,
-					selected.ETagKey,
-					ct);
+				// The same file, unchanged, is normally processed once. A re-run is an explicit
+				// instruction to do it again, so the check is skipped rather than the marker being
+				// deleted: deleting would destroy the record of the original run having happened.
+				var alreadyProcessed = rerun is null
+					&& await _status.IsProcessedAsync(
+						selected.LabId,
+						selected.DriveId,
+						selected.ItemId,
+						selected.ETagKey,
+						ct);
 
 				step15.EndTimeIST = _processLog.NowIST();
 				step15.Status = alreadyProcessed ? "SKIPPED" : "SUCCESS";
-				step15.ErrorMessage = alreadyProcessed ? "already processed (etag unchanged)" : null;
+				step15.ErrorMessage = alreadyProcessed ? "already processed (etag unchanged)"
+					: rerun is not null ? "re-run requested; the already-processed check was bypassed"
+					: null;
 				await _processLog.StepEndAsync(runCtx, step15, ct);
 				activeStep = null;
 
@@ -1451,6 +1484,19 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 					_fileLog.Info($"Lab {lab.LabId}: removing staging folder left by an incomplete run -> {stagingFolder}");
 					TryDeleteDirectory(stagingFolder);
 				}
+
+				// In the finally rather than on the success path because every early exit above is
+				// a `continue`, which runs this block. A claimed request that never gets an outcome
+				// blocks the lab from being re-run again, so it has to be closed on every path.
+				if (rerun is not null)
+				{
+					await _rerunRequests.CompleteAsync(
+						rerun.RerunRequestId,
+						runCtx.RunId,
+						runRow.OverallStatus ?? "UNKNOWN",
+						runRow.Notes,
+						ct);
+				}
 			}
 		}
 
@@ -2181,7 +2227,7 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 	/// </para>
 	/// </summary>
 	private async Task<LRN.MasterFileProcessorWorker.Database.SourceRunDecision> EvaluateLabDatabaseGateAsync(
-		LabFileMap lab, CancellationToken ct)
+		LabFileMap lab, CancellationToken ct, bool ignoreAlreadyIngested = false)
 	{
 		try
 		{
@@ -2209,7 +2255,7 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			}
 
 			return await _labRunGate.DecideAsync(
-				lab.LabId, connectionString, requiredFileTypes, ingestFileTypes, ct);
+				lab.LabId, connectionString, requiredFileTypes, ingestFileTypes, ct, ignoreAlreadyIngested);
 		}
 		catch (Exception ex)
 		{

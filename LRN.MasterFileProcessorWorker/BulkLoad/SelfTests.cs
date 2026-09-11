@@ -50,6 +50,7 @@ public static class SelfTests
         LabDatabaseGateAgainstRealLrnFileStatusRows();
         LabDatabaseGateRequiresAllThreeFileTypes();
         LabDatabaseSourceLabelling();
+        RerunBypassesMarkersButNotReadiness();
 
         Console.WriteLine(new string('-', 70));
 
@@ -1394,6 +1395,92 @@ public static class SelfTests
 
         Check("an unrecognised file type gets no override",
             bothFromDb.SourceOverrideFor("LIS Summary") is null);
+    }
+
+    /// <summary>
+    /// What an operator-requested re-run is allowed to skip.
+    ///
+    /// <para>
+    /// A re-run exists to redo work that has already been done, so both "already done" gates give
+    /// way: the SharePoint ETag marker and the upstream already-ingested RunID marker. The
+    /// readiness check does NOT give way. Whether LIS, LINELEVEL and CLAIMLEVEL have all finished
+    /// is a question about whether the SOURCE is safe to read, and nobody clicking a button in a
+    /// browser is asking to read tables an unfinished run is still writing.
+    /// </para>
+    /// </summary>
+    private static void RerunBypassesMarkersButNotReadiness()
+    {
+        Console.WriteLine("\nRe-run - which gates give way and which do not");
+
+        // Mirrors DecideAsync: readiness first, then the marker, with the re-run flag skipping
+        // only the second.
+        static (bool Ingest, string Reason) Decide(
+            Dictionary<string, string> statuses,
+            string runId,
+            string? lastIngested,
+            bool isRerun)
+        {
+            foreach (var fileType in new[] { "LIS", "LINELEVEL", "CLAIMLEVEL" })
+            {
+                if (!statuses.TryGetValue(fileType, out var status))
+                    return (false, $"no {fileType} row");
+
+                if (!string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase))
+                    return (false, $"{fileType} is {status}");
+            }
+
+            if (isRerun)
+                return (true, "re-run requested; the already-ingested marker was not consulted");
+
+            return string.Equals(lastIngested, runId, StringComparison.OrdinalIgnoreCase)
+                ? (false, "already ingested")
+                : (true, "not yet ingested");
+        }
+
+        const string run = "COVE_20260910_D";
+
+        static Dictionary<string, string> Rows(string lis, string line, string claim) =>
+            new() { ["LIS"] = lis, ["LINELEVEL"] = line, ["CLAIMLEVEL"] = claim };
+
+        var allDone = Rows("Completed", "Completed", "Completed");
+
+        // The case the whole feature exists for: the run is finished and already loaded, and the
+        // scheduled poll would do nothing. The re-run goes ahead.
+        Check("scheduled run skips a RunID it has already ingested",
+            !Decide(allDone, run, lastIngested: run, isRerun: false).Ingest);
+
+        Check("re-run loads that same RunID again",
+            Decide(allDone, run, lastIngested: run, isRerun: true).Ingest);
+
+        // ...but the source still has to be safe to read.
+        Check("re-run still waits while LIS is Inprogress",
+            !Decide(Rows("Inprogress", "Completed", "Completed"), run, null, isRerun: true).Ingest);
+
+        Check("re-run still waits while LINELEVEL is Inprogress",
+            !Decide(Rows("Completed", "Inprogress", "Completed"), run, null, isRerun: true).Ingest);
+
+        Check("re-run still waits while CLAIMLEVEL is Inprogress",
+            !Decide(Rows("Completed", "Completed", "Inprogress"), run, null, isRerun: true).Ingest);
+
+        Check("re-run still refuses a Failed upstream run",
+            !Decide(Rows("Completed", "Failed", "Completed"), run, null, isRerun: true).Ingest);
+
+        Check("re-run still refuses when a file type has no row at all",
+            !Decide(new Dictionary<string, string> { ["LINELEVEL"] = "Completed", ["CLAIMLEVEL"] = "Completed" },
+                run, null, isRerun: true).Ingest);
+
+        // The ETag gate, which is the SharePoint equivalent of the same idea.
+        static bool AlreadyProcessed(bool markerSaysProcessed, bool isRerun) =>
+            !isRerun && markerSaysProcessed;
+
+        Check("unchanged file is skipped on a scheduled run",
+            AlreadyProcessed(markerSaysProcessed: true, isRerun: false));
+
+        Check("unchanged file is processed on a re-run",
+            !AlreadyProcessed(markerSaysProcessed: true, isRerun: true));
+
+        Check("a changed file is processed either way",
+            !AlreadyProcessed(false, false) && !AlreadyProcessed(false, true));
     }
 
     private static void Check(string name, bool condition, string? detail = null)

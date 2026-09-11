@@ -1,4 +1,4 @@
-@model LabMetricsDashboard.Models.MasterValuesPageViewModel
+﻿@model LabMetricsDashboard.Models.MasterValuesPageViewModel
 @{
     ViewData["Title"] = "Report Audit Log";
 }
@@ -55,6 +55,26 @@
     .mv-badge.Warning { background: #FDF3E3; color: #B7791F; }
     .mv-badge.Info { background: #E5EEF7; color: #2E5C8A; }
     .mv-badge.Start, .mv-badge.End { background: #dcfce7; color: #166534; }
+
+    /* Re-run dialog */
+    .rr-labs { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: .4rem .9rem; }
+    .rr-lab { display: flex; align-items: center; gap: .45rem; padding: .35rem .5rem; border: 1px solid #e2e8f0; border-radius: 6px; font-size: .82rem; }
+    .rr-lab:hover { background: #f8fbff; border-color: #bfd8f2; }
+    .rr-lab input { flex: none; }
+    .rr-lab label { margin: 0; cursor: pointer; flex: 1 1 auto; }
+    .rr-warn { background: #FBEAE9; border: 1px solid #F3C7C4; color: #7f1d1d; border-radius: 6px; padding: .7rem .85rem; font-size: .82rem; }
+    .rr-warn ul { margin: .45rem 0 0; padding-left: 1.1rem; }
+    .rr-warn li { margin-bottom: .2rem; }
+    .rr-selected { font-weight: 800; }
+    .rr-hist { font-size: .78rem; }
+    .rr-hist th, .rr-hist td { border: 1px solid #d8e1ee; vertical-align: top; white-space: nowrap; }
+    .rr-hist td.rr-notes { white-space: pre-wrap; word-break: break-word; max-width: 260px; }
+    .rr-st { display: inline-flex; border-radius: 999px; padding: .1rem .45rem; font-size: .68rem; font-weight: 800; }
+    .rr-st.Pending { background: #FDF3E3; color: #B7791F; }
+    .rr-st.Claimed { background: #E5EEF7; color: #2E5C8A; }
+    .rr-st.Completed { background: #dcfce7; color: #166534; }
+    .rr-st.Failed { background: #FBEAE9; color: #B3261E; }
+    .rr-st.Cancelled { background: #eef2f7; color: #64748b; }
 </style>
 
 <div class="mv-shell">
@@ -71,6 +91,15 @@
                 <i class="bi bi-download"></i> All Logs (CSV)
             </button>
             <button type="button" class="btn btn-outline-secondary" id="refreshBtn"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+@if (Model.CanWrite)
+{
+            <button type="button" class="btn btn-warning" id="rerunOpenBtn" title="Re-run the master file processor for one or more labs">
+                <i class="bi bi-arrow-repeat"></i> Re-run Master Processor
+            </button>
+            <button type="button" class="btn btn-outline-secondary" id="rerunHistoryBtn" title="Who requested a re-run, when, from where and what happened">
+                <i class="bi bi-clock-history"></i> Re-run History
+            </button>
+}
         </div>
     </div>
 
@@ -186,6 +215,114 @@
         </div>
     </div>
 </div>
+
+@if (Model.CanWrite)
+{
+@Html.AntiForgeryToken()
+
+<div class="modal fade" id="rerunModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-arrow-repeat"></i> Re-run Master File Processor</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted" style="font-size:.83rem;">
+                    Select the labs to re-process. Each selected lab is queued for the master file processor,
+                    which picks the request up on its next poll and rebuilds that lab&rsquo;s reports from its
+                    current source data.
+                </p>
+
+                <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="rrSelectAll">Select all</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="rrClearAll">Clear</button>
+                    <input type="text" class="form-control form-control-sm" id="rrSearch" placeholder="Filter labs&hellip;" style="max-width:220px;" />
+                    <small class="text-muted ms-auto" id="rrCount">No labs selected</small>
+                </div>
+
+                <div class="rr-labs" id="rrLabs">
+                    <div class="text-muted">Loading labs&hellip;</div>
+                </div>
+
+                <div class="mt-3">
+                    <label for="rrNotes" style="font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.02em;color:#64748b;">
+                        Reason for the re-run
+                    </label>
+                    <textarea class="form-control form-control-sm" id="rrNotes" rows="2" maxlength="1000"
+                              placeholder="Recorded against every lab in this request, e.g. source file was corrected and reloaded"></textarea>
+                </div>
+
+                <div class="mv-info-banner mt-3" id="rrError" style="display:none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-warning" id="rrNextBtn" disabled>
+                    <i class="bi bi-arrow-right"></i> Continue
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="rerunConfirmModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title text-danger"><i class="bi bi-exclamation-triangle-fill"></i> Confirm re-run</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size:.88rem;">
+                    All reports will be re-run for <span class="rr-selected" id="rrConfirmLabs"></span>.
+                </p>
+                <div class="rr-warn">
+                    <div><b>This cannot be reverted.</b></div>
+                    <ul>
+                        <li>New reports will be created for each selected lab.</li>
+                        <li>The current reports for those labs will be removed and replaced.</li>
+                        <li>It may take a few minutes to complete all the required reports.</li>
+                    </ul>
+                </div>
+                <p class="text-muted mt-3 mb-0" style="font-size:.8rem;">
+                    The request is recorded against your account, with the time, this machine and the
+                    reason you entered.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="rrCancelBtn" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="rrRunBtn"><i class="bi bi-play-fill"></i> Run</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="rerunHistoryModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Re-run history</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mv-log-scroll">
+                    <table class="table table-sm table-bordered align-middle rr-hist">
+                        <thead><tr>
+                            <th>Requested</th><th>Lab</th><th>Status</th><th>Requested By</th>
+                            <th>From</th><th>Reason</th><th>Run ID</th><th>Result</th>
+                        </tr></thead>
+                        <tbody id="rrHistRows"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" id="rrHistRefresh"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+}
 
 @section Scripts {
 <script nonce='@Context.Items["CspNonce"]'>
@@ -395,6 +532,151 @@ el('logTypeFilter').addEventListener('change',renderLog);
 el('logSearch').addEventListener('input',()=>{clearTimeout(logFilterTimer);logFilterTimer=setTimeout(renderLog,200);});
 el('logErrorCsvBtn').onclick=()=>{if(logRunId)downloadRunErrors(logRunId);};
 el('logAllCsvBtn').onclick=()=>{if(logRunId)downloadRunAll(logRunId);};
+
+// ── re-run the master file processor ───────────────────────────────────────
+@if (Model.CanWrite)
+{
+<text>
+const rrUrls={
+  labs:'@Url.Action("MasterProcessorRerunLabs","MasterValues")',
+  run:'@Url.Action("MasterProcessorRerun","MasterValues")',
+  history:'@Url.Action("MasterProcessorRerunHistory","MasterValues")'
+};
+const rrModal=new bootstrap.Modal(document.getElementById('rerunModal'));
+const rrConfirm=new bootstrap.Modal(document.getElementById('rerunConfirmModal'));
+const rrHistory=new bootstrap.Modal(document.getElementById('rerunHistoryModal'));
+const antiForgery=()=>document.querySelector('input[name="__RequestVerificationToken"]').value;
+let rrLabs=[],rrChecked=new Set();
+
+function rrError(message){
+  const b=el('rrError');
+  if(!message){b.style.display='none';b.textContent='';return;}
+  b.textContent=message;b.style.display='';
+}
+function rrSelectedLabs(){return rrLabs.filter(l=>rrChecked.has(l.labId));}
+function rrPaintCount(){
+  const n=rrChecked.size;
+  el('rrCount').textContent=n===0?'No labs selected':`${n} lab${n===1?'':'s'} selected`;
+  el('rrNextBtn').disabled=n===0;
+}
+function rrVisibleLabs(){
+  const term=el('rrSearch').value.trim().toLowerCase();
+  return rrLabs.filter(l=>!term||(l.labName||'').toLowerCase().includes(term));
+}
+function rrPaintLabs(){
+  const list=rrVisibleLabs();
+  el('rrLabs').innerHTML=list.length
+    ? list.map(l=>'<div class="rr-lab">'
+        +`<input class="form-check-input" type="checkbox" id="rrLab${l.labId}" data-lab="${l.labId}"${rrChecked.has(l.labId)?' checked':''} />`
+        +`<label for="rrLab${l.labId}">${esc(l.labName)}</label></div>`).join('')
+    : '<div class="text-muted">No labs match this filter.</div>';
+  rrPaintCount();
+}
+// Delegated, because the list is re-rendered on every keystroke in the filter box and per-element
+// handlers would have to be rebound each time.
+el('rrLabs').addEventListener('change',e=>{
+  const box=e.target.closest('input[data-lab]');
+  if(!box)return;
+  const id=Number(box.dataset.lab);
+  if(box.checked)rrChecked.add(id); else rrChecked.delete(id);
+  rrPaintCount();
+});
+el('rrSearch').addEventListener('input',rrPaintLabs);
+// Select all applies to what the filter is showing. Ticking labs the user cannot currently see is
+// how the wrong lab gets rebuilt.
+el('rrSelectAll').onclick=()=>{rrVisibleLabs().forEach(l=>rrChecked.add(l.labId));rrPaintLabs();};
+el('rrClearAll').onclick=()=>{rrChecked.clear();rrPaintLabs();};
+
+el('rerunOpenBtn').onclick=async()=>{
+  rrChecked.clear();rrError('');
+  el('rrNotes').value='';el('rrSearch').value='';
+  el('rrLabs').innerHTML='<div class="text-muted">Loading labs…</div>';
+  rrPaintCount();
+  rrModal.show();
+  try{
+    const r=await fetch(rrUrls.labs);
+    const d=await r.json().catch(()=>([]));
+    if(!r.ok)throw new Error(d.message||'Unable to load the lab list.');
+    rrLabs=Array.isArray(d)?d:[];
+    rrPaintLabs();
+  }catch(e){
+    rrLabs=[];
+    el('rrLabs').innerHTML='<div class="text-danger">Unable to load the lab list.</div>';
+    rrError(e.message||'Unable to load the lab list.');
+  }
+};
+
+el('rrNextBtn').onclick=()=>{
+  const names=rrSelectedLabs().map(l=>l.labName);
+  if(!names.length)return;
+  el('rrConfirmLabs').textContent=names.join(', ');
+  rrConfirm.show();
+};
+// Cancel returns to the picker with the selection intact rather than discarding the choices.
+el('rrCancelBtn').onclick=()=>rrConfirm.hide();
+
+el('rrRunBtn').onclick=async()=>{
+  const labs=rrSelectedLabs();
+  if(!labs.length)return;
+  const btn=el('rrRunBtn');
+  btn.disabled=true;
+  btn.innerHTML='<span class="spinner-border spinner-border-sm"></span> Queueing…';
+  try{
+    const r=await fetch(rrUrls.run,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','RequestVerificationToken':antiForgery()},
+      body:JSON.stringify({labIds:labs.map(l=>l.labId),notes:el('rrNotes').value.trim()})
+    });
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.message||'The re-run could not be queued.');
+    rrConfirm.hide();rrModal.hide();
+    const parts=[];
+    if((d.queued||[]).length)parts.push('Queued: '+d.queued.join(', ')+'.');
+    if((d.alreadyQueued||[]).length)parts.push('Already in progress, not queued again: '+d.alreadyQueued.join(', ')+'.');
+    if((d.failed||[]).length)parts.push('Could not be queued: '+d.failed.join(', ')+'.');
+    banner(parts.join(' ')+' The processor will pick these up on its next poll.');
+    openRerunHistory();
+  }catch(e){
+    rrError(e.message||'The re-run could not be queued.');
+    rrConfirm.hide();
+  }finally{
+    btn.disabled=false;
+    btn.innerHTML='<i class="bi bi-play-fill"></i> Run';
+  }
+};
+
+function rrWhen(value){
+  if(!value)return '—';
+  const d=new Date(value);
+  return isNaN(d)?'—':d.toLocaleDateString()+' '+d.toLocaleTimeString();
+}
+async function openRerunHistory(){
+  el('rrHistRows').innerHTML='<tr><td colspan="8" class="text-center text-muted py-3">Loading…</td></tr>';
+  rrHistory.show();
+  try{
+    const r=await fetch(rrUrls.history+'?take=50');
+    const d=await r.json().catch(()=>([]));
+    if(!r.ok)throw new Error(d.message||'Unable to load the re-run history.');
+    const rows=Array.isArray(d)?d:[];
+    el('rrHistRows').innerHTML=rows.map(x=>{
+      const st=(x.status||'').replace(/[^A-Za-z]/g,'');
+      const from=[x.requestedFromApp,x.requestedFromHost,x.requestedFromIp].filter(Boolean).join(' / ')||'—';
+      return `<tr><td>${esc(rrWhen(x.requestedOn))}</td><td>${esc(x.labName||x.labId)}</td>`
+        +`<td><span class="rr-st ${st}">${esc(x.status||'—')}</span></td>`
+        +`<td>${esc(x.requestedBy||'—')}${x.requestedByRole?'<br><small class="text-muted">'+esc(x.requestedByRole)+'</small>':''}</td>`
+        +`<td><small>${esc(from)}</small></td>`
+        +`<td class="rr-notes">${esc(x.notes||'—')}</td>`
+        +`<td>${esc(x.runId||'—')}</td>`
+        +`<td>${esc(x.resultStatus||'—')}${x.completedOn?'<br><small class="text-muted">'+esc(rrWhen(x.completedOn))+'</small>':''}</td></tr>`;
+    }).join('')||'<tr><td colspan="8" class="text-center text-muted py-3">No re-runs have been requested.</td></tr>';
+  }catch(e){
+    el('rrHistRows').innerHTML=`<tr><td colspan="8" class="text-center text-danger py-3">${esc(e.message||'Unable to load the re-run history.')}</td></tr>`;
+  }
+}
+el('rrHistRefresh').onclick=openRerunHistory;
+el('rerunHistoryBtn').onclick=openRerunHistory;
+</text>
+}
 
 // ── wiring ─────────────────────────────────────────────────────────────────
 el('applyBtn').onclick=()=>load();

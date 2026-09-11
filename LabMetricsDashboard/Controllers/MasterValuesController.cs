@@ -1,4 +1,4 @@
-using LabMetricsDashboard.Models;
+﻿using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -9,11 +9,16 @@ namespace LabMetricsDashboard.Controllers;
 public sealed class MasterValuesController : Controller
 {
     private readonly IMasterValuesApiClient _api;
+    private readonly IMasterProcessorRerunRepository _rerun;
     private readonly ILogger<MasterValuesController> _logger;
 
-    public MasterValuesController(IMasterValuesApiClient api, ILogger<MasterValuesController> logger)
+    public MasterValuesController(
+        IMasterValuesApiClient api,
+        IMasterProcessorRerunRepository rerun,
+        ILogger<MasterValuesController> logger)
     {
         _api = api;
+        _rerun = rerun;
         _logger = logger;
     }
 
@@ -511,7 +516,15 @@ public sealed class MasterValuesController : Controller
     {
         if (!HasAnyMasterAccess) return Forbid();
         ViewData["PageLabel"] = "Report Audit Log";
-        return View(new MasterValuesPageViewModel { Title = "Report Audit Log", RoleLabel = RoleLabel });
+
+        // CanWrite drives the re-run control only. Everything else on this screen is read-only for
+        // every role that can reach it.
+        return View(new MasterValuesPageViewModel
+        {
+            Title = "Report Audit Log",
+            RoleLabel = RoleLabel,
+            CanWrite = CanRerunMasterProcessor
+        });
     }
 
     [HttpGet]
@@ -540,6 +553,108 @@ public sealed class MasterValuesController : Controller
             return File(result.Content, "text/csv", result.FileName);
         }
         catch (InvalidOperationException ex) { return BadRequest(ErrorPayload(ex.Message)); }
+    }
+
+    // ── Re-run the master file processor ──────────────────────────────────────
+    // Restricted to LRN Admin. A re-run truncates and reloads a lab's line, claim and LIS tables
+    // and republishes its reports, so it is destructive in a way the rest of this read-only screen
+    // is not. Viewing the audit log is not authority to rebuild a week of data.
+
+    private bool CanRerunMasterProcessor => IsLrnAdmin;
+
+    /// <summary>The labs that may be re-run, for the dialog's checkbox list.</summary>
+    [HttpGet]
+    public async Task<IActionResult> MasterProcessorRerunLabs(CancellationToken ct)
+    {
+        if (!CanRerunMasterProcessor) return Forbid();
+
+        try
+        {
+            var labs = await _api.GetLabsAsync(ct);
+            return Json(labs.Select(l => new { labId = l.LabId, labName = l.LabName })
+                            .OrderBy(l => l.labName, StringComparer.OrdinalIgnoreCase));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ErrorPayload(ex.Message));
+        }
+    }
+
+    /// <summary>Recent re-run requests and what became of them.</summary>
+    [HttpGet]
+    public async Task<IActionResult> MasterProcessorRerunHistory(int take, CancellationToken ct)
+    {
+        if (!CanRerunMasterProcessor) return Forbid();
+
+        try { return Json(await _rerun.GetRecentAsync(take <= 0 ? 25 : take, ct)); }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not read the master processor re-run history.");
+            return BadRequest(ErrorPayload("The re-run history is unavailable."));
+        }
+    }
+
+    /// <summary>
+    /// Queues a re-run for each selected lab. The worker picks the requests up on its next poll.
+    ///
+    /// <para>
+    /// The requester, their role and the origin of the request are taken from the authenticated
+    /// context and the connection, never from the posted body. Only the free-text note comes from
+    /// the browser, because only the requester knows why they are doing this.
+    /// </para>
+    /// </summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> MasterProcessorRerun(
+        [FromBody] MasterProcessorRerunRequestBody body, CancellationToken ct)
+    {
+        if (!CanRerunMasterProcessor) return Forbid();
+
+        var requestedIds = (body?.LabIds ?? new List<int>()).Distinct().ToList();
+        if (requestedIds.Count == 0)
+            return BadRequest(ErrorPayload("Select at least one lab to re-run."));
+
+        // Resolved against the real lab list rather than trusted from the body, so a posted id that
+        // is not a lab cannot reach the queue and sit there as a request the worker never matches.
+        IReadOnlyList<MasterValueLabOption> known;
+        try { known = await _api.GetLabsAsync(ct); }
+        catch (InvalidOperationException ex) { return BadRequest(ErrorPayload(ex.Message)); }
+
+        var selected = known
+            .Where(l => requestedIds.Contains(l.LabId))
+            .Select(l => new MasterProcessorRerunLabSelection { LabId = l.LabId, LabName = l.LabName })
+            .ToList();
+
+        if (selected.Count == 0)
+            return BadRequest(ErrorPayload("None of the selected labs could be resolved."));
+
+        var context = new MasterProcessorRerunContext
+        {
+            RequestedBy = User.Identity?.Name ?? "unknown",
+            RequestedByRole = RoleLabel,
+            App = "LabMetricsDashboard",
+            Host = Environment.MachineName,
+            ClientIp = HttpContext.Connection.RemoteIpAddress?.ToString(),
+            UserAgent = Request.Headers.UserAgent.ToString(),
+            Notes = body?.Notes
+        };
+
+        var result = await _rerun.RequestAsync(selected, context, ct);
+
+        // Logged on the web server as well as in the table: if the queue write itself is what goes
+        // wrong later, the application log still shows the request was made and by whom.
+        _logger.LogWarning(
+            "Master processor re-run requested by {User} ({Role}) from {Host}/{Ip} for lab(s) {Labs}. Batch {Batch}. Notes: {Notes}",
+            context.RequestedBy, context.RequestedByRole, context.Host, context.ClientIp,
+            string.Join(", ", selected.Select(l => l.LabName)), result.BatchId, context.Notes);
+
+        return Json(new
+        {
+            batchId = result.BatchId,
+            queued = result.Queued,
+            alreadyQueued = result.AlreadyQueued,
+            failed = result.Failed
+        });
     }
 
     [HttpGet]

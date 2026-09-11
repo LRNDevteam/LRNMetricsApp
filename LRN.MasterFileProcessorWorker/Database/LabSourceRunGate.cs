@@ -126,12 +126,19 @@ ORDER BY LrnFileId DESC;";
     ///   re-ingest on every single poll for ever.</item>
     /// </list>
     /// </summary>
+    /// <param name="ignoreAlreadyIngested">
+    /// Set by an operator-requested re-run. It skips ONLY the "we have already taken this RunID"
+    /// marker, never the readiness check above it: re-running against tables an unfinished upstream
+    /// run is still writing would publish a torn week, and a re-run is a request to redo the work,
+    /// not a request to ignore whether the source is safe to read.
+    /// </param>
     public async Task<SourceRunDecision> DecideAsync(
         int labId,
         string labConnectionString,
         IReadOnlyList<string> requiredFileTypes,
         IReadOnlyList<string> ingestFileTypes,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool ignoreAlreadyIngested = false)
     {
         var runs = new List<UpstreamRun>();
 
@@ -175,6 +182,13 @@ ORDER BY LrnFileId DESC;";
         }
 
         var runId = runIds[0];
+
+        if (ignoreAlreadyIngested)
+        {
+            return SourceRunDecision.Ingest(runId,
+                $"run {runId} is Completed for {string.Join(", ", requiredFileTypes)}; "
+                + "re-run requested, so the already-ingested marker was not consulted.");
+        }
 
         await EnsureMarkerTableAsync(labConnectionString, ct);
 

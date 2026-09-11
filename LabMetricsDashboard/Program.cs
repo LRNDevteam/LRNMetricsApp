@@ -1,4 +1,4 @@
-using Azure.Identity;
+﻿using Azure.Identity;
 using LabMetricsDashboard.Controllers;
 using LabMetricsDashboard.Filters;
 using LabMetricsDashboard.Models;
@@ -590,6 +590,10 @@ builder.Services
     .AddHttpClient<IReportBoardApiClient, ReportBoardApiClient>()
     .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<ILabNameResolver, LabNameResolver>();
+// Master file processor re-run queue. Writes LRNMaster directly rather than going through
+// the Reports API: the worker reads the same table, so the queue is the contract between
+// the two, and putting an HTTP hop in front of it would add a moving part without a reader.
+builder.Services.AddScoped<IMasterProcessorRerunRepository, SqlMasterProcessorRerunRepository>();
 
 // ── Reimbursement Insights chat (Foundry agent via the ReimbursementAgentProxy App Service) ──
 // The browser posts to ReimbursementChatController on this origin and this app calls the proxy,
