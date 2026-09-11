@@ -354,7 +354,9 @@ public sealed class LimsMasterBulkImporter
 				else if (loadColumn.SpecialColumn == LimsSpecialColumn.LabName)
 					value = request.LabName;
 				else if (loadColumn.SpecialColumn == LimsSpecialColumn.SourceFileName)
-					value = sourceTable;   // the table IS the source; naming it keeps the audit trail honest
+					// The table IS the source; naming it, with the run that filled it, keeps the
+					// audit trail honest and still tells two runs apart.
+					value = string.IsNullOrWhiteSpace(request.SourceLabel) ? sourceTable : request.SourceLabel;
 				else if (loadColumn.SpecialColumn == LimsSpecialColumn.RunId)
 					value = request.RunId;
 				else if (loadColumn.SpecialColumn == LimsSpecialColumn.AdditionalFields)
@@ -1070,6 +1072,14 @@ public sealed class LimsImportRequest
 
 	/// <summary>True when this request reads from a table rather than a workbook.</summary>
 	public bool UsesSqlSource => !string.IsNullOrWhiteSpace(SourceTable);
+
+	/// <summary>
+	/// What to stamp into the destination's SourceFileName column, when the table name alone is not
+	/// enough: "&lt;upstream RunID&gt;_&lt;table&gt;". The table is truncated and refilled in place,
+	/// so its name reads the same on every run and cannot distinguish one pull from the next.
+	/// Falls back to <see cref="SourceTable"/> when not set.
+	/// </summary>
+	public string? SourceLabel { get; set; }
 	public string ConnectionString { get; set; } = string.Empty;
 	public string DestinationTable { get; set; } = "dbo.LIMSMaster";
 	public string? SchemaJsonPath { get; set; }

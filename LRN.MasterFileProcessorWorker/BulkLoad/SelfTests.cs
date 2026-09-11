@@ -49,6 +49,7 @@ public static class SelfTests
         LabDatabaseSourceRunDecisions();
         LabDatabaseGateAgainstRealLrnFileStatusRows();
         LabDatabaseGateRequiresAllThreeFileTypes();
+        LabDatabaseSourceLabelling();
 
         Console.WriteLine(new string('-', 70));
 
@@ -1313,6 +1314,86 @@ public static class SelfTests
                     ["LINELEVEL"] = run,
                     ["CLAIMLEVEL"] = run
                 }).Ingest);
+    }
+
+    /// <summary>
+    /// How a database-sourced input is named in LRN_Run_Log, ReportsWorkflowTracker and
+    /// ReportRunIdInfoLog: <c>&lt;upstream RunID&gt;_&lt;table&gt;</c>.
+    ///
+    /// <para>
+    /// The fallbacks are the substance here. A lab can source one level from its tables and another
+    /// from the workbook, and a label must never be invented for a level that really did come from
+    /// SharePoint - that would point anyone reconciling a figure at a table the rows never touched.
+    /// </para>
+    /// </summary>
+    private static void LabDatabaseSourceLabelling()
+    {
+        Console.WriteLine("\nLabDatabase - source labelling in the run logs");
+
+        const string run = "COVE_20260910_D";
+        const string lineTable = "dbo.Cove_Line_Level_Billing_Master";
+        const string claimTable = "dbo.Cove_Claim_Level_Billing_Master";
+        const string lisTable = "dbo.Cove_LIS_Master";
+
+        var label = Database.LabSourceRunGate.SourceLabel(run, lineTable);
+        Check("label is <RunID>_<table>", label == $"{run}_{lineTable}", label);
+
+        Check("no table -> no label, not a stray underscore",
+            Database.LabSourceRunGate.SourceLabel(run, null) is null
+            && Database.LabSourceRunGate.SourceLabel(run, "   ") is null);
+
+        Check("no run id -> the table alone",
+            Database.LabSourceRunGate.SourceLabel(null, lineTable) == lineTable
+            && Database.LabSourceRunGate.SourceLabel("  ", lineTable) == lineTable);
+
+        Check("surrounding whitespace is trimmed off both halves",
+            Database.LabSourceRunGate.SourceLabel($"  {run} ", $" {lineTable}  ") == $"{run}_{lineTable}");
+
+        // Run level: one field, possibly several tables, one shared RunID.
+        var runLabel = Database.LabSourceRunGate.RunSourceLabel(run, new[] { lineTable, claimTable, lisTable });
+        Check("run label states the RunID once and lists the tables",
+            runLabel == $"{run}_[{lineTable}, {claimTable}, {lisTable}]", runLabel);
+
+        Check("run label drops blanks and duplicates",
+            Database.LabSourceRunGate.RunSourceLabel(run, new[] { lineTable, null, "  ", lineTable })
+                == $"{run}_[{lineTable}]");
+
+        Check("no tables at all -> no run label",
+            Database.LabSourceRunGate.RunSourceLabel(run, new string?[] { null, "" }) is null);
+
+        // ---- per-level routing on the import request ----------------------------------------
+        var bothFromDb = new LineClaimImportRequest(
+            RunId: "R1", WeekFolder: null,
+            SourceFullPath: "sites/x/Cove_Master File.xlsx",
+            SourceFileName: "Cove_Master File.xlsx",
+            FileCreatedDateTime: null,
+            LineLevelCsvPath: "line.csv", ClaimLevelCsvPath: "claim.csv",
+            LineLevelSource: $"{run}_{lineTable}",
+            ClaimLevelSource: $"{run}_{claimTable}");
+
+        Check("line level resolves to the line table",
+            bothFromDb.SourceOverrideFor(FileTypes.LineLevel) == $"{run}_{lineTable}");
+
+        Check("claim level resolves to the claim table",
+            bothFromDb.SourceOverrideFor(FileTypes.ClaimLevel) == $"{run}_{claimTable}");
+
+        // A workbook-sourced lab passes neither, and must keep the SharePoint path and name it has
+        // always logged rather than acquiring a table label.
+        var fromWorkbook = bothFromDb with { LineLevelSource = null, ClaimLevelSource = null };
+
+        Check("a workbook-sourced lab gets no override at either level",
+            fromWorkbook.SourceOverrideFor(FileTypes.LineLevel) is null
+            && fromWorkbook.SourceOverrideFor(FileTypes.ClaimLevel) is null);
+
+        // The mixed case: LIS comes from a table, the two billing levels still come from the
+        // workbook. Only the LIS load may be relabelled.
+        var lisOnly = bothFromDb with { LineLevelSource = null, ClaimLevelSource = "   " };
+
+        Check("a blank per-level source is not treated as an override",
+            lisOnly.SourceOverrideFor(FileTypes.ClaimLevel) is null);
+
+        Check("an unrecognised file type gets no override",
+            bothFromDb.SourceOverrideFor("LIS Summary") is null);
     }
 
     private static void Check(string name, bool condition, string? detail = null)

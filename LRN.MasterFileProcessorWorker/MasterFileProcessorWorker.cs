@@ -345,9 +345,43 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				}
 
 				runRow.LatestMasterFileFound = "YES";
-				runRow.InputMasterSharePointPath = selected.SharePointPath;
-				runRow.InputMasterFileName = selected.Name;
-				runRow.InputMasterFileModifiedTime = selected.LastModifiedUtc?.ToLocalTime().DateTime;
+
+				// What the run log calls its input has to be what the data actually came from. A
+				// LabDatabase lab still downloads the workbook - the client-paid file lives beside it
+				// and the week folder is still the output destination - but not one claim or line row
+				// comes out of it, so naming it here would send anyone reconciling a figure to a file
+				// that never fed the load.
+				var dbRunSourceLabel = lab.UsesLabDatabaseSource
+					? LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.RunSourceLabel(
+						sourceRunId,
+						new[] { lab.LineLevelSourceTable, lab.ClaimLevelSourceTable, lab.LimsSourceTable })
+					: null;
+
+				// Per level, because a lab may take one level from its tables and another from the
+				// workbook. SourceLabel returns null when that level has no table configured, so the
+				// fallback names the workbook only where the workbook is genuinely the source.
+				var lineSourceLabel =
+					LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.SourceLabel(sourceRunId, lab.LineLevelSourceTable)
+					?? selected.Name;
+				var claimSourceLabel =
+					LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.SourceLabel(sourceRunId, lab.ClaimLevelSourceTable)
+					?? selected.Name;
+
+				if (dbRunSourceLabel is not null)
+				{
+					runRow.InputMasterSharePointPath = dbRunSourceLabel;
+					runRow.InputMasterFileName = dbRunSourceLabel;
+
+					// Deliberately left null: a table has no modified time or size on disk, and
+					// carrying the workbook's would describe a file this run did not read.
+					runRow.InputMasterFileModifiedTime = null;
+				}
+				else
+				{
+					runRow.InputMasterSharePointPath = selected.SharePointPath;
+					runRow.InputMasterFileName = selected.Name;
+					runRow.InputMasterFileModifiedTime = selected.LastModifiedUtc?.ToLocalTime().DateTime;
+				}
 
 				// STEP 15: Check already processed
 				stepSeq = 15;
@@ -550,12 +584,17 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				await TrySyncClientPaidFileAsync(lab, selected, processedOutFolder, runCtx.RunId, ct);
 
 				// Update file size after download
-				try
+				// Skipped for a LabDatabase lab: the size of a workbook it did not read from would
+				// sit beside a table name and read as that table's size.
+				if (!lab.UsesLabDatabaseSource)
 				{
-					var fi = new FileInfo(stagingPath);
-					runRow.InputMasterFileSizeMB = Math.Round((decimal)fi.Length / (1024m * 1024m), 2);
+					try
+					{
+						var fi = new FileInfo(stagingPath);
+						runRow.InputMasterFileSizeMB = Math.Round((decimal)fi.Length / (1024m * 1024m), 2);
+					}
+					catch { }
 				}
-				catch { }
 
 				step20.EndTimeIST = _processLog.NowIST();
 				step20.Status = "SUCCESS";
@@ -811,7 +850,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 					commonSchema: _commonLineSchema!,
 					labId: lab.LabId,
 					labName: lab.LabName,
-					sourceFileName: selected.Name,
+					sourceFileName: lineSourceLabel,
 					ingestedOnLocal: DateTime.Now,
 					labSchema: labLineSchema,
 					insuranceMaster: _insuranceMaster,
@@ -926,7 +965,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 							commonSchema: _commonClaimSchema!,
 							labId: lab.LabId,
 							labName: lab.LabName,
-							sourceFileName: selected.Name,
+							sourceFileName: claimSourceLabel,
 							ingestedOnLocal: DateTime.Now,
 							labSchema: labClaimSchema,
 							insuranceMaster: _insuranceMaster,
@@ -993,7 +1032,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				await _processLog.StepStartAsync(runCtx, step85, ct);
 
 				var bulkOutcomes = await TryImportLineClaimLevelAsync(
-					lab, runCtx.RunId, selected, weekFolder, lineLoadPath, claimLoadPath, ct);
+					lab, runCtx.RunId, selected, weekFolder, lineLoadPath, claimLoadPath, ct, sourceRunId);
 
 				step85.EndTimeIST = _processLog.NowIST();
 				step85.RecordsOut = (int)Math.Min(int.MaxValue, bulkOutcomes.Sum(o => o.RowsCopied));
@@ -1151,8 +1190,8 @@ statusMessage: $"Saved LineLevel='{lineOutPath}', ClaimLevel='{claimOutPath}', M
 					localNow: runLocalNow,
 					labId: lab.LabId,
 					labName: lab.LabName,
-					sourceFileName: selected.Name,
-					sourceFileLocation: selected.SharePointPath,
+					sourceFileName: dbRunSourceLabel ?? selected.Name,
+					sourceFileLocation: dbRunSourceLabel ?? selected.SharePointPath,
 					status: "Completed",
 message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summary}", claimOutput: claimOutPath,
 					lineOutput: lineOutPath);
@@ -2355,7 +2394,8 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		string? weekFolder,
 		string lineCsvPath,
 		string claimCsvPath,
-		CancellationToken ct)
+		CancellationToken ct,
+		string? sourceRunId = null)
 	{
 		var empty = Array.Empty<LineClaimImportOutcome>();
 
@@ -2385,6 +2425,13 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			if (resolved is null)
 				return empty;   // TryResolveLabAsync has already logged the specific reason
 
+			// Null for a workbook-sourced level, which leaves the SharePoint path and file name in
+			// the logs exactly as before.
+			var lineSource = LRN.MasterFileProcessorWorker.Database.LabSourceRunGate
+				.SourceLabel(sourceRunId, lab.LineLevelSourceTable);
+			var claimSource = LRN.MasterFileProcessorWorker.Database.LabSourceRunGate
+				.SourceLabel(sourceRunId, lab.ClaimLevelSourceTable);
+
 			var request = new LineClaimImportRequest(
 				RunId: runId,
 				WeekFolder: weekFolder,
@@ -2392,7 +2439,9 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 				SourceFileName: selected?.Name,
 				FileCreatedDateTime: selected?.LastModifiedUtc?.LocalDateTime,
 				LineLevelCsvPath: lineCsvPath,
-				ClaimLevelCsvPath: claimCsvPath);
+				ClaimLevelCsvPath: claimCsvPath,
+				LineLevelSource: lineSource,
+				ClaimLevelSource: claimSource);
 
 			return await _lineClaimImport.ImportLabAsync(resolved, request, ct);
 		}
@@ -2788,9 +2837,14 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 		// Whatever the run is reading FROM is what the logs should name, so a reader can tell at a
 		// glance which source a lab's LIS Summary was built on.
+		// Paired with the upstream RunID: the table is truncated and refilled in place, so its name
+		// alone reads identically on every run and would not say which pull of the data this was.
 		var sourceFileName = useSqlSource
-			? lab.LimsSourceTable!
+			? LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.SourceLabel(sourceRunIdForLims, lab.LimsSourceTable)!
 			: Path.GetFileName(limsRawMasterPath ?? string.Empty);
+
+		// ReportsWorkflowTracker has no source column; Remarks is the only field that can carry it.
+		var sourceRemark = useSqlSource ? $"Source: {sourceFileName}" : null;
 		var enabled = _configuration.GetValue<bool?>("MasterFileProcessor:LimsSqlImportEnabled") ?? true;
 
 		if (!enabled)
@@ -2803,7 +2857,8 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 			await _workflowTracker.UpsertAsync(runId ?? string.Empty, lab.LabId, lab.LabName, weekFolder,
 				WorkflowReportNames.LisSummary, WorkflowReportNames.LisSummary, WorkflowStatus.Skipped,
-				null, startedOn, ReportRunIdInfoLogger.IstNow(), reason, ct);
+				null, startedOn, ReportRunIdInfoLogger.IstNow(),
+				sourceRemark is null ? reason : $"{reason}. {sourceRemark}", ct);
 
 			return;
 		}
@@ -2815,7 +2870,7 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 			await _workflowTracker.UpsertAsync(runId ?? string.Empty, lab.LabId, lab.LabName, weekFolder,
 				WorkflowReportNames.LisSummary, WorkflowReportNames.LisSummary, WorkflowStatus.InProgress,
-				null, startedOn, null, null, ct);
+				null, startedOn, null, sourceRemark, ct);
 
 			// Deliberately NO fallback to DefaultConnection. That fallback used to sit at the end of
 			// this chain, which meant a lab with a missing or misspelt connection key silently
@@ -2843,6 +2898,7 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			{
 				ExcelPath = limsRawMasterPath ?? string.Empty,
 				SourceTable = useSqlSource ? lab.LimsSourceTable : null,
+				SourceLabel = useSqlSource ? sourceFileName : null,
 				ConnectionString = connectionString,
 				DestinationTable = _configuration["MasterFileProcessor:LimsDestinationTable"] ?? "dbo.LIMSMaster",
 				SchemaJsonPath = schemaPath,
@@ -2902,7 +2958,7 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 			await _workflowTracker.UpsertAsync(runId ?? string.Empty, lab.LabId, lab.LabName, weekFolder,
 				WorkflowReportNames.LisSummary, WorkflowReportNames.LisSummary, WorkflowStatus.Success,
-				result.TotalRowsCopied, startedOn, ReportRunIdInfoLogger.IstNow(), null, ct);
+				result.TotalRowsCopied, startedOn, ReportRunIdInfoLogger.IstNow(), sourceRemark, ct);
 
 			await _runInfo.EndAsync(runId ?? string.Empty, WorkflowReportNames.LisSummary, lab.LabName,
 				$"LIS Summary processing ended for lab {lab.LabName} ({lab.LabId}).", ct, sourceFileName);
@@ -2917,7 +2973,8 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 			await _workflowTracker.UpsertAsync(runId ?? string.Empty, lab.LabId, lab.LabName, weekFolder,
 				WorkflowReportNames.LisSummary, WorkflowReportNames.LisSummary, WorkflowStatus.Failed,
-				null, startedOn, ReportRunIdInfoLogger.IstNow(), ex.Message, ct);
+				null, startedOn, ReportRunIdInfoLogger.IstNow(),
+				sourceRemark is null ? ex.Message : $"{ex.Message} {sourceRemark}", ct);
 
 			await _runInfo.EndAsync(runId ?? string.Empty, WorkflowReportNames.LisSummary, lab.LabName,
 				$"LIS Summary processing ended with failure for lab {lab.LabName} ({lab.LabId}).", ct, sourceFileName);

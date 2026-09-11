@@ -303,4 +303,47 @@ END;";
         FileTypes.LineLevel,
         FileTypes.ClaimLevel
     };
+
+    /// <summary>
+    /// How a database-sourced input is named in every log: <c>&lt;upstream RunID&gt;_&lt;table&gt;</c>,
+    /// for example <c>COVE_20260910_D_dbo.Cove_Line_Level_Billing_Master</c>.
+    ///
+    /// <para>
+    /// A SharePoint-sourced run names a workbook, and that name carries the week and the version, so
+    /// a reader can tell two runs apart. A table name alone carries neither - the table is truncated
+    /// and refilled in place, so every run would log the identical string. Pairing it with the
+    /// upstream RunID restores what the file name used to give: which pull of the data this was.
+    /// </para>
+    /// <para>
+    /// Returns the table on its own when there is no RunID, so the label degrades to something
+    /// still true rather than to a stray leading underscore.
+    /// </para>
+    /// </summary>
+    public static string? SourceLabel(string? sourceRunId, string? tableName)
+    {
+        var table = tableName?.Trim();
+        if (string.IsNullOrEmpty(table)) return null;
+
+        var runId = sourceRunId?.Trim();
+        return string.IsNullOrEmpty(runId) ? table : $"{runId}_{table}";
+    }
+
+    /// <summary>
+    /// The run-level label for LRN_Run_Log, which has one field for what may be several tables.
+    /// The RunID is shared by all of them, so it is stated once and the tables follow it.
+    /// </summary>
+    public static string? RunSourceLabel(string? sourceRunId, IEnumerable<string?> tableNames)
+    {
+        var tables = tableNames
+            .Select(t => t?.Trim())
+            .Where(t => !string.IsNullOrEmpty(t))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (tables.Count == 0) return null;
+
+        var joined = string.Join(", ", tables);
+        var runId = sourceRunId?.Trim();
+        return string.IsNullOrEmpty(runId) ? joined : $"{runId}_[{joined}]";
+    }
 }
