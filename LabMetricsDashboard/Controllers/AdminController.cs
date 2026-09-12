@@ -1,4 +1,4 @@
-using LabMetricsDashboard.Models;
+﻿using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Models.Menu;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -6,6 +6,14 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace LabMetricsDashboard.Controllers;
 
+// Every action on this controller creates users, grants roles or grants lab access. The class
+// carried no [Authorize] at all: only the four Menu* actions were protected, so user creation,
+// role assignment and user deletion were reachable by anyone who could reach the site.
+//
+// Applied at class level rather than per action, so an action added later is protected by default
+// instead of by remembering. The per-action [Authorize(Roles = "Admin")] on the Menu* actions is
+// now redundant but left in place - it says the same thing and removing it changes nothing.
+[Authorize(Roles = "Admin")]
 public class AdminController : Controller
 {
     private static readonly SemaphoreSlim CreateUserGate = new(1, 1);
@@ -200,6 +208,7 @@ public class AdminController : Controller
     }
 
     [HttpPost]
+    [ValidateAntiForgeryToken]
     public async Task<IActionResult> CreateUserAjax([FromForm] AdminViewModel vm)
     {
         // Validate using ModelState and explicit checks
@@ -249,6 +258,7 @@ public class AdminController : Controller
     }
 
     [HttpPost]
+    [ValidateAntiForgeryToken]
     public async Task<IActionResult> CreateRoleAjax([FromForm] AdminViewModel vm)
     {
         var role = vm?.NewRole;
@@ -258,6 +268,7 @@ public class AdminController : Controller
     }
 
     [HttpPost]
+    [ValidateAntiForgeryToken]
     public async Task<IActionResult> AssignRoleAjax([FromForm] int assignUserId, [FromForm] int assignRoleId)
     {
         if (assignUserId <= 0 || assignRoleId <= 0) return BadRequest(new { success = false, errors = new[] { "Invalid user or role" } });
@@ -266,6 +277,7 @@ public class AdminController : Controller
     }
 
     [HttpPost]
+    [ValidateAntiForgeryToken]
     public async Task<IActionResult> AssignUserLabAjax([FromForm] int assignUserId, [FromForm] int labId)
     {
         if (assignUserId <= 0 || labId <= 0) return BadRequest(new { success = false, errors = new[] { "Invalid user or lab" } });
@@ -275,6 +287,7 @@ public class AdminController : Controller
     }
 
     [HttpPost]
+    [ValidateAntiForgeryToken]
     public async Task<IActionResult> RemoveUserRole([FromForm] int userRoleId)
     {
         if (userRoleId <= 0) return BadRequest();
@@ -283,6 +296,7 @@ public class AdminController : Controller
     }
 
     [HttpPost]
+    [ValidateAntiForgeryToken]
     public async Task<IActionResult> RemoveUserLab([FromForm] int ulid)
     {
         if (ulid <= 0) return BadRequest();
@@ -291,6 +305,7 @@ public class AdminController : Controller
     }
 
     [HttpPost]
+    [ValidateAntiForgeryToken]
     public async Task<IActionResult> RemoveUser([FromForm] int userId)
     {
         if (userId <= 0) return BadRequest(new { success = false, errors = new[] { "Invalid user" } });

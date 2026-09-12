@@ -1,5 +1,20 @@
-@* Shared admin JS for AJAX forms and mapping refresh *@
+﻿@* Shared admin JS for AJAX forms and mapping refresh *@
 <script nonce='@Context.Items["CspNonce"]'>
+
+    // ── Antiforgery ────────────────────────────────────────────────────────────────────────
+    // Every mutating Admin endpoint requires a token now. Read from any token field the page
+    // rendered: each admin form emits one via @Html.AntiForgeryToken() and, for a given request,
+    // they all hold the same value.
+    //
+    // An absent field yields no header, so the request fails at the server rather than appearing
+    // to carry a token that is empty.
+    function afHeaders(extra) {
+        const headers = Object.assign({}, extra || {});
+        const field = document.querySelector('input[name="__RequestVerificationToken"]');
+        if (field && field.value) headers['RequestVerificationToken'] = field.value;
+        return headers;
+    }
+
 (function(){
     function jsonFormData(form) { return new FormData(form); }
     // Resolve the Admin controller path through the app root so these AJAX calls keep working
@@ -98,7 +113,7 @@
 
     // Generic helper to POST FormData and handle JSON errors
     async function postForm(url, fd){
-        const resp = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
+        const resp = await fetch(url, { method: 'POST', headers: afHeaders(), body: fd, credentials: 'same-origin' });
         if (!resp.ok) {
             let data = null; try { data = await resp.json(); } catch(e) {}
             if (data && data.errors) throw new Error(data.errors.join('; '));
@@ -336,7 +351,7 @@
                 if (submitLabel) submitLabel.textContent = submitButton.dataset.defaultText || 'Create User';
             }
             const fd = jsonFormData(frmCreateUser);
-            fetch(ADMIN_BASE + '/CreateUserAjax', { method: 'POST', body: fd, credentials: 'same-origin' })
+            fetch(ADMIN_BASE + '/CreateUserAjax', { method: 'POST', headers: afHeaders(), body: fd, credentials: 'same-origin' })
             .then(async r=>{
                 if (!r.ok) { const d = await r.json().catch(()=>null); const msg = d && d.errors ? d.errors.join('; ') : 'Create user failed';
                     const errEl = document.getElementById('createUserErrors'); if (errEl) { errEl.classList.remove('d-none'); errEl.textContent = msg; }
@@ -357,7 +372,7 @@
         frmCreateRole.addEventListener('submit', function(e){
             e.preventDefault();
             const fd = jsonFormData(frmCreateRole);
-            fetch(ADMIN_BASE + '/CreateRoleAjax', { method: 'POST', body: fd, credentials: 'same-origin' })
+            fetch(ADMIN_BASE + '/CreateRoleAjax', { method: 'POST', headers: afHeaders(), body: fd, credentials: 'same-origin' })
             .then(async r=>{ if (!r.ok){ const d = await r.json().catch(()=>null); alert(d && d.errors? d.errors.join('; '): 'Create role failed'); return;} await refreshRoles(); frmCreateRole.reset(); }).catch(err=>{ console.error(err); alert(err.message||'Error'); });
         });
     }
@@ -365,18 +380,18 @@
     // Assign role forms
     const frmAssignRole = document.getElementById('frmAssignRole') || document.getElementById('frmAssignRolePage');
     if (frmAssignRole){
-        frmAssignRole.addEventListener('submit', function(e){ e.preventDefault(); const fd = jsonFormData(frmAssignRole); fetch(ADMIN_BASE + '/AssignRoleAjax',{method:'POST',body:fd,credentials:'same-origin'}).then(r=>{ if (!r.ok) { alert('Assign failed'); return;} const uid = (document.getElementById('mapUserSelect')||document.getElementById('mapUserSelectPage')).value; if (uid) loadMappingsForUser(uid); }).catch(err=>{console.error(err); alert('Network error');}); });
+        frmAssignRole.addEventListener('submit', function(e){ e.preventDefault(); const fd = jsonFormData(frmAssignRole); fetch(ADMIN_BASE + '/AssignRoleAjax',{method:'POST',headers: afHeaders(), body:fd,credentials:'same-origin'}).then(r=>{ if (!r.ok) { alert('Assign failed'); return;} const uid = (document.getElementById('mapUserSelect')||document.getElementById('mapUserSelectPage')).value; if (uid) loadMappingsForUser(uid); }).catch(err=>{console.error(err); alert('Network error');}); });
     }
 
     // Assign lab forms
     const frmAssignLab = document.getElementById('frmAssignLab') || document.getElementById('frmAssignLabPage');
     if (frmAssignLab){
-        frmAssignLab.addEventListener('submit', function(e){ e.preventDefault(); const fd = jsonFormData(frmAssignLab); fetch(ADMIN_BASE + '/AssignUserLabAjax',{method:'POST',body:fd,credentials:'same-origin'}).then(r=>{ if (!r.ok){ alert('Assign lab failed'); return;} const uid = (document.getElementById('mapUserSelect2')||document.getElementById('mapUserSelectPage2')).value; if (uid) loadMappingsForUser(uid); }).catch(err=>{console.error(err); alert('Network error');}); });
+        frmAssignLab.addEventListener('submit', function(e){ e.preventDefault(); const fd = jsonFormData(frmAssignLab); fetch(ADMIN_BASE + '/AssignUserLabAjax',{method:'POST',headers: afHeaders(), body:fd,credentials:'same-origin'}).then(r=>{ if (!r.ok){ alert('Assign lab failed'); return;} const uid = (document.getElementById('mapUserSelect2')||document.getElementById('mapUserSelectPage2')).value; if (uid) loadMappingsForUser(uid); }).catch(err=>{console.error(err); alert('Network error');}); });
     }
 
     // Remove delegated
-    document.addEventListener('click', function(e){ const tr = e.target.closest('[data-remove-role]'); if (tr){ const id = tr.getAttribute('data-remove-role'); fetch(ADMIN_BASE + '/RemoveUserRole',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'userRoleId='+encodeURIComponent(id),credentials:'same-origin'}).then(r=>{ if(r.ok){ const uid = (document.getElementById('mapUserSelect')||document.getElementById('mapUserSelectPage')).value; if(uid) loadMappingsForUser(uid);} else alert('Remove failed');}); } });
-    document.addEventListener('click', function(e){ const tr = e.target.closest('[data-remove-ul]'); if (tr){ const id = tr.getAttribute('data-remove-ul'); fetch(ADMIN_BASE + '/RemoveUserLab',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'ulid='+encodeURIComponent(id),credentials:'same-origin'}).then(r=>{ if(r.ok){ const uid = (document.getElementById('mapUserSelect2')||document.getElementById('mapUserSelectPage2')).value; if(uid) loadMappingsForUser(uid);} else alert('Remove failed');}); } });
+    document.addEventListener('click', function(e){ const tr = e.target.closest('[data-remove-role]'); if (tr){ const id = tr.getAttribute('data-remove-role'); fetch(ADMIN_BASE + '/RemoveUserRole',{method:'POST',headers: afHeaders({'Content-Type':'application/x-www-form-urlencoded'}), body:'userRoleId='+encodeURIComponent(id),credentials:'same-origin'}).then(r=>{ if(r.ok){ const uid = (document.getElementById('mapUserSelect')||document.getElementById('mapUserSelectPage')).value; if(uid) loadMappingsForUser(uid);} else alert('Remove failed');}); } });
+    document.addEventListener('click', function(e){ const tr = e.target.closest('[data-remove-ul]'); if (tr){ const id = tr.getAttribute('data-remove-ul'); fetch(ADMIN_BASE + '/RemoveUserLab',{method:'POST',headers: afHeaders({'Content-Type':'application/x-www-form-urlencoded'}), body:'ulid='+encodeURIComponent(id),credentials:'same-origin'}).then(r=>{ if(r.ok){ const uid = (document.getElementById('mapUserSelect2')||document.getElementById('mapUserSelectPage2')).value; if(uid) loadMappingsForUser(uid);} else alert('Remove failed');}); } });
     document.addEventListener('click', function(e){
         const btn = e.target.closest('[data-remove-userid]');
         if (!btn) return;
@@ -387,8 +402,7 @@
         btn.disabled = true;
         fetch(ADMIN_BASE + '/RemoveUser', {
             method: 'POST',
-            headers: { 'Content-Type':'application/x-www-form-urlencoded' },
-            body: 'userId=' + encodeURIComponent(id),
+            headers: afHeaders({ 'Content-Type':'application/x-www-form-urlencoded' }), body: 'userId=' + encodeURIComponent(id),
             credentials: 'same-origin'
         }).then(async r=>{
             if (!r.ok) {

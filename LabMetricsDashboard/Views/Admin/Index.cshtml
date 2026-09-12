@@ -1,4 +1,4 @@
-@model LabMetricsDashboard.Models.AdminViewModel
+﻿@model LabMetricsDashboard.Models.AdminViewModel
 @inherits Microsoft.AspNetCore.Mvc.Razor.RazorPage<LabMetricsDashboard.Models.AdminViewModel>
 @{
     ViewData["Title"] = "User / Role Management";
@@ -308,6 +308,21 @@
     })();
 </script>
 <script nonce='@Context.Items["CspNonce"]'>
+
+    // ── Antiforgery ────────────────────────────────────────────────────────────────────────
+    // Every mutating Admin endpoint requires a token now. Read from any token field the page
+    // rendered: each admin form emits one via @Html.AntiForgeryToken() and, for a given request,
+    // they all hold the same value.
+    //
+    // An absent field yields no header, so the request fails at the server rather than appearing
+    // to carry a token that is empty.
+    function afHeaders(extra) {
+        const headers = Object.assign({}, extra || {});
+        const field = document.querySelector('input[name="__RequestVerificationToken"]');
+        if (field && field.value) headers['RequestVerificationToken'] = field.value;
+        return headers;
+    }
+
     // AJAX handlers for create user/role and mapping actions
     (function(){
         function jsonFormData(form) {
@@ -339,7 +354,7 @@
                     }
                 };
                 const fd = jsonFormData(frmUser);
-                fetch('@Url.Action("CreateUserAjax", "Admin")', { method: 'POST', body: fd, credentials: 'same-origin' })
+                fetch('@Url.Action("CreateUserAjax", "Admin")', { method: 'POST', headers: afHeaders(), body: fd, credentials: 'same-origin' })
                 .then(async r => {
                     if (!r.ok) {
                         const data = await r.json().catch(()=>null);
@@ -369,7 +384,7 @@
             frmRole.addEventListener('submit', function(e){
                 e.preventDefault();
                 const fd = jsonFormData(frmRole);
-                fetch('@Url.Action("CreateRoleAjax", "Admin")', { method: 'POST', body: fd, credentials: 'same-origin' })
+                fetch('@Url.Action("CreateRoleAjax", "Admin")', { method: 'POST', headers: afHeaders(), body: fd, credentials: 'same-origin' })
                 .then(async r => {
                     if (!r.ok) {
                         const data = await r.json().catch(()=>null);
@@ -393,7 +408,7 @@
             frmAssignRole.addEventListener('submit', function(e){
                 e.preventDefault();
                 const fd = jsonFormData(frmAssignRole);
-                fetch('@Url.Action("AssignRoleAjax", "Admin")', { method: 'POST', body: fd, credentials: 'same-origin' })
+                fetch('@Url.Action("AssignRoleAjax", "Admin")', { method: 'POST', headers: afHeaders(), body: fd, credentials: 'same-origin' })
                 .then(async r => {
                     if (!r.ok) { alert('Assign failed'); return; }
                     const uid = document.getElementById('mapUserSelect').value;
@@ -409,7 +424,7 @@
             frmAssignLab.addEventListener('submit', function(e){
                 e.preventDefault();
                 const fd = jsonFormData(frmAssignLab);
-                fetch('@Url.Action("AssignUserLabAjax", "Admin")', { method: 'POST', body: fd, credentials: 'same-origin' })
+                fetch('@Url.Action("AssignUserLabAjax", "Admin")', { method: 'POST', headers: afHeaders(), body: fd, credentials: 'same-origin' })
                 .then(async r => {
                     if (!r.ok) { alert('Assign lab failed'); return; }
                     const uid = document.getElementById('mapUserSelect2').value;
@@ -424,7 +439,7 @@
             const target = e.target.closest('[data-remove-role]');
             if (target) {
                 const id = target.getAttribute('data-remove-role');
-                fetch('@Url.Action("RemoveUserRole", "Admin")', { method: 'POST', headers: { 'Content-Type':'application/x-www-form-urlencoded' }, body: 'userRoleId=' + encodeURIComponent(id), credentials: 'same-origin' })
+                fetch('@Url.Action("RemoveUserRole", "Admin")', { method: 'POST', headers: afHeaders({ 'Content-Type':'application/x-www-form-urlencoded' }), body: 'userRoleId=' + encodeURIComponent(id), credentials: 'same-origin' })
                 .then(r=>{ if (r.ok) { const uid = document.getElementById('mapUserSelect').value; if (uid) loadMappingsForUser(uid); } else alert('Remove failed'); });
             }
         });
@@ -433,7 +448,7 @@
             const target = e.target.closest('[data-remove-ul]');
             if (target) {
                 const id = target.getAttribute('data-remove-ul');
-                fetch('@Url.Action("RemoveUserLab", "Admin")', { method: 'POST', headers: { 'Content-Type':'application/x-www-form-urlencoded' }, body: 'ulid=' + encodeURIComponent(id), credentials: 'same-origin' })
+                fetch('@Url.Action("RemoveUserLab", "Admin")', { method: 'POST', headers: afHeaders({ 'Content-Type':'application/x-www-form-urlencoded' }), body: 'ulid=' + encodeURIComponent(id), credentials: 'same-origin' })
                 .then(r=>{ if (r.ok) { const uid = document.getElementById('mapUserSelect2').value; if (uid) loadMappingsForUser(uid); } else alert('Remove failed'); });
             }
         });
