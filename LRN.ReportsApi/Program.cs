@@ -80,6 +80,12 @@ builder.Services.Configure<DenialWorkflowSupportOptions>(builder.Configuration.G
 builder.Services.Configure<DenialCodeMasterExportOptions>(builder.Configuration.GetSection("DenialCodeMasterExport"));
 builder.Services.AddScoped<IDenialWorkflowRepository, SqlDenialWorkflowRepository>();
 builder.Services.AddScoped<IDenialWorkflowService, DenialWorkflowService>();
+
+// HIPAA finding F4. One answer to "may this caller act on this lab", for the whole API.
+builder.Services.AddScoped<LRN.ReportsApi.Security.IUserLabLookup,
+                           LRN.ReportsApi.Security.DenialWorkflowUserLabLookup>();
+builder.Services.AddScoped<LRN.ReportsApi.Security.ILabAccess, LRN.ReportsApi.Security.LabAccess>();
+builder.Services.AddScoped<LRN.ReportsApi.Filters.RequireLabAccessFilter>();
 builder.Services.AddScoped<IDenialCodeMasterRepository, SqlDenialCodeMasterRepository>();
 builder.Services.AddScoped<IDenialCodeMasterExcelService, DenialCodeMasterExcelService>();
 builder.Services.AddScoped<IDenialActionChangeVerificationRepository, SqlDenialActionChangeVerificationRepository>();
@@ -130,7 +136,13 @@ builder.Services.AddSingleton<IDenialMapperPushJobService, DenialMapperPushJobSe
 builder.Services.AddSingleton<IDenialWorkflowUploadJobService, DenialWorkflowUploadJobService>();
 builder.Services.AddHttpClient();
 builder.Services.AddAuthorization();
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    // Global rather than per controller. The finding was not that one endpoint forgot the check -
+    // it was that only one endpoint had it. A filter scoped by ROUTE covers an endpoint added
+    // tomorrow; a per-action attribute covers what somebody remembered today.
+    options.Filters.AddService<LRN.ReportsApi.Filters.RequireLabAccessFilter>();
+});
 builder.Services.AddResponseCompression(options =>
 {
     options.EnableForHttps = true;

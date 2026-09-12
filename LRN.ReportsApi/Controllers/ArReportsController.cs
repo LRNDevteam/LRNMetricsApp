@@ -1,6 +1,7 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Security.Claims;
 using LRN.ReportsApi.Models;
+using LRN.ReportsApi.Security;
 using LRN.ReportsApi.Services;
 using LRN.ReportsApi.Services.ArReports;
 using Microsoft.AspNetCore.Mvc;
@@ -24,16 +25,19 @@ public sealed class ArReportsController : ControllerBase
 
     private readonly IArActivityReportRepository _repository;
     private readonly IDenialWorkflowService _workflowService;
+    private readonly ILabAccess _labAccess;
     private readonly ILogger<ArReportsController> _logger;
 
     public ArReportsController(
         IArActivityReportRepository repository,
         IDenialWorkflowService workflowService,
-        ILogger<ArReportsController> logger)
+        ILogger<ArReportsController> logger,
+        ILabAccess labAccess)
     {
         _repository = repository;
         _workflowService = workflowService;
         _logger = logger;
+        _labAccess = labAccess;
     }
 
     // ==================================================================================
@@ -193,20 +197,11 @@ public sealed class ArReportsController : ControllerBase
         }
     }
 
-    private async Task<bool> CanAccessLabAsync(int labId, CancellationToken ct)
-    {
-        if (IsAdminFromToken()) return true;
-
-        var tokenLabIds = User.Claims
-            .Where(c => string.Equals(c.Type, "lab_id", StringComparison.OrdinalIgnoreCase))
-            .Select(c => int.TryParse(c.Value, out var id) ? id : 0)
-            .Where(id => id > 0)
-            .ToHashSet();
-        if (tokenLabIds.Count > 0) return tokenLabIds.Contains(labId);
-
-        var labs = await _workflowService.GetLabsForUserAsync(CurrentUserName(), ct);
-        return labs.Any(lab => lab.LabId == labId);
-    }
+    // The third copy of this rule in the API before F4. Now delegated, so there is one
+    // implementation to keep correct. The route-level RequireLabAccessFilter also covers this
+    // controller; the in-action calls stay because they return this screen's own wording.
+    private Task<bool> CanAccessLabAsync(int labId, CancellationToken ct) =>
+        _labAccess.CanAccessAsync(User, labId, ct);
 
     private ObjectResult LabAccessDenied()
         => StatusCode(StatusCodes.Status403Forbidden, new { message = "Access denied. You can run AR reports only for your authorized labs." });
@@ -214,7 +209,10 @@ public sealed class ArReportsController : ControllerBase
     private static string NormalizeRoleToken(string? value)
         => new((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
 
-    private bool IsAdminFromToken() => NormalizeRoleToken(FirstClaim(ClaimTypes.Role, "role", "roles")).Contains("ADMIN");
+    // HIPAA finding F10. Was: normalise the FIRST role claim, then ask whether it CONTAINED
+    // "ADMIN". "Non Admin", "Admin Assistant" and "Administrative Reviewer" all passed, and an
+    // admin whose token listed another role first did not.
+    private bool IsAdminFromToken() => _labAccess.IsAdmin(User);
 
     /// <summary>
     /// Mirrors DenialWorkflowController.IsReviewerOnly. Both must agree, or the report offers a

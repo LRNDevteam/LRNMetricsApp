@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using LRN.ReportsApi.Models;
 
 namespace LRN.ReportsApi.Services;
@@ -10,6 +10,18 @@ public interface IDenialWorkflowExportJobService
     IReadOnlyList<ClaimExportJobSummary> ListJobs(string requestedBy);
     ClaimExportFile? GetCompletedFile(string jobId, string requestedBy);
     ClaimExportStatusResponse? Cancel(string jobId, string requestedBy);
+
+    /// <summary>
+    /// The lab this job was started for, or null when the job is unknown to this caller.
+    ///
+    /// <para>
+    /// HIPAA finding F4. Jobs are already scoped to the user who started them, so one user cannot
+    /// fetch another's file. The gap this closes is narrower and slower: a user whose access to a
+    /// lab is revoked between starting an export and downloading it. Without a re-check at download
+    /// time, the file outlives the entitlement that justified it.
+    /// </para>
+    /// </summary>
+    int? GetJobLabId(string jobId, string requestedBy);
 }
 
 public sealed record ClaimExportFile(string FilePath, string FileName, string ContentType);
@@ -180,6 +192,20 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
         }
 
         return live.OrderByDescending(x => x.CreatedOnUtc).Take(100).ToList();
+    }
+
+    public int? GetJobLabId(string jobId, string requestedBy)
+    {
+        if (Jobs.TryGetValue(jobId, out var state) && CanAccess(state, requestedBy))
+            return state.LabId;
+
+        // Not in memory after a restart: durable history still records which lab it was for.
+        var h = _history.Get(jobId);
+        if (h is null) return null;
+        if (!string.IsNullOrWhiteSpace(requestedBy) && !string.IsNullOrWhiteSpace(h.RequestedBy)
+            && !string.Equals(h.RequestedBy, requestedBy, StringComparison.OrdinalIgnoreCase)) return null;
+
+        return h.LabId;
     }
 
     public ClaimExportFile? GetCompletedFile(string jobId, string requestedBy)

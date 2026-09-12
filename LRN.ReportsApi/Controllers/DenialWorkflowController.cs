@@ -1,4 +1,4 @@
-using LRN.ReportsApi.Models;
+﻿using LRN.ReportsApi.Models;
 using LRN.ReportsApi.Security;
 using LRN.ReportsApi.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -20,14 +20,16 @@ public sealed class DenialWorkflowController : ControllerBase
     private readonly IDenialWorkflowExportJobService _exportJobs;
     private readonly IDenialWorkflowUploadJobService _uploadJobs;
     private readonly IDenialWorkflowSupportService _supportService;
+    private readonly LRN.ReportsApi.Security.ILabAccess _labAccess;
     private readonly IConfiguration _configuration;
     private readonly ILogger<DenialWorkflowController> _logger;
-    public DenialWorkflowController(IDenialWorkflowService service, IDenialWorkflowExportJobService exportJobs, IDenialWorkflowUploadJobService uploadJobs, IDenialWorkflowSupportService supportService, IConfiguration configuration, ILogger<DenialWorkflowController> logger)
+    public DenialWorkflowController(IDenialWorkflowService service, IDenialWorkflowExportJobService exportJobs, IDenialWorkflowUploadJobService uploadJobs, IDenialWorkflowSupportService supportService, IConfiguration configuration, ILogger<DenialWorkflowController> logger, LRN.ReportsApi.Security.ILabAccess labAccess)
     {
         _service = service;
         _exportJobs = exportJobs;
         _uploadJobs = uploadJobs;
         _supportService = supportService;
+        _labAccess = labAccess;
         _configuration = configuration;
         _logger = logger;
     }
@@ -227,20 +229,56 @@ public sealed class DenialWorkflowController : ControllerBase
     }
 
     [HttpGet("claims/export/{jobId}")]
-    public ActionResult<ClaimExportStatusResponse> ClaimsExportStatus([FromRoute] string jobId)
+    public async Task<ActionResult<ClaimExportStatusResponse>> ClaimsExportStatus([FromRoute] string jobId, CancellationToken ct)
     {
         var requestedBy = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? string.Empty;
+        if (await JobLabDeniedAsync(jobId, requestedBy, ct) is { } denied) return denied;
+
         var status = _exportJobs.GetStatus(jobId, requestedBy);
         return status is null ? NotFound(new { message = "Export job was not found." }) : Ok(status);
     }
 
     [HttpGet("claims/export/{jobId}/download")]
-    public IActionResult DownloadClaimsExport([FromRoute] string jobId)
+    public async Task<IActionResult> DownloadClaimsExport([FromRoute] string jobId, CancellationToken ct)
     {
         var requestedBy = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? string.Empty;
+        if (await JobLabDeniedAsync(jobId, requestedBy, ct) is { } denied) return denied;
+
         var file = _exportJobs.GetCompletedFile(jobId, requestedBy);
         if (file is null) return NotFound(new { message = "Export file is not ready yet." });
         return PhysicalFile(file.FilePath, file.ContentType, file.FileName);
+    }
+
+    /// <summary>
+    /// A 403 when the job belongs to a lab the caller may no longer use, otherwise null.
+    ///
+    /// <para>
+    /// HIPAA finding F4. These endpoints carry a jobId rather than a labId, so the route-level
+    /// RequireLabAccessFilter has nothing to check. Jobs are already scoped to the user who started
+    /// them, so this is not about one user reading another's file - it is about a user whose access
+    /// to a lab is revoked between starting an export and downloading it. Without the re-check the
+    /// file outlives the entitlement that justified producing it.
+    /// </para>
+    /// <para>
+    /// An unknown job returns null and falls through to the endpoint's own NotFound, so this never
+    /// turns "no such job" into "forbidden" and confirms a job id by the difference.
+    /// </para>
+    /// </summary>
+    private async Task<ObjectResult?> JobLabDeniedAsync(string jobId, string requestedBy, CancellationToken ct)
+    {
+        var labId = _exportJobs.GetJobLabId(jobId, requestedBy);
+        if (labId is null or <= 0) return null;
+
+        if (await _labAccess.CanAccessAsync(User, labId.Value, ct)) return null;
+
+        _logger.LogWarning(
+            "Export job access denied. User={User} JobId={JobId} LabId={LabId}",
+            requestedBy, jobId, labId);
+
+        return new ObjectResult(new { message = LRN.ReportsApi.Security.LabAccess.DeniedMessage })
+        {
+            StatusCode = StatusCodes.Status403Forbidden
+        };
     }
 
     [HttpDelete("claims/export/{jobId}")]

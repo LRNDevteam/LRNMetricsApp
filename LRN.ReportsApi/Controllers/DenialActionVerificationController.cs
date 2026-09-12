@@ -1,5 +1,6 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using LRN.ReportsApi.Models;
+using LRN.ReportsApi.Security;
 using LRN.ReportsApi.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,11 +13,13 @@ public sealed class DenialActionVerificationController : ControllerBase
 {
     private readonly IDenialActionChangeVerificationRepository _repo;
     private readonly IDenialWorkflowService _workflowService;
+    private readonly ILabAccess _labAccess;
 
-    public DenialActionVerificationController(IDenialActionChangeVerificationRepository repo, IDenialWorkflowService workflowService)
+    public DenialActionVerificationController(IDenialActionChangeVerificationRepository repo, IDenialWorkflowService workflowService, ILabAccess labAccess)
     {
         _repo = repo;
         _workflowService = workflowService;
+        _labAccess = labAccess;
     }
 
     [HttpGet]
@@ -97,33 +100,21 @@ public sealed class DenialActionVerificationController : ControllerBase
     private ActionResult AccessDenied() => StatusCode(StatusCodes.Status403Forbidden, new { message = "Access denied. Action Change Verification is available only for AR Manager." });
     private ActionResult LabAccessDenied() => StatusCode(StatusCodes.Status403Forbidden, new { message = "Access denied. You can verify denial actions only for your assigned lab." });
 
-    private async Task<bool> CanAccessLabAsync(int labId, CancellationToken ct)
-    {
-        if (IsAdminFromToken()) return true;
-        var tokenLabIds = User.Claims
-            .Where(c => string.Equals(c.Type, "lab_id", StringComparison.OrdinalIgnoreCase))
-            .Select(c => int.TryParse(c.Value, out var id) ? id : 0)
-            .Where(id => id > 0)
-            .ToHashSet();
-        if (tokenLabIds.Count > 0) return tokenLabIds.Contains(labId);
+    // Delegates to the shared service. The local copy of this rule was the only place the check
+    // existed, which is what finding F4 was about; keeping a second implementation here is how the
+    // two would drift apart again.
+    private Task<bool> CanAccessLabAsync(int labId, CancellationToken ct) =>
+        _labAccess.CanAccessAsync(User, labId, ct);
 
-        var labs = await _workflowService.GetLabsForUserAsync(CurrentUserName(), ct);
-        return labs.Any(lab => lab.LabId == labId);
-    }
+    // HIPAA finding F10. These used to normalise the FIRST role claim and ask whether it CONTAINED
+    // "ADMIN" or "ARMANAGER". Two faults in one line: a user whose first claim happened to be some
+    // other role silently lost their rights, and any role whose name merely contains the word -
+    // "Non Admin", "Admin Assistant", "Administrative Reviewer" - was granted them. Now matched
+    // exactly, against every role claim the token carries.
+    private bool IsAdminFromToken() => _labAccess.IsAdmin(User);
 
-    private bool IsAdminFromToken()
-    {
-        var role = FirstClaim(ClaimTypes.Role, "role", "roles");
-        var token = new string((role ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
-        return token.Contains("ADMIN");
-    }
-
-    private bool IsArManagerFromToken()
-    {
-        var role = FirstClaim(ClaimTypes.Role, "role", "roles");
-        var token = new string((role ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
-        return token.Contains("ARMANAGER") || token.Contains("ADMIN");
-    }
+    private bool IsArManagerFromToken() =>
+        LabAccess.HasRole(User, "AR Manager", "ARManager") || _labAccess.IsAdmin(User);
 
     private string CurrentUserName() => FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow";
 
