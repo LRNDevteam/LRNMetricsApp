@@ -90,8 +90,15 @@ def mask(value: str) -> str:
 def scan():
     findings = collections.defaultdict(set)
 
+    self_path = pathlib.Path(__file__).resolve()
+
     for rel in tracked_files():
         path = ROOT / rel
+
+        # The scanner's own regexes and docstring contain every pattern it looks for, so it
+        # matches itself. Skipping it is not a blind spot: there is nothing in here to leak.
+        if path.resolve() == self_path:
+            continue
         if not path.is_file() or path.stat().st_size > MAX_BYTES:
             continue
         try:
@@ -111,7 +118,10 @@ def scan():
                         continue
 
                     if kind == 'cert check off':
-                        bucket = 'ALLOWED (Development)' if is_dev else 'ACTIONABLE'
+                        # A document explaining why the setting is dangerous has to quote it.
+                        bucket = ('ALLOWED (Development)' if is_dev
+                                  else 'DOC/TEST' if is_doc
+                                  else 'ACTIONABLE')
                         shown = 'True'
                     else:
                         bucket = 'DOC/TEST' if is_doc else 'ACTIONABLE'
