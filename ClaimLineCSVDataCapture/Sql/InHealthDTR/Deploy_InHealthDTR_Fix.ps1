@@ -1,4 +1,4 @@
-# =====================================================================
+﻿# =====================================================================
 # InHealthDTR Database Fix Deployment Script
 # =====================================================================
 # This script deploys the database changes to fix the column mismatch
@@ -35,13 +35,13 @@ Write-Host ""
 
 # Build connection string
 if ($UseWindowsAuth) {
-	$connectionString = "Server=$ServerName;Database=$DatabaseName;Integrated Security=True;TrustServerCertificate=True;"
+	$connectionString = "Server=$ServerName;Database=$DatabaseName;Integrated Security=True;TrustServerCertificate=False;"
 } else {
 	if ([string]::IsNullOrEmpty($Username) -or [string]::IsNullOrEmpty($Password)) {
 		Write-Host "ERROR: Username and Password required for SQL Authentication" -ForegroundColor Red
 		exit 1
 	}
-	$connectionString = "Server=$ServerName;Database=$DatabaseName;User Id=$Username;Password=$Password;TrustServerCertificate=True;"
+	$connectionString = "Server=$ServerName;Database=$DatabaseName;User Id=$Username;Password=$Password;TrustServerCertificate=False;"
 }
 
 function Execute-SqlScript {

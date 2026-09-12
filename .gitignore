@@ -24,3 +24,50 @@ appsettings.Local.json
 # absent on a clean clone", but the rule was missing and the SharePoint app-registration secret was
 # committed. The tracked template is appsettings.Secrets.example.json — keep real values out.
 appsettings.Secrets.json
+
+# ── Merged from LabMetricsDashboard/gitignore (P0-A) ────────────────────────────────────────
+# That file had no leading dot, so git never read it: every rule in it was decorative. The rules
+# worth keeping are folded in here, where they apply to the whole repository.
+
+# Build and publish output
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+artifacts/
+_artifacts/
+_publish_test/
+publish/
+[Tt]est[Rr]esult*/
+*.binlog
+
+# Front-end dependencies and generated bundles.
+#
+# dist/ is scoped with a leading slash and an explicit exception. A bare "dist/" matches at every
+# depth, which would swallow LabMetricsDashboard/wwwroot/lib/*/dist - the VENDORED bootstrap,
+# jQuery and jQuery-validation files the site actually serves. Those are committed on purpose and
+# there is no build step that regenerates them, so ignoring them would break the site on a clean
+# clone.
+**/node_modules/
+/LRN.WebUI/dist/
+/LRN.WebUI/build/
+/LRN.WebUI/.vite/
+/LRN.WebUI/.cache/
+**/.vercel/
+!LabMetricsDashboard/wwwroot/lib/**
+
+# Secrets, certificates and per-machine environment
+appsettings.*.local.json
+appsettings.Development.local.json
+*.pfx
+*.publishsettings
+.env
+.env.*
+!.env.example
+secrets.json
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+*.bak
+*.orig
+*.rej

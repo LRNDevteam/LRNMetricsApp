@@ -1,4 +1,4 @@
-{
+﻿{
   "//": [
     "Lab config for the LRNLabDemo demo lab, derived from the real PCRLabsofAmerica.json.",
     "",
@@ -29,7 +29,7 @@
   "LRNLabDemo": {
     "//DbLabName": "Not set on purpose - step 4 re-stamps the demo data to LabName 'LRNLabDemo', so the config key already matches the data. Only add DbLabName if you skip the re-stamp.",
 
-    "DbConnectionString": "Server=ReportEngine\\SQLEXPRESS;Database=LRNLabDemo;User Id=sa;Password=<demo-password>;TrustServerCertificate=True;",
+    "DbConnectionString": "Server=ReportEngine\\SQLEXPRESS;Database=LRNLabDemo;User Id=sa;Password=<demo-password>;TrustServerCertificate=False;",
 
     "//paths": "Demo copies, NOT PCR's live folders. Create these and copy PCR's current files in once.",
     "ProductionMasterCsvPath": "C:\\LRN-Files\\Automation\\LRN-Demo\\LRN-Input\\LRNLabDemo\\",

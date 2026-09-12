@@ -132,6 +132,16 @@ else
         "expected on a developer machine and a misconfiguration on a server.");
 }
 
+// ── The signing key must exist before anything else starts ─────────────────────────────────
+// RequireVaultSecrets above only fires when the vault was actually read. A server whose
+// KeyVault:Uri is empty, or whose vault holds no JwtSigningKey, previously started cleanly and
+// failed later: WorkflowJwtIssuer throws on the first token request, so the site comes up, the
+// dashboard loads, and only the denial workflow is dead. That reads as a workflow bug rather than
+// a deployment fault, and it can survive a release unnoticed.
+//
+// Development is exempt so a developer with no vault access can still run the rest of the site.
+RequireSigningKey(builder.Configuration, builder.Environment);
+
 // Bind the "LabConfig" section from appsettings.json.
 var labConfigOptions = builder.Configuration
     .GetSection(LabConfigOptions.Section)
@@ -1084,6 +1094,38 @@ static bool ApplyKeyVault(IConfigurationBuilder configuration, string? uri)
 /// only the first one fails loudly on its own. The message names the secret to create, in the
 /// '--' form you type into the vault, because that is the only form that helps at 2am.
 /// </summary>
+/// <summary>
+/// Outside Development, the JWT signing key must be present and long enough to sign with.
+/// </summary>
+/// <remarks>
+/// The 32-character floor is not arbitrary: HMAC-SHA256 has a 256-bit key, and both
+/// WorkflowJwtIssuer and the Reports API reject anything shorter. Checking it here turns a runtime
+/// failure on the first workflow request into a startup failure the deployment cannot miss.
+/// </remarks>
+static void RequireSigningKey(IConfiguration configuration, IWebHostEnvironment environment)
+{
+    if (environment.IsDevelopment()) return;
+
+    const string key = "DenialWorkflowAuth:JwtSigningKey";
+    var value = configuration[key];
+
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        throw new InvalidOperationException(
+            $"{key} is not configured. Set it in Azure Key Vault as the secret " +
+            "'DenialWorkflowAuth--JwtSigningKey', or as the environment variable " +
+            "'DenialWorkflowAuth__JwtSigningKey'. It must be at least 32 characters and IDENTICAL " +
+            "in LabMetricsDashboard and LRN.ReportsApi. See docs/SECRETS.md.");
+    }
+
+    if (value.Trim().Length < 32)
+    {
+        throw new InvalidOperationException(
+            $"{key} is configured but is only {value.Trim().Length} characters. It must be at " +
+            "least 32. See docs/SECRETS.md.");
+    }
+}
+
 static void RequireVaultSecrets(IConfiguration configuration, params string[] requiredKeys)
 {
     var missing = requiredKeys.Where(k => string.IsNullOrWhiteSpace(configuration[k])).ToArray();

@@ -1,4 +1,4 @@
-using LRN.ReportsApi.Models;
+﻿using LRN.ReportsApi.Models;
 using LRN.ReportsApi.Services;
 using LRN.ReportsApi.Security;
 using System.Security.Claims;
@@ -50,6 +50,13 @@ if (ApplyKeyVault(builder.Configuration, builder.Configuration["KeyVault:Uri"]))
         "ConnectionStrings:DefaultConnection",
         "DenialWorkflowAuth:JwtSigningKey");
 }
+
+// ── The signing key must exist before anything else starts ─────────────────────────────────
+// RequireVaultSecrets above runs only when the vault was read. Without this, an API deployed with
+// no signing key starts happily and rejects every workflow token at runtime, which looks like an
+// authentication bug rather than a missing secret. Development is exempt so the API still runs on
+// a machine with no vault access.
+RequireSigningKey(builder.Configuration, builder.Environment);
 
 var apiFileLogSection = builder.Configuration.GetSection("Logging:File");
 try
@@ -385,6 +392,34 @@ static bool ApplyKeyVault(IConfigurationBuilder configuration, string? uri)
 /// that names the symptom and hides the cause. Checking here lets the message name the secret
 /// that is missing, at the moment the app would otherwise have carried on.
 /// </summary>
+/// <summary>
+/// Outside Development, the JWT signing key must be present and long enough to verify with.
+/// It has to be byte-identical to the one LabMetricsDashboard signs with, or every token fails.
+/// </summary>
+static void RequireSigningKey(IConfiguration configuration, IWebHostEnvironment environment)
+{
+    if (environment.IsDevelopment()) return;
+
+    const string key = "DenialWorkflowAuth:JwtSigningKey";
+    var value = configuration[key];
+
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        throw new InvalidOperationException(
+            $"{key} is not configured. Set it in Azure Key Vault as the secret " +
+            "'DenialWorkflowAuth--JwtSigningKey', or as the environment variable " +
+            "'DenialWorkflowAuth__JwtSigningKey'. It must be at least 32 characters and IDENTICAL " +
+            "in LabMetricsDashboard and LRN.ReportsApi. See docs/SECRETS.md.");
+    }
+
+    if (value.Trim().Length < 32)
+    {
+        throw new InvalidOperationException(
+            $"{key} is configured but is only {value.Trim().Length} characters. It must be at " +
+            "least 32. See docs/SECRETS.md.");
+    }
+}
+
 static void RequireVaultSecrets(IConfiguration configuration, params string[] requiredKeys)
 {
     var missing = requiredKeys.Where(k => string.IsNullOrWhiteSpace(configuration[k])).ToArray();

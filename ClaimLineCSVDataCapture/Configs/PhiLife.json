@@ -1,4 +1,4 @@
-{
+﻿{
   // ─────────────────────────────────────────────────────────────────────────────
   // PhiLife lab configuration
   //
@@ -18,7 +18,7 @@
 
   // ── Connection string for the PhiLife SQL Server database ─────────────────
   // FILL IN: replace with the actual PhiLife DB connection string
-  "DbConnectionString": "Server=YOUR_SERVER;Database=YOUR_PHILIFE_DB;Integrated Security=True;TrustServerCertificate=True;",
+  "DbConnectionString": "Server=YOUR_SERVER;Database=YOUR_PHILIFE_DB;Integrated Security=True;TrustServerCertificate=False;",
 
   // ── CSV ingestion flags ───────────────────────────────────────────────────
   // ClaimLineInsert MUST be true to enable file processing.
