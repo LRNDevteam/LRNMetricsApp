@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Http.Timeouts;
@@ -11,6 +11,8 @@ public class PredictionController : Controller
     private const int PageSize = 50;
 
     private readonly LabSettings _labSettings;
+    // HIPAA finding F3: the lab list must come from the USER, never from configuration.
+    private readonly LabMetricsDashboard.Services.Security.ILabAccessService _labAccess;
     private readonly LabCsvFileResolver _resolver;
     private readonly PredictionReportParserService _parser;
     private readonly IPredictionDbRepository _dbRepo;
@@ -20,6 +22,7 @@ public class PredictionController : Controller
 
     public PredictionController(
         LabSettings labSettings,
+        LabMetricsDashboard.Services.Security.ILabAccessService labAccess,
         LabCsvFileResolver resolver,
         PredictionReportParserService parser,
         IPredictionDbRepository dbRepo,
@@ -28,6 +31,7 @@ public class PredictionController : Controller
         ILogger<PredictionController> logger)
     {
         _labSettings      = labSettings;
+        _labAccess = labAccess;
         _resolver         = resolver;
         _parser           = parser;
         _dbRepo           = dbRepo;
@@ -58,7 +62,7 @@ public class PredictionController : Controller
         string? filterPredictionStatus,
         int page = 1)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         var labConfig = !string.IsNullOrEmpty(selectedLab) && _labSettings.Labs.TryGetValue(selectedLab, out var cfg)
@@ -503,7 +507,7 @@ public class PredictionController : Controller
         string? tab = null,
         int page = 1)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         var labConfig = !string.IsNullOrEmpty(selectedLab) && _labSettings.Labs.TryGetValue(selectedLab, out var cfg)
@@ -951,7 +955,7 @@ public class PredictionController : Controller
         string? filterForecastingPayabilitySubstatus,
         string? filterPredictionStatus)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
         var labConfig     = !string.IsNullOrEmpty(selectedLab) && _labSettings.Labs.TryGetValue(selectedLab, out var cfg) ? cfg : null;
 
@@ -1019,7 +1023,7 @@ public class PredictionController : Controller
         string? filterPanelName,
         string? filterCPTCode)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
         var labConfig     = !string.IsNullOrEmpty(selectedLab) && _labSettings.Labs.TryGetValue(selectedLab, out var cfg) ? cfg : null;
 

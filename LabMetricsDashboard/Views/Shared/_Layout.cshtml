@@ -1,7 +1,8 @@
-@using LabMetricsDashboard.Models
+﻿@using LabMetricsDashboard.Models
 @using LabMetricsDashboard.Models.Menu
 @inject LabSettings LabSettingsInstance
 @inject LabConfigOptions LabConfigInstance
+@inject LabMetricsDashboard.Services.Security.ILabAccessService LabAccess
 @inject IConfiguration Configuration
 @* Same source of truth the navbar uses, so the Reimbursement Insights shortcuts below are
    hidden from roles that have no mapping for it — otherwise the icon would open a new tab
@@ -995,7 +996,6 @@
         @{
             var selectedLab = ViewData["SelectedLab"] as string;
             var pageLabel = ViewData["PageLabel"] as string;
-            var allLabKeys = LabSettingsInstance.Labs.Keys.OrderBy(x => x).ToList();
 
             // Restrict the navbar lab selector to labs the signed-in user is assigned to.
             // Admins see every lab. Anonymous (login screen) sees nothing.
@@ -1012,14 +1012,13 @@
             var isEtl = (User?.IsInRole("ETL") ?? false) || (User?.IsInRole("Etl") ?? false);
             var canSeePolicyMaster = isLrnAdmin || isPayerPolicyAdmin || isReportsAnalyst || isEtl;
             var canSeeLabMaster = isLrnAdmin || isReportsManager || isReportsAnalyst || isEtl;
-            var userLabClaims = User?.Claims?
-            .Where(c => c.Type == "LabName")
-            .Select(c => c.Value)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            // Admins get every lab except a demo lab they were not explicitly assigned —
-            // see LabConfigOptions.DemoLabs.
-            var availableLabs = LabConfigInstance.VisibleLabs(allLabKeys, userLabClaims, isAdmin);
+            // HIPAA finding F3. The same service the controllers and the global filter use, so the
+            // picker cannot offer a lab the server would refuse, and cannot hide one it would allow.
+            // This used to be a second, independent copy of the rule computed from the claims here;
+            // two copies of an access rule is one copy too many.
+            // Admins get every lab except a demo lab they were not explicitly assigned - see
+            // LabConfigOptions.DemoLabs, which VisibleLabs still applies underneath.
+            var availableLabs = LabAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
 
             // For the navbar lab selector: priority order:
             //   1. ViewData["SelectedLab"]  — set by most controllers after resolving the lab

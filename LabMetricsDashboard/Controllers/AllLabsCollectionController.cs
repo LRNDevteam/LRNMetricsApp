@@ -1,4 +1,4 @@
-using LabMetricsDashboard.Models;
+﻿using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -24,6 +24,9 @@ namespace LabMetricsDashboard.Controllers;
 ///   </item>
 /// </list>
 /// </summary>
+// Shows every lab's collection figures side by side, which is precisely what a lab-scoped user
+// must not see. There is no per-lab variant of this screen, so the whole controller is Admin-only.
+[Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
 public class AllLabsCollectionController : Controller
 {
     private readonly LabSettings _labSettings;

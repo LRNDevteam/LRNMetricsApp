@@ -1,4 +1,4 @@
-using LabMetricsDashboard.Models;
+﻿using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,7 +12,16 @@ public sealed class InsightTemplateController : Controller
 {
     private readonly LabSettings _labSettings;
 
-    public InsightTemplateController(LabSettings labSettings) => _labSettings = labSettings;
+    // HIPAA finding F3: the lab list must come from the USER, never from configuration.
+    private readonly LabMetricsDashboard.Services.Security.ILabAccessService _labAccess;
+
+    public InsightTemplateController(
+        LabSettings labSettings,
+        LabMetricsDashboard.Services.Security.ILabAccessService labAccess)
+    {
+        _labSettings = labSettings;
+        _labAccess = labAccess;
+    }
 
     [HttpGet]
     public IActionResult Index(string? lab, string? report)
@@ -36,7 +45,7 @@ public sealed class InsightTemplateController : Controller
 
     private IActionResult Render(string? lab, string? report, string title)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
         if (!NotesController.TryResolveReportName(report, out var reportName)
             && !string.IsNullOrWhiteSpace(report))

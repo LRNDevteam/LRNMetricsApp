@@ -1,4 +1,4 @@
-using ClosedXML.Excel;
+﻿using ClosedXML.Excel;
 using DocumentFormat.OpenXml.EMMA;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Models.DenialWorkflow;
@@ -22,14 +22,16 @@ public sealed class DenialWorkflowController : Controller
     private readonly IUserManagementRepository _userRepository;
     private readonly WorkflowJwtIssuer _jwtIssuer;
     private readonly IConfiguration _configuration;
+    private readonly LabMetricsDashboard.Services.Security.ILabAccessService _labAccess;
 
-    public DenialWorkflowController(IDenialWorkflowApiClient workflowApi, IDenialRecordRepository denialRepository, IUserManagementRepository userRepository, WorkflowJwtIssuer jwtIssuer, IConfiguration configuration)
+    public DenialWorkflowController(IDenialWorkflowApiClient workflowApi, IDenialRecordRepository denialRepository, IUserManagementRepository userRepository, WorkflowJwtIssuer jwtIssuer, IConfiguration configuration, LabMetricsDashboard.Services.Security.ILabAccessService labAccess)
     {
         _workflowApi = workflowApi;
         _denialRepository = denialRepository;
         _userRepository = userRepository;
         _jwtIssuer = jwtIssuer;
         _configuration = configuration;
+        _labAccess = labAccess;
     }
 
     [AllowAnonymous]
@@ -71,7 +73,7 @@ public sealed class DenialWorkflowController : Controller
         // controls that would 403 on submit.
         if (IsLabUserRole()) return RedirectToReactWorkflow();
 
-        var labs = (await _denialRepository.GetLabsAsync(cancellationToken)).OrderBy(x => x.LabName).ToList();
+        var labs = (AllowedLabs(await _denialRepository.GetLabsAsync(cancellationToken))).OrderBy(x => x.LabName).ToList();
         var selectedLab = ResolveSelectedLab(labs, labId, lab);
         if (selectedLab == null) return View(new DenialWorkflowPageViewModel());
 
@@ -140,7 +142,7 @@ public sealed class DenialWorkflowController : Controller
         // the export path to hand a view-only role.
         if (IsLabUserRole()) return RedirectToReactWorkflow();
 
-        var labs = (await _denialRepository.GetLabsAsync(cancellationToken)).OrderBy(x => x.LabName).ToList();
+        var labs = (AllowedLabs(await _denialRepository.GetLabsAsync(cancellationToken))).OrderBy(x => x.LabName).ToList();
         var selectedLab = ResolveSelectedLab(labs, labId, lab);
         if (selectedLab == null) return NotFound("No lab found.");
 
@@ -505,6 +507,14 @@ public sealed class DenialWorkflowController : Controller
         if (string.IsNullOrWhiteSpace(url)) return Forbid();
         return Redirect(url.Contains('#') ? url : $"{url}#aging");
     }
+
+    // HIPAA finding F3. The repository returns every lab; this screen must only ever offer the
+    // ones this user is entitled to. Filtering in one place keeps every usage honest, and the
+    // global RequireLabAccessFilter still catches a labId typed straight into the URL.
+    private List<LabOption> AllowedLabs(IEnumerable<LabOption> labs) =>
+        (labs ?? Enumerable.Empty<LabOption>())
+            .Where(x => _labAccess.CanAccess(User, x.LabName))
+            .ToList();
 }
 
 public sealed class InsightAssignmentRow

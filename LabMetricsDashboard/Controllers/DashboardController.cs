@@ -1,4 +1,4 @@
-using LabMetricsDashboard.Models;
+﻿using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Models.Notes;
 using System.Diagnostics;
 using LabMetricsDashboard.Services;
@@ -46,6 +46,8 @@ public class DashboardController : Controller
     }
 
     private readonly LabSettings _labSettings;
+    // HIPAA finding F3: the lab list must come from the USER, never from configuration.
+    private readonly LabMetricsDashboard.Services.Security.ILabAccessService _labAccess;
     private readonly LabCsvFileResolver _resolver;
     private readonly CsvParserService _csvParser;
     private readonly IClinicSummaryRepository _clinicSummaryRepo;
@@ -63,6 +65,7 @@ public class DashboardController : Controller
 
     public DashboardController(
         LabSettings labSettings,
+        LabMetricsDashboard.Services.Security.ILabAccessService labAccess,
         LabCsvFileResolver resolver,
         CsvParserService csvParser,
         IClinicSummaryRepository clinicSummaryRepo,
@@ -79,6 +82,7 @@ public class DashboardController : Controller
         IMemoryCache cache)
     {
         _labSettings = labSettings;
+        _labAccess = labAccess;
         _resolver = resolver;
         _csvParser = csvParser;
         _clinicSummaryRepo = clinicSummaryRepo;
@@ -109,7 +113,7 @@ public class DashboardController : Controller
         string? filterFirstBillTo,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
         filterPayerName = NormalizeFilterValues(filterPayerName);
         filterPanelName = NormalizeFilterValues(filterPanelName);
@@ -617,7 +621,7 @@ public class DashboardController : Controller
         int page = 1,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         _labSettings.Labs.TryGetValue(selectedLab, out var labConfig);
@@ -904,7 +908,7 @@ public class DashboardController : Controller
         int page = 1,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         _labSettings.Labs.TryGetValue(selectedLab, out var labConfig);
@@ -1103,7 +1107,7 @@ public class DashboardController : Controller
         string? filterFirstBillTo,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         // Normalize: remove empty entries
@@ -1280,7 +1284,7 @@ public class DashboardController : Controller
         string? filterFirstBillTo,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         if (string.IsNullOrWhiteSpace(selectedLab)
@@ -1343,7 +1347,7 @@ public class DashboardController : Controller
         string? filterFirstBillTo,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         if (string.IsNullOrWhiteSpace(selectedLab)
@@ -1406,7 +1410,7 @@ public class DashboardController : Controller
         string? filterFirstBillTo,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         if (string.IsNullOrWhiteSpace(selectedLab)
@@ -1468,7 +1472,7 @@ public class DashboardController : Controller
         string? filterFirstBillTo,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         filterClinicNames   = filterClinicNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
@@ -1598,7 +1602,7 @@ public class DashboardController : Controller
         string? filterFirstBillTo,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         // Normalize: remove empty entries
@@ -1753,7 +1757,7 @@ public class DashboardController : Controller
         string? filterFirstBillTo,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
         filterPayerName = NormalizeFilterValues(filterPayerName);
         filterPanelName = NormalizeFilterValues(filterPanelName);
@@ -1804,7 +1808,7 @@ public class DashboardController : Controller
         string? filterFirstBillTo,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         filterSalesRepNames = filterSalesRepNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
@@ -2191,7 +2195,7 @@ public class DashboardController : Controller
         }
 
         if (availableLabs.Count == 0)
-            availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+            availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
 
         var selectedLab = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
         FirstPaintLog.Write(_logger, "Production", selectedLab ?? "", "request", 0,
@@ -2924,7 +2928,7 @@ public class DashboardController : Controller
         string? filterFirstBilledTo,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         filterPayerNames = filterPayerNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
@@ -3333,7 +3337,7 @@ public class DashboardController : Controller
         string? filterFirstBilledTo,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         filterPayerNames = filterPayerNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];

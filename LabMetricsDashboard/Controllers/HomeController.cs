@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Diagnostics;
@@ -13,6 +13,8 @@ public class HomeController : Controller
 
     private readonly ILogger<HomeController> _logger;
     private readonly LabSettings _labSettings;
+    // HIPAA finding F3: the lab list must come from the USER, never from configuration.
+    private readonly LabMetricsDashboard.Services.Security.ILabAccessService _labAccess;
     private readonly LabCsvFileResolver _resolver;
     private readonly IPredictionDbRepository _predictionRepo;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache _cache;
@@ -20,12 +22,14 @@ public class HomeController : Controller
     public HomeController(
         ILogger<HomeController> logger,
         LabSettings labSettings,
+        LabMetricsDashboard.Services.Security.ILabAccessService labAccess,
         LabCsvFileResolver resolver,
         IPredictionDbRepository predictionRepo,
         Microsoft.Extensions.Caching.Memory.IMemoryCache cache)
     {
         _logger = logger;
         _labSettings = labSettings;
+        _labAccess = labAccess;
         _resolver = resolver;
         _predictionRepo = predictionRepo;
         _cache = cache;
@@ -45,7 +49,7 @@ public class HomeController : Controller
         // (via ?lab=) but reverted on the next navigation. Resolving here writes the cookie
         // and sets ViewData["SelectedLab"] so the choice carries to every other page — the
         // same pattern every content controller (Dashboard, CollectionSummary, …) already uses.
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         ViewData["SelectedLab"] = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         var resolvedSort = string.IsNullOrWhiteSpace(sort) ? "latest" : sort;
@@ -62,7 +66,7 @@ public class HomeController : Controller
 
         await Task.WhenAll(runInfoTasks.Values);
 
-        var tiles = _labSettings.Labs.Keys
+        var tiles = _labAccess.GetAllowedLabNames(User)
             .OrderBy(name => name)
             .Select(labName =>
             {

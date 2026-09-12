@@ -35,15 +35,18 @@ public class DenialDashboardController : Controller
 	};
 
 	private readonly IDenialDashboardApiClient _dashboardApi;
+	private readonly LabMetricsDashboard.Services.Security.ILabAccessService _labAccess;
 	private readonly IUserManagementRepository _userRepository;
 	private readonly LabConfigOptions _labConfig;
 
 	public DenialDashboardController(
 		IDenialDashboardApiClient dashboardApi,
+		LabMetricsDashboard.Services.Security.ILabAccessService labAccess,
 		IUserManagementRepository userRepository,
 		LabConfigOptions labConfig)
 	{
 		_dashboardApi = dashboardApi;
+		_labAccess = labAccess;
 		_userRepository = userRepository;
 		_labConfig = labConfig;
 	}
@@ -63,7 +66,7 @@ public class DenialDashboardController : Controller
 	{
 		filters ??= new DenialDashboardFilters();
 
-		var labs = (await _dashboardApi.GetLabsAsync(cancellationToken))
+		var labs = (AllowedLabs(await _dashboardApi.GetLabsAsync(cancellationToken)))
 			.OrderBy(x => x.LabName)
 			.ThenBy(x => x.LabId)
 			.ToList();
@@ -196,7 +199,7 @@ public class DenialDashboardController : Controller
 	public async Task<IActionResult> LineItemGrid([FromQuery] DenialDashboardFilters filters, [FromQuery] string? lab, CancellationToken cancellationToken)
 	{
 		filters ??= new DenialDashboardFilters();
-		var labs = (await _dashboardApi.GetLabsAsync(cancellationToken)).OrderBy(x => x.LabName).ThenBy(x => x.LabId).ToList();
+		var labs = (AllowedLabs(await _dashboardApi.GetLabsAsync(cancellationToken))).OrderBy(x => x.LabName).ThenBy(x => x.LabId).ToList();
 		if (labs.Count == 0) return PartialView("_DenialLineItemGrid", new LineItemGridViewModel());
 
 		var currentLab = ResolveSelectedLab(HttpContext, labs, filters.LabId, lab);
@@ -212,7 +215,7 @@ public class DenialDashboardController : Controller
 	public async Task<IActionResult> InsightGrid([FromQuery] DenialDashboardFilters filters, [FromQuery] string? lab, CancellationToken cancellationToken)
 	{
 		filters ??= new DenialDashboardFilters();
-		var labs = (await _dashboardApi.GetLabsAsync(cancellationToken)).OrderBy(x => x.LabName).ThenBy(x => x.LabId).ToList();
+		var labs = (AllowedLabs(await _dashboardApi.GetLabsAsync(cancellationToken))).OrderBy(x => x.LabName).ThenBy(x => x.LabId).ToList();
 		if (labs.Count == 0) return PartialView("_DenialInsightGrid", new InsightGridViewModel());
 
 		var currentLab = ResolveSelectedLab(HttpContext, labs, filters.LabId, lab);
@@ -348,7 +351,7 @@ public class DenialDashboardController : Controller
 	{
 		if (labId <= 0) return BadRequest("Lab is required.");
 
-		var labs = await _dashboardApi.GetLabsAsync(cancellationToken);
+		var labs = AllowedLabs(await _dashboardApi.GetLabsAsync(cancellationToken));
 		if (labs.All(x => x.LabId != labId)) return NotFound();
 
 		var payload = await _dashboardApi.GetFilterAutocompleteOptionsAsync(labId, cancellationToken);
@@ -363,7 +366,7 @@ public class DenialDashboardController : Controller
 	{
 		filters ??= new DenialDashboardFilters();
 
-		var labs = (await _dashboardApi.GetLabsAsync(cancellationToken))
+		var labs = (AllowedLabs(await _dashboardApi.GetLabsAsync(cancellationToken)))
 			.OrderBy(x => x.LabName)
 			.ThenBy(x => x.LabId)
 			.ToList();
@@ -549,7 +552,7 @@ public class DenialDashboardController : Controller
 		CancellationToken cancellationToken)
 	{
 		filters ??= new DenialDashboardFilters();
-		var labs = (await _dashboardApi.GetLabsAsync(cancellationToken)).OrderBy(x => x.LabName).ThenBy(x => x.LabId).ToList();
+		var labs = (AllowedLabs(await _dashboardApi.GetLabsAsync(cancellationToken))).OrderBy(x => x.LabName).ThenBy(x => x.LabId).ToList();
 		if (labs.Count == 0)
 		{
 			TempData["DenialDashboardError"] = "No labs were found for task-board export.";
@@ -1264,4 +1267,13 @@ public class DenialDashboardController : Controller
 		var diff = (7 + (value.DayOfWeek - DayOfWeek.Monday)) % 7;
 		return value.AddDays(-diff).Date;
 	}
+
+	// HIPAA finding F3. The API returns every lab it knows about; this screen must only ever offer
+	// the ones this user is entitled to. Filtering here rather than at each call site keeps the two
+	// dozen usages honest, and the global RequireLabAccessFilter still catches a labId typed
+	// straight into the URL.
+	private List<LabOption> AllowedLabs(IEnumerable<LabOption> labs) =>
+		(labs ?? Enumerable.Empty<LabOption>())
+			.Where(x => _labAccess.CanAccess(User, x.LabName))
+			.ToList();
 }

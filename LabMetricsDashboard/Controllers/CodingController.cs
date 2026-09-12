@@ -1,4 +1,4 @@
-using LabMetricsDashboard.Models;
+﻿using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
@@ -10,6 +10,8 @@ public class CodingController : Controller
     private static readonly TimeSpan CodingCacheDuration = TimeSpan.FromMinutes(5);
 
     private readonly LabSettings _labSettings;
+    // HIPAA finding F3: the lab list must come from the USER, never from configuration.
+    private readonly LabMetricsDashboard.Services.Security.ILabAccessService _labAccess;
     private readonly ICodingValidationRepository _repo;
     private readonly LabCsvFileResolver _fileResolver;
     private readonly IMemoryCache _cache;
@@ -18,6 +20,7 @@ public class CodingController : Controller
 
     public CodingController(
         LabSettings labSettings,
+        LabMetricsDashboard.Services.Security.ILabAccessService labAccess,
         ICodingValidationRepository repo,
         LabCsvFileResolver fileResolver,
         IMemoryCache cache,
@@ -25,6 +28,7 @@ public class CodingController : Controller
         IConfiguration configuration)
     {
         _labSettings   = labSettings;
+        _labAccess = labAccess;
         _repo          = repo;
         _fileResolver  = fileResolver;
         _cache         = cache;
@@ -35,7 +39,7 @@ public class CodingController : Controller
     /// <summary>GET /Coding/Summary?lab=PCRLabsofAmerica</summary>
     public async Task<IActionResult> Summary(string? lab, CancellationToken ct)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         if (string.IsNullOrWhiteSpace(selectedLab))
@@ -119,7 +123,7 @@ public class CodingController : Controller
     [HttpGet]
     public async Task<IActionResult> InsightsPane(string? lab, string type, CancellationToken ct)
     {
-        var availableLabs = _labSettings.Labs.Keys.ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
         if (string.IsNullOrWhiteSpace(selectedLab)
             || !_labSettings.Labs.TryGetValue(selectedLab, out var config)
@@ -185,7 +189,7 @@ public class CodingController : Controller
         int page = 1, int pageSize = 50,
         string? panel = null, string? status = null, string? search = null)
     {
-        var availableLabs = _labSettings.Labs.Keys.ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
         if (string.IsNullOrWhiteSpace(selectedLab)
             || !_labSettings.Labs.TryGetValue(selectedLab, out var config)
@@ -242,7 +246,7 @@ public class CodingController : Controller
         string? additional = null,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
         if (string.IsNullOrWhiteSpace(selectedLab)
             || !_labSettings.Labs.TryGetValue(selectedLab, out var config)
@@ -289,7 +293,7 @@ public class CodingController : Controller
     /// <summary>Downloads the current Coding Summary data as a formatted Excel file.</summary>
     public async Task<IActionResult> ExportCodingExcel(string? lab, CancellationToken ct)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         if (string.IsNullOrWhiteSpace(selectedLab)

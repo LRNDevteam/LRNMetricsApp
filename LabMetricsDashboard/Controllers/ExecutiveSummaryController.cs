@@ -1,4 +1,4 @@
-using LabMetricsDashboard.Models;
+﻿using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
@@ -17,6 +17,8 @@ namespace LabMetricsDashboard.Controllers;
 public sealed class ExecutiveSummaryController : Controller
 {
     private readonly LabSettings _labSettings;
+    // HIPAA finding F3: the lab list must come from the USER, never from configuration.
+    private readonly LabMetricsDashboard.Services.Security.ILabAccessService _labAccess;
     private readonly SqlPhiExecutiveSummaryRepository _repo;
     private readonly IAnalysisRangeService _analysisRange;
     private readonly PredictionInsightLoader _insightLoader;
@@ -62,6 +64,7 @@ public sealed class ExecutiveSummaryController : Controller
 
     public ExecutiveSummaryController(
         LabSettings labSettings,
+        LabMetricsDashboard.Services.Security.ILabAccessService labAccess,
         SqlPhiExecutiveSummaryRepository repo,
         IAnalysisRangeService analysisRange,
         PredictionInsightLoader insightLoader,
@@ -70,6 +73,7 @@ public sealed class ExecutiveSummaryController : Controller
         BeechTreeRevenuePipelineLisService pipelineLis)
     {
         _labSettings = labSettings;
+        _labAccess = labAccess;
         _repo        = repo;
         _analysisRange = analysisRange;
         _insightLoader = insightLoader;
@@ -103,7 +107,7 @@ public sealed class ExecutiveSummaryController : Controller
         string[]? reps      = null,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
 
         // Cookie → query-string → first lab (same logic as every other page)
         var labName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
@@ -190,7 +194,7 @@ public sealed class ExecutiveSummaryController : Controller
         string[]? reps      = null,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var labName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
         var emptyVm = new PhiExecutiveSummaryViewModel
         {
@@ -329,7 +333,7 @@ public sealed class ExecutiveSummaryController : Controller
     [HttpGet]
     public async Task<IActionResult> FilterOptions(string? lab, CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var labName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         if (!_labSettings.Labs.TryGetValue(labName, out var config)
@@ -396,7 +400,7 @@ public sealed class ExecutiveSummaryController : Controller
         string? export    = null, // "excel"
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var labName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         // Build the back-link URL preserving the original index filters
@@ -521,7 +525,7 @@ public sealed class ExecutiveSummaryController : Controller
         int?    monthTo   = null,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var labName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         // Show the resolved lab in the navbar and lock lab switching: the drill
@@ -918,7 +922,7 @@ public sealed class ExecutiveSummaryController : Controller
         int?    year = null, // legacy querystring; ignored when months is set
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var labName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         // Allowed trailing windows (doc / Insights style).
@@ -1097,7 +1101,7 @@ public sealed class ExecutiveSummaryController : Controller
     private async Task<ExecSummaryThreePillarViewModel> BuildThreePillarShellAsync(
         string? lab, int? months, CancellationToken ct)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var labName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
         var allowed = new[] { 3, 6, 9, 12, 19 };
         var trailingMonths = months is int m && allowed.Contains(m) ? m : 12;
@@ -1138,7 +1142,7 @@ public sealed class ExecutiveSummaryController : Controller
     [HttpGet]
     public async Task<IActionResult> RevenuePipelineLis(string? lab, CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var labName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
         var backUrl = Url.Action("Index", "ExecutiveSummary", new { lab = labName }) ?? "/ExecutiveSummary";
 

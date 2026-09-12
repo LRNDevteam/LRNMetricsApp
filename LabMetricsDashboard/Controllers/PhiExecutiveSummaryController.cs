@@ -1,4 +1,4 @@
-using LabMetricsDashboard.Models;
+﻿using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -7,6 +7,8 @@ namespace LabMetricsDashboard.Controllers;
 public class PhiExecutiveSummaryController : Controller
 {
     private readonly LabSettings _labSettings;
+    // HIPAA finding F3: the lab list must come from the USER, never from configuration.
+    private readonly LabMetricsDashboard.Services.Security.ILabAccessService _labAccess;
     private readonly SqlPhiExecutiveSummaryRepository _repo;
     private readonly ILogger<PhiExecutiveSummaryController> _logger;
 
@@ -41,10 +43,12 @@ public class PhiExecutiveSummaryController : Controller
 
     public PhiExecutiveSummaryController(
         LabSettings labSettings,
+        LabMetricsDashboard.Services.Security.ILabAccessService labAccess,
         SqlPhiExecutiveSummaryRepository repo,
         ILogger<PhiExecutiveSummaryController> logger)
     {
         _labSettings = labSettings;
+        _labAccess = labAccess;
         _repo        = repo;
         _logger      = logger;
     }
@@ -57,7 +61,7 @@ public class PhiExecutiveSummaryController : Controller
         int?     monthTo,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
 
         // Resolve via cookie → query-string → first lab (same logic as all other pages)
         var labName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);

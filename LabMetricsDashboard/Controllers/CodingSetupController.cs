@@ -12,15 +12,19 @@ public class CodingSetupController : Controller
 {
     private readonly ICodingSetupRepository _repo;
     private readonly LabSettings _labSettings;
+    // HIPAA finding F3: the lab list must come from the USER, never from configuration.
+    private readonly LabMetricsDashboard.Services.Security.ILabAccessService _labAccess;
     private readonly ILogger<CodingSetupController> _logger;
 
     public CodingSetupController(
         ICodingSetupRepository repo,
         LabSettings labSettings,
+        LabMetricsDashboard.Services.Security.ILabAccessService labAccess,
         ILogger<CodingSetupController> logger)
     {
         _repo = repo;
         _labSettings = labSettings;
+        _labAccess = labAccess;
         _logger = logger;
     }
 
@@ -32,7 +36,7 @@ public class CodingSetupController : Controller
         string sortColumn = "PanelName", string sortDirection = "asc",
         string activeFilter = "active", int page = 1, CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         var (records, totalCount) = await _repo.GetPagedAsync(
@@ -464,7 +468,7 @@ public class CodingSetupController : Controller
 
     private string ResolveLab(string? lab)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         return LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
     }
 

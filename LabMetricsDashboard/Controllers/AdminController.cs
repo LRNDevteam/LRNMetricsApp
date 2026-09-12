@@ -14,6 +14,10 @@ namespace LabMetricsDashboard.Controllers;
 // instead of by remembering. The per-action [Authorize(Roles = "Admin")] on the Menu* actions is
 // now redundant but left in place - it says the same thing and removing it changes nothing.
 [Authorize(Roles = "Admin")]
+// A labId here is what is being GRANTED, not what is being read. The read rule would stop
+// an admin assigning a demo lab, because VisibleLabs deliberately withholds demo labs from
+// admins - breaking lab administration to enforce a rule about reading lab data.
+[LabMetricsDashboard.Filters.SkipLabAccessCheck]
 public class AdminController : Controller
 {
     private static readonly SemaphoreSlim CreateUserGate = new(1, 1);

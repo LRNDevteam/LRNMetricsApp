@@ -500,6 +500,14 @@ else
 
 builder.Services.AddSingleton(labSettings);
 builder.Services.AddSingleton(labConfigOptions);
+
+// HIPAA finding F3. The single answer to "which labs may this user see".
+builder.Services.AddSingleton<LabMetricsDashboard.Services.Security.ILabAccessService,
+                              LabMetricsDashboard.Services.Security.LabAccessService>();
+
+// Resolved per request via AddService<> above, so they must be in the container themselves.
+builder.Services.AddScoped<LabMetricsDashboard.Filters.RequireLabAccessFilter>();
+builder.Services.AddScoped<LabMetricsDashboard.Filters.LabAccessDeniedExceptionFilter>();
 builder.Services.AddSingleton<LabCsvFileResolver>();
 builder.Services.AddSingleton<CsvParserService>();
 builder.Services.AddSingleton<PredictionInsightLoader>();
@@ -731,6 +739,16 @@ builder.Services.AddControllersWithViews(options =>
         .RequireAuthenticatedUser()
         .Build();
     options.Filters.Add(new AuthorizeFilter(policy));
+
+    // HIPAA finding F3. Global, not per action, and that is the point: the failure this guards
+    // against is an endpoint that takes a lab and whose author did not think about access. A
+    // per-action attribute only protects what somebody remembered to decorate, which is the
+    // situation that produced the finding - the export and download actions were the ones most
+    // often missed, and they hand over a whole file.
+    options.Filters.AddService<LabMetricsDashboard.Filters.RequireLabAccessFilter>();
+
+    // Turns a refusal thrown from inside an action into 403 rather than an unhandled 500.
+    options.Filters.AddService<LabMetricsDashboard.Filters.LabAccessDeniedExceptionFilter>();
 });
 
 builder.Services.AddRequestTimeouts();

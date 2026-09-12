@@ -1,4 +1,4 @@
-using LabMetricsDashboard.Models;
+﻿using LabMetricsDashboard.Models;
 using System.Diagnostics;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -16,6 +16,8 @@ namespace LabMetricsDashboard.Controllers;
 public class CollectionSummaryController : Controller
 {
     private readonly LabSettings _labSettings;
+    // HIPAA finding F3: the lab list must come from the USER, never from configuration.
+    private readonly LabMetricsDashboard.Services.Security.ILabAccessService _labAccess;
     private readonly ICollectionSummaryRepository _repo;
     private readonly IAnalysisRangeService _analysisRange;
     private readonly INotesRepository _notes;
@@ -23,12 +25,14 @@ public class CollectionSummaryController : Controller
 
     public CollectionSummaryController(
         LabSettings labSettings,
+        LabMetricsDashboard.Services.Security.ILabAccessService labAccess,
         ICollectionSummaryRepository repo,
         IAnalysisRangeService analysisRange,
         INotesRepository notes,
         ILogger<CollectionSummaryController> logger)
     {
         _labSettings = labSettings;
+        _labAccess = labAccess;
         _repo = repo;
         _analysisRange = analysisRange;
         _notes = notes;
@@ -55,7 +59,7 @@ public class CollectionSummaryController : Controller
         string? filterCheckDateTo,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         filterPayerNames = filterPayerNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
@@ -181,7 +185,7 @@ public class CollectionSummaryController : Controller
         string? filterCheckDateTo,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
         if (string.IsNullOrWhiteSpace(selectedLab)
             || !_labSettings.Labs.TryGetValue(selectedLab, out var config)
@@ -331,7 +335,7 @@ public class CollectionSummaryController : Controller
         string? filterCheckDateTo,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         if (string.IsNullOrWhiteSpace(selectedLab)
@@ -667,7 +671,7 @@ public class CollectionSummaryController : Controller
         string? filterCheckDateTo,
         CancellationToken ct = default)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var availableLabs = _labAccess.GetAllowedLabNames(User).OrderBy(x => x).ToList();
         var selectedLab = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         filterPayerNames = filterPayerNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
