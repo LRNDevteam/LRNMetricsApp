@@ -135,6 +135,8 @@ export const denialWorkflowService = {
   ,getDenialMapperAudit: (labId) => api(`/denial-mapper/audit?${qs({ labId, take: 200 })}`)
   ,getDenialMapperClassifications: (labId) => api(`/denial-mapper/classifications?${qs({ labId })}`)
   ,uploadDenialMapper: (file) => { const form = new FormData(); form.append('file', file); return api('/denial-mapper/upload', { method: 'POST', body: form }); }
+  ,getDenialMapperSuperExportUrl: () => apiUrl('/denial-mapper/super-master/export')
+  ,getDenialMapperSuperTemplateUrl: () => apiUrl('/denial-mapper/super-master/template')
 
   // ── AR follow-up reporting suite ────────────────────────────────────────────
   // The catalog drives which reports the Reports screen offers and which are shown inactive, so

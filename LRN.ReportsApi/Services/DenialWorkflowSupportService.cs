@@ -1,6 +1,4 @@
-using System.Net;
 using System.Net.Http.Json;
-using System.Net.Mail;
 using System.Security.Claims;
 using System.Text;
 using LRN.ReportsApi.Models;
@@ -18,17 +16,20 @@ public sealed class DenialWorkflowSupportService : IDenialWorkflowSupportService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IOptions<DenialWorkflowSupportOptions> _options;
     private readonly IWebHostEnvironment _environment;
+    private readonly IDenialWorkflowEmailSender _emailSender;
     private readonly ILogger<DenialWorkflowSupportService> _logger;
 
     public DenialWorkflowSupportService(
         IHttpClientFactory httpClientFactory,
         IOptions<DenialWorkflowSupportOptions> options,
         IWebHostEnvironment environment,
+        IDenialWorkflowEmailSender emailSender,
         ILogger<DenialWorkflowSupportService> logger)
     {
         _httpClientFactory = httpClientFactory;
         _options = options;
         _environment = environment;
+        _emailSender = emailSender;
         _logger = logger;
     }
 
@@ -54,8 +55,12 @@ public sealed class DenialWorkflowSupportService : IDenialWorkflowSupportService
         await SaveSupportRequestAsync(requestId, body, ct);
 
         var teamsSent = await SendTeamsMessageAsync(requestId, userName, role, contactEmail, page, issueType, priority, subject, message, ct);
-        var emailSent = _options.Value.EnableSmtpEmail
-            && await SendEmailAsync(supportEmails, contactEmail, subject, body, ct);
+        var emailSent = await _emailSender.SendAsync(
+            supportEmails,
+            $"Denial Workflow Support: {subject}",
+            body,
+            string.IsNullOrWhiteSpace(contactEmail) ? null : contactEmail,
+            ct);
 
         return new DenialWorkflowSupportRequestResult
         {
@@ -80,44 +85,6 @@ public sealed class DenialWorkflowSupportService : IDenialWorkflowSupportService
 
         var filePath = Path.Combine(folder, $"denial-workflow-support-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{requestId}.txt");
         await File.WriteAllTextAsync(filePath, body, Encoding.UTF8, ct);
-    }
-
-    private async Task<bool> SendEmailAsync(IReadOnlyList<string> supportEmails, string contactEmail, string subject, string body, CancellationToken ct)
-    {
-        var options = _options.Value;
-        if (string.IsNullOrWhiteSpace(options.SmtpHost) || string.IsNullOrWhiteSpace(options.SmtpFromEmail))
-            return false;
-
-        using var message = new MailMessage
-        {
-            From = new MailAddress(options.SmtpFromEmail),
-            Subject = $"Denial Workflow Support: {subject}",
-            Body = body,
-            IsBodyHtml = false
-        };
-
-        foreach (var email in supportEmails) message.To.Add(email);
-        if (!string.IsNullOrWhiteSpace(contactEmail)) message.ReplyToList.Add(contactEmail);
-
-        using var client = new SmtpClient(options.SmtpHost, options.SmtpPort)
-        {
-            EnableSsl = options.SmtpEnableSsl
-        };
-
-        if (!string.IsNullOrWhiteSpace(options.SmtpUserName))
-            client.Credentials = new NetworkCredential(options.SmtpUserName, options.SmtpPassword);
-
-        try
-        {
-            using var registration = ct.Register(client.SendAsyncCancel);
-            await client.SendMailAsync(message, ct);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unable to send denial workflow support email to {SupportEmails}.", string.Join(", ", supportEmails));
-            return false;
-        }
     }
 
     private async Task<bool> SendTeamsMessageAsync(
