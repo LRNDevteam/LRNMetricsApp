@@ -8,5 +8,7 @@
     <PackageReference Include="Raffinert.FuzzySharp" Version="5.0.2" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Azure.Identity" Version="1.11.4" />
+    <PackageReference Include="Microsoft.NETCore.Platforms" Version="1.1.0" />
   </ItemGroup>
 </Project>
