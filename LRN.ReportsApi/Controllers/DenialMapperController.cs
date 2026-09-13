@@ -10,7 +10,7 @@ namespace LRN.ReportsApi.Controllers;
 [ApiController]
 [Route("api/denialworkflow/denial-mapper")]
 [Route("api/denial-workflow/denial-mapper")]
-public sealed class DenialMapperController(IDenialMapperRepository repository, IDenialWorkflowService workflowService, IDenialMapperPushJobService pushJobs) : ControllerBase
+public sealed class DenialMapperController(IDenialMapperRepository repository, IDenialWorkflowService workflowService, IDenialMapperPushJobService pushJobs, IDenialMapperExcelService excelService) : ControllerBase
 {
     [HttpGet("dashboard")]
     public async Task<ActionResult<DenialMapperDashboard>> Dashboard([FromQuery] int? labId, CancellationToken ct)
@@ -166,6 +166,22 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     [HttpPost("upload")]
     [RequestSizeLimit(100_000_000)]
     public async Task<ActionResult<DenialCodeMasterImportResult>> Upload([FromForm] DenialCodeMasterImportRequest request,CancellationToken ct){if(!IsAdmin())return Denied();var uploadError=await FileUploadGuard.ValidateExcelAsync(request.File,25*1024*1024,ct);if(uploadError!=null)return BadRequest(new{message=uploadError});await using var stream=request.File!.OpenReadStream();return Ok(await repository.ImportSuperMasterAsync(stream,request.File.FileName,UserName(),Role(),ct));}
+
+    [HttpGet("super-master/export")]
+    public async Task<ActionResult> ExportSuperMaster(CancellationToken ct)
+    {
+        if (!IsAdmin() && !IsViewer()) return Denied();
+        var bytes = await excelService.ExportAsync(ct);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "DenialActionSuperMaster.xlsx");
+    }
+
+    [HttpGet("super-master/template")]
+    public ActionResult SuperMasterTemplate()
+    {
+        if (!IsAdmin()) return Denied();
+        var bytes = excelService.BuildImportTemplate();
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "DenialActionSuperMaster_Template.xlsx");
+    }
 
     private async Task<int?> AuthorizedLab(int? requested, CancellationToken ct)
     {

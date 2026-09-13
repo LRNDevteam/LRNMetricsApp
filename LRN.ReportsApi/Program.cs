@@ -77,6 +77,7 @@ builder.Services.AddScoped<IDenialCodeMasterRepository, SqlDenialCodeMasterRepos
 builder.Services.AddScoped<IDenialCodeMasterExcelService, DenialCodeMasterExcelService>();
 builder.Services.AddScoped<IDenialActionChangeVerificationRepository, SqlDenialActionChangeVerificationRepository>();
 builder.Services.AddScoped<IDenialMapperRepository, SqlDenialMapperRepository>();
+builder.Services.AddScoped<IDenialMapperExcelService, DenialMapperExcelService>();
 builder.Services.AddScoped<IMasterValuesRepository, SqlMasterValuesRepository>();
 builder.Services.AddScoped<IReportAuditLogService, ReportAuditLogService>();
 builder.Services.AddScoped<IMenuRepository, SqlMenuRepository>();
@@ -116,6 +117,7 @@ builder.Services.AddSingleton<LRN.PayerPolicyMapper.Core.MatchingPipeline>();
 builder.Services.AddScoped<IPayerMappingService, PayerMappingService>();
 builder.Services.AddScoped<IPayerRulesAdminService, PayerRulesAdminService>();
 builder.Services.AddScoped<IDenialWorkflowIssueNotifier, DenialWorkflowIssueNotifier>();
+builder.Services.AddScoped<IDenialWorkflowEmailSender, SmtpDenialWorkflowEmailSender>();
 builder.Services.AddScoped<IDenialWorkflowSupportService, DenialWorkflowSupportService>();
 builder.Services.AddSingleton<IDenialWorkflowJobHistoryStore, DenialWorkflowJobHistoryStore>();
 builder.Services.AddSingleton<IDenialWorkflowExportJobService, DenialWorkflowExportJobService>();
