@@ -23,12 +23,12 @@ public sealed class DenialCodeMasterController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<PagedResult<DenialCodeMasterRecord>>> List([FromQuery] int labId, [FromQuery] string? search, [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default)
+    public async Task<ActionResult<PagedResult<DenialCodeMasterRecord>>> List([FromQuery] int labId, [FromQuery] string? search, [FromQuery] int page = 1, [FromQuery] int pageSize = 25, [FromQuery] string? sortBy = null, [FromQuery] string? sortDir = null, CancellationToken ct = default)
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
         if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
-        return Ok(await _repo.GetPagedAsync(labId, search, page, pageSize, ct));
+        return Ok(await _repo.GetPagedAsync(labId, search, page, pageSize, sortBy, sortDir, ct));
     }
 
     [HttpGet("lookups")]
@@ -132,6 +132,18 @@ public sealed class DenialCodeMasterController : ControllerBase
         await _repo.DeleteAsync(labId, denialCode, coverageStatus!, icdComplianceStatus!, ct);
         await _excelService.RegenerateExportAsync(labId, ct);
         return Ok(new { success = true, message = "Denial code deleted and classifier Excel regenerated." });
+    }
+
+    // "Sync Now": propagates the lab's current Denial Code Master into live DenialTaskBoard rows on
+    // demand. Codes with no assigned open task apply immediately; codes assigned to an open task are
+    // staged into the existing Denial Code Push Verification queue for explicit confirmation instead.
+    [HttpPost("sync")]
+    public async Task<ActionResult<DenialCodeSyncResult>> Sync([FromQuery] int labId, CancellationToken ct)
+    {
+        if (!IsArManagerFromToken()) return AccessDenied();
+        if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
+        return Ok(await _repo.SyncLabActionsAsync(labId, CurrentUserName(), ct));
     }
 
     [HttpPost("regenerate-export")]

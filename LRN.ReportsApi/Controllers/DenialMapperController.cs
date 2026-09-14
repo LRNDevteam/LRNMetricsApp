@@ -57,6 +57,17 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     public async Task<ActionResult> ConfirmPush(DenialMapperPushDecisionRequest request,CancellationToken ct)
     {if(!IsAdmin())return Denied();var count=await repository.ConfirmPushAsync(request.PushAuditIds,UserName(),Role(),ct);return Ok(new{labCount=count,message=$"Super Master staged in {count} lab(s) and is awaiting AR Manager confirmation. Existing overrides were preserved."});}
 
+    // Confirms only the caller's chosen denial codes from one pending push, instead of pushing
+    // every Super Master mapping to the lab. The rest of that push's differences stay pending.
+    [HttpPost("confirm-push-selected")]
+    public async Task<ActionResult> ConfirmPushSelected(DenialMapperPushSelectedDecisionRequest request,CancellationToken ct)
+    {
+        if(!IsAdmin())return Denied();
+        if(request.DetailIds is null||request.DetailIds.Count==0)return BadRequest(new{message="Select at least one denial code to push."});
+        var count=await repository.ConfirmPushSelectedAsync(request.PushAuditId,request.DetailIds,UserName(),Role(),ct);
+        return Ok(new{appliedCount=count,message=$"{count} selected denial code(s) pushed and awaiting AR Manager confirmation. Unselected codes remain pending."});
+    }
+
     // Async "Push to Labs" step 1 — compare: returns a jobId immediately and runs ComparePushAsync on
     // a background scope (it counts open tasks per difference per lab, which is slow), so the admin is
     // never blocked on the page. Creates the PendingConfirmation push-audit rows the confirm step needs.

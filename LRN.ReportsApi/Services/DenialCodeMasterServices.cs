@@ -8,7 +8,7 @@ namespace LRN.ReportsApi.Services;
 
 public interface IDenialCodeMasterRepository
 {
-    Task<PagedResult<DenialCodeMasterRecord>> GetPagedAsync(int labId, string? search, int page, int pageSize, CancellationToken ct);
+    Task<PagedResult<DenialCodeMasterRecord>> GetPagedAsync(int labId, string? search, int page, int pageSize, string? sortBy, string? sortDir, CancellationToken ct);
     Task<IReadOnlyList<DenialCodeMasterRecord>> GetAllAsync(int labId, CancellationToken ct);
     Task<DenialCodeMasterRecord?> GetByKeyAsync(int labId, string denialCode, string coverageStatus, string icdComplianceStatus, CancellationToken ct);
     Task<bool> ExistsAsync(int labId, string denialCode, string coverageStatus, string icdComplianceStatus, CancellationToken ct);
@@ -18,6 +18,7 @@ public interface IDenialCodeMasterRepository
     Task<DenialCodeMasterLookups> GetLookupsAsync(int labId, CancellationToken ct);
     Task<DenialCodeMasterImportResult> ReplaceFromImportAsync(int labId, IReadOnlyList<DenialCodeMasterRequest> records, int skippedCount, IReadOnlyList<string> errors, string? sourceFileName, string? userName, CancellationToken ct);
     Task<DenialCodeMasterImpact> GetImpactAsync(int labId, string denialCode, CancellationToken ct);
+    Task<DenialCodeSyncResult> SyncLabActionsAsync(int labId, string? userName, CancellationToken ct);
 }
 
 public interface IDenialCodeMasterExcelService
@@ -64,11 +65,35 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
             .ToDictionary(g => g.Key, g => ResolveLabConnectionString(configuration, g.First().Id, g.First().Name, g.First().ConnectionKey));
     }
 
-    public async Task<PagedResult<DenialCodeMasterRecord>> GetPagedAsync(int labId, string? search, int page, int pageSize, CancellationToken ct)
+    // Whitelisted so SortBy can never reach the query as raw SQL - only these grid columns are
+    // sortable, matching the columns DenialCodeMasterPage.jsx actually shows.
+    private static readonly IReadOnlyDictionary<string, string> SortableColumns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["denialCode"] = "DenialCode",
+        ["denialClassification"] = "DenialClassification",
+        ["coverageStatus"] = "CoverageStatus",
+        ["icdComplianceStatus"] = "ICDComplianceStatus",
+        ["actionCode"] = "ActionCode",
+        ["actionCategory"] = "ActionCategory",
+        ["priority"] = "Priority",
+        ["updatedOn"] = "UpdatedOn"
+    };
+
+    internal static string BuildOrderBy(string? sortBy, string? sortDir)
+    {
+        const string fallback = "DenialCode, CoverageStatus, ICDComplianceStatus";
+        if (string.IsNullOrWhiteSpace(sortBy) || !SortableColumns.TryGetValue(sortBy.Trim(), out var column))
+            return fallback;
+        var direction = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase) ? "DESC" : "ASC";
+        return $"{column} {direction}, DenialCode, CoverageStatus, ICDComplianceStatus";
+    }
+
+    public async Task<PagedResult<DenialCodeMasterRecord>> GetPagedAsync(int labId, string? search, int page, int pageSize, string? sortBy, string? sortDir, CancellationToken ct)
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 25 : Math.Clamp(pageSize, 10, 200);
         var where = SearchWhere(search, out var parameters);
+        var orderBy = BuildOrderBy(sortBy, sortDir);
 
         var result = new PagedResult<DenialCodeMasterRecord> { Page = page, PageSize = pageSize };
         await using var conn = OpenLab(labId);
@@ -86,7 +111,7 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
                    Priority, SLADays, NotesComments, CreatedOn, CreatedBy, UpdatedOn, UpdatedBy
             FROM dbo.DenialCodeMaster
             WHERE {where}
-            ORDER BY DenialCode, CoverageStatus, ICDComplianceStatus
+            ORDER BY {orderBy}
             OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
             """;
         await using var cmd = new SqlCommand(sql, conn);
@@ -284,6 +309,112 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
         result.Queues = queues;
         result.AffectedClaims = queues.Sum(q => q.ClaimCount);
         return result;
+    }
+
+    // "Sync Now": propagates the lab's current Denial Code Master into live DenialTaskBoard rows,
+    // on demand, instead of waiting for the next Excel import. Deliberately reuses the same
+    // detection/staging machinery an import already uses (CreateActionChangeBatchAsync) for the
+    // assigned-open-task case rather than duplicating that logic - only the "no open task" auto-
+    // apply path below is new.
+    //
+    // Scope note: this only touches dbo.DenialTaskBoard. dbo.DenialLineItem and dbo.DenialInsight
+    // use materially different denial-code matching (LineItem's DenialCodeNormalized can hold
+    // several semicolon-joined codes per row from a single claim line; Insight's DenialCodes rolls
+    // up multiple codes per aggregated row) and were deliberately left out of this pass rather than
+    // guessed at - extending Sync Now to them needs the same care given to this method, not a
+    // copy-paste of its WHERE clause.
+    public async Task<DenialCodeSyncResult> SyncLabActionsAsync(int labId, string? userName, CancellationToken ct)
+    {
+        var user = string.IsNullOrWhiteSpace(userName) ? "ReactWorkflow" : userName;
+        await using var conn = OpenLab(labId);
+        await conn.OpenAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        try
+        {
+            // 1) Rows with no assigned open task apply immediately - the complement of the
+            //    "assigned + open" condition CreateActionChangeBatchAsync stages for confirmation.
+            const string autoApplySql = """
+                UPDATE t
+                SET t.ActionCode = m.ActionCode,
+                    t.ActionCategory = m.ActionCategory,
+                    t.Task = m.Task,
+                    t.ShortCategory = m.ShortCategory
+                FROM dbo.DenialTaskBoard t
+                INNER JOIN dbo.DenialCodeMaster m
+                    ON UPPER(LTRIM(RTRIM(ISNULL(t.DenialCode, '')))) = UPPER(LTRIM(RTRIM(m.DenialCode)))
+                   AND UPPER(LTRIM(RTRIM(ISNULL(t.CoverageStatus, 'N/A')))) = UPPER(LTRIM(RTRIM(m.CoverageStatus)))
+                   AND UPPER(LTRIM(RTRIM(ISNULL(t.ICDComplianceStatus, 'N/A')))) = UPPER(LTRIM(RTRIM(m.ICDComplianceStatus)))
+                WHERE (
+                        ISNULL(LTRIM(RTRIM(t.ActionCode)), '') <> ISNULL(m.ActionCode, '')
+                     OR ISNULL(LTRIM(RTRIM(t.ActionCategory)), '') <> ISNULL(m.ActionCategory, '')
+                     OR ISNULL(LTRIM(RTRIM(t.Task)), '') <> ISNULL(m.Task, '')
+                     OR ISNULL(LTRIM(RTRIM(t.ShortCategory)), '') <> ISNULL(m.ShortCategory, '')
+                  )
+                  AND NOT (
+                        NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo, ''))), '') IS NOT NULL
+                    AND LOWER(LTRIM(RTRIM(ISNULL(t.Status, '')))) NOT IN ('close', 'closed')
+                    AND LOWER(LTRIM(RTRIM(ISNULL(t.WorkFlowStatus, '')))) NOT IN ('close', 'closed', 'closed claim')
+                  );
+                SELECT @@ROWCOUNT;
+                """;
+            int autoApplied;
+            await using (var cmd = new SqlCommand(autoApplySql, conn, (SqlTransaction)tx) { CommandTimeout = 180 })
+                autoApplied = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+
+            // 2) Assigned + open task drift is staged into the existing verification queue for
+            //    explicit human confirmation, sourced from the whole current master (not a fresh
+            //    import) via the same #DenialCodeMasterImport shape ReplaceFromImportAsync uses.
+            const string stageSql = """
+                CREATE TABLE #DenialCodeMasterImport
+                (
+                    DenialCode nvarchar(100) NOT NULL,
+                    DenialDescription nvarchar(1000) NULL,
+                    DenialClassification nvarchar(255) NULL,
+                    CoverageStatus nvarchar(255) NOT NULL,
+                    ICDComplianceStatus nvarchar(255) NOT NULL,
+                    DenialValidity nvarchar(255) NULL,
+                    ActionCode nvarchar(100) NULL,
+                    RecommendedAction nvarchar(1000) NULL,
+                    ActionCategory nvarchar(255) NULL,
+                    Task nvarchar(500) NULL,
+                    ShortCategory nvarchar(255) NULL,
+                    Priority nvarchar(100) NULL,
+                    SLADays nvarchar(100) NULL,
+                    NotesComments nvarchar(2000) NULL,
+                    CreatedBy nvarchar(100) NULL
+                );
+                INSERT INTO #DenialCodeMasterImport
+                    (DenialCode, DenialDescription, DenialClassification, CoverageStatus, ICDComplianceStatus,
+                     DenialValidity, ActionCode, RecommendedAction, ActionCategory, Task, ShortCategory,
+                     Priority, SLADays, NotesComments, CreatedBy)
+                SELECT DenialCode, DenialDescription, DenialClassification, CoverageStatus, ICDComplianceStatus,
+                       DenialValidity, ActionCode, RecommendedAction, ActionCategory, Task, ShortCategory,
+                       Priority, SLADays, NotesComments, @User
+                FROM dbo.DenialCodeMaster;
+                """;
+            await using (var cmd = new SqlCommand(stageSql, conn, (SqlTransaction)tx) { CommandTimeout = 180 })
+            {
+                cmd.Parameters.AddWithValue("@User", user);
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+
+            await EnsureActionChangeSchemaAsync(conn, (SqlTransaction)tx, ct);
+            var actionChangeSummary = await CreateActionChangeBatchAsync(conn, (SqlTransaction)tx, "Sync Now", user, ct);
+
+            await tx.CommitAsync(ct);
+            return new DenialCodeSyncResult
+            {
+                AutoAppliedTaskCount = autoApplied,
+                BatchId = actionChangeSummary?.BatchId,
+                AffectedClaims = actionChangeSummary?.AffectedClaims ?? 0,
+                AffectedTasks = actionChangeSummary?.AffectedTasks ?? 0
+            };
+        }
+        catch
+        {
+            await tx.RollbackAsync(CancellationToken.None);
+            throw;
+        }
     }
 
     public async Task<DenialCodeMasterImportResult> ReplaceFromImportAsync(int labId, IReadOnlyList<DenialCodeMasterRequest> records, int skippedCount, IReadOnlyList<string> errors, string? sourceFileName, string? userName, CancellationToken ct)

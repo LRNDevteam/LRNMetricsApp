@@ -65,6 +65,19 @@ public sealed class DenialCodeMasterImportResult
     public string? Message { get; set; }
 }
 
+// Result of an on-demand "Sync Now" for one lab: propagates the current Denial Code Master into
+// live DenialTaskBoard rows. Rows with no assigned open task are patched immediately
+// (AutoAppliedTaskCount); rows that are assigned to an open task are staged into the existing
+// Denial Code Push Verification queue instead (BatchId), requiring explicit human confirmation.
+public sealed class DenialCodeSyncResult
+{
+    public int AutoAppliedTaskCount { get; set; }
+    public long? BatchId { get; set; }
+    public int AffectedClaims { get; set; }
+    public int AffectedTasks { get; set; }
+    public bool HasActionChangeWarnings => BatchId > 0;
+}
+
 public sealed class DenialCodeMasterImportRequest
 {
     public IFormFile? File { get; set; }

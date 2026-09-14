@@ -83,6 +83,8 @@ public sealed class DenialMapperPushDifference
     public string? NewDenialClassification { get; set; }
     public string DifferenceType { get; set; } = string.Empty;
     public bool IsAssignedToOpenTask { get; set; }
+    public DateTime? AppliedOn { get; set; }
+    public string? AppliedByUserId { get; set; }
     public int OpenAssignedTaskCount { get; set; }
 }
 
@@ -106,6 +108,15 @@ public sealed class DenialMapperPushAuditView
 public sealed class DenialMapperPushDecisionRequest
 {
     public IReadOnlyList<long> PushAuditIds { get; set; } = Array.Empty<long>();
+}
+
+// Confirms only the chosen rows of a single pending push, leaving the rest of that audit's
+// differences unapplied (they remain available to push later; a future Compare will re-surface
+// them since the underlying Super Master / Lab Master values are still different).
+public sealed class DenialMapperPushSelectedDecisionRequest
+{
+    public long PushAuditId { get; set; }
+    public IReadOnlyList<long> DetailIds { get; set; } = Array.Empty<long>();
 }
 
 // Row for the admin "Push Status / Confirmations" page (Slice C): one persisted push-audit record

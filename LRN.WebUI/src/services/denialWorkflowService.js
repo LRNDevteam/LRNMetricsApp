@@ -96,6 +96,7 @@ export const denialWorkflowService = {
     return api(`/denial-code-master/import?labId=${encodeURIComponent(labId)}`, { method: 'POST', body: form });
   },
   regenerateDenialCodeMasterExcel: (labId) => api(`/denial-code-master/regenerate-export?labId=${encodeURIComponent(labId)}`, { method: 'POST' }),
+  syncDenialCodeMaster: (labId) => api(`/denial-code-master/sync?labId=${encodeURIComponent(labId)}`, { method: 'POST' }),
   getDenialCodeMasterExportUrl: (labId) => apiUrl(`/denial-code-master/export?labId=${encodeURIComponent(labId)}`),
   getDenialCodeMasterTemplateUrl: () => apiUrl('/denial-code-master/template'),
   getDenialActionVerification: async (query) => normalizePagedResult(await api(`/denial-action-verification?${qs(query)}`)),
@@ -115,6 +116,7 @@ export const denialWorkflowService = {
   ,getDenialMapperLabs: () => api('/denial-mapper/labs')
   ,compareDenialMapperPush: (labIds) => api('/denial-mapper/compare-push', { method: 'POST', body: JSON.stringify({ labIds }) })
   ,confirmDenialMapperPush: (pushAuditIds) => api('/denial-mapper/confirm-push', { method: 'POST', body: JSON.stringify({ pushAuditIds }) })
+  ,confirmDenialMapperPushSelected: (pushAuditId, detailIds) => api('/denial-mapper/confirm-push-selected', { method: 'POST', body: JSON.stringify({ pushAuditId, detailIds }) })
   // Async "Push to Labs" — two backgrounded steps, each returns a jobId (202); poll the job for
   // completion so the admin is never blocked. Step 1 compares (creates pending pushes); step 2
   // confirms/distributes a pending push (deferrable, run from Push Status).
