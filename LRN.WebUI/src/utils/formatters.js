@@ -37,6 +37,10 @@ export const isAccountManagerRole = (role) => normalizeRole(role).includes('acco
 export const isLabUserRole = (role) => normalizeRole(role).includes('labuser');
 export const isReadOnlyWorkflowRole = (role) => isClientManagerRole(role) || isAccountManagerRole(role) || isLabUserRole(role);
 export const isArManagerRole = (role) => normalizeRole(role).includes('armanager');
+// Exact match, unlike the includes('admin') checks elsewhere in this file, which also match
+// "Payer Policy Admin". Mirrors PayerMasterRoles.IsLrnAdmin in the API (Admin / LRN Admin /
+// LRNAdmin); the Workflow Master Values screen and its endpoints both use it, so they agree.
+export const isLrnAdminRole = (role) => ['admin', 'lrnadmin'].includes(normalizeRole(role));
 export const isArReviewerRole = (role) => {
   const r = normalizeRole(role);
   return (r.includes('arreviewer') || r.includes('aranalyser') || r.includes('aranalyzer') || r.includes('reviewer'))

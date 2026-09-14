@@ -23,5 +23,8 @@
     <None Include="..\..\LRN.ReportsApi\Sql\ArReports\RPT01_ActivityDetail_Setup.sql"
           Link="Sql\RPT01_ActivityDetail_Setup.sql"
           CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\LRN.ReportsApi\Sql\DenialWorkflow_MasterValues_Setup.sql"
+          Link="Sql\DenialWorkflow_MasterValues_Setup.sql"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

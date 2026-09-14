@@ -138,6 +138,15 @@ export const denialWorkflowService = {
   ,getDenialMapperSuperExportUrl: () => apiUrl('/denial-mapper/super-master/export')
   ,getDenialMapperSuperTemplateUrl: () => apiUrl('/denial-mapper/super-master/template')
 
+  // ── Workflow master values (admin only) ─────────────────────────────────────
+  // The seven lists the Denial Mapper offers. The value being edited travels in the body, and the
+  // one being deleted in the query string, because values such as "Client Info Pending / Write Off"
+  // contain slashes and cannot be route segments.
+  ,getWorkflowMasters: () => api('/workflow-masters')
+  ,addWorkflowMasterValue: (type, payload) => api(`/workflow-masters/${encodeURIComponent(type)}`, { method: 'POST', body: JSON.stringify(payload) })
+  ,updateWorkflowMasterValue: (type, payload) => api(`/workflow-masters/${encodeURIComponent(type)}`, { method: 'PUT', body: JSON.stringify(payload) })
+  ,deleteWorkflowMasterValue: (type, value) => api(`/workflow-masters/${encodeURIComponent(type)}?${qs({ value })}`, { method: 'DELETE' })
+
   // ── AR follow-up reporting suite ────────────────────────────────────────────
   // The catalog drives which reports the Reports screen offers and which are shown inactive, so
   // adding or activating a report is a data change (dbo.DenialReportCatalog), not a UI edit.

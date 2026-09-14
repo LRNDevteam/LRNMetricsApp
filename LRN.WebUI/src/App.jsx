@@ -4,7 +4,7 @@ import { emptyDashboard, emptyFilter, emptyFilterOptions, emptyPagedResult } fro
 import { denialWorkflowService, qs } from './services/denialWorkflowService';
 import { GENERIC_WORKFLOW_ERROR } from './services/httpClient';
 import { claimRole, claimUser, clearWorkflowJwt, ensureWorkflowJwt, getJwt, parseJwt } from './utils/auth';
-import { canAssignRole, canDownloadWorkflowRole, initials, isArManagerRole, isArReviewerRole, isClientManagerRole, isAccountManagerRole, isLabUserRole, isReadOnlyWorkflowRole } from './utils/formatters';
+import { canAssignRole, canDownloadWorkflowRole, initials, isArManagerRole, isArReviewerRole, isClientManagerRole, isAccountManagerRole, isLabUserRole, isLrnAdminRole, isReadOnlyWorkflowRole } from './utils/formatters';
 import DashboardFilter from './components/DashboardFilter';
 import { clearHiddenWorkflowFilters, getFiltersForRoleQueue, getQueuesForRole, normalizeQueueKey } from './config/workflowRoleQueues';
 import DashboardPage from './pages/DashboardPage';
@@ -18,6 +18,7 @@ import ContactSupportPage from './pages/ContactSupportPage';
 import DenialCodeMasterPage from './pages/DenialCodeMasterPage';
 import DenialActionVerificationPage from './pages/DenialActionVerificationPage';
 import DenialMapperPage from './pages/DenialMapperPage';
+import WorkflowMasterValuesPage from './pages/WorkflowMasterValuesPage';
 import ReportCatalogPage from './pages/reports/ReportCatalogPage';
 import Rpt01ActivityDetailPage from './pages/reports/Rpt01ActivityDetailPage';
 import { JobsBadge, JobsPage } from './components/JobsCenter';
@@ -66,7 +67,7 @@ export default function App() {
   const [labId, setLabId] = useState(Number(localStorage.getItem('denial.labId') || 0));
   // 'reports' is the AR report catalog; 'rpt01' is the first live report under it. Each future
   // report gets its own view key so it is deep-linkable by hash, the same as every other screen.
-  const workflowViews = ['dashboard', 'aging', 'summary', 'claims', 'myworklist', 'escalations', 'verification', 'denialcodemaster', 'denialmapper', 'denialactionverification', 'exports', 'reports', 'rpt01', 'jobs', 'support', 'admin'];
+  const workflowViews = ['dashboard', 'aging', 'summary', 'claims', 'myworklist', 'escalations', 'verification', 'denialcodemaster', 'denialmapper', 'denialactionverification', 'workflowmasters', 'exports', 'reports', 'rpt01', 'jobs', 'support', 'admin'];
   const getStoredView = () => {
     const hashView = String(window.location.hash || '').replace('#', '').trim().toLowerCase();
     return workflowViews.includes(hashView) ? hashView : '';
@@ -131,6 +132,8 @@ export default function App() {
   const denialMapperLabUser = /lab\s*user/i.test(String(user.role || ''));
   const denialMapperRole = adminRole || arManagerOnly || clientManager || accountManager || denialMapperViewer || denialMapperLabUser;
   const denialMapperAdmin = adminRole;
+  // Strict, unlike adminRole: master values are for Admin / LRN Admin only, and the API checks the same.
+  const lrnAdmin = isLrnAdminRole(user.role);
   const exportBusy = !!claimExportJob && ['Queued', 'Running'].includes(claimExportJob.status);
   const activeQueueKey = view === 'myworklist' ? myWorklistView : view === 'claims' ? claimTaskView : '';
   const visibleFilters = useMemo(() => (view === 'dashboard'
@@ -185,6 +188,7 @@ export default function App() {
     // escalation queues and no verification decisions. Deep links to those land on Claim View.
     if (labUser && ['myworklist', 'escalations', 'verification'].includes(safeView)) { safeView = 'claims'; blockedByRole = true; }
     if ((safeView === 'denialcodemaster' || safeView === 'denialactionverification') && !isArManagerRole(user.role) && !String(user.role || '').toLowerCase().includes('admin')) { safeView = resolveLandingView(user.role); blockedByRole = true; }
+    if (safeView === 'workflowmasters' && !isLrnAdminRole(user.role)) { safeView = resolveLandingView(user.role); blockedByRole = true; }
     // Cumulative Audit F-19: the security boundary was already enforced (the restricted
     // content never rendered), but the user got no explanation for why they landed somewhere
     // else — just a silently-swapped page. Surface it so the redirect isn't confusing.
@@ -867,7 +871,7 @@ export default function App() {
   const mapperHeaderActive = denialMapperAdmin && (view === 'denialmapper' || view === 'denialactionverification');
   const headerLabs = mapperHeaderActive && denialMapperLabs.length ? denialMapperLabs : labs;
   const labName = [...denialMapperLabs, ...labs].find(l => Number(l.labId ?? l.LabId) === Number(labId))?.labName || 'Select Lab';
-  const pageTitle = { dashboard: 'Denial Dashboard', aging: 'Aging Dashboard', summary: 'Denial Summary', claims: canAssign ? 'Claim Assignment' : 'Claim View', myworklist: 'My Worklist', escalations: escalationView === 'response' ? 'Escalation Response' : 'Escalation Queue', verification: 'Verification', denialcodemaster: 'Denial Code Master', denialmapper: 'Denial Mapper', denialactionverification: 'Action Change Verification', exports: 'Exports', reports: 'AR Follow-up Reports', rpt01: 'RPT-01 · AR Follow-up Activity Detail', jobs: 'Uploads & Downloads', support: 'Contact Support', admin: 'Admin Setup' }[view] || 'Denial Workflow';
+  const pageTitle = { dashboard: 'Denial Dashboard', aging: 'Aging Dashboard', summary: 'Denial Summary', claims: canAssign ? 'Claim Assignment' : 'Claim View', myworklist: 'My Worklist', escalations: escalationView === 'response' ? 'Escalation Response' : 'Escalation Queue', verification: 'Verification', denialcodemaster: 'Denial Code Master', denialmapper: 'Denial Mapper', denialactionverification: 'Action Change Verification', exports: 'Exports', reports: 'AR Follow-up Reports', rpt01: 'RPT-01 · AR Follow-up Activity Detail', jobs: 'Uploads & Downloads', support: 'Contact Support', admin: 'Admin Setup', workflowmasters: 'Workflow Master Values' }[view] || 'Denial Workflow';
   // UAT: the browser tab title stayed on the generic static value from index.html and never
   // reflected which page was open.
   useEffect(() => { document.title = `${pageTitle} · LRN Denial Workflow`; }, [pageTitle]);
@@ -1388,6 +1392,7 @@ export default function App() {
         </div>}
         <button className={`lrn-nav-item ${view === 'jobs' ? 'active' : ''}`} onClick={() => setView('jobs')}><i className="bi bi-arrow-down-up" />Uploads &amp; Downloads</button>
         <button className={`lrn-nav-item ${view === 'support' ? 'active' : ''}`} onClick={() => setView('support')}><i className="bi bi-life-preserver" />Contact Support</button>
+        {lrnAdmin && <button className={`lrn-nav-item ${view === 'workflowmasters' ? 'active' : ''}`} onClick={() => setView('workflowmasters')}><i className="bi bi-sliders2" />Master Values</button>}
         {adminRole && <button className={`lrn-nav-item ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}><i className="bi bi-gear" />Admin Setup</button>}
       </nav>
       <div className="sidebar-logout"><button type="button" className="sidebar-logout-btn" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button></div>
@@ -1426,7 +1431,7 @@ export default function App() {
         {mapperNotification&&<div className="lrn-alert warning mapper-login-alert"><div><strong>Denial Code push confirmation is pending.</strong><span>Review it in Denial Action Master before applying the codes to this lab.</span></div><div><button className="wl-btn teal xs" onClick={()=>{setMapperReviewAuditId(mapperNotification.pushAuditId);setView('denialcodemaster');}}>Review Now</button><button className="wl-btn xs" onClick={()=>setMapperNotification(null)}>Later</button></div></div>}
         {/* The AR report screens carry their own as-of/data-refresh metadata strip, so the global
             source-file row would only duplicate it. */}
-        {view !== 'denialmapper' && view !== 'jobs' && view !== 'reports' && view !== 'rpt01' && <div className="claim-filter-toggle-row">
+        {view !== 'denialmapper' && view !== 'workflowmasters' && view !== 'jobs' && view !== 'reports' && view !== 'rpt01' && <div className="claim-filter-toggle-row">
           <div className="last-run-reference" title={lastRunReference?.outputFileName || lastRunReference?.OutputFileName || lastRunReference?.runId || lastRunReference?.RunId || ''}>
             <i className="bi bi-file-earmark-text" />
             <span className="last-run-label">Source File</span>
@@ -1436,7 +1441,7 @@ export default function App() {
         </div>}
         {/* RPT-01 and the report catalog own their filter bar (the report's filter set is its own,
             and its applied-filter summary has to stay visible and match the export). */}
-        {view !== 'myworklist' && view !== 'aging' && view !== 'support' && view !== 'denialcodemaster' && view !== 'denialmapper' && view !== 'denialactionverification' && view !== 'jobs' && view !== 'reports' && view !== 'rpt01' && (
+        {view !== 'myworklist' && view !== 'aging' && view !== 'support' && view !== 'denialcodemaster' && view !== 'denialmapper' && view !== 'denialactionverification' && view !== 'workflowmasters' && view !== 'jobs' && view !== 'reports' && view !== 'rpt01' && (
           <div className={(view === 'verification' || view === 'escalations' || (view === 'claims' && !claimFiltersOpen) || (view === 'dashboard' && !dashboardFiltersOpen)) ? 'global-filter-hidden' : ''}>
             <DashboardFilter filter={filter} setFilterValue={setFilterValue} clearFilter={clearFilter} reviewers={reviewers} options={filterOptions} visibleFilters={visibleFilters} />
           </div>
@@ -1480,6 +1485,7 @@ export default function App() {
         {view === 'denialcodemaster' && arManagerOnly && <DenialCodeMasterPage labId={labId} role={user.role || ''} setMessage={setWorkflowMessage} initialPushAuditId={mapperReviewAuditId} onPushConfirmed={()=>{setMapperNotification(null);setMapperReviewAuditId(null);}} onReviewActionChanges={(batchId) => { setActionVerificationBatchId(batchId || ''); setView('denialactionverification'); }} />}
         {view === 'denialmapper' && denialMapperRole && <DenialMapperPage user={user} labs={labs} labId={labId} setLabId={setLabId} setMessage={setWorkflowMessage} screen={denialMapperView} onScreenChange={setDenialMapperView} />}
         {view === 'denialactionverification' && (denialMapperAdmin || arManagerOnly) && <DenialActionVerificationPage labId={labId} setMessage={setWorkflowMessage} initialBatchId={actionVerificationBatchId} />}
+        {view === 'workflowmasters' && lrnAdmin && <WorkflowMasterValuesPage setMessage={setWorkflowMessage} />}
         {view === 'exports' && <WorkflowPlaceholder title="Exports">Use Overall Download or per-tab Download from Claim Assignment for claim extracts. Aging Dashboard also includes a Download Excel action.</WorkflowPlaceholder>}
         {view === 'jobs' && <JobsPage key={jobsFocusUploadId || 'jobs'} setMessage={setWorkflowMessage} initialUploadJobId={jobsFocusUploadId} />}
         {view === 'reports' && <ReportCatalogPage labId={labId} setMessage={setWorkflowMessage} onOpenReport={routeKey => setView(workflowViews.includes(routeKey) ? routeKey : 'reports')} />}

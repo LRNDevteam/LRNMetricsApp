@@ -557,9 +557,26 @@ IF COL_LENGTH('dbo.DenialMapperPushAudit','FailureMessage') IS NULL ALTER TABLE 
 IF OBJECT_ID('dbo.DenialMapperPushAuditDetail','U') IS NULL
 CREATE TABLE dbo.DenialMapperPushAuditDetail(PushAuditDetailId bigint IDENTITY PRIMARY KEY,PushAuditId bigint NOT NULL,TargetLabId int NOT NULL,DenialCode nvarchar(100) NOT NULL,ICDComplianceStatus nvarchar(255) NULL,CoverageStatus nvarchar(255) NULL,ExistingActionCode nvarchar(255) NULL,NewActionCode nvarchar(255) NULL,ExistingActionCategory nvarchar(500) NULL,NewActionCategory nvarchar(500) NULL,ExistingTask nvarchar(500) NULL,NewTask nvarchar(500) NULL,ExistingShortCategory nvarchar(1000) NULL,NewShortCategory nvarchar(1000) NULL,ExistingDenialClassification nvarchar(255) NULL,NewDenialClassification nvarchar(255) NULL,DifferenceType nvarchar(255) NOT NULL,IsAssignedToOpenTask bit NOT NULL DEFAULT 0,OpenAssignedTaskCount int NOT NULL DEFAULT 0,CreatedOn datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),CONSTRAINT FK_DMPAD_Audit FOREIGN KEY(PushAuditId) REFERENCES dbo.DenialMapperPushAudit(PushAuditId));
 """;await using var cmd=new SqlCommand(sql,c);await cmd.ExecuteNonQueryAsync(ct);}
-    private static async Task EnsureMasterDataSchemaAsync(SqlConnection c,CancellationToken ct)
+    /// <summary>
+    /// Creates the seven workflow master lists if they are missing and seeds a FRESH database with
+    /// the defaults. Shared with <see cref="SqlWorkflowMasterValuesRepository"/>, which is where
+    /// admins now maintain these lists.
+    ///
+    /// The seed used to be a MERGE that ran on every Denial Mapper load with
+    /// "WHEN MATCHED THEN UPDATE SET ... IsActive=1" and "WHEN NOT MATCHED THEN INSERT". Harmless
+    /// while the lists were read-only, but it made them impossible to maintain: any seeded value an
+    /// admin deactivated, re-sorted, re-coded, renamed or deleted came back on the next page load.
+    /// Seeding now happens only when a table is completely empty, so the lists belong to the admins.
+    /// </summary>
+    internal static async Task EnsureMasterDataSchemaAsync(SqlConnection c,CancellationToken ct)
     {
-        const string sql="""
+        await using (var cmd=new SqlCommand(MasterDataSchemaSql,c){CommandTimeout=180})
+            await cmd.ExecuteNonQueryAsync(ct);
+        await using (var seed=new SqlCommand(MasterDataSeedSql,c){CommandTimeout=180})
+            await seed.ExecuteNonQueryAsync(ct);
+    }
+
+    internal const string MasterDataSchemaSql="""
 IF OBJECT_ID('dbo.DenialMapperLookupMaster','U') IS NULL
 CREATE TABLE dbo.DenialMapperLookupMaster
 (
@@ -582,6 +599,21 @@ CREATE TABLE dbo.DenialMapperActionCategoryMaster
     CreatedOn datetime2(0) NOT NULL CONSTRAINT DF_DMACM_CreatedOn DEFAULT SYSUTCDATETIME()
 );
 
+-- Who last touched a value. Nullable: the seeded rows predate the admin screen.
+IF COL_LENGTH('dbo.DenialMapperLookupMaster','CreatedBy') IS NULL ALTER TABLE dbo.DenialMapperLookupMaster ADD CreatedBy nvarchar(200) NULL;
+IF COL_LENGTH('dbo.DenialMapperLookupMaster','ModifiedBy') IS NULL ALTER TABLE dbo.DenialMapperLookupMaster ADD ModifiedBy nvarchar(200) NULL;
+IF COL_LENGTH('dbo.DenialMapperLookupMaster','ModifiedOn') IS NULL ALTER TABLE dbo.DenialMapperLookupMaster ADD ModifiedOn datetime2(0) NULL;
+IF COL_LENGTH('dbo.DenialMapperActionCategoryMaster','CreatedBy') IS NULL ALTER TABLE dbo.DenialMapperActionCategoryMaster ADD CreatedBy nvarchar(200) NULL;
+IF COL_LENGTH('dbo.DenialMapperActionCategoryMaster','ModifiedBy') IS NULL ALTER TABLE dbo.DenialMapperActionCategoryMaster ADD ModifiedBy nvarchar(200) NULL;
+IF COL_LENGTH('dbo.DenialMapperActionCategoryMaster','ModifiedOn') IS NULL ALTER TABLE dbo.DenialMapperActionCategoryMaster ADD ModifiedOn datetime2(0) NULL;
+""";
+    // A SEPARATE batch, not a convenience: on an existing database SQL Server binds column names
+    // for the whole batch before any of it runs, so an INSERT naming CreatedBy in the same batch
+    // as the ALTER that adds it fails with "Invalid column name" even though the ALTER comes first.
+    internal const string MasterDataSeedSql="""
+-- Seed a fresh database only; existing rows are never touched. See EnsureMasterDataSchemaAsync.
+IF NOT EXISTS (SELECT 1 FROM dbo.DenialMapperLookupMaster)
+BEGIN
 DECLARE @Lookup TABLE(LookupType nvarchar(50),LookupValue nvarchar(255),SortOrder int);
 INSERT @Lookup VALUES
 ('DenialClassification','Administrative Denial',10),
@@ -640,26 +672,22 @@ INSERT @Lookup VALUES
 ('SLADays','0 days',10),('SLADays','5 days',20),('SLADays','7 days',30),('SLADays','10 days',40),('SLADays','15 days',50),('SLADays','30 days',60),
 ('Priority','High',10),('Priority','Medium',20),('Priority','Low',30);
 
-MERGE dbo.DenialMapperLookupMaster AS target
-USING @Lookup AS source
-ON target.LookupType=source.LookupType AND target.LookupValue=source.LookupValue
-WHEN MATCHED THEN UPDATE SET SortOrder=source.SortOrder,IsActive=1
-WHEN NOT MATCHED THEN INSERT(LookupType,LookupValue,SortOrder) VALUES(source.LookupType,source.LookupValue,source.SortOrder);
+INSERT dbo.DenialMapperLookupMaster(LookupType,LookupValue,SortOrder,CreatedBy)
+SELECT LookupType,LookupValue,SortOrder,N'system' FROM @Lookup;
+END
 
+IF NOT EXISTS (SELECT 1 FROM dbo.DenialMapperActionCategoryMaster)
+BEGIN
 DECLARE @Action TABLE(ActionCategory nvarchar(255),ActionCode nvarchar(100),SortOrder int);
 INSERT @Action VALUES
 ('Appeal','APP',10),('Rebill','APP',20),('Client Info Pending','CIP',30),
 ('Client Info Pending / Write Off','CIP / WOFF',40),('Credentialing / Enrollment','CRED',50),
 ('Manual Review','MR',60),('No Action','NA',70);
 
-MERGE dbo.DenialMapperActionCategoryMaster AS target
-USING @Action AS source ON target.ActionCategory=source.ActionCategory
-WHEN MATCHED THEN UPDATE SET ActionCode=source.ActionCode,SortOrder=source.SortOrder,IsActive=1
-WHEN NOT MATCHED THEN INSERT(ActionCategory,ActionCode,SortOrder) VALUES(source.ActionCategory,source.ActionCode,source.SortOrder);
+INSERT dbo.DenialMapperActionCategoryMaster(ActionCategory,ActionCode,SortOrder,CreatedBy)
+SELECT ActionCategory,ActionCode,SortOrder,N'system' FROM @Action;
+END
 """;
-        await using var cmd=new SqlCommand(sql,c){CommandTimeout=180};
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
     private static async Task InsertPushDetailAsync(SqlConnection c,SqlTransaction tx,DenialMapperPushDifference d,CancellationToken ct)
     {const string sql="INSERT dbo.DenialMapperPushAuditDetail(PushAuditId,TargetLabId,DenialCode,ICDComplianceStatus,CoverageStatus,ExistingActionCode,NewActionCode,ExistingActionCategory,NewActionCategory,ExistingTask,NewTask,ExistingShortCategory,NewShortCategory,ExistingDenialClassification,NewDenialClassification,DifferenceType,IsAssignedToOpenTask,OpenAssignedTaskCount) OUTPUT inserted.PushAuditDetailId VALUES(@Audit,@Lab,@Code,@Icd,@Coverage,@OldCode,@NewCode,@OldCategory,@NewCategory,@OldTask,@NewTask,@OldShort,@NewShort,@OldClass,@NewClass,@Type,@Assigned,@Count)";await using var cmd=new SqlCommand(sql,c,tx);cmd.Parameters.AddWithValue("@Audit",d.PushAuditId);cmd.Parameters.AddWithValue("@Lab",d.TargetLabId);cmd.Parameters.AddWithValue("@Code",d.DenialCode);cmd.Parameters.AddWithValue("@Icd",Db(d.ICDComplianceStatus));cmd.Parameters.AddWithValue("@Coverage",Db(d.CoverageStatus));cmd.Parameters.AddWithValue("@OldCode",Db(d.ExistingActionCode));cmd.Parameters.AddWithValue("@NewCode",Db(d.NewActionCode));cmd.Parameters.AddWithValue("@OldCategory",Db(d.ExistingActionCategory));cmd.Parameters.AddWithValue("@NewCategory",Db(d.NewActionCategory));cmd.Parameters.AddWithValue("@OldTask",Db(d.ExistingTask));cmd.Parameters.AddWithValue("@NewTask",Db(d.NewTask));cmd.Parameters.AddWithValue("@OldShort",Db(d.ExistingShortCategory));cmd.Parameters.AddWithValue("@NewShort",Db(d.NewShortCategory));cmd.Parameters.AddWithValue("@OldClass",Db(d.ExistingDenialClassification));cmd.Parameters.AddWithValue("@NewClass",Db(d.NewDenialClassification));cmd.Parameters.AddWithValue("@Type",d.DifferenceType);cmd.Parameters.AddWithValue("@Assigned",d.IsAssignedToOpenTask);cmd.Parameters.AddWithValue("@Count",d.OpenAssignedTaskCount);d.PushAuditDetailId=Convert.ToInt64(await cmd.ExecuteScalarAsync(ct));}
     private static async Task<IReadOnlyList<DenialMapperPushDifference>> ReadPushDetailsAsync(SqlConnection c,long id,string labName,CancellationToken ct)

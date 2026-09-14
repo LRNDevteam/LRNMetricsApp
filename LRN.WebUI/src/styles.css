@@ -2329,3 +2329,69 @@ body{background:#f5f7fb;color:#101828}
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }
+
+/* ── Workflow Master Values (admin) ────────────────────────────────────────────
+   Scoped under .wm-page. Builds on the Denial Mapper's dm-page / dm-head / dm-modal /
+   dm-mock-form / dm-badge / dm-actions so the two admin screens read as one family. */
+.wm-page .visually-hidden{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.wm-layout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:14px;align-items:start}
+.wm-lists{display:flex;flex-direction:column;gap:4px;background:#fff;border:1px solid #e2e8f0;border-radius:9px;padding:6px;position:sticky;top:8px}
+.wm-list-btn{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:1px solid transparent;background:transparent;border-radius:7px;padding:8px 10px;color:#334155;cursor:pointer;font:inherit}
+.wm-list-btn:hover{background:#f1f5f9}
+.wm-list-btn:focus-visible{outline:0;box-shadow:0 0 0 2px rgba(37,99,235,.35)}
+.wm-list-btn.active{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+.wm-list-btn>i{font-size:15px;width:28px;height:28px;border-radius:7px;display:grid;place-items:center;background:#f1f5f9;color:#475569;flex:0 0 auto}
+.wm-list-btn.active>i{background:#dbeafe;color:#2563eb}
+.wm-list-text{display:flex;flex-direction:column;min-width:0}
+.wm-list-label{font-size:12px;font-weight:700}
+.wm-list-text small{font-size:10px;color:#94a3b8}
+.wm-list-btn.active .wm-list-text small{color:#60a5fa}
+.wm-lists-empty{padding:10px;font-size:11px;color:#94a3b8}
+.wm-panel{background:#fff;border:1px solid #e2e8f0;border-radius:9px;min-width:0;overflow:hidden}
+.wm-empty-panel{padding:48px 20px;text-align:center;color:#94a3b8;font-size:12px}
+.wm-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:14px 16px 10px;border-bottom:1px solid #eef2f7}
+.wm-panel-head h3{margin:0;font-size:15px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:7px}
+.wm-panel-head h3 i{color:#2563eb}
+.wm-panel-head p{margin:3px 0 0;font-size:11px;color:#64748b}
+.wm-panel-head .wl-btn.teal{background:#2563eb;border-color:#2563eb;white-space:nowrap}
+.wm-panel-head .wl-btn.teal:hover{background:#1d4ed8}
+.wm-toolbar{display:flex;align-items:center;gap:14px;padding:10px 16px;border-bottom:1px solid #eef2f7;flex-wrap:wrap}
+.wm-search{display:flex;align-items:center;gap:7px;height:32px;padding:0 9px;border:1px solid #cbd5e1;border-radius:6px;min-width:240px;flex:0 1 320px;color:#94a3b8}
+.wm-search:focus-within{border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,.12)}
+.wm-search input{border:0;outline:0;flex:1;min-width:0;font-size:12px;color:#0f172a;background:transparent}
+.wm-check{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#334155;cursor:pointer}
+.wm-check input{width:14px;height:14px;margin:0;accent-color:#2563eb}
+.wm-count{margin-left:auto;font-size:11px;color:#94a3b8}
+.wm-row-error{margin:10px 16px 0}
+.wm-table-wrap{overflow:auto;max-height:calc(100vh - 330px)}
+.wm-table{width:100%;min-width:720px}
+.wm-table thead th{position:sticky;top:0;z-index:2;background:#f8fafc;white-space:nowrap}
+.wm-table td{vertical-align:middle}
+.wm-table .wm-num{text-align:right;white-space:nowrap}
+.wm-table .wm-value{font-weight:600;color:#0f172a;overflow-wrap:anywhere;min-width:220px}
+.wm-table tr.wm-inactive td{background:#fafbfc}
+.wm-table tr.wm-inactive .wm-value{color:#94a3b8;font-weight:500}
+.wm-code{font:600 11px ui-monospace,SFMono-Regular,Consolas,monospace;background:#f1f5f9;color:#334155;border-radius:4px;padding:2px 6px;white-space:nowrap}
+.wm-usage{display:inline-block;min-width:26px;text-align:center;font-weight:700;font-size:11px;color:#1d4ed8;background:#eff6ff;border-radius:999px;padding:2px 8px}
+.wm-muted{color:#cbd5e1}
+.wm-changed{white-space:nowrap;font-size:11px;color:#475569}
+.wm-changed small{display:block;font-size:10px;color:#94a3b8}
+.wm-actions-col{width:1%}
+.wm-row-actions{justify-content:flex-end}
+.wm-row-actions button:disabled{opacity:.4;cursor:not-allowed}
+.wm-row-actions button.wm-danger:not(:disabled):hover{color:#b91c1c;border-color:#fca5a5}
+.wm-empty-row{text-align:center;color:#94a3b8;padding:28px 12px!important}
+.wm-footnote{margin:0;padding:10px 16px 12px;font-size:11px;line-height:1.55;color:#64748b;border-top:1px solid #eef2f7;background:#fcfdfe}
+.wm-footnote i{color:#94a3b8}
+.wm-footnote strong{color:#334155}
+.wm-modal .dm-mock-form small.wm-field-note{display:block;margin-top:4px;font-size:10px;line-height:1.45;color:#64748b;text-transform:none;letter-spacing:0;font-weight:400}
+.wm-modal .dm-mock-form input[readonly]{background:#f8fafc;color:#64748b;cursor:not-allowed}
+.wm-modal .dm-mock-form label.wm-check-field{display:flex;align-items:center}
+.wm-modal .dm-mock-form label.wm-check-field>span{display:inline;margin:0;font-size:12px;font-weight:500;letter-spacing:0;text-transform:none;color:#334155}
+.wm-modal .dm-mock-form label.wm-check-field input{width:14px;height:14px}
+.wm-dialog-error{margin:0}
+.wm-confirm-text{margin:0;font-size:12px;line-height:1.6;color:#334155}
+.wm-spin{display:inline-block;animation:wm-spin .8s linear infinite}
+@keyframes wm-spin{to{transform:rotate(360deg)}}
+@media (max-width:900px){.wm-layout{grid-template-columns:1fr}.wm-lists{position:static;flex-direction:row;overflow-x:auto}.wm-list-btn{flex:0 0 auto;width:auto}}
+@media (prefers-reduced-motion:reduce){.wm-spin{animation:none}}
