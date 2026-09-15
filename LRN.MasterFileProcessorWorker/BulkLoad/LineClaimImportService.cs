@@ -4,6 +4,14 @@ using Microsoft.Extensions.Options;
 namespace LRN.MasterFileProcessorWorker.BulkLoad;
 
 /// <summary>Everything the import needs about the file being loaded, from the worker's run context.</summary>
+/// <param name="SourceFullPath">Where the data came from: a SharePoint path, or the upstream
+/// RunID and table for a lab sourced from its own database.</param>
+/// <param name="LineLevelSource">
+/// What to call the line-level input in the logs, when it differs from <paramref name="SourceFileName"/>.
+/// A lab can take one level from its tables and the other from the workbook, so the two levels carry
+/// their own labels rather than sharing the run's one. Null falls back to <paramref name="SourceFileName"/>.
+/// </param>
+/// <param name="ClaimLevelSource">The same, for claim level.</param>
 public sealed record LineClaimImportRequest(
     string RunId,
     string? WeekFolder,
@@ -11,7 +19,27 @@ public sealed record LineClaimImportRequest(
     string? SourceFileName,
     DateTime? FileCreatedDateTime,
     string LineLevelCsvPath,
-    string ClaimLevelCsvPath);
+    string ClaimLevelCsvPath,
+    string? LineLevelSource = null,
+    string? ClaimLevelSource = null)
+{
+    /// <summary>
+    /// This level's own source label, or null when the level has none and the run's file name and
+    /// path apply. Null rather than a fallback because the two callers fall back differently: one
+    /// wants the file NAME, the other the full PATH, and collapsing them here would quietly replace
+    /// a SharePoint path with a bare file name for every lab that is not database-sourced.
+    /// </summary>
+    public string? SourceOverrideFor(string fileType)
+    {
+        var perLevel = string.Equals(fileType, FileTypes.LineLevel, StringComparison.OrdinalIgnoreCase)
+            ? LineLevelSource
+            : string.Equals(fileType, FileTypes.ClaimLevel, StringComparison.OrdinalIgnoreCase)
+                ? ClaimLevelSource
+                : null;
+
+        return string.IsNullOrWhiteSpace(perLevel) ? null : perLevel;
+    }
+}
 
 public sealed record LineClaimImportOutcome(string FileType, bool Succeeded, bool Skipped, long RowsCopied, string? Message);
 
@@ -197,6 +225,27 @@ public sealed class LineClaimImportService
         var sourceSystem = lab.LabName;
         var stopwatch = Stopwatch.StartNew();
 
+        // Where this level's rows actually originated. Null for a workbook-sourced lab, in which
+        // case every log below keeps the values it has always carried.
+        var sourceOverride = request.SourceOverrideFor(fileType);
+
+        // ReportRunIdInfoLog.SourceFileName has always held the standardized CSV that was copied in.
+        // For a database-sourced level that CSV is an intermediate this worker wrote seconds earlier,
+        // so it names nothing a reader can trace back; the upstream RunID and table do.
+        var logSourceName = sourceOverride ?? Path.GetFileName(csvPath);
+
+        // Same substitution for LineClaimFileLogs.SourceFullPath and the SourceFullPath stamped on
+        // every loaded row.
+        var sourceFullPath = sourceOverride ?? request.SourceFullPath;
+
+        // ReportsWorkflowTracker has no source column - Remarks is the only field that can carry it.
+        var sourceRemark = sourceOverride is null ? null : $"Source: {sourceOverride}";
+
+        static string? WithSource(string? remark, string? sourceRemark) =>
+            string.IsNullOrWhiteSpace(sourceRemark) ? remark
+            : string.IsNullOrWhiteSpace(remark) ? sourceRemark
+            : $"{remark} {sourceRemark}";
+
         // ---- skip paths. Every one is logged; none is silent. ----
         var skipReason = ResolveSkipReason(level);
 
@@ -205,11 +254,11 @@ public sealed class LineClaimImportService
             _logger.LogInformation("Lab {LabId} [{FileType}]: skipped - {Reason}", lab.LabId, fileType, skipReason);
 
             await _runInfo.InfoAsync(request.RunId, fileType, sourceSystem,
-                $"{fileType} skipped for lab {lab.LabName} ({lab.LabId}): {skipReason}", ct, Path.GetFileName(csvPath)).ConfigureAwait(false);
+                $"{fileType} skipped for lab {lab.LabName} ({lab.LabId}): {skipReason}", ct, logSourceName).ConfigureAwait(false);
 
             await _tracker.UpsertAsync(request.RunId, lab.LabId, lab.LabName, request.WeekFolder,
                 reportName, fileType, WorkflowStatus.Skipped, null, startedOn,
-                ReportRunIdInfoLogger.IstNow(), skipReason, ct).ConfigureAwait(false);
+                ReportRunIdInfoLogger.IstNow(), WithSource(skipReason, sourceRemark), ct).ConfigureAwait(false);
 
             return new LineClaimImportOutcome(fileType, Succeeded: true, Skipped: true, 0, skipReason);
         }
@@ -219,27 +268,27 @@ public sealed class LineClaimImportService
         try
         {
             await _runInfo.StartAsync(request.RunId, fileType, sourceSystem,
-                $"{fileType} bulk copy started for lab {lab.LabName} ({lab.LabId}). Source: {request.SourceFileName}", ct, Path.GetFileName(csvPath))
+                $"{fileType} bulk copy started for lab {lab.LabName} ({lab.LabId}). Source: {sourceOverride ?? request.SourceFileName}", ct, logSourceName)
                 .ConfigureAwait(false);
 
             await _tracker.UpsertAsync(request.RunId, lab.LabId, lab.LabName, request.WeekFolder,
-                reportName, fileType, WorkflowStatus.InProgress, null, startedOn, null, null, ct).ConfigureAwait(false);
+                reportName, fileType, WorkflowStatus.InProgress, null, startedOn, null, sourceRemark, ct).ConfigureAwait(false);
 
             // 1. file log row -> FileLogId, which is stamped onto every data row.
             fileLogId = await _fileLog.InsertAsync(
                 lab.ConnectionString, request.RunId, request.WeekFolder, lab.LabName,
-                request.SourceFullPath, Path.GetFileName(csvPath), fileType,
+                sourceFullPath, Path.GetFileName(csvPath), fileType,
                 request.FileCreatedDateTime, ct).ConfigureAwait(false);
 
             await _runInfo.InfoAsync(request.RunId, fileType, sourceSystem,
-                $"LineClaimFileLogs row {fileLogId} created. Truncate + load into {level!.SqlTableName} starting.", ct, Path.GetFileName(csvPath))
+                $"LineClaimFileLogs row {fileLogId} created. Truncate + load into {level!.SqlTableName} starting.", ct, logSourceName)
                 .ConfigureAwait(false);
 
             var audit = new AuditColumns.AuditValues(
                 FileLogId: fileLogId,
                 RunId: request.RunId,
                 WeekFolder: request.WeekFolder,
-                SourceFullPath: request.SourceFullPath,
+                SourceFullPath: sourceFullPath,
                 FileName: Path.GetFileName(csvPath),
                 FileType: fileType,
                 LabId: lab.LabId,
@@ -256,11 +305,11 @@ public sealed class LineClaimImportService
                     WorkflowStatus.Skipped, 0, result.SkipReason, ct).ConfigureAwait(false);
 
                 await _runInfo.WarningAsync(request.RunId, fileType, sourceSystem,
-                    $"{fileType} produced no load: {result.SkipReason}", ct, Path.GetFileName(csvPath)).ConfigureAwait(false);
+                    $"{fileType} produced no load: {result.SkipReason}", ct, logSourceName).ConfigureAwait(false);
 
                 await _tracker.UpsertAsync(request.RunId, lab.LabId, lab.LabName, request.WeekFolder,
                     reportName, fileType, WorkflowStatus.Skipped, 0, startedOn,
-                    ReportRunIdInfoLogger.IstNow(), result.SkipReason, ct).ConfigureAwait(false);
+                    ReportRunIdInfoLogger.IstNow(), WithSource(result.SkipReason, sourceRemark), ct).ConfigureAwait(false);
 
                 return new LineClaimImportOutcome(fileType, true, true, 0, result.SkipReason);
             }
@@ -269,22 +318,22 @@ public sealed class LineClaimImportService
                 WorkflowStatus.Success, result.RowsInTable, null, ct).ConfigureAwait(false);
 
             await _runInfo.InfoAsync(request.RunId, fileType, sourceSystem,
-                $"{fileType} bulk copy completed. Rows={result.RowsInTable}, Table={level!.SqlTableName}, Duration={stopwatch.ElapsedMilliseconds} ms.", ct, Path.GetFileName(csvPath))
+                $"{fileType} bulk copy completed. Rows={result.RowsInTable}, Table={level!.SqlTableName}, Duration={stopwatch.ElapsedMilliseconds} ms.", ct, logSourceName)
                 .ConfigureAwait(false);
 
             if (result.MissingCsvHeaders.Count > 0 || result.UnmappedCsvHeaders.Count > 0)
             {
                 await _runInfo.WarningAsync(request.RunId, fileType, sourceSystem,
                     $"Mapping gaps. Mapped-but-absent-in-CSV: [{string.Join("; ", result.MissingCsvHeaders)}]. " +
-                    $"In-CSV-but-unmapped: [{string.Join("; ", result.UnmappedCsvHeaders)}].", ct, Path.GetFileName(csvPath)).ConfigureAwait(false);
+                    $"In-CSV-but-unmapped: [{string.Join("; ", result.UnmappedCsvHeaders)}].", ct, logSourceName).ConfigureAwait(false);
             }
 
             await _tracker.UpsertAsync(request.RunId, lab.LabId, lab.LabName, request.WeekFolder,
                 reportName, fileType, WorkflowStatus.Success, result.RowsInTable, startedOn,
-                ReportRunIdInfoLogger.IstNow(), null, ct).ConfigureAwait(false);
+                ReportRunIdInfoLogger.IstNow(), sourceRemark, ct).ConfigureAwait(false);
 
             await _runInfo.EndAsync(request.RunId, fileType, sourceSystem,
-                $"{fileType} processing ended for lab {lab.LabName} ({lab.LabId}).", ct, Path.GetFileName(csvPath)).ConfigureAwait(false);
+                $"{fileType} processing ended for lab {lab.LabName} ({lab.LabId}).", ct, logSourceName).ConfigureAwait(false);
 
             return new LineClaimImportOutcome(fileType, true, false, result.RowsInTable, null);
         }
@@ -299,14 +348,14 @@ public sealed class LineClaimImportService
                     WorkflowStatus.Failed, null, ex.Message, ct).ConfigureAwait(false);
             }
 
-            await _runInfo.ErrorAsync(request.RunId, fileType, sourceSystem, ex, ct).ConfigureAwait(false);
+            await _runInfo.ErrorAsync(request.RunId, fileType, sourceSystem, ex, ct, logSourceName).ConfigureAwait(false);
 
             await _tracker.UpsertAsync(request.RunId, lab.LabId, lab.LabName, request.WeekFolder,
                 reportName, fileType, WorkflowStatus.Failed, null, startedOn,
-                ReportRunIdInfoLogger.IstNow(), ex.Message, ct).ConfigureAwait(false);
+                ReportRunIdInfoLogger.IstNow(), WithSource(ex.Message, sourceRemark), ct).ConfigureAwait(false);
 
             await _runInfo.EndAsync(request.RunId, fileType, sourceSystem,
-                $"{fileType} processing ended with failure for lab {lab.LabName} ({lab.LabId}).", ct, Path.GetFileName(csvPath)).ConfigureAwait(false);
+                $"{fileType} processing ended with failure for lab {lab.LabName} ({lab.LabId}).", ct, logSourceName).ConfigureAwait(false);
 
             return new LineClaimImportOutcome(fileType, false, false, 0, ex.Message);
         }

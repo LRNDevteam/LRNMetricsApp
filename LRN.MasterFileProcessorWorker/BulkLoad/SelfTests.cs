@@ -41,6 +41,16 @@ public static class SelfTests
         AugustusPanelNewComesFromSourceColumn();
         EmptyRowsAreNotImported();
         RowsWithoutIdentityAreImportedAndCounted();
+        LabDatabaseTableNameQuoting();
+        LabDatabaseSchemaMatching();
+        LabDatabaseCsvFormattingMatchesWorkbookPath();
+        LabDatabaseLimsSourceRouting();
+        LabDatabaseLimsSchemaMatching();
+        LabDatabaseSourceRunDecisions();
+        LabDatabaseGateAgainstRealLrnFileStatusRows();
+        LabDatabaseGateRequiresAllThreeFileTypes();
+        LabDatabaseSourceLabelling();
+        RerunBypassesMarkersButNotReadiness();
 
         Console.WriteLine(new string('-', 70));
 
@@ -800,6 +810,678 @@ public static class SelfTests
     }
 
     // ---------------- helpers ----------------
+
+    // ---------------- LabDatabase source (MasterDataSource = "LabDatabase") ----------------
+
+    /// <summary>
+    /// The source table name is the one part of the SELECT that comes from configuration rather
+    /// than a parameter, so it has to be quoted, and anything that is not a plain one- or two-part
+    /// identifier has to be refused outright.
+    /// </summary>
+    private static void LabDatabaseTableNameQuoting()
+    {
+        Console.WriteLine("\nLabDatabase - table name quoting");
+
+        Check("schema.table is quoted",
+            LRN.MasterFileProcessorWorker.Database.LabDatabaseMasterReader
+                .QuoteTableName("dbo.Cove_Claim_Level_Billing_Master")
+            == "[dbo].[Cove_Claim_Level_Billing_Master]");
+
+        Check("bare table is quoted",
+            LRN.MasterFileProcessorWorker.Database.LabDatabaseMasterReader
+                .QuoteTableName("Cove_Line_Level_Billing_Master")
+            == "[Cove_Line_Level_Billing_Master]");
+
+        Check("already-bracketed name is not double-bracketed",
+            LRN.MasterFileProcessorWorker.Database.LabDatabaseMasterReader
+                .QuoteTableName("[dbo].[Cove_Claim_Level_Billing_Master]")
+            == "[dbo].[Cove_Claim_Level_Billing_Master]");
+
+        Check("surrounding whitespace is tolerated",
+            LRN.MasterFileProcessorWorker.Database.LabDatabaseMasterReader
+                .QuoteTableName(" dbo . Cove_Claim_Level_Billing_Master ")
+            == "[dbo].[Cove_Claim_Level_Billing_Master]");
+
+        foreach (var bad in new[]
+                 {
+                     "",
+                     "   ",
+                     "a.b.c.d",
+                     "dbo.Claims; DROP TABLE Claims--",
+                     "dbo.Claims]--",
+                     "dbo.O'Brien"
+                 })
+        {
+            var rejected = false;
+            try
+            {
+                LRN.MasterFileProcessorWorker.Database.LabDatabaseMasterReader.QuoteTableName(bad);
+            }
+            catch (ArgumentException)
+            {
+                rejected = true;
+            }
+
+            Check($"rejects unsafe table name: \"{bad}\"", rejected);
+        }
+    }
+
+    /// <summary>
+    /// The Cove tables and the Cove schema JSONs disagree on spacing - the schema says "TotalWO"
+    /// and "Total Balance", the table says "Total WO" and "TotalBalance". Both sides normalise to
+    /// the same token, so those must count as present; a genuinely absent column must not.
+    /// </summary>
+    private static void LabDatabaseSchemaMatching()
+    {
+        Console.WriteLine("\nLabDatabase - schema matching");
+
+        static string Norm(string value) =>
+            new string((value ?? "").Trim().ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+
+        Check("'TotalWO' matches table 'Total WO'", Norm("TotalWO") == Norm("Total WO"));
+        Check("'Total Balance' matches table 'TotalBalance'", Norm("Total Balance") == Norm("TotalBalance"));
+        Check("'Claim Level CPT' matches 'ClaimLevelCPT'", Norm("Claim Level CPT") == Norm("ClaimLevelCPT"));
+        Check("'Payment %' matches 'Payment%'", Norm("Payment %") == Norm("Payment%"));
+
+        // Different columns must still be different - the normalisation strips punctuation, so this
+        // is the check that it has not been loosened into matching everything.
+        Check("'CarrierBalance' does not match 'PatientBalance'",
+            Norm("CarrierBalance") != Norm("PatientBalance"));
+        Check("'CarrierWO' does not match 'PatientWO'",
+            Norm("CarrierWO") != Norm("PatientWO"));
+        Check("'TotalCharge' does not match 'TotalAllowed'",
+            Norm("TotalCharge") != Norm("TotalAllowed"));
+    }
+
+    /// <summary>
+    /// A row read from SQL has to become the same CSV text the workbook path would have written,
+    /// or the same lab's dates and amounts would parse differently depending on which source fed
+    /// it. Both paths run through ExcelCsvExporter, so this pins the behaviour that matters.
+    /// </summary>
+    private static void LabDatabaseCsvFormattingMatchesWorkbookPath()
+    {
+        Console.WriteLine("\nLabDatabase - CSV value formatting");
+
+        Check("null becomes empty",
+            ExcelCsvExporter.ConvertCellToString(null, "Carrier") == "");
+
+        Check("DBNull becomes empty",
+            ExcelCsvExporter.ConvertCellToString(DBNull.Value, "Carrier") == "");
+
+        Check("date uses yyyy-MM-dd HH:mm:ss",
+            ExcelCsvExporter.ConvertCellToString(new DateTime(2026, 9, 1, 13, 45, 7), "BeginDOS")
+            == "2026-09-01 13:45:07");
+
+        // Amount-style headers keep two decimals; identifier-style numbers must not gain ".00",
+        // which would turn a CPT or a visit number into something that no longer joins.
+        Check("amount column keeps 2 decimals",
+            ExcelCsvExporter.ConvertCellToString(420m, "CarrierBalance") == "420.00");
+
+        Check("charge column keeps 2 decimals",
+            ExcelCsvExporter.ConvertCellToString(1234.5m, "TotalCharge") == "1234.50");
+
+        Check("identifier-style integer has no decimals",
+            ExcelCsvExporter.ConvertCellToString(87801m, "Claim Level CPT") == "87801");
+
+        Check("non-integer, non-amount value keeps its precision",
+            ExcelCsvExporter.ConvertCellToString(0.5849d, "Ratio") == "0.5849");
+
+        Check("bool is lower-case",
+            ExcelCsvExporter.ConvertCellToString(false, "T/F") == "false");
+
+        // Escaping: a payer name with a comma is the everyday case that breaks a naive writer.
+        Check("value with a comma is quoted",
+            ExcelCsvExporter.CsvEscape("MERCY CARE PLAN, AHCCCS") == "\"MERCY CARE PLAN, AHCCCS\"");
+
+        Check("embedded quote is doubled and wrapped",
+            ExcelCsvExporter.CsvEscape("O\"Brien") == "\"O\"\"Brien\"");
+
+        Check("newline is quoted",
+            ExcelCsvExporter.CsvEscape("line1\nline2") == "\"line1\nline2\"");
+
+        Check("plain value is not quoted",
+            ExcelCsvExporter.CsvEscape("HUMANA") == "HUMANA");
+    }
+
+    /// <summary>
+    /// LimsImportRequest routes on SourceTable alone. Getting this wrong in either direction is
+    /// silent: a workbook lab reading an empty table, or a table lab looking for a file that is
+    /// no longer published.
+    /// </summary>
+    private static void LabDatabaseLimsSourceRouting()
+    {
+        Console.WriteLine("\nLabDatabase - LIMS source routing");
+
+        var workbook = new LimsImportRequest { ExcelPath = @"C:\lims\Cove_LIMS.xlsx" };
+        Check("no SourceTable -> workbook path", !workbook.UsesSqlSource);
+
+        var table = new LimsImportRequest { SourceTable = "dbo.Cove_LIS_Master" };
+        Check("SourceTable set -> SQL path", table.UsesSqlSource);
+
+        var blank = new LimsImportRequest { SourceTable = "   " };
+        Check("whitespace SourceTable is not a SQL source", !blank.UsesSqlSource);
+
+        // A table lab has no workbook, so the request must not need one to be considered valid.
+        var tableOnly = new LimsImportRequest { SourceTable = "dbo.Cove_LIS_Master", ExcelPath = "" };
+        Check("SQL source needs no ExcelPath", tableOnly.UsesSqlSource && tableOnly.ExcelPath.Length == 0);
+
+        // Both set: the table wins, so a stale workbook beside the data cannot quietly take over.
+        var both = new LimsImportRequest { SourceTable = "dbo.Cove_LIS_Master", ExcelPath = @"C:\lims\old.xlsx" };
+        Check("SourceTable wins when both are set", both.UsesSqlSource);
+    }
+
+    /// <summary>
+    /// The LIMS schema JSON maps ExcelColName -> SQLColName, and Cove's has a trailing space in
+    /// "New Status " on BOTH sides. The source table spells it without one, so the normalisation
+    /// has to bridge that - otherwise the column silently lands empty.
+    /// </summary>
+    private static void LabDatabaseLimsSchemaMatching()
+    {
+        Console.WriteLine("\nLabDatabase - LIMS schema matching");
+
+        static string Norm(string value) =>
+            new string((value ?? "").Trim().ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+
+        Check("schema 'New Status ' matches table 'New Status'", Norm("New Status ") == Norm("New Status"));
+        Check("'Panel type' matches 'Paneltype'", Norm("Panel type") == Norm("Paneltype"));
+        Check("'Collection Week' matches 'CollectionWeek'", Norm("Collection Week") == Norm("CollectionWeek"));
+        Check("'Policy_Holder_DOB' matches 'PolicyHolderDOB'", Norm("Policy_Holder_DOB") == Norm("PolicyHolderDOB"));
+        Check("'Time to Result' matches 'TimetoResult'", Norm("Time to Result") == Norm("TimetoResult"));
+
+        // Near-miss pairs that must stay distinct.
+        Check("'Status' does not match 'New Status'", Norm("Status") != Norm("New Status"));
+        Check("'Status' does not match 'Sub Status'", Norm("Status") != Norm("Sub Status"));
+        Check("'Client Status' does not match 'New Status'", Norm("Client Status") != Norm("New Status"));
+        Check("'DOB' does not match 'Policy_Holder_DOB'", Norm("DOB") != Norm("Policy_Holder_DOB"));
+        Check("'Time to Result' does not match 'Time to Bill'", Norm("Time to Result") != Norm("Time to Bill"));
+        Check("'FacilityCity' does not match 'FacilityState'", Norm("FacilityCity") != Norm("FacilityState"));
+    }
+
+    /// <summary>
+    /// The gate in front of a LabDatabase lab. These rules decide whether a week's data moves at
+    /// all, and every one of them fails silently if it is wrong - either nothing ever loads, or
+    /// half a refresh gets published as final.
+    /// </summary>
+    private static void LabDatabaseSourceRunDecisions()
+    {
+        Console.WriteLine("\nLabDatabase - source run gate");
+
+        // Mirrors LabSourceRunGate.DecideAsync without needing a database: same inputs, same rules.
+        static (bool Ingest, string Reason) Decide(
+            (string FileType, string RunId, string Status)[] latest,
+            Dictionary<string, string> lastIngested)
+        {
+            foreach (var (fileType, runId, status) in latest)
+            {
+                if (runId is null)
+                    return (false, $"no {fileType} row");
+                if (!string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase))
+                    return (false, $"latest {fileType} run {runId} is '{status}'");
+            }
+
+            var distinct = latest.Select(x => x.RunId).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (distinct.Count != 1)
+                return (false, "runs disagree across file types");
+
+            foreach (var (fileType, runId, _) in latest)
+            {
+                lastIngested.TryGetValue(fileType, out var last);
+                if (!string.Equals(last, runId, StringComparison.OrdinalIgnoreCase))
+                    return (true, $"{fileType} last saw '{last ?? "nothing"}'");
+            }
+
+            return (false, "already ingested for every file type");
+        }
+
+        var completed = new[]
+        {
+            ("LINELEVEL",  "R20260902COV1487", "Completed"),
+            ("CLAIMLEVEL", "R20260902COV1487", "Completed")
+        };
+
+        Check("a new Completed run is ingested",
+            Decide(completed, new Dictionary<string, string>()).Ingest);
+
+        Check("the same run is not ingested twice",
+            !Decide(completed, new Dictionary<string, string>
+            {
+                ["LINELEVEL"] = "R20260902COV1487",
+                ["CLAIMLEVEL"] = "R20260902COV1487"
+            }).Ingest);
+
+        Check("a newer Completed run is ingested",
+            Decide(completed, new Dictionary<string, string>
+            {
+                ["LINELEVEL"] = "R20260826COV1450",
+                ["CLAIMLEVEL"] = "R20260826COV1450"
+            }).Ingest);
+
+        // One level behind is still work to do: it is how a partial failure gets retried.
+        Check("one level behind still triggers a run",
+            Decide(completed, new Dictionary<string, string>
+            {
+                ["LINELEVEL"] = "R20260902COV1487",
+                ["CLAIMLEVEL"] = "R20260826COV1450"
+            }).Ingest);
+
+        Check("Inprogress is not consumed",
+            !Decide(new[]
+            {
+                ("LINELEVEL",  "R20260902COV1487", "Inprogress"),
+                ("CLAIMLEVEL", "R20260902COV1487", "Completed")
+            }, new Dictionary<string, string>()).Ingest);
+
+        Check("Failed is not consumed",
+            !Decide(new[]
+            {
+                ("LINELEVEL",  "R20260902COV1487", "Failed"),
+                ("CLAIMLEVEL", "R20260902COV1487", "Failed")
+            }, new Dictionary<string, string>()).Ingest);
+
+        // The three tables are refreshed together. Halves from different runs would produce a
+        // workbook whose line level and claim level do not reconcile.
+        Check("mismatched run ids across file types are refused",
+            !Decide(new[]
+            {
+                ("LINELEVEL",  "R20260902COV1487", "Completed"),
+                ("CLAIMLEVEL", "R20260826COV1450", "Completed")
+            }, new Dictionary<string, string>()).Ingest);
+
+        Check("status match is case-insensitive",
+            Decide(new[]
+            {
+                ("LINELEVEL",  "R20260902COV1487", "COMPLETED"),
+                ("CLAIMLEVEL", "R20260902COV1487", "completed")
+            }, new Dictionary<string, string>()).Ingest);
+
+        Check("LIS is gated alongside the billing levels",
+            !Decide(new[]
+            {
+                ("LINELEVEL",  "R20260902COV1487", "Completed"),
+                ("CLAIMLEVEL", "R20260902COV1487", "Completed"),
+                ("LIS",        "R20260902COV1487", "Inprogress")
+            }, new Dictionary<string, string>()).Ingest);
+    }
+
+    /// <summary>
+    /// Replays the real Cove rows from LRNMaster.dbo.LrnFileStatus - 21 rows, three per run, seven
+    /// runs across two week ranges, ending Completed -> Failed -> Failed -> Inprogress.
+    ///
+    /// <para>
+    /// The point of using the real shape is the ordering. "Latest" has to mean the last row
+    /// inserted (LrnFileId), not the newest timestamp: an Inprogress row has no CompletedOn, so a
+    /// timestamp sort falls back to StartedOn and can rank a finished older run ABOVE a running
+    /// newer one - which is exactly when the tables are being rewritten underneath us.
+    /// </para>
+    /// </summary>
+    private static void LabDatabaseGateAgainstRealLrnFileStatusRows()
+    {
+        Console.WriteLine("\nLabDatabase - gate against real LrnFileStatus rows");
+
+        // (LrnFileId, FileType, RunId, Status) exactly as the table holds them.
+        var rows = new (int Id, string FileType, string RunId, string Status)[]
+        {
+            (1,  "LIS",        "COVE_20260909_A", "Inprogress"),
+            (2,  "LINELEVEL",  "COVE_20260909_A", "Inprogress"),
+            (3,  "CLAIMLEVEL", "COVE_20260909_A", "Inprogress"),
+            (4,  "LIS",        "COVE_20260909_A", "Completed"),
+            (5,  "LINELEVEL",  "COVE_20260909_A", "Completed"),
+            (6,  "CLAIMLEVEL", "COVE_20260909_A", "Completed"),
+            (7,  "LIS",        "COVE_20260909_B", "Completed"),
+            (8,  "LINELEVEL",  "COVE_20260909_B", "Completed"),
+            (9,  "CLAIMLEVEL", "COVE_20260909_B", "Completed"),
+            (10, "LIS",        "COVE_20260910_A", "Completed"),
+            (11, "LINELEVEL",  "COVE_20260910_A", "Completed"),
+            (12, "CLAIMLEVEL", "COVE_20260910_A", "Completed"),
+            (13, "LIS",        "COVE_20260910_B", "Failed"),
+            (14, "LINELEVEL",  "COVE_20260910_B", "Failed"),
+            (15, "CLAIMLEVEL", "COVE_20260910_B", "Failed"),
+            (16, "LIS",        "COVE_20260910_C", "Failed"),
+            (17, "LINELEVEL",  "COVE_20260910_C", "Failed"),
+            (18, "CLAIMLEVEL", "COVE_20260910_C", "Failed"),
+            (19, "LIS",        "COVE_20260910_D", "Inprogress"),
+            (20, "LINELEVEL",  "COVE_20260910_D", "Inprogress"),
+            (21, "CLAIMLEVEL", "COVE_20260910_D", "Inprogress")
+        };
+
+        // Mirrors GetLatestRunAsync's ORDER BY LrnFileId DESC.
+        static (string RunId, string Status)? Latest(
+            (int Id, string FileType, string RunId, string Status)[] all, string fileType)
+        {
+            var row = all.Where(r => string.Equals(r.FileType, fileType, StringComparison.OrdinalIgnoreCase))
+                         .OrderByDescending(r => r.Id)
+                         .FirstOrDefault();
+            return row.FileType is null ? null : (row.RunId, row.Status);
+        }
+
+        // Mirrors DecideAsync.
+        static (bool Ingest, string RunId) Decide(
+            (int Id, string FileType, string RunId, string Status)[] all,
+            string[] fileTypes,
+            Dictionary<string, string> lastIngested)
+        {
+            var found = new List<(string RunId, string Status)>();
+            foreach (var fileType in fileTypes)
+            {
+                var latest = Latest(all, fileType);
+                if (latest is null) return (false, "");
+                if (!string.Equals(latest.Value.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+                    return (false, "");
+                found.Add(latest.Value);
+            }
+
+            var distinct = found.Select(f => f.RunId).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (distinct.Count != 1) return (false, "");
+
+            foreach (var fileType in fileTypes)
+            {
+                lastIngested.TryGetValue(fileType, out var last);
+                if (!string.Equals(last, distinct[0], StringComparison.OrdinalIgnoreCase))
+                    return (true, distinct[0]);
+            }
+
+            return (false, distinct[0]);
+        }
+
+        var allTypes = new[] { "LINELEVEL", "CLAIMLEVEL", "LIS" };
+
+        // As the table stands, the newest rows (19-21) are Inprogress -> wait.
+        Check("table as-is: latest LINELEVEL is the Inprogress run",
+            Latest(rows, "LINELEVEL")!.Value.RunId == "COVE_20260910_D"
+            && Latest(rows, "LINELEVEL")!.Value.Status == "Inprogress");
+
+        Check("table as-is: gate waits, nothing is ingested",
+            !Decide(rows, allTypes, new Dictionary<string, string>()).Ingest);
+
+        // The earlier Completed run is NOT reached back for: the tables now hold whatever the
+        // failed and in-progress attempts left behind.
+        Check("does not fall back to the last Completed run",
+            Decide(rows, allTypes, new Dictionary<string, string>()).RunId != "COVE_20260910_A");
+
+        // Once that in-progress run finishes, it becomes the one to take.
+        var completed = rows.Select(r => r.Id >= 19 ? (r.Id, r.FileType, r.RunId, "Completed") : r).ToArray();
+        var decision = Decide(completed, allTypes, new Dictionary<string, string>());
+        Check("once it completes, that run is ingested", decision.Ingest && decision.RunId == "COVE_20260910_D");
+
+        // And only once.
+        Check("and not a second time",
+            !Decide(completed, allTypes, new Dictionary<string, string>
+            {
+                ["LINELEVEL"] = "COVE_20260910_D",
+                ["CLAIMLEVEL"] = "COVE_20260910_D",
+                ["LIS"] = "COVE_20260910_D"
+            }).Ingest);
+
+        // A run that ends Failed is never consumed, even though an older run Completed.
+        var failedLatest = rows.Where(r => r.Id <= 18).ToArray();
+        Check("latest run Failed -> wait, do not consume",
+            !Decide(failedLatest, allTypes, new Dictionary<string, string>()).Ingest);
+
+        // Rows 4-6 replace the Inprogress rows 1-3 for the same run: the later rows win.
+        var firstRunOnly = rows.Where(r => r.Id <= 6).ToArray();
+        Check("a later row supersedes the same run's earlier Inprogress row",
+            Decide(firstRunOnly, allTypes, new Dictionary<string, string>()).Ingest);
+    }
+
+    /// <summary>
+    /// The processor starts on a RunID only when LIS, LINELEVEL and CLAIMLEVEL have ALL completed
+    /// for it. A run with two of three done is a run whose tables are still being written.
+    ///
+    /// <para>
+    /// Readiness and progress are separate sets here, and the last two checks are why: a lab that
+    /// does not load some file type must still WAIT for it, but must not TRACK it - tracking a
+    /// file type that never loads leaves its marker permanently behind and re-triggers the load on
+    /// every poll for ever.
+    /// </para>
+    /// </summary>
+    private static void LabDatabaseGateRequiresAllThreeFileTypes()
+    {
+        Console.WriteLine("\nLabDatabase - all three file types must be Completed");
+
+        static (bool Ingest, string Reason) Decide(
+            Dictionary<string, (string RunId, string Status)> latest,
+            string[] required,
+            string[] ingest,
+            Dictionary<string, string> lastIngested)
+        {
+            var runs = new List<string>();
+            foreach (var fileType in required)
+            {
+                if (!latest.TryGetValue(fileType, out var row))
+                    return (false, $"no {fileType} row");
+                if (!string.Equals(row.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+                    return (false, $"{fileType} is {row.Status}");
+                runs.Add(row.RunId);
+            }
+
+            if (runs.Distinct(StringComparer.OrdinalIgnoreCase).Count() != 1)
+                return (false, "run ids disagree");
+
+            foreach (var fileType in ingest)
+            {
+                lastIngested.TryGetValue(fileType, out var last);
+                if (!string.Equals(last, runs[0], StringComparison.OrdinalIgnoreCase))
+                    return (true, "work to do");
+            }
+
+            return (false, "already ingested");
+        }
+
+        var all = new[] { "LIS", "LINELEVEL", "CLAIMLEVEL" };
+        const string run = "COVE_20260910_D";
+
+        static Dictionary<string, (string, string)> Rows(string lis, string line, string claim, string runId) =>
+            new()
+            {
+                ["LIS"] = (runId, lis),
+                ["LINELEVEL"] = (runId, line),
+                ["CLAIMLEVEL"] = (runId, claim)
+            };
+
+        Check("all three Completed -> start",
+            Decide(Rows("Completed", "Completed", "Completed", run), all, all, new()).Ingest);
+
+        Check("LIS still Inprogress -> wait",
+            !Decide(Rows("Inprogress", "Completed", "Completed", run), all, all, new()).Ingest);
+
+        Check("LINELEVEL still Inprogress -> wait",
+            !Decide(Rows("Completed", "Inprogress", "Completed", run), all, all, new()).Ingest);
+
+        Check("CLAIMLEVEL still Inprogress -> wait",
+            !Decide(Rows("Completed", "Completed", "Inprogress", run), all, all, new()).Ingest);
+
+        Check("one Failed among three -> wait",
+            !Decide(Rows("Completed", "Failed", "Completed", run), all, all, new()).Ingest);
+
+        Check("a missing file type row -> wait",
+            !Decide(new Dictionary<string, (string, string)>
+            {
+                ["LINELEVEL"] = (run, "Completed"),
+                ["CLAIMLEVEL"] = (run, "Completed")
+            }, all, all, new()).Ingest);
+
+        // Readiness still spans all three even when the lab loads only two of them...
+        var twoOnly = new[] { "LINELEVEL", "CLAIMLEVEL" };
+
+        Check("a lab loading two levels still waits for LIS",
+            !Decide(Rows("Inprogress", "Completed", "Completed", run), all, twoOnly, new()).Ingest);
+
+        // ...and once everything is ready, only the loaded two decide "already done", so the run
+        // settles instead of re-triggering because LIS has no marker.
+        Check("progress is judged only on what the lab loads",
+            !Decide(Rows("Completed", "Completed", "Completed", run), all, twoOnly,
+                new Dictionary<string, string>
+                {
+                    ["LINELEVEL"] = run,
+                    ["CLAIMLEVEL"] = run
+                }).Ingest);
+    }
+
+    /// <summary>
+    /// How a database-sourced input is named in LRN_Run_Log, ReportsWorkflowTracker and
+    /// ReportRunIdInfoLog: <c>&lt;upstream RunID&gt;_&lt;table&gt;</c>.
+    ///
+    /// <para>
+    /// The fallbacks are the substance here. A lab can source one level from its tables and another
+    /// from the workbook, and a label must never be invented for a level that really did come from
+    /// SharePoint - that would point anyone reconciling a figure at a table the rows never touched.
+    /// </para>
+    /// </summary>
+    private static void LabDatabaseSourceLabelling()
+    {
+        Console.WriteLine("\nLabDatabase - source labelling in the run logs");
+
+        const string run = "COVE_20260910_D";
+        const string lineTable = "dbo.Cove_Line_Level_Billing_Master";
+        const string claimTable = "dbo.Cove_Claim_Level_Billing_Master";
+        const string lisTable = "dbo.Cove_LIS_Master";
+
+        var label = Database.LabSourceRunGate.SourceLabel(run, lineTable);
+        Check("label is <RunID>_<table>", label == $"{run}_{lineTable}", label);
+
+        Check("no table -> no label, not a stray underscore",
+            Database.LabSourceRunGate.SourceLabel(run, null) is null
+            && Database.LabSourceRunGate.SourceLabel(run, "   ") is null);
+
+        Check("no run id -> the table alone",
+            Database.LabSourceRunGate.SourceLabel(null, lineTable) == lineTable
+            && Database.LabSourceRunGate.SourceLabel("  ", lineTable) == lineTable);
+
+        Check("surrounding whitespace is trimmed off both halves",
+            Database.LabSourceRunGate.SourceLabel($"  {run} ", $" {lineTable}  ") == $"{run}_{lineTable}");
+
+        // Run level: one field, possibly several tables, one shared RunID.
+        var runLabel = Database.LabSourceRunGate.RunSourceLabel(run, new[] { lineTable, claimTable, lisTable });
+        Check("run label states the RunID once and lists the tables",
+            runLabel == $"{run}_[{lineTable}, {claimTable}, {lisTable}]", runLabel);
+
+        Check("run label drops blanks and duplicates",
+            Database.LabSourceRunGate.RunSourceLabel(run, new[] { lineTable, null, "  ", lineTable })
+                == $"{run}_[{lineTable}]");
+
+        Check("no tables at all -> no run label",
+            Database.LabSourceRunGate.RunSourceLabel(run, new string?[] { null, "" }) is null);
+
+        // ---- per-level routing on the import request ----------------------------------------
+        var bothFromDb = new LineClaimImportRequest(
+            RunId: "R1", WeekFolder: null,
+            SourceFullPath: "sites/x/Cove_Master File.xlsx",
+            SourceFileName: "Cove_Master File.xlsx",
+            FileCreatedDateTime: null,
+            LineLevelCsvPath: "line.csv", ClaimLevelCsvPath: "claim.csv",
+            LineLevelSource: $"{run}_{lineTable}",
+            ClaimLevelSource: $"{run}_{claimTable}");
+
+        Check("line level resolves to the line table",
+            bothFromDb.SourceOverrideFor(FileTypes.LineLevel) == $"{run}_{lineTable}");
+
+        Check("claim level resolves to the claim table",
+            bothFromDb.SourceOverrideFor(FileTypes.ClaimLevel) == $"{run}_{claimTable}");
+
+        // A workbook-sourced lab passes neither, and must keep the SharePoint path and name it has
+        // always logged rather than acquiring a table label.
+        var fromWorkbook = bothFromDb with { LineLevelSource = null, ClaimLevelSource = null };
+
+        Check("a workbook-sourced lab gets no override at either level",
+            fromWorkbook.SourceOverrideFor(FileTypes.LineLevel) is null
+            && fromWorkbook.SourceOverrideFor(FileTypes.ClaimLevel) is null);
+
+        // The mixed case: LIS comes from a table, the two billing levels still come from the
+        // workbook. Only the LIS load may be relabelled.
+        var lisOnly = bothFromDb with { LineLevelSource = null, ClaimLevelSource = "   " };
+
+        Check("a blank per-level source is not treated as an override",
+            lisOnly.SourceOverrideFor(FileTypes.ClaimLevel) is null);
+
+        Check("an unrecognised file type gets no override",
+            bothFromDb.SourceOverrideFor("LIS Summary") is null);
+    }
+
+    /// <summary>
+    /// What an operator-requested re-run is allowed to skip.
+    ///
+    /// <para>
+    /// A re-run exists to redo work that has already been done, so both "already done" gates give
+    /// way: the SharePoint ETag marker and the upstream already-ingested RunID marker. The
+    /// readiness check does NOT give way. Whether LIS, LINELEVEL and CLAIMLEVEL have all finished
+    /// is a question about whether the SOURCE is safe to read, and nobody clicking a button in a
+    /// browser is asking to read tables an unfinished run is still writing.
+    /// </para>
+    /// </summary>
+    private static void RerunBypassesMarkersButNotReadiness()
+    {
+        Console.WriteLine("\nRe-run - which gates give way and which do not");
+
+        // Mirrors DecideAsync: readiness first, then the marker, with the re-run flag skipping
+        // only the second.
+        static (bool Ingest, string Reason) Decide(
+            Dictionary<string, string> statuses,
+            string runId,
+            string? lastIngested,
+            bool isRerun)
+        {
+            foreach (var fileType in new[] { "LIS", "LINELEVEL", "CLAIMLEVEL" })
+            {
+                if (!statuses.TryGetValue(fileType, out var status))
+                    return (false, $"no {fileType} row");
+
+                if (!string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase))
+                    return (false, $"{fileType} is {status}");
+            }
+
+            if (isRerun)
+                return (true, "re-run requested; the already-ingested marker was not consulted");
+
+            return string.Equals(lastIngested, runId, StringComparison.OrdinalIgnoreCase)
+                ? (false, "already ingested")
+                : (true, "not yet ingested");
+        }
+
+        const string run = "COVE_20260910_D";
+
+        static Dictionary<string, string> Rows(string lis, string line, string claim) =>
+            new() { ["LIS"] = lis, ["LINELEVEL"] = line, ["CLAIMLEVEL"] = claim };
+
+        var allDone = Rows("Completed", "Completed", "Completed");
+
+        // The case the whole feature exists for: the run is finished and already loaded, and the
+        // scheduled poll would do nothing. The re-run goes ahead.
+        Check("scheduled run skips a RunID it has already ingested",
+            !Decide(allDone, run, lastIngested: run, isRerun: false).Ingest);
+
+        Check("re-run loads that same RunID again",
+            Decide(allDone, run, lastIngested: run, isRerun: true).Ingest);
+
+        // ...but the source still has to be safe to read.
+        Check("re-run still waits while LIS is Inprogress",
+            !Decide(Rows("Inprogress", "Completed", "Completed"), run, null, isRerun: true).Ingest);
+
+        Check("re-run still waits while LINELEVEL is Inprogress",
+            !Decide(Rows("Completed", "Inprogress", "Completed"), run, null, isRerun: true).Ingest);
+
+        Check("re-run still waits while CLAIMLEVEL is Inprogress",
+            !Decide(Rows("Completed", "Completed", "Inprogress"), run, null, isRerun: true).Ingest);
+
+        Check("re-run still refuses a Failed upstream run",
+            !Decide(Rows("Completed", "Failed", "Completed"), run, null, isRerun: true).Ingest);
+
+        Check("re-run still refuses when a file type has no row at all",
+            !Decide(new Dictionary<string, string> { ["LINELEVEL"] = "Completed", ["CLAIMLEVEL"] = "Completed" },
+                run, null, isRerun: true).Ingest);
+
+        // The ETag gate, which is the SharePoint equivalent of the same idea.
+        static bool AlreadyProcessed(bool markerSaysProcessed, bool isRerun) =>
+            !isRerun && markerSaysProcessed;
+
+        Check("unchanged file is skipped on a scheduled run",
+            AlreadyProcessed(markerSaysProcessed: true, isRerun: false));
+
+        Check("unchanged file is processed on a re-run",
+            !AlreadyProcessed(markerSaysProcessed: true, isRerun: true));
+
+        Check("a changed file is processed either way",
+            !AlreadyProcessed(false, false) && !AlreadyProcessed(false, true));
+    }
 
     private static void Check(string name, bool condition, string? detail = null)
     {

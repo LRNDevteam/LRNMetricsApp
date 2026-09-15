@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using ClosedXML.Excel;
 using LRN.ReportsApi.Models;
 using Microsoft.Data.SqlClient;
@@ -8,7 +8,7 @@ namespace LRN.ReportsApi.Services;
 
 public interface IDenialCodeMasterRepository
 {
-    Task<PagedResult<DenialCodeMasterRecord>> GetPagedAsync(int labId, string? search, int page, int pageSize, CancellationToken ct);
+    Task<PagedResult<DenialCodeMasterRecord>> GetPagedAsync(int labId, string? search, int page, int pageSize, string? sortBy, string? sortDir, CancellationToken ct);
     Task<IReadOnlyList<DenialCodeMasterRecord>> GetAllAsync(int labId, CancellationToken ct);
     Task<DenialCodeMasterRecord?> GetByKeyAsync(int labId, string denialCode, string coverageStatus, string icdComplianceStatus, CancellationToken ct);
     Task<bool> ExistsAsync(int labId, string denialCode, string coverageStatus, string icdComplianceStatus, CancellationToken ct);
@@ -18,6 +18,7 @@ public interface IDenialCodeMasterRepository
     Task<DenialCodeMasterLookups> GetLookupsAsync(int labId, CancellationToken ct);
     Task<DenialCodeMasterImportResult> ReplaceFromImportAsync(int labId, IReadOnlyList<DenialCodeMasterRequest> records, int skippedCount, IReadOnlyList<string> errors, string? sourceFileName, string? userName, CancellationToken ct);
     Task<DenialCodeMasterImpact> GetImpactAsync(int labId, string denialCode, CancellationToken ct);
+    Task<DenialCodeSyncResult> SyncLabActionsAsync(int labId, string? userName, CancellationToken ct);
 }
 
 public interface IDenialCodeMasterExcelService
@@ -64,11 +65,35 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
             .ToDictionary(g => g.Key, g => ResolveLabConnectionString(configuration, g.First().Id, g.First().Name, g.First().ConnectionKey));
     }
 
-    public async Task<PagedResult<DenialCodeMasterRecord>> GetPagedAsync(int labId, string? search, int page, int pageSize, CancellationToken ct)
+    // Whitelisted so SortBy can never reach the query as raw SQL - only these grid columns are
+    // sortable, matching the columns DenialCodeMasterPage.jsx actually shows.
+    private static readonly IReadOnlyDictionary<string, string> SortableColumns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["denialCode"] = "DenialCode",
+        ["denialClassification"] = "DenialClassification",
+        ["coverageStatus"] = "CoverageStatus",
+        ["icdComplianceStatus"] = "ICDComplianceStatus",
+        ["actionCode"] = "ActionCode",
+        ["actionCategory"] = "ActionCategory",
+        ["priority"] = "Priority",
+        ["updatedOn"] = "UpdatedOn"
+    };
+
+    internal static string BuildOrderBy(string? sortBy, string? sortDir)
+    {
+        const string fallback = "DenialCode, CoverageStatus, ICDComplianceStatus";
+        if (string.IsNullOrWhiteSpace(sortBy) || !SortableColumns.TryGetValue(sortBy.Trim(), out var column))
+            return fallback;
+        var direction = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase) ? "DESC" : "ASC";
+        return $"{column} {direction}, DenialCode, CoverageStatus, ICDComplianceStatus";
+    }
+
+    public async Task<PagedResult<DenialCodeMasterRecord>> GetPagedAsync(int labId, string? search, int page, int pageSize, string? sortBy, string? sortDir, CancellationToken ct)
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 25 : Math.Clamp(pageSize, 10, 200);
         var where = SearchWhere(search, out var parameters);
+        var orderBy = BuildOrderBy(sortBy, sortDir);
 
         var result = new PagedResult<DenialCodeMasterRecord> { Page = page, PageSize = pageSize };
         await using var conn = OpenLab(labId);
@@ -86,7 +111,7 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
                    Priority, SLADays, NotesComments, CreatedOn, CreatedBy, UpdatedOn, UpdatedBy
             FROM dbo.DenialCodeMaster
             WHERE {where}
-            ORDER BY DenialCode, CoverageStatus, ICDComplianceStatus
+            ORDER BY {orderBy}
             OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
             """;
         await using var cmd = new SqlCommand(sql, conn);
@@ -286,6 +311,112 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
         return result;
     }
 
+    // "Sync Now": propagates the lab's current Denial Code Master into live DenialTaskBoard rows,
+    // on demand, instead of waiting for the next Excel import. Deliberately reuses the same
+    // detection/staging machinery an import already uses (CreateActionChangeBatchAsync) for the
+    // assigned-open-task case rather than duplicating that logic - only the "no open task" auto-
+    // apply path below is new.
+    //
+    // Scope note: this only touches dbo.DenialTaskBoard. dbo.DenialLineItem and dbo.DenialInsight
+    // use materially different denial-code matching (LineItem's DenialCodeNormalized can hold
+    // several semicolon-joined codes per row from a single claim line; Insight's DenialCodes rolls
+    // up multiple codes per aggregated row) and were deliberately left out of this pass rather than
+    // guessed at - extending Sync Now to them needs the same care given to this method, not a
+    // copy-paste of its WHERE clause.
+    public async Task<DenialCodeSyncResult> SyncLabActionsAsync(int labId, string? userName, CancellationToken ct)
+    {
+        var user = string.IsNullOrWhiteSpace(userName) ? "ReactWorkflow" : userName;
+        await using var conn = OpenLab(labId);
+        await conn.OpenAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        try
+        {
+            // 1) Rows with no assigned open task apply immediately - the complement of the
+            //    "assigned + open" condition CreateActionChangeBatchAsync stages for confirmation.
+            const string autoApplySql = """
+                UPDATE t
+                SET t.ActionCode = m.ActionCode,
+                    t.ActionCategory = m.ActionCategory,
+                    t.Task = m.Task,
+                    t.ShortCategory = m.ShortCategory
+                FROM dbo.DenialTaskBoard t
+                INNER JOIN dbo.DenialCodeMaster m
+                    ON UPPER(LTRIM(RTRIM(ISNULL(t.DenialCode, '')))) = UPPER(LTRIM(RTRIM(m.DenialCode)))
+                   AND UPPER(LTRIM(RTRIM(ISNULL(t.CoverageStatus, 'N/A')))) = UPPER(LTRIM(RTRIM(m.CoverageStatus)))
+                   AND UPPER(LTRIM(RTRIM(ISNULL(t.ICDComplianceStatus, 'N/A')))) = UPPER(LTRIM(RTRIM(m.ICDComplianceStatus)))
+                WHERE (
+                        ISNULL(LTRIM(RTRIM(t.ActionCode)), '') <> ISNULL(m.ActionCode, '')
+                     OR ISNULL(LTRIM(RTRIM(t.ActionCategory)), '') <> ISNULL(m.ActionCategory, '')
+                     OR ISNULL(LTRIM(RTRIM(t.Task)), '') <> ISNULL(m.Task, '')
+                     OR ISNULL(LTRIM(RTRIM(t.ShortCategory)), '') <> ISNULL(m.ShortCategory, '')
+                  )
+                  AND NOT (
+                        NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo, ''))), '') IS NOT NULL
+                    AND LOWER(LTRIM(RTRIM(ISNULL(t.Status, '')))) NOT IN ('close', 'closed')
+                    AND LOWER(LTRIM(RTRIM(ISNULL(t.WorkFlowStatus, '')))) NOT IN ('close', 'closed', 'closed claim')
+                  );
+                SELECT @@ROWCOUNT;
+                """;
+            int autoApplied;
+            await using (var cmd = new SqlCommand(autoApplySql, conn, (SqlTransaction)tx) { CommandTimeout = 180 })
+                autoApplied = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+
+            // 2) Assigned + open task drift is staged into the existing verification queue for
+            //    explicit human confirmation, sourced from the whole current master (not a fresh
+            //    import) via the same #DenialCodeMasterImport shape ReplaceFromImportAsync uses.
+            const string stageSql = """
+                CREATE TABLE #DenialCodeMasterImport
+                (
+                    DenialCode nvarchar(100) NOT NULL,
+                    DenialDescription nvarchar(1000) NULL,
+                    DenialClassification nvarchar(255) NULL,
+                    CoverageStatus nvarchar(255) NOT NULL,
+                    ICDComplianceStatus nvarchar(255) NOT NULL,
+                    DenialValidity nvarchar(255) NULL,
+                    ActionCode nvarchar(100) NULL,
+                    RecommendedAction nvarchar(1000) NULL,
+                    ActionCategory nvarchar(255) NULL,
+                    Task nvarchar(500) NULL,
+                    ShortCategory nvarchar(255) NULL,
+                    Priority nvarchar(100) NULL,
+                    SLADays nvarchar(100) NULL,
+                    NotesComments nvarchar(2000) NULL,
+                    CreatedBy nvarchar(100) NULL
+                );
+                INSERT INTO #DenialCodeMasterImport
+                    (DenialCode, DenialDescription, DenialClassification, CoverageStatus, ICDComplianceStatus,
+                     DenialValidity, ActionCode, RecommendedAction, ActionCategory, Task, ShortCategory,
+                     Priority, SLADays, NotesComments, CreatedBy)
+                SELECT DenialCode, DenialDescription, DenialClassification, CoverageStatus, ICDComplianceStatus,
+                       DenialValidity, ActionCode, RecommendedAction, ActionCategory, Task, ShortCategory,
+                       Priority, SLADays, NotesComments, @User
+                FROM dbo.DenialCodeMaster;
+                """;
+            await using (var cmd = new SqlCommand(stageSql, conn, (SqlTransaction)tx) { CommandTimeout = 180 })
+            {
+                cmd.Parameters.AddWithValue("@User", user);
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+
+            await EnsureActionChangeSchemaAsync(conn, (SqlTransaction)tx, ct);
+            var actionChangeSummary = await CreateActionChangeBatchAsync(conn, (SqlTransaction)tx, "Sync Now", user, ct);
+
+            await tx.CommitAsync(ct);
+            return new DenialCodeSyncResult
+            {
+                AutoAppliedTaskCount = autoApplied,
+                BatchId = actionChangeSummary?.BatchId,
+                AffectedClaims = actionChangeSummary?.AffectedClaims ?? 0,
+                AffectedTasks = actionChangeSummary?.AffectedTasks ?? 0
+            };
+        }
+        catch
+        {
+            await tx.RollbackAsync(CancellationToken.None);
+            throw;
+        }
+    }
+
     public async Task<DenialCodeMasterImportResult> ReplaceFromImportAsync(int labId, IReadOnlyList<DenialCodeMasterRequest> records, int skippedCount, IReadOnlyList<string> errors, string? sourceFileName, string? userName, CancellationToken ct)
     {
         if (errors.Count > 0) return new DenialCodeMasterImportResult { SkippedCount = skippedCount, FailedCount = errors.Count, Errors = errors };
@@ -296,11 +427,17 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
 
         var inserted = 0;
         var updated = 0;
+        var mergedDuplicateCount = 0;
         DenialCodeActionChangeSummary? actionChangeSummary = null;
         try
         {
             var uniqueRecords = DeduplicateImportRecords(records);
-            skippedCount += records.Count - uniqueRecords.Count;
+
+            // Distinct from skippedCount (blank Denial Code, never became a candidate row): these
+            // rows parsed fine but shared a (DenialCode, CoverageStatus, ICDComplianceStatus) key
+            // with another row in the same file. Only the last one in file order is kept - that key
+            // is the table's primary key, so two rows sharing it can never both exist as DB rows.
+            mergedDuplicateCount = records.Count - uniqueRecords.Count;
 
             if (uniqueRecords.Count > 0)
             {
@@ -320,6 +457,7 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
             InsertedCount = inserted,
             UpdatedCount = updated,
             SkippedCount = skippedCount,
+            MergedDuplicateCount = mergedDuplicateCount,
             FailedCount = 0,
             HasActionChangeWarnings = actionChangeSummary?.BatchId > 0,
             BatchId = actionChangeSummary?.BatchId,
@@ -1212,15 +1350,16 @@ public sealed class DenialCodeMasterExcelService : IDenialCodeMasterExcelService
 
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add(SheetName);
+        DenialExcelTheme.ApplyDefaults(sheet);
+        sheet.TabColor = DenialExcelTheme.TabGreen;
         sheet.Cell(1, 1).Value = TitleText;
-        sheet.Range(1, 1, 1, TemplateHeaders.Length).Merge().Style.Font.SetBold();
+        var titleRange = sheet.Range(1, 1, 1, TemplateHeaders.Length).Merge();
+        titleRange.Style.Font.SetBold().Font.SetFontColor(XLColor.White).Font.SetFontSize(DenialExcelTheme.FontSizeTitle);
+        titleRange.Style.Fill.SetBackgroundColor(DenialExcelTheme.TitleBg);
+        titleRange.Style.Alignment.SetVertical(XLAlignmentVerticalValues.Center);
 
         for (var i = 0; i < TemplateHeaders.Length; i++)
-        {
-            var cell = sheet.Cell(2, i + 1);
-            cell.Value = TemplateHeaders[i];
-            cell.Style.Font.Bold = true;
-        }
+            DenialExcelTheme.StyleHeaderCell(sheet.Cell(2, i + 1).SetValue(TemplateHeaders[i]));
 
         var row = 3;
         foreach (var record in records)
@@ -1252,15 +1391,16 @@ public sealed class DenialCodeMasterExcelService : IDenialCodeMasterExcelService
     {
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add(SheetName);
+        DenialExcelTheme.ApplyDefaults(sheet);
+        sheet.TabColor = DenialExcelTheme.TabGreen;
         sheet.Cell(1, 1).Value = TitleText;
-        sheet.Range(1, 1, 1, TemplateHeaders.Length).Merge().Style.Font.SetBold();
+        var titleRange = sheet.Range(1, 1, 1, TemplateHeaders.Length).Merge();
+        titleRange.Style.Font.SetBold().Font.SetFontColor(XLColor.White).Font.SetFontSize(DenialExcelTheme.FontSizeTitle);
+        titleRange.Style.Fill.SetBackgroundColor(DenialExcelTheme.TitleBg);
+        titleRange.Style.Alignment.SetVertical(XLAlignmentVerticalValues.Center);
 
         for (var i = 0; i < TemplateHeaders.Length; i++)
-        {
-            var cell = sheet.Cell(2, i + 1);
-            cell.Value = TemplateHeaders[i];
-            cell.Style.Font.Bold = true;
-        }
+            DenialExcelTheme.StyleHeaderCell(sheet.Cell(2, i + 1).SetValue(TemplateHeaders[i]));
 
         // One illustrative sample row so users see the expected shape. Row 3 == first data row,
         // matching ImportAsync (which starts reading at row 3 and skips rows with a blank Denial Code).
@@ -1425,7 +1565,10 @@ public sealed class SqlDenialActionChangeVerificationRepository : IDenialActionC
             ("OldShortCategory", x => x.OldShortCategory), ("NewShortCategory", x => x.NewShortCategory),
             ("VerificationStatus", x => x.VerificationStatus), ("VerifiedBy", x => x.VerifiedBy), ("VerifiedOn", x => x.VerifiedOn), ("CreatedOn", x => x.CreatedOn)
         ];
-        for (var i = 0; i < columns.Length; i++) sheet.Cell(1, i + 1).Value = columns[i].Header;
+        DenialExcelTheme.ApplyDefaults(sheet);
+        sheet.TabColor = DenialExcelTheme.TabGreen;
+        for (var i = 0; i < columns.Length; i++)
+            DenialExcelTheme.StyleHeaderCell(sheet.Cell(1, i + 1).SetValue(columns[i].Header));
         var r = 2;
         foreach (var x in rows.Items)
         {
@@ -1440,7 +1583,11 @@ public sealed class SqlDenialActionChangeVerificationRepository : IDenialActionC
             }
             r++;
         }
-        sheet.Range(1, 1, 1, columns.Length).Style.Font.SetBold();
+        // InsuranceBalance is the one money column on this sheet.
+        var balanceColumn = Array.FindIndex(columns, x => x.Header == "InsuranceBalance") + 1;
+        if (balanceColumn > 0 && r > 2)
+            sheet.Range(2, balanceColumn, r - 1, balanceColumn).Style.NumberFormat.Format = DenialExcelTheme.AccountingNumberFormat2;
+        sheet.SheetView.FreezeRows(1);
         sheet.Columns().AdjustToContents();
         using var ms = new MemoryStream();
         workbook.SaveAs(ms);

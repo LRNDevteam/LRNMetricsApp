@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Data;
 using System.Text;
 using LRN.ReportsApi.Models;
@@ -3725,6 +3725,10 @@ ORDER BY {string.Join(", ", orderByParts)};";
         using var workbook = new ClosedXML.Excel.XLWorkbook();
         var sheet = workbook.Worksheets.Add("Task Upload");
         var lookupSheet = workbook.Worksheets.Add("Dropdown Values");
+        DenialExcelTheme.ApplyDefaults(sheet);
+        DenialExcelTheme.ApplyDefaults(lookupSheet);
+        sheet.TabColor = DenialExcelTheme.TabGreen;
+        lookupSheet.TabColor = DenialExcelTheme.TabGold;
 
         for (var col = 0; col < headers.Length; col++)
         {
@@ -3732,9 +3736,12 @@ ORDER BY {string.Join(", ", orderByParts)};";
             cell.Value = headers[col];
             cell.Style.Font.Bold = true;
             cell.Style.Alignment.Horizontal = ClosedXML.Excel.XLAlignmentHorizontalValues.Center;
+            // Read-only reference columns sit in the theme's light band, the editable columns in
+            // the darker group fill, so the split still reads at a glance but both are Accent 6
+            // greens from the Production Report palette rather than a blue/green mix.
             cell.Style.Fill.BackgroundColor = col < readOnlyCount
-                ? ClosedXML.Excel.XLColor.FromHtml("#D9EAF7")
-                : ClosedXML.Excel.XLColor.FromHtml("#E2EFDA");
+                ? DenialExcelTheme.BandedRowBg
+                : DenialExcelTheme.GroupRowBg;
         }
 
         for (var row = 0; row < taskRows.Count; row++)
@@ -6417,12 +6424,22 @@ ORDER BY UserName;";
         await writer.WriteLineAsync("<?xml version=\"1.0\"?>");
         await writer.WriteLineAsync("<?mso-application progid=\"Excel.Sheet\"?>");
         await writer.WriteLineAsync("<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\" xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\">");
-        await writer.WriteLineAsync("<Styles><Style ss:ID=\"Header\"><Font ss:Bold=\"1\"/><Interior ss:Color=\"#D9EAF7\" ss:Pattern=\"Solid\"/></Style></Styles>");
+        // Production Report palette (see DenialExcelTheme): dark-green header band, white bold
+        // Calibri, and an Accounting format on the money columns so this download matches the
+        // rest of the suite.
+        await writer.WriteLineAsync(
+            "<Styles>"
+            + $"<Style ss:ID=\"Header\"><Font ss:Bold=\"1\" ss:Color=\"#FFFFFF\" ss:FontName=\"{DenialExcelTheme.FontName}\"/>"
+            + $"<Interior ss:Color=\"{DenialExcelTheme.HeaderBgHex}\" ss:Pattern=\"Solid\"/>"
+            + "<Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\" ss:WrapText=\"1\"/></Style>"
+            + $"<Style ss:ID=\"Money\"><NumberFormat ss:Format=\"{DenialExcelTheme.AccountingNumberFormatXml}\"/></Style>"
+            + "</Styles>");
 
         var rowCount = 0;
         var sheetIndex = 1;
         var sheetOpen = false;
         var headers = Enumerable.Range(0, rd.FieldCount).Select(rd.GetName).ToArray();
+        var moneyColumn = headers.Select(DenialExcelTheme.IsMoneyColumn).ToArray();
 
         async Task StartSheetAsync()
         {
@@ -6455,9 +6472,11 @@ ORDER BY UserName;";
                 }
 
                 var value = rd.GetValue(i);
-                var type = value is byte or short or int or long or float or double or decimal ? "Number" : "String";
+                var isNumber = value is byte or short or int or long or float or double or decimal;
+                var type = isNumber ? "Number" : "String";
                 var text = value is DateTime dt ? dt.ToString("yyyy-MM-dd HH:mm:ss") : Convert.ToString(value) ?? string.Empty;
-                await writer.WriteLineAsync($"<Cell><Data ss:Type=\"{type}\">{XmlEscape(text)}</Data></Cell>");
+                var style = isNumber && moneyColumn[i] ? " ss:StyleID=\"Money\"" : string.Empty;
+                await writer.WriteLineAsync($"<Cell{style}><Data ss:Type=\"{type}\">{XmlEscape(text)}</Data></Cell>");
             }
             await writer.WriteLineAsync("</Row>");
             rowCount++;

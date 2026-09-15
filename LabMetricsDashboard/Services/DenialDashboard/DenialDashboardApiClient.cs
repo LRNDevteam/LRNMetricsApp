@@ -24,8 +24,13 @@ public interface IDenialDashboardApiClient
     Task<IReadOnlyList<DenialBreakdownSourceRecord>> GetBreakdownSourceByLabAsync(int labId, DenialDashboardFilters filters, CancellationToken cancellationToken = default);
     Task<DenialFilterAutocompleteOptions> GetFilterAutocompleteOptionsAsync(int labId, CancellationToken cancellationToken = default);
     Task<int> AssignReviewerByInsightAsync(int labId, string denialCode, string payerName, string reviewerUserName, string? runId, CancellationToken cancellationToken = default);
+    Task<int> UpdateInsightDetailAsync(int labId, string denialCode, string payerName, string? feedbackHtml, string? responsibility, DateTime? discussionDate, string? eta, string? runId, CancellationToken cancellationToken = default);
     Task<int> UpdateReviewerTaskAsync(int labId, string taskId, string status, string comments, string reviewerUserName, string? runId, CancellationToken cancellationToken = default);
     Task<TaskBoardUploadResult> UpdateTaskBoardAsync(int labId, IReadOnlyList<TaskBoardCsvUpdate> updates, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<DenialDashboardSnapshotInfo>> GetInsightSnapshotsAsync(int labId, bool includeArchived, CancellationToken cancellationToken = default);
+    Task<bool> InsightSnapshotPeriodExistsAsync(int labId, string periodType, DateTime periodStart, CancellationToken cancellationToken = default);
+    Task<DenialDashboardSnapshotInfo?> SaveInsightSnapshotAsync(int labId, string periodType, DateTime periodStart, DateTime periodEnd, string fileName, byte[] content, string? createdBy, CancellationToken cancellationToken = default);
+    Task<(string FileName, byte[] Content)?> DownloadInsightSnapshotAsync(int labId, long snapshotId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Run provenance for the dashboard header (run id + the source file it came from).</summary>
@@ -141,6 +146,25 @@ public sealed class DenialDashboardApiClient : IDenialDashboardApiClient
         return payload?.RowsAffected ?? 0;
     }
 
+    public async Task<int> UpdateInsightDetailAsync(int labId, string denialCode, string payerName, string? feedbackHtml, string? responsibility, DateTime? discussionDate, string? eta, string? runId, CancellationToken cancellationToken = default)
+    {
+        await AuthorizeAsync(cancellationToken);
+        using var response = await _http.PostAsJsonAsync("api/denial-dashboard/insight-details", new
+        {
+            labId,
+            denialCode,
+            payerName,
+            feedbackHtml,
+            responsibility,
+            discussionDate,
+            eta,
+            runId
+        }, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        var payload = await response.Content.ReadFromJsonAsync<RowsAffectedResponse>(cancellationToken: cancellationToken);
+        return payload?.RowsAffected ?? 0;
+    }
+
     public async Task<int> UpdateReviewerTaskAsync(int labId, string taskId, string status, string comments, string reviewerUserName, string? runId, CancellationToken cancellationToken = default)
     {
         await AuthorizeAsync(cancellationToken);
@@ -164,6 +188,58 @@ public sealed class DenialDashboardApiClient : IDenialDashboardApiClient
         using var response = await _http.PostAsJsonAsync($"api/denial-dashboard/task-board/update?labId={labId}", updates, cancellationToken);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<TaskBoardUploadResult>(cancellationToken: cancellationToken) ?? new TaskBoardUploadResult();
+    }
+
+    public async Task<IReadOnlyList<DenialDashboardSnapshotInfo>> GetInsightSnapshotsAsync(int labId, bool includeArchived, CancellationToken cancellationToken = default)
+    {
+        await AuthorizeAsync(cancellationToken);
+        return await _http.GetFromJsonAsync<List<DenialDashboardSnapshotInfo>>(
+            $"api/denial-dashboard/snapshots?labId={labId}&includeArchived={includeArchived}", cancellationToken) ?? new List<DenialDashboardSnapshotInfo>();
+    }
+
+    public async Task<bool> InsightSnapshotPeriodExistsAsync(int labId, string periodType, DateTime periodStart, CancellationToken cancellationToken = default)
+    {
+        await AuthorizeAsync(cancellationToken);
+        var url = $"api/denial-dashboard/snapshots/period-exists?labId={labId}&periodType={Uri.EscapeDataString(periodType)}&periodStart={periodStart:yyyy-MM-dd}";
+        var payload = await _http.GetFromJsonAsync<ExistsResponse>(url, cancellationToken);
+        return payload?.Exists ?? false;
+    }
+
+    public async Task<DenialDashboardSnapshotInfo?> SaveInsightSnapshotAsync(int labId, string periodType, DateTime periodStart, DateTime periodEnd, string fileName, byte[] content, string? createdBy, CancellationToken cancellationToken = default)
+    {
+        await AuthorizeAsync(cancellationToken);
+        using var response = await _http.PostAsJsonAsync($"api/denial-dashboard/snapshots?labId={labId}", new
+        {
+            periodType,
+            periodStart,
+            periodEnd,
+            fileName,
+            content,
+            createdBy
+        }, cancellationToken);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.Conflict) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<DenialDashboardSnapshotInfo>(cancellationToken: cancellationToken);
+    }
+
+    public async Task<(string FileName, byte[] Content)?> DownloadInsightSnapshotAsync(int labId, long snapshotId, CancellationToken cancellationToken = default)
+    {
+        await AuthorizeAsync(cancellationToken);
+        using var response = await _http.GetAsync($"api/denial-dashboard/snapshots/{snapshotId}/download?labId={labId}", cancellationToken);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+
+        var fileName = response.Content.Headers.ContentDisposition?.FileNameStar
+            ?? response.Content.Headers.ContentDisposition?.FileName
+            ?? $"DenialDashboardSnapshot_{snapshotId}.xlsx";
+        var content = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        return (fileName.Trim('"'), content);
+    }
+
+    private sealed class ExistsResponse
+    {
+        public bool Exists { get; set; }
     }
 
     private async Task AuthorizeAsync(CancellationToken cancellationToken)

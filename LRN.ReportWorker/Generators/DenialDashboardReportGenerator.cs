@@ -1,4 +1,4 @@
-using LabMetricsDashboard.Controllers;
+﻿using LabMetricsDashboard.Controllers;
 using LabMetricsDashboard.Services;
 using LabMetricsDashboard.ViewModels;
 using LRN.ReportQueue.Shared;
@@ -232,7 +232,8 @@ SELECT
             // is not: ClosedXML buffers a whole sheet's XML in a MemoryStream when saving and
             // throws "Stream was too long" past 2 GB, which a wide lab with large ICD code
             // lists reaches. Stream that one in afterwards at bounded memory instead.
-            using (var workbook = DenialDashboardExcelExportBuilder.CreateWorkbook(exportData, includeLineItemSheet: false))
+            using (var workbook = DenialDashboardExcelExportBuilder.CreateWorkbook(
+                exportData, includeLineItemSheet: false, fileName: Path.GetFileName(targetPath)))
             using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
                 workbook.SaveAs(fs);

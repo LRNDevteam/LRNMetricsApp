@@ -1,8 +1,7 @@
-@model LabMetricsDashboard.ViewModels.BreakdownPivotViewModel
+﻿@model LabMetricsDashboard.ViewModels.BreakdownPivotViewModel
 @using System.Globalization
 
 @{
-    string Money(decimal amount) => amount.ToString("$#,##0.00", CultureInfo.GetCultureInfo("en-US"));
     var tableId = "pivot_" + Guid.NewGuid().ToString("N");
     var groupNumber = 0;
     string? currentGroupKey = null;
@@ -81,10 +80,10 @@
                                 @foreach (var cell in row.Cells)
                                 {
                                     <td class="text-end pivot-claims">@(cell.ClaimCount == 0 ? "-" : cell.ClaimCount.ToString("N0"))</td>
-                                    <td class="text-end pivot-balance">@(cell.DenialBalance == 0 ? "$ -" : Money(cell.DenialBalance))</td>
+                                    <td class="text-end pivot-balance">@Acct2(cell.DenialBalance)</td>
                                 }
                                 <td class="text-end pivot-claims total-col">@(row.TotalClaimCount == 0 ? "-" : row.TotalClaimCount.ToString("N0"))</td>
-                                <td class="text-end pivot-balance total-col">@(row.TotalBalance == 0 ? "$ -" : Money(row.TotalBalance))</td>
+                                <td class="text-end pivot-balance total-col">@Acct2(row.TotalBalance)</td>
                             </tr>
                         }
                         else
@@ -95,10 +94,10 @@
                                 @foreach (var cell in row.Cells)
                                 {
                                     <td class="text-end pivot-claims">@(cell.ClaimCount == 0 ? "-" : cell.ClaimCount.ToString("N0"))</td>
-                                    <td class="text-end pivot-balance">@(cell.DenialBalance == 0 ? "$ -" : Money(cell.DenialBalance))</td>
+                                    <td class="text-end pivot-balance">@Acct2(cell.DenialBalance)</td>
                                 }
                                 <td class="text-end pivot-claims total-col">@(row.TotalClaimCount == 0 ? "-" : row.TotalClaimCount.ToString("N0"))</td>
-                                <td class="text-end pivot-balance total-col">@(row.TotalBalance == 0 ? "$ -" : Money(row.TotalBalance))</td>
+                                <td class="text-end pivot-balance total-col">@Acct2(row.TotalBalance)</td>
                             </tr>
                         }
                     }
@@ -109,10 +108,10 @@
                         @foreach (var total in Model.TotalsByPeriod)
                         {
                             <th class="text-end">@total.ClaimCount.ToString("N0")</th>
-                            <th class="text-end">@Money(total.DenialBalance)</th>
+                            <th class="text-end">@Acct2(total.DenialBalance)</th>
                         }
                         <th class="text-end">@Model.GrandTotalClaimCount.ToString("N0")</th>
-                        <th class="text-end">@Money(Model.GrandTotalBalance)</th>
+                        <th class="text-end">@Acct2(Model.GrandTotalBalance)</th>
                     </tr>
                 </tfoot>
             </table>

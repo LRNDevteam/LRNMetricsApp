@@ -422,6 +422,101 @@
         "CsvHeader": "Panel Name Based on CPT",
         "SqlColumn": "PanelNameBasedOnCPT",
         "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Plan Name",
+        "SqlColumn": "PlanName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Service Location",
+        "SqlColumn": "ServiceLocation",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Bill Type",
+        "SqlColumn": "BillType",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Claim Level Denial Code",
+        "SqlColumn": "ClaimLevelDenialCode",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Last Billed Date",
+        "SqlColumn": "LastBilledDate",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Manual CWO",
+        "SqlColumn": "ManualCWO",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Physician NPI",
+        "SqlColumn": "PhysicianNPI",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Claim State",
+        "SqlColumn": "ClaimState",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Sub State",
+        "SqlColumn": "SubState",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Active Bucket",
+        "SqlColumn": "ActiveBucket",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Balance Responsibility",
+        "SqlColumn": "BalanceResponsibility",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Primary Deposit Date",
+        "SqlColumn": "PrimaryDepositDate",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Secondary Deposit Date",
+        "SqlColumn": "SecondaryDepositDate",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Patient Deposit Date",
+        "SqlColumn": "PatientDepositDate",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Last Updated Date",
+        "SqlColumn": "LastUpdatedDate",
+        "IncludeInHash": false
+      },
+      {
+        "CsvHeader": "Created On",
+        "SqlColumn": "SourceCreatedOn",
+        "IncludeInHash": false
+      },
+      {
+        "CsvHeader": "Created By",
+        "SqlColumn": "SourceCreatedBy",
+        "IncludeInHash": false
+      },
+      {
+        "CsvHeader": "Updated On",
+        "SqlColumn": "SourceUpdatedOn",
+        "IncludeInHash": false
+      },
+      {
+        "CsvHeader": "Updated By",
+        "SqlColumn": "SourceUpdatedBy",
+        "IncludeInHash": false
       }
     ]
   },
@@ -812,6 +907,121 @@
         "CsvHeader": "Source",
         "SqlColumn": "Source",
         "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Plan Name",
+        "SqlColumn": "PlanName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "LIS Panel Name",
+        "SqlColumn": "PanelNameLIS",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Panel Name as per CPT",
+        "SqlColumn": "PanelNameBasedOnCPT",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Service Location",
+        "SqlColumn": "ServiceLocation",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Bill Type",
+        "SqlColumn": "BillType",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Claim Level CPT",
+        "SqlColumn": "ClaimLevelCPT",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Claim Level Denial Code",
+        "SqlColumn": "ClaimLevelDenialCode",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Claim Level ICD",
+        "SqlColumn": "ClaimLevelICD",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Manual CWO",
+        "SqlColumn": "ManualCWO",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Physician NPI",
+        "SqlColumn": "PhysicianNPI",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Last Billed Date",
+        "SqlColumn": "LastBilledDate",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Claim State",
+        "SqlColumn": "ClaimState",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Sub State",
+        "SqlColumn": "SubState",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Active Bucket",
+        "SqlColumn": "ActiveBucket",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Balance Responsibility",
+        "SqlColumn": "BalanceResponsibility",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Primary Deposit Date",
+        "SqlColumn": "PrimaryDepositDate",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Secondary Deposit Date",
+        "SqlColumn": "SecondaryDepositDate",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Patient Deposit Date",
+        "SqlColumn": "PatientDepositDate",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Last Updated Date",
+        "SqlColumn": "LastUpdatedDate",
+        "IncludeInHash": false
+      },
+      {
+        "CsvHeader": "Created On",
+        "SqlColumn": "SourceCreatedOn",
+        "IncludeInHash": false
+      },
+      {
+        "CsvHeader": "Created By",
+        "SqlColumn": "SourceCreatedBy",
+        "IncludeInHash": false
+      },
+      {
+        "CsvHeader": "Updated On",
+        "SqlColumn": "SourceUpdatedOn",
+        "IncludeInHash": false
+      },
+      {
+        "CsvHeader": "Updated By",
+        "SqlColumn": "SourceUpdatedBy",
+        "IncludeInHash": false
       }
     ]
   }

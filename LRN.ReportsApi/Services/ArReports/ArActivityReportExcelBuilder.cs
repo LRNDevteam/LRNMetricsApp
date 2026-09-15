@@ -1,4 +1,4 @@
-using ClosedXML.Excel;
+﻿using ClosedXML.Excel;
 using LRN.ReportsApi.Models;
 
 namespace LRN.ReportsApi.Services.ArReports;
@@ -14,10 +14,19 @@ namespace LRN.ReportsApi.Services.ArReports;
 /// </summary>
 internal static class ArActivityReportExcelBuilder
 {
-    private static readonly XLColor HeaderFill = XLColor.FromHtml("#16325C");
-    private static readonly XLColor HeaderText = XLColor.FromHtml("#FFFFFF");
-    private static readonly XLColor SectionFill = XLColor.FromHtml("#E9F1FD");
-    private static readonly XLColor WarnFill = XLColor.FromHtml("#FDF4E3");
+    // Production Report palette — see DenialExcelTheme. This sheet used to carry the report
+    // document's own navy/blue, which made RPT-01 the odd workbook out next to every other LRN
+    // download.
+    private static readonly XLColor HeaderFill = DenialExcelTheme.HeaderBg;
+    private static readonly XLColor HeaderText = XLColor.White;
+    private static readonly XLColor SectionFill = DenialExcelTheme.BandedRowBg;
+
+    /// <summary>
+    /// Marks a caveat or a figure that needs a second look (a truncated export, a measure that
+    /// falls back to current state). Deliberately NOT a theme green — it has to stand out against
+    /// the green bands around it, so it stays the Office theme's Accent 4 "Neutral" amber.
+    /// </summary>
+    private static readonly XLColor WarnFill = XLColor.FromHtml("#FFEB9C");
 
     public static byte[] Build(ArActivityReportResult report)
     {
@@ -127,7 +136,7 @@ internal static class ArActivityReportExcelBuilder
             {
                 case decimal money:
                     sheet.Cell(row, 2).Value = money;
-                    sheet.Cell(row, 2).Style.NumberFormat.Format = "$#,##0.00";
+                    sheet.Cell(row, 2).Style.NumberFormat.Format = DenialExcelTheme.AccountingNumberFormat2;
                     break;
                 default:
                     sheet.Cell(row, 2).Value = Convert.ToInt32(value);
@@ -184,7 +193,7 @@ internal static class ArActivityReportExcelBuilder
             sheet.Cell(row, 6).Value = group.ActionsCompleted;
             sheet.Cell(row, 7).Value = group.EscalationsRaised;
             sheet.Cell(row, 8).Value = group.BalanceWorked;
-            sheet.Cell(row, 8).Style.NumberFormat.Format = "$#,##0.00";
+            sheet.Cell(row, 8).Style.NumberFormat.Format = DenialExcelTheme.AccountingNumberFormat2;
             row++;
         }
 
@@ -244,7 +253,7 @@ internal static class ArActivityReportExcelBuilder
             {
                 var cell = sheet.Cell(row, col++);
                 cell.Value = value;
-                cell.Style.NumberFormat.Format = "$#,##0.00";
+                cell.Style.NumberFormat.Format = DenialExcelTheme.AccountingNumberFormat2;
             }
             void Number(int value)
             {
@@ -367,7 +376,7 @@ internal static class ArActivityReportExcelBuilder
             sheet.Cell(row, 2).Value = summary;
             sheet.Cell(row, 3).Value = detail;
             sheet.Cell(row, 4).Value = summary - detail;
-            var format = money ? "$#,##0.00" : "#,##0";
+            var format = money ? DenialExcelTheme.AccountingNumberFormat2 : "#,##0";
             for (var c = 2; c <= 4; c++) sheet.Cell(row, c).Style.NumberFormat.Format = format;
             if (summary != detail) sheet.Range(row, 1, row, 4).Style.Fill.SetBackgroundColor(WarnFill);
             row++;

@@ -439,6 +439,22 @@
 		{
 			"Name": "Source",
 			"DataType": "string"
+		},
+		{
+			"Name": "Claim Level CPT",
+			"DataType": "string"
+		},
+		{
+			"Name": "Claim Level Denial Code",
+			"DataType": "string"
+		},
+		{
+			"Name": "Claim Level ICD",
+			"DataType": "string"
+		},
+		{
+			"Name": "Last Billed Date",
+			"DataType": "date"
 		}
 	]
 }

@@ -1,4 +1,4 @@
-using Azure.Identity;
+﻿using Azure.Identity;
 using LabMetricsDashboard.Controllers;
 using LabMetricsDashboard.Filters;
 using LabMetricsDashboard.Models;
@@ -577,6 +577,11 @@ builder.Services.AddHttpClient<IDenialWorkflowApiClient, DenialWorkflowApiClient
 builder.Services
     .AddHttpClient<IDenialDashboardApiClient, DenialDashboardApiClient>()
     .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(10));
+// Denial Dashboard weekly/monthly snapshot capture. Retention lives server-side in LRN.ReportsApi;
+// this only decides WHEN to build a workbook and POST it, since the builder lives in this project.
+builder.Services.Configure<LabMetricsDashboard.Services.DenialDashboard.DenialDashboardSnapshotSchedulerOptions>(
+    builder.Configuration.GetSection("DenialDashboardSnapshots"));
+builder.Services.AddHostedService<LabMetricsDashboard.Services.DenialDashboard.DenialDashboardSnapshotScheduler>();
 builder.Services
     .AddHttpClient<IMasterValuesApiClient, MasterValuesApiClient>()
     .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(10));
@@ -590,6 +595,11 @@ builder.Services
     .AddHttpClient<IReportBoardApiClient, ReportBoardApiClient>()
     .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<ILabNameResolver, LabNameResolver>();
+// Master file processor re-run queue. Writes LRNMaster directly rather than going through
+// the Reports API: the worker reads the same table, so the queue is the contract between
+// the two, and putting an HTTP hop in front of it would add a moving part without a reader.
+builder.Services.AddScoped<IMasterProcessorRerunRepository, SqlMasterProcessorRerunRepository>();
+builder.Services.AddScoped<IDenialDatabaseRerunRepository, SqlDenialDatabaseRerunRepository>();
 
 // ── Reimbursement Insights chat (Foundry agent via the ReimbursementAgentProxy App Service) ──
 // The browser posts to ReimbursementChatController on this origin and this app calls the proxy,

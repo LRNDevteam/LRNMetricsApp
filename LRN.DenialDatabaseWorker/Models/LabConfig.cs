@@ -18,6 +18,19 @@ public sealed class LabConfig
 	/// </summary>
 	public string LabConnectionString { get; set; } = "";
 	public string ClaimActionMapper { get; set; } = "";
+
+	/// <summary>
+	/// Whether this lab may fall through to the classifier workbook as a last resort.
+	///
+	/// Every lab is tried in the same fixed order regardless of this setting: first its own
+	/// dbo.DenialCodeMaster (what AR Managers edit in the web app), then LRNMaster's central
+	/// dbo.DenialMapperSuperMaster. This setting only decides what happens if BOTH of those come back
+	/// empty: File (default) falls through to the newest *Denial_Action_Classifier_v*.xlsx under
+	/// <see cref="ClaimActionMapper"/>; Database fails the run instead of silently using a workbook
+	/// that may be stale or that no per-lab edit ever reaches.
+	/// </summary>
+	public ClaimActionMapperSource ClaimActionMapperSource { get; set; } = ClaimActionMapperSource.File;
+
 	public string SharePointUploadPath { get; set; } = "";
 
 	/// <summary>
@@ -29,4 +42,10 @@ public sealed class LabConfig
 	/// different one. The flag says what is intended instead of inferring it.
 	/// </summary>
 	public bool OverrideInsuranceBalanceWithBilled { get; set; }
+}
+
+public enum ClaimActionMapperSource
+{
+	File,
+	Database
 }

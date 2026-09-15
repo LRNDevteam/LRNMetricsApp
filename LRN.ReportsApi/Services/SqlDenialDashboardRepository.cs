@@ -878,6 +878,68 @@ SELECT MatchedRows = (SELECT COUNT(1) FROM #MatchedRows);";
 		await command.ExecuteNonQueryAsync(cancellationToken);
 	}
 
+	/// <summary>
+	/// Writes the AR Manager's Observations (rich text), Responsible Person, Discussion Date and ETA
+	/// for one Denial Insight row - the same (DenialCode, HighImpactInsurance) row identity
+	/// <see cref="TryUpdateDenialInsightAssignedToAsync"/> already uses for the reviewer assignment.
+	/// Column-tolerant like that method: a lab whose DenialInsight predates one of these columns is
+	/// updated on whichever columns it actually has, rather than failing outright.
+	/// </summary>
+	public async Task<int> UpdateInsightDetailsAsync(int labId, string denialCode, string payerName, string? feedbackHtml, string? responsibility, DateTime? discussionDate, string? eta, string? runId, CancellationToken cancellationToken = default)
+	{
+		if (string.IsNullOrWhiteSpace(denialCode) || string.IsNullOrWhiteSpace(payerName)) return 0;
+
+		var currentRunId = string.IsNullOrWhiteSpace(runId) ? await GetCurrentRunIdAsync(labId, cancellationToken) : runId;
+		await using var connection = await OpenLabConnectionAsync(labId, cancellationToken);
+		if (!await TableExistsAsync(connection, "dbo", "DenialInsight", cancellationToken)) return 0;
+
+		var cols = await GetTableColumnsAsync(connection, "dbo", "DenialInsight", cancellationToken);
+		if (!cols.Contains("DenialCodes")) return 0;
+
+		var sanitizedFeedback = DenialSummaryHtml.Sanitize(feedbackHtml);
+		var trimmedResponsibility = string.IsNullOrWhiteSpace(responsibility) ? null : responsibility.Trim();
+		if (trimmedResponsibility?.Length > 200) trimmedResponsibility = trimmedResponsibility[..200];
+
+		var setParts = new List<string>();
+		if (cols.Contains("Feedback")) setParts.Add("[Feedback] = @Feedback");
+		if (cols.Contains("Responsibility")) setParts.Add("[Responsibility] = @Responsibility");
+		if (cols.Contains("DiscussionDate")) setParts.Add("[DiscussionDate] = @DiscussionDate");
+		if (cols.Contains("ETA")) setParts.Add("[ETA] = @Eta");
+		if (setParts.Count == 0) return 0;
+
+		var whereParts = new List<string>
+		{
+			"LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [DenialCodes]), ''))) = @DenialCode"
+		};
+
+		if (cols.Contains("HighImpactInsurance"))
+			whereParts.Add("LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [HighImpactInsurance]), ''))) = @PayerName");
+		if (cols.Contains("LabId")) whereParts.Add("([LabId] = @LabId OR [LabId] IS NULL)");
+		if (!string.IsNullOrWhiteSpace(currentRunId) && cols.Contains("RunId")) whereParts.Add("(ISNULL([RunId], '') = '' OR [RunId] = @RunId)");
+
+		var sql = $"UPDATE dbo.DenialInsight SET {string.Join(", ", setParts)} WHERE {string.Join(" AND ", whereParts)}; SELECT @@ROWCOUNT;";
+		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 };
+		command.Parameters.AddWithValue("@Feedback", (object?)sanitizedFeedback ?? DBNull.Value);
+		command.Parameters.AddWithValue("@Responsibility", (object?)trimmedResponsibility ?? DBNull.Value);
+		command.Parameters.AddWithValue("@DiscussionDate", (object?)discussionDate?.Date ?? DBNull.Value);
+		command.Parameters.AddWithValue("@Eta", (object?)(string.IsNullOrWhiteSpace(eta) ? null : eta.Trim()) ?? DBNull.Value);
+		command.Parameters.AddWithValue("@DenialCode", denialCode.Trim());
+		command.Parameters.AddWithValue("@PayerName", payerName.Trim());
+		command.Parameters.AddWithValue("@LabId", await ScopeLabIdAsync(labId, cancellationToken));
+		command.Parameters.AddWithValue("@RunId", currentRunId ?? string.Empty);
+
+		var updated = await command.ExecuteScalarAsync(cancellationToken);
+		var updatedCount = updated == null || updated == DBNull.Value ? 0 : Convert.ToInt32(updated);
+
+		if (updatedCount > 0)
+		{
+			_cache.Remove(InsightTableCacheKey(labId));
+			_cache.Remove($"{InsightTableCacheKey(labId)}:{currentRunId ?? "all"}");
+		}
+
+		return updatedCount;
+	}
+
 	public async Task<int> UpdateReviewerTaskAsync(int labId, string taskId, string status, string comments, string reviewerUserName, string? runId, CancellationToken cancellationToken = default)
 	{
 		if (string.IsNullOrWhiteSpace(taskId) || string.IsNullOrWhiteSpace(reviewerUserName)) return 0;

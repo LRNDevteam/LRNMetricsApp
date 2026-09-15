@@ -24,3 +24,5 @@ appsettings.Local.json
 # absent on a clean clone", but the rule was missing and the SharePoint app-registration secret was
 # committed. The tracked template is appsettings.Secrets.example.json — keep real values out.
 appsettings.Secrets.json
+/LRN.MasterFileProcessorWorker/Properties/PublishProfiles/FolderProfile.pubxml
+/LRN.ReportsApi/Properties/PublishProfiles/FolderProfile.pubxml

@@ -2,6 +2,11 @@
   LRNMaster - normalized Denial Mapper master data
   Source: master data.xlsx supplied 2026-06-26
 
+  !! DO NOT RE-RUN once admins use Denial Workflow > Master Values (September 2026). !!
+  The MERGE below re-activates, re-sorts and re-codes every value in its list and re-inserts
+  any an admin deleted - it would silently undo their changes. It was a one-off normalisation.
+  For a new environment use DenialWorkflow_MasterValues_Setup.sql, which only seeds empty tables.
+
   Normalization decisions:
   - Non Covered / Non-Covered => Non-Covered
   - Conditional Note variants => canonical values using "Conditional - ..."

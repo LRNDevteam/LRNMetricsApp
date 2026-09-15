@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Security.Claims;
 using CsvHelper;
 using CsvHelper.Configuration;
@@ -355,6 +355,48 @@ public class DenialDashboardController : Controller
 		return Json(payload);
 	}
 
+	/// <summary>Saved Denial Dashboard snapshots (spec 4f-4i): list, on-demand capture, download.</summary>
+	[HttpGet]
+	public async Task<IActionResult> InsightSnapshots(int labId, bool includeArchived, CancellationToken cancellationToken)
+	{
+		if (labId <= 0) return BadRequest(new { message = "Lab is required." });
+		return Json(await _dashboardApi.GetInsightSnapshotsAsync(labId, includeArchived, cancellationToken));
+	}
+
+	[HttpPost]
+	[ValidateAntiForgeryToken]
+	public async Task<IActionResult> SaveInsightSnapshotNow(int labId, string? lab, CancellationToken cancellationToken)
+	{
+		if (!HasAnyRole("AR Manager", "ARManager", "Admin"))
+			return Json(new { saved = false, message = "Only AR Manager can save a snapshot." });
+
+		if (labId <= 0) return Json(new { saved = false, message = "Lab is required." });
+
+		var labName = lab;
+		if (string.IsNullOrWhiteSpace(labName))
+		{
+			var labs = await _dashboardApi.GetLabsAsync(cancellationToken);
+			labName = labs.FirstOrDefault(x => x.LabId == labId)?.LabName ?? $"Lab {labId}";
+		}
+
+		var today = DateTime.Now.Date;
+		var createdBy = User.Identity?.Name ?? "unknown";
+		var info = await DenialDashboardSnapshotBuilder.BuildAndSaveAsync(_dashboardApi, labId, labName, "OnDemand", today, today, createdBy, cancellationToken);
+
+		return info is null
+			? Json(new { saved = false, message = "The snapshot could not be saved. Try again." })
+			: Json(new { saved = true, snapshot = info });
+	}
+
+	[HttpGet]
+	public async Task<IActionResult> DownloadInsightSnapshot(int labId, long snapshotId, CancellationToken cancellationToken)
+	{
+		var file = await _dashboardApi.DownloadInsightSnapshotAsync(labId, snapshotId, cancellationToken);
+		return file is null
+			? NotFound()
+			: File(file.Value.Content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", file.Value.FileName);
+	}
+
 	[HttpGet]
 	public async Task<IActionResult> ExportToExcel(
 		[FromQuery] DenialDashboardFilters filters,
@@ -391,14 +433,16 @@ public class DenialDashboardController : Controller
 			selectedLab.LabName, currentRunId, normalizedFilters,
 			allRecords, lineItems, insights, breakdownSource);
 
-		using var workbook = DenialDashboardExcelExportBuilder.CreateWorkbook(exportData);
+		// Name the file first: the workbook's report header block prints it, as the client
+		// template does, so the builder has to be told what it will be served as.
+		var safeLabName = string.Join("_", selectedLab.LabName.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim('_');
+		var fileNameFiltered = $"{safeLabName}_DenialDashboard_Filtered_{(string.IsNullOrWhiteSpace(currentRunId) ? DateTime.Now : currentRunId)}_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
+
+		using var workbook = DenialDashboardExcelExportBuilder.CreateWorkbook(exportData, fileName: fileNameFiltered);
 
 		await using var stream = new MemoryStream();
 		workbook.SaveAs(stream);
 		stream.Position = 0;
-
-		var safeLabName = string.Join("_", selectedLab.LabName.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim('_');
-		var fileNameFiltered = $"{safeLabName}_DenialDashboard_Filtered_{(string.IsNullOrWhiteSpace(currentRunId) ? DateTime.Now : currentRunId)}_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
 		return File(stream.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileNameFiltered);
 	}
 
@@ -462,6 +506,91 @@ public class DenialDashboardController : Controller
 		{
 			TempData["DenialDashboardError"] = "Assignments were submitted, but no matching denial tasks were found for the selected denial code and payer rows.";
 		}
+
+		return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+	}
+
+	/// <summary>AJAX single-row save for Observations/Responsible Person/Discussion Date/ETA (spec item 1).</summary>
+	[HttpPost]
+	[ValidateAntiForgeryToken]
+	public async Task<IActionResult> SaveInsightDetail(
+		int labId,
+		string? denialCode,
+		string? payerName,
+		string? feedbackHtml,
+		string? responsibility,
+		DateTime? discussionDate,
+		string? eta,
+		string? runId,
+		CancellationToken cancellationToken)
+	{
+		if (!HasAnyRole("AR Manager", "ARManager", "Admin"))
+			return Json(new { saved = false, message = "Only AR Manager can edit denial insight rows." });
+
+		if (string.IsNullOrWhiteSpace(denialCode) || string.IsNullOrWhiteSpace(payerName))
+			return Json(new { saved = false, message = "This row is missing its Denial Code or Payer Name." });
+
+		var updated = await _dashboardApi.UpdateInsightDetailAsync(labId, denialCode.Trim(), payerName.Trim(), feedbackHtml, responsibility, discussionDate, eta, runId, cancellationToken);
+		return Json(updated > 0
+			? new { saved = true, message = "Saved." }
+			: new { saved = false, message = "No matching denial insight row was found to update." });
+	}
+
+	/// <summary>Bulk "Save All" for every row on the current page (spec item 1) - same shape as AssignInsightReviewersOverall.</summary>
+	[HttpPost]
+	[ValidateAntiForgeryToken]
+	public async Task<IActionResult> SaveInsightDetailsOverall(
+		int labId,
+		string? lab,
+		string? runId,
+		[FromForm] string[] denialCodes,
+		[FromForm] string[] payerNames,
+		[FromForm] string[] feedbackHtmls,
+		[FromForm] string[] responsibilities,
+		[FromForm] string[] discussionDates,
+		[FromForm] string[] etas,
+		[FromForm] DenialDashboardFilters filters,
+		CancellationToken cancellationToken)
+	{
+		filters ??= new DenialDashboardFilters();
+		filters.ActiveTab = "denial-insight";
+
+		if (!HasAnyRole("AR Manager", "ARManager", "Admin"))
+		{
+			TempData["DenialDashboardError"] = "Only AR Manager can edit denial insight rows.";
+			return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+		}
+
+		if (denialCodes.Length == 0 || payerNames.Length == 0)
+		{
+			TempData["DenialDashboardError"] = "No denial insight rows were submitted.";
+			return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+		}
+
+		var rowCount = denialCodes.Length;
+		var savedRows = 0;
+		var totalUpdated = 0;
+
+		for (var i = 0; i < rowCount; i++)
+		{
+			var denialCode = denialCodes.ElementAtOrDefault(i)?.Trim();
+			var payerName = payerNames.ElementAtOrDefault(i)?.Trim();
+			if (string.IsNullOrWhiteSpace(denialCode) || string.IsNullOrWhiteSpace(payerName)) continue;
+
+			var feedbackHtml = feedbackHtmls.ElementAtOrDefault(i);
+			var responsibility = responsibilities.ElementAtOrDefault(i);
+			var eta = etas.ElementAtOrDefault(i);
+			DateTime? discussionDate = DateTime.TryParse(discussionDates.ElementAtOrDefault(i), out var parsed) ? parsed : null;
+
+			savedRows++;
+			totalUpdated += await _dashboardApi.UpdateInsightDetailAsync(labId, denialCode, payerName, feedbackHtml, responsibility, discussionDate, eta, runId, cancellationToken);
+		}
+
+		TempData[totalUpdated > 0 ? "DenialDashboardSuccess" : "DenialDashboardError"] = savedRows == 0
+			? "No denial insight rows were submitted."
+			: totalUpdated > 0
+				? $"Saved {totalUpdated:N0} of {savedRows:N0} denial insight row(s)."
+				: "No matching denial insight rows were found to update.";
 
 		return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
 	}
@@ -675,6 +804,125 @@ public class DenialDashboardController : Controller
 
 		TempData[result.Errors.Count > 0 ? "DenialDashboardError" : "DenialDashboardSuccess"] = message;
 		return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+	}
+
+	/// <summary>
+	/// Re-imports Observations/Responsible Person/Discussion Date/ETA from an edited Denial Insight
+	/// export (spec item 3): "download, edit in Excel, upload" as a round trip. Reads the same "Denial
+	/// Insight" sheet layout <see cref="DenialDashboardExcelExportBuilder"/> writes (title row 2,
+	/// header row 3, data from row 4 - see BuildInsightSheet/WriteKeyObservations), and applies each
+	/// row through the same UpdateInsightDetailAsync call Save/Save All already use, so sanitization
+	/// happens in exactly one place regardless of how the edit arrived.
+	/// </summary>
+	[HttpPost]
+	[ValidateAntiForgeryToken]
+	public async Task<IActionResult> UploadInsightDetailsExcel(
+		int? labId,
+		string? lab,
+		string? runId,
+		IFormFile? insightExcel,
+		[FromForm] DenialDashboardFilters filters,
+		CancellationToken cancellationToken)
+	{
+		filters ??= new DenialDashboardFilters();
+		filters.ActiveTab = "denial-insight";
+
+		if (!HasAnyRole("AR Manager", "ARManager", "Admin"))
+		{
+			TempData["DenialDashboardError"] = "Only AR Manager can upload denial insight updates.";
+			return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+		}
+
+		if (!labId.HasValue)
+		{
+			TempData["DenialDashboardError"] = "Please select a lab before uploading.";
+			return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+		}
+
+		if (insightExcel is null || insightExcel.Length == 0)
+		{
+			TempData["DenialDashboardError"] = "Please choose an Excel file to upload.";
+			return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+		}
+
+		var uploadError = await FileUploadGuard.ValidateExcelAsync(insightExcel, 25 * 1024 * 1024, cancellationToken);
+		if (uploadError != null)
+		{
+			TempData["DenialDashboardError"] = uploadError;
+			return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+		}
+
+		List<InsightDetailUpload> rows;
+		try
+		{
+			rows = ReadInsightDetailsExcel(insightExcel);
+		}
+		catch (Exception ex)
+		{
+			TempData["DenialDashboardError"] = $"Denial insight upload failed: {ex.Message}";
+			return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+		}
+
+		var updated = 0;
+		var notMatched = 0;
+
+		foreach (var row in rows)
+		{
+			var rowsAffected = await _dashboardApi.UpdateInsightDetailAsync(
+				labId.Value, row.DenialCode, row.PayerName, row.FeedbackHtml, row.Responsibility, row.DiscussionDate, row.Eta, runId, cancellationToken);
+			if (rowsAffected > 0) updated++;
+			else notMatched++;
+		}
+
+		var message = rows.Count == 0
+			? "No denial code rows were found in the uploaded file."
+			: $"Denial insight upload complete. Updated {updated:N0} row(s)" + (notMatched > 0 ? $", {notMatched:N0} row(s) did not match a current denial insight row (by Denial Code + Highest $ Impact - Insurance)." : ".");
+
+		TempData[updated > 0 || rows.Count == 0 ? "DenialDashboardSuccess" : "DenialDashboardError"] = message;
+		return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+	}
+
+	private sealed record InsightDetailUpload(string DenialCode, string PayerName, string? FeedbackHtml, string? Responsibility, DateTime? DiscussionDate, string? Eta);
+
+	/// <summary>
+	/// Parses the "Denial Insight" sheet's Key Observations table. Column positions match
+	/// <see cref="DenialDashboardExcelExportBuilder"/>'s WriteKeyObservations exactly: header row 3,
+	/// data from row 4, col 3 Denial Codes, col 8 Highest $ Impact - Insurance, col 22 Feedback /
+	/// Response, col 24 Responsibility, col 25 Discussion Date, col 26 ETA.
+	/// </summary>
+	private static List<InsightDetailUpload> ReadInsightDetailsExcel(IFormFile file)
+	{
+		using var stream = file.OpenReadStream();
+		using var workbook = new ClosedXML.Excel.XLWorkbook(stream);
+
+		if (!workbook.TryGetWorksheet(DenialDashboardExcelExportBuilder.DenialInsightSheetName, out var sheet))
+			throw new InvalidOperationException($"Worksheet '{DenialDashboardExcelExportBuilder.DenialInsightSheetName}' was not found.");
+
+		var rows = new List<InsightDetailUpload>();
+		var lastRow = sheet.LastRowUsed()?.RowNumber() ?? 0;
+
+		for (var r = 4; r <= lastRow; r++)
+		{
+			var denialCode = sheet.Cell(r, 3).GetString().Trim();
+			if (string.IsNullOrWhiteSpace(denialCode) || denialCode.Equals("Total", StringComparison.OrdinalIgnoreCase)) continue;
+
+			var payerName = sheet.Cell(r, 8).GetString().Trim();
+			var feedback = sheet.Cell(r, 22).GetString();
+			var responsibility = sheet.Cell(r, 24).GetString();
+			var eta = sheet.Cell(r, 26).GetString();
+
+			DateTime? discussionDate = null;
+			var discussionCell = sheet.Cell(r, 25);
+			if (!discussionCell.IsEmpty())
+			{
+				if (discussionCell.DataType == ClosedXML.Excel.XLDataType.DateTime) discussionDate = discussionCell.GetDateTime();
+				else if (DateTime.TryParse(discussionCell.GetString(), out var parsed)) discussionDate = parsed;
+			}
+
+			rows.Add(new InsightDetailUpload(denialCode, payerName, feedback, responsibility, discussionDate, eta));
+		}
+
+		return rows;
 	}
 
 	private bool HasAnyRole(params string[] roleNames)

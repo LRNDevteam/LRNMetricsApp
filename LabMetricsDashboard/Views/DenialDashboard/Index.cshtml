@@ -930,13 +930,23 @@
                                 }
                                 @if (Model.IsArManager)
                                 {
-                                    <span class="ms-1">Pick AR Reviewers across rows, then submit once to assign all matching tasks.</span>
+                                    <span class="ms-1">Pick AR Reviewers across rows, then submit once to assign all matching tasks. Edit Observations / Responsible Person / Discussion Date / ETA inline, then Save that row or Save All.</span>
                                 }
                             </div>
                         </div>
                         <div class="d-flex flex-wrap gap-2 align-items-center">
                             @if (Model.IsArManager)
                             {
+                                <div class="insight-richtext-toolbar btn-group btn-group-sm" role="toolbar" aria-label="Observation formatting">
+                                    <button type="button" class="btn btn-outline-secondary" data-rt-cmd="bold" title="Bold"><i class="bi bi-type-bold"></i></button>
+                                    <button type="button" class="btn btn-outline-secondary" data-rt-cmd="italic" title="Italic"><i class="bi bi-type-italic"></i></button>
+                                    <button type="button" class="btn btn-outline-secondary" data-rt-cmd="underline" title="Underline"><i class="bi bi-type-underline"></i></button>
+                                    <button type="button" class="btn btn-outline-secondary" data-rt-cmd="insertUnorderedList" title="Bullet list"><i class="bi bi-list-ul"></i></button>
+                                    <button type="button" class="btn btn-outline-secondary" data-rt-cmd="insertOrderedList" title="Numbered list"><i class="bi bi-list-ol"></i></button>
+                                </div>
+                                <button type="submit" formaction="@Url.Action("SaveInsightDetailsOverall", "DenialDashboard")" class="btn btn-sm btn-outline-primary rounded-pill px-3">
+                                    <i class="bi bi-save me-1"></i> Save All
+                                </button>
                                 <button type="submit" class="btn btn-sm btn-primary rounded-pill px-3">
                                     <i class="bi bi-check2-circle me-1"></i> Submit Reviewer Assignments
                                 </button>
@@ -956,6 +966,24 @@
                         <div class="grid-loading" hidden><div class="page-loader-spinner"></div></div>
                     </div>
                 </form>
+
+                @if (Model.IsArManager)
+                {
+                    <form asp-action="UploadInsightDetailsExcel" asp-controller="DenialDashboard" method="post" enctype="multipart/form-data" class="d-inline-block mt-2" id="insightUploadForm">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="labId" value="@Model.Filters.LabId" />
+                        <input type="hidden" name="lab" value="@Model.CurrentLabName" />
+                        <input type="hidden" name="runId" value="@Model.CurrentRunId" />
+                        <input type="hidden" name="ActiveTab" value="denial-insight" />
+                        <label class="btn btn-sm btn-outline-secondary rounded-pill px-3 mb-0" title="Re-upload a Denial Insight export with edited Observations / Responsible Person / Discussion Date / ETA">
+                            <i class="bi bi-upload me-1"></i> Upload Denial Insight
+                            <input type="file" name="insightExcel" accept=".xlsx,.xlsm" hidden onchange="this.form.submit()" />
+                        </label>
+                    </form>
+                    <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3 mt-2 ms-2" id="insightSnapshotsBtn">
+                        <i class="bi bi-clock-history me-1"></i> Saved Snapshots
+                    </button>
+                }
             </div>
         </div>
     </div>
@@ -988,6 +1016,49 @@
         </div>
     </div>
 </div>
+
+@if (Model.IsArManager)
+{
+    <div class="modal fade" id="insightSnapshotsModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Saved Denial Dashboard Snapshots</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted" style="font-size:.83rem;">
+                        Each snapshot is the Monthly Summary, Weekly Summary and Denial Insight workbook (the same one "Download Excel" produces) as of the date it was taken.
+                        Weekly and monthly snapshots are captured automatically; the 4 most recent of each stay listed below, older ones are archived (still downloadable, shown when "Include archived" is checked).
+                    </p>
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" id="insightSnapshotsIncludeArchived" />
+                            <label class="form-check-label" for="insightSnapshotsIncludeArchived">Include archived</label>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-primary" id="insightSnapshotSaveNowBtn">
+                            <i class="bi bi-camera me-1"></i> Save Snapshot Now
+                        </button>
+                    </div>
+                    <div class="mv-info-banner" id="insightSnapshotsError" style="display:none;"></div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered align-middle">
+                            <thead><tr>
+                                <th>Period</th><th>Range</th><th>Size</th><th>Status</th><th>Created</th><th>By</th><th></th>
+                            </tr></thead>
+                            <tbody id="insightSnapshotsRows"><tr><td colspan="7" class="text-center text-muted py-3">Loading…</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" id="insightSnapshotsRefresh"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <br />
 <br />
 <br />
@@ -1567,6 +1638,197 @@
                 if (btn) btn.innerHTML = '<i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span>';
                 if (!document.querySelector('.fs-host.is-fs')) document.body.classList.remove('fs-lock');
             });
+        })();
+
+        // Denial Insight inline editing: Observations (rich text), Responsible Person, Discussion
+        // Date and ETA. The grid body is swapped in via AJAX (setupAjaxGrids above), so every
+        // listener here is delegated from `document` rather than bound to elements that get replaced.
+        (function setupInsightEditing() {
+            const form = document.getElementById('denialInsightAssignmentForm');
+            if (!form) return;
+
+            function antiForgeryToken() {
+                const input = form.querySelector('input[name="__RequestVerificationToken"]');
+                return input ? input.value : '';
+            }
+
+            // The contenteditable Observations div is not itself a form field - sync its current
+            // HTML into the hidden `feedbackHtmls` input beside it before anything reads that input.
+            function syncFeedbackInputs(scope) {
+                (scope || document).querySelectorAll('.insight-richtext').forEach(function (editor) {
+                    const cell = editor.closest('td');
+                    const hidden = cell ? cell.querySelector('.insight-feedback-input') : null;
+                    if (hidden) hidden.value = editor.innerHTML;
+                });
+            }
+
+            // "Save All" is a native form submit (see formaction on the button) - sync right before
+            // the browser serializes the form so it picks up the latest edited text.
+            form.addEventListener('submit', function () { syncFeedbackInputs(form); });
+
+            // Rich text toolbar: mousedown + preventDefault keeps focus (and the text selection) on
+            // whichever Observations cell the user was editing, so execCommand lands in the right place.
+            let activeEditor = null;
+            document.addEventListener('focusin', function (e) {
+                if (e.target.classList && e.target.classList.contains('insight-richtext')) activeEditor = e.target;
+            });
+            document.querySelectorAll('.insight-richtext-toolbar [data-rt-cmd]').forEach(function (btn) {
+                btn.addEventListener('mousedown', function (e) {
+                    e.preventDefault();
+                    if (!activeEditor) return;
+                    document.execCommand(btn.getAttribute('data-rt-cmd'), false, null);
+                    syncFeedbackInputs(activeEditor.closest('tr'));
+                });
+            });
+
+            // Per-row Save (AJAX): posts just this row's edited fields, no full page reload.
+            document.addEventListener('click', function (e) {
+                const btn = e.target.closest('.insight-row-save');
+                if (!btn) return;
+                e.preventDefault();
+                const row = btn.closest('tr');
+                if (!row) return;
+
+                syncFeedbackInputs(row);
+                const status = row.querySelector('.insight-row-status');
+                const denialCode = row.querySelector('.insight-row-code');
+                const payerName = row.querySelector('.insight-row-payer');
+                const feedback = row.querySelector('.insight-feedback-input');
+                const responsibility = row.querySelector('.insight-responsibility-input');
+                const discussionDate = row.querySelector('input[name="discussionDates"]');
+                const eta = row.querySelector('input[name="etas"]');
+                if (!denialCode || !payerName) return;
+
+                btn.disabled = true;
+                if (status) { status.textContent = 'Saving…'; status.className = 'insight-row-status'; }
+
+                const body = new URLSearchParams({
+                    labId: (form.querySelector('input[name="labId"]') || {}).value || '',
+                    denialCode: denialCode.value || '',
+                    payerName: payerName.value || '',
+                    feedbackHtml: feedback ? feedback.value : '',
+                    responsibility: responsibility ? responsibility.value : '',
+                    discussionDate: discussionDate ? discussionDate.value : '',
+                    eta: eta ? eta.value : '',
+                    runId: (form.querySelector('input[name="runId"]') || {}).value || ''
+                });
+
+                fetch('@Url.Action("SaveInsightDetail", "DenialDashboard")', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': antiForgeryToken() },
+                    body: body.toString(),
+                    credentials: 'same-origin'
+                })
+                    .then(function (r) { return r.json(); })
+                    .then(function (result) {
+                        if (status) {
+                            status.textContent = result.message || (result.saved ? 'Saved.' : 'Not saved.');
+                            status.className = 'insight-row-status ' + (result.saved ? 'text-success' : 'text-danger');
+                        }
+                    })
+                    .catch(function () {
+                        if (status) { status.textContent = 'Save failed.'; status.className = 'insight-row-status text-danger'; }
+                    })
+                    .finally(function () { btn.disabled = false; });
+            });
+        })();
+
+        // Saved Denial Dashboard snapshots (spec item 4): list, on-demand capture, download.
+        (function setupInsightSnapshots() {
+            const openBtn = document.getElementById('insightSnapshotsBtn');
+            const modalEl = document.getElementById('insightSnapshotsModal');
+            if (!openBtn || !modalEl) return;
+
+            const modal = new bootstrap.Modal(modalEl);
+            const rows = document.getElementById('insightSnapshotsRows');
+            const includeArchived = document.getElementById('insightSnapshotsIncludeArchived');
+            const saveNowBtn = document.getElementById('insightSnapshotSaveNowBtn');
+            const refreshBtn = document.getElementById('insightSnapshotsRefresh');
+            const errorBox = document.getElementById('insightSnapshotsError');
+            const assignmentForm = document.getElementById('denialInsightAssignmentForm');
+            const labId = (assignmentForm && assignmentForm.querySelector('input[name="labId"]')) ? assignmentForm.querySelector('input[name="labId"]').value : '';
+            const labName = (assignmentForm && assignmentForm.querySelector('input[name="lab"]')) ? assignmentForm.querySelector('input[name="lab"]').value : '';
+
+            function showError(message) {
+                if (!errorBox) return;
+                if (!message) { errorBox.style.display = 'none'; errorBox.textContent = ''; return; }
+                errorBox.textContent = message; errorBox.style.display = '';
+            }
+
+            function fmtDate(value) {
+                if (!value) return '—';
+                const d = new Date(value);
+                return isNaN(d) ? '—' : d.toLocaleDateString();
+            }
+
+            function fmtSize(bytes) {
+                if (!bytes && bytes !== 0) return '—';
+                if (bytes < 1024) return bytes + ' B';
+                if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+                return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            }
+
+            async function load() {
+                rows.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Loading…</td></tr>';
+                showError('');
+                try {
+                    const url = '@Url.Action("InsightSnapshots", "DenialDashboard")?labId=' + encodeURIComponent(labId) + '&includeArchived=' + (includeArchived.checked ? 'true' : 'false');
+                    const r = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' });
+                    if (!r.ok) throw new Error('Unable to load snapshots (' + r.status + ').');
+                    const list = await r.json();
+                    if (!Array.isArray(list) || list.length === 0) {
+                        rows.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">No snapshots have been saved yet.</td></tr>';
+                        return;
+                    }
+                    rows.innerHTML = list.map(function (s) {
+                        const range = s.periodType === 'Monthly'
+                            ? fmtDate(s.periodStart)
+                            : fmtDate(s.periodStart) + ' – ' + fmtDate(s.periodEnd);
+                        const status = s.isArchived ? '<span class="text-muted">Archived</span>' : '<span class="text-success">Active</span>';
+                        const dl = '@Url.Action("DownloadInsightSnapshot", "DenialDashboard")?labId=' + encodeURIComponent(labId) + '&snapshotId=' + s.snapshotId;
+                        return '<tr><td>' + s.periodType + '</td><td>' + range + '</td><td>' + fmtSize(s.sizeBytes) + '</td><td>' + status + '</td>'
+                            + '<td>' + fmtDate(s.createdOn) + '</td><td>' + (s.createdBy || '—') + '</td>'
+                            + '<td><a class="btn btn-sm btn-outline-primary" href="' + dl + '"><i class="bi bi-download"></i></a></td></tr>';
+                    }).join('');
+                } catch (e) {
+                    rows.innerHTML = '';
+                    showError(e.message || 'Unable to load snapshots.');
+                }
+            }
+
+            openBtn.addEventListener('click', function () { modal.show(); load(); });
+            refreshBtn.addEventListener('click', load);
+            includeArchived.addEventListener('change', load);
+
+            saveNowBtn.addEventListener('click', async function () {
+                saveNowBtn.disabled = true;
+                const original = saveNowBtn.innerHTML;
+                saveNowBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving…';
+                showError('');
+                try {
+                    const body = new URLSearchParams({ labId: labId, lab: labName });
+                    const r = await fetch('@Url.Action("SaveInsightSnapshotNow", "DenialDashboard")', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': antiForgeryToken() },
+                        body: body.toString(),
+                        credentials: 'same-origin'
+                    });
+                    const result = await r.json();
+                    if (!result.saved) throw new Error(result.message || 'The snapshot could not be saved.');
+                    await load();
+                } catch (e) {
+                    showError(e.message || 'The snapshot could not be saved.');
+                } finally {
+                    saveNowBtn.disabled = false;
+                    saveNowBtn.innerHTML = original;
+                }
+            });
+
+            function antiForgeryToken() {
+                const form = document.getElementById('denialInsightAssignmentForm');
+                const input = form ? form.querySelector('input[name="__RequestVerificationToken"]') : null;
+                return input ? input.value : '';
+            }
         })();
 
         document.querySelectorAll('.accordion-search-input').forEach(function (input) {

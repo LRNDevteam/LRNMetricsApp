@@ -122,6 +122,27 @@ $env:MasterFileProcessor__SharePoint__ClientSecret = "..."
 
 `--selftest` needs neither the vault nor a database.
 
+## Cove column mapping
+
+Cove's line- and claim-level data come from `dbo.Cove_Line_Level_Billing_Master` and
+`dbo.Cove_Claim_Level_Billing_Master`, whose column names are the "New ... Master" column of
+`Sample/Cove_ColumMapping_NewMasterReports_v1.1.xlsx` (Deepak's mapping). The config was checked
+against that file in Sep 2026 by running `StandardCsvExporter` over the tables' real headers.
+
+Every row the file marks **Mapped** or **Required** matches the load, with these decisions:
+
+| File says | Load does | Why |
+|---|---|---|
+| Claim `Claim Level Denial Code` -> `DenialCode` | Same (was `Denial Code` before Sep 2026) | Set in `Cove_ClaimLevel.schema.json` |
+| Line `TotalBalance` -> `TotalBalance` | Same (was computed as Patient + Insurance balance) | Set in `Cove_LineLevel.schema.json` |
+| Claim `Claim Level CPT` -> `CPTCodeXUnitsXModifier` | Source goes to `CPTCodeXUnitsXModifierOrginal`; `CPTCodeXUnitsXModifier` is the line-level roll-up | Kept consistent with every other lab |
+| Line `UID` -> `LineLevelUID` | `UID` -> `UID`; `LineLevelUID` computed | Join key for the Denial worker and dashboards |
+| `InsertedDateTime` required | Filled by the table default, not the mapping | - |
+
+Columns the file marks **Unmapped / N/A / Not Required** (for example `ClinicName`, `SalesRepname`,
+`ClaimUID`, `TotalWO`, `T_F`, `PlanName`, the deposit dates, `Created/Updated On/By`) are still
+loaded on purpose: Clinic Summary, Sales Rep Summary, the Denial worker and the dashboards read them.
+
 ## Notifications
 
 Both channels are **off**. Each has exactly one switch in `appsettings.json`:

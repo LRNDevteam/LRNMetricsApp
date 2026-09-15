@@ -6,7 +6,7 @@ import DocumentTable from '../components/DocumentTable';
 import ClaimNotesPanel from '../components/ClaimNotesPanel';
 import HistoryTimeline from '../components/HistoryTimeline';
 import StructuredNoteText from '../components/StructuredNoteText';
-import { canUpdateWorkflowRole, isAccountManagerRole, isClientManagerRole } from '../utils/formatters';
+import { accounting, canUpdateWorkflowRole, isAccountManagerRole, isClientManagerRole } from '../utils/formatters';
 import { canDeleteClaimDocument } from '../utils/documentPermissions';
 import { MAX_TEXT_LENGTH, limitText, textCountLabel } from '../utils/textLimits';
 import { dedupeEscalations } from '../utils/escalations';
@@ -14,7 +14,7 @@ import { getQueuesForRole } from '../config/workflowRoleQueues';
 import ClaimCsvUpload from '../components/ClaimCsvUpload';
 
 const fmtDate = v => v ? new Date(v).toLocaleDateString() : '-';
-const money = v => Number(v || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+const money = v => accounting(v, 2);
 const statusOptions = ['Assigned', 'Payer Follow-up Required', 'Pending Payer Response', 'Pending Documentation', 'Write-Off Pending Approval', 'Closed'];
 // UAT: reconciled against spec (and against ClaimAssignmentPage.jsx's equivalent list) --
 // added "Coding / CPT clarification" and "ICD / diagnosis clarification" (were missing),

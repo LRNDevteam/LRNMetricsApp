@@ -77,6 +77,8 @@ builder.Services.AddScoped<IDenialCodeMasterRepository, SqlDenialCodeMasterRepos
 builder.Services.AddScoped<IDenialCodeMasterExcelService, DenialCodeMasterExcelService>();
 builder.Services.AddScoped<IDenialActionChangeVerificationRepository, SqlDenialActionChangeVerificationRepository>();
 builder.Services.AddScoped<IDenialMapperRepository, SqlDenialMapperRepository>();
+builder.Services.AddScoped<IWorkflowMasterValuesRepository, SqlWorkflowMasterValuesRepository>();
+builder.Services.AddScoped<IDenialMapperExcelService, DenialMapperExcelService>();
 builder.Services.AddScoped<IMasterValuesRepository, SqlMasterValuesRepository>();
 builder.Services.AddScoped<IReportAuditLogService, ReportAuditLogService>();
 builder.Services.AddScoped<IMenuRepository, SqlMenuRepository>();
@@ -84,11 +86,21 @@ builder.Services.AddScoped<ILabAnalyticsRepository, SqlLabAnalyticsRepository>()
 builder.Services.AddScoped<ICptLookupRepository, SqlCptLookupRepository>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IDenialDashboardRepository, SqlDenialDashboardRepository>();
+// Denial Dashboard snapshots (Monthly/Weekly Summary + Denial Insight workbook, archived by
+// retention like the Denial Summary snapshots below, but a separate table/feature).
+builder.Services.Configure<DenialDashboardSnapshotOptions>(builder.Configuration.GetSection("DenialDashboardSnapshots"));
+builder.Services.AddScoped<IDenialDashboardSnapshotRepository, SqlDenialDashboardSnapshotRepository>();
+builder.Services.AddScoped<IDenialDashboardSnapshotService, DenialDashboardSnapshotService>();
 // AR follow-up reporting suite (RPT-01 AR Follow-up Activity Detail and the shared report catalog).
 builder.Services.AddScoped<LRN.ReportsApi.Services.ArReports.IArActivityReportRepository,
                            LRN.ReportsApi.Services.ArReports.SqlArActivityReportRepository>();
 builder.Services.AddScoped<IPayerMasterWorkflowService, PayerMasterWorkflowService>();
 builder.Services.AddHostedService<PayerMasterSlaEscalationService>();
+// Denial Summary observations and weekly/monthly Excel snapshots (Denial Workflow v1.1, 4a-4i).
+builder.Services.Configure<DenialSummarySnapshotOptions>(builder.Configuration.GetSection("DenialSummarySnapshots"));
+builder.Services.AddScoped<IDenialSummaryRepository, SqlDenialSummaryRepository>();
+builder.Services.AddScoped<IDenialSummarySnapshotService, DenialSummarySnapshotService>();
+builder.Services.AddHostedService<DenialSummarySnapshotScheduler>();
 
 // ── Payer mapping intelligence (LRN.PayerPolicyMapper.Core) ──────────────────
 // Same pipeline as the LRN.PayerPolicyMapper worker; the Step 0 index is a singleton
@@ -116,6 +128,7 @@ builder.Services.AddSingleton<LRN.PayerPolicyMapper.Core.MatchingPipeline>();
 builder.Services.AddScoped<IPayerMappingService, PayerMappingService>();
 builder.Services.AddScoped<IPayerRulesAdminService, PayerRulesAdminService>();
 builder.Services.AddScoped<IDenialWorkflowIssueNotifier, DenialWorkflowIssueNotifier>();
+builder.Services.AddScoped<IDenialWorkflowEmailSender, SmtpDenialWorkflowEmailSender>();
 builder.Services.AddScoped<IDenialWorkflowSupportService, DenialWorkflowSupportService>();
 builder.Services.AddSingleton<IDenialWorkflowJobHistoryStore, DenialWorkflowJobHistoryStore>();
 builder.Services.AddSingleton<IDenialWorkflowExportJobService, DenialWorkflowExportJobService>();

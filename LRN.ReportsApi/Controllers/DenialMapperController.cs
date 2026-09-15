@@ -10,7 +10,7 @@ namespace LRN.ReportsApi.Controllers;
 [ApiController]
 [Route("api/denialworkflow/denial-mapper")]
 [Route("api/denial-workflow/denial-mapper")]
-public sealed class DenialMapperController(IDenialMapperRepository repository, IDenialWorkflowService workflowService, IDenialMapperPushJobService pushJobs) : ControllerBase
+public sealed class DenialMapperController(IDenialMapperRepository repository, IDenialWorkflowService workflowService, IDenialMapperPushJobService pushJobs, IDenialMapperExcelService excelService) : ControllerBase
 {
     [HttpGet("dashboard")]
     public async Task<ActionResult<DenialMapperDashboard>> Dashboard([FromQuery] int? labId, CancellationToken ct)
@@ -56,6 +56,17 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     [HttpPost("confirm-push")]
     public async Task<ActionResult> ConfirmPush(DenialMapperPushDecisionRequest request,CancellationToken ct)
     {if(!IsAdmin())return Denied();var count=await repository.ConfirmPushAsync(request.PushAuditIds,UserName(),Role(),ct);return Ok(new{labCount=count,message=$"Super Master staged in {count} lab(s) and is awaiting AR Manager confirmation. Existing overrides were preserved."});}
+
+    // Confirms only the caller's chosen denial codes from one pending push, instead of pushing
+    // every Super Master mapping to the lab. The rest of that push's differences stay pending.
+    [HttpPost("confirm-push-selected")]
+    public async Task<ActionResult> ConfirmPushSelected(DenialMapperPushSelectedDecisionRequest request,CancellationToken ct)
+    {
+        if(!IsAdmin())return Denied();
+        if(request.DetailIds is null||request.DetailIds.Count==0)return BadRequest(new{message="Select at least one denial code to push."});
+        var count=await repository.ConfirmPushSelectedAsync(request.PushAuditId,request.DetailIds,UserName(),Role(),ct);
+        return Ok(new{appliedCount=count,message=$"{count} selected denial code(s) pushed and awaiting AR Manager confirmation. Unselected codes remain pending."});
+    }
 
     // Async "Push to Labs" step 1 — compare: returns a jobId immediately and runs ComparePushAsync on
     // a background scope (it counts open tasks per difference per lab, which is slow), so the admin is
@@ -141,6 +152,20 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
         return Ok(new{mappingCount=count,message=$"{count} approved mapping(s) were applied to Denial Action Master."});
     }
 
+    [HttpGet("missing-code-notifications")]
+    public async Task<ActionResult> MissingCodeNotifications([FromQuery]int labId,CancellationToken ct)
+    {if(!IsArManager())return Denied();var effective=await AuthorizedLab(labId,ct);if(effective is null)return Denied();return Ok(await repository.PendingMissingCodeNotificationsAsync(effective.Value,ct));}
+
+    [HttpPost("missing-code-notifications/{notificationId:long}/acknowledge")]
+    public async Task<ActionResult> AcknowledgeMissingCodeNotification(long notificationId,[FromQuery]int labId,CancellationToken ct)
+    {
+        if(!IsArManager())return Denied();
+        var effective=await AuthorizedLab(labId,ct);
+        if(effective is null)return Denied();
+        var count=await repository.AcknowledgeMissingCodeNotificationAsync(notificationId,effective.Value,UserName(),ct);
+        return Ok(new{acknowledged=count>0,message=count>0?"Notification acknowledged.":"This notification was already acknowledged."});
+    }
+
     [HttpGet("master-data")]
     public async Task<ActionResult<DenialMapperMasterData>> MasterData(CancellationToken ct)
     {
@@ -166,6 +191,22 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     [HttpPost("upload")]
     [RequestSizeLimit(100_000_000)]
     public async Task<ActionResult<DenialCodeMasterImportResult>> Upload([FromForm] DenialCodeMasterImportRequest request,CancellationToken ct){if(!IsAdmin())return Denied();var uploadError=await FileUploadGuard.ValidateExcelAsync(request.File,25*1024*1024,ct);if(uploadError!=null)return BadRequest(new{message=uploadError});await using var stream=request.File!.OpenReadStream();return Ok(await repository.ImportSuperMasterAsync(stream,request.File.FileName,UserName(),Role(),ct));}
+
+    [HttpGet("super-master/export")]
+    public async Task<ActionResult> ExportSuperMaster(CancellationToken ct)
+    {
+        if (!IsAdmin() && !IsViewer()) return Denied();
+        var bytes = await excelService.ExportAsync(ct);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "DenialActionSuperMaster.xlsx");
+    }
+
+    [HttpGet("super-master/template")]
+    public ActionResult SuperMasterTemplate()
+    {
+        if (!IsAdmin()) return Denied();
+        var bytes = excelService.BuildImportTemplate();
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "DenialActionSuperMaster_Template.xlsx");
+    }
 
     private async Task<int?> AuthorizedLab(int? requested, CancellationToken ct)
     {

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { denialWorkflowService } from '../../services/denialWorkflowService';
+import { accounting } from '../../utils/formatters';
 
 /**
  * RPT-01 — AR Follow-up Activity Detail.
@@ -70,14 +71,13 @@ function text(row, key, fallback = '—') {
   return value === undefined || value === null || value === '' ? fallback : String(value);
 }
 
+// Whole dollars for the KPI tile, cents in the grid — both in Accounting layout.
 function money(value) {
-  const n = Number(value || 0);
-  return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+  return accounting(value, 0);
 }
 
 function moneyExact(value) {
-  const n = Number(value || 0);
-  return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return accounting(value, 2);
 }
 
 function count(value) {

@@ -96,6 +96,7 @@ export const denialWorkflowService = {
     return api(`/denial-code-master/import?labId=${encodeURIComponent(labId)}`, { method: 'POST', body: form });
   },
   regenerateDenialCodeMasterExcel: (labId) => api(`/denial-code-master/regenerate-export?labId=${encodeURIComponent(labId)}`, { method: 'POST' }),
+  syncDenialCodeMaster: (labId) => api(`/denial-code-master/sync?labId=${encodeURIComponent(labId)}`, { method: 'POST' }),
   getDenialCodeMasterExportUrl: (labId) => apiUrl(`/denial-code-master/export?labId=${encodeURIComponent(labId)}`),
   getDenialCodeMasterTemplateUrl: () => apiUrl('/denial-code-master/template'),
   getDenialActionVerification: async (query) => normalizePagedResult(await api(`/denial-action-verification?${qs(query)}`)),
@@ -115,6 +116,7 @@ export const denialWorkflowService = {
   ,getDenialMapperLabs: () => api('/denial-mapper/labs')
   ,compareDenialMapperPush: (labIds) => api('/denial-mapper/compare-push', { method: 'POST', body: JSON.stringify({ labIds }) })
   ,confirmDenialMapperPush: (pushAuditIds) => api('/denial-mapper/confirm-push', { method: 'POST', body: JSON.stringify({ pushAuditIds }) })
+  ,confirmDenialMapperPushSelected: (pushAuditId, detailIds) => api('/denial-mapper/confirm-push-selected', { method: 'POST', body: JSON.stringify({ pushAuditId, detailIds }) })
   // Async "Push to Labs" — two backgrounded steps, each returns a jobId (202); poll the job for
   // completion so the admin is never blocked. Step 1 compares (creates pending pushes); step 2
   // confirms/distributes a pending push (deferrable, run from Push Status).
@@ -129,12 +131,25 @@ export const denialWorkflowService = {
   ,getDenialMapperPushVerificationExportUrl: (pushAuditId) => apiUrl(`/denial-mapper/push-verification/${pushAuditId}/export`)
   ,getDenialMapperNotifications: (labId) => api(`/denial-mapper/notifications?labId=${encodeURIComponent(labId)}`)
   ,acknowledgeDenialMapperNotification: (pushAuditId, labId) => api(`/denial-mapper/notifications/${pushAuditId}/acknowledge?labId=${encodeURIComponent(labId)}`, { method: 'POST' })
+  ,getMissingDenialCodeNotifications: (labId) => api(`/denial-mapper/missing-code-notifications?labId=${encodeURIComponent(labId)}`)
+  ,acknowledgeMissingDenialCodeNotification: (notificationId, labId) => api(`/denial-mapper/missing-code-notifications/${notificationId}/acknowledge?labId=${encodeURIComponent(labId)}`, { method: 'POST' })
   ,getDenialMapperLab: async (labId, query) => normalizePagedResult(await api(`/denial-mapper/lab-master?${qs({ ...query, labId })}`))
   ,saveDenialMapperOverride: (labId, id, payload) => api(`/denial-mapper/lab-master/${id}/override?labId=${labId}`, { method: 'PUT', body: JSON.stringify(payload) })
   ,removeDenialMapperOverride: (labId, id) => api(`/denial-mapper/lab-master/${id}/override?labId=${labId}`, { method: 'DELETE' })
   ,getDenialMapperAudit: (labId) => api(`/denial-mapper/audit?${qs({ labId, take: 200 })}`)
   ,getDenialMapperClassifications: (labId) => api(`/denial-mapper/classifications?${qs({ labId })}`)
   ,uploadDenialMapper: (file) => { const form = new FormData(); form.append('file', file); return api('/denial-mapper/upload', { method: 'POST', body: form }); }
+  ,getDenialMapperSuperExportUrl: () => apiUrl('/denial-mapper/super-master/export')
+  ,getDenialMapperSuperTemplateUrl: () => apiUrl('/denial-mapper/super-master/template')
+
+  // ── Workflow master values (admin only) ─────────────────────────────────────
+  // The seven lists the Denial Mapper offers. The value being edited travels in the body, and the
+  // one being deleted in the query string, because values such as "Client Info Pending / Write Off"
+  // contain slashes and cannot be route segments.
+  ,getWorkflowMasters: () => api('/workflow-masters')
+  ,addWorkflowMasterValue: (type, payload) => api(`/workflow-masters/${encodeURIComponent(type)}`, { method: 'POST', body: JSON.stringify(payload) })
+  ,updateWorkflowMasterValue: (type, payload) => api(`/workflow-masters/${encodeURIComponent(type)}`, { method: 'PUT', body: JSON.stringify(payload) })
+  ,deleteWorkflowMasterValue: (type, value) => api(`/workflow-masters/${encodeURIComponent(type)}?${qs({ value })}`, { method: 'DELETE' })
 
   // ── AR follow-up reporting suite ────────────────────────────────────────────
   // The catalog drives which reports the Reports screen offers and which are shown inactive, so
@@ -151,6 +166,14 @@ export const denialWorkflowService = {
   ,getRpt01SavedViews: (labId) => api(`/reports/rpt01/saved-views?labId=${encodeURIComponent(labId)}`)
   ,saveRpt01View: (payload) => api('/reports/rpt01/saved-views', { method: 'POST', body: JSON.stringify(payload) })
   ,deleteRpt01View: (savedViewId, labId) => api(`/reports/rpt01/saved-views/${encodeURIComponent(savedViewId)}?labId=${encodeURIComponent(labId)}`, { method: 'DELETE' })
+
+  // ── Denial Summary observations and snapshots (v1.1 4a-4i) ──────────────────
+  ,getDenialSummaryObservations: (labId) => api(`/denial-summary/observations?labId=${encodeURIComponent(labId)}`)
+  ,saveDenialSummaryObservation: (labId, payload) => api(`/denial-summary/observations?labId=${encodeURIComponent(labId)}`, { method: 'PUT', body: JSON.stringify(payload) })
+  ,getDenialSummarySnapshots: (labId, includeArchived = false) => api(`/denial-summary/snapshots?${qs({ labId, includeArchived })}`)
+  ,takeDenialSummarySnapshot: (labId) => api(`/denial-summary/snapshots?labId=${encodeURIComponent(labId)}`, { method: 'POST' })
+  // Blob URL: the caller sets a.download to the snapshot's FileName.
+  ,getDenialSummarySnapshotDownloadUrl: (labId, snapshotId) => apiUrl(`/denial-summary/snapshots/${encodeURIComponent(snapshotId)}/download?labId=${encodeURIComponent(labId)}`)
 };
 
 export { qs };

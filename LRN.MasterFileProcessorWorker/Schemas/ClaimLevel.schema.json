@@ -147,7 +147,6 @@
 				"SaleRepName"
 			]
 		},
-
 		{
 			"Name": "PatientID",
 			"DataType": "string",
@@ -402,6 +401,7 @@
 			"Name": "Panel Name LIS",
 			"DataType": "string",
 			"Aliases": [
+				"LIS Panel Name",
 				"Panel Name LIS"
 			]
 		},
@@ -409,6 +409,7 @@
 			"Name": "Panel Name Based on CPT",
 			"DataType": "string",
 			"Aliases": [
+				"Panel Name as per CPT",
 				"Panel Name Based on CPT"
 			]
 		},
@@ -429,6 +430,14 @@
 		{
 			"Name": "ClaimUID",
 			"DataType": "string"
+		},
+		{
+			"Name": "Claim Level Denial Code",
+			"DataType": "string"
+		},
+		{
+			"Name": "Last Billed Date",
+			"DataType": "date"
 		}
 	]
 }
