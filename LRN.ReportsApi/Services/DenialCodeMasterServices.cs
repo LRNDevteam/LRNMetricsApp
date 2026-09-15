@@ -427,11 +427,17 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
 
         var inserted = 0;
         var updated = 0;
+        var mergedDuplicateCount = 0;
         DenialCodeActionChangeSummary? actionChangeSummary = null;
         try
         {
             var uniqueRecords = DeduplicateImportRecords(records);
-            skippedCount += records.Count - uniqueRecords.Count;
+
+            // Distinct from skippedCount (blank Denial Code, never became a candidate row): these
+            // rows parsed fine but shared a (DenialCode, CoverageStatus, ICDComplianceStatus) key
+            // with another row in the same file. Only the last one in file order is kept - that key
+            // is the table's primary key, so two rows sharing it can never both exist as DB rows.
+            mergedDuplicateCount = records.Count - uniqueRecords.Count;
 
             if (uniqueRecords.Count > 0)
             {
@@ -451,6 +457,7 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
             InsertedCount = inserted,
             UpdatedCount = updated,
             SkippedCount = skippedCount,
+            MergedDuplicateCount = mergedDuplicateCount,
             FailedCount = 0,
             HasActionChangeWarnings = actionChangeSummary?.BatchId > 0,
             BatchId = actionChangeSummary?.BatchId,

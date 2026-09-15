@@ -152,6 +152,20 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
         return Ok(new{mappingCount=count,message=$"{count} approved mapping(s) were applied to Denial Action Master."});
     }
 
+    [HttpGet("missing-code-notifications")]
+    public async Task<ActionResult> MissingCodeNotifications([FromQuery]int labId,CancellationToken ct)
+    {if(!IsArManager())return Denied();var effective=await AuthorizedLab(labId,ct);if(effective is null)return Denied();return Ok(await repository.PendingMissingCodeNotificationsAsync(effective.Value,ct));}
+
+    [HttpPost("missing-code-notifications/{notificationId:long}/acknowledge")]
+    public async Task<ActionResult> AcknowledgeMissingCodeNotification(long notificationId,[FromQuery]int labId,CancellationToken ct)
+    {
+        if(!IsArManager())return Denied();
+        var effective=await AuthorizedLab(labId,ct);
+        if(effective is null)return Denied();
+        var count=await repository.AcknowledgeMissingCodeNotificationAsync(notificationId,effective.Value,UserName(),ct);
+        return Ok(new{acknowledged=count>0,message=count>0?"Notification acknowledged.":"This notification was already acknowledged."});
+    }
+
     [HttpGet("master-data")]
     public async Task<ActionResult<DenialMapperMasterData>> MasterData(CancellationToken ct)
     {

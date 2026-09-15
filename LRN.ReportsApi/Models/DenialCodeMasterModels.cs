@@ -56,6 +56,7 @@ public sealed class DenialCodeMasterImportResult
     public int InsertedCount { get; set; }
     public int UpdatedCount { get; set; }
     public int SkippedCount { get; set; }
+    public int MergedDuplicateCount { get; set; }
     public int FailedCount { get; set; }
     public IReadOnlyList<string> Errors { get; set; } = Array.Empty<string>();
     public bool HasActionChangeWarnings { get; set; }

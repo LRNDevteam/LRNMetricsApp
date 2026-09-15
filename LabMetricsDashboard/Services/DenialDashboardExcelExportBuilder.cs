@@ -1,4 +1,6 @@
-﻿using ClosedXML.Excel;
+﻿using System.Net;
+using System.Text.RegularExpressions;
+using ClosedXML.Excel;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.ViewModels;
 
@@ -1018,7 +1020,7 @@ public static class DenialDashboardExcelExportBuilder
 			ws.Cell(row, 16).Value = "Link";
 			ws.Cell(row, 17).Value = item.ActionCategory;
 			ws.Cell(row, 18).Value = item.Action;
-			ws.Cell(row, 22).Value = item.Feedback;
+			ws.Cell(row, 22).Value = HtmlToPlainText(item.Feedback);
 			ws.Cell(row, 24).Value = string.IsNullOrWhiteSpace(item.Responsibility)
 				? item.ResponsibilityReviewer
 				: item.Responsibility;
@@ -1044,6 +1046,26 @@ public static class DenialDashboardExcelExportBuilder
 
 		return row + 1;
 	}
+	/// <summary>
+	/// Readable text for an Excel cell: the Feedback (Observations) column now stores AR Manager
+	/// rich text as sanitized HTML (see LRN.ReportsApi's DenialSummaryHtml, whose allowlist this
+	/// mirrors) - dumping that markup into a spreadsheet cell would be unreadable, so strip it back
+	/// to plain text, keeping line breaks and bullets legible.
+	/// </summary>
+	private static string HtmlToPlainText(string? html)
+	{
+		if (string.IsNullOrWhiteSpace(html)) return string.Empty;
+
+		var text = Regex.Replace(html, @"<\s*br\s*/?\s*>", "\n", RegexOptions.IgnoreCase);
+		text = Regex.Replace(text, @"<\s*li\s*>", "\n• ", RegexOptions.IgnoreCase);
+		text = Regex.Replace(text, @"<\s*/\s*(p|div|ul|ol)\s*>", "\n", RegexOptions.IgnoreCase);
+		text = Regex.Replace(text, @"<[^>]*>", string.Empty);
+		text = WebUtility.HtmlDecode(text);
+		text = Regex.Replace(text, @"[ \t]+\n", "\n");
+		text = Regex.Replace(text, @"\n{3,}", "\n\n");
+		return text.Trim();
+	}
+
 	/// <summary>Suffix for a spill column holding part <paramref name="part"/> of an oversized value.</summary>
 	private static string OverflowHeader(string header, int part) => $"{header} (cont. {part})";
 

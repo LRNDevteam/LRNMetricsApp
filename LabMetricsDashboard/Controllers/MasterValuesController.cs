@@ -10,15 +10,18 @@ public sealed class MasterValuesController : Controller
 {
     private readonly IMasterValuesApiClient _api;
     private readonly IMasterProcessorRerunRepository _rerun;
+    private readonly IDenialDatabaseRerunRepository _denialRerun;
     private readonly ILogger<MasterValuesController> _logger;
 
     public MasterValuesController(
         IMasterValuesApiClient api,
         IMasterProcessorRerunRepository rerun,
+        IDenialDatabaseRerunRepository denialRerun,
         ILogger<MasterValuesController> logger)
     {
         _api = api;
         _rerun = rerun;
+        _denialRerun = denialRerun;
         _logger = logger;
     }
 
@@ -645,6 +648,94 @@ public sealed class MasterValuesController : Controller
         // wrong later, the application log still shows the request was made and by whom.
         _logger.LogWarning(
             "Master processor re-run requested by {User} ({Role}) from {Host}/{Ip} for lab(s) {Labs}. Batch {Batch}. Notes: {Notes}",
+            context.RequestedBy, context.RequestedByRole, context.Host, context.ClientIp,
+            string.Join(", ", selected.Select(l => l.LabName)), result.BatchId, context.Notes);
+
+        return Json(new
+        {
+            batchId = result.BatchId,
+            queued = result.Queued,
+            alreadyQueued = result.AlreadyQueued,
+            failed = result.Failed
+        });
+    }
+
+    // ── Re-run the Denial Database service ──────────────────────────────────
+    // Same gate and shape as the master file processor re-run above, targeting
+    // LRN.DenialDatabaseWorker instead: it reprocesses one lab's denial data with its
+    // already-processed gates bypassed, without touching the master file processor's queue.
+
+    /// <summary>The labs that may be re-run, for the dialog's checkbox list.</summary>
+    [HttpGet]
+    public async Task<IActionResult> DenialDatabaseRerunLabs(CancellationToken ct)
+    {
+        if (!CanRerunMasterProcessor) return Forbid();
+
+        try
+        {
+            var labs = await _api.GetLabsAsync(ct);
+            return Json(labs.Select(l => new { labId = l.LabId, labName = l.LabName })
+                            .OrderBy(l => l.labName, StringComparer.OrdinalIgnoreCase));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ErrorPayload(ex.Message));
+        }
+    }
+
+    /// <summary>Recent Denial Database re-run requests and what became of them.</summary>
+    [HttpGet]
+    public async Task<IActionResult> DenialDatabaseRerunHistory(int take, CancellationToken ct)
+    {
+        if (!CanRerunMasterProcessor) return Forbid();
+
+        try { return Json(await _denialRerun.GetRecentAsync(take <= 0 ? 25 : take, ct)); }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not read the denial database re-run history.");
+            return BadRequest(ErrorPayload("The re-run history is unavailable."));
+        }
+    }
+
+    /// <summary>Queues a Denial Database Service re-run for each selected lab.</summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> DenialDatabaseRerun(
+        [FromBody] DenialDatabaseRerunRequestBody body, CancellationToken ct)
+    {
+        if (!CanRerunMasterProcessor) return Forbid();
+
+        var requestedIds = (body?.LabIds ?? new List<int>()).Distinct().ToList();
+        if (requestedIds.Count == 0)
+            return BadRequest(ErrorPayload("Select at least one lab to re-run."));
+
+        IReadOnlyList<MasterValueLabOption> known;
+        try { known = await _api.GetLabsAsync(ct); }
+        catch (InvalidOperationException ex) { return BadRequest(ErrorPayload(ex.Message)); }
+
+        var selected = known
+            .Where(l => requestedIds.Contains(l.LabId))
+            .Select(l => new DenialDatabaseRerunLabSelection { LabId = l.LabId, LabName = l.LabName })
+            .ToList();
+
+        if (selected.Count == 0)
+            return BadRequest(ErrorPayload("None of the selected labs could be resolved."));
+
+        var context = new DenialDatabaseRerunContext
+        {
+            RequestedBy = User.Identity?.Name ?? "unknown",
+            RequestedByRole = RoleLabel,
+            App = "LabMetricsDashboard",
+            Host = Environment.MachineName,
+            ClientIp = HttpContext.Connection.RemoteIpAddress?.ToString(),
+            UserAgent = Request.Headers.UserAgent.ToString(),
+            Notes = body?.Notes
+        };
+
+        var result = await _denialRerun.RequestAsync(selected, context, ct);
+
+        _logger.LogWarning(
+            "Denial database re-run requested by {User} ({Role}) from {Host}/{Ip} for lab(s) {Labs}. Batch {Batch}. Notes: {Notes}",
             context.RequestedBy, context.RequestedByRole, context.Host, context.ClientIp,
             string.Join(", ", selected.Select(l => l.LabName)), result.BatchId, context.Notes);
 

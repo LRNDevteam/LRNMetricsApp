@@ -159,6 +159,19 @@ public sealed class DenialMapperNotification
     public string Message { get; set; } = "Denial Mapper update is available for your lab. Please verify and confirm the Denial Code Master changes.";
 }
 
+public sealed class MissingDenialCodeNotification
+{
+    public long NotificationId { get; set; }
+    public int LabId { get; set; }
+    public string LabName { get; set; } = string.Empty;
+    public string DenialCode { get; set; } = string.Empty;
+    public string? RunId { get; set; }
+    public DateTime FirstSeenOn { get; set; }
+    public DateTime LastSeenOn { get; set; }
+    public int OccurrenceCount { get; set; }
+    public string Message { get; set; } = "This denial code was found in your lab's denial database but is not in the central Denial Mapper Super Master yet.";
+}
+
 public sealed class DenialMapperLabStatus
 {
     public int LabId { get; set; }

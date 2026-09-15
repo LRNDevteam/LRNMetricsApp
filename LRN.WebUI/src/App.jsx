@@ -77,6 +77,9 @@ export default function App() {
   const [denialMapperLabs, setDenialMapperLabs] = useState([]);
   const [mapperNotification, setMapperNotification] = useState(null);
   const [mapperReviewAuditId, setMapperReviewAuditId] = useState(null);
+  const [missingCodeNotifications, setMissingCodeNotifications] = useState([]);
+  const [missingCodeBannerDismissed, setMissingCodeBannerDismissed] = useState(false);
+  const [reviewMissingCodes, setReviewMissingCodes] = useState(false);
   const [filter, setFilter] = useState(emptyFilter);
   const [debouncedFilter, setDebouncedFilter] = useState(emptyFilter);
   const [dashboard, setDashboard] = useState(emptyDashboard);
@@ -144,6 +147,12 @@ export default function App() {
   useEffect(() => {
     if (!authReady || !arManagerOnly || !labId) return;
     denialWorkflowService.getDenialMapperNotifications(labId).then(items => setMapperNotification(items?.[0] || null)).catch(() => {});
+  }, [authReady, arManagerOnly, labId]);
+
+  useEffect(() => {
+    if (!authReady || !arManagerOnly || !labId) return;
+    setMissingCodeBannerDismissed(false);
+    denialWorkflowService.getMissingDenialCodeNotifications(labId).then(items => setMissingCodeNotifications(items || [])).catch(() => {});
   }, [authReady, arManagerOnly, labId]);
 
   const supportEmailList = useCallback((err = null) => {
@@ -1429,6 +1438,7 @@ export default function App() {
       </header>
       <main className="lrn-content">
         {mapperNotification&&<div className="lrn-alert warning mapper-login-alert"><div><strong>Denial Code push confirmation is pending.</strong><span>Review it in Denial Action Master before applying the codes to this lab.</span></div><div><button className="wl-btn teal xs" onClick={()=>{setMapperReviewAuditId(mapperNotification.pushAuditId);setView('denialcodemaster');}}>Review Now</button><button className="wl-btn xs" onClick={()=>setMapperNotification(null)}>Later</button></div></div>}
+        {missingCodeNotifications.length>0&&!missingCodeBannerDismissed&&<div className="lrn-alert warning mapper-login-alert"><div><strong>{missingCodeNotifications.length} denial code{missingCodeNotifications.length===1?'':'s'} from this lab aren't in the central Denial Mapper yet.</strong><span>Review them in Denial Action Master.</span></div><div><button className="wl-btn teal xs" onClick={()=>{setReviewMissingCodes(true);setView('denialcodemaster');}}>Review Now</button><button className="wl-btn xs" onClick={()=>setMissingCodeBannerDismissed(true)}>Later</button></div></div>}
         {/* The AR report screens carry their own as-of/data-refresh metadata strip, so the global
             source-file row would only duplicate it. */}
         {view !== 'denialmapper' && view !== 'workflowmasters' && view !== 'jobs' && view !== 'reports' && view !== 'rpt01' && <div className="claim-filter-toggle-row">
@@ -1482,7 +1492,7 @@ export default function App() {
         {view === 'verification' && <VerificationPage data={verification} changePage={changePage} tabCounts={claimMenuCounts} onTabChange={handleClaimTabRoute} reviewers={reviewers} canAssign={canAssign} assignClaims={assignClaims} />}
         {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setWorkflowMessage} onSaved={() => { refreshMenuCounts(); refreshWorkflowNotifications(); }} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} tabCounts={{ ...myWorklistMenuCounts, followupDue: (workflowNotifications.sections || []).find(s => s.key === 'follow-up')?.count ?? 0 }} onExportQueryChange={setMyWorklistExportQuery} onDownloadTemplate={(exportQuery, tab) => startClaimExport({ currentTab: true, uploadTemplate: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} exportBusy={exportBusy} />}
         {view === 'escalations' && <EscalationQueuePage labId={labId} user={user} reviewers={reviewers} taskView={escalationView === 'response' ? 'claim' : escalationView} responseOnly={escalationView === 'response'} setTaskView={setEscalationView} tabCounts={claimMenuCounts} onClaimTabChange={handleClaimTabRoute} canAssign={canAssign} assignClaims={assignClaims} setMessage={setWorkflowMessage} />}
-        {view === 'denialcodemaster' && arManagerOnly && <DenialCodeMasterPage labId={labId} role={user.role || ''} setMessage={setWorkflowMessage} initialPushAuditId={mapperReviewAuditId} onPushConfirmed={()=>{setMapperNotification(null);setMapperReviewAuditId(null);}} onReviewActionChanges={(batchId) => { setActionVerificationBatchId(batchId || ''); setView('denialactionverification'); }} />}
+        {view === 'denialcodemaster' && arManagerOnly && <DenialCodeMasterPage labId={labId} role={user.role || ''} setMessage={setWorkflowMessage} initialPushAuditId={mapperReviewAuditId} onPushConfirmed={()=>{setMapperNotification(null);setMapperReviewAuditId(null);}} initialShowMissingCodes={reviewMissingCodes} onMissingCodesReviewed={()=>{denialWorkflowService.getMissingDenialCodeNotifications(labId).then(items=>setMissingCodeNotifications(items||[])).catch(()=>{});}} onReviewActionChanges={(batchId) => { setActionVerificationBatchId(batchId || ''); setView('denialactionverification'); }} />}
         {view === 'denialmapper' && denialMapperRole && <DenialMapperPage user={user} labs={labs} labId={labId} setLabId={setLabId} setMessage={setWorkflowMessage} screen={denialMapperView} onScreenChange={setDenialMapperView} />}
         {view === 'denialactionverification' && (denialMapperAdmin || arManagerOnly) && <DenialActionVerificationPage labId={labId} setMessage={setWorkflowMessage} initialBatchId={actionVerificationBatchId} />}
         {view === 'workflowmasters' && lrnAdmin && <WorkflowMasterValuesPage setMessage={setWorkflowMessage} />}

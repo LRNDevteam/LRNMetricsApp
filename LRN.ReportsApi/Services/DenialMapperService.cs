@@ -23,6 +23,8 @@ public interface IDenialMapperRepository
     Task UpdatePushAuditDetailAsync(long pushAuditId, long detailId, DenialMapperPushDetailEditRequest request, string user, string role, CancellationToken ct);
     Task<IReadOnlyList<DenialMapperNotification>> PendingNotificationsAsync(int labId, string user, CancellationToken ct);
     Task<int> AcknowledgeNotificationAsync(long pushAuditId, int labId, string user, CancellationToken ct);
+    Task<IReadOnlyList<MissingDenialCodeNotification>> PendingMissingCodeNotificationsAsync(int labId, CancellationToken ct);
+    Task<int> AcknowledgeMissingCodeNotificationAsync(long notificationId, int labId, string user, CancellationToken ct);
     Task<PagedResult<DenialMapperRecord>> LabMasterAsync(int labId, string? search, string? classification, int page, int pageSize, CancellationToken ct);
     Task SaveOverrideAsync(int labId, long superMasterId, DenialMapperOverrideRequest request, string user, string role, CancellationToken ct);
     Task RemoveOverrideAsync(int labId, long superMasterId, string user, string role, CancellationToken ct);
@@ -350,6 +352,71 @@ public sealed class SqlDenialMapperRepository : IDenialMapperRepository
 
     public async Task<IReadOnlyList<DenialMapperNotification>> PendingNotificationsAsync(int labId,string user,CancellationToken ct)
     {await using var c=Open();await c.OpenAsync(ct);await EnsurePushAuditSchemaAsync(c,ct);var list=new List<DenialMapperNotification>();await using var cmd=new SqlCommand("SELECT a.PushAuditId,a.SourceLabId,a.TargetLabId,ISNULL(l.LabName,''),a.PushStatus,a.TotalDifferences,a.CreatedOn FROM dbo.DenialMapperPushAudit a LEFT JOIN dbo.Labs l ON l.LabId=a.TargetLabId WHERE a.TargetLabId=@Lab AND a.PushStatus='Pushed' AND a.AcknowledgedOn IS NULL ORDER BY a.CreatedOn DESC",c);cmd.Parameters.AddWithValue("@Lab",labId);await using var r=await cmd.ExecuteReaderAsync(ct);while(await r.ReadAsync(ct))list.Add(new(){PushAuditId=r.GetInt64(0),SourceLabId=r.GetInt32(1),TargetLabId=r.GetInt32(2),TargetLabName=r.GetString(3),PushStatus=r.GetString(4),TotalDifferences=r.GetInt32(5),CreatedOn=r.GetDateTime(6)});return list;}
+
+    public async Task<IReadOnlyList<MissingDenialCodeNotification>> PendingMissingCodeNotificationsAsync(int labId, CancellationToken ct)
+    {
+        await using var c = Open(); await c.OpenAsync(ct);
+        await EnsureMissingDenialCodeNotificationSchemaAsync(c, ct);
+        var list = new List<MissingDenialCodeNotification>();
+        await using var cmd = new SqlCommand(
+            "SELECT NotificationId, LabId, LabName, DenialCode, RunId, FirstSeenOn, LastSeenOn, OccurrenceCount " +
+            "FROM dbo.MissingDenialCodeNotification WHERE LabId=@Lab AND IsAcknowledged=0 ORDER BY LastSeenOn DESC", c);
+        cmd.Parameters.AddWithValue("@Lab", labId);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            list.Add(new()
+            {
+                NotificationId = r.GetInt64(0),
+                LabId = r.GetInt32(1),
+                LabName = r.IsDBNull(2) ? "" : r.GetString(2),
+                DenialCode = r.GetString(3),
+                RunId = r.IsDBNull(4) ? null : r.GetString(4),
+                FirstSeenOn = r.GetDateTime(5),
+                LastSeenOn = r.GetDateTime(6),
+                OccurrenceCount = r.GetInt32(7)
+            });
+        return list;
+    }
+
+    public async Task<int> AcknowledgeMissingCodeNotificationAsync(long id, int labId, string user, CancellationToken ct)
+    {
+        await using var c = Open(); await c.OpenAsync(ct);
+        await EnsureMissingDenialCodeNotificationSchemaAsync(c, ct);
+        await using var cmd = new SqlCommand(
+            "UPDATE dbo.MissingDenialCodeNotification SET IsAcknowledged=1, AcknowledgedOn=SYSUTCDATETIME(), AcknowledgedByUserName=@User " +
+            "WHERE NotificationId=@Id AND LabId=@Lab AND IsAcknowledged=0", c);
+        cmd.Parameters.AddWithValue("@Id", id);
+        cmd.Parameters.AddWithValue("@Lab", labId);
+        cmd.Parameters.AddWithValue("@User", user);
+        return await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task EnsureMissingDenialCodeNotificationSchemaAsync(SqlConnection c, CancellationToken ct)
+    {
+        const string sql = """
+            IF OBJECT_ID('dbo.MissingDenialCodeNotification','U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.MissingDenialCodeNotification
+                (
+                    NotificationId BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_MissingDenialCodeNotification PRIMARY KEY,
+                    LabId INT NOT NULL,
+                    LabName NVARCHAR(120) NULL,
+                    DenialCode NVARCHAR(50) NOT NULL,
+                    RunId VARCHAR(30) NULL,
+                    FirstSeenOn DATETIME2(3) NOT NULL CONSTRAINT DF_MDCN_FirstSeenOn DEFAULT SYSUTCDATETIME(),
+                    LastSeenOn DATETIME2(3) NOT NULL CONSTRAINT DF_MDCN_LastSeenOn DEFAULT SYSUTCDATETIME(),
+                    OccurrenceCount INT NOT NULL CONSTRAINT DF_MDCN_OccurrenceCount DEFAULT 1,
+                    IsAcknowledged BIT NOT NULL CONSTRAINT DF_MDCN_IsAcknowledged DEFAULT 0,
+                    AcknowledgedOn DATETIME2(3) NULL,
+                    AcknowledgedByUserName NVARCHAR(200) NULL
+                );
+                CREATE UNIQUE INDEX UX_MDCN_Lab_Code_Active ON dbo.MissingDenialCodeNotification (LabId, DenialCode) WHERE IsAcknowledged = 0;
+                CREATE INDEX IX_MDCN_Lab_CreatedOn ON dbo.MissingDenialCodeNotification (LabId, LastSeenOn DESC);
+            END
+            """;
+        await using var cmd = new SqlCommand(sql, c);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
 
     public async Task<int> AcknowledgeNotificationAsync(long id,int labId,string user,CancellationToken ct)
     {

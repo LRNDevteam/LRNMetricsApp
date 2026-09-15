@@ -86,6 +86,11 @@ builder.Services.AddScoped<ILabAnalyticsRepository, SqlLabAnalyticsRepository>()
 builder.Services.AddScoped<ICptLookupRepository, SqlCptLookupRepository>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IDenialDashboardRepository, SqlDenialDashboardRepository>();
+// Denial Dashboard snapshots (Monthly/Weekly Summary + Denial Insight workbook, archived by
+// retention like the Denial Summary snapshots below, but a separate table/feature).
+builder.Services.Configure<DenialDashboardSnapshotOptions>(builder.Configuration.GetSection("DenialDashboardSnapshots"));
+builder.Services.AddScoped<IDenialDashboardSnapshotRepository, SqlDenialDashboardSnapshotRepository>();
+builder.Services.AddScoped<IDenialDashboardSnapshotService, DenialDashboardSnapshotService>();
 // AR follow-up reporting suite (RPT-01 AR Follow-up Activity Detail and the shared report catalog).
 builder.Services.AddScoped<LRN.ReportsApi.Services.ArReports.IArActivityReportRepository,
                            LRN.ReportsApi.Services.ArReports.SqlArActivityReportRepository>();

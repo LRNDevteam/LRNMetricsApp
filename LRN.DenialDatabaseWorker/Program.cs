@@ -133,12 +133,15 @@ builder.Services.AddSingleton<FileResolver>();
 builder.Services.AddSingleton<OutputPathBuilder>();
 builder.Services.AddSingleton<DenialAnalysisRunLogRepository>();
 builder.Services.AddSingleton<DenialTaskBoardRepository>();
+builder.Services.AddSingleton<DenialMapperSuperMasterRepository>();
+builder.Services.AddSingleton<MissingDenialCodeDetector>();
 
 // Run logging + workflow tracker (LRNMaster). Both wrap stored procedures and swallow
 // their own failures, so a logging outage costs a log row and not the run.
 builder.Services.AddSingleton<RecentSuccessRunProvider>();
 builder.Services.AddSingleton<ReportRunIdInfoLogger>();
 builder.Services.AddSingleton<ReportsWorkflowTrackerRepository>();
+builder.Services.AddSingleton<DenialDatabaseRerunRequestStore>();
 
 // SharePoint
 builder.Services.AddHttpClient<SharePointGraphClient>();

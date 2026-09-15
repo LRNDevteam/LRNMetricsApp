@@ -13,7 +13,7 @@
     var activeColumnFilters = columnFilters.Count(kv => !string.IsNullOrWhiteSpace(kv.Value));
 
     // Header text, css, and the server-side filter key (null = no per-column filter for that column).
-    var insightColumns = new (string Header, string Css, string? Key)[]
+    var insightColumns = new List<(string Header, string Css, string? Key)>
     {
         ("Denial Codes", "", "DenialCodes"),
         ("Description", "", "Descriptions"),
@@ -27,12 +27,16 @@
         ("Action Code", "", "ActionCode"),
         ("Action", "", "Action"),
         ("Task", "", "Task"),
-        ("Feedback", "", "Feedback"),
-        ("Responsibility", "", "Responsibility"),
+        ("Feedback (Observations)", "", "Feedback"),
+        ("Responsibility (Responsible Person)", "", "Responsibility"),
         ("Responsibility Reviewer", "", "ResponsibilityReviewer"),
         ("Discussion Date", "", null),
         ("ETA", "", "ETA")
     };
+    if (Model.IsArManager) insightColumns.Add(("Save", "", null));
+
+    // <input type="date"> requires an exact yyyy-MM-dd value or it silently shows blank.
+    string EtaDateValue(string? eta) => DateTime.TryParse(eta, out var parsed) ? parsed.ToString("yyyy-MM-dd") : "";
 }
 <div class="ajax-grid-body" data-grid-page="@Model.InsightPage" data-grid-total-pages="@Model.InsightTotalPages">
     <div class="insight-summary-strip mb-3">
@@ -81,14 +85,33 @@
                             <td>@item.ActionCode</td>
                             <td class="text-wrap narrow-cell">@item.Action</td>
                             <td class="text-wrap narrow-cell">@item.Task</td>
-                            <td class="text-wrap narrow-cell">@(string.IsNullOrWhiteSpace(item.Feedback) ? "-" : item.Feedback)</td>
-                            <td>@(string.IsNullOrWhiteSpace(item.Responsibility) ? "-" : item.Responsibility)</td>
+                            <td class="text-wrap narrow-cell insight-editable-cell">
+                                @if (Model.IsArManager)
+                                {
+                                    <input type="hidden" name="denialCodes" class="insight-row-code" value="@item.DenialCodes" />
+                                    <input type="hidden" name="payerNames" class="insight-row-payer" value="@item.HighImpactInsurance" />
+                                    <div class="insight-richtext" contenteditable="true" data-role="feedback-editor">@Html.Raw(item.Feedback)</div>
+                                    <input type="hidden" name="feedbackHtmls" class="insight-feedback-input" value="@item.Feedback" />
+                                }
+                                else
+                                {
+                                    @Html.Raw(string.IsNullOrWhiteSpace(item.Feedback) ? "-" : item.Feedback)
+                                }
+                            </td>
+                            <td class="insight-editable-cell">
+                                @if (Model.IsArManager)
+                                {
+                                    <input type="text" name="responsibilities" class="form-control form-control-sm insight-responsibility-input" value="@item.Responsibility" placeholder="Responsible person" maxlength="200" />
+                                }
+                                else
+                                {
+                                    @(string.IsNullOrWhiteSpace(item.Responsibility) ? "-" : item.Responsibility)
+                                }
+                            </td>
                             <td>
                                 @if (Model.IsArManager)
                                 {
                                     <div class="min-w-260">
-                                        <input type="hidden" name="denialCodes" value="@item.DenialCodes" />
-                                        <input type="hidden" name="payerNames" value="@item.HighImpactInsurance" />
                                         <select name="reviewerUserNames" class="form-select form-select-sm denial-reviewer-select">
                                             <option value="">Select Reviewer</option>
                                             @foreach (var reviewer in Model.ReviewerOptions)
@@ -103,15 +126,40 @@
                                     @(string.IsNullOrWhiteSpace(item.ResponsibilityReviewer) ? "-" : item.ResponsibilityReviewer)
                                 }
                             </td>
-                            <td>@(item.DiscussionDate?.ToString("dd MMM yyyy") ?? "-")</td>
-                            <td>@(string.IsNullOrWhiteSpace(item.ETA) ? "-" : item.ETA)</td>
+                            <td class="insight-editable-cell">
+                                @if (Model.IsArManager)
+                                {
+                                    <input type="date" name="discussionDates" class="form-control form-control-sm insight-date-input" value="@(item.DiscussionDate?.ToString("yyyy-MM-dd"))" />
+                                }
+                                else
+                                {
+                                    @(item.DiscussionDate?.ToString("dd MMM yyyy") ?? "-")
+                                }
+                            </td>
+                            <td class="insight-editable-cell">
+                                @if (Model.IsArManager)
+                                {
+                                    <input type="date" name="etas" class="form-control form-control-sm insight-date-input" value="@EtaDateValue(item.ETA)" />
+                                }
+                                else
+                                {
+                                    @(string.IsNullOrWhiteSpace(item.ETA) ? "-" : item.ETA)
+                                }
+                            </td>
+                            @if (Model.IsArManager)
+                            {
+                                <td class="insight-save-cell">
+                                    <button type="button" class="btn btn-sm btn-outline-primary insight-row-save"><i class="bi bi-save"></i> Save</button>
+                                    <span class="insight-row-status"></span>
+                                </td>
+                            }
                         </tr>
                     }
                 }
                 else
                 {
                     <tr>
-                        <td colspan="@insightColumns.Length" class="text-center text-muted py-4">
+                        <td colspan="@insightColumns.Count" class="text-center text-muted py-4">
                             @(activeColumnFilters > 0 ? "No denial insight rows match the current column filters." : "No denial insight rows were found for the selected lab.")
                         </td>
                     </tr>

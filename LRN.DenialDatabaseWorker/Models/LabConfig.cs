@@ -20,14 +20,14 @@ public sealed class LabConfig
 	public string ClaimActionMapper { get; set; } = "";
 
 	/// <summary>
-	/// Where this lab's denial-to-action mapping comes from.
+	/// Whether this lab may fall through to the classifier workbook as a last resort.
 	///
-	/// File (default): the newest *Denial_Action_Classifier_v*.xlsx under <see cref="ClaimActionMapper"/>.
-	/// Database: the lab's own dbo.DenialCodeMaster, i.e. what AR Managers edit in the web app. Falls
-	/// back to File, with a warning, when that table is missing or empty.
-	///
-	/// Switch a lab to Database only after comparing its DenialCodeMaster against the classifier file:
-	/// a code present in the file but absent from the table stops mapping on the next run.
+	/// Every lab is tried in the same fixed order regardless of this setting: first its own
+	/// dbo.DenialCodeMaster (what AR Managers edit in the web app), then LRNMaster's central
+	/// dbo.DenialMapperSuperMaster. This setting only decides what happens if BOTH of those come back
+	/// empty: File (default) falls through to the newest *Denial_Action_Classifier_v*.xlsx under
+	/// <see cref="ClaimActionMapper"/>; Database fails the run instead of silently using a workbook
+	/// that may be stale or that no per-lab edit ever reaches.
 	/// </summary>
 	public ClaimActionMapperSource ClaimActionMapperSource { get; set; } = ClaimActionMapperSource.File;
 

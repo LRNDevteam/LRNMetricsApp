@@ -244,7 +244,7 @@ function SyncNowConfirmModal({ syncing, onCancel, onConfirm }) {
   </div>;
 }
 
-export default function DenialCodeMasterPage({ labId, role = '', setMessage, onReviewActionChanges, initialPushAuditId = null, onPushConfirmed }) {
+export default function DenialCodeMasterPage({ labId, role = '', setMessage, onReviewActionChanges, initialPushAuditId = null, onPushConfirmed, initialShowMissingCodes = false, onMissingCodesReviewed }) {
   // UAT: this component had zero independent role awareness — App.jsx's router is the only
   // thing keeping Account/Client Manager off this page today. Gate Add/Edit/Delete at the
   // component level too (backend already enforces Admin/AR-Manager-only on every endpoint),
@@ -265,13 +265,16 @@ export default function DenialCodeMasterPage({ labId, role = '', setMessage, onR
   const [actionWarning, setActionWarning] = useState(null);
   const [impactPreview, setImpactPreview] = useState(null);
   const [impactSaving, setImpactSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState(initialPushAuditId ? 'push' : 'master');
+  const [activeTab, setActiveTab] = useState(initialPushAuditId ? 'push' : (initialShowMissingCodes ? 'missing' : 'master'));
   const [pendingPushes, setPendingPushes] = useState([]);
   const [selectedPushId, setSelectedPushId] = useState(initialPushAuditId || null);
   const [pushAudit, setPushAudit] = useState(null);
   const [pushLoading, setPushLoading] = useState(false);
   const [pushConfirming, setPushConfirming] = useState(false);
   const [pushEditor, setPushEditor] = useState(null);
+  const [missingCodes, setMissingCodes] = useState([]);
+  const [missingCodesLoading, setMissingCodesLoading] = useState(false);
+  const [acknowledgingMissingCodeId, setAcknowledgingMissingCodeId] = useState(null);
 
   async function load(next = query) {
     if (!labId) return;
@@ -327,9 +330,37 @@ export default function DenialCodeMasterPage({ labId, role = '', setMessage, onR
   }
 
   useEffect(() => {
-    setActiveTab(initialPushAuditId ? 'push' : 'master');
+    setActiveTab(initialPushAuditId ? 'push' : (initialShowMissingCodes ? 'missing' : 'master'));
     loadPendingPushes(initialPushAuditId);
-  }, [labId, initialPushAuditId]);
+    loadMissingCodes();
+  }, [labId, initialPushAuditId, initialShowMissingCodes]);
+
+  async function loadMissingCodes() {
+    if (!labId) return;
+    setMissingCodesLoading(true);
+    try {
+      const items = await denialWorkflowService.getMissingDenialCodeNotifications(labId);
+      setMissingCodes(Array.isArray(items) ? items : []);
+    } catch (err) {
+      setMessage({ type: 'danger', text: err.message || 'Unable to load missing denial code notifications.' });
+    } finally {
+      setMissingCodesLoading(false);
+    }
+  }
+
+  async function acknowledgeMissingCode(notificationId) {
+    if (acknowledgingMissingCodeId) return;
+    setAcknowledgingMissingCodeId(notificationId);
+    try {
+      await denialWorkflowService.acknowledgeMissingDenialCodeNotification(notificationId, labId);
+      await loadMissingCodes();
+      onMissingCodesReviewed?.();
+    } catch (err) {
+      setMessage({ type: 'danger', text: err.message || 'Unable to acknowledge the missing denial code.' });
+    } finally {
+      setAcknowledgingMissingCodeId(null);
+    }
+  }
 
   useEffect(() => {
     if (activeTab !== 'push' || !selectedPushId) return;
@@ -398,7 +429,7 @@ export default function DenialCodeMasterPage({ labId, role = '', setMessage, onR
     setMessage?.({ type: 'info', text: `Importing ${file.name}. This may take a few minutes...` });
     try {
       const result = await denialWorkflowService.importDenialCodeMaster(labId, file);
-      setMessage({ type: result.failedCount ? 'warning' : 'success', text: `Import complete. Inserted: ${result.insertedCount || 0}, updated/replaced: ${result.updatedCount || 0}, skipped: ${result.skippedCount || 0}, failed: ${result.failedCount || 0}.` });
+      setMessage({ type: result.failedCount ? 'warning' : 'success', text: `Import complete. Inserted: ${result.insertedCount || 0}, updated/replaced: ${result.updatedCount || 0}, blank rows skipped: ${result.skippedCount || 0}, merged as duplicates (same Denial Code + Coverage + ICD): ${result.mergedDuplicateCount || 0}, failed: ${result.failedCount || 0}.` });
       if (result.hasActionChangeWarnings || result.HasActionChangeWarnings) setActionWarning(result);
       load(query);
     } catch (err) {
@@ -508,6 +539,10 @@ export default function DenialCodeMasterPage({ labId, role = '', setMessage, onR
         Denial Code Push Verification
         {pendingPushes.length > 0 && <span>{pendingPushes.length}</span>}
       </button>
+      <button type="button" className={`${activeTab === 'missing' ? 'active' : ''} ${missingCodes.length ? 'pending' : ''}`} onClick={() => setActiveTab('missing')}>
+        Missing Denial Codes
+        {missingCodes.length > 0 && <span>{missingCodes.length}</span>}
+      </button>
     </div>
     {pendingPushes.length > 0 && activeTab === 'master' && <button type="button" className="dcm-pending-banner" onClick={() => setActiveTab('push')}>
       <i className="bi bi-exclamation-circle-fill" />
@@ -576,6 +611,23 @@ export default function DenialCodeMasterPage({ labId, role = '', setMessage, onR
           </table>
         </div>
         <div className="dcm-push-actions"><button type="button" className="wl-btn teal" disabled={pushConfirming} onClick={confirmPush}><i className="bi bi-check2-circle" />{pushConfirming ? 'Applying Codes...' : 'Confirm and Apply to Denial Action Master'}</button></div>
+      </div>}
+    </div>}
+    {activeTab === 'missing' && <div className="dcm-push-review">
+      {missingCodesLoading && <div className="loading-line" />}
+      {!missingCodes.length && !missingCodesLoading && <div className="dcm-no-push"><i className="bi bi-check-circle" /><strong>No missing denial codes</strong><span>Denial codes found in this lab's denial database that aren't in the central Denial Mapper Super Master will appear here.</span></div>}
+      {missingCodes.length > 0 && <div className="claim-assign-scroll dcm-table-wrap">
+        <table className="lrn-table workflow-table dcm-table">
+          <thead><tr><th>Denial Code</th><th>Run ID</th><th>First Seen</th><th>Last Seen</th><th>Occurrences</th><th>Action</th></tr></thead>
+          <tbody>{missingCodes.map(item => <tr className="dcm-pending-row" key={item.notificationId}>
+            <td><strong>{item.denialCode}</strong></td>
+            <td>{item.runId || '-'}</td>
+            <td>{item.firstSeenOn ? new Date(item.firstSeenOn).toLocaleString() : '-'}</td>
+            <td>{item.lastSeenOn ? new Date(item.lastSeenOn).toLocaleString() : '-'}</td>
+            <td>{item.occurrenceCount || 1}</td>
+            <td><button className="wl-btn xs" disabled={acknowledgingMissingCodeId === item.notificationId} onClick={() => acknowledgeMissingCode(item.notificationId)}><i className="bi bi-check2" /> {acknowledgingMissingCodeId === item.notificationId ? 'Acknowledging...' : 'Acknowledge'}</button></td>
+          </tr>)}</tbody>
+        </table>
       </div>}
     </div>}
     {editor && <EditorModal initial={editor.denialCode ? editor : null} lookups={lookups} masterData={masterData} onClose={() => setEditor(null)} onSave={save} />}

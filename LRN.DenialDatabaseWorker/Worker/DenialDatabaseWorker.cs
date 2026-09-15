@@ -35,12 +35,15 @@ public sealed class DenialDatabaseWorker : BackgroundService
     private readonly OutputPathBuilder _outputPathBuilder;
     private readonly DenialAnalysisRunLogRepository _runLogRepo;
     private readonly DenialTaskBoardRepository _denialTaskBoardRepo;
+    private readonly DenialMapperSuperMasterRepository _superMasterRepo;
+    private readonly MissingDenialCodeDetector _missingCodeDetector;
     private readonly SharePointGraphOptions _spOpt;
 
     // Run logging + workflow tracker (LRNMaster). These are what the report dashboard reads.
     private readonly RecentSuccessRunProvider _recentSuccessRunProvider;
     private readonly ReportRunIdInfoLogger _infoLogger;
     private readonly ReportsWorkflowTrackerRepository _workflowTracker;
+    private readonly DenialDatabaseRerunRequestStore _rerunRequests;
 
     public DenialDatabaseWorker(
         ILogger<DenialDatabaseWorker> logger,
@@ -57,11 +60,14 @@ public sealed class DenialDatabaseWorker : BackgroundService
         OutputPathBuilder outputPathBuilder,
         DenialAnalysisRunLogRepository runLogRepo,
         DenialTaskBoardRepository denialTaskBoardRepo,
+        DenialMapperSuperMasterRepository superMasterRepo,
+        MissingDenialCodeDetector missingCodeDetector,
         ISharePointUploader uploader,
         IOptions<SharePointGraphOptions> spOpt,
         RecentSuccessRunProvider recentSuccessRunProvider,
         ReportRunIdInfoLogger infoLogger,
-        ReportsWorkflowTrackerRepository workflowTracker)
+        ReportsWorkflowTrackerRepository workflowTracker,
+        DenialDatabaseRerunRequestStore rerunRequests)
     {
         _logger = logger;
         _options = options.Value;
@@ -76,12 +82,15 @@ public sealed class DenialDatabaseWorker : BackgroundService
         _outputPathBuilder = outputPathBuilder;
         _runLogRepo = runLogRepo;
         _denialTaskBoardRepo = denialTaskBoardRepo;
+        _superMasterRepo = superMasterRepo;
+        _missingCodeDetector = missingCodeDetector;
         _uploader = uploader;
         _spOpt = spOpt.Value;
         _teamsNotifier = teamsNotifier;
         _recentSuccessRunProvider = recentSuccessRunProvider;
         _infoLogger = infoLogger;
         _workflowTracker = workflowTracker;
+        _rerunRequests = rerunRequests;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -92,10 +101,13 @@ public sealed class DenialDatabaseWorker : BackgroundService
         // an already-cancelled token.
         if (_options.RunOnceOnStartup)
         {
+            var rerunByLab = await ClaimRerunRequestsAsync(stoppingToken);
+
             foreach (var lab in _labs)
             {
                 if (stoppingToken.IsCancellationRequested) break;
-                await ProcessLabAsync(lab, stoppingToken);
+                rerunByLab.TryGetValue(lab.LabId, out var rerun);
+                await ProcessLabAsync(lab, rerun, stoppingToken);
             }
 
             _logger.LogInformation(
@@ -107,10 +119,15 @@ public sealed class DenialDatabaseWorker : BackgroundService
         {
             while (!stoppingToken.IsCancellationRequested)
             {
+                // Claimed once per poll and BEFORE the lab loop, so a request that arrives mid-poll
+                // waits for the next one rather than being half-applied to a lab already passed.
+                var rerunByLab = await ClaimRerunRequestsAsync(stoppingToken);
+
                 foreach (var lab in _labs)
                 {
                     if (stoppingToken.IsCancellationRequested) break;
-                    await ProcessLabAsync(lab, stoppingToken);
+                    rerunByLab.TryGetValue(lab.LabId, out var rerun);
+                    await ProcessLabAsync(lab, rerun, stoppingToken);
                 }
 
                 if (stoppingToken.IsCancellationRequested) break;
@@ -128,7 +145,15 @@ public sealed class DenialDatabaseWorker : BackgroundService
         }
     }
 
-    private async Task ProcessLabAsync(LabConfig lab, CancellationToken ct)
+    private async Task<Dictionary<int, RerunRequest>> ClaimRerunRequestsAsync(CancellationToken ct)
+    {
+        var rerunByLab = new Dictionary<int, RerunRequest>();
+        foreach (var request in await _rerunRequests.ClaimPendingAsync(ct))
+            rerunByLab[request.LabId] = request;
+        return rerunByLab;
+    }
+
+    private async Task ProcessLabAsync(LabConfig lab, RerunRequest? rerun, CancellationToken ct)
     {
         string payerPolicySource = "";
         string claimActionMapperFile = "";
@@ -149,14 +174,20 @@ public sealed class DenialDatabaseWorker : BackgroundService
                 _logger.LogInformation(
                     "Lab {LabName}: {Procedure} returned no successful run. Nothing to process.",
                     lab.LabName, _options.RecentSuccessRunProcedure);
+
+                if (rerun is not null)
+                    await _rerunRequests.CompleteAsync(rerun.RerunRequestId, null, "SKIPPED",
+                        "No successful upstream run was found for this lab.", ct);
                 return;
             }
 
             runId = successRun.RunId;
 
             // Step 2 - do not repeat work already done for this RunId. Only a Success row
-            // stops us; a previous Failed or Skipped run is exactly the one to retry.
-            if (await _workflowTracker.IsAlreadySuccessfulAsync(runId, ct))
+            // stops us; a previous Failed or Skipped run is exactly the one to retry. A re-run
+            // asked for from the Report Audit Log screen is an explicit instruction to do it again,
+            // so this gate (and the DenialAnalysisRunLog one below) is skipped for it.
+            if (rerun is null && await _workflowTracker.IsAlreadySuccessfulAsync(runId, ct))
             {
                 _logger.LogInformation(
                     "Lab {LabName}: {ReportName} already succeeded for RunId {RunId}. Skipping.",
@@ -182,7 +213,7 @@ public sealed class DenialDatabaseWorker : BackgroundService
                 // though SELECT ... WHERE PayStatus = 'Denied' returns plenty.
                 await CompleteAsSkippedAsync(lab, runId, startedOn,
                     $"RunId {runId} has no rows in {SourceTableLabel(lab)}. " +
-                    await DescribeAvailableRunsAsync(lab, ct), ct);
+                    await DescribeAvailableRunsAsync(lab, ct), rerun, ct);
                 return;
             }
 
@@ -205,39 +236,62 @@ public sealed class DenialDatabaseWorker : BackgroundService
                 $"Run found in {SourceTableLabel(lab)}. Rows={sourceRun.TotalRowCount}, " +
                 $"{_options.DeniedPayStatus}Rows={sourceRun.DeniedRowCount}.", ct: ct);
 
-            if (await _runLogRepo.ExistsAsync(runId))
+            if (rerun is null && await _runLogRepo.ExistsAsync(runId))
             {
                 await CompleteAsSkippedAsync(lab, runId, startedOn,
-                    $"RunId {runId} is already recorded in dbo.DenialAnalysisRunLog.", ct);
+                    $"RunId {runId} is already recorded in dbo.DenialAnalysisRunLog.", rerun, ct);
                 return;
             }
 
-            // Null means "read the classifier workbook"; set only when the lab's DenialCodeMaster is used.
+            // Three-tier fallback, tried in order for every lab: the lab's own DenialCodeMaster
+            // table, then LRNMaster's central DenialMapperSuperMaster, then (only for labs whose
+            // ClaimActionMapperSource is File) the classifier workbook on disk. A lab configured
+            // Database-only has no file fallback: an empty tier 1+2 fails loudly instead of quietly
+            // mapping nothing.
             List<Dictionary<string, string>>? claimRows = null;
 
-            if (lab.ClaimActionMapperSource == ClaimActionMapperSource.Database)
-            {
-                var master = await new DenialCodeMasterRepository(lab.LabConnectionString, _options.SqlCommandTimeoutSeconds)
-                    .ReadAsync(ct);
+            var labMaster = await new DenialCodeMasterRepository(lab.LabConnectionString, _options.SqlCommandTimeoutSeconds)
+                .ReadAsync(ct);
 
-                if (master.Rows.Count > 0)
+            if (labMaster.Rows.Count > 0)
+            {
+                claimRows = labMaster.Rows;
+                claimActionMapperFile = labMaster.SourceLabel;
+            }
+            else
+            {
+                var labReason = labMaster.TableExists ? "is empty" : "does not exist";
+                _logger.LogWarning(
+                    "Lab {LabName}: {Source} {Reason}. Falling back to LRNMaster's {SuperMaster}.",
+                    lab.LabName, labMaster.SourceLabel, labReason, DenialMapperSuperMasterRepository.TableName);
+                await _infoLogger.InfoAsync(runId, lab.LabName,
+                    $"{labMaster.SourceLabel} {labReason}; falling back to LRNMaster's {DenialMapperSuperMasterRepository.TableName}.", ct: ct);
+
+                var superMaster = await _superMasterRepo.ReadAsync(ct);
+
+                if (superMaster.Rows.Count > 0)
                 {
-                    claimRows = master.Rows;
-                    claimActionMapperFile = master.SourceLabel;
+                    claimRows = superMaster.Rows;
+                    claimActionMapperFile = superMaster.SourceLabel;
                 }
                 else
                 {
-                    var reason = master.TableExists ? "is empty" : "does not exist";
+                    var superReason = superMaster.TableExists ? "has no active rows" : "does not exist";
                     _logger.LogWarning(
-                        "Lab {LabName}: ClaimActionMapperSource=Database but {Source} {Reason}. Falling back to the classifier workbook.",
-                        lab.LabName, master.SourceLabel, reason);
+                        "Lab {LabName}: {Source} {Reason}.", lab.LabName, superMaster.SourceLabel, superReason);
                     await _infoLogger.InfoAsync(runId, lab.LabName,
-                        $"{master.SourceLabel} {reason}; using the classifier workbook instead.", ct: ct);
+                        $"{superMaster.SourceLabel} {superReason}.", ct: ct);
                 }
             }
 
             if (claimRows is null)
             {
+                if (lab.ClaimActionMapperSource != ClaimActionMapperSource.File)
+                    throw new InvalidOperationException(
+                        $"Lab {lab.LabName}: no claim action mapping data available. Checked {DenialCodeMasterRepository.TableName} " +
+                        $"(lab database), {DenialMapperSuperMasterRepository.TableName} (LRNMaster), and ClaimActionMapperSource=" +
+                        $"{lab.ClaimActionMapperSource} does not permit falling back to the classifier file.");
+
                 claimActionMapperFile = _fileResolver.GetLatestClaimActionMapper(lab);
 
                 if (string.IsNullOrWhiteSpace(claimActionMapperFile) || !File.Exists(claimActionMapperFile))
@@ -304,7 +358,7 @@ public sealed class DenialDatabaseWorker : BackgroundService
 
                 await CompleteAsSkippedAsync(lab, runId, startedOn,
                     $"RunId {sourceRun.RunId} has {sourceRun.TotalRowCount} row(s) in {SourceTableLabel(lab)} " +
-                    $"but none with PayStatus = '{_options.DeniedPayStatus}'. Nothing to copy.", ct);
+                    $"but none with PayStatus = '{_options.DeniedPayStatus}'. Nothing to copy.", rerun, ct);
                 return;
             }
 
@@ -315,6 +369,14 @@ public sealed class DenialDatabaseWorker : BackgroundService
             await _stepLogger.LogAsync(lab, "Normalize DenialCode + map fields", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
             var (headers, finalRows) = _builder.Build(payerRows, claimMapperIndex);
             ApplyClaimUid(finalRows);
+
+            // Best-effort: codes this lab denied that LRNMaster's DenialMapperSuperMaster doesn't
+            // know about yet. Never allowed to fail the run - see MissingDenialCodeDetector.
+            var deniedCodes = finalRows
+                .Select(r => r.GetValueOrDefault("DenialCode_Normalized") ?? "")
+                .SelectMany(v => v.Split(';', StringSplitOptions.RemoveEmptyEntries))
+                .ToList();
+            await _missingCodeDetector.DetectAndNotifyAsync(lab, runId, deniedCodes, ct);
 
             // Lab-specific insurance amount rule:
             // Augustus (19), Certus (18), and NorthWest (20) must use Billed Amount
@@ -504,6 +566,10 @@ public sealed class DenialDatabaseWorker : BackgroundService
 
             await _infoLogger.EndAsync(runId, lab.LabName,
                 $"Denial report processing ended for lab {lab.LabName}.", ct: ct);
+
+            if (rerun is not null)
+                await _rerunRequests.CompleteAsync(rerun.RerunRequestId, runId, "SUCCESS",
+                    $"{lineItemTable.Rows.Count} denial line item row(s) written.", ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -537,6 +603,10 @@ public sealed class DenialDatabaseWorker : BackgroundService
                 await _infoLogger.EndAsync(runId, lab.LabName,
                     $"Denial report processing cancelled by shutdown for lab {lab.LabName}.",
                     ct: CancellationToken.None);
+
+                if (rerun is not null)
+                    await _rerunRequests.CompleteAsync(rerun.RerunRequestId, runId, "SKIPPED",
+                        "Cancelled by host shutdown before the run completed.", CancellationToken.None);
             }
         }
         catch (Exception ex)
@@ -558,6 +628,9 @@ public sealed class DenialDatabaseWorker : BackgroundService
 
             await _infoLogger.EndAsync(runId, lab.LabName,
                 $"Denial report processing ended with an error for lab {lab.LabName}.", ct: CancellationToken.None);
+
+            if (rerun is not null)
+                await _rerunRequests.CompleteAsync(rerun.RerunRequestId, runId, "FAILED", SummarizeError(ex), CancellationToken.None);
         }
     }
 
@@ -566,7 +639,7 @@ public sealed class DenialDatabaseWorker : BackgroundService
     /// an absent row is indistinguishable from a crashed process, so a report that decides
     /// it has nothing to do still says so, with the reason.
     /// </summary>
-    private async Task CompleteAsSkippedAsync(LabConfig lab, string runId, DateTime startedOn, string reason, CancellationToken ct)
+    private async Task CompleteAsSkippedAsync(LabConfig lab, string runId, DateTime startedOn, string reason, RerunRequest? rerun, CancellationToken ct)
     {
         _logger.LogInformation("Lab {LabName}: {Reason} Skipping.", lab.LabName, reason);
 
@@ -582,6 +655,9 @@ public sealed class DenialDatabaseWorker : BackgroundService
 
         await _infoLogger.EndAsync(runId, lab.LabName,
             $"Denial report skipped for lab {lab.LabName}.", ct: ct);
+
+        if (rerun is not null)
+            await _rerunRequests.CompleteAsync(rerun.RerunRequestId, runId, "SKIPPED", reason, ct);
     }
 
     /// <summary>One line for @Remarks. The full exception text goes to the info log.</summary>

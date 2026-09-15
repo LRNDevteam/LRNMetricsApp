@@ -131,6 +131,8 @@ export const denialWorkflowService = {
   ,getDenialMapperPushVerificationExportUrl: (pushAuditId) => apiUrl(`/denial-mapper/push-verification/${pushAuditId}/export`)
   ,getDenialMapperNotifications: (labId) => api(`/denial-mapper/notifications?labId=${encodeURIComponent(labId)}`)
   ,acknowledgeDenialMapperNotification: (pushAuditId, labId) => api(`/denial-mapper/notifications/${pushAuditId}/acknowledge?labId=${encodeURIComponent(labId)}`, { method: 'POST' })
+  ,getMissingDenialCodeNotifications: (labId) => api(`/denial-mapper/missing-code-notifications?labId=${encodeURIComponent(labId)}`)
+  ,acknowledgeMissingDenialCodeNotification: (notificationId, labId) => api(`/denial-mapper/missing-code-notifications/${notificationId}/acknowledge?labId=${encodeURIComponent(labId)}`, { method: 'POST' })
   ,getDenialMapperLab: async (labId, query) => normalizePagedResult(await api(`/denial-mapper/lab-master?${qs({ ...query, labId })}`))
   ,saveDenialMapperOverride: (labId, id, payload) => api(`/denial-mapper/lab-master/${id}/override?labId=${labId}`, { method: 'PUT', body: JSON.stringify(payload) })
   ,removeDenialMapperOverride: (labId, id) => api(`/denial-mapper/lab-master/${id}/override?labId=${labId}`, { method: 'DELETE' })
