@@ -896,7 +896,9 @@ SELECT MatchedRows = (SELECT COUNT(1) FROM #MatchedRows);";
 		var cols = await GetTableColumnsAsync(connection, "dbo", "DenialInsight", cancellationToken);
 		if (!cols.Contains("DenialCodes")) return 0;
 
-		var sanitizedFeedback = DenialSummaryHtml.Sanitize(feedbackHtml);
+		// Plain text now (the grid edits it as a <textarea>, not a rich text editor) - trim only, no
+		// HTML sanitization needed since nothing here is ever rendered as markup.
+		var trimmedFeedback = string.IsNullOrWhiteSpace(feedbackHtml) ? null : feedbackHtml.Trim();
 		var trimmedResponsibility = string.IsNullOrWhiteSpace(responsibility) ? null : responsibility.Trim();
 		if (trimmedResponsibility?.Length > 200) trimmedResponsibility = trimmedResponsibility[..200];
 
@@ -919,7 +921,7 @@ SELECT MatchedRows = (SELECT COUNT(1) FROM #MatchedRows);";
 
 		var sql = $"UPDATE dbo.DenialInsight SET {string.Join(", ", setParts)} WHERE {string.Join(" AND ", whereParts)}; SELECT @@ROWCOUNT;";
 		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 };
-		command.Parameters.AddWithValue("@Feedback", (object?)sanitizedFeedback ?? DBNull.Value);
+		command.Parameters.AddWithValue("@Feedback", (object?)trimmedFeedback ?? DBNull.Value);
 		command.Parameters.AddWithValue("@Responsibility", (object?)trimmedResponsibility ?? DBNull.Value);
 		command.Parameters.AddWithValue("@DiscussionDate", (object?)discussionDate?.Date ?? DBNull.Value);
 		command.Parameters.AddWithValue("@Eta", (object?)(string.IsNullOrWhiteSpace(eta) ? null : eta.Trim()) ?? DBNull.Value);
