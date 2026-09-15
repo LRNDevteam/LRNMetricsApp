@@ -28,7 +28,7 @@ GO
 
 DECLARE @LabId    INT           = 4,          -- <<< Cove
         @LabName  VARCHAR(120)  = 'Cove',     -- <<< must match dbo.LRN_Run_Log.LabName
-        @WhatIf   BIT           = 1;          -- <<< 1 = preview only, 0 = actually delete
+        @WhatIf   BIT           = 0;          -- <<< 1 = preview only, 0 = actually delete
 
 ------------------------------------------------------------------------------------------------
 -- The runs in scope. Every child table below is keyed on RunID, so the set is collected once and

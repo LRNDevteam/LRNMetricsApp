@@ -19,8 +19,10 @@ What it does (per LAB):
    - WeekFolder and SourceFullPath still supply the folder structure that used to be parsed out
      of the workbook file name and path. With `ProcessLatestRunOnly = true` only that RunId's rows
      are read; a RunId already present in `dbo.DenialAnalysisRunLog` is skipped.
-   - ClaimActionMapper is still an Excel file (must contain a denial prefix column like
-     "Denial Code_Prefix" / "Denial code_prefix" and the mapping columns)
+   - The denial-to-action mapping comes from one of two places, chosen per lab by
+     `Labs[].ClaimActionMapperSource` (see "Denial action mapping source" below):
+     `File` (default) - the newest `*Denial_Action_Classifier_v*.xlsx` under `ClaimActionMapper`;
+     `Database` - the lab's own `dbo.DenialCodeMaster`, which AR Managers edit in the web app.
 2. Normalizes `PayerPolicyFile.DenialCode`:
    - split by comma
    - uppercase
@@ -48,6 +50,34 @@ What it does (per LAB):
    `NWL_LRN.dbo.PayerValidationReport (RunId=..., PayStatus=Denied, Rows=...)`)
 7. Optional SharePoint upload (Graph API):
    Upload to: <SharePointUploadPath base folder>/<LABNAME>/<Month>/<MMDDYYYY>/LabName_DenialDatabase_MMDDYYYY.xlsx
+
+---
+
+## Denial action mapping source
+
+**Why this setting exists.** AR Managers edit each lab's Denial Code Master in the web app, which
+stores it in that lab's `dbo.DenialCodeMaster`. LRN.ReportsApi also rewrites a classifier workbook on
+every edit, but into a single global folder (`DenialCodeMasterExport:ExportFolderPath`, currently
+`NWL_Lab`) that no lab's `ClaimActionMapper` points at. Every lab instead reads the shared
+`PCRLabsofAmerica` classifier, so as of Sep 2026 no web-app edit had ever reached a lab's mapping.
+
+`"ClaimActionMapperSource": "Database"` makes the worker read the table directly. If the table is
+missing or empty the worker logs a warning and falls back to the workbook, so a lab never runs with
+no mapping at all. The step log's `ClaimActionMapperFilePath` shows which was used, e.g.
+`SQL NWL_LRN.dbo.DenialCodeMaster`.
+
+**Switching a lab.** A code in the workbook but absent from the table stops mapping on the next
+run, and its denials reach the board without an action. Per lab:
+
+1. Compare the lab's `dbo.DenialCodeMaster` with the classifier workbook it reads today (codes and
+   action columns). Import the workbook through the Denial Code Master page first if the table is
+   behind.
+2. Set `"ClaimActionMapperSource": "Database"` on that lab in `Labs[]` and restart the service.
+3. Check the step log shows `SQL <that lab's database>.dbo.DenialCodeMaster`. The database named
+   there comes from the worker's Key Vault connection; it must be the same database the web app
+   edits (the API resolves it from the lab config file first).
+
+Leave `ClaimActionMapper` configured after switching: it is the fallback.
 
 ---
 

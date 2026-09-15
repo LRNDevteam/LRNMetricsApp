@@ -2403,3 +2403,47 @@ body{background:#f5f7fb;color:#101828}
 @keyframes wm-spin{to{transform:rotate(360deg)}}
 @media (max-width:900px){.wm-layout{grid-template-columns:1fr}.wm-lists{position:static;flex-direction:row;overflow-x:auto}.wm-list-btn{flex:0 0 auto;width:auto}}
 @media (prefers-reduced-motion:reduce){.wm-spin{animation:none}}
+
+/* Denial Summary observations (4a-4f) and snapshots (4g-4i) */
+.summary-obs-table th:first-child,.summary-obs-table td:first-child{width:32%!important}
+.summary-obs-table .obs-col{width:26%!important;text-align:left!important}
+.obs-cell,.obs-add{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;width:100%;background:transparent;border:0;padding:0;text-align:left;cursor:pointer;font:inherit;color:inherit}
+.obs-cell:hover .obs-person,.obs-add:hover{color:#0f766e}
+.obs-add{color:#64748b;font-size:11px;font-weight:700}
+.obs-empty{color:#94a3b8}
+.obs-pill{display:inline-block;border-radius:999px;padding:1px 7px;font-size:10px;font-weight:800;line-height:16px;border:1px solid #cbd5e1;background:#f1f5f9;color:#334155;white-space:nowrap}
+.obs-pill.open{background:#e0f2fe;border-color:#bae6fd;color:#075985}
+.obs-pill.due{background:#fef3c7;border-color:#fde68a;color:#92400e}
+.obs-pill.overdue{background:#fee2e2;border-color:#fecaca;color:#991b1b}
+.obs-pill.done{background:#dcfce7;border-color:#bbf7d0;color:#166534}
+.obs-pill.archived{margin-left:6px;background:#f1f5f9;color:#64748b}
+.obs-person{font-size:11px;font-weight:700;color:#1f2937;overflow-wrap:anywhere}
+.obs-due{font-size:10px;color:#64748b;white-space:nowrap}
+.obs-modal{width:min(760px,96vw)}
+.obs-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:14px;overflow:auto}
+.obs-form .obs-full{grid-column:1/-1}
+.obs-error{color:#b91c1c;font-size:12px;font-weight:600}
+@media(max-width:700px){.obs-form{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.rte{border:1px solid #cbd5e1;border-radius:6px;background:#fff;text-transform:none;letter-spacing:0;font-weight:500}
+.rte:focus-within{border-color:#1abc9c;box-shadow:0 0 0 2px rgba(26,188,156,.12)}
+.rte-toolbar{display:flex;gap:2px;padding:4px;border-bottom:1px solid #e5e7eb;background:#f8fafc;border-radius:6px 6px 0 0}
+.rte-tool{width:28px;height:26px;border:0;border-radius:4px;background:transparent;color:#334155;cursor:pointer}
+.rte-tool:hover:not(:disabled){background:#e2e8f0}
+.rte-content,.rte-readonly{min-height:150px;max-height:320px;overflow:auto;padding:9px 11px;font-size:13px;line-height:1.5;color:#0f172a;outline:0;text-transform:none;letter-spacing:0;font-weight:400}
+.rte-content:empty::before{content:attr(data-placeholder);color:#94a3b8}
+.rte-content ul,.rte-content ol,.rte-readonly ul,.rte-readonly ol{margin:4px 0 4px 20px;padding:0}
+.rte-content p,.rte-readonly p{margin:0 0 6px}
+.rte-readonly{border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc}
+.snapshot-card{margin-top:16px}
+.snapshot-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.snapshot-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.snapshot-archived-toggle{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:#475569;cursor:pointer}
+.snapshot-archived-toggle input{margin:0}
+.snapshot-tabs{display:flex;gap:4px;margin:10px 0 6px;border-bottom:1px solid #e5e7eb}
+.snapshot-tab{border:0;background:transparent;padding:7px 12px;font-size:12px;font-weight:700;color:#64748b;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer}
+.snapshot-tab.active{color:#0f766e;border-bottom-color:#1abc9c}
+.snapshot-count{display:inline-block;min-width:18px;margin-left:4px;padding:0 5px;border-radius:999px;background:#eef2f7;color:#475569;font-size:10px;line-height:16px;text-align:center}
+.snapshot-table th:first-child,.snapshot-table td:first-child{width:30%!important}
+.snapshot-table .snapshot-dl-col{width:90px!important;text-align:right!important}
+.snapshot-table tr.archived td{color:#64748b}
+.snapshot-by{display:block;font-size:10px;color:#94a3b8}

@@ -91,6 +91,11 @@ builder.Services.AddScoped<LRN.ReportsApi.Services.ArReports.IArActivityReportRe
                            LRN.ReportsApi.Services.ArReports.SqlArActivityReportRepository>();
 builder.Services.AddScoped<IPayerMasterWorkflowService, PayerMasterWorkflowService>();
 builder.Services.AddHostedService<PayerMasterSlaEscalationService>();
+// Denial Summary observations and weekly/monthly Excel snapshots (Denial Workflow v1.1, 4a-4i).
+builder.Services.Configure<DenialSummarySnapshotOptions>(builder.Configuration.GetSection("DenialSummarySnapshots"));
+builder.Services.AddScoped<IDenialSummaryRepository, SqlDenialSummaryRepository>();
+builder.Services.AddScoped<IDenialSummarySnapshotService, DenialSummarySnapshotService>();
+builder.Services.AddHostedService<DenialSummarySnapshotScheduler>();
 
 // ── Payer mapping intelligence (LRN.PayerPolicyMapper.Core) ──────────────────
 // Same pipeline as the LRN.PayerPolicyMapper worker; the Step 0 index is a singleton

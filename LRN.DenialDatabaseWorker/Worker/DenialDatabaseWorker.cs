@@ -212,10 +212,37 @@ public sealed class DenialDatabaseWorker : BackgroundService
                 return;
             }
 
-            claimActionMapperFile = _fileResolver.GetLatestClaimActionMapper(lab);
+            // Null means "read the classifier workbook"; set only when the lab's DenialCodeMaster is used.
+            List<Dictionary<string, string>>? claimRows = null;
 
-            if (string.IsNullOrWhiteSpace(claimActionMapperFile) || !File.Exists(claimActionMapperFile))
-                throw new FileNotFoundException("Latest claim action mapper file not found.", claimActionMapperFile);
+            if (lab.ClaimActionMapperSource == ClaimActionMapperSource.Database)
+            {
+                var master = await new DenialCodeMasterRepository(lab.LabConnectionString, _options.SqlCommandTimeoutSeconds)
+                    .ReadAsync(ct);
+
+                if (master.Rows.Count > 0)
+                {
+                    claimRows = master.Rows;
+                    claimActionMapperFile = master.SourceLabel;
+                }
+                else
+                {
+                    var reason = master.TableExists ? "is empty" : "does not exist";
+                    _logger.LogWarning(
+                        "Lab {LabName}: ClaimActionMapperSource=Database but {Source} {Reason}. Falling back to the classifier workbook.",
+                        lab.LabName, master.SourceLabel, reason);
+                    await _infoLogger.InfoAsync(runId, lab.LabName,
+                        $"{master.SourceLabel} {reason}; using the classifier workbook instead.", ct: ct);
+                }
+            }
+
+            if (claimRows is null)
+            {
+                claimActionMapperFile = _fileResolver.GetLatestClaimActionMapper(lab);
+
+                if (string.IsNullOrWhiteSpace(claimActionMapperFile) || !File.Exists(claimActionMapperFile))
+                    throw new FileNotFoundException("Latest claim action mapper file not found.", claimActionMapperFile);
+            }
 
             var (yearFolder, monthFolder, weekFolder) = _fileResolver.ExtractFolderStructure(
                 sourceRun.SourceFullPath,
@@ -252,7 +279,7 @@ public sealed class DenialDatabaseWorker : BackgroundService
 
             // 2. Load Claim Action Mapper
             await _stepLogger.LogAsync(lab, "Load ClaimActionMapper excel", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
-            var claimRows = _excelReader.Read(claimActionMapperFile, "Denial Classifier");
+            claimRows ??= _excelReader.Read(claimActionMapperFile, "Denial Classifier");
             var claimMapperIndex = new ClaimActionMapperIndex(claimRows);
             await _stepLogger.LogAsync(lab, "Load ClaimActionMapper excel", "Completed", payerPolicySource, claimActionMapperFile, outFile, null, ct);
 

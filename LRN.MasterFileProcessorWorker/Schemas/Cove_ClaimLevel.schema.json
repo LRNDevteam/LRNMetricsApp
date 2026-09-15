@@ -58,7 +58,7 @@
       "DataType": "int"
     },
     {
-      "Name": "TotalCharge",
+      "Name": "TotalCharges",
       "Required": true,
       "DataType": "decimal"
     },
@@ -73,7 +73,7 @@
       "DataType": "decimal"
     },
     {
-      "Name": "TotalWO",
+      "Name": "Total W/O",
       "Required": true,
       "DataType": "decimal"
     },
@@ -113,12 +113,12 @@
       "DataType": "string"
     },
     {
-      "Name": "Denial Code",
+      "Name": "ClaimLevelDenialCode",
       "Required": true,
       "DataType": "string"
     },
     {
-      "Name": "Denial Date",
+      "Name": "DenialDate",
       "Required": false,
       "DataType": "date"
     }

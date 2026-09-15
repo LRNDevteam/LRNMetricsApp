@@ -73,7 +73,7 @@
 			"DataType": "string"
 		},
 		{
-			"Name": "TotalCharge",
+			"Name": "TotalCharges",
 			"Required": true,
 			"DataType": "decimal"
 		},
@@ -99,6 +99,11 @@
 		},
 		{
 			"Name": "PatientBalance",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "TotalBalance",
 			"Required": false,
 			"DataType": "decimal"
 		},
@@ -133,8 +138,8 @@
 			"DataType": "date"
 		},
 		{
-			"Name": "Denial Code",
-			"Required": true,
+			"Name": "DenialCode",
+			"Required": false,
 			"DataType": "string"
 		}
 	]

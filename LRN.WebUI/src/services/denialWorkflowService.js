@@ -164,6 +164,14 @@ export const denialWorkflowService = {
   ,getRpt01SavedViews: (labId) => api(`/reports/rpt01/saved-views?labId=${encodeURIComponent(labId)}`)
   ,saveRpt01View: (payload) => api('/reports/rpt01/saved-views', { method: 'POST', body: JSON.stringify(payload) })
   ,deleteRpt01View: (savedViewId, labId) => api(`/reports/rpt01/saved-views/${encodeURIComponent(savedViewId)}?labId=${encodeURIComponent(labId)}`, { method: 'DELETE' })
+
+  // ── Denial Summary observations and snapshots (v1.1 4a-4i) ──────────────────
+  ,getDenialSummaryObservations: (labId) => api(`/denial-summary/observations?labId=${encodeURIComponent(labId)}`)
+  ,saveDenialSummaryObservation: (labId, payload) => api(`/denial-summary/observations?labId=${encodeURIComponent(labId)}`, { method: 'PUT', body: JSON.stringify(payload) })
+  ,getDenialSummarySnapshots: (labId, includeArchived = false) => api(`/denial-summary/snapshots?${qs({ labId, includeArchived })}`)
+  ,takeDenialSummarySnapshot: (labId) => api(`/denial-summary/snapshots?labId=${encodeURIComponent(labId)}`, { method: 'POST' })
+  // Blob URL: the caller sets a.download to the snapshot's FileName.
+  ,getDenialSummarySnapshotDownloadUrl: (labId, snapshotId) => apiUrl(`/denial-summary/snapshots/${encodeURIComponent(snapshotId)}/download?labId=${encodeURIComponent(labId)}`)
 };
 
 export { qs };

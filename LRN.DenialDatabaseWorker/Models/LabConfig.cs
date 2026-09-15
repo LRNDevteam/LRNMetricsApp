@@ -18,6 +18,19 @@ public sealed class LabConfig
 	/// </summary>
 	public string LabConnectionString { get; set; } = "";
 	public string ClaimActionMapper { get; set; } = "";
+
+	/// <summary>
+	/// Where this lab's denial-to-action mapping comes from.
+	///
+	/// File (default): the newest *Denial_Action_Classifier_v*.xlsx under <see cref="ClaimActionMapper"/>.
+	/// Database: the lab's own dbo.DenialCodeMaster, i.e. what AR Managers edit in the web app. Falls
+	/// back to File, with a warning, when that table is missing or empty.
+	///
+	/// Switch a lab to Database only after comparing its DenialCodeMaster against the classifier file:
+	/// a code present in the file but absent from the table stops mapping on the next run.
+	/// </summary>
+	public ClaimActionMapperSource ClaimActionMapperSource { get; set; } = ClaimActionMapperSource.File;
+
 	public string SharePointUploadPath { get; set; } = "";
 
 	/// <summary>
@@ -29,4 +42,10 @@ public sealed class LabConfig
 	/// different one. The flag says what is intended instead of inferring it.
 	/// </summary>
 	public bool OverrideInsuranceBalanceWithBilled { get; set; }
+}
+
+public enum ClaimActionMapperSource
+{
+	File,
+	Database
 }
