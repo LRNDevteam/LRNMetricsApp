@@ -1,4 +1,4 @@
-ï»¿using System.Globalization;
+using System.Globalization;
 using System.Security.Claims;
 using CsvHelper;
 using CsvHelper.Configuration;
@@ -49,7 +49,7 @@ public class DenialDashboardController : Controller
 	}
 
 	/// <summary>
-	/// Dashboard LabId â†’ LabSettings config key (LabConfig:LabsID), which is what the report
+	/// Dashboard LabId ? LabSettings config key (LabConfig:LabsID), which is what the report
 	/// queue keys connection strings by. Falls back to the display name when unmapped.
 	/// </summary>
 	private string ResolveConfiguredLabKey(int labId, string displayName)
@@ -89,7 +89,7 @@ public class DenialDashboardController : Controller
 		// tab SET itself is the same for every role now - Task Board, SLA Tracker, Filter Panel and
 		// the Dashboard task-stat strip were retired, along with the role-scoped filtering that
 		// used to narrow GetByLabAsync's rows for AR Reviewer sessions.
-		var isArManager = HasAnyRole("AR Manager", "ARManager");
+		var isArManager = HasAnyRole("AR Manager", "ARManager", "Admin");
 
 		// The task-board dataset itself is no longer rendered anywhere on this page, but it is
 		// still the only source for the Global filters bar's Status / Priority / Action Category /
@@ -220,7 +220,7 @@ public class DenialDashboardController : Controller
 		var normalized = Normalize(filters, currentLab.LabId);
 		var currentRunId = await _dashboardApi.GetCurrentRunIdAsync(currentLab.LabId, cancellationToken) ?? string.Empty;
 
-		var isArManager = HasAnyRole("AR Manager", "ARManager");
+		var isArManager = HasAnyRole("AR Manager", "ARManager", "Admin");
 		var allInsights = (await _dashboardApi.GetInsightTableByLabAsync(currentLab.LabId, cancellationToken)).ToList();
 		var insights = FilterInsights(allInsights, normalized);
 
@@ -693,7 +693,7 @@ public class DenialDashboardController : Controller
 			.ThenBy(x => x.TaskId)
 			.ToList();
 
-		var isArManager = HasAnyRole("AR Manager", "ARManager");
+		var isArManager = HasAnyRole("AR Manager", "ARManager", "Admin");
 		var isArReviewer = HasAnyRole("AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer");
 		var currentUserName = User.Identity?.Name?.Trim() ?? string.Empty;
 		if (isArReviewer && !isArManager)
@@ -995,7 +995,7 @@ public class DenialDashboardController : Controller
 		// 3) The shared cross-report cookie. The standard reports store a LabConfig KEY here (e.g.
 		//    "Inhealth_DTR", "Augustus_Labs"), which is a DIFFERENT namespace from the denial API's
 		//    lab NAMES (e.g. "InHealth", "Augustus"), so match tolerantly. Read-only on purpose: never
-		//    overwrite this cookie with a denial name â€” the standard reports resolve it as a config key,
+		//    overwrite this cookie with a denial name — the standard reports resolve it as a config key,
 		//    so clobbering it made an InHealth selection reopen as the first lab (Augustus) everywhere.
 		if (httpContext.Request.Cookies.TryGetValue(SelectedLabCookieName, out var cookieLab)
 			&& !string.IsNullOrWhiteSpace(cookieLab))
@@ -1114,7 +1114,7 @@ public class DenialDashboardController : Controller
 
 	/// <summary>
 	/// Aggregates one lab's denial data into the six exported tabs exactly the way
-	/// <see cref="Index"/> aggregates them for the page â€” filters, breakdowns and pivots all
+	/// <see cref="Index"/> aggregates them for the page — filters, breakdowns and pivots all
 	/// come from the same helpers. Shared by the synchronous download and by
 	/// LRN.ReportWorker's queued DenialDashboard report, so the two can never drift.
 	/// </summary>
@@ -1151,7 +1151,7 @@ public class DenialDashboardController : Controller
 			ActionCategoryBreakdown: BuildBreakdown(filteredRecords, x => x.EffectiveActionCategory),
 			ClassificationBreakdown: BuildBreakdown(filteredRecords, x => x.DenialClassification),
 			DeadlineBreakdown: BuildDeadlineBreakdown(filteredRecords),
-			// "(Unassigned)" rather than "(Blank)" â€” an unclaimed denial is the actionable case.
+			// "(Unassigned)" rather than "(Blank)" — an unclaimed denial is the actionable case.
 			AssignedToBreakdown: BuildBreakdown(filteredRecords,
 				x => string.IsNullOrWhiteSpace(x.AssignedTo) ? "(Unassigned)" : x.AssignedTo.Trim()),
 			// Notes/assignment come from the UNFILTERED task board: a line item still carries its
