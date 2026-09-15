@@ -40,13 +40,29 @@ public sealed record LisSummaryResult(
     Dictionary<string, int> GrandTotalByMonth,
     Dictionary<int, int> GrandTotalByYear,
     int GrandTotal,
-    LisSummaryKpiCards KpiCards);
+    LisSummaryKpiCards KpiCards,
+    LisKeyMetricsBlock? KeyMetrics = null);
 
 public sealed record LisSummaryKpiCards(
     int TotalSamples,
     int BilledCount,
     int UnbilledCount,
     int SelfPayCount);
+
+/// <summary>
+/// Recent four calendar months by Date of Collection: average Time to Result and
+/// Time to Bill per month (blank source values excluded from each average).
+/// </summary>
+public sealed record LisKeyMetricsMonth(
+    int Year,
+    int Month,
+    string Label,
+    double? AvgTimeToResult,
+    double? AvgTimeToBill);
+
+public sealed record LisKeyMetricsBlock(
+    string CollectionDateLabel,
+    IReadOnlyList<LisKeyMetricsMonth> Months);
 
 public sealed record LisSummaryFilterOptions(
     List<string> Panels,
@@ -88,7 +104,7 @@ public sealed class LisSummaryFilters
     public DateOnly? CollectedFrom { get; set; }
     public DateOnly? CollectedTo { get; set; }
     public string DateType { get; set; } = "Collected";
-    public string DateRange { get; set; } = "custom";
+    public string DateRange { get; set; } = "last-month";
     public DateOnly? DateFrom { get; set; }
     public DateOnly? DateTo { get; set; }
     public string? Panel { get; set; }

@@ -32,7 +32,7 @@ public sealed record CollectionSummaryMonthPeriod(int Year, int Month)
 public sealed record CollectionSummaryWeekPeriod(byte WeekKey, DateOnly WeekStart, DateOnly WeekEnd)
 {
     public string Key => $"W{WeekKey}";
-    public string Label => $"Week {WeekKey} ({WeekStart:MM/dd} - {WeekEnd:MM/dd})";
+    public string Label => $"{WeekStart:M/d/yyyy} \u2013 {WeekEnd:M/d/yyyy}";
 }
 
 /// <summary>Payer drill-down row under a panel for monthly collection claim volume.</summary>

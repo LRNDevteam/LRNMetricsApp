@@ -178,7 +178,7 @@
     <div class="card-header d-flex justify-content-between align-items-center" style="background:#f8f9fa">
         <span class="fw-bold" style="font-size:.88rem">&#128196; Line Item Detail</span>
         <span class="text-muted" style="font-size:.78rem">
-            Showing @Model.Paging.FirstItem–@Model.Paging.LastItem of @Model.Paging.TotalFiltered.ToString("N0") records
+            Showing @Model.Paging.FirstItemï¿½@Model.Paging.LastItem of @Model.Paging.TotalFiltered.ToString("N0") records
         </span>
     </div>
     <div class="card-body p-0">
@@ -217,9 +217,9 @@
                         <tr>
                             <td>@r.VisitNumber</td>
                             <td><strong>@r.CPTCode</strong></td>
-                            <td title="@r.PayerName">@(payerDisplay.Length > 24 ? payerDisplay[..24] + "…" : payerDisplay)</td>
+                            <td title="@r.PayerName">@(payerDisplay.Length > 24 ? payerDisplay[..24] + "ï¿½" : payerDisplay)</td>
                             <td><span class="badge bg-light text-dark border" style="font-size:.68rem">@r.PayerType</span></td>
-                            <td title="@r.PanelName">@(r.PanelName.Length > 20 ? r.PanelName[..20] + "…" : r.PanelName)</td>
+                            <td title="@r.PanelName">@(r.PanelName.Length > 20 ? r.PanelName[..20] + "ï¿½" : r.PanelName)</td>
                             <td>@r.PayStatus</td>
                             <td style="white-space:nowrap">@r.ExpectedPaymentDate</td>
                             <td class="text-end">$@r.ModeAllowedAmountSameLab.ToString("N2")</td>

@@ -1,3 +1,4 @@
+using System.Globalization;
 using ClosedXML.Excel;
 using LabMetricsDashboard.Models;
 
@@ -11,6 +12,7 @@ public static class LisSummaryExcelExportBuilder
     // Cove client LIMS Report palette (same tokens as Collection / Executive).
     private static readonly XLColor HeaderGreen = ExcelTheme.Collection.HeaderBg;
     private static readonly XLColor YearGreen = ExcelTheme.Collection.HeaderBg;
+    private static readonly XLColor MonthHeaderBg = ExcelTheme.Collection.MonthHeaderBg; // #E2EFDA
     private static readonly XLColor TotalGreen = ExcelTheme.Collection.TotalRowBg;
     private static readonly XLColor BorderColor = ExcelTheme.BorderColor;
     private static readonly XLColor ChildBg = ExcelTheme.Collection.ChildRowBg;
@@ -131,13 +133,20 @@ public static class LisSummaryExcelExportBuilder
         var includeLogicColumn = false;
         var firstDataColumn = 3;
         var titleRow = 1;
+        var rowAfterTitle = titleRow + 1;
 
-        // Filters now live on their own "Filtered Values" sheet, so the pivot starts near the
-        // top instead of below eleven rows of metadata.
-        var sampleNoteRow = 2;
-        var yearHeaderRow = 4;
-        var monthHeaderRow = 5;
-        var dataStartRow = 6;
+        if (result.KeyMetrics is { Months.Count: > 0 } keyMetrics)
+        {
+            // Key Metrics is Metrics | Month1 | Month2 | … — not the summary pivot's
+            // S.No | Description layout, so months start in column 2 (no blank gap).
+            rowAfterTitle = BuildKeyMetricsSection(sheet, keyMetrics, rowAfterTitle);
+            rowAfterTitle++;
+        }
+
+        var sampleNoteRow = rowAfterTitle;
+        var yearHeaderRow = sampleNoteRow + 2;
+        var monthHeaderRow = yearHeaderRow + 1;
+        var dataStartRow = monthHeaderRow + 1;
 
         var lastColumn = firstDataColumn + monthColumns.Count;
 
@@ -178,7 +187,10 @@ public static class LisSummaryExcelExportBuilder
             }
 
             sheet.Cell(monthHeaderRow, col).Value = $"{year} Total";
-            sheet.Cell(yearHeaderRow, yearStart).Value = year;
+            // Year must be text. A numeric 2025 plus CountNumberFormat becomes "2,025".
+            var yearCell = sheet.Cell(yearHeaderRow, yearStart);
+            yearCell.Value = year.ToString(CultureInfo.InvariantCulture);
+            yearCell.Style.NumberFormat.Format = "@";
             sheet.Range(yearHeaderRow, yearStart, yearHeaderRow, col).Merge();
             col++;
         }
@@ -199,9 +211,43 @@ public static class LisSummaryExcelExportBuilder
         headerRange.Style.Border.InsideBorderColor = BorderColor;
 
         sheet.Range(yearHeaderRow, firstDataColumn, yearHeaderRow, lastColumn).Style.Fill.BackgroundColor = YearGreen;
+        sheet.Range(yearHeaderRow, firstDataColumn, yearHeaderRow, lastColumn).Style.Font.FontColor = XLColor.White;
+
+        // Month names (JAN, FEB, …) are the table subheading — mint, not dark green.
+        col = firstDataColumn;
+        foreach (var year in result.Years.OrderBy(x => x))
+        {
+            var yearMonthColumns = monthColumns.Where(x => x.Year == year && !x.IsYearTotal).ToList();
+            if (yearMonthColumns.Count == 0) continue;
+            foreach (var _ in yearMonthColumns)
+            {
+                var monthCell = sheet.Cell(monthHeaderRow, col);
+                monthCell.Style.Fill.BackgroundColor = MonthHeaderBg;
+                monthCell.Style.Font.FontColor = ExcelTheme.Collection.ContrastOn(MonthHeaderBg);
+                col++;
+            }
+            var yearTotalCell = sheet.Cell(monthHeaderRow, col);
+            yearTotalCell.Style.Fill.BackgroundColor = HeaderGreen;
+            yearTotalCell.Style.Font.FontColor = XLColor.White;
+            col++;
+        }
+
         var grandTotalHeader = sheet.Range(yearHeaderRow, lastColumn, monthHeaderRow, lastColumn);
         grandTotalHeader.Style.Fill.BackgroundColor = HeaderGreen;
         grandTotalHeader.Style.Font.FontColor = XLColor.White;
+
+        // Re-assert year labels as text after header fills, so they cannot
+        // pick up a numeric format from the data columns.
+        col = firstDataColumn;
+        foreach (var year in result.Years.OrderBy(x => x))
+        {
+            var yearMonthColumns = monthColumns.Where(x => x.Year == year && !x.IsYearTotal).ToList();
+            if (yearMonthColumns.Count == 0) continue;
+            var yearCell = sheet.Cell(yearHeaderRow, col);
+            yearCell.Style.NumberFormat.Format = "@";
+            yearCell.Value = year.ToString(CultureInfo.InvariantCulture);
+            col += yearMonthColumns.Count + 1;
+        }
 
         var rowNumber = dataStartRow;
         foreach (var row in result.Rows)
@@ -226,7 +272,9 @@ public static class LisSummaryExcelExportBuilder
         // Freeze the label columns AND the two header rows, so months and row names both stay put.
         sheet.SheetView.Freeze(monthHeaderRow, 2);
 
-        sheet.Columns(firstDataColumn, lastColumn).Style.NumberFormat.Format = ExcelTheme.Collection.CountNumberFormat;
+        // Apply count format only to data cells — never the year header row.
+        sheet.Range(dataStartRow, firstDataColumn, rowNumber, lastColumn)
+            .Style.NumberFormat.Format = ExcelTheme.Collection.CountNumberFormat;
         sheet.Column(1).Width = 10;
         sheet.Column(2).Width = 36;
         if (includeLogicColumn)
@@ -248,6 +296,97 @@ public static class LisSummaryExcelExportBuilder
 
         sheet.PageSetup.PageOrientation = XLPageOrientation.Landscape;
         sheet.PageSetup.FitToPages(1, 0);
+    }
+
+    /// <summary>
+    /// Recent 4 Months by Date of Collection — average Time to Result / Time to Bill.
+    /// Layout matches the client template: Metrics | Month 1 | Month 2 | Month 3 | Month 4
+    /// (real month names in the headers). Filter note above the table, then metrics, then values.
+    /// </summary>
+    private static int BuildKeyMetricsSection(
+        IXLWorksheet sheet,
+        LisKeyMetricsBlock metrics,
+        int startRow)
+    {
+        const int metricsCol = 1;
+        const int firstMonthCol = 2;
+        var lastColumn = Math.Max(firstMonthCol, firstMonthCol + metrics.Months.Count - 1);
+
+        var titleRange = sheet.Range(startRow, metricsCol, startRow, lastColumn);
+        titleRange.Merge();
+        var titleCell = sheet.Cell(startRow, metricsCol);
+        titleCell.Value = $"Key Metrics — Recent 4 Months by {metrics.CollectionDateLabel}";
+        titleCell.Style.Font.Bold = true;
+        titleCell.Style.Font.FontColor = XLColor.White;
+        titleCell.Style.Fill.BackgroundColor = HeaderGreen;
+        titleCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+        var filterRow = startRow + 1;
+        sheet.Cell(filterRow, metricsCol).Value =
+            $"Filter: {metrics.CollectionDateLabel}. Exclude blank Time to Result / Time to Bill. Average per month.";
+        sheet.Range(filterRow, metricsCol, filterRow, lastColumn).Merge();
+        sheet.Cell(filterRow, metricsCol).Style.Font.Italic = true;
+        sheet.Cell(filterRow, metricsCol).Style.Font.FontColor = XLColor.FromHtml("#5C738A");
+
+        var headerRow = filterRow + 1;
+        sheet.Cell(headerRow, metricsCol).Value = "Metrics";
+        var col = firstMonthCol;
+        foreach (var month in metrics.Months)
+        {
+            sheet.Cell(headerRow, col).Value = month.Label;
+            col++;
+        }
+
+        var resultRow = headerRow + 1;
+        sheet.Cell(resultRow, metricsCol).Value = "Time to Result";
+        col = firstMonthCol;
+        foreach (var month in metrics.Months)
+        {
+            WriteMetricCell(sheet.Cell(resultRow, col), month.AvgTimeToResult);
+            col++;
+        }
+
+        var billRow = resultRow + 1;
+        sheet.Cell(billRow, metricsCol).Value = "Time to Bill";
+        col = firstMonthCol;
+        foreach (var month in metrics.Months)
+        {
+            WriteMetricCell(sheet.Cell(billRow, col), month.AvgTimeToBill);
+            col++;
+        }
+
+        var table = sheet.Range(headerRow, metricsCol, billRow, lastColumn);
+        table.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        table.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        table.Style.Border.OutsideBorderColor = BorderColor;
+        table.Style.Border.InsideBorderColor = BorderColor;
+
+        var headerRange = sheet.Range(headerRow, metricsCol, headerRow, lastColumn);
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Font.FontColor = XLColor.White;
+        headerRange.Style.Fill.BackgroundColor = HeaderGreen;
+        headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+        sheet.Range(resultRow, firstMonthCol, billRow, lastColumn)
+            .Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+
+        sheet.Column(metricsCol).Width = Math.Max(sheet.Column(metricsCol).Width, 18);
+        for (var c = firstMonthCol; c <= lastColumn; c++)
+            sheet.Column(c).Width = Math.Max(sheet.Column(c).Width, 12);
+
+        return billRow;
+    }
+
+    private static void WriteMetricCell(IXLCell cell, double? value)
+    {
+        if (!value.HasValue)
+        {
+            cell.Value = string.Empty;
+            return;
+        }
+
+        cell.Value = Math.Round(value.Value, 2);
+        cell.Style.NumberFormat.Format = "0.##";
     }
 
     private static void BuildLineDataSheet(IXLWorksheet sheet, LisLineDataResult? lineData)
@@ -390,14 +529,20 @@ public static class LisSummaryExcelExportBuilder
         {
             range.Style.Font.Bold = true;
             range.Style.Fill.BackgroundColor = XLColor.White;
+            range.Style.Font.FontColor = XLColor.Black;
+        }
+        else if (level == 1)
+        {
+            // Billed / Not Billed under Billable, Self-Pay, System Test, etc.
+            range.Style.Fill.BackgroundColor = MonthHeaderBg;
+            range.Style.Font.FontColor = ExcelTheme.Collection.ContrastOn(MonthHeaderBg);
+            sheet.Cell(rowNumber, 2).Style.Font.Bold = true;
         }
         else
         {
             range.Style.Fill.BackgroundColor = ChildBg;
-            if (level == 1)
-                sheet.Cell(rowNumber, 2).Style.Font.Bold = true;
-            else
-                sheet.Cell(rowNumber, 2).Style.Alignment.Indent = Math.Min(level, 4);
+            range.Style.Font.FontColor = ExcelTheme.Collection.ContrastOn(ChildBg);
+            sheet.Cell(rowNumber, 2).Style.Alignment.Indent = Math.Min(level, 4);
         }
     }
 

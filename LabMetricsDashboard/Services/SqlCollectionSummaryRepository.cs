@@ -180,10 +180,15 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
     private static bool IsAugustusCollectionPrefix(string? prefix) =>
         string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsCoveCollectionPrefix(string? prefix) =>
+        string.Equals(prefix, "Cove", StringComparison.OrdinalIgnoreCase);
+
     private static string CollectionGetSp(string prefix, string leaf) =>
         IsAugustusCollectionPrefix(prefix)
             ? $"dbo.usp_Get{prefix}_{leaf}_v2"
-            : $"dbo.usp_Get{prefix}_{leaf}";
+            : IsCoveCollectionPrefix(prefix) && leaf is "CS_InsuranceVsAging" or "CS_PanelAverages"
+                ? $"dbo.usp_Get{prefix}_{leaf}_ClientLogic"
+                : $"dbo.usp_Get{prefix}_{leaf}";
 
     /// <summary>
     /// Tries each Collection Summary prefix candidate (e.g. Cert then CERT for Certus).
@@ -394,7 +399,9 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 rawRows.Add(new PanelAveragesRawRow(
                     PanelName:         GetStringOrEmpty(r, "PanelName"),
                     PayerName:         GetStringOrEmpty(r, "PayerName"),
-                    ClaimCount:        GetInt32OrDefault(r, "NoOfClaims"),
+                    ClaimCount:        HasColumn(r, "NoOfClaims")
+                                           ? GetInt32OrDefault(r, "NoOfClaims")
+                                           : GetInt32OrDefault(r, "ClaimCount"),
                     TotalCharges:      GetDecimalOrDefault(r, "TotalCharges"),
                     CarrierPayment:    GetDecimalOrDefault(r, "CarrierPayment"),
                     FullyPaidCount:    GetInt32OrDefault(r, "FullyPaidCount"),
@@ -621,9 +628,13 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             rows.Add(new PanelPaymentRow(
                 PanelName:         GetStringOrEmpty(r, "PanelName"),
                 NoOfClaims:        GetInt32OrDefault(r, "NoOfClaims"),
-                InsurancePayments: GetDecimalOrDefault(r, "InsurancePayments"),
-                BillYear:          HasColumn(r, "BilledYear")  ? GetInt32OrDefault(r, "BilledYear")  : 0,
-                BillMonth:         HasColumn(r, "BilledMonth") ? GetInt32OrDefault(r, "BilledMonth") : 0));
+                InsurancePayments: HasColumn(r, "InsurancePayments")
+                    ? GetDecimalOrDefault(r, "InsurancePayments")
+                    : GetDecimalOrDefault(r, "InsurancePayment"),
+                BillYear:          HasColumn(r, "BilledYear")  ? GetInt32OrDefault(r, "BilledYear")
+                    : HasColumn(r, "BillYear") ? GetInt32OrDefault(r, "BillYear") : 0,
+                BillMonth:         HasColumn(r, "BilledMonth") ? GetInt32OrDefault(r, "BilledMonth")
+                    : HasColumn(r, "BillMonth") ? GetInt32OrDefault(r, "BillMonth") : 0));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
         return new PanelPaymentResult(rows);
@@ -2342,7 +2353,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         if (!string.IsNullOrWhiteSpace(prefix))
             return await GetPanelAveragesViaSpAsync(
                 connectionString,
-                $"dbo.usp_Get{prefix}_CS_PanelAverages",
+                CollectionGetSp(prefix, "CS_PanelAverages"),
                 filterPayerNames, filterPanelNames,
                 filterFirstBillFrom, filterFirstBillTo,
                 filterDosFrom, filterDosTo,
@@ -2526,12 +2537,13 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
         string? labName = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        int lastMonths = 6)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
         var prefix = LabCollectionPrefix.GetPrefix(labName);
-        if (!string.IsNullOrWhiteSpace(prefix))
+        if (!string.IsNullOrWhiteSpace(prefix) && lastMonths == 6)
             return await GetAvgPaymentsViaSpAsync(
                 connectionString,
                 $"dbo.usp_Get{prefix}_CS_AvgPayments",
@@ -2541,7 +2553,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 filterCheckDateFrom, filterCheckDateTo,
                 ct).ConfigureAwait(false);
 
-        var cutoffDate    = DateTime.Today.AddMonths(-6);
+        var cutoffDate    = DateTime.Today.AddMonths(-Math.Max(1, lastMonths));
         var adjStatusList = string.Join(", ", AdjudicatedStatuses.Select((_, i) => $"@apAdjSt_{i}"));
 
         const string visitKey = "COALESCE(NULLIF(LTRIM(RTRIM(AccessionNumber)), ''), ClaimID)";

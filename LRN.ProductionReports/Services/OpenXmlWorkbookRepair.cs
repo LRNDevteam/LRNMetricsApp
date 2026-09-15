@@ -23,9 +23,14 @@ public static class OpenXmlWorkbookRepair
 
     public static void StripRepairTriggers(string filePath)
     {
-        using var doc = SpreadsheetDocument.Open(filePath, isEditable: true, new OpenSettings { AutoSave = false });
-        StripRepairTriggers(doc);
-        doc.WorkbookPart?.Workbook.Save();
+        using (var doc = SpreadsheetDocument.Open(filePath, isEditable: true, new OpenSettings { AutoSave = false }))
+        {
+            StripRepairTriggers(doc);
+            doc.WorkbookPart?.Workbook.Save();
+        }
+
+        // ClosedXML leaves pivot caches at the zip root; move them under /xl/ so Excel paints values.
+        OpenXmlPivotCacheFix.Apply(filePath);
     }
 
     public static void StripRepairTriggers(SpreadsheetDocument doc)

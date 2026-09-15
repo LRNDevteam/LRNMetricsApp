@@ -138,13 +138,25 @@ public sealed class NotesController : Controller
 
     [HttpPost("Save")]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Save(string? lab, string? report, [FromBody] NoteSaveRequest req, CancellationToken ct)
+    public async Task<IActionResult> Save(string? lab, string? report, [FromBody] NoteSaveRequest? req, CancellationToken ct)
     {
         if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
-        if (req is null) return BadRequest(new { error = "Missing payload." });
+        if (req is null)
+        {
+            var detail = ModelState.Values.SelectMany(v => v.Errors)
+                .Select(e => e.ErrorMessage)
+                .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m));
+            return BadRequest(new
+            {
+                error = string.IsNullOrWhiteSpace(detail)
+                    ? "Missing payload."
+                    : $"Invalid payload: {detail}"
+            });
+        }
         var reportRaw = string.IsNullOrWhiteSpace(report) ? req.ReportName : report;
         if (!TryResolveReportName(reportRaw, out var reportName)) return BadRequest(new { error = $"Unknown report '{reportRaw}'." });
         req.ReportName = reportName;
+        NormalizeWeekRange(req);
         try
         {
             NotesResult result;
@@ -160,6 +172,85 @@ public sealed class NotesController : Controller
             return Json(result);
         }
         catch (Exception ex) { return Fail(ex, "save note"); }
+    }
+
+    /// <summary>
+    /// NotesInsight.WeekRangeStart/End are NOT NULL. When the report page has no
+    /// billed-week banner (or the client sent empty dates), default to today so
+    /// inserts succeed across Production / Collection / LIS / Executive Summary.
+    /// </summary>
+    private static void NormalizeWeekRange(NoteSaveRequest req)
+    {
+        DateTime? parsedStart = null;
+        DateTime? parsedEnd = null;
+        if (req.WeekRangeStart is null || req.WeekRangeEnd is null)
+            TryParseWeekRangeText(req.WeekRangeText, out parsedStart, out parsedEnd);
+
+        if (req.WeekRangeStart is null)
+            req.WeekRangeStart = parsedStart ?? DateTime.Today;
+        if (req.WeekRangeEnd is null)
+            req.WeekRangeEnd = parsedEnd ?? req.WeekRangeStart;
+
+        if (req.WeekRangeEnd < req.WeekRangeStart)
+            req.WeekRangeEnd = req.WeekRangeStart;
+
+        if (string.IsNullOrWhiteSpace(req.WeekRangeText))
+        {
+            var s = req.WeekRangeStart!.Value;
+            var e = req.WeekRangeEnd!.Value;
+            req.WeekRangeText = s.Date == e.Date
+                ? s.ToString("MM.dd.yyyy")
+                : $"{s:MM.dd.yyyy} - {e:MM.dd.yyyy}";
+        }
+    }
+
+    private static void TryParseWeekRangeText(
+        string? text, out DateTime? start, out DateTime? end)
+    {
+        start = null;
+        end = null;
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        static DateTime? ToDate(string raw)
+        {
+            raw = raw.Trim();
+            if (DateTime.TryParseExact(raw,
+                    ["MM.dd.yyyy", "M.d.yyyy", "MM/dd/yyyy", "M/d/yyyy", "yyyy-MM-dd", "yyyy.MM.dd"],
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var dt))
+                return dt.Date;
+            if (DateTime.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AllowWhiteSpaces, out dt))
+                return dt.Date;
+            return null;
+        }
+
+        var tokens = System.Text.RegularExpressions.Regex.Matches(
+            text,
+            @"\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[./]\d{1,2}[./]\d{2,4}");
+        if (tokens.Count >= 2)
+        {
+            start = ToDate(tokens[0].Value);
+            end = ToDate(tokens[^1].Value);
+            return;
+        }
+        if (tokens.Count == 1)
+        {
+            start = end = ToDate(tokens[0].Value);
+            return;
+        }
+
+        var parts = System.Text.RegularExpressions.Regex.Split(text, @"\s*[-–—]\s*|\s+to\s+",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .ToArray();
+        if (parts.Length >= 2)
+        {
+            start = ToDate(parts[0]);
+            end = ToDate(parts[1]);
+        }
+        else if (parts.Length == 1)
+            start = end = ToDate(parts[0]);
     }
 
     [HttpPost("Delete")]

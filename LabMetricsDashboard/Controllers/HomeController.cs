@@ -239,6 +239,7 @@ public class HomeController : Controller
         if (string.IsNullOrEmpty(path)) return false;
         return path.Contains("/GetMeta", StringComparison.OrdinalIgnoreCase)
             || path.Contains("/GetSummary", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/GetKeyMetrics", StringComparison.OrdinalIgnoreCase)
             || path.Contains("/GetTable", StringComparison.OrdinalIgnoreCase)
             || path.Contains("/GetTabPartial", StringComparison.OrdinalIgnoreCase)
             || path.Contains("/FilterOptions", StringComparison.OrdinalIgnoreCase)

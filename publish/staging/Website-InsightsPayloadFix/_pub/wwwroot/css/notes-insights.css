@@ -1,0 +1,240 @@
+/* ============================================================
+   Notes & Insights component styling.
+   Matches the Executive Summary reference theme: dark navy
+   header, teal accents, light-background Red/Yellow/Green pills.
+   ============================================================ */
+
+.ni-btn-open {
+    /* "Notes & Insights" button that sits before Export Excel */
+    white-space: nowrap;
+}
+
+/* ---- Draggable / resizable callout window ---- */
+.ni-callout {
+    position: fixed;
+    top: 90px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 1040px;
+    max-width: 96vw;
+    height: 620px;
+    max-height: calc(100vh - 110px);
+    min-width: 520px;
+    min-height: 320px;
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    box-shadow: 0 18px 48px rgba(2, 18, 43, .28);
+    z-index: 1080;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+    resize: both;
+}
+
+.ni-callout.ni-open { display: flex; }
+
+.ni-header {
+    background: #0e3460;             /* dark navy */
+    color: #fff;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: move;
+    user-select: none;
+    flex-shrink: 0;
+}
+.ni-header .ni-title { font-weight: 600; font-size: .9rem; }
+.ni-header .ni-sub   { font-size: .72rem; color: #b9d0ea; margin-left: 4px; }
+.ni-header .ni-win-actions { margin-left: auto; display: flex; gap: 4px; }
+.ni-header .ni-win-actions button {
+    background: transparent; border: none; color: #cfe0f2;
+    width: 26px; height: 24px; border-radius: 4px; cursor: pointer; line-height: 1;
+}
+.ni-header .ni-win-actions button:hover { background: rgba(255,255,255,.15); color: #fff; }
+
+/* Teal context strip (Report / Week / RunId) */
+.ni-context {
+    background: #e6f3f5;
+    border-bottom: 1px solid #cfe4e7;
+    padding: 6px 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    font-size: .74rem;
+    color: #0e3460;
+    flex-shrink: 0;
+}
+.ni-context b { color: #094; }
+.ni-context .ni-ctx-item span { color: #5a7184; text-transform: uppercase; letter-spacing: .03em; font-size: .66rem; }
+
+/* Toolbar */
+.ni-toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    padding: 8px 12px; border-bottom: 1px solid #e5e7eb; flex-shrink: 0;
+}
+.ni-toolbar .ni-spacer { flex: 1; }
+.ni-toolbar input, .ni-toolbar select {
+    font-size: .78rem; padding: 3px 6px; border: 1px solid #cbd5e1; border-radius: 5px;
+}
+
+.ni-body { flex: 1 1 auto; overflow: auto; padding: 0; min-height: 0; }
+
+/* Summary cards (archive) */
+.ni-cards { display: flex; gap: 10px; padding: 10px 12px; flex-wrap: wrap; }
+.ni-card {
+    flex: 1; min-width: 140px; border: 1px solid #e2e8f0; border-radius: 8px;
+    padding: 8px 12px; background: #f8fafc;
+}
+.ni-card .ni-card-val { font-size: 1.3rem; font-weight: 700; color: #0e3460; }
+.ni-card .ni-card-lbl { font-size: .68rem; color: #64748b; text-transform: uppercase; letter-spacing: .03em; }
+
+/* Table */
+.ni-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+.ni-table th {
+    position: sticky; top: 0; background: #f1f5f9; color: #334155;
+    text-align: left; padding: 6px 8px; border-bottom: 2px solid #cbd5e1; white-space: nowrap;
+    font-size: .7rem; text-transform: uppercase; letter-spacing: .02em;
+}
+.ni-table td { padding: 6px 8px; border-bottom: 1px solid #eef2f6; vertical-align: top; }
+.ni-table tr:hover td { background: #f8fbff; }
+.ni-truncate { max-width: 260px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* Risk / Status pills (light background) */
+.ni-pill { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: .7rem; font-weight: 600; border: 1px solid transparent; }
+.ni-pill.risk-Red    { background: #fdecec; color: #b3261e; border-color: #f5c2c0; }
+.ni-pill.risk-Yellow { background: #fdf6e3; color: #8a6d00; border-color: #f0e0a8; }
+.ni-pill.risk-Green  { background: #e8f7ee; color: #1c7a41; border-color: #bfe6cd; }
+.ni-pill.status-Open     { background: #eef2ff; color: #3949ab; border-color: #cdd6f7; }
+.ni-pill.status-WIP      { background: #fff4e5; color: #b25e00; border-color: #ffdbb0; }
+.ni-pill.status-Deferred { background: #f3f4f6; color: #4b5563; border-color: #d8dbe0; }
+.ni-pill.status-Closed   { background: #e8f7ee; color: #1c7a41; border-color: #bfe6cd; }
+.ni-pill.ni-overdue      { background: #fdecec; color: #b3261e; border-color: #f5c2c0; }
+.ni-pill.ni-carry        { background: #eef7fb; color: #0e6b8a; border-color: #bfe2ee; }
+
+/* Row action icons */
+.ni-actions button { background: transparent; border: none; cursor: pointer; padding: 2px 4px; font-size: .95rem; color: #475569; }
+.ni-actions button:hover { color: #0e3460; }
+
+/* Detail / form view */
+.ni-detail { padding: 0; }
+.ni-detail-head {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    border-bottom: 1px solid #e5e7eb; background: #f8fafc; flex-wrap: wrap;
+}
+.ni-detail-head .ni-detail-title { font-weight: 700; color: #0e3460; }
+.ni-section { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; }
+.ni-section h6 {
+    font-size: .68rem; text-transform: uppercase; letter-spacing: .05em;
+    color: #64748b; margin: 0 0 8px; font-weight: 700;
+}
+.ni-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; }
+.ni-field { display: flex; flex-direction: column; gap: 3px; }
+.ni-field.full { grid-column: 1 / -1; }
+.ni-field label { font-size: .68rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: .02em; }
+.ni-field .ni-ro { font-size: .82rem; color: #1e293b; }
+.ni-field input, .ni-field select, .ni-field textarea {
+    font-size: .82rem; padding: 5px 7px; border: 1px solid #cbd5e1; border-radius: 5px; width: 100%;
+}
+.ni-field textarea { min-height: 62px; resize: vertical; }
+/* RiskLabel watermark shown beneath the RiskCode dropdown */
+.ni-watermark { display: block; margin-top: 3px; color: #94a3b8; font-size: .72rem; font-style: italic; }
+
+/* Read-only archive banner */
+.ni-banner {
+    margin: 10px 14px; padding: 8px 12px; border-radius: 6px;
+    background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; font-size: .78rem;
+}
+
+/* Footer action bar */
+.ni-footer {
+    display: flex; gap: 8px; align-items: center; padding: 10px 14px;
+    border-top: 1px solid #e5e7eb; background: #f8fafc; flex-shrink: 0;
+    margin: 0; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px;
+}
+/* footer is empty in views that don't use it — collapse it so there's no dead strip */
+.ni-footer:empty { display: none; }
+.ni-footer .ni-spacer { flex: 1; }
+.ni-footer .btn { font-size: .82rem; padding: 6px 16px; font-weight: 600; }
+.ni-footer .btn-success { background: #0f9d58; border-color: #0f9d58; color: #fff; }
+.ni-footer .btn-success:hover { background: #0c8a4d; border-color: #0c8a4d; }
+
+/* Revision timeline */
+.ni-timeline { padding: 12px 16px; }
+.ni-rev { position: relative; padding: 0 0 14px 18px; border-left: 2px solid #dbe4ee; }
+.ni-rev:last-child { border-left-color: transparent; }
+.ni-rev::before { content: ""; position: absolute; left: -6px; top: 2px; width: 10px; height: 10px; border-radius: 50%; background: #0e3460; }
+.ni-rev .ni-rev-type { font-weight: 700; color: #0e3460; font-size: .8rem; }
+.ni-rev .ni-rev-meta { font-size: .72rem; color: #64748b; }
+.ni-rev .ni-rev-sum { font-size: .78rem; color: #334155; margin-top: 2px; }
+
+/* Empty / loading states */
+.ni-empty, .ni-loading { padding: 24px; text-align: center; color: #64748b; font-size: .82rem; }
+
+/* Toast */
+.ni-toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: #0e3460; color: #fff; padding: 8px 16px; border-radius: 6px;
+    font-size: .82rem; z-index: 1100; box-shadow: 0 8px 24px rgba(2,18,43,.3);
+    opacity: 0; transition: opacity .25s; pointer-events: none;
+}
+.ni-toast.show { opacity: 1; }
+
+/* ---- Active landing: cards, filters, edit grid ---- */
+.ni-card-sub { font-size: .62rem; color: #94a3b8; margin-top: 2px; }
+.ni-drag-hint { font-size: .72rem; color: #94a3b8; }
+.ni-foot-note { font-size: .72rem; color: #64748b; max-width: 62%; }
+
+.ni-filters { border: 1px solid #e5e7eb; border-radius: 8px; margin: 4px 12px 10px; padding: 8px 12px; background: #fbfdff; }
+.ni-filters-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; color: #0e3460; }
+.ni-filters-note { font-size: .7rem; color: #94a3b8; font-weight: 400; }
+.ni-filter-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 12px; }
+.ni-ff { display: flex; flex-direction: column; gap: 3px; }
+.ni-ff.ni-ff-wide { grid-column: span 2; }
+.ni-ff label { font-size: .64rem; text-transform: uppercase; letter-spacing: .03em; color: #64748b; font-weight: 600; }
+.ni-ff input, .ni-ff select { font-size: .76rem; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 5px; }
+.ni-ff-range { display: flex; gap: 4px; }
+.ni-ff-range input { width: 100%; }
+
+.ni-grid-wrap { overflow: auto; padding: 0 4px; }
+.ni-grid-edit { min-width: 2100px; }
+.ni-grid-edit td { vertical-align: top; }
+.ni-grid-edit td input, .ni-grid-edit td select, .ni-grid-edit td textarea {
+    width: 100%; font-size: .74rem; padding: 3px 5px; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff;
+}
+.ni-grid-edit td textarea { min-height: 50px; resize: vertical; line-height: 1.3; }
+.ni-grid-edit td.ni-num { color: #94a3b8; font-size: .72rem; white-space: nowrap; }
+.ni-grid-edit td.ni-week { font-size: .72rem; white-space: nowrap; color: #334155; font-weight: 600; }
+.ni-grid-edit .ni-risk { min-width: 74px; }
+.ni-grid-edit .ni-risk-pill { margin-top: 5px; }
+.ni-grid-edit .ni-smp { max-width: 220px; }
+/* Column widths for the horizontal insight grid */
+.ni-grid-edit .ni-td-risk { min-width: 92px; }
+.ni-grid-edit .ni-td-party { min-width: 150px; }
+.ni-grid-edit .ni-td-insights { min-width: 400px; }
+.ni-grid-edit .ni-td-insights .ni-insights-box { min-height: 50px; max-height: 160px; overflow: auto; resize: both; white-space: pre; }
+.ni-grid-edit .ni-td-text { min-width: 400px; }
+.ni-grid-edit .ni-td-smp { width: 250px; }
+.ni-grid-edit .ni-td-date { width: 130px; }
+.ni-grid-edit .ni-td-status { min-width: 110px; }
+.ni-grid-edit .ni-actions { text-align: center; white-space: nowrap; }
+.ni-grid-edit .ni-actions button {
+    background: #fff; border: 1px solid #dbe4ee; border-radius: 6px; width: 26px; height: 26px;
+    padding: 0; font-size: .85rem; color: #475569; cursor: pointer; margin: 0 1px;
+}
+.ni-grid-edit .ni-actions button:hover { color: #0e3460; border-color: #94b6d8; background: #f1f6fb; }
+.ni-grid-edit .ni-actions button.ni-act-del:hover { color: #b3261e; border-color: #f5c2c0; background: #fdecec; }
+
+/* Active layout: the panel scrolls vertically as a whole; the grid area
+   keeps its own horizontal scrollbar directly under the rows. */
+.ni-body.ni-body-active { display: block; overflow-y: auto; overflow-x: hidden; min-height: 0; }
+.ni-body-active > .ni-cards, .ni-body-active > .ni-filters { flex-shrink: 0; }
+.ni-body-active > .ni-gridzone { display: block; }
+.ni-gridzone > .ni-grid-wrap { overflow-x: auto; overflow-y: hidden; }
+
+.ni-gridbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 14px; flex-shrink: 0; }
+.ni-count { font-weight: 700; color: #0e3460; background: #eaf1f9; border: 1px solid #d3e2f2; border-radius: 999px; padding: 3px 12px; font-size: .74rem; }
+.ni-gridbar-note { font-size: .72rem; color: #0e6b8a; font-weight: 600; }
+.ni-week-pills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.ni-pill.ni-current { background: #eef2ff; color: #3949ab; border-color: #cdd6f7; }

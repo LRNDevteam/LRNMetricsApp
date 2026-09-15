@@ -1,0 +1,44 @@
+﻿Replace and restart (service already installed)
+==============================================
+
+1. Stop the service (elevated):
+     sc stop "LRN - CPU Monitor"
+
+2. Wait until it is STOPPED:
+     sc query "LRN - CPU Monitor"
+
+3. Copy everything inside the CpuMonitor\ folder from this zip
+   over the existing install folder (overwrite files).
+   Leave your Logs\ folder alone if you want to keep history.
+
+4. If you customized appsettings.json on the server, do NOT overwrite it
+   blindly. Merge these keys into your existing file instead:
+     CpuThresholdPercent
+     MachineCpuThresholdPercent
+     MachineTopConsumers
+     ConsecutiveSamplesBeforeAlert
+     AlertCooldownMinutes
+     HeartbeatMinutes
+
+   Defaults in this package:
+     CpuThresholdPercent           = 40
+     MachineCpuThresholdPercent    = 85
+     ConsecutiveSamplesBeforeAlert = 1
+     AlertCooldownMinutes          = 0
+     HeartbeatMinutes              = 10
+
+5. Start the service:
+     sc start "LRN - CPU Monitor"
+
+6. Confirm in Logs\cpu-monitor-*.txt within ~15 seconds:
+     "Logging any process over 40% (whole machine..."
+   and within ~10 minutes a Heartbeat: line.
+
+What changed vs the first live zip
+----------------------------------
+- Log on first window over threshold (was 3 windows / ~35s)
+- No 15-minute silence between repeats (cooldown 0)
+- Machine-total alert when box is busy but no single process is
+- Heartbeat every 10 minutes
+- Breach line names the configured threshold
+- Startup header in both logs states effective settings

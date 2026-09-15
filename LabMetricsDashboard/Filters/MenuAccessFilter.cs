@@ -33,8 +33,8 @@ public sealed class MenuAccessFilter : IAsyncAuthorizationFilter
 
     private static readonly HashSet<string> AllowedLisActions = new(StringComparer.OrdinalIgnoreCase)
     {
-        "GetSummary", "GetMeta",
-    };
+		"GetSummary", "GetMeta", "GetKeyMetrics",
+	};
 
     private static readonly HashSet<string> AllowedExecutiveActions = new(StringComparer.OrdinalIgnoreCase)
     {

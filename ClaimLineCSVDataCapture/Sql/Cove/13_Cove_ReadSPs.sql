@@ -1,4 +1,4 @@
--- COVE Labs — Read stored procedures for the Production Summary Report tabs.
+-- COVE Labs ï¿½ Read stored procedures for the Production Summary Report tabs.
 -- Called by LabMetricsDashboard.SqlLabProductionSummaryRepository.
 --
 -- Lab specifics:
@@ -6,9 +6,9 @@
 --   * Weekly column joins on FirstBilledDate (NOT ChargeEnteredDate).
 --   * Monthly column pivot uses ChargeEnteredDate.
 --   * Coding tab is sourced from UNBILLED claims (FirstBilledDate IS NULL/blank).
---   * UnbilledAging snapshot (dbo.Cove_UnbilledAging) does NOT carry a TotalCharges
---     column, so the fast path emits 0 for charges; the filtered live aggregate
---     computes real charges from dbo.ClaimLevelData.
+--   * UnbilledAging snapshot (dbo.Cove_UnbilledAging) stores TotalCharges
+--     (SUM ChargeAmount). No-filter path returns that column; filtered path
+--     recomputes from dbo.ClaimLevelData.
 -- ============================================================
 
 SET NOCOUNT ON;
@@ -405,9 +405,8 @@ END
 GO
 
 -- ============================================================
--- Unbilled Aging (Panelname x AgingDOS). Snapshot table has no
--- TotalCharges column, so the fast path returns 0; the live path
--- aggregates real charges from dbo.ClaimLevelData.
+-- Unbilled Aging (Panelname x AgingDOS). Snapshot stores
+-- TotalCharges = SUM(ChargeAmount) for unbilled claims.
 -- ============================================================
 CREATE OR ALTER PROCEDURE dbo.usp_GetCove_UnbilledAging
     @PayerNames      NVARCHAR(MAX) = NULL,
@@ -436,7 +435,7 @@ BEGIN
         SELECT  PanelName,
                 AgingDOS                       AS AgingBucket,
                 ClaimCount,
-                CAST(0 AS DECIMAL(18,2))       AS TotalCharges
+                ISNULL(TotalCharges, 0)        AS TotalCharges
         FROM    dbo.Cove_UnbilledAging
         ORDER BY PanelName, AgingDOS;
         RETURN;

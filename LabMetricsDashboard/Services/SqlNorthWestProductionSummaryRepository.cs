@@ -1536,12 +1536,13 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
             LTRIM(RTRIM(ISNULL(CPTCode, 'Unknown')))                        AS CPTCode,
             FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM')          AS BilledYearMonth,
             COUNT(*)                                                        AS CPTCount,
-            ISNULL(SUM(TRY_CAST(Units AS DECIMAL(18,2))), 0)                AS BilledUnits,
+            CAST(COUNT(*) AS DECIMAL(18,2))                                 AS BilledUnits,
             ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)         AS TotalCharges
         FROM dbo.LineLevelData
         WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
           AND LTRIM(RTRIM(ISNULL(FirstBilledDate, ''))) <> ''
           AND NULLIF(LTRIM(RTRIM(CPTCode)), '') IS NOT NULL
+          AND TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
           AND (
                   UPPER(LTRIM(RTRIM(ISNULL(Source, '')))) LIKE 'WEBPM%'
                OR UPPER(LTRIM(RTRIM(ISNULL(Source, '')))) LIKE 'DAQ%'
@@ -1578,7 +1579,8 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
             var cpt        = rdr.GetString(1);
             var month      = rdr.GetString(2);
             var claimCount = rdr.GetInt32(3);
-            var units      = ReadDecimalByNameOrIndex(rdr, 4, "BilledUnits", "Units");
+            // Count of CPT — never SUM(Units). Keep Units in sync with CPTCount.
+            var units      = (decimal)claimCount;
             var charges    = ReadDecimalByNameOrIndex(rdr, 5, "TotalCharges", "BilledCharges", "ChargeAmount");
 
             allMonths.Add(month);

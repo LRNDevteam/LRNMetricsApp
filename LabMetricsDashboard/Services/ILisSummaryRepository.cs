@@ -23,19 +23,37 @@ public sealed record LisLineExportPlan(
 
 public interface ILisSummaryRepository
 {
-    Task<LisSummaryResult> GetLisSummaryAsync(
-        string connectionString,
-        string labName,
-        int? labId = null,
-        string dateType = "Collected",
-        DateOnly? dateFrom = null,
-        DateOnly? dateTo = null,
-        string? panel = null,
-        string? clinic = null,
-        string? refPhy = null,
-        string? salesRep = null,
-        string? collector = null,
-        CancellationToken ct = default);
+	Task<LisSummaryResult> GetLisSummaryAsync(
+		string connectionString,
+		string labName,
+		int? labId = null,
+		string dateType = "Collected",
+		DateOnly? dateFrom = null,
+		DateOnly? dateTo = null,
+		string? panel = null,
+		string? clinic = null,
+		string? refPhy = null,
+		string? salesRep = null,
+		string? collector = null,
+		CancellationToken ct = default,
+		bool includeKeyMetrics = false);
+
+	/// <summary>
+	/// Recent 4 months average Time to Result / Time to Bill by Date of Collection.
+	/// Loaded separately from the main pivot so the summary page is not blocked by it.
+	/// </summary>
+	Task<LisKeyMetricsBlock?> GetKeyMetricsAsync(
+		string connectionString,
+		string labName,
+		int? labId = null,
+		DateOnly? dateFrom = null,
+		DateOnly? dateTo = null,
+		string? panel = null,
+		string? clinic = null,
+		string? refPhy = null,
+		string? salesRep = null,
+		string? collector = null,
+		CancellationToken ct = default);
 
     Task<LisSummaryFilterOptions> GetFilterOptionsAsync(
         string connectionString,

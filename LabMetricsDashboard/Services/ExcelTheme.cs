@@ -1,4 +1,4 @@
-﻿using ClosedXML.Excel;
+using ClosedXML.Excel;
 
 
 namespace LabMetricsDashboard.Services;
@@ -152,6 +152,9 @@ public static class ExcelTheme
         /// <summary>Avg Payments group: 30 Days (Accent 4 Lighter 80%).</summary>
         public static readonly XLColor Group30Day = XLColor.FromHtml("#FFF2CC");
 
+        /// <summary>CP Exception parent row — same Accent 4 Lighter 80% as the client workbook.</summary>
+        public static readonly XLColor CpExceptionBg = XLColor.FromHtml("#FFF2CC");
+
         /// <summary>Avg Payments group: 60 Days (Accent 2 Lighter 80%).</summary>
         public static readonly XLColor Group60Day = XLColor.FromHtml("#FCE4D6");
 
@@ -167,8 +170,68 @@ public static class ExcelTheme
         /// <summary>ClaimLevelData / LineLevelData — Accent 2.</summary>
         public static readonly XLColor TabGold = XLColor.FromHtml("#ED7D31");
 
+        /// <summary>Insights meta block (Client Name / Analysis Range) — Office Light 2.</summary>
+        public static readonly XLColor MetaHeaderBg = XLColor.FromHtml("#E7E6E6");
+
         public const string CountNumberFormat = @"#,##0;-#,##0;""-"";@";
         public const string AccountingNumberFormat = @"_(""$""* #,##0_);_(""$""* \(#,##0\);_(""$""* ""-""_);_(@_)";
+
+        public const string ConfidentialityNotice =
+            "The information in this report is confidential and intended solely for the use of the intended recipient. If you are not the intended recipient, please inform the sender immediately and delete this report.";
+
+        /// <summary>
+        /// Writes the Client Name…Source block above Monthly on Insights.
+        /// Returns the first row after the block (title bar).
+        /// </summary>
+        public static int WriteReportMetaHeader(
+            IXLWorksheet ws, int colCount,
+            IReadOnlyList<(string Label, string? Value)> items)
+        {
+            int rows = Math.Max(items.Count, 1);
+            int span = Math.Max(colCount, 2);
+            var fill = ws.Range(1, 1, rows + 1, span);
+            fill.Style.Fill.BackgroundColor = MetaHeaderBg;
+            fill.Style.Font.FontName = FontName;
+            fill.Style.Font.FontSize = FontSizeBody;
+            fill.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+
+            int row = 1;
+            foreach (var (label, value) in items)
+            {
+                var labelCell = ws.Cell(row, 1);
+                labelCell.Value = label.EndsWith(":", StringComparison.Ordinal) ? label : label + ":";
+                labelCell.Style.Font.Bold = true;
+                labelCell.Style.Font.FontColor = XLColor.Black;
+                labelCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+
+                var valueCell = ws.Cell(row, 2);
+                valueCell.Value = value ?? "";
+                valueCell.Style.Font.Bold = true;
+                valueCell.Style.Font.FontColor = XLColor.Black;
+                row++;
+            }
+
+            if (span >= 5)
+            {
+                int discCol = Math.Max(4, span - 2);
+                var disc = ws.Range(1, discCol, rows, span);
+                disc.Merge();
+                var dcell = ws.Cell(1, discCol);
+                dcell.Value = ConfidentialityNotice;
+                dcell.Style.Font.FontSize = 7;
+                dcell.Style.Font.Italic = true;
+                dcell.Style.Font.FontColor = XLColor.FromHtml("#595959");
+                dcell.Style.Alignment.WrapText = true;
+                dcell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+                dcell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+                dcell.Style.Fill.BackgroundColor = MetaHeaderBg;
+            }
+
+            for (int r = 1; r <= rows + 1; r++)
+                ws.Row(r).Height = 16;
+
+            return rows + 2;
+        }
 
         public static XLColor ContrastOn(XLColor background)
         {
@@ -176,6 +239,7 @@ public static class ExcelTheme
                 || background.Equals(ChildRowBg) || background.Equals(GroupRowBg)
                 || background.Equals(GroupFullyPaid) || background.Equals(GroupAdjudicated)
                 || background.Equals(Group30Day) || background.Equals(Group60Day)
+                || background.Equals(CpExceptionBg)
                 || background.Equals(XLColor.White))
                 return XLColor.Black;
 

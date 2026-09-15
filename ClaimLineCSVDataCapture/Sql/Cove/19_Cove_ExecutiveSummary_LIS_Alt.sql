@@ -193,6 +193,17 @@ BEGIN
     FROM #Lis
     WHERE NULLIF(PanelType, '') IS NOT NULL;
 
+    -- CP Exception children: only panels that actually have that SubStatus
+    -- (SELECT DISTINCT PanelType FROM LIMSMaster WHERE SubStatus = 'CP Exception').
+    DROP TABLE IF EXISTS #CpExceptionPanels;
+    SELECT DISTINCT PanelType
+    INTO #CpExceptionPanels
+    FROM #Lis
+    WHERE NewStatus = 'Billable'
+      AND BillCategory = 'Not Billed'
+      AND SubStatus = 'CP Exception'
+      AND NULLIF(PanelType, '') IS NOT NULL;
+
     -- ───────────────────────────────────────────────────────────────────────
     --  Cove_ES_LIS - A, B (+ dynamic PanelType subs per distinct LIMSMaster
     --  PanelType), C, D (+20 subs incl D.5/D.6 dynamic PanelType subs),
@@ -312,13 +323,13 @@ BEGIN
                          AND l.NewStatus = 'Billable' AND l.BillCategory = 'Not Billed' AND l.SubStatus = 'CP Exception'
         GROUP BY p.ESYear, p.ESMonth
 
-        -- D.6.<PanelType>  CP Exception by Panel - one row per DISTINCT
-        -- PanelType found in LIMSMaster (dynamic, not a fixed list)
+        -- D.6.<PanelType>  CP Exception by Panel — only distinct PanelTypes
+        -- that have SubStatus = 'CP Exception' (not every LIMSMaster panel).
         UNION ALL
         SELECT p.ESYear, p.ESMonth, N'D.6.' + pt.PanelType, N'    ' + pt.PanelType,
                COUNT(DISTINCT l.Accession)
         FROM #LisPeriods p
-        CROSS JOIN #PanelTypes pt
+        CROSS JOIN #CpExceptionPanels pt
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
                          AND l.NewStatus = 'Billable' AND l.BillCategory = 'Not Billed' AND l.SubStatus = 'CP Exception' AND l.PanelType = pt.PanelType
         GROUP BY p.ESYear, p.ESMonth, pt.PanelType
@@ -525,6 +536,31 @@ BEGIN
     DROP TABLE IF EXISTS #Lis;
     DROP TABLE IF EXISTS #LisPeriods;
     DROP TABLE IF EXISTS #PanelTypes;
+    DROP TABLE IF EXISTS #CpExceptionPanels;
+
+    -- PMS RoleID G (Billed Mismatches) = F − Billable Samples (this SP's RoleID B).
+    -- Capture runs LIS_Alt after usp_RefreshCove_ExecutiveSummary, so recompute G here.
+    IF OBJECT_ID('dbo.Cove_ES_PMS', 'U') IS NOT NULL
+    BEGIN
+        UPDATE g
+        SET g.ESMonthClaimCount =
+                CASE
+                    WHEN ISNULL(f.ESMonthClaimCount, 0) - ISNULL(lis.ESMonthClaimCount, 0) > 0
+                    THEN ISNULL(f.ESMonthClaimCount, 0) - ISNULL(lis.ESMonthClaimCount, 0)
+                    ELSE 0
+                END,
+            g.RefreshedAt = GETDATE()
+        FROM dbo.Cove_ES_PMS AS g
+        INNER JOIN dbo.Cove_ES_PMS AS f
+            ON  f.ESYear  = g.ESYear
+            AND f.ESMonth = g.ESMonth
+            AND f.RoleID  = 'F'
+        LEFT JOIN dbo.Cove_ES_LIS AS lis
+            ON  lis.ESYear  = g.ESYear
+            AND lis.ESMonth = g.ESMonth
+            AND lis.RoleID  = 'B'   -- Billable Samples
+        WHERE g.RoleID = 'G';
+    END
 
     PRINT 'usp_RefreshCove_ExecutiveSummary_LIS_Alt completed.';
 END;

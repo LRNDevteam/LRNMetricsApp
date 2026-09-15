@@ -4,7 +4,7 @@ SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-ALTER   PROCEDURE [dbo].[usp_RefreshCove_ExecutiveSummary_LIS_Alt]
+CREATE OR ALTER PROCEDURE [dbo].[usp_RefreshCove_ExecutiveSummary_LIS_Alt]
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -102,6 +102,20 @@ BEGIN
         FROM #Lis
         WHERE NULLIF(PanelType, '') IS NOT NULL
     ) src;
+
+    -- CP Exception children: DISTINCT PanelType from LIMSMaster where
+    -- SubStatus = 'CP Exception' (not a CROSS JOIN of every panel).
+    -- PanelSeq is kept from #PanelTypes so existing RoleIDs stay stable.
+    DROP TABLE IF EXISTS #CpExceptionPanels;
+    SELECT pt.PanelType, pt.PanelSeq
+    INTO #CpExceptionPanels
+    FROM #PanelTypes pt
+    WHERE pt.PanelType IN (
+        SELECT DISTINCT PanelType
+        FROM #Lis
+        WHERE SubStatus = N'CP Exception'
+          AND NULLIF(PanelType, '') IS NOT NULL
+    );
 
     -- ── #SubStatuses: distinct SubStatus values under D (Not Billed) ─────────
     -- SubSeq drives D.1 / D.2 … RoleIDs (replaces the old hardcoded D.1–D.20).
@@ -216,8 +230,7 @@ BEGIN
                          AND l.SubStatus = ss.SubStatus
         GROUP BY p.ESYear, p.ESMonth, ss.SubStatus, ss.SubSeq
 
-        -- D.{n}.1, D.{n}.2 …  PanelType breakdown for exception SubStatuses only
-        -- (IsException = 1 → 'Coding exception' and 'CP Exception')
+        -- Coding exception by Panel — every distinct LIMSMaster PanelType
         -- RoleID = D.{SubSeq}.{PanelSeq}; Description shows the panel name.
         UNION ALL
         SELECT p.ESYear, p.ESMonth,
@@ -230,7 +243,24 @@ BEGIN
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
                          AND l.NewStatus = 'Billable' AND l.BillCategory = 'Not Billed'
                          AND l.SubStatus = ss.SubStatus AND l.PanelType = pt.PanelType
-        WHERE ss.IsException = 1
+        WHERE ss.SubStatus = N'Coding exception'
+        GROUP BY p.ESYear, p.ESMonth, ss.SubStatus, ss.SubSeq, pt.PanelType, pt.PanelSeq
+
+        -- CP Exception by Panel — only DISTINCT PanelType where
+        -- SubStatus = 'CP Exception' (Fungus, GI, PGx, RPP, STI, Tox,
+        -- Urinalysis, UTI, Women's Health, Wound — not CGx / combo panels).
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth,
+               N'D.' + CAST(ss.SubSeq AS NVARCHAR(10)) + N'.' + CAST(pt.PanelSeq AS NVARCHAR(10)),
+               N'    ' + pt.PanelType,
+               COUNT(DISTINCT l.Accession)
+        FROM #LisPeriods p
+        CROSS JOIN #SubStatuses ss
+        CROSS JOIN #CpExceptionPanels pt
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+                         AND l.NewStatus = 'Billable' AND l.BillCategory = 'Not Billed'
+                         AND l.SubStatus = ss.SubStatus AND l.PanelType = pt.PanelType
+        WHERE ss.SubStatus = N'CP Exception'
         GROUP BY p.ESYear, p.ESMonth, ss.SubStatus, ss.SubSeq, pt.PanelType, pt.PanelSeq
 
         -- E  Other Samples
@@ -260,6 +290,7 @@ BEGIN
     DROP TABLE IF EXISTS #Lis;
     DROP TABLE IF EXISTS #LisPeriods;
     DROP TABLE IF EXISTS #PanelTypes;
+    DROP TABLE IF EXISTS #CpExceptionPanels;
     DROP TABLE IF EXISTS #SubStatuses;
     DROP TABLE IF EXISTS #OtherStatuses;
     PRINT 'usp_RefreshCove_ExecutiveSummary_LIS_Alt completed.';

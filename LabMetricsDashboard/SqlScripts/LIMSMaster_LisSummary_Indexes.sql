@@ -1,5 +1,19 @@
 IF OBJECT_ID(N'dbo.LIMSMaster', N'U') IS NOT NULL
 BEGIN
+    -- Cove / Elixir pivot date
+    IF COL_LENGTH(N'dbo.LIMSMaster', N'DateOfCollection') IS NOT NULL
+       AND NOT EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE object_id = OBJECT_ID(N'dbo.LIMSMaster')
+          AND name = N'IX_LIMSMaster_LisSummary_DateOfCollection'
+    )
+    BEGIN
+        CREATE NONCLUSTERED INDEX IX_LIMSMaster_LisSummary_DateOfCollection
+        ON dbo.LIMSMaster (DateOfCollection)
+        INCLUDE (Accession, NewStatus, BillCategory, SubStatus, ClientStatus, SourceFile);
+    END;
+
     IF COL_LENGTH(N'dbo.LIMSMaster', N'RequestCollectDate') IS NOT NULL
        AND NOT EXISTS (
         SELECT 1

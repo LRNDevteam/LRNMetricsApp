@@ -730,31 +730,58 @@ BEGIN
     GROUP BY v.RowCode, v.Description, v.SubStatusVal;
     PRINT CONVERT(VARCHAR(8), GETDATE(), 108) + ' [LIS-7] D.{n} done.';
 
-    -- ── D.{n}.{m}  Exception SubStatus by panel (D.5/D.6 only, matching 19_LIS_Alt) ─────
-    -- Skipped when no panel filter is active: a large #Lis (date-only filter) makes the
-    -- triple CROSS JOIN (#Lis × 2 exceptions × N PanelTypes) prohibitively expensive.
-    -- These sub-rows are only meaningful when drilling into a specific panel anyway.
+    -- ── D.6.{PanelType}  CP Exception grouped by PanelType.
+    -- Only DISTINCT PanelType from #Lis WHERE SubStatus = 'CP Exception'
+    -- (not a CROSS JOIN of every LIMSMaster panel).
+    INSERT INTO #LisRows (ESYear, ESMonth, RowCode, Description, MetricValue)
+    SELECT p.LISYear, p.LISMonth,
+           N'D.6.' + pt.PanelType,
+           N'    ' + pt.PanelType,
+           CAST(COUNT(DISTINCT CASE
+               WHEN l.SubStatus = 'CP Exception' AND l.PanelType = pt.PanelType
+               THEN l.Accession END) AS DECIMAL(18,2))
+    FROM (SELECT DISTINCT LISYear, LISMonth FROM #Lis) p
+    CROSS JOIN (
+        SELECT DISTINCT PanelType
+        FROM #Lis
+        WHERE NewStatus = 'Billable' AND BillCategory = 'Not Billed'
+          AND SubStatus = 'CP Exception' AND NULLIF(PanelType, '') IS NOT NULL
+    ) pt
+    LEFT JOIN #Lis l
+           ON l.LISYear = p.LISYear AND l.LISMonth = p.LISMonth
+          AND l.NewStatus = 'Billable' AND l.BillCategory = 'Not Billed'
+    GROUP BY p.LISYear, p.LISMonth, pt.PanelType
+    UNION ALL
+    SELECT 0, 0,
+           N'D.6.' + pt.PanelType,
+           N'    ' + pt.PanelType,
+           CAST(COUNT(DISTINCT Accession) AS DECIMAL(18,2))
+    FROM #Lis
+    WHERE NewStatus = 'Billable' AND BillCategory = 'Not Billed'
+      AND SubStatus = 'CP Exception' AND NULLIF(PanelType, '') IS NOT NULL
+    GROUP BY PanelType;
+
+    -- D.5.{PanelType} Coding exception by panel — only when a panel filter is on
+    -- (the full CROSS JOIN is expensive on an unfiltered #Lis).
     IF @HasPanelFilter = 1
     INSERT INTO #LisRows (ESYear, ESMonth, RowCode, Description, MetricValue)
     SELECT l.LISYear, l.LISMonth,
-           N'D.' + CAST(ex.SubNum AS NVARCHAR(10)) + N'.' + CAST(pt.PanelSeq AS NVARCHAR(10)),
+           N'D.5.' + pt.PanelType,
            N'    ' + pt.PanelType,
-           CAST(COUNT(DISTINCT CASE WHEN l.SubStatus = ex.SubStatusVal AND l.PanelType = pt.PanelType THEN l.Accession END) AS DECIMAL(18,2))
+           CAST(COUNT(DISTINCT CASE WHEN l.SubStatus = 'Coding exception' AND l.PanelType = pt.PanelType THEN l.Accession END) AS DECIMAL(18,2))
     FROM #Lis l
-    CROSS JOIN (VALUES (5, 'Coding exception'), (6, 'CP Exception')) ex(SubNum, SubStatusVal)
     CROSS JOIN #LisPanelTypes pt
     WHERE l.NewStatus = 'Billable' AND l.BillCategory = 'Not Billed'
-    GROUP BY l.LISYear, l.LISMonth, ex.SubNum, ex.SubStatusVal, pt.PanelSeq, pt.PanelType
+    GROUP BY l.LISYear, l.LISMonth, pt.PanelType
     UNION ALL
     SELECT 0, 0,
-           N'D.' + CAST(ex.SubNum AS NVARCHAR(10)) + N'.' + CAST(pt.PanelSeq AS NVARCHAR(10)),
+           N'D.5.' + pt.PanelType,
            N'    ' + pt.PanelType,
-           CAST(COUNT(DISTINCT CASE WHEN l.SubStatus = ex.SubStatusVal AND l.PanelType = pt.PanelType THEN l.Accession END) AS DECIMAL(18,2))
+           CAST(COUNT(DISTINCT CASE WHEN l.SubStatus = 'Coding exception' AND l.PanelType = pt.PanelType THEN l.Accession END) AS DECIMAL(18,2))
     FROM #Lis l
-    CROSS JOIN (VALUES (5, 'Coding exception'), (6, 'CP Exception')) ex(SubNum, SubStatusVal)
     CROSS JOIN #LisPanelTypes pt
     WHERE l.NewStatus = 'Billable' AND l.BillCategory = 'Not Billed'
-    GROUP BY ex.SubNum, ex.SubStatusVal, pt.PanelSeq, pt.PanelType;
+    GROUP BY pt.PanelType;
 
     -- ── E.{n}  Other Samples by NewStatus (pre-aggregated) ─────────────────────
     PRINT CONVERT(VARCHAR(8), GETDATE(), 108) + ' [LIS-8] Building E.{n} (pre-agg)...';

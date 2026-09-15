@@ -101,7 +101,11 @@ public sealed class NoteSaveRequest
     public string   ReportName       { get; set; } = "Executive Summary";
     public string?  ReportRunId      { get; set; }
     public string?  WeekRangeText    { get; set; }
+
+    [System.Text.Json.Serialization.JsonConverter(typeof(NullableDateTimeJsonConverter))]
     public DateTime? WeekRangeStart  { get; set; }
+
+    [System.Text.Json.Serialization.JsonConverter(typeof(NullableDateTimeJsonConverter))]
     public DateTime? WeekRangeEnd    { get; set; }
 
     public string   RiskCode         { get; set; } = "Yellow";
@@ -113,9 +117,16 @@ public sealed class NoteSaveRequest
     public string?  ActionSolution   { get; set; }
     public string?  FeedbackResponse { get; set; }
     public string?  Responsibility   { get; set; }
+
+    [System.Text.Json.Serialization.JsonConverter(typeof(NullableDateTimeJsonConverter))]
     public DateTime? DiscussionDate  { get; set; }
+
+    [System.Text.Json.Serialization.JsonConverter(typeof(NullableDateTimeJsonConverter))]
     public DateTime? ETA             { get; set; }
+
+    [System.Text.Json.Serialization.JsonConverter(typeof(NullableDateTimeJsonConverter))]
     public DateTime? ClosedDate      { get; set; }
+
     public string   StatusCode       { get; set; } = "Open";
 }
 

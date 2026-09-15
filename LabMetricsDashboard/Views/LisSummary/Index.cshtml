@@ -157,6 +157,205 @@
         font-variant-numeric: tabular-nums;
     }
 
+    .lis-km {
+        position: relative;
+        overflow: hidden;
+        box-shadow: 0 10px 28px rgba(15, 39, 71, .06);
+    }
+
+    .lis-km::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 4px;
+        background: linear-gradient(180deg, #1b3a5c 0%, #4f7fad 100%);
+    }
+
+    .lis-km-body {
+        padding: 1.15rem 1.25rem 1.2rem;
+    }
+
+    .lis-km-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: .85rem 1.25rem;
+        flex-wrap: wrap;
+        margin-bottom: 1rem;
+    }
+
+    .lis-km-filter {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        max-width: 100%;
+        padding: .4rem .7rem;
+        border-radius: .7rem;
+        background: #f3f7fb;
+        border: 1px solid #e2ebf4;
+        color: #5b6f86;
+        font-size: .75rem;
+        font-weight: 500;
+        line-height: 1.25;
+    }
+
+    .lis-km-filter-label {
+        flex: 0 0 auto;
+        padding: .12rem .45rem;
+        border-radius: .45rem;
+        background: #1b3a5c;
+        color: #fff;
+        font-size: .65rem;
+        font-weight: 700;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+    }
+
+    .lis-km-panel {
+        border: 1px solid #e4edf6;
+        border-radius: .9rem;
+        background:
+            linear-gradient(180deg, #f8fbfe 0%, #ffffff 42%);
+        overflow: hidden;
+    }
+
+    .lis-km-table {
+        width: 100%;
+        margin: 0;
+        border-collapse: separate;
+        border-spacing: 0;
+        table-layout: fixed;
+    }
+
+    .lis-km-table thead th {
+        padding: .7rem 1rem;
+        border: 0;
+        border-bottom: 1px solid #e4edf6;
+        background: transparent;
+        color: #6a7f97;
+        font-size: .68rem;
+        font-weight: 700;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        text-align: right;
+        white-space: nowrap;
+    }
+
+    .lis-km-table .lis-km-metric-head {
+        text-align: left;
+        width: 28%;
+    }
+
+    .lis-km-table tbody th,
+    .lis-km-table tbody td {
+        padding: 1rem;
+        border: 0;
+        border-bottom: 1px solid #edf2f7;
+        vertical-align: middle;
+        background: transparent;
+    }
+
+    .lis-km-table tbody tr:last-child th,
+    .lis-km-table tbody tr:last-child td {
+        border-bottom: 0;
+    }
+
+    .lis-km-metric-name {
+        text-align: left;
+        font-weight: 600;
+    }
+
+    .lis-km-metric-title {
+        display: block;
+        color: #14324f;
+        font-size: .92rem;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+
+    .lis-km-metric-unit {
+        display: block;
+        margin-top: .18rem;
+        color: #8496ab;
+        font-size: .7rem;
+        font-weight: 500;
+        letter-spacing: .02em;
+    }
+
+    .lis-km-table tbody td {
+        text-align: right;
+    }
+
+    .lis-km-value {
+        display: block;
+        color: #001b44;
+        font-size: 1.28rem;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -.02em;
+        line-height: 1.1;
+    }
+
+    .lis-km-delta {
+        display: inline-block;
+        margin-top: .28rem;
+        padding: .08rem .4rem;
+        border-radius: 999px;
+        font-size: .68rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: .01em;
+        line-height: 1.2;
+    }
+
+    .lis-km-delta.is-better {
+        color: #0f6b45;
+        background: #e8f7ef;
+    }
+
+    .lis-km-delta.is-worse {
+        color: #9a3412;
+        background: #fff1e8;
+    }
+
+    .lis-km-delta.is-flat {
+        color: #64748b;
+        background: #eef2f6;
+    }
+
+    .lis-km-table th.lis-km-latest,
+    .lis-km-table td.lis-km-latest {
+        background: linear-gradient(180deg, rgba(27, 58, 92, .06) 0%, rgba(27, 58, 92, .03) 100%);
+    }
+
+    .lis-km-table thead th.lis-km-latest {
+        color: #1b3a5c;
+    }
+
+    .lis-km-table td.lis-km-latest .lis-km-value {
+        color: #0b2744;
+    }
+
+    @@media (max-width: 768px) {
+        .lis-km-table {
+            table-layout: auto;
+        }
+
+        .lis-km-table thead th,
+        .lis-km-table tbody th,
+        .lis-km-table tbody td {
+            padding: .75rem .7rem;
+        }
+
+        .lis-km-value {
+            font-size: 1.08rem;
+        }
+
+        .lis-km-table .lis-km-metric-head {
+            width: auto;
+        }
+    }
+
     @@media (max-width: 992px) {
         .lis-kpi-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1195,6 +1394,13 @@ else if (result is null)
 }
 else if (activeTab == "summary")
 {
+    <div id="lisKeyMetricsHost">
+        @if (result.KeyMetrics is { Months.Count: > 0 } keyMetrics)
+        {
+            @await Html.PartialAsync("_KeyMetrics", keyMetrics)
+        }
+    </div>
+
     <div class="lis-kpi-grid">
         <div class="lis-kpi-card">
             <div class="lis-kpi-label">Total Samples</div>
@@ -1582,15 +1788,34 @@ else
         if (!host || !document.getElementById('lisResultSpinner')) return;
         if (window.lmdFpLog) window.lmdFpLog('spinner-on', 'page landed — in-page spinner on');
         var qs = window.location.search || '';
-        fetch('@Url.Action("GetSummary", "LisSummary")' + qs, { credentials: 'same-origin' })
+        var controller = new AbortController();
+        var timeoutId = setTimeout(function () { controller.abort(); }, 90000);
+        fetch('@Url.Action("GetSummary", "LisSummary")' + qs, { credentials: 'same-origin', signal: controller.signal })
             .then(function (r) { return r.text(); })
             .then(function (html) {
+                clearTimeout(timeoutId);
                 host.innerHTML = html;
                 if (window.lmdInitLisFreeze) window.lmdInitLisFreeze();
                 if (window.lmdFpLog) window.lmdFpLog('monthly-html', 'LIS summary HTML on screen');
+                var kmHost = document.getElementById('lisKeyMetricsHost');
+                if (!kmHost || kmHost.querySelector('.lis-km')) return;
+                kmHost.innerHTML = '<div class="text-muted small py-2 px-1">Loading key metrics…</div>';
+                fetch('@Url.Action("GetKeyMetrics", "LisSummary")' + qs, { credentials: 'same-origin' })
+                    .then(function (r) { return r.text(); })
+                    .then(function (kmHtml) {
+                        if (!kmHost.isConnected) return;
+                        kmHost.innerHTML = kmHtml || '';
+                    })
+                    .catch(function () {
+                        if (kmHost.isConnected) kmHost.innerHTML = '';
+                    });
             })
-            .catch(function () {
-                host.innerHTML = '<div class="alert alert-warning border-0 shadow-sm">Failed to load LIS Summary. Please refresh the page.</div>';
+            .catch(function (err) {
+                clearTimeout(timeoutId);
+                var timedOut = err && err.name === 'AbortError';
+                host.innerHTML = timedOut
+                    ? '<div class="alert alert-warning border-0 shadow-sm">LIS Summary is taking too long. Set <strong>Date Range</strong> to <strong>This month</strong> (or a shorter Custom range) and click Apply Filter.</div>'
+                    : '<div class="alert alert-warning border-0 shadow-sm">Failed to load LIS Summary. Please refresh the page.</div>';
             });
         fetch('@Url.Action("GetMeta", "LisSummary")' + qs, { credentials: 'same-origin' })
             .then(function (r) { return r.ok ? r.json() : null; })

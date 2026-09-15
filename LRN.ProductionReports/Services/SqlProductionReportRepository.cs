@@ -1165,8 +1165,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
 
         var whereClauses = new List<string>
         {
-            "LTRIM(RTRIM(PayerName_Raw)) <> ''",
-            "PayerName_Raw IS NOT NULL",
+            // Full claim-level: blank payer coalesced later — do not exclude blanks.
         };
         var parameters = new List<SqlParameter>();
 
@@ -1191,7 +1190,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         if (filterPayerNames is { Count: > 0 })
         {
             var pNames = filterPayerNames.Select((n, i) => $"@pxpn{i}").ToList();
-            whereClauses.Add($"LTRIM(RTRIM(PayerName_Raw)) IN ({string.Join(",", pNames)})");
+            whereClauses.Add($"LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))) IN ({string.Join(",", pNames)})");
             for (int i = 0; i < filterPayerNames.Count; i++)
                 parameters.Add(new SqlParameter($"@pxpn{i}", filterPayerNames[i]));
         }
@@ -1248,14 +1247,14 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             : "PanelName";
         var pivotSql = $"""
             SELECT
-                LTRIM(RTRIM(PayerName_Raw))                            AS PayerName,
+                LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))         AS PayerName,
                 LTRIM(RTRIM({pxpPanelExpr}))                           AS PanelName,
                 COUNT(DISTINCT ClaimID)                                  AS ClaimCount,
                 ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)  AS BilledCharges
             FROM dbo.ClaimLevelData
             WHERE {whereStr}
             GROUP BY
-                LTRIM(RTRIM(PayerName_Raw)),
+                LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
                 LTRIM(RTRIM({pxpPanelExpr}))
             ORDER BY PayerName, PanelName
             """;
@@ -3993,7 +3992,9 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         DateOnly? filterFirstBilledTo,
         CancellationToken ct)
     {
-        var spName = $"dbo.usp_Get{spPrefix}PayerBreakdown";
+        var spName = string.Equals(spPrefix, CovePrefix, StringComparison.OrdinalIgnoreCase)
+            ? "dbo.usp_GetCove_PayerBreakdown_FullCharges"
+            : $"dbo.usp_Get{spPrefix}PayerBreakdown";
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new SqlCommand(spName, conn)
@@ -4002,7 +4003,22 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             CommandTimeout = 180,
         };
         AddProductionFilterParameters(cmd, filterPayerNames, filterPanelNames, filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, filterFirstBilledFrom, filterFirstBilledTo);
-        await using var rdr = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        SqlDataReader rdr;
+        try
+        {
+            rdr = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        }
+        catch (SqlException ex) when (string.Equals(spPrefix, CovePrefix, StringComparison.OrdinalIgnoreCase) && ex.Number is 2812 or 208)
+        {
+            await using var fb = new SqlCommand($"dbo.usp_Get{spPrefix}PayerBreakdown", conn)
+            {
+                CommandType = CommandType.StoredProcedure,
+                CommandTimeout = 180,
+            };
+            AddProductionFilterParameters(fb, filterPayerNames, filterPanelNames, filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, filterFirstBilledFrom, filterFirstBilledTo);
+            rdr = await fb.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        }
+        await using var _rdr = rdr;
 
         var payerMonth = new Dictionary<string, Dictionary<string, (int c, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
         var allMonths = new SortedSet<string>();
@@ -4067,7 +4083,9 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         DateOnly? filterFirstBilledTo,
         CancellationToken ct)
     {
-        var spName = $"dbo.usp_Get{spPrefix}PayerByPanel";
+        var spName = string.Equals(spPrefix, CovePrefix, StringComparison.OrdinalIgnoreCase)
+            ? "dbo.usp_GetCove_PayerByPanel_FullClaims"
+            : $"dbo.usp_Get{spPrefix}PayerByPanel";
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new SqlCommand(spName, conn)
@@ -4076,7 +4094,23 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             CommandTimeout = 180,
         };
         AddProductionFilterParameters(cmd, filterPayerNames, filterPanelNames, filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, filterFirstBilledFrom, filterFirstBilledTo);
-        await using var rdr = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        SqlDataReader rdr;
+        try
+        {
+            rdr = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        }
+        catch (SqlException ex) when (string.Equals(spPrefix, CovePrefix, StringComparison.OrdinalIgnoreCase) && ex.Number is 2812 or 208)
+        {
+            await using var fb = new SqlCommand($"dbo.usp_Get{spPrefix}PayerByPanel", conn)
+            {
+                CommandType = CommandType.StoredProcedure,
+                CommandTimeout = 180,
+            };
+            AddProductionFilterParameters(fb, filterPayerNames, filterPanelNames, filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, filterFirstBilledFrom, filterFirstBilledTo);
+            rdr = await fb.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        }
+        await using (rdr)
+        {
 
         var payerPanel = new Dictionary<string, Dictionary<string, (int c, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
         var allPanels = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -4119,6 +4153,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         }
 
         return new PayerPanelResult(panelColumns, payerRows, grandByPanel, grandByPanel.Values.Sum(c => c.ClaimCount), grandByPanel.Values.Sum(c => c.BilledCharges));
+        }
     }
 
     private async Task<UnbilledAgingResult> GetUnbilledAgingFromStoredProcedureAsync(
@@ -4196,7 +4231,9 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         DateOnly? filterFirstBilledTo,
         CancellationToken ct)
     {
-        var spName = $"dbo.usp_Get{spPrefix}CPTBreakdown";
+        var spName = string.Equals(spPrefix, CovePrefix, StringComparison.OrdinalIgnoreCase)
+            ? "dbo.usp_GetCove_CPTBreakdown_CountCpt"
+            : $"dbo.usp_Get{spPrefix}CPTBreakdown";
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new SqlCommand(spName, conn)
@@ -4205,7 +4242,22 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             CommandTimeout = 180,
         };
         AddProductionFilterParameters(cmd, filterPayerNames, filterPanelNames, filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, filterFirstBilledFrom, filterFirstBilledTo);
-        await using var rdr = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        SqlDataReader rdr;
+        try
+        {
+            rdr = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        }
+        catch (SqlException ex) when (string.Equals(spPrefix, CovePrefix, StringComparison.OrdinalIgnoreCase) && ex.Number is 2812 or 208)
+        {
+            await using var fb = new SqlCommand($"dbo.usp_Get{spPrefix}CPTBreakdown", conn)
+            {
+                CommandType = CommandType.StoredProcedure,
+                CommandTimeout = 180,
+            };
+            AddProductionFilterParameters(fb, filterPayerNames, filterPanelNames, filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, filterFirstBilledFrom, filterFirstBilledTo);
+            rdr = await fb.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        }
+        await using var _rdr = rdr;
 
         var cptMonth = new Dictionary<string, Dictionary<string, (decimal units, decimal ch, int claims)>>(StringComparer.OrdinalIgnoreCase);
         var allMonths = new SortedSet<string>();
@@ -4218,7 +4270,9 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             // NorthWest Billed Units is COUNT(Units), not SUM(Units). CPTCount is the
             // count of unit/line rows (snapshot still stores SUM in BilledUnits until refresh).
             decimal units;
-            if (string.Equals(spPrefix, NorthWestPrefix, StringComparison.OrdinalIgnoreCase))
+            // Cove Count of CPT — never SUM(Units). NW already maps count→units.
+            if (string.Equals(spPrefix, NorthWestPrefix, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(spPrefix, CovePrefix, StringComparison.OrdinalIgnoreCase))
             {
                 units = claimCount;
             }

@@ -72,7 +72,8 @@ public sealed class LisSummaryReportGenerator : IReportGenerator
 
         var summary = await _repo.GetLisSummaryAsync(
             connStr, job.LabName, f.LabId, dateType, dateFrom, dateTo,
-            f.Panel, f.Clinic, f.RefPhy, f.SalesRep, f.Collector, ct);
+            f.Panel, f.Clinic, f.RefPhy, f.SalesRep, f.Collector, ct,
+            includeKeyMetrics: true);
         await Progress(10);
 
         // Resolves the line-level SELECT + the AdditionalFields columns; the key

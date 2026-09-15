@@ -1,10 +1,12 @@
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Models.Notes;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using LabMetricsDashboard.Services;
 using LRN.ProductionReports.Models;
 using LRN.ProductionReports.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Caching.Memory;
 
 
@@ -2194,6 +2196,8 @@ public class DashboardController : Controller
             availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
 
         var selectedLab = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+        ProductionDiagLog.Write(_logger,
+            $"shell-request lab={selectedLab} host={Request.Host} path={Request.PathBase}{Request.Path} qs={Request.QueryString.Value}");
         FirstPaintLog.Write(_logger, "Production", selectedLab ?? "", "request", 0,
             "controller entered (HTML not sent yet)");
 
@@ -2309,6 +2313,8 @@ public class DashboardController : Controller
 
             ViewData["AnalysisRange"] = AnalysisRangeInfo.Empty;
 
+            var analysisTask = _analysisRange.GetAsync(config.DbConnectionString, ct);
+
             var vm = new ProductionReportViewModel
             {
                 AvailableLabs              = availableLabs,
@@ -2392,13 +2398,37 @@ public class DashboardController : Controller
                 CptBreakdownGrandTotalUnits    = cptResult.GrandTotalUnits,
                 CptBreakdownGrandTotalCharges  = cptResult.GrandTotalCharges,
                 CptUnitsLabel                  = isAugustusLab
+                    || selectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
                     ? "Count of CPT"
-                    : genericSummaryRepo?.IsCertus == true ? "Billed Units" : "No. of Claims",
+                    : genericSummaryRepo?.IsCertus == true ? "Billed Units" : "Count of CPT",
                 ReportWeekFolder               = null,
                 ReportRunId                    = null,
                 LimsRunId                      = null,
             };
-            CacheProductionReport(vm);
+            var entry = CacheProductionReport(vm);
+            var monthlySw = Stopwatch.StartNew();
+            try
+            {
+                await EnsureProductionPaneAsync(entry, "monthly-pane", ct);
+                ProductionDiagLog.Write(_logger,
+                    $"shell-monthly-ok lab={selectedLab} panels={vm.PanelRows.Count} months={vm.Months.Count} ms={monthlySw.ElapsedMilliseconds} host={Request.Host}");
+            }
+            catch (Exception monthlyEx)
+            {
+                ProductionDiagLog.Error(_logger, monthlyEx, "shell-monthly-fail");
+            }
+
+            try
+            {
+                var analysis = await analysisTask;
+                ViewData["AnalysisRange"] = analysis;
+            }
+            catch (Exception analysisEx)
+            {
+                ProductionDiagLog.Write(_logger, $"shell-banner-fail lab={selectedLab} {analysisEx.GetType().Name}: {analysisEx.Message}");
+            }
+            ProductionDiagLog.Write(_logger,
+                $"shell-ok lab={selectedLab} cacheKeyLen={(ViewData["PrCacheKey"] as string)?.Length ?? 0} host={Request.Host}");
             return View(vm);
         }
         catch (Exception ex)
@@ -2420,26 +2450,44 @@ public class DashboardController : Controller
     [HttpGet]
     public async Task<IActionResult> ProductionSummaryReportTab(string key, string pane, CancellationToken ct)
     {
+        ProductionDiagLog.Write(_logger,
+            $"tab-start pane={pane} keyLen={key?.Length ?? 0} host={Request.Host} path={Request.PathBase}{Request.Path} cancel={ct.IsCancellationRequested}");
         if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(pane))
+        {
+            ProductionDiagLog.Write(_logger, "tab-badrequest empty key or pane");
             return BadRequest();
+        }
         if (!_cache.TryGetValue(key, out CachedProductionReport? entry) || entry is null)
-            return StatusCode(409, "Report expired. Refresh the page.");
+        {
+            ProductionDiagLog.Write(_logger, "tab-cache-miss restoring");
+            if (!TryRestoreProductionCache(key, out entry) || entry is null)
+            {
+                ProductionDiagLog.Write(_logger, "tab-409 cache expired");
+                return StatusCode(409, "Report expired. Refresh the page.");
+            }
+        }
 
         try
         {
             var paneSw = Stopwatch.StartNew();
             await EnsureProductionPaneAsync(entry, pane, ct);
+            ProductionDiagLog.Write(_logger,
+                $"tab-ensure-ok pane={pane} lab={entry.Vm.SelectedLab} ms={paneSw.ElapsedMilliseconds} panels={entry.Vm.PanelRows.Count} months={entry.Vm.Months.Count}");
             FirstPaintLog.Write(_logger, "Production", entry.Vm.SelectedLab, "tab-" + pane,
                 paneSw.ElapsedMilliseconds);
+            ViewData["PrPaneOnly"] = pane;
+            return PartialView("ProductionReport", entry.Vm);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            ProductionDiagLog.Write(_logger, $"tab-cancelled pane={pane}");
+            return StatusCode(499);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "ProductionSummaryReportTab failed for pane {Pane}.", pane);
+            ProductionDiagLog.Error(_logger, ex, $"tab-500 pane={pane}");
             return StatusCode(500, "Could not load this tab.");
         }
-
-        ViewData["PrPaneOnly"] = pane;
-        return PartialView("ProductionReport", entry.Vm);
     }
 
     /// <summary>
@@ -2477,7 +2525,10 @@ public class DashboardController : Controller
         if (string.IsNullOrWhiteSpace(key))
             return BadRequest();
         if (!_cache.TryGetValue(key, out CachedProductionReport? entry) || entry is null)
-            return StatusCode(409, "Report expired. Refresh the page.");
+        {
+            if (!TryRestoreProductionCache(key, out entry) || entry is null)
+                return StatusCode(409, "Report expired. Refresh the page.");
+        }
 
         var vm = entry.Vm;
         if (!_labSettings.Labs.TryGetValue(vm.SelectedLab, out var config)
@@ -2510,19 +2561,92 @@ public class DashboardController : Controller
     private sealed class CachedProductionReport
     {
         public required ProductionReportViewModel Vm { get; init; }
-        public HashSet<string> LoadedPanes { get; } = new(StringComparer.OrdinalIgnoreCase);
-        public SemaphoreSlim Gate { get; } = new(1, 1);
+        public ConcurrentDictionary<string, byte> LoadedPanes { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public ConcurrentDictionary<string, SemaphoreSlim> PaneGates { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
-    private void CacheProductionReport(ProductionReportViewModel vm)
+    private static MemoryCacheEntryOptions ProductionCacheOptions() => new()
+    {
+        SlidingExpiration = TimeSpan.FromHours(2),
+        AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(8),
+    };
+
+    private CachedProductionReport CacheProductionReport(ProductionReportViewModel vm)
     {
         var key = $"pr|{User.Identity?.Name}|{vm.SelectedLab}|{Request.QueryString.Value}";
-        _cache.Set(key, new CachedProductionReport { Vm = vm }, new MemoryCacheEntryOptions
-        {
-            SlidingExpiration = TimeSpan.FromMinutes(15),
-        });
+        var entry = new CachedProductionReport { Vm = vm };
+        _cache.Set(key, entry, ProductionCacheOptions());
         ViewData["PrCacheKey"] = key;
         ViewData["PrLazyTabs"] = true;
+        return entry;
+    }
+
+    /// <summary>
+    /// Rebuilds the lazy-tab cache after IIS recycle / memory eviction so Weekly and
+    /// later tabs do not 409 while Monthly (already on screen) still looks fine.
+    /// Key format: pr|{user}|{lab}|{original query string}.
+    /// </summary>
+    private bool TryRestoreProductionCache(string key, out CachedProductionReport? entry)
+    {
+        entry = null;
+        var parts = key.Split('|', 4);
+        if (parts.Length < 3 || !string.Equals(parts[0], "pr", StringComparison.Ordinal))
+            return false;
+        if (!string.Equals(parts[1], User.Identity?.Name ?? "", StringComparison.Ordinal))
+            return false;
+
+        var selectedLab = parts[2];
+        if (string.IsNullOrWhiteSpace(selectedLab) || !_labSettings.Labs.TryGetValue(selectedLab, out var config))
+            return false;
+
+        var qs = parts.Length > 3 ? parts[3] : string.Empty;
+        if (qs.StartsWith('?')) qs = qs[1..];
+        var q = QueryHelpers.ParseQuery(qs);
+
+        static List<string> QList(IReadOnlyDictionary<string, Microsoft.Extensions.Primitives.StringValues> query, string name) =>
+            query.TryGetValue(name, out var vals)
+                ? vals.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+                : [];
+
+        static string? Q(IReadOnlyDictionary<string, Microsoft.Extensions.Primitives.StringValues> query, string name) =>
+            query.TryGetValue(name, out var vals) ? vals.FirstOrDefault() : null;
+
+        static bool QBool(IReadOnlyDictionary<string, Microsoft.Extensions.Primitives.StringValues> query, string name) =>
+            query.TryGetValue(name, out var vals)
+            && bool.TryParse(vals.FirstOrDefault(), out var b) && b;
+
+        var productionRule = config.ProductionSummary?.Rule;
+        var weekRule = !string.IsNullOrWhiteSpace(config.ProductionSummary?.WeekRule)
+            ? config.ProductionSummary!.WeekRule : productionRule;
+        var isAugustusLab = selectedLab.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
+                         || selectedLab.Equals("Augustus", StringComparison.OrdinalIgnoreCase);
+        _labSummaryRepos.TryGetValue(selectedLab, out var genericSummaryRepo);
+
+        var vm = new ProductionReportViewModel
+        {
+            SelectedLab = selectedLab,
+            ProductionSummaryRule = productionRule,
+            ProductionSummaryWeekRule = weekRule,
+            ProductionSummaryWeekRange = config.ProductionSummary?.WeekRange,
+            FilterPayerNames = QList(q, "filterPayerNames"),
+            FilterPanelNames = QList(q, "filterPanelNames"),
+            FilterPayerNamesExclude = QBool(q, "filterPayerNamesExclude"),
+            FilterPanelNamesExclude = QBool(q, "filterPanelNamesExclude"),
+            FilterDosFrom = Q(q, "filterDosFrom"),
+            FilterDosTo = Q(q, "filterDosTo"),
+            FilterFirstBillFrom = Q(q, "filterFirstBillFrom"),
+            FilterFirstBillTo = Q(q, "filterFirstBillTo"),
+            FilterFirstBilledFrom = Q(q, "filterFirstBilledFrom"),
+            FilterFirstBilledTo = Q(q, "filterFirstBilledTo"),
+            CptUnitsLabel = isAugustusLab
+                || selectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
+                ? "Count of CPT"
+                : genericSummaryRepo?.IsCertus == true ? "Billed Units" : "Count of CPT",
+        };
+        entry = new CachedProductionReport { Vm = vm };
+        _cache.Set(key, entry, ProductionCacheOptions());
+        _logger.LogInformation("Restored Production tab cache for lab {Lab} key={Key}.", selectedLab, key);
+        return true;
     }
 
     private async Task<(List<string> PayerNames, List<string> PanelNames)> GetProductionFilterOptionsCachedAsync(
@@ -2558,10 +2682,14 @@ public class DashboardController : Controller
 
     private async Task EnsureProductionPaneAsync(CachedProductionReport entry, string pane, CancellationToken ct)
     {
-        await entry.Gate.WaitAsync(ct);
+        // One gate per tab so Weekly / CPT / Payer can load in parallel. The old single
+        // lock made later tabs sit until earlier SPs finished, and IIS then killed them
+        // with a generic "Could not load this tab" error.
+        var paneGate = entry.PaneGates.GetOrAdd(pane, static _ => new SemaphoreSlim(1, 1));
+        await paneGate.WaitAsync(ct);
         try
         {
-            if (entry.LoadedPanes.Contains(pane))
+            if (entry.LoadedPanes.ContainsKey(pane))
                 return;
 
             var vm = entry.Vm;
@@ -2901,11 +3029,11 @@ public class DashboardController : Controller
                     return;
             }
 
-            entry.LoadedPanes.Add(pane);
+            entry.LoadedPanes.TryAdd(pane, 0);
         }
         finally
         {
-            entry.Gate.Release();
+            paneGate.Release();
         }
     }
 
@@ -2970,14 +3098,18 @@ public class DashboardController : Controller
 
         try
         {
+            ProductionDiagLog.Write(
+                $"excel-export-start lab={selectedLab} hasFilters={hasFilters} host={HttpContext.Request.Host}");
             if (!hasFilters)
             {
                 var recentReport = TryResolveLatestProductionReportExcel(config.Reports);
                 if (recentReport is null)
                 {
+                    ProductionDiagLog.Write($"excel-export-nofile lab={selectedLab} reports={config.Reports}");
                     TempData["ExportError"] = $"No pre-generated Production Report Excel was found for {selectedLab}. Please wait for ClaimLineCSVDataCapture to generate it or apply filters to build a live export.";
                     return RedirectToAction(nameof(ProductionSummaryReport), new { lab });
                 }
+                ProductionDiagLog.Write($"excel-export-file lab={selectedLab} file={recentReport.Name}");
 
                 Response.Cookies.Append("prExportDone", "1", new CookieOptions
 
@@ -3235,7 +3367,10 @@ public class DashboardController : Controller
                 CptBreakdownGrandByMonth        = cptResult.GrandTotalByMonth,
                 CptBreakdownGrandTotalUnits     = cptResult.GrandTotalUnits,
                 CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
-                CptUnitsLabel                   = isAugustusLab ? "Count of CPT" : "No. of Claims",
+                CptUnitsLabel                   = isAugustusLab
+                    || selectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
+                    ? "Count of CPT"
+                    : "Count of CPT",
                 PanelBreakdownMonths              = pnlResult.Months,
                 PanelBreakdownYears               = pnlResult.Years,
                 PanelBreakdownRows                = pnlResult.PayerRows,
@@ -3273,7 +3408,7 @@ public class DashboardController : Controller
 
             await using var stream = new MemoryStream();
             workbook.SaveAs(stream);
-            stream.Position = 0;
+            OpenXmlPivotCacheFix.Apply(stream);
 
             _logger.LogInformation(
                 "[ProdExcelExport] Phase 5 DONE in {Ms}ms ({Sec:N1}s) — " +
@@ -3311,6 +3446,7 @@ public class DashboardController : Controller
         }
         catch (Exception ex)
         {
+            ProductionDiagLog.Error(_logger, ex, $"excel-export-fail lab={selectedLab}");
             _logger.LogError(ex, "Production Report Excel export failed for lab '{LabName}'.", selectedLab);
             TempData["ExportError"] = $"Export failed: {ex.Message}";
             return RedirectToAction(nameof(ProductionSummaryReport), new { lab });
@@ -3513,6 +3649,7 @@ public class DashboardController : Controller
                 CptBreakdownGrandByMonth        = cptResult.GrandTotalByMonth,
                 CptBreakdownGrandTotalUnits     = cptResult.GrandTotalUnits,
                 CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
+                CptUnitsLabel                   = "Count of CPT",
             };
 
             sw.Restart();
@@ -3626,16 +3763,28 @@ public class DashboardController : Controller
     }
 
     /// <summary>
-    /// Returns the most recent pre-generated workbook from the configured reports folder.
+    /// Returns the most recent pre-generated Production Report workbook.
+    /// Ignores Coding / Collection xlsx that share the same reports root.
     /// </summary>
     private static FileInfo? TryResolveLatestProductionReportExcel(string? reportsRoot)
     {
         if (string.IsNullOrWhiteSpace(reportsRoot) || !Directory.Exists(reportsRoot))
             return null;
 
+        static bool IsProductionWorkbook(FileInfo file)
+        {
+            if (file.Name.Contains("ProductionReport", StringComparison.OrdinalIgnoreCase))
+                return true;
+            var dir = file.DirectoryName ?? "";
+            return dir.Contains("Production Report", StringComparison.OrdinalIgnoreCase)
+                && !file.Name.Contains("Collection", StringComparison.OrdinalIgnoreCase)
+                && !file.Name.Contains("Coding", StringComparison.OrdinalIgnoreCase);
+        }
+
         return Directory
             .EnumerateFiles(reportsRoot, "*.xlsx", SearchOption.AllDirectories)
             .Select(path => new FileInfo(path))
+            .Where(IsProductionWorkbook)
             .MaxBy(file => file.LastWriteTimeUtc);
     }
 

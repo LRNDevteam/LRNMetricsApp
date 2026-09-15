@@ -146,6 +146,7 @@ public sealed class CollectionReportGenerator : IReportGenerator
             using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
                 wb.SaveAs(fs);
         }
+        OpenXmlPivotCacheFix.Apply(tempPath);
         await progress(20);
         _ = (claimCount, lineCount);   // pre-counts drive GenerateAsync's log/progress only
 

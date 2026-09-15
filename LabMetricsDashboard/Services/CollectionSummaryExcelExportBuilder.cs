@@ -9,7 +9,7 @@ namespace LabMetricsDashboard.Services;
 /// mint month bands on volume sheets, white parent / gray child rows,
 /// gold / peach / orange tabs, Calibri 10.
 /// </summary>
-public static class CollectionSummaryExcelExportBuilder
+public static partial class CollectionSummaryExcelExportBuilder
 {
     private static readonly XLColor ColHeader = ExcelTheme.Collection.HeaderBg;
     private static readonly XLColor ColMonth = ExcelTheme.Collection.MonthHeaderBg;
@@ -42,18 +42,21 @@ public static class CollectionSummaryExcelExportBuilder
     {
         var wb = new XLWorkbook();
 
-        BuildMonthlyClaimVolumeSheet(wb, vm, labName);
-        BuildWeeklyClaimVolumeSheet(wb, vm, labName);
+        var insightsWs = BuildMonthlyClaimVolumeSheet(wb, vm, labName);
+        BuildWeeklyClaimVolumeSheet(wb, vm, labName, insightsWs);
+        BuildAvgPaymentsSheet(wb, vm.AvgPaymentsLast3Months, labName, lastMonths: 3);
         BuildTop5ReimbursementSheet(wb, vm.Top5Reimbursement, labName);
         if (vm.ShowTop5TotalPayments)
             BuildTop5TotalPaymentsSheet(wb, vm.Top5TotalPayments, labName);
         BuildInsuranceAgingSheet(wb, vm.InsuranceAging, labName);
         BuildPanelPaymentSheet(wb, vm.PanelPayments, labName);
         BuildInsurancePaymentPctSheet(wb, vm.InsurancePaymentPct, labName);
+        BuildInsuranceVsPaymentSheet(wb, vm.InsuranceVsPayment, labName);
         BuildCptPaymentPctSheet(wb, vm.CptPaymentPct, labName);
         BuildPanelAveragesSheet(wb, vm.PanelAverages, labName);
-        BuildAvgPaymentsSheet(wb, vm.AvgPayments, labName);
+        BuildAvgPaymentsSheet(wb, vm.AvgPayments, labName, lastMonths: 6);
         BuildStatusSummarySheet(wb, vm.StatusSummary, labName);
+        BuildRepVsPaymentSheet(wb, vm.RepPayments, labName);
         BuildProviderSummarySheet(wb, vm.ProviderSummary, labName);
 
         if (claimRowsOmitted.HasValue)
@@ -74,7 +77,17 @@ public static class CollectionSummaryExcelExportBuilder
             WriteFilterFooter(ws, lastRow + 2, colCount, activeFilters);
         }
 
+        ApplySheetOrder(wb);
         return wb;
+    }
+
+    /// <summary>Insights first, then Avg payments_Last 3 Months.</summary>
+    internal static void ApplySheetOrder(XLWorkbook wb)
+    {
+        if (wb.Worksheets.TryGetWorksheet("Insights", out var insights))
+            insights.Position = 1;
+        if (wb.Worksheets.TryGetWorksheet("Avg payments_Last 3 Months", out var avg3))
+            avg3.Position = 2;
     }
 
     /// <summary>
@@ -98,12 +111,12 @@ public static class CollectionSummaryExcelExportBuilder
 
     // ?? Monthly Claim Volume ????????????????????????????????????????
 
-    private static void BuildMonthlyClaimVolumeSheet(XLWorkbook wb, CollectionSummaryViewModel vm, string labName)
+    private static IXLWorksheet? BuildMonthlyClaimVolumeSheet(XLWorkbook wb, CollectionSummaryViewModel vm, string labName)
     {
         var pivot = vm.MonthlyClaimVolume;
-        if (!pivot.HasData) return;
+        if (!pivot.HasData) return null;
 
-        var ws = wb.AddWorksheet("Monthly Claim Volume");
+        var ws = wb.AddWorksheet("Insights");
         ws.TabColor = ExcelTheme.Collection.TabRed;
         ExcelTheme.ApplyDefaults(ws);
 
@@ -123,7 +136,7 @@ public static class CollectionSummaryExcelExportBuilder
         }
         colCount += 3;
 
-        int row = 1;
+        int row = ExcelTheme.Collection.WriteReportMetaHeader(ws, colCount, CollectionInsightsMeta(vm, labName));
         ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, $"Monthly Claim Volume \u2014 {labName}");
         row++;
 
@@ -260,23 +273,55 @@ public static class CollectionSummaryExcelExportBuilder
         }
 
         AutoFitColumns(ws);
-        ws.SheetView.FreezeRows(hRow3);
         ExcelTheme.FinishOutline(ws);
+        return ws;
     }
 
-    // ?? Weekly Claim Volume ?????????????????????????????????????????
+    private static List<(string Label, string? Value)> CollectionInsightsMeta(
+        CollectionSummaryViewModel vm, string labName)
+    {
+        var range = vm.AnalysisRange;
+        var analysis = string.IsNullOrWhiteSpace(range.WeekFolder)
+            ? "Billed Week Range"
+            : $"Billed Week Range  |  {range.WeekFolder}";
+        var inserted = range.InsertedDateTime.HasValue
+            ? range.InsertedDateTime.Value.ToString("MMM d, yyyy h:mm tt")
+            : "N/A";
+        return
+        [
+            ("Client Name", labName),
+            ("Report Date", DateTime.Now.ToString("dddd, MMMM d, yyyy")),
+            ("Report Type", "Collection Report"),
+            ("Analysis Range", analysis),
+            ("ReportId (RunID)", string.IsNullOrWhiteSpace(range.RunId) ? "N/A" : range.RunId),
+            ("Inserted Date", inserted),
+            ("Source", "LRN (LIS)"),
+        ];
+    }
 
-    private static void BuildWeeklyClaimVolumeSheet(XLWorkbook wb, CollectionSummaryViewModel vm, string labName)
+    private static void BuildWeeklyClaimVolumeSheet(
+        XLWorkbook wb, CollectionSummaryViewModel vm, string labName, IXLWorksheet? insightsWs)
     {
         var pivot = vm.WeeklyClaimVolume;
         if (!pivot.HasData) return;
 
-        var ws = wb.AddWorksheet("Weekly Claim Volume");
-        ws.TabColor = ExcelTheme.Collection.TabRed;
-        ExcelTheme.ApplyDefaults(ws);
-
         int colCount = 1 + pivot.Weeks.Count * 3 + 3; // Panel + weeks*3 + Grand*3
-        int row = 1;
+        var appended = insightsWs is not null;
+        var ws = insightsWs
+                 ?? wb.Worksheets.FirstOrDefault(s => s.Name.Equals("Insights", StringComparison.OrdinalIgnoreCase))
+                 ?? wb.AddWorksheet("Insights");
+        int row;
+        if (appended)
+        {
+            row = (ws.LastRowUsed()?.RowNumber() ?? 1) + 3;
+        }
+        else
+        {
+            ws.TabColor = ExcelTheme.Collection.TabRed;
+            ExcelTheme.ApplyDefaults(ws);
+            row = 1;
+        }
+
         ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, $"Weekly Claim Volume \u2014 {labName}");
         row++;
 
@@ -361,7 +406,6 @@ public static class CollectionSummaryExcelExportBuilder
         }
 
         AutoFitColumns(ws);
-        ws.SheetView.FreezeRows(hRow2);
         ExcelTheme.FinishOutline(ws);
     }
 
@@ -435,7 +479,9 @@ public static class CollectionSummaryExcelExportBuilder
 
     private static void BuildInsuranceAgingSheet(XLWorkbook wb, List<InsuranceAgingRow> rows, string labName)
     {
-        var ws = wb.AddWorksheet("Insurance vs Aging");
+        if (TryBuildInsuranceAgingPivot(wb, rows, labName)) return;
+
+        var ws = wb.AddWorksheet("No Response Vs Aging");
         ws.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
 
@@ -459,7 +505,7 @@ public static class CollectionSummaryExcelExportBuilder
         int colCount = headers.Length;
 
         int row = 1;
-        ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, $"Insurance vs Aging \u2014 {labName}");
+        ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, $"No Response Vs Aging \u2014 {labName}");
         row++;
         ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ColHeader);
         row++;
@@ -555,7 +601,17 @@ public static class CollectionSummaryExcelExportBuilder
 
     private static void BuildPanelPaymentSheet(XLWorkbook wb, List<PanelPaymentRow> rows, string labName)
     {
-        var ws = wb.AddWorksheet("Panel vs Payment");
+        // Formatted month grid (no PivotTable) when year/month grain is present — Cove client layout.
+        var withPeriod = rows.Any(r => r.BillYear > 1900 && r.BillMonth is >= 1 and <= 12);
+        if (withPeriod)
+        {
+            BuildPanelPaymentMonthlySheet(wb, rows, labName);
+            return;
+        }
+
+        if (TryBuildPanelPaymentPivot(wb, rows, labName)) return;
+
+        var ws = wb.AddWorksheet("Panel Vs Payments");
         ws.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
 
@@ -563,7 +619,7 @@ public static class CollectionSummaryExcelExportBuilder
         int colCount = headers.Length;
 
         int row = 1;
-        ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, $"Panel vs Payment \u2014 {labName}");
+        ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, $"Panel Vs Payments \u2014 {labName}");
         row++;
         ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ColHeader);
         row++;
@@ -597,10 +653,130 @@ public static class CollectionSummaryExcelExportBuilder
         ws.SheetView.FreezeRows(3);
     }
 
+    private static void BuildPanelPaymentMonthlySheet(XLWorkbook wb, List<PanelPaymentRow> rows, string labName)
+    {
+        var periods = rows
+            .Where(r => r.BillYear > 1900 && r.BillMonth is >= 1 and <= 12)
+            .Select(r => (Year: r.BillYear, Month: r.BillMonth))
+            .Distinct()
+            .OrderBy(p => p.Year).ThenBy(p => p.Month)
+            .ToList();
+        var years = periods.Select(p => p.Year).Distinct().OrderBy(y => y).ToList();
+
+        var pivotRows = rows
+            .Where(r => r.BillYear > 1900 && r.BillMonth is >= 1 and <= 12)
+            .GroupBy(r => r.PanelName, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new
+            {
+                PanelName = g.Key,
+                Cells = g.GroupBy(r => (Year: r.BillYear, Month: r.BillMonth))
+                    .ToDictionary(
+                        cg => cg.Key,
+                        cg => (Count: cg.Sum(x => x.NoOfClaims), Payment: cg.Sum(x => x.InsurancePayments))),
+                TotalClaims = g.Sum(x => x.NoOfClaims),
+                TotalPay = g.Sum(x => x.InsurancePayments),
+            })
+            .OrderByDescending(r => r.TotalPay)
+            .ToList();
+
+        const int metrics = 2;
+        int colCount = 1 + periods.Count * metrics + years.Count * metrics + metrics;
+
+        var ws = wb.AddWorksheet("Panel Vs Payments");
+        ws.TabColor = ExcelTheme.Collection.TabYellow;
+        ExcelTheme.ApplyDefaults(ws);
+
+        int row = 1;
+        ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, $"Panel Vs Payments — {labName}");
+        row++;
+
+        int hRow1 = row;
+        WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, "Panel", ColHeader);
+        int hCol = 2;
+        foreach (var year in years)
+        {
+            var mons = periods.Where(p => p.Year == year).ToList();
+            int span = mons.Count * metrics + metrics;
+            WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + span - 1, year.ToString(), ColHeader);
+            hCol += span;
+        }
+        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + metrics - 1, "Grand Total", ColHeader);
+
+        int hRow2 = hRow1 + 1;
+        hCol = 2;
+        foreach (var year in years)
+        {
+            foreach (var p in periods.Where(x => x.Year == year))
+            {
+                var mk = new DateTime(p.Year, p.Month, 1).ToString("MMM");
+                WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, mk, ColHeader);
+                hCol += 2;
+            }
+            WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, $"Year {year}", ColHeader);
+            hCol += 2;
+        }
+        WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, "", ColHeader);
+
+        // metric sub-headers on a third row for clarity
+        int hRow3 = hRow2 + 1;
+        hCol = 2;
+        void WriteMetricPair()
+        {
+            WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ColHeader);
+            WriteHeaderCell(ws, hRow3, hCol++, "Insurance Payments", ColHeader);
+        }
+        foreach (var year in years)
+        {
+            foreach (var _ in periods.Where(x => x.Year == year))
+                WriteMetricPair();
+            WriteMetricPair();
+        }
+        WriteMetricPair();
+
+        // Fix merged first column to span 3 header rows
+        ws.Range(hRow1, 1, hRow3, 1).Merge();
+        ws.Cell(hRow1, 1).Value = "Panel";
+        ws.Cell(hRow1, 1).Style.Fill.BackgroundColor = ColHeader;
+        ws.Cell(hRow1, 1).Style.Font.Bold = true;
+        ws.Cell(hRow1, 1).Style.Font.FontColor = XLColor.White;
+
+        row = hRow3 + 1;
+        foreach (var pr in pivotRows)
+        {
+            var bg = XLColor.White;
+            int col = 1;
+            WriteCell(ws, row, col++, pr.PanelName, bg, isText: true);
+            foreach (var year in years)
+            {
+                int yClaims = 0;
+                decimal yPay = 0m;
+                foreach (var p in periods.Where(x => x.Year == year))
+                {
+                    pr.Cells.TryGetValue((p.Year, p.Month), out var cell);
+                    WriteCell(ws, row, col++, cell.Count, bg);
+                    WriteCell(ws, row, col++, cell.Payment, bg, isCurrency: true);
+                    yClaims += cell.Count;
+                    yPay += cell.Payment;
+                }
+                WriteCell(ws, row, col++, yClaims, bg);
+                WriteCell(ws, row, col++, yPay, bg, isCurrency: true);
+            }
+            WriteCell(ws, row, col++, pr.TotalClaims, bg);
+            WriteCell(ws, row, col, pr.TotalPay, bg, isCurrency: true);
+            row++;
+        }
+
+        AutoFitColumns(ws);
+        ws.SheetView.FreezeRows(hRow3);
+        ws.SheetView.FreezeColumns(1);
+    }
+
     // ?? Insurance vs Payment % ??????????????????????????????????????
 
     private static void BuildInsurancePaymentPctSheet(XLWorkbook wb, List<InsurancePaymentPctRow> rows, string labName)
     {
+        if (TryBuildInsurancePaymentPctPivot(wb, rows, labName)) return;
+
         var ws = wb.AddWorksheet("Insurance vs Payment %");
         ws.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
@@ -633,6 +809,8 @@ public static class CollectionSummaryExcelExportBuilder
 
     private static void BuildCptPaymentPctSheet(XLWorkbook wb, List<CptPaymentPctRow> rows, string labName)
     {
+        if (TryBuildCptPaymentPctPivot(wb, rows, labName)) return;
+
         var ws = wb.AddWorksheet("CPT vs Payment %");
         ws.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
@@ -680,7 +858,8 @@ public static class CollectionSummaryExcelExportBuilder
         int colCount = headers.Length;
 
         int row = 1;
-        ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, $"Panel Averages (Last 6 Months) \u2014 {labName}");
+        ExcelTheme.Collection.WriteTitleBar(ws, row, colCount,
+            $"Panel Averages \u2014 Last 6 Months | Billed / DOS \u2014 {labName}");
         row++;
         ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ColHeader);
         row++;
@@ -736,11 +915,12 @@ public static class CollectionSummaryExcelExportBuilder
 
     // ?? Average Payments (Per Panel | Last 6 Months | Posted Date) ?????
 
-    private static void BuildAvgPaymentsSheet(XLWorkbook wb, PanelAveragesResult result, string labName)
+    private static void BuildAvgPaymentsSheet(XLWorkbook wb, PanelAveragesResult result, string labName, int lastMonths = 6)
     {
         if (result.PanelRows.Count == 0) return;
 
-        var ws = wb.AddWorksheet("Avg Payments");
+        var sheetName = lastMonths <= 3 ? "Avg payments_Last 3 Months" : "Avg Payments";
+        var ws = wb.AddWorksheet(sheetName);
         ws.TabColor = ExcelTheme.Collection.TabPeach;
         ExcelTheme.ApplyDefaults(ws);
 
@@ -756,7 +936,7 @@ public static class CollectionSummaryExcelExportBuilder
 
         int row = 1;
         ExcelTheme.Collection.WriteTitleBar(ws, row, colCount,
-            $"Average Payments \u2014 Per Panel | Last 6 Months | Posted Date \u2014 {labName}");
+            $"Average Payments \u2014 Per Panel | Last {lastMonths} Months | Posted Date \u2014 {labName}");
         row++;
 
         // Two-row header: span group columns (Cove Avg payments pastels)
@@ -832,9 +1012,9 @@ public static class CollectionSummaryExcelExportBuilder
         // Summary rows appear ABOVE their detail rows (parent before children)
         ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
 
-        var claimStatusBg = ColHeader;
+        var claimStatusBg = XLColor.White;
         var panelBg       = XLColor.White;
-        var cptBg         = ColChild;
+        var cptBg         = XLColor.White;
         var payerBg       = XLColor.White;
         var grandBg       = ColTotal;
 
@@ -854,28 +1034,28 @@ public static class CollectionSummaryExcelExportBuilder
             // L1 � ClaimStatus: no outline level (always visible), dark header
             WriteSsRow(ws, row++, csRow.ClaimStatus,
                 csRow.NoClaims, csRow.InsurancePayments, csRow.InsuranceBalance, csRow.PatientBalance,
-                claimStatusBg, XLColor.White, bold: true, indent: 0, outlineLevel: 0);
+                claimStatusBg, XLColor.Black, bold: false, indent: 0, outlineLevel: 0);
 
             foreach (var panelRow in csRow.PanelRows)
             {
                 // L2 � Panel: outline level 1
                 WriteSsRow(ws, row++, panelRow.PanelName,
                     panelRow.NoClaims, panelRow.InsurancePayments, panelRow.InsuranceBalance, panelRow.PatientBalance,
-                    panelBg, XLColor.Black, bold: true, indent: 1, outlineLevel: 1);
+                    panelBg, XLColor.Black, bold: false, indent: 1, outlineLevel: 1);
 
                 foreach (var cptRow in panelRow.CptRows)
                 {
                     // L3 � CPT: outline level 2
                     WriteSsRow(ws, row++, cptRow.CptCode,
                         cptRow.NoClaims, cptRow.InsurancePayments, cptRow.InsuranceBalance, cptRow.PatientBalance,
-                        cptBg, XLColor.Black, bold: true, indent: 2, outlineLevel: 2);
+                        cptBg, XLColor.Black, bold: false, indent: 2, outlineLevel: 2);
 
                     foreach (var payerRow in cptRow.Payers)
                     {
                         // L4 � Payer: outline level 3 (deepest, initially visible)
                         WriteSsRow(ws, row++, payerRow.PayerName,
                             payerRow.NoClaims, payerRow.InsurancePayments, payerRow.InsuranceBalance, payerRow.PatientBalance,
-                            payerBg, XLColor.FromHtml("#334155"), bold: false, indent: 4, outlineLevel: 3);
+                            payerBg, XLColor.Black, bold: false, indent: 4, outlineLevel: 3);
                     }
                 }
             }
@@ -961,11 +1141,46 @@ public static class CollectionSummaryExcelExportBuilder
     }
 
 
+    private static void BuildRepVsPaymentSheet(XLWorkbook wb, RepPaymentResult result, string labName)
+    {
+        if (TryBuildRepVsPaymentPivot(wb, result, labName)) return;
+        if (result.Rows.Count == 0) return;
+
+        var ws = wb.AddWorksheet("Rep Vs Payment");
+        ws.TabColor = ExcelTheme.Collection.TabYellow;
+        ExcelTheme.ApplyDefaults(ws);
+
+        string[] headers = ["Sales Rep", "Year", "Month", "No. of Claims", "Insurance Payments"];
+        int colCount = headers.Length;
+        int row = 1;
+        ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, $"Rep Vs Payment \u2014 {labName}");
+        row++;
+        ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ColHeader);
+        row++;
+
+        foreach (var r in result.Rows
+                     .OrderBy(x => x.SalesRepName, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(x => x.Year)
+                     .ThenBy(x => x.Month))
+        {
+            WriteCell(ws, row, 1, r.SalesRepName, XLColor.White, isText: true);
+            WriteCell(ws, row, 2, r.Year, XLColor.White);
+            WriteCell(ws, row, 3, new DateTime(2000, Math.Clamp(r.Month, 1, 12), 1).ToString("MMM"), XLColor.White, isText: true);
+            WriteCell(ws, row, 4, r.NoOfClaims, XLColor.White);
+            WriteCell(ws, row, 5, r.InsurancePayments, XLColor.White, isCurrency: true);
+            row++;
+        }
+
+        AutoFitColumns(ws);
+        ws.SheetView.FreezeRows(3);
+    }
+
     // ?? Provider Summary ??????????????????????????????????????????????
 
     private static void BuildProviderSummarySheet(XLWorkbook wb, ProviderSummaryResult result, string labName)
     {
         if (!result.HasData) return;
+        if (TryBuildProviderSummaryPivot(wb, result, labName)) return;
 
         var ws = wb.AddWorksheet("Provider Summary");
         ws.TabColor = ExcelTheme.Collection.TabYellow;

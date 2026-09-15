@@ -184,7 +184,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
     private static void BuildMonthlyAndWeeklySheet(
         XLWorkbook wb, ProductionReportViewModel vm, string labName)
     {
-        var ws = wb.AddWorksheet("MonthlyAndWeeklyVolume");
+        var ws = wb.AddWorksheet("Insights");
         ws.TabColor = PrExcel.TabGreen;
         PrExcel.ApplyDefaults(ws);
 
@@ -1103,55 +1103,69 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         PrExcel.ApplyDefaults(ws);
 
         var panels = vm.PayerPanelColumns;
-        const int colCount = 3;
+        const int metrics = 2;
+        int colCount = 1 + panels.Count * metrics + metrics;
 
         int row = 1;
         PrExcel.WriteTitleBar(ws, row, colCount, "Payer × Panel");
         row++;
-        PrExcel.WriteHeaderRow(ws, row, 1,
-            ["Payer / Panel", "No. of Claims", "Total Billed Charges"], PrExcel.MetricHeaderBg);
-        row++;
 
+        int hRow1 = row;
+        WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, "Payer x Panel", PrExcel.HeaderBg);
+        int hCol = 2;
+        foreach (var panel in panels)
+        {
+            WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1, panel, PrExcel.HeaderBg);
+            hCol += 2;
+        }
+        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1, "Grand Total", PrExcel.HeaderBg);
+
+        int hRow2 = hRow1 + 1;
+        hCol = 2;
+        foreach (var _ in panels)
+        {
+            WriteHeaderCell(ws, hRow2, hCol++, "No. of Claims", PrExcel.MetricHeaderBg);
+            WriteHeaderCell(ws, hRow2, hCol++, "Total Billed Charges", PrExcel.MetricHeaderBg);
+        }
+        WriteHeaderCell(ws, hRow2, hCol++, "No. of Claims", PrExcel.MetricHeaderBg);
+        WriteHeaderCell(ws, hRow2, hCol, "Total Billed Charges", PrExcel.MetricHeaderBg);
+
+        row = hRow2 + 1;
         int dataIdx = 0;
         foreach (var pr in vm.PayerPanelRows)
         {
-            var parentBg = PrExcel.GetRowBg(dataIdx, isGroupRow: true);
-            WriteCell(ws, row, 1, pr.PayerName, parentBg, isText: true);
-            WriteCell(ws, row, 2, pr.GrandTotalClaims, parentBg);
-            WriteCurrencyCell(ws, row, 3, pr.GrandTotalCharges, parentBg);
-            ws.Row(row).Style.Font.Bold = true;
-            row++;
-
-            var childPanels = panels
-                .Select(p => (Name: p, Cell: GetMonthCell(pr.ByPanel, p)))
-                .Where(x => x.Cell.ClaimCount != 0 || x.Cell.BilledCharges != 0m)
-                .ToList();
-
-            int firstChild = row;
-            int childIdx = 0;
-            foreach (var (name, cell) in childPanels)
+            var bg = PrExcel.GetRowBg(dataIdx);
+            int col = 1;
+            WriteCell(ws, row, col++, pr.PayerName, bg, isText: true);
+            foreach (var panel in panels)
             {
-                var bg = PrExcel.GetRowBg(childIdx);
-                WriteCell(ws, row, 1, $"    {name}", bg, isText: true);
-                WriteCell(ws, row, 2, cell.ClaimCount, bg);
-                WriteCurrencyCell(ws, row, 3, cell.BilledCharges, bg);
-                row++;
-                childIdx++;
+                var cell = GetMonthCell(pr.ByPanel, panel);
+                WriteCell(ws, row, col++, cell.ClaimCount, bg);
+                WriteCurrencyCell(ws, row, col++, cell.BilledCharges, bg);
             }
-            if (childPanels.Count > 1)
-                GroupChildRows(ws, firstChild, row - 1);
+            WriteCell(ws, row, col++, pr.GrandTotalClaims, bg);
+            WriteCurrencyCell(ws, row, col, pr.GrandTotalCharges, bg);
+            row++;
             dataIdx++;
         }
 
         PrExcel.StyleGreenTotalRow(ws, row, 1, colCount);
-        ws.Cell(row, 1).Value = "Grand Total";
-        ws.Cell(row, 2).Value = vm.PayerPanelGrandTotalClaims;
-        ws.Cell(row, 2).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
-        ws.Cell(row, 3).Value = vm.PayerPanelGrandTotalCharges;
-        ws.Cell(row, 3).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
+        int gtCol = 1;
+        ws.Cell(row, gtCol++).Value = "Grand Total";
+        foreach (var panel in panels)
+        {
+            var cell = GetMonthCell(vm.PayerPanelGrandByPanel, panel);
+            ws.Cell(row, gtCol).Value = cell.ClaimCount;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
+            ws.Cell(row, gtCol).Value = cell.BilledCharges;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
+        }
+        ws.Cell(row, gtCol).Value = vm.PayerPanelGrandTotalClaims;
+        ws.Cell(row, gtCol++).Style.NumberFormat.Format = PrExcel.CountNumberFormat;
+        ws.Cell(row, gtCol).Value = vm.PayerPanelGrandTotalCharges;
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = PrExcel.AccountingNumberFormat;
 
         PrExcel.AutoFitColumns(ws, colCount);
-        FinishOutline(ws);
     }
 
     // ?? Unbilled � Aging ??????????????????????????????????????????????????????
@@ -1340,13 +1354,13 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             var mons = cptMonthsByYear.GetValueOrDefault(year, []);
             foreach (var _ in mons)
             {
-                WriteHeaderCell(ws, hRow3, hCol++, "Count of Units", PrExcel.MetricHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, "Count of CPT", PrExcel.MetricHeaderBg);
                 WriteHeaderCell(ws, hRow3, hCol++, "Billed Amount", PrExcel.MetricHeaderBg);
             }
-            WriteHeaderCell(ws, hRow3, hCol++, "Count of Units", PrExcel.MetricHeaderBg);
+            WriteHeaderCell(ws, hRow3, hCol++, "Count of CPT", PrExcel.MetricHeaderBg);
             WriteHeaderCell(ws, hRow3, hCol++, "Billed Amount", PrExcel.MetricHeaderBg);
         }
-        WriteHeaderCell(ws, hRow3, hCol++, "Count of Units", PrExcel.MetricHeaderBg);
+        WriteHeaderCell(ws, hRow3, hCol++, "Count of CPT", PrExcel.MetricHeaderBg);
         WriteHeaderCell(ws, hRow3, hCol,   "Billed Amount", PrExcel.MetricHeaderBg);
 
         row = hRow3 + 1;

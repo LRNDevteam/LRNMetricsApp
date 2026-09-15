@@ -1,4 +1,4 @@
-﻿namespace LabMetricsDashboard.Models;
+namespace LabMetricsDashboard.Models;
 
 using LabMetricsDashboard.Services;
 
@@ -98,6 +98,11 @@ public sealed class CollectionSummaryViewModel
 
     // ?? Average Payments (Per Panel | Last 6 Months | Posted Date) ???
     public PanelAveragesResult AvgPayments { get; set; } = new PanelAveragesResult([]);
+
+    /// <summary>Same Avg Payments metrics restricted to the latest 3 posted months.</summary>
+    public PanelAveragesResult AvgPaymentsLast3Months { get; set; } = new PanelAveragesResult([]);
+
+    public RepPaymentResult RepPayments { get; set; } = new([]);
 
     // ?? Status Summary ????????????????????????????????????????????
     public StatusSummaryResult StatusSummary { get; set; } = StatusSummaryResult.Empty;
@@ -312,14 +317,20 @@ public sealed record CptPaymentPctRow(
 {
     /// <summary>
     /// Payment % = SUM(InsurancePayment) / SUM(ChargeAmount) × 100.
-    /// When the aggregate table supplies a pre-computed <see cref="SnapshotPaymentPct"/>
-    /// (e.g. Elix_CS_CptVsPaymentPct.PaymentPct) that value is used directly,
-    /// because the aggregate stores 0 for PaidInsurancePayment/PaidChargeAmount
-    /// while still carrying the correct percentage.
+    /// Prefer the paid-amount ratio when those columns are populated. Otherwise
+    /// use the snapshot percent (0–100 points, or 0–1 ratio).
     /// </summary>
-    public decimal PaymentPct => SnapshotPaymentPct ?? (PaidChargeAmount == 0
-        ? 0m
-        : Math.Round(PaidInsurancePayment / PaidChargeAmount * 100m, 2));
+    public decimal PaymentPct
+    {
+        get
+        {
+            if (PaidChargeAmount != 0m)
+                return Math.Round(PaidInsurancePayment / PaidChargeAmount * 100m, 2);
+            var snap = SnapshotPaymentPct ?? 0m;
+            if (snap == 0m) return 0m;
+            return snap is > 0m and <= 1m ? Math.Round(snap * 100m, 2) : snap;
+        }
+    }
 }
 
 // ?? Monthly Claim Volume pivot types ???????????????????????????

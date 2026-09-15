@@ -233,12 +233,19 @@ public sealed class AllLabsCollectionExcelBuilder
         var avgPayTask      = useAggregates
             ? _repo.GetAvgPaymentsFromAggregatesAsync(connStr, aggregatePrefix!, ct)
             : _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
+        var avgPay3Task     = _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct, lastMonths: 3);
         var statusTask      = useAggregates
             ? _repo.GetStatusSummaryFromAggregatesAsync(connStr, aggregatePrefix!, ct)
             : _repo.GetStatusSummaryAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
         var providerTask    = useAggregates
             ? _repo.GetProviderSummaryFromAggregatesAsync(connStr, aggregatePrefix!, ct)
             : _repo.GetProviderSummaryAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
+        var repPayTask      = useAggregates
+            ? _repo.GetRepPaymentFromAggregatesAsync(connStr, aggregatePrefix!, ct)
+            : _repo.GetRepPaymentAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
+        var insVsPayTask    = useAggregates && aggregatePrefix is not null
+            ? _repo.GetInsuranceVsPaymentFromAggregatesAsync(connStr, aggregatePrefix, ct)
+            : _repo.GetInsuranceVsPaymentAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
 
         // Count raw rows before fetching to enforce the 200K limit
         var claimCountTask = _repo.GetClaimLevelDataCountAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
@@ -247,7 +254,8 @@ public sealed class AllLabsCollectionExcelBuilder
         await Task.WhenAll(
             monthlyTask, weeklyTask, reimbTask, totPayTask,
             agingTask, panelPayTask, insPctTask,
-            cptPctTask, panelAvgTask, avgPayTask, statusTask, providerTask,
+            cptPctTask, panelAvgTask, avgPayTask, avgPay3Task, statusTask, providerTask,
+            repPayTask, insVsPayTask,
             claimCountTask, lineCountTask);
 
         int claimCount       = await claimCountTask;
@@ -280,8 +288,11 @@ public sealed class AllLabsCollectionExcelBuilder
             CptPaymentPct         = (await cptPctTask).Rows,
             PanelAverages         = (await panelAvgTask).PanelRows,
             AvgPayments           = await avgPayTask,
+            AvgPaymentsLast3Months = await avgPay3Task,
             StatusSummary         = await statusTask,
             ProviderSummary       = await providerTask,
+            RepPayments           = await repPayTask,
+            InsuranceVsPayment    = await insVsPayTask,
             ShowInsuranceVsPayment = !string.Equals(
                 LabCollectionPrefix.GetPrefix(labName), "NW",
                 StringComparison.OrdinalIgnoreCase),

@@ -149,24 +149,39 @@ public sealed class ProductionReportGenerator : IReportGenerator
             : productionRule;
         var weekRange = config.ProductionSummary?.WeekRange;
 
+        var isCove = job.LabName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
+                  || job.LabName.Contains("Cove", StringComparison.OrdinalIgnoreCase);
+        _labSummaryRepos.TryGetValue(job.LabName, out var labSummaryRepo);
+        // Cove keys may be exactly "Cove"
+        if (labSummaryRepo is null)
+            _labSummaryRepos.TryGetValue("Cove", out labSummaryRepo);
+
         // Phase 1 — 7 summary queries concurrently.
+        // Cove Production Summary breakdowns use SqlLabProductionSummaryRepository
+        // (usp_GetCove_*_CountCpt / FullCharges / FullClaims / FirstBilled).
         var monthlyTask = _repo.GetMonthlyClaimVolumeAsync(
             connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, productionRule, ct);
         var weeklyTask = _repo.GetWeeklyClaimVolumeAsync(
             connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, weekRule, weekRange, ct);
         var codingTask = _repo.GetCodingAsync(connStr, panelArg, ct);
-        var payerBreakdownTask = _repo.GetPayerBreakdownAsync(
-            connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, productionRule, ct);
-        var payerPanelTask = _repo.GetPayerPanelAsync(
-            connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, productionRule, ct);
+        var payerBreakdownTask = isCove && labSummaryRepo is not null
+            ? labSummaryRepo.GetPayerBreakdownAsync(
+                connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct)
+            : _repo.GetPayerBreakdownAsync(
+                connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, productionRule, ct);
+        var payerPanelTask = isCove && labSummaryRepo is not null
+            ? labSummaryRepo.GetPayerByPanelAsync(
+                connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct)
+            : _repo.GetPayerPanelAsync(
+                connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, productionRule, ct);
         var unbilledAgingTask = _repo.GetUnbilledAgingAsync(
             connStr, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, productionRule, ct);
-        var cptBreakdownTask = _repo.GetCptBreakdownAsync(
-            connStr, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
-        // Panel Breakdown: usp_Get{Prefix}PanelBreakdownWithPayers via the lab's generic
-        // repo (Sql/40_AllLabs_PanelBreakdownWithPayers.sql). Labs without that SP - or
-        // with no generic repo at all - return an empty result and the sheet is skipped.
-        var panelBreakdownTask = _labSummaryRepos.TryGetValue(job.LabName, out var labSummaryRepo)
+        var cptBreakdownTask = isCove && labSummaryRepo is not null
+            ? labSummaryRepo.GetCptBreakdownAsync(
+                connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct)
+            : _repo.GetCptBreakdownAsync(
+                connStr, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
+        var panelBreakdownTask = labSummaryRepo is not null
             ? labSummaryRepo.GetPanelBreakdownAsync(
                 connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct)
             : Task.FromResult(new PayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0));
@@ -240,6 +255,7 @@ public sealed class ProductionReportGenerator : IReportGenerator
             CptBreakdownGrandByMonth        = cptResult.GrandTotalByMonth,
             CptBreakdownGrandTotalUnits     = cptResult.GrandTotalUnits,
             CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
+            CptUnitsLabel                   = isCove ? "Count of CPT" : "No. of Claims",
             PanelBreakdownMonths              = pnlResult.Months,
             PanelBreakdownYears               = pnlResult.Years,
             PanelBreakdownRows                = pnlResult.PayerRows,

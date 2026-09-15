@@ -1137,8 +1137,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
 
         var whereClauses = new List<string>
         {
-            "LTRIM(RTRIM(PayerName_Raw)) <> ''",
-            "PayerName_Raw IS NOT NULL",
+            // Full claim-level: blank payer coalesced later — do not exclude blanks.
         };
         var parameters = new List<SqlParameter>();
 
@@ -1163,7 +1162,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         if (filterPayerNames is { Count: > 0 })
         {
             var pNames = filterPayerNames.Select((n, i) => $"@pxpn{i}").ToList();
-            whereClauses.Add($"LTRIM(RTRIM(PayerName_Raw)) IN ({string.Join(",", pNames)})");
+            whereClauses.Add($"LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))) IN ({string.Join(",", pNames)})");
             for (int i = 0; i < filterPayerNames.Count; i++)
                 parameters.Add(new SqlParameter($"@pxpn{i}", filterPayerNames[i]));
         }
@@ -1220,14 +1219,14 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             : "PanelName";
         var pivotSql = $"""
             SELECT
-                LTRIM(RTRIM(PayerName_Raw))                            AS PayerName,
+                LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))         AS PayerName,
                 LTRIM(RTRIM({pxpPanelExpr}))                           AS PanelName,
                 COUNT(DISTINCT ClaimID)                                  AS ClaimCount,
                 ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)  AS BilledCharges
             FROM dbo.ClaimLevelData
             WHERE {whereStr}
             GROUP BY
-                LTRIM(RTRIM(PayerName_Raw)),
+                LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
                 LTRIM(RTRIM({pxpPanelExpr}))
             ORDER BY PayerName, PanelName
             """;

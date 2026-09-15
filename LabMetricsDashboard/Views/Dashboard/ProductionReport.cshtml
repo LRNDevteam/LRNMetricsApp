@@ -1,6 +1,10 @@
 @using LRN.ProductionReports.Models
+@using LabMetricsDashboard.Services
 @model LRN.ProductionReports.Models.ProductionReportViewModel
 @{
+    var prPaneOnlyBoot = ViewData["PrPaneOnly"] as string;
+    if (!string.IsNullOrEmpty(prPaneOnlyBoot))
+        ProductionDiagLog.Write($"view-start pane={prPaneOnlyBoot} lab={Model.SelectedLab} panels={Model.PanelRows.Count} months={Model.Months.Count}");
     ViewData["Title"]       = $"Production Report - {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Production Report";
@@ -22,8 +26,12 @@
                 </style>
 
     // Filter out year 1900 on the view side as well
+    bool IsYm(string? m) =>
+        !string.IsNullOrEmpty(m) && m.Length >= 4
+        && int.TryParse(m.AsSpan(0, 4), out var y) && y > 1900;
+
     var validYears  = Model.Years.Where(y => y > 1900).ToList();
-    var validMonths = Model.Months.Where(m => int.Parse(m[..4]) > 1900).ToList();
+    var validMonths = Model.Months.Where(IsYm).ToList();
 
     var monthsByYear = validMonths
         .GroupBy(m => int.Parse(m[..4]))
@@ -33,7 +41,12 @@
     string MonthLabel(string ym)
     {
         var parts = ym.Split('-');
-        return new DateTime(int.Parse(parts[0]), int.Parse(parts[1]), 1).ToString("MMM");
+        if (parts.Length < 2
+            || !int.TryParse(parts[0], out var y)
+            || !int.TryParse(parts[1], out var mo)
+            || mo < 1 || mo > 12)
+            return ym;
+        return new DateTime(y, mo, 1).ToString("MMM");
     }
 
     int CellClaims(Dictionary<string, ProductionMonthCell>? d, string mk)
@@ -52,13 +65,13 @@
 
     // Recompute grand totals excluding 1900
     int grandClaims = Model.GrandTotalByMonth
-        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.ClaimCount);
+        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value.ClaimCount);
     decimal grandCharges = Model.GrandTotalByMonth
-        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.BilledCharges);
+        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value.BilledCharges);
 
     // Payer Breakdown helpers
     var pbYears  = Model.PayerBreakdownYears.Where(y => y > 1900).ToList();
-    var pbMonths = Model.PayerBreakdownMonths.Where(m => int.Parse(m[..4]) > 1900).ToList();
+    var pbMonths = Model.PayerBreakdownMonths.Where(IsYm).ToList();
     var pbMonthsByYear = pbMonths
         .GroupBy(m => int.Parse(m[..4]))
         .OrderBy(g => g.Key)
@@ -78,13 +91,13 @@
     decimal PbGrandYearCharges(int year) =>
         Model.PayerBreakdownGrandChargesByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
     int pbGrandTotal = Model.PayerBreakdownGrandByMonth
-        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value);
     decimal pbGrandTotalCharges = Model.PayerBreakdownGrandChargesByMonth
-        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value);
 
     // Panel Breakdown helpers (same month/year layout as Payer Breakdown)
     var pnlYears  = Model.PanelBreakdownYears.Where(y => y > 1900).ToList();
-    var pnlMonths = Model.PanelBreakdownMonths.Where(m => int.Parse(m[..4]) > 1900).ToList();
+    var pnlMonths = Model.PanelBreakdownMonths.Where(IsYm).ToList();
     var pnlMonthsByYear = pnlMonths
         .GroupBy(m => int.Parse(m[..4]))
         .OrderBy(g => g.Key)
@@ -94,12 +107,12 @@
     decimal PnlGrandYearCharges(int year) =>
         Model.PanelBreakdownGrandChargesByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
     int pnlGrandTotal = Model.PanelBreakdownGrandByMonth
-        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value);
     decimal pnlGrandTotalCharges = Model.PanelBreakdownGrandChargesByMonth
-        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value);
 
     Dictionary<int, List<string>> InsightMonthsByYear(IEnumerable<string> months) => months
-        .Where(m => int.Parse(m[..4]) > 1900)
+        .Where(m => IsYm(m))
         .GroupBy(m => int.Parse(m[..4]))
         .OrderBy(g => g.Key)
         .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
@@ -111,16 +124,16 @@
     var daqYears = Model.InsightDaqYears.Where(y => y > 1900).ToList();
     var daqMonthsByYear = InsightMonthsByYear(Model.InsightDaqMonths);
     int daqGrandTotal = Model.InsightDaqGrandByMonth
-        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value);
     decimal daqGrandTotalCharges = Model.InsightDaqGrandChargesByMonth
-        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value);
 
     var webYears = Model.InsightWebPmYears.Where(y => y > 1900).ToList();
     var webMonthsByYear = InsightMonthsByYear(Model.InsightWebPmMonths);
     int webGrandTotal = Model.InsightWebPmGrandByMonth
-        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value);
     decimal webGrandTotalCharges = Model.InsightWebPmGrandChargesByMonth
-        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value);
 
     var hpYears = Model.HighestPayerYears.Where(y => y > 1900).ToList();
     var hpMonthsByYear = InsightMonthsByYear(Model.HighestPayerMonths);
@@ -129,9 +142,9 @@
     decimal HpGrandYearCharges(int year) =>
         Model.HighestPayerGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.BilledCharges);
     int hpGrandClaims = Model.HighestPayerGrandByMonth
-        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.ClaimCount);
+        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value.ClaimCount);
     decimal hpGrandCharges = Model.HighestPayerGrandByMonth
-        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.BilledCharges);
+        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value.BilledCharges);
 
     // Payer X Panel helpers
     var pxpPanels = Model.PayerPanelColumns;
@@ -148,11 +161,14 @@
         => d is not null && d.TryGetValue(bk, out var c) ? c.BilledCharges : 0m;
 
     // CPT Breakdown helpers
-    var cptShowUnits = Model.CptUnitsLabel != "No. of Claims";
-    var cptShowCountOfUnits = Model.CptUnitsLabel is "Count of CPT" or "Count of Units" or "No. of Claims";
-    var cptUnitsHeader = string.IsNullOrWhiteSpace(Model.CptUnitsLabel) ? "Count of Units" : Model.CptUnitsLabel;
+    var cptShowUnits = Model.CptUnitsLabel is "Billed Units";
+    // Cove / NW / Augustus: Count of CPT — never display SUM(Units).
+    var cptShowCountOfUnits = !cptShowUnits
+        || string.Equals(Model.CptUnitsLabel, "Count of CPT", StringComparison.OrdinalIgnoreCase)
+        || Model.SelectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase);
+    var cptUnitsHeader = string.IsNullOrWhiteSpace(Model.CptUnitsLabel) ? "Count of CPT" : Model.CptUnitsLabel;
     var cptYears  = Model.CptBreakdownYears.Where(y => y > 1900).ToList();
-    var cptMonths = Model.CptBreakdownMonths.Where(m => int.Parse(m[..4]) > 1900).ToList();
+    var cptMonths = Model.CptBreakdownMonths.Where(IsYm).ToList();
     var cptMonthsByYear = cptMonths
         .GroupBy(m => int.Parse(m[..4]))
         .OrderBy(g => g.Key)
@@ -177,18 +193,23 @@
     int CptGrandYearClaims(int year) =>
         Model.CptBreakdownGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.ClaimCount);
     decimal cptGrandUnits = Model.CptBreakdownGrandByMonth
-        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.Units);
+        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value.Units);
     decimal cptGrandCharges = Model.CptBreakdownGrandByMonth
-        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.BilledCharges);
+        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value.BilledCharges);
     int cptGrandClaims = Model.CptBreakdownGrandByMonth
-        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.ClaimCount);
+        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value.ClaimCount);
 
-    // Shell first: no tab HTML until JS fetches ProductionSummaryReportTab.
+    // Shell first: Monthly is filled on the server. Other tabs stay lazy (JS).
     var prPaneOnly = ViewData["PrPaneOnly"] as string;
     var prChrome = string.IsNullOrEmpty(prPaneOnly);
     bool PrShow(string paneId) =>
-        !string.IsNullOrEmpty(prPaneOnly)
-            && string.Equals(prPaneOnly, paneId, StringComparison.OrdinalIgnoreCase);
+        (!string.IsNullOrEmpty(prPaneOnly)
+            && string.Equals(prPaneOnly, paneId, StringComparison.OrdinalIgnoreCase))
+        || (prChrome
+            && string.Equals(paneId, "monthly-pane", StringComparison.OrdinalIgnoreCase)
+            && Model.PanelRows.Count > 0);
+    if (!string.IsNullOrEmpty(prPaneOnly))
+        ProductionDiagLog.Write($"view-helpers-ok pane={prPaneOnly} years={validYears.Count}");
 }
 
 @if (prChrome)
@@ -806,7 +827,11 @@ th.pr-month-data, td.pr-month-data {
         <!-- ??? Monthly Claim Volume tab pane ????????????????????? -->
         @if (prChrome || PrShow("monthly-pane"))
         {
-        <div class="tab-pane fade show active" id="monthly-pane" role="tabpanel" aria-labelledby="monthly-tab" data-pr-lazy="monthly-pane">
+        <div class="tab-pane fade show active" id="monthly-pane" role="tabpanel" aria-labelledby="monthly-tab"@(PrShow("monthly-pane") ? null : Html.Raw(" data-pr-lazy=\"monthly-pane\""))>
+            @if (!PrShow("monthly-pane"))
+            {
+            <div class="pr-tab-loading"><div class="pr-tab-spinner" role="status" aria-label="Loading"></div><div>Loading monthly data&hellip;</div></div>
+            }
             @if (PrShow("monthly-pane"))
             {
             @if (Model.PanelRows.Count > 0 && validYears.Count > 0)
@@ -1038,6 +1063,10 @@ th.pr-month-data, td.pr-month-data {
                     <div class="mt-1"><span class="fw-semibold">Default Logic:</span> columns grouped by <code>YEAR/MONTH(FirstBilledDate)</code>; rows = <code>PanelName</code> with Top 3 <code>PayerName</code> drill-down by <code>COUNT(DISTINCT ClaimID)</code>; sort by Grand Total.</div>
                 }
             </div> *@
+            }
+            @if (PrShow("monthly-pane"))
+            {
+                ProductionDiagLog.Write($"view-monthly-html-done lab={Model.SelectedLab} panels={Model.PanelRows.Count}");
             }
         </div>
         }
@@ -1953,14 +1982,21 @@ th.pr-month-data, td.pr-month-data {
                     <div class="pr-filter-summary">
                         <span class="filter-dot">•</span>
                         <span><span class="filter-label">Filter:</span>
-                            <span class="filter-key-2">ChargeEnteredDate</span> is a valid date
-                            @if (Model.IsNorthWestLab)
+                            @if (string.Equals(Model.SelectedLab, "Cove", StringComparison.OrdinalIgnoreCase)
+                                 || (Model.SelectedLab?.Contains("Cove", StringComparison.OrdinalIgnoreCase) ?? false))
                             {
-                            <text>&nbsp;·&nbsp; FirstBilledDate is a date, or blank with Emedix date</text>
+                            <text><span class="filter-key-2">FirstBilledDate</span> is a valid date
+                            &nbsp;·&nbsp; <span class="filter-key-2">ChargeEnteredDate</span> is a valid date</text>
+                            }
+                            else if (Model.IsNorthWestLab)
+                            {
+                            <text><span class="filter-key-2">ChargeEnteredDate</span> is a valid date
+                            &nbsp;·&nbsp; FirstBilledDate is a date, or blank with Emedix date</text>
                             }
                             else
                             {
-                            <text>&nbsp;·&nbsp; FirstBilledDate is not blank</text>
+                            <text><span class="filter-key-2">ChargeEnteredDate</span> is a valid date
+                            &nbsp;·&nbsp; FirstBilledDate is not blank</text>
                             }
                         </span>
                     </div>
@@ -2411,16 +2447,197 @@ th.pr-month-data, td.pr-month-data {
     </div>
 }
 
-@if (prChrome && !string.IsNullOrWhiteSpace(Model.SelectedLab))
+@if (prChrome)
 {
-    @await Html.PartialAsync("_ProductionInsights", Model)
+<script nonce='@Context.Items["CspNonce"]'>
+(function () {
+    var host = document.getElementById('prTabContent');
+    if (!host) return;
+    var tabUrl = host.getAttribute('data-pr-tab-url');
+    var tabKey = host.getAttribute('data-pr-key');
+    var metaUrl = host.getAttribute('data-pr-meta-url');
+    function fillMsList(listEl, names, inputName) {
+        if (!listEl || !names || !names.length) return;
+        listEl.innerHTML = '';
+        names.forEach(function (name) {
+            var label = document.createElement('label');
+            var input = document.createElement('input');
+            input.type = 'checkbox';
+            input.name = inputName;
+            input.value = name;
+            label.appendChild(input);
+            label.appendChild(document.createTextNode(' ' + name));
+            listEl.appendChild(label);
+        });
+    }
+    function fillBanner(d) {
+        var el = document.getElementById('pr-analysis-banner');
+        if (!el || !d || !(d.weekFolder || d.runId || d.inserted)) return;
+        var wrap = document.createElement('div');
+        wrap.className = 'd-flex flex-wrap gap-3 align-items-center mb-3 px-1';
+        wrap.style.fontSize = '.82rem';
+        wrap.style.color = '#374151';
+        function addPair(label, value) {
+            if (!value) return;
+            var span = document.createElement('span');
+            var lab = document.createElement('span');
+            lab.className = 'fw-semibold text-secondary';
+            lab.style.fontSize = '.72rem';
+            lab.style.letterSpacing = '.04em';
+            lab.style.textTransform = 'uppercase';
+            lab.textContent = label;
+            var val = document.createElement('span');
+            val.className = 'ms-1 fw-semibold';
+            val.style.color = '#0e3460';
+            val.textContent = value;
+            span.appendChild(lab);
+            span.appendChild(val);
+            wrap.appendChild(span);
+        }
+        var range = document.createElement('span');
+        range.innerHTML = '<span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">Analysis Range:</span><span class="ms-1 fw-semibold text-dark">Billed Week Range</span>';
+        if (d.weekFolder) {
+            var dash = document.createElement('span');
+            dash.className = 'ms-1 text-muted';
+            dash.textContent = ' \u2014 ';
+            var folder = document.createElement('span');
+            folder.className = 'ms-1 fw-semibold';
+            folder.style.color = '#0e3460';
+            folder.textContent = d.weekFolder;
+            range.appendChild(dash);
+            range.appendChild(folder);
+        }
+        wrap.appendChild(range);
+        addPair('ReportId (RunID):', d.runId);
+        addPair('Inserted Date:', d.inserted);
+        el.innerHTML = '';
+        el.appendChild(wrap);
+    }
+    if (metaUrl && tabKey) {
+        fetch(metaUrl + '?key=' + encodeURIComponent(tabKey), { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                fillMsList(document.getElementById('prPayerList'), d.payers, 'filterPayerNames');
+                fillMsList(document.getElementById('prPanelList'), d.panels, 'filterPanelNames');
+                fillBanner(d);
+            })
+            .catch(function () { });
+    }
+    function loadPane(pane) {
+        if (!pane || !pane.getAttribute('data-pr-lazy') || pane.getAttribute('data-pr-loaded') === '1') return;
+        if (!tabUrl || !tabKey) {
+            pane.innerHTML = '<div class="text-center py-5 text-danger">Could not load this tab. Refresh the page.</div>';
+            return;
+        }
+        pane.setAttribute('data-pr-loaded', '1');
+        pane.innerHTML = '<div class="pr-tab-loading"><div class="pr-tab-spinner" role="status"></div><div>Loading tab\u2026</div></div>';
+        if (window.lmdFpLog) window.lmdFpLog('tab-fetch-start', pane.id);
+        fetch(tabUrl + '?key=' + encodeURIComponent(tabKey) + '&pane=' + encodeURIComponent(pane.id), { credentials: 'same-origin' })
+            .then(function (r) {
+                if (!r.ok) throw new Error('tab ' + r.status);
+                return r.text();
+            })
+            .then(function (html) {
+                var tmp = document.createElement('div');
+                tmp.innerHTML = html;
+                var inner = tmp.querySelector('#' + pane.id) || tmp;
+                pane.innerHTML = inner.id === pane.id ? inner.innerHTML : tmp.innerHTML;
+                if (window.lmdFpLog) window.lmdFpLog('tab-fetch-html', pane.id);
+            })
+            .catch(function (err) {
+                pane.setAttribute('data-pr-loaded', '0');
+                pane.innerHTML = '<div class="text-center py-5 text-danger">Could not load this tab. <button type="button" class="btn btn-sm btn-outline-danger ms-2" id="prRetryTmp">Retry</button></div>';
+                var b = pane.querySelector('#prRetryTmp');
+                if (b) b.addEventListener('click', function () { loadPane(pane); });
+                if (window.lmdFpLog) window.lmdFpLog('tab-fetch-error', pane.id + ' ' + (err && err.message ? err.message : 'error'));
+            });
+    }
+    window.prLoadPane = loadPane;
+    var tabs = document.getElementById('prTabs');
+    if (tabs) {
+        tabs.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-bs-target]');
+            if (!btn) return;
+            var pane = document.querySelector(btn.getAttribute('data-bs-target'));
+            loadPane(pane);
+        });
+    }
+
+    // Queue via UserReports; LRN.ReportWorker builds the workbook. Keep this
+    // in the small script so a throw in the later IIFE cannot leave the button dead.
+    var exportBtn = document.getElementById('exportExcelBtn');
+    if (exportBtn && exportBtn.getAttribute('data-pr-export-bound') !== '1') {
+        exportBtn.setAttribute('data-pr-export-bound', '1');
+        var queueUrl = '@Url.Action("Queue", "UserReports")';
+        exportBtn.addEventListener('click', function () {
+            var form = document.getElementById('prFilterForm');
+            if (!form) return;
+            var fd = new FormData(form);
+            var val = function (n) { return (fd.get(n) || '').toString().trim() || null; };
+            var all = function (n) {
+                var v = fd.getAll(n).map(function (x) { return x.toString().trim(); })
+                         .filter(function (x) { return x.length > 0; });
+                return v.length > 0 ? v : null;
+            };
+            var filters = {
+                PayerNames: all('filterPayerNames'),
+                PanelNames: all('filterPanelNames'),
+                DosFrom: val('filterDosFrom'),
+                DosTo: val('filterDosTo'),
+                FirstBillFrom: val('filterFirstBillFrom'),
+                FirstBillTo: val('filterFirstBillTo'),
+                FirstBilledFrom: val('filterFirstBilledFrom'),
+                FirstBilledTo: val('filterFirstBilledTo')
+            };
+            var body = new FormData();
+            body.append('lab', '@Model.SelectedLab');
+            body.append('reportType', 'ProductionReport');
+            body.append('filterDetails', JSON.stringify(filters));
+            var af = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
+            if (af) body.append('__RequestVerificationToken', af.value);
+            var original = exportBtn.innerHTML;
+            exportBtn.disabled = true;
+            if (window.rptExportBusy) window.rptExportBusy(exportBtn, '<span class="spinner-border spinner-border-sm"></span> Queuing\u2026');
+            fetch(queueUrl, { method: 'POST', body: body, credentials: 'same-origin' })
+                .then(function (r) {
+                    return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; })
+                        .catch(function () { return { ok: r.ok, status: r.status, j: null }; });
+                })
+                .then(function (res) {
+                    if (res.ok) {
+                        if (window.rptExportBusy) window.rptExportBusy(exportBtn, '<i class="bi bi-check-circle"></i> Generating \u2014 watch Reports');
+                        if (window.lrnShowReportAlert) window.lrnShowReportAlert('success');
+                        if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
+                        setTimeout(function () { if (window.rptExportIdle) window.rptExportIdle(exportBtn, original); else { exportBtn.innerHTML = original; exportBtn.disabled = false; } }, 8000);
+                    } else {
+                        if (window.rptExportIdle) window.rptExportIdle(exportBtn, original);
+                        else { exportBtn.innerHTML = original; exportBtn.disabled = false; }
+                        var qMsg = res.j && res.j.message ? res.j.message : '';
+                        if (window.lrnShowReportAlert) {
+                            if (res.status === 409 || /already/i.test(qMsg)) window.lrnShowReportAlert('info');
+                            else window.lrnShowReportAlert('error', { message: qMsg || 'Could not queue the report.' });
+                        }
+                    }
+                })
+                .catch(function () {
+                    if (window.rptExportIdle) window.rptExportIdle(exportBtn, original);
+                    else { exportBtn.innerHTML = original; exportBtn.disabled = false; }
+                    if (window.lrnShowReportAlert) window.lrnShowReportAlert('error', { message: 'Could not queue the report.' });
+                });
+        });
+    }
+})();
+</script>
 }
 
 @if (prChrome)
 {
 <script nonce='@Context.Items["CspNonce"]'>
-    // Multi-select dropdown widget (matches Clinic Summary pattern)
-    document.addEventListener('DOMContentLoaded', function () {
+    // Run immediately (script sits after #prTabContent). Waiting for DOMContentLoaded
+    // left Monthly blank: later layout scripts (chart.js) can delay that event, and
+    // Collection already loads its first tab from an IIFE for the same reason.
+    (function () {
         var tabHost = document.getElementById('prTabContent');
         if (tabHost) {
             var tabUrl = tabHost.getAttribute('data-pr-tab-url');
@@ -2496,33 +2713,64 @@ th.pr-month-data, td.pr-month-data {
             }
             function loadPrPane(pane) {
                 if (!pane || !pane.hasAttribute('data-pr-lazy') || pane.getAttribute('data-pr-loaded') === '1') return;
-                if (!tabUrl || !tabKey) return;
+                if (!tabUrl || !tabKey) {
+                    pane.innerHTML = '<div class="text-center py-5 text-danger">Could not load this tab. Refresh the page, then try again.</div>';
+                    if (window.lmdFpLog) window.lmdFpLog('tab-fetch-nokey', 'url=' + (tabUrl || '') + ' keyLen=' + (tabKey ? tabKey.length : 0));
+                    return;
+                }
                 pane.setAttribute('data-pr-loaded', '1');
                 pane.innerHTML = '<div class="pr-tab-loading"><div class="pr-tab-spinner" role="status" aria-label="Loading"></div><div>' +
                     (pane.id === 'monthly-pane' ? 'Loading monthly data\u2026' : 'Loading tab\u2026') + '</div></div>';
+                if (window.lmdFpLog) {
+                    window.lmdFpLog('tab-fetch-start', pane.id + ' keyLen=' + (tabKey ? tabKey.length : 0) + ' url=' + tabUrl);
+                }
                 if (pane.id === 'monthly-pane' && window.lmdFpLog) {
                     window.lmdFpLog('spinner-on', 'page landed — in-tab spinner on');
                 }
-                fetch(tabUrl + '?key=' + encodeURIComponent(tabKey) + '&pane=' + encodeURIComponent(pane.id), { credentials: 'same-origin' })
+                function fetchPane() {
+                    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+                    var timer = ctrl ? setTimeout(function () { try { ctrl.abort(); } catch (e) { } }, 45000);
+                    return fetch(tabUrl + '?key=' + encodeURIComponent(tabKey) + '&pane=' + encodeURIComponent(pane.id), {
+                        credentials: 'same-origin',
+                        signal: ctrl ? ctrl.signal : undefined
+                    }).finally(function () { if (timer) clearTimeout(timer); });
+                }
+                function applyHtml(html) {
+                    var tmp = document.createElement('div');
+                    tmp.innerHTML = html;
+                    var inner = tmp.querySelector('#' + pane.id) || tmp;
+                    pane.innerHTML = inner.id === pane.id ? inner.innerHTML : tmp.innerHTML;
+                    if (window.lmdFpLog) {
+                        window.lmdFpLog('tab-fetch-html', pane.id + ' htmlLen=' + (html ? html.length : 0));
+                    }
+                    if (pane.id === 'monthly-pane' && window.lmdFpLog) {
+                        window.lmdFpLog('monthly-html', 'monthly tab HTML on screen');
+                    }
+                }
+                function showError(err) {
+                    pane.setAttribute('data-pr-loaded', '0');
+                    pane.innerHTML = '<div class="text-center py-5 text-danger">Could not load this tab. <button type="button" class="btn btn-sm btn-outline-danger ms-2 pr-tab-retry">Retry</button></div>';
+                    if (window.lmdFpLog) {
+                        window.lmdFpLog('tab-fetch-error', pane.id + ' ' + (err && err.message ? err.message : 'error'));
+                    }
+                    var retry = pane.querySelector('.pr-tab-retry');
+                    if (retry) retry.addEventListener('click', function () { loadPrPane(pane); });
+                }
+                fetchPane()
+                    .then(function (r) {
+                        if (window.lmdFpLog) window.lmdFpLog('tab-fetch-http', pane.id + ' status=' + r.status);
+                        if (r.status === 409 || (r.status >= 500 && r.status < 600)) return fetchPane();
+                        return r;
+                    })
                     .then(function (r) {
                         if (!r.ok) throw new Error('tab ' + r.status);
                         return r.text();
                     })
-                    .then(function (html) {
-                        var tmp = document.createElement('div');
-                        tmp.innerHTML = html;
-                        var inner = tmp.querySelector('#' + pane.id) || tmp;
-                        pane.innerHTML = inner.id === pane.id ? inner.innerHTML : tmp.innerHTML;
-                        if (pane.id === 'monthly-pane' && window.lmdFpLog) {
-                            window.lmdFpLog('monthly-html', 'monthly tab HTML on screen');
-                        }
-                    })
-                    .catch(function () {
-                        pane.setAttribute('data-pr-loaded', '0');
-                        pane.innerHTML = '<div class="text-center py-5 text-danger">Could not load this tab. Refresh the page.</div>';
-                    });
+                    .then(applyHtml)
+                    .catch(showError);
             }
-            document.getElementById('prTabs')?.addEventListener('show.bs.tab', function (e) {
+            var prTabsEl = document.getElementById('prTabs');
+            if (prTabsEl) prTabsEl.addEventListener('show.bs.tab', function (e) {
                 var btn = e.target.closest('[data-bs-target]');
                 var sel = btn && btn.getAttribute('data-bs-target');
                 loadPrPane(sel && document.querySelector(sel));
@@ -2587,6 +2835,7 @@ th.pr-month-data, td.pr-month-data {
             var search = ms.querySelector('.pr-ms-search');
             var labelEl = ms.querySelector('.pr-ms-label');
             var countEl = ms.querySelector('.pr-ms-count');
+            if (!btn || !panel || !labelEl || !countEl) return;
             function liveLabels() { return ms.querySelectorAll('.pr-ms-list label'); }
 
             function updateLabel() {
@@ -2641,9 +2890,10 @@ th.pr-month-data, td.pr-month-data {
             });
         });
 
-        // Export Excel with progress overlay
+        // Export Excel with progress overlay (skip if the small tab-loader already bound it)
         var exportBtn = document.getElementById('exportExcelBtn');
-        if (exportBtn) {
+        if (exportBtn && exportBtn.getAttribute('data-pr-export-bound') !== '1') {
+            exportBtn.setAttribute('data-pr-export-bound', '1');
             var overlay = document.getElementById('prExportOverlay');
             var bar = document.getElementById('prExportBar');
             var pctLabel = document.getElementById('prExportPct');
@@ -2681,7 +2931,8 @@ th.pr-month-data, td.pr-month-data {
             // generates the workbook in the background and the 📄 Reports badge
             // notifies when ready. Falls back to the legacy synchronous download
             // when the lab has no queue table (400) or the queue call fails.
-            exportBtn.addEventListener('click', function () {
+            exportBtn.addEventListener('click', function (e) {
+                e.preventDefault();
                 var form = document.getElementById('prFilterForm');
                 if (!form) return;
 
@@ -2712,21 +2963,18 @@ th.pr-month-data, td.pr-month-data {
 
                 var original = exportBtn.innerHTML;
                 exportBtn.disabled = true;
-                window.rptExportBusy(exportBtn, '<span class="spinner-border spinner-border-sm"></span> Queuing…');
+                if (window.rptExportBusy) window.rptExportBusy(exportBtn, '<span class="spinner-border spinner-border-sm"></span> Queuing…');
 
                 fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
-                    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+                    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }).catch(function () { return { ok: r.ok, status: r.status, j: null }; }); })
                     .then(function (res) {
                         if (res.ok) {
-                            window.rptExportBusy(exportBtn, '<i class="bi bi-check-circle"></i> Generating — watch Reports');
+                            if (window.rptExportBusy) window.rptExportBusy(exportBtn, '<i class="bi bi-check-circle"></i> Generating — watch Reports');
                             if (window.lrnShowReportAlert) window.lrnShowReportAlert('success');
                             if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
-                            setTimeout(function () { window.rptExportIdle(exportBtn, original); }, 8000);
-                        } else if (res.status === 400) {
-                            window.rptExportIdle(exportBtn, original);
-                            legacySyncExport();
+                            setTimeout(function () { if (window.rptExportIdle) window.rptExportIdle(exportBtn, original); }, 8000);
                         } else {
-                            window.rptExportIdle(exportBtn, original);
+                            if (window.rptExportIdle) window.rptExportIdle(exportBtn, original);
                             var qMsg = res.j && res.j.message ? res.j.message : '';
                             if (window.lrnShowReportAlert) {
                                 if (res.status === 409 || /already/i.test(qMsg)) {
@@ -2738,8 +2986,8 @@ th.pr-month-data, td.pr-month-data {
                         }
                     })
                     .catch(function () {
-                        window.rptExportIdle(exportBtn, original);
-                        legacySyncExport();
+                        if (window.rptExportIdle) window.rptExportIdle(exportBtn, original);
+                        if (window.lrnShowReportAlert) window.lrnShowReportAlert('error', { message: 'Could not queue the report.' });
                     });
             });
 
@@ -2824,6 +3072,11 @@ th.pr-month-data, td.pr-month-data {
                 }, 600000);
             }
         }
-    });
+    }());
 </script>
+}
+
+@if (prChrome && !string.IsNullOrWhiteSpace(Model.SelectedLab))
+{
+    @await Html.PartialAsync("_ProductionInsights", Model)
 }

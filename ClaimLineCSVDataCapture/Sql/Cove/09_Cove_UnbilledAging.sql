@@ -1,8 +1,8 @@
--- COVE Labs — Unbilled × Aging (by AgingDOS)
+-- COVE Labs ï¿½ Unbilled ï¿½ Aging (by AgingDOS)
 -- Rule:
 --   Filter  : FirstBilledDate IS NULL or blank  (truly unbilled claims)
 --   Row     : Panelname  (Panel)
---   Columns : AgingDOS bucket | COUNT(DISTINCT ClaimID)
+--   Columns : AgingDOS bucket | COUNT(DISTINCT ClaimID) | SUM(ChargeAmount)
 --   Note    : COVE uses AgingDOS (age from date of service) instead of the generic Aging column.
 -- ============================================================
 
@@ -15,12 +15,17 @@ GO
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Cove_UnbilledAging')
 CREATE TABLE dbo.Cove_UnbilledAging
 (
-    SummaryId   INT             NOT NULL IDENTITY(1,1) PRIMARY KEY,
-    PanelName   NVARCHAR(500)   NOT NULL,   -- stores Panelname value
-    AgingDOS    NVARCHAR(100)   NOT NULL,
-    ClaimCount  INT             NOT NULL DEFAULT 0,
-    RefreshedAt DATETIME        NOT NULL DEFAULT GETDATE()
+    SummaryId    INT             NOT NULL IDENTITY(1,1) PRIMARY KEY,
+    PanelName    NVARCHAR(500)   NOT NULL,   -- stores Panelname value
+    AgingDOS     NVARCHAR(100)   NOT NULL,
+    ClaimCount   INT             NOT NULL DEFAULT 0,
+    TotalCharges DECIMAL(18,2)   NOT NULL DEFAULT 0,
+    RefreshedAt  DATETIME        NOT NULL DEFAULT GETDATE()
 );
+GO
+
+IF COL_LENGTH('dbo.Cove_UnbilledAging', 'TotalCharges') IS NULL
+    ALTER TABLE dbo.Cove_UnbilledAging ADD TotalCharges DECIMAL(18,2) NOT NULL CONSTRAINT DF_Cove_UnbilledAging_TotalCharges DEFAULT 0;
 GO
 
 -- ============================================================
@@ -34,7 +39,8 @@ BEGIN
     SELECT
         LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), '(No Panelname)')))     AS Panelname,
         ISNULL(LTRIM(RTRIM(AgingDOS)), 'Unknown')                                        AS AgingDOS,
-        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))                                AS ClaimCount
+        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))                                AS ClaimCount,
+        ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)                          AS TotalCharges
     INTO #Raw
     FROM dbo.ClaimLevelData
     WHERE (FirstBilledDate IS NULL OR LTRIM(RTRIM(FirstBilledDate)) = '')
@@ -44,19 +50,19 @@ BEGIN
 
     TRUNCATE TABLE dbo.Cove_UnbilledAging;
 
-    INSERT INTO dbo.Cove_UnbilledAging (PanelName, AgingDOS, ClaimCount, RefreshedAt)
-    SELECT Panelname, AgingDOS, ClaimCount, GETDATE()
+    INSERT INTO dbo.Cove_UnbilledAging (PanelName, AgingDOS, ClaimCount, TotalCharges, RefreshedAt)
+    SELECT Panelname, AgingDOS, ClaimCount, TotalCharges, GETDATE()
     FROM #Raw
     ORDER BY Panelname, AgingDOS;
 
     DROP TABLE IF EXISTS #Raw;
 
-    PRINT 'usp_RefreshCove_UnbilledAging completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
+    PRINT 'usp_RefreshCove_UnbilledAging completed ï¿½ ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END
 GO
 
 /*
-SELECT PanelName, AgingDOS, ClaimCount
+SELECT PanelName, AgingDOS, ClaimCount, TotalCharges
 FROM dbo.Cove_UnbilledAging ORDER BY PanelName, AgingDOS;
 */
 

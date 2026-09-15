@@ -22,7 +22,7 @@ public sealed record RawDataSegment(string SheetName, string[] Columns, List<obj
 /// summary export (ExcelTheme green family, matching PredictionExcelExportBuilder).
 /// Headers use merged cells mirroring the view table layout exactly.
 /// </summary>
-public static class ProductionReportExcelExportBuilder
+public static partial class ProductionReportExcelExportBuilder
 {
     /// <summary>Row threshold above which data is split into multiple sheets (3 lakh).</summary>
     private const int SplitThreshold = 300_000;
@@ -140,6 +140,7 @@ public static class ProductionReportExcelExportBuilder
         var wb = new XLWorkbook();
 
         BuildMonthlyAndWeeklySheet(wb, vm, labName, weekFolder: null, runId: null);
+        TryBuildProductionSummaryPivot(wb, vm);
         BuildCptBreakdownSheet(wb, vm);
         BuildPayerBreakdownSheet(wb, vm);
         BuildPayerPanelSheet(wb, vm);
@@ -167,6 +168,7 @@ public static class ProductionReportExcelExportBuilder
         var wb = new XLWorkbook();
 
         BuildMonthlyAndWeeklySheet(wb, vm, labName, weekFolder, runId);
+        TryBuildProductionSummaryPivot(wb, vm);
         BuildCptBreakdownSheet(wb, vm);
         BuildPayerBreakdownSheet(wb, vm);
         BuildPayerPanelSheet(wb, vm);
@@ -200,9 +202,10 @@ public static class ProductionReportExcelExportBuilder
 
         BuildMonthlyAndWeeklySheet(wb, vm, labName, weekFolder, runId);
         logger?.LogInformation(
-            "[ProdExcelExport][Sheet] MonthlyAndWeeklyVolume built in {Ms}ms", sw.ElapsedMilliseconds);
+            "[ProdExcelExport][Sheet] Insights (monthly/weekly) built in {Ms}ms", sw.ElapsedMilliseconds);
 
         sw.Restart();
+        TryBuildProductionSummaryPivot(wb, vm);
         BuildCptBreakdownSheet(wb, vm);
         logger?.LogInformation(
             "[ProdExcelExport][Sheet] CPTBreakdown built in {Ms}ms ({Rows} CPT rows)",
@@ -300,7 +303,7 @@ public static class ProductionReportExcelExportBuilder
         XLWorkbook wb, ProductionReportViewModel vm, string labName,
         string? weekFolder, string? runId)
     {
-        var ws = wb.AddWorksheet("MonthlyAndWeeklyVolume");
+        var ws = wb.AddWorksheet("Insights");
         ws.TabColor = ExcelTheme.TabRed;
         ExcelTheme.ApplyDefaults(ws);
 
@@ -691,14 +694,17 @@ public static class ProductionReportExcelExportBuilder
 
     private static void BuildPayerBreakdownSheet(XLWorkbook wb, ProductionReportViewModel vm)
     {
+        if (TryBuildPayerBreakdownPivot(wb, vm)) return;
         if (vm.PayerBreakdownRows.Count == 0) return;
 
         var ws = wb.AddWorksheet("Payer Breakdown");
         ws.TabColor = ExcelTheme.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
 
+        var isCove = vm.SelectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase);
         var showCharges = vm.IsNorthWestLab
             || vm.IsAugustusLab
+            || isCove
             || string.Equals(vm.ProductionSummaryRule, "Rule4", StringComparison.OrdinalIgnoreCase)
             || string.Equals(vm.ProductionSummaryRule, "Rule3", StringComparison.OrdinalIgnoreCase);
         var metrics = showCharges ? 2 : 1;
@@ -850,6 +856,7 @@ public static class ProductionReportExcelExportBuilder
 
     private static void BuildPanelBreakdownSheet(XLWorkbook wb, ProductionReportViewModel vm)
     {
+        if (TryBuildPanelBreakdownPivot(wb, vm)) return;
         if (vm.PanelBreakdownRows.Count == 0) return;
 
         var ws = wb.AddWorksheet("Panel Breakdown");
@@ -870,7 +877,10 @@ public static class ProductionReportExcelExportBuilder
         colCount += metrics;
 
         int row = 1;
-        ExcelTheme.WriteTitleBar(ws, row, colCount, "Panel Breakdown (Charge Entered Date)", ExcelTheme.InsightsHeaderBg);
+        var panelTitle = vm.SelectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
+            ? "Panel Breakdown (First Billed Date)"
+            : "Panel Breakdown (Charge Entered Date)";
+        ExcelTheme.WriteTitleBar(ws, row, colCount, panelTitle, ExcelTheme.InsightsHeaderBg);
         row++;
 
         int hRow1 = row;
@@ -997,62 +1007,77 @@ public static class ProductionReportExcelExportBuilder
 
     private static void BuildPayerPanelSheet(XLWorkbook wb, ProductionReportViewModel vm)
     {
+        if (TryBuildPayerPanelPivot(wb, vm)) return;
         if (vm.PayerPanelRows.Count == 0) return;
 
         var ws = wb.AddWorksheet("Payor x Panel");
         ws.TabColor = ExcelTheme.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
 
+        // Client layout: Payers as rows, Panels as column groups
+        // (each panel = No. of Claims + Total Billed Charges).
         var panels = vm.PayerPanelColumns;
-        const int colCount = 3;
+        const int metrics = 2;
+        int colCount = 1 + panels.Count * metrics + metrics;
 
         int row = 1;
         ExcelTheme.WriteTitleBar(ws, row, colCount, "Payor x Panel", ExcelTheme.InsightsHeaderBg);
         row++;
-        ExcelTheme.WriteHeaderRow(ws, row, 1,
-            ["Payer / Panel", "No. of Claims", "Total Billed Charges"], ExcelTheme.InsightsHeaderBg);
-        row++;
 
-        int dataIdx = 0;
+        int hRow1 = row;
+        WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, "PAYER X PANEL", ExcelTheme.InsightsHeaderBg);
+        int hCol = 2;
+        foreach (var panel in panels)
+        {
+            WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1, panel, ExcelTheme.InsightsHeaderBg);
+            hCol += 2;
+        }
+        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1, "Grand Total", ExcelTheme.InsightsHeaderBg);
+
+        int hRow2 = hRow1 + 1;
+        hCol = 2;
+        foreach (var _ in panels)
+        {
+            WriteHeaderCell(ws, hRow2, hCol++, "NO. OF CLAIMS", ExcelTheme.InsightsHeaderBg);
+            WriteHeaderCell(ws, hRow2, hCol++, "TOTAL BILLED CHARGES", ExcelTheme.InsightsHeaderBg);
+        }
+        WriteHeaderCell(ws, hRow2, hCol++, "NO. OF CLAIMS", ExcelTheme.InsightsHeaderBg);
+        WriteHeaderCell(ws, hRow2, hCol, "TOTAL BILLED CHARGES", ExcelTheme.InsightsHeaderBg);
+
+        row = hRow2 + 1;
         foreach (var pr in vm.PayerPanelRows)
         {
-            var parentBg = XLColor.White;
-            WriteCell(ws, row, 1, pr.PayerName, parentBg, isText: true);
-            WriteCell(ws, row, 2, pr.GrandTotalClaims, parentBg);
-            WriteCurrencyCell(ws, row, 3, pr.GrandTotalCharges, parentBg);
-            ws.Row(row).Style.Font.Bold = true;
-            row++;
-
-            var childPanels = panels
-                .Select(p => (Name: p, Cell: GetMonthCell(pr.ByPanel, p)))
-                .Where(x => x.Cell.ClaimCount != 0 || x.Cell.BilledCharges != 0m)
-                .ToList();
-
-            int firstChild = row;
-            int childIdx = 0;
-            foreach (var (name, cell) in childPanels)
+            var bg = XLColor.White;
+            int col = 1;
+            WriteCell(ws, row, col++, pr.PayerName, bg, isText: true);
+            foreach (var panel in panels)
             {
-                var bg = XLColor.White;
-                WriteCell(ws, row, 1, $"    {name}", bg, isText: true);
-                WriteCell(ws, row, 2, cell.ClaimCount, bg);
-                WriteCurrencyCell(ws, row, 3, cell.BilledCharges, bg);
-                row++;
-                childIdx++;
+                var cell = GetMonthCell(pr.ByPanel, panel);
+                WriteCell(ws, row, col++, cell.ClaimCount, bg);
+                WriteCurrencyCell(ws, row, col++, cell.BilledCharges, bg);
             }
-            if (childPanels.Count > 1)
-                ExcelTheme.GroupChildRows(ws, firstChild, row - 1);
-            dataIdx++;
+            WriteCell(ws, row, col++, pr.GrandTotalClaims, bg);
+            WriteCurrencyCell(ws, row, col, pr.GrandTotalCharges, bg);
+            row++;
         }
 
         ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
-        ws.Cell(row, 1).Value = "Grand Total";
-        ws.Cell(row, 2).Value = vm.PayerPanelGrandTotalClaims;
-        ws.Cell(row, 2).Style.NumberFormat.Format = ExcelTheme.CountNumberFormat;
-        ws.Cell(row, 3).Value = vm.PayerPanelGrandTotalCharges;
-        ws.Cell(row, 3).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+        int gtCol = 1;
+        ws.Cell(row, gtCol++).Value = "Grand Total";
+        foreach (var panel in panels)
+        {
+            var cell = GetMonthCell(vm.PayerPanelGrandByPanel, panel);
+            ws.Cell(row, gtCol).Value = cell.ClaimCount;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.CountNumberFormat;
+            ws.Cell(row, gtCol).Value = cell.BilledCharges;
+            ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+        }
+        ws.Cell(row, gtCol).Value = vm.PayerPanelGrandTotalClaims;
+        ws.Cell(row, gtCol++).Style.NumberFormat.Format = ExcelTheme.CountNumberFormat;
+        ws.Cell(row, gtCol).Value = vm.PayerPanelGrandTotalCharges;
+        ws.Cell(row, gtCol).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
 
         ExcelTheme.AutoFitColumns(ws, colCount);
-        ExcelTheme.FinishOutline(ws);
     }
 
     // ?? Unbilled X Aging ?????????????????????????????????????????????????
@@ -1138,6 +1163,7 @@ public static class ProductionReportExcelExportBuilder
 
     private static void BuildCptBreakdownSheet(XLWorkbook wb, ProductionReportViewModel vm)
     {
+        if (TryBuildCptBreakdownPivot(wb, vm)) return;
         if (vm.CptBreakdownRows.Count == 0) return;
 
         var ws = wb.AddWorksheet("CPT Breakdown");
@@ -1153,11 +1179,13 @@ public static class ProductionReportExcelExportBuilder
 
         var showCptCount = vm.IsNorthWestLab
             || vm.IsAugustusLab
+            || vm.SelectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(vm.CptUnitsLabel, "Count of CPT", StringComparison.OrdinalIgnoreCase)
             || string.Equals(vm.ProductionSummaryRule, "Rule4", StringComparison.OrdinalIgnoreCase)
             || string.Equals(vm.ProductionSummaryRule, "Rule3", StringComparison.OrdinalIgnoreCase);
         var cptCountHeader = !string.IsNullOrWhiteSpace(vm.CptUnitsLabel)
             ? vm.CptUnitsLabel
-            : showCptCount ? "Count of Units" : "Billed Units";
+            : showCptCount ? "Count of CPT" : "Billed Units";
         const int metrics = 2;
         int colCount = 1;
         foreach (var year in cptYears)
@@ -1165,7 +1193,10 @@ public static class ProductionReportExcelExportBuilder
         colCount += metrics;
 
         int row = 1;
-        ExcelTheme.WriteTitleBar(ws, row, colCount, "CPT Breakdown (Billed Date)", ExcelTheme.InsightsHeaderBg);
+        var cptTitle = vm.SelectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
+            ? "CPT Breakdown (First Billed Date)"
+            : "CPT Breakdown (Billed Date)";
+        ExcelTheme.WriteTitleBar(ws, row, colCount, cptTitle, ExcelTheme.InsightsHeaderBg);
         row++;
 
         // ?? Header Row 1: year grouping ??

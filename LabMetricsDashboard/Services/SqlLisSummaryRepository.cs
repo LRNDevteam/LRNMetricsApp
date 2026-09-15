@@ -1,12 +1,21 @@
 using System.Data;
+using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using LabMetricsDashboard.Models;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
 
 namespace LabMetricsDashboard.Services;
 
 public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 {
+	private readonly ILogger<SqlLisSummaryRepository> _logger;
+
+	public SqlLisSummaryRepository(ILogger<SqlLisSummaryRepository> logger)
+	{
+		_logger = logger;
+	}
 	/// <summary>dbo.LIMSMaster column holding per-row extra fields as a JSON object.</summary>
 	private const string AdditionalFieldsColumn = "AdditionalFields";
 
@@ -465,23 +474,38 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		string? refPhy = null,
 		string? salesRep = null,
 		string? collector = null,
-		CancellationToken ct = default)
+		CancellationToken ct = default,
+		bool includeKeyMetrics = false)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
+		var sw = Stopwatch.StartNew();
+		FirstPaintLog.Write(_logger, "LIS", labName, "summary-start", 0,
+			$"dateType={dateType} from={dateFrom:yyyy-MM-dd} to={dateTo:yyyy-MM-dd} includeKeyMetrics={includeKeyMetrics}");
+
 		await using var conn = new SqlConnection(connectionString);
 		await conn.OpenAsync(ct);
+		FirstPaintLog.Write(_logger, "LIS", labName, "summary-db-open", sw.ElapsedMilliseconds);
 
-		var columns = await GetLimsMasterColumnsAsync(conn, ct);
+		var columnTypes = await GetLimsMasterColumnTypesAsync(conn, ct);
+		var columns = new HashSet<string>(columnTypes.Keys, StringComparer.OrdinalIgnoreCase);
 		if (columns.Count == 0)
 		{
 			throw new InvalidOperationException("dbo.LIMSMaster was not found, or no columns were found in dbo.LIMSMaster.");
 		}
+		FirstPaintLog.Write(_logger, "LIS", labName, "summary-schema", sw.ElapsedMilliseconds, $"cols={columns.Count}");
 
 		var profile = ResolveProfile(labName, labId, columns, dateType);
 		var filterColumns = ResolveFilterColumns(columns, profile.LogicSheetName);
 		var sourceFileName = await GetLatestSourceFileNameAsync(conn, columns, ct);
-		var raw = await LoadDynamicGroupsAsync(conn, profile, filterColumns, dateFrom, dateTo, panel, clinic, refPhy, salesRep, collector, ct);
+		FirstPaintLog.Write(_logger, "LIS", labName, "summary-sourcefile", sw.ElapsedMilliseconds,
+			$"dateCol={profile.DateColumn} logic={profile.LogicSheetName}");
+
+		var raw = await LoadDynamicGroupsAsync(
+			conn, profile, filterColumns, columnTypes, dateFrom, dateTo,
+			panel, clinic, refPhy, salesRep, collector, ct);
+		FirstPaintLog.Write(_logger, "LIS", labName, "summary-groups", sw.ElapsedMilliseconds, $"rawGroups={raw.Count}");
+
 		var summaryRaw = UsesBlankIncorrectDosSummary(profile.LogicSheetName)
 			? raw.Where(HasBlankIncorrectDos).ToList()
 			: UsesBlankNaSummary(profile.LogicSheetName)
@@ -513,6 +537,19 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			.ToDictionary(g => g.Key, g => g.Sum(x => x.TotalClaims));
 
 		var kpiCards = BuildKpiCards(summaryRaw, rows, grandByMonth.Values.Sum());
+		LisKeyMetricsBlock? keyMetrics = null;
+		if (includeKeyMetrics)
+		{
+			var kmSw = Stopwatch.StartNew();
+			keyMetrics = await LoadKeyMetricsAsync(
+				conn, columns, columnTypes, profile.LogicSheetName, filterColumns, dateFrom, dateTo,
+				panel, clinic, refPhy, salesRep, collector, ct);
+			FirstPaintLog.Write(_logger, "LIS", labName, "summary-keymetrics", kmSw.ElapsedMilliseconds,
+				$"months={keyMetrics?.Months.Count ?? 0}");
+		}
+
+		FirstPaintLog.Write(_logger, "LIS", labName, "summary-done", sw.ElapsedMilliseconds,
+			$"rows={rows.Count} months={months.Count} total={grandByMonth.Values.Sum()}");
 
 		return new LisSummaryResult(
 			profile.LogicSheetName,
@@ -523,27 +560,72 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			grandByMonth,
 			grandByYear,
 			grandByMonth.Values.Sum(),
-			kpiCards);
+			kpiCards,
+			keyMetrics);
 	}
 
-	private static async Task<HashSet<string>> GetLimsMasterColumnsAsync(SqlConnection conn, CancellationToken ct)
+	public async Task<LisKeyMetricsBlock?> GetKeyMetricsAsync(
+		string connectionString,
+		string labName,
+		int? labId = null,
+		DateOnly? dateFrom = null,
+		DateOnly? dateTo = null,
+		string? panel = null,
+		string? clinic = null,
+		string? refPhy = null,
+		string? salesRep = null,
+		string? collector = null,
+		CancellationToken ct = default)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+		var sw = Stopwatch.StartNew();
+		FirstPaintLog.Write(_logger, "LIS", labName, "keymetrics-start", 0,
+			$"from={dateFrom:yyyy-MM-dd} to={dateTo:yyyy-MM-dd}");
+
+		await using var conn = new SqlConnection(connectionString);
+		await conn.OpenAsync(ct);
+
+		var columnTypes = await GetLimsMasterColumnTypesAsync(conn, ct);
+		var columns = new HashSet<string>(columnTypes.Keys, StringComparer.OrdinalIgnoreCase);
+		if (columns.Count == 0) return null;
+
+		var logicSheet = ResolveLogicSheet(labName, labId);
+		var filterColumns = ResolveFilterColumns(columns, logicSheet);
+		var result = await LoadKeyMetricsAsync(
+			conn, columns, columnTypes, logicSheet, filterColumns, dateFrom, dateTo,
+			panel, clinic, refPhy, salesRep, collector, ct);
+
+		FirstPaintLog.Write(_logger, "LIS", labName, "keymetrics-done", sw.ElapsedMilliseconds,
+			$"months={result?.Months.Count ?? 0}");
+		return result;
+	}
+
+	private static async Task<Dictionary<string, string>> GetLimsMasterColumnTypesAsync(
+		SqlConnection conn, CancellationToken ct)
 	{
 		const string sql = """
-            SELECT COLUMN_NAME
+            SELECT COLUMN_NAME, DATA_TYPE
             FROM INFORMATION_SCHEMA.COLUMNS
             WHERE TABLE_SCHEMA = 'dbo'
               AND TABLE_NAME = 'LIMSMaster';
             """;
 
-		var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var types = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 60 };
 		await using var reader = await cmd.ExecuteReaderAsync(ct);
 		while (await reader.ReadAsync(ct))
 		{
-			columns.Add(reader.GetString(0));
+			types[reader.GetString(0)] = reader.GetString(1);
 		}
 
-		return columns;
+		return types;
+	}
+
+	private static async Task<HashSet<string>> GetLimsMasterColumnsAsync(SqlConnection conn, CancellationToken ct)
+	{
+		var types = await GetLimsMasterColumnTypesAsync(conn, ct);
+		return new HashSet<string>(types.Keys, StringComparer.OrdinalIgnoreCase);
 	}
 
 	private static async Task<string> GetLatestSourceFileNameAsync(
@@ -1039,6 +1121,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		SqlConnection conn,
 		DimensionProfile profile,
 		FilterColumnProfile filterColumns,
+		IReadOnlyDictionary<string, string> columnTypes,
 		DateOnly? dateFrom,
 		DateOnly? dateTo,
 		string? panel,
@@ -1048,24 +1131,36 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		string? collector,
 		CancellationToken ct)
 	{
-		var dateExpr = $"TRY_CONVERT(date, {Q(profile.DateColumn)})";
+		var dateExpr = BuildDateExpr(profile.DateColumn, columnTypes);
 		var where = new List<string>
 		{
 			$"{dateExpr} IS NOT NULL",
 			$"YEAR({dateExpr}) > 1900"
 		};
 
-		var parameters = new List<SqlParameter>();
-		if (dateFrom.HasValue)
+		// Unbounded group-by on LIMSMaster (especially Cove DateOfCollection) can run for
+		// minutes and leave the page on "Loading LIS Summary...". Cap to recent months when
+		// the user left the date filters blank.
+		var effectiveFrom = dateFrom;
+		var effectiveTo = dateTo;
+		if (!effectiveFrom.HasValue && !effectiveTo.HasValue)
 		{
-			where.Add($"{dateExpr} >= @fromDate");
-			parameters.Add(new SqlParameter("@fromDate", SqlDbType.Date) { Value = dateFrom.Value.ToDateTime(TimeOnly.MinValue) });
+			var today = DateOnly.FromDateTime(DateTime.Today);
+			effectiveFrom = new DateOnly(today.Year, today.Month, 1).AddMonths(-5);
+			effectiveTo = today;
 		}
 
-		if (dateTo.HasValue)
+		var parameters = new List<SqlParameter>();
+		if (effectiveFrom.HasValue)
+		{
+			where.Add($"{dateExpr} >= @fromDate");
+			parameters.Add(new SqlParameter("@fromDate", SqlDbType.Date) { Value = effectiveFrom.Value.ToDateTime(TimeOnly.MinValue) });
+		}
+
+		if (effectiveTo.HasValue)
 		{
 			where.Add($"{dateExpr} <= @toDate");
-			parameters.Add(new SqlParameter("@toDate", SqlDbType.Date) { Value = dateTo.Value.ToDateTime(TimeOnly.MinValue) });
+			parameters.Add(new SqlParameter("@toDate", SqlDbType.Date) { Value = effectiveTo.Value.ToDateTime(TimeOnly.MinValue) });
 		}
 
 		AddOptionalFilter(where, parameters, filterColumns.PanelExpression, "@panel", panel);
@@ -1112,7 +1207,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
             """;
 
 		var raw = new List<RawLisGroup>();
-		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 240 };
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 90 };
 		foreach (var p in parameters) cmd.Parameters.Add(p);
 
 		await using var rdr = await cmd.ExecuteReaderAsync(ct);
@@ -1132,6 +1227,175 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		}
 
 		return raw;
+	}
+
+	/// <summary>
+	/// Recent four months by Date of Collection. Always buckets on the lab's collected
+	/// date column regardless of the summary pivot's date type. Respects the same
+	/// dimensional filters and optional collection-date range as the summary query.
+	/// </summary>
+	private static async Task<LisKeyMetricsBlock?> LoadKeyMetricsAsync(
+		SqlConnection conn,
+		HashSet<string> columns,
+		IReadOnlyDictionary<string, string> columnTypes,
+		string logicSheetName,
+		FilterColumnProfile filterColumns,
+		DateOnly? dateFrom,
+		DateOnly? dateTo,
+		string? panel,
+		string? clinic,
+		string? refPhy,
+		string? salesRep,
+		string? collector,
+		CancellationToken ct)
+	{
+		var timeToResultColumn = FirstExisting(columns, "TimetoResult", "TimeToResult", "Time to Result");
+		var timeToBillColumn = FirstExisting(columns, "TimetoBill", "TimeToBill", "Time to Bill");
+		if (string.IsNullOrWhiteSpace(timeToResultColumn) || string.IsNullOrWhiteSpace(timeToBillColumn))
+		{
+			return null;
+		}
+
+		string collectionDateColumn;
+		try
+		{
+			collectionDateColumn = ResolveDateColumn(columns, logicSheetName, "Collected");
+		}
+		catch (InvalidOperationException)
+		{
+			return null;
+		}
+
+		var dateExpr = BuildDateExpr(collectionDateColumn, columnTypes);
+		var resultExpr = BuildDurationAvgExpr(timeToResultColumn, columnTypes);
+		var billExpr = BuildDurationAvgExpr(timeToBillColumn, columnTypes);
+
+		// Recent-4-months is always relative to the latest collection date in LIMSMaster
+		// (plus panel/clinic/etc. filters). The page Date From/To must NOT shrink this to
+		// a single month — that produced "only Aug" while the template expects 4 columns.
+		var where = new List<string>
+		{
+			$"{dateExpr} IS NOT NULL",
+			$"YEAR({dateExpr}) > 1900"
+		};
+
+		var parameters = new List<SqlParameter>();
+		AddOptionalFilter(where, parameters, filterColumns.PanelExpression, "@kmPanel", panel);
+		AddOptionalFilter(where, parameters, filterColumns.ClinicExpression, "@kmClinic", clinic);
+		AddOptionalFilter(where, parameters, filterColumns.RefPhyExpression, "@kmRefPhy", refPhy);
+		AddOptionalFilter(where, parameters, filterColumns.SalesRepExpression, "@kmSalesRep", salesRep);
+		AddOptionalFilter(where, parameters, filterColumns.CollectorExpression, "@kmCollector", collector);
+
+		var whereSql = string.Join(" AND ", where);
+
+		var sql = $"""
+            ;WITH Bounds AS (
+                SELECT MAX({dateExpr}) AS MaxCollectionDate
+                FROM dbo.LIMSMaster WITH (NOLOCK)
+                WHERE {whereSql}
+            ),
+            Window AS (
+                SELECT
+                    DATEFROMPARTS(
+                        YEAR(DATEADD(month, -3, MaxCollectionDate)),
+                        MONTH(DATEADD(month, -3, MaxCollectionDate)),
+                        1) AS FromDate,
+                    EOMONTH(MaxCollectionDate) AS ToDate
+                FROM Bounds
+                WHERE MaxCollectionDate IS NOT NULL
+            )
+            SELECT
+                YEAR({dateExpr}) AS MetricYear,
+                MONTH({dateExpr}) AS MetricMonth,
+                AVG(CAST({resultExpr} AS float)) AS AvgTimeToResult,
+                AVG(CAST({billExpr} AS float)) AS AvgTimeToBill
+            FROM dbo.LIMSMaster WITH (NOLOCK)
+            CROSS JOIN Window w
+            WHERE {whereSql}
+              AND {dateExpr} >= w.FromDate
+              AND {dateExpr} <= w.ToDate
+            GROUP BY YEAR({dateExpr}), MONTH({dateExpr})
+            ORDER BY MetricYear, MetricMonth;
+            """;
+
+		var loaded = new Dictionary<(int Year, int Month), LisKeyMetricsMonth>();
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 45 };
+		foreach (var p in parameters) cmd.Parameters.Add(p);
+
+		await using var rdr = await cmd.ExecuteReaderAsync(ct);
+		while (await rdr.ReadAsync(ct))
+		{
+			var year = rdr.GetInt32(0);
+			var month = rdr.GetInt32(1);
+			loaded[(year, month)] = new LisKeyMetricsMonth(
+				year,
+				month,
+				new DateTime(year, month, 1).ToString("MMM", CultureInfo.InvariantCulture),
+				rdr.IsDBNull(2) ? null : Convert.ToDouble(rdr.GetValue(2)),
+				rdr.IsDBNull(3) ? null : Convert.ToDouble(rdr.GetValue(3)));
+		}
+
+		if (loaded.Count == 0)
+		{
+			return null;
+		}
+
+		// Always emit exactly 4 month columns ending at the latest loaded month.
+		var end = loaded.Keys.OrderBy(k => k.Year).ThenBy(k => k.Month).Last();
+		var endDate = new DateOnly(end.Year, end.Month, 1);
+		var months = new List<LisKeyMetricsMonth>(4);
+		for (var i = 3; i >= 0; i--)
+		{
+			var d = endDate.AddMonths(-i);
+			if (loaded.TryGetValue((d.Year, d.Month), out var existing))
+			{
+				months.Add(existing);
+			}
+			else
+			{
+				months.Add(new LisKeyMetricsMonth(
+					d.Year,
+					d.Month,
+					new DateTime(d.Year, d.Month, 1).ToString("MMM", CultureInfo.InvariantCulture),
+					null,
+					null));
+			}
+		}
+
+		var label = collectionDateColumn.Equals("DateOfCollection", StringComparison.OrdinalIgnoreCase)
+			? "Date of Collection"
+			: collectionDateColumn;
+
+		return new LisKeyMetricsBlock(label, months);
+	}
+
+	private static string BuildDurationNumericExpr(string columnName)
+		=> $"TRY_CONVERT(float, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(columnName)}))), ''))";
+
+	/// <summary>
+	/// Native date/datetime columns must not go through TRY_CONVERT — that forces a scan.
+	/// Cove DateOfCollection is already date; TimetoResult / TimetoBill are already int.
+	/// </summary>
+	private static string BuildDateExpr(string columnName, IReadOnlyDictionary<string, string> columnTypes)
+	{
+		if (columnTypes.TryGetValue(columnName, out var dataType)
+			&& dataType is "date" or "datetime" or "datetime2" or "smalldatetime")
+		{
+			return Q(columnName);
+		}
+
+		return $"TRY_CONVERT(date, {Q(columnName)})";
+	}
+
+	private static string BuildDurationAvgExpr(string columnName, IReadOnlyDictionary<string, string> columnTypes)
+	{
+		if (columnTypes.TryGetValue(columnName, out var dataType)
+			&& dataType is "int" or "bigint" or "smallint" or "tinyint" or "decimal" or "numeric" or "float" or "real")
+		{
+			return Q(columnName);
+		}
+
+		return BuildDurationNumericExpr(columnName);
 	}
 
 	private static string ResolveDateColumn(HashSet<string> columns, string logicSheet, string dateType)

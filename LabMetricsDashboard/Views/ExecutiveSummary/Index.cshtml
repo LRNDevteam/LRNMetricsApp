@@ -192,6 +192,24 @@
     tr.es-sub-sub-row td.col-desc { padding-left: 3rem; font-weight: 400; color: #64748b; background: #fafbfc; }
     tr.es-sub-sub-row:hover td, tr.es-sub-sub-row:hover td.col-desc { background: #f1f5f9; }
 
+    /* CP Exception — client Exec Summary: parent #FFF2CC, panel children #E2EFDA */
+    tr.es-cp-exception td,
+    tr.es-cp-exception td.col-desc {
+        background: #FFF2CC !important;
+        color: #1e293b;
+        font-weight: 700;
+    }
+    tr.es-cp-exception:hover td,
+    tr.es-cp-exception:hover td.col-desc { background: #FFE699 !important; }
+    tr.es-cp-exception-child td,
+    tr.es-cp-exception-child td.col-desc {
+        background: #E2EFDA !important;
+        color: #1e293b;
+        font-style: italic;
+    }
+    tr.es-cp-exception-child:hover td,
+    tr.es-cp-exception-child:hover td.col-desc { background: #D4E6C8 !important; }
+
     /* ── Collapsible sub-rows ─────────────────────────────────── */
     tr.es-cat-row.has-children td.col-desc { cursor: pointer; user-select: none; }
     tr.es-cat-row.has-children td.col-desc::before {
@@ -934,6 +952,12 @@
                                     string rClass = row.IsSubSubRow ? "es-sub-sub-row"
                                                   : isSub           ? "es-sub-row"
                                                   :                   "es-cat-row";
+                                    var leafForClass = (row.Description ?? "").Trim();
+                                    if (leafForClass.Equals("CP Exception", StringComparison.OrdinalIgnoreCase))
+                                        rClass += " es-cp-exception";
+                                    else if (row.IsSubSubRow
+                                             && string.Equals(drillSubParentTitle, "CP Exception", StringComparison.OrdinalIgnoreCase))
+                                        rClass += " es-cp-exception-child";
                                     bool dollarRow = IsDollar(row.Category);
 
                                     var leafTitle = (row.Description ?? "").Trim();

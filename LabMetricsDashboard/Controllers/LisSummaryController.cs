@@ -137,7 +137,12 @@ public class LisSummaryController : Controller
 		try
 		{
 			var tabSw = Stopwatch.StartNew();
+			FirstPaintLog.Write(_logger, "LIS", selectedLabName, "getsummary-enter", 0,
+				$"range={filters.EffectiveDateRange} from={filters.EffectiveDateFrom:yyyy-MM-dd} to={filters.EffectiveDateTo:yyyy-MM-dd} dateType={filters.EffectiveDateType} tab={filters.EffectiveActiveTab}");
+
 			var labOptions = await GetLabOptionsAsync(availableLabs, cancellationToken);
+			FirstPaintLog.Write(_logger, "LIS", selectedLabName, "getsummary-laboptions", tabSw.ElapsedMilliseconds);
+
 			var selectedLabOption = ResolveSelectedLabOption(labOptions, selectedLabName, filters.LabId);
 			filters.LabId = selectedLabOption?.LabId;
 			NormalizeLabDateType(filters, selectedLabOption?.LabName ?? selectedLabName);
@@ -181,7 +186,9 @@ public class LisSummaryController : Controller
 			var lineTask = LineOrNullAsync();
 			await Task.WhenAll(summaryTask, lineTask);
 			FirstPaintLog.Write(_logger, "LIS", selectedLabName, "tab-summary", tabSw.ElapsedMilliseconds,
-				loadLine ? "summary+line" : "summary only");
+				loadLine
+					? $"summary+line rows={summaryTask.Result.Rows.Count}"
+					: $"summary only rows={summaryTask.Result.Rows.Count} months={summaryTask.Result.Months.Count}");
 
 			ViewData["LisPaneOnly"] = "result";
 			return PartialView("Index", new LisSummaryPageViewModel
@@ -210,6 +217,63 @@ public class LisSummaryController : Controller
 				? $"The LIS Summary query for {selectedLabName} took too long and the page stopped waiting. Narrow the date range or filters and try again."
 				: $"Failed to load LIS Summary: {ex.Message}";
 			return Content($"<div class=\"alert alert-warning border-0 shadow-sm\">{System.Net.WebUtility.HtmlEncode(msg)}</div>", "text/html");
+		}
+	}
+
+	/// <summary>
+	/// Key Metrics HTML after the main LIS Summary pivot has landed. Kept separate so
+	/// AVG(Time to Result / Time to Bill) does not block the status summary.
+	/// </summary>
+	[HttpGet]
+	public async Task<IActionResult> GetKeyMetrics(
+		[FromQuery] LisSummaryFilters filters,
+		[FromQuery] string? lab,
+		CancellationToken cancellationToken)
+	{
+		filters ??= new LisSummaryFilters();
+		filters.Normalize();
+
+		var availableLabs = GetAvailableLisLabs();
+		var selectedLabName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+		selectedLabName = ResolveConfiguredLabKey(selectedLabName, availableLabs);
+
+		if (availableLabs.Count == 0 || string.IsNullOrWhiteSpace(selectedLabName)
+			|| !_labSettings.Labs.TryGetValue(selectedLabName, out var config)
+			|| !config.LineClaimEnable
+			|| string.IsNullOrWhiteSpace(config.DbConnectionString))
+		{
+			return Content(string.Empty);
+		}
+
+		try
+		{
+			var labOptions = await GetLabOptionsAsync(availableLabs, cancellationToken);
+			var selectedLabOption = ResolveSelectedLabOption(labOptions, selectedLabName, filters.LabId);
+			filters.LabId = selectedLabOption?.LabId;
+			NormalizeLabDateType(filters, selectedLabOption?.LabName ?? selectedLabName);
+
+			var metrics = await _lisSummaryRepository.GetKeyMetricsAsync(
+				config.DbConnectionString,
+				selectedLabOption?.LabName ?? selectedLabName,
+				selectedLabOption?.LabId ?? 0,
+				filters.EffectiveDateFrom,
+				filters.EffectiveDateTo,
+				filters.Panel,
+				filters.Clinic,
+				filters.RefPhy,
+				filters.SalesRep,
+				filters.Collector,
+				cancellationToken);
+
+			if (metrics is null || metrics.Months.Count == 0)
+				return Content(string.Empty);
+
+			return PartialView("_KeyMetrics", metrics);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogWarning(ex, "LIS Key Metrics failed for lab '{LabName}'.", selectedLabName);
+			return Content(string.Empty);
 		}
 	}
 
@@ -322,7 +386,8 @@ public class LisSummaryController : Controller
 				filters.RefPhy,
 				filters.SalesRep,
 				filters.Collector,
-				cancellationToken);
+				cancellationToken,
+				includeKeyMetrics: true);
 
 			if (result.Rows.Count == 0)
 			{

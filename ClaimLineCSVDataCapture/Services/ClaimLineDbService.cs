@@ -525,11 +525,11 @@ public sealed class ClaimLineDbService
         [
             "dbo.usp_RefreshCove_MonthlyBilledProductionSummary",
             "dbo.usp_RefreshCove_WeeklyBilledProductionSummary",
-            "dbo.usp_RefreshCove_PayerBreakdown",
-            "dbo.usp_RefreshCove_PayerByPanel",
-            "dbo.usp_RefreshCove_PanelBreakdownWithPayers",
+            "dbo.usp_RefreshCove_PayerBreakdown_FullCharges",
+            "dbo.usp_RefreshCove_PayerByPanel_FullClaims",
+            "dbo.usp_RefreshCove_PanelBreakdown_FirstBilled",
             "dbo.usp_RefreshCove_UnbilledAging",
-            "dbo.usp_RefreshCove_CPTBreakdown",
+            "dbo.usp_RefreshCove_CPTBreakdown_CountCpt",
             "dbo.usp_RefreshCove_CodingBreakdown_Unbilled",
         ];
 
@@ -854,10 +854,21 @@ public sealed class ClaimLineDbService
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshCertusCollectionReports()
         => RunProductionReportSPs(BuildCollectionSummarySpList("Cert"));
 
-    /// <summary>Refreshes the COVE Collection Summary aggregates.</summary>
+    /// <summary>Refreshes the COVE Collection Summary aggregates (ClientLogic SPs for Aging / PanelAverages / PanelVsPayment).</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshCoveCollectionReports()
-        => RunProductionReportSPs(BuildCollectionSummarySpList("Cove"));
-
+    {
+        var procedures = BuildCollectionSummarySpList("Cove")
+            .Select(sp => sp switch
+            {
+                "dbo.usp_RefreshCove_CS_InsuranceVsAging" => "dbo.usp_RefreshCove_CS_InsuranceVsAging_ClientLogic",
+                "dbo.usp_RefreshCove_CS_PanelAverages" => "dbo.usp_RefreshCove_CS_PanelAverages_ClientLogic",
+                "dbo.usp_RefreshCove_CS_PanelVsPayment" => "dbo.usp_RefreshCove_CS_PanelVsPayment_ClientLogic",
+                "dbo.usp_RefreshCove_CS_WeeklyClaimVolume" => "dbo.usp_RefreshCove_CS_WeeklyClaimVolume_ClientLogic",
+                _ => sp,
+            })
+            .ToArray();
+        return RunProductionReportSPs(procedures);
+    }
     /// <summary>Refreshes the Elixir Collection Summary aggregates.</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshElixirCollectionReports()
         => RunProductionReportSPs(BuildCollectionSummarySpList("Elix"));

@@ -200,9 +200,16 @@ public sealed class SqlNotesRepository : INotesRepository
         await using var cmd = new SqlCommand("dbo.usp_NotesInsight_Insert", conn) { CommandType = CommandType.StoredProcedure, CommandTimeout = CommandTimeoutSeconds };
         cmd.Parameters.AddWithValue("@ReportKeyId", reportKeyId);
         cmd.Parameters.AddWithValue("@ReportRunId", (object?)NullIfEmpty(req.ReportRunId) ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@WeekRangeStart", (object?)req.WeekRangeStart ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@WeekRangeEnd", (object?)req.WeekRangeEnd ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@WeekRangeText", (object?)NullIfEmpty(req.WeekRangeText) ?? DBNull.Value);
+        // WeekRangeStart/End are NOT NULL on NotesInsight — never send DBNull.
+        var weekStart = (req.WeekRangeStart ?? DateTime.Today).Date;
+        var weekEnd = (req.WeekRangeEnd ?? weekStart).Date;
+        if (weekEnd < weekStart) weekEnd = weekStart;
+        cmd.Parameters.AddWithValue("@WeekRangeStart", weekStart);
+        cmd.Parameters.AddWithValue("@WeekRangeEnd", weekEnd);
+        cmd.Parameters.AddWithValue("@WeekRangeText", (object?)NullIfEmpty(req.WeekRangeText)
+            ?? (weekStart == weekEnd
+                ? weekStart.ToString("MM.dd.yyyy")
+                : $"{weekStart:MM.dd.yyyy} - {weekEnd:MM.dd.yyyy}"));
         cmd.Parameters.AddWithValue("@RiskCode", req.RiskCode);
         cmd.Parameters.AddWithValue("@ResponsibleParty", (object?)NullIfEmpty(req.ResponsibleParty) ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@Insights", (object?)req.Insights ?? DBNull.Value);

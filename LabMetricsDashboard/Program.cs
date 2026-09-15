@@ -987,6 +987,7 @@ app.Use(async (context, next) =>
         || (path.Contains("LisSummary", StringComparison.OrdinalIgnoreCase)
             && !path.Contains("Export", StringComparison.OrdinalIgnoreCase)
             && !path.Contains("GetSummary", StringComparison.OrdinalIgnoreCase)
+            && !path.Contains("GetKeyMetrics", StringComparison.OrdinalIgnoreCase)
             && !path.Contains("GetMeta", StringComparison.OrdinalIgnoreCase))
         || (path.Contains("ExecutiveSummary", StringComparison.OrdinalIgnoreCase)
             && !path.Contains("Export", StringComparison.OrdinalIgnoreCase)

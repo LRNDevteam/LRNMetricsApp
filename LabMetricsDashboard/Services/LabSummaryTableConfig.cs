@@ -20,7 +20,6 @@ namespace LabMetricsDashboard.Services;
 /// </param>
 /// <param name="UnbilledAgingHasCharges">
 /// <c>true</c> when a <c>TotalCharges</c> column exists in the UnbilledAging table.
-/// <c>false</c> for Cove (table was created without it).
 /// </param>
 /// <param name="HasCodingTables">
 /// <c>true</c> when <c>{Prefix}CodingPanelSummary</c> and
@@ -59,9 +58,9 @@ public record LabSummaryTableConfig(
         new("Cert_", "PayerName",  "Aging",       UnbilledAgingHasCharges: true,  HasCodingTables: true)
         { SupportsFilteredMonthlyWeeklySp = true };
 
-    /// <summary>COVE Labs � prefix <c>Cove_</c>. Aging table has no TotalCharges column.</summary>
+    /// <summary>COVE Labs � prefix <c>Cove_</c>. Aging table stores TotalCharges (SUM ChargeAmount).</summary>
     public static readonly LabSummaryTableConfig Cove =
-        new("Cove_", "PanelName",  "AgingDOS",    UnbilledAgingHasCharges: false, HasCodingTables: true)
+        new("Cove_", "PanelName",  "AgingDOS",    UnbilledAgingHasCharges: true,  HasCodingTables: true)
         { SupportsFilteredMonthlyWeeklySp = true };
 
     /// <summary>Elixir Labs � prefix <c>Elix_</c>.</summary>

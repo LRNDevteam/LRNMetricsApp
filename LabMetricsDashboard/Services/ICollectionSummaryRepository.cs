@@ -220,6 +220,8 @@ public interface ICollectionSummaryRepository
     /// Columns: No. of Claims, Total Charges, Avg Billed, Fully Paid metrics,
     ///          Adjudicated metrics, 30-day metrics, 60-day metrics.
     /// Ranked by COUNT(DISTINCT ClaimID) descending.
+    /// <paramref name="lastMonths"/> defaults to 6; pass 3 for the client
+    /// "Avg payments_Last 3 Months" sheet (always live, not the 6-month snapshot).
     /// </summary>
     Task<PanelAveragesResult> GetAvgPaymentsAsync(
         string connectionString,
@@ -229,7 +231,8 @@ public interface ICollectionSummaryRepository
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
         string? labName = null,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        int lastMonths = 6);
 
     /// <summary>
     /// Returns the row count of <c>dbo.ClaimLevelData</c> respecting the active filters.
@@ -420,8 +423,8 @@ public sealed record CollectionWeekBucket(
 {
     /// <summary>Display key for dictionary lookups.</summary>
     public string Key => $"W{WeekNumber}";
-    /// <summary>Formatted header label: "Week N (MM/dd � MM/dd)".</summary>
-    public string Label => $"Week {WeekNumber} ({WeekStart:MM/dd} - {WeekEnd:MM/dd})";
+    /// <summary>Formatted header — same as Production UI: M/d/yyyy – M/d/yyyy (no "Week N").</summary>
+    public string Label => $"{WeekStart:M/d/yyyy} \u2013 {WeekEnd:M/d/yyyy}";
 }
 
 /// <summary>Result container for the Collection Weekly Claim Volume tab.</summary>

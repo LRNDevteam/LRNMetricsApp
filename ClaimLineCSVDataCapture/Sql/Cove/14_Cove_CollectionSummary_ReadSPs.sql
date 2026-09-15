@@ -434,7 +434,8 @@ BEGIN
     IF @HasFilter = 0
     BEGIN
         SELECT  PanelName, PayerName,
-                ClaimCount        AS NoOfClaims,
+                NoOfClaims,
+                NoOfClaims        AS ClaimCount,
                 TotalCharges,     CarrierPayment,
                 FullyPaidCount,   FullyPaidAmount,
                 AdjudicatedCount, AdjudicatedAmount,
@@ -833,13 +834,16 @@ BEGIN
     DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
 
     SELECT
-        LTRIM(RTRIM(SalesRepname))                                          AS SalesRepName,
+        LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(SalesRepname)), ''), 'Unknown'))) AS SalesRepName,
         CAST(YEAR (TRY_CAST(CheckDate AS DATE)) AS INT)                     AS CheckYear,
         CAST(MONTH(TRY_CAST(CheckDate AS DATE)) AS INT)                     AS CheckMonth,
         COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), ''))                            AS NoOfClaims,
         ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)        AS InsurancePayment
     FROM dbo.ClaimLevelData
     WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+      AND TRY_CAST(CheckDate AS DATE) IS NOT NULL
+      AND LTRIM(RTRIM(ISNULL(CheckDate, ''))) <> ''
+      AND YEAR(TRY_CAST(CheckDate AS DATE)) > 1900
       AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
       AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
       AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
@@ -849,7 +853,7 @@ BEGIN
       AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate       AS DATE) >= @CheckDateFrom)
       AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate       AS DATE) <= @CheckDateTo)
     GROUP BY
-        LTRIM(RTRIM(SalesRepname)),
+        LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(SalesRepname)), ''), 'Unknown'))),
         CAST(YEAR (TRY_CAST(CheckDate AS DATE)) AS INT),
         CAST(MONTH(TRY_CAST(CheckDate AS DATE)) AS INT)
     ORDER BY SalesRepName, CheckYear, CheckMonth;
@@ -973,8 +977,8 @@ BEGIN
         RETURN;
     END;
 
-    DECLARE @PayerList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
-    DECLARE @PanelList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
+    DECLARE @PayerList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
 
     IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
         INSERT INTO @PayerList SELECT DISTINCT LTRIM(RTRIM(value))
@@ -991,9 +995,24 @@ BEGIN
         LTRIM(RTRIM(CPTCode))                                                    AS CPTCode,
         ISNULL(SUM(TRY_CAST(Units AS DECIMAL(18,2))), 0)                        AS SumUnits,
         ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
+                              OR ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
                         THEN TRY_CAST(InsurancePayment AS DECIMAL(18,2)) ELSE 0 END), 0) AS PaidInsurancePayment,
         ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
-                        THEN TRY_CAST(ChargeAmount     AS DECIMAL(18,2)) ELSE 0 END), 0) AS PaidChargeAmount
+                              OR ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+                        THEN TRY_CAST(ChargeAmount     AS DECIMAL(18,2)) ELSE 0 END), 0) AS PaidChargeAmount,
+        CAST(CASE
+            WHEN ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
+                                      OR ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+                                 THEN TRY_CAST(ChargeAmount AS DECIMAL(18,2)) ELSE 0 END), 0) = 0
+            THEN 0
+            ELSE ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
+                                      OR ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+                                 THEN TRY_CAST(InsurancePayment AS DECIMAL(18,2)) ELSE 0 END), 0)
+                 * 100.0
+                 / NULLIF(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
+                                        OR ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+                                   THEN TRY_CAST(ChargeAmount AS DECIMAL(18,2)) ELSE 0 END), 0)
+        END AS DECIMAL(9,4)) AS PaymentPct
     FROM dbo.LineLevelData
     WHERE CPTCode IS NOT NULL AND LTRIM(RTRIM(CPTCode)) <> ''
       AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
@@ -1038,7 +1057,9 @@ BEGIN
 
     IF @HasFilter = 0
     BEGIN
-        SELECT ClaimStatus, PanelName, CptCode, PayerName,
+        SELECT ClaimStatus, PanelName,
+               CAST(CptCode AS NVARCHAR(400)) AS CptCode,
+               PayerName,
                NoOfClaims, InsurancePayment, InsuranceBalance, PatientBalance
         FROM   dbo.Cove_CS_StatusSummary;
         RETURN;
@@ -1059,10 +1080,10 @@ BEGIN
     DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
 
     SELECT
-        ISNULL(LTRIM(RTRIM(ClaimStatus)),            '(blank)') AS ClaimStatus,
-        ISNULL(LTRIM(RTRIM(Panelname)),              '(blank)') AS PanelName,
-        ISNULL(LTRIM(RTRIM(CPTCodeXUnitsXModifier)), '(blank)') AS CptCode,
-        ISNULL(LTRIM(RTRIM(PayerName_Raw)),          '(blank)') AS PayerName,
+        ISNULL(LEFT(LTRIM(RTRIM(ClaimStatus)), 200), '(blank)') AS ClaimStatus,
+        ISNULL(LEFT(LTRIM(RTRIM(Panelname)), 500), '(blank)')   AS PanelName,
+        ISNULL(LEFT(LTRIM(RTRIM(CPTCodeXUnitsXModifier)), 400), '(blank)') AS CptCode,
+        ISNULL(LEFT(LTRIM(RTRIM(PayerName_Raw)), 500), '(blank)') AS PayerName,
         COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))                    AS NoOfClaims,
         ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)         AS InsurancePayment,
         ISNULL(SUM(TRY_CAST(InsuranceBalance AS DECIMAL(18,2))), 0)         AS InsuranceBalance,
@@ -1077,10 +1098,10 @@ BEGIN
       AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate       AS DATE) >= @CheckDateFrom)
       AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate       AS DATE) <= @CheckDateTo)
     GROUP BY
-        LTRIM(RTRIM(ClaimStatus)),
-        LTRIM(RTRIM(Panelname)),
-        LTRIM(RTRIM(CPTCodeXUnitsXModifier)),
-        LTRIM(RTRIM(PayerName_Raw));
+        ISNULL(LEFT(LTRIM(RTRIM(ClaimStatus)), 200), '(blank)'),
+        ISNULL(LEFT(LTRIM(RTRIM(Panelname)), 500), '(blank)'),
+        ISNULL(LEFT(LTRIM(RTRIM(CPTCodeXUnitsXModifier)), 400), '(blank)'),
+        ISNULL(LEFT(LTRIM(RTRIM(PayerName_Raw)), 500), '(blank)');
 END
 GO
 

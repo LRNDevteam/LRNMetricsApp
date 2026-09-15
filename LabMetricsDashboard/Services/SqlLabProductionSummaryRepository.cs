@@ -76,11 +76,18 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
         //   PayerRank = 0  -> panel-level totals across ALL payers (panel row).
         //   PayerRank 1..N -> top payer drill-down sub-rows.
         var spName = $"dbo.usp_Get{_cfg.Prefix}MonthlyBilledProductionSummary";
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var hasFilter = (filterPayerNames?.Count ?? 0) > 0 || (filterPanelNames?.Count ?? 0) > 0
+            || filterDosFrom is not null || filterDosTo is not null
+            || filterFirstBillFrom is not null || filterFirstBillTo is not null
+            || filterFirstBilledFrom is not null || filterFirstBilledTo is not null;
+        ProductionDiagLog.Write(_logger, $"monthly-sp-start {spName} hasFilter={hasFilter} timeout=180");
 
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
+            ProductionDiagLog.Write(_logger, $"monthly-sp-connected {spName} openMs={sw.ElapsedMilliseconds}");
             await using var cmd  = new SqlCommand(spName, conn)
             {
                 CommandType    = CommandType.StoredProcedure,
@@ -93,19 +100,42 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                 filterFirstBillFrom, filterFirstBillTo,
                 filterFirstBilledFrom, filterFirstBilledTo);
             await using var rdr  = await cmd.ExecuteReaderAsync(ct);
+            ProductionDiagLog.Write(_logger, $"monthly-sp-reader {spName} execMs={sw.ElapsedMilliseconds}");
 
             var panelMonth    = new Dictionary<string, Dictionary<string, (int c, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
             var payerMonthMap = new Dictionary<string, Dictionary<string, Dictionary<string, (int c, decimal ch)>>>(StringComparer.OrdinalIgnoreCase);
             var allMonths     = new SortedSet<string>();
+            var rowCount = 0;
+            var skipCount = 0;
 
             while (await rdr.ReadAsync(ct))
             {
-                var panel   = rdr.GetString(0);
-                var payer   = rdr.GetString(1);
-                var rank    = (int)rdr.GetByte(2);
-                var month   = rdr.GetString(3);
-                var count   = rdr.GetInt32(4);
-                var charges = rdr.GetDecimal(5);
+                rowCount++;
+                string panel;
+                string payer;
+                int rank;
+                string month;
+                int count;
+                decimal charges;
+                try
+                {
+                    panel = rdr.IsDBNull(0) ? "Unknown" : rdr.GetString(0);
+                    payer = rdr.IsDBNull(1) ? "" : rdr.GetString(1);
+                    rank = Convert.ToInt32(rdr.GetValue(2));
+                    month = rdr.IsDBNull(3) ? "" : rdr.GetString(3);
+                    count = rdr.IsDBNull(4) ? 0 : Convert.ToInt32(rdr.GetValue(4));
+                    charges = rdr.IsDBNull(5) ? 0m : Convert.ToDecimal(rdr.GetValue(5));
+                }
+                catch (Exception rowEx)
+                {
+                    skipCount++;
+                    if (skipCount <= 5)
+                        ProductionDiagLog.Write(_logger, $"monthly-sp-row-skip n={rowCount} {rowEx.GetType().Name}: {rowEx.Message}");
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(month) || month.Length < 4)
+                    continue;
 
                 allMonths.Add(month);
 
@@ -125,9 +155,16 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
             }
 
             var months       = allMonths.ToList();
-            var years        = months.Select(m => int.Parse(m[..4])).Distinct().OrderBy(y => y).ToList();
+            var years        = months
+                .Select(m => int.TryParse(m.AsSpan(0, 4), out var y) ? y : 0)
+                .Where(y => y > 1900)
+                .Distinct()
+                .OrderBy(y => y)
+                .ToList();
             var grandByMonth = new Dictionary<string, ProductionMonthCell>();
             var panelRows    = new List<ProductionPanelRow>();
+            ProductionDiagLog.Write(_logger,
+                $"monthly-sp-read {spName} rows={rowCount} skipped={skipCount} payerPanels={payerMonthMap.Count} months={months.Count} ms={sw.ElapsedMilliseconds}");
 
 
             // Fallback: if the SP table pre-dates the PayerRank=0 change (no all-payer
@@ -181,6 +218,8 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                 });
             }
 
+            ProductionDiagLog.Write(_logger,
+                $"monthly-sp-done {spName} panelRows={panelRows.Count} grandClaims={grandByMonth.Values.Sum(c => c.ClaimCount)} ms={sw.ElapsedMilliseconds}");
         return new SharedProductionReportResult(
                 [],
                 panelRows.Select(p => p.PanelName).ToList(),
@@ -193,8 +232,8 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[{Prefix}] GetMonthlyAsync failed.", _cfg.Prefix);
-        return new SharedProductionReportResult([], [], [], [], [], new Dictionary<string, ProductionMonthCell>(), 0, 0m);
+            ProductionDiagLog.Error(_logger, ex, $"monthly-sp-fail dbo.usp_Get{_cfg.Prefix}MonthlyBilledProductionSummary");
+            return new SharedProductionReportResult([], [], [], [], [], new Dictionary<string, ProductionMonthCell>(), 0, 0m);
         }
     }
 
@@ -349,7 +388,7 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default)
     {
-        // Certus has no coding tables — return empty so the tab shows the "no data" state.
+        // Certus has no coding tables ? return empty so the tab shows the "no data" state.
         if (!_cfg.HasCodingTables)
         return new SharedCodingResult([], 0, 0m);
 
@@ -460,33 +499,55 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default)
     {
-        var spName = $"dbo.usp_Get{_cfg.Prefix}PanelBreakdownWithPayers";
+        var spName = IsCove()
+            ? "dbo.usp_GetCove_PanelBreakdown_FirstBilled"
+            : $"dbo.usp_Get{_cfg.Prefix}PanelBreakdownWithPayers";
 
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
 
-            await using var cmd = new SqlCommand(spName, conn)
+            try
             {
-                CommandType    = CommandType.StoredProcedure,
-                CommandTimeout = 180,
-            };
-            AddProductionFilterParameters(
-                cmd,
-                filterPayerNames, filterPanelNames,
-                filterDosFrom, filterDosTo,
-                filterFirstBillFrom, filterFirstBillTo,
-                filterFirstBilledFrom, filterFirstBilledTo);
+                await using var cmd = new SqlCommand(spName, conn)
+                {
+                    CommandType    = CommandType.StoredProcedure,
+                    CommandTimeout = 180,
+                };
+                AddProductionFilterParameters(
+                    cmd,
+                    filterPayerNames, filterPanelNames,
+                    filterDosFrom, filterDosTo,
+                    filterFirstBillFrom, filterFirstBillTo,
+                    filterFirstBilledFrom, filterFirstBilledTo);
 
-            await using var rdr = await cmd.ExecuteReaderAsync(ct);
-            return await ReadPanelBreakdownWithPayersAsync(rdr, ct);
+                await using var rdr = await cmd.ExecuteReaderAsync(ct);
+                return await ReadPanelBreakdownWithPayersAsync(rdr, ct);
+            }
+            catch (SqlException ex) when (IsCove() && ex.Number is 2812 or 208)
+            {
+                _logger.LogWarning(ex,
+                    "[Cove_] usp_GetCove_PanelBreakdown_FirstBilled missing; falling back to PanelBreakdownWithPayers.");
+                await using var fb = new SqlCommand("dbo.usp_GetCove_PanelBreakdownWithPayers", conn)
+                {
+                    CommandType = CommandType.StoredProcedure,
+                    CommandTimeout = 180,
+                };
+                AddProductionFilterParameters(
+                    fb,
+                    filterPayerNames, filterPanelNames,
+                    filterDosFrom, filterDosTo,
+                    filterFirstBillFrom, filterFirstBillTo,
+                    filterFirstBilledFrom, filterFirstBilledTo);
+                await using var rdr = await fb.ExecuteReaderAsync(ct);
+                return await ReadPanelBreakdownWithPayersAsync(rdr, ct);
+            }
         }
         catch (SqlException ex) when (ex.Number is 2812 or 208)
         {
             _logger.LogWarning(
-                "[{Prefix}] {Sp} not deployed - Panel Breakdown will be empty for this lab. "
-                + "Run Sql/40_AllLabs_PanelBreakdownWithPayers.sql on its database.",
+                "[{Prefix}] {Sp} not deployed - Panel Breakdown will be empty for this lab.",
                 _cfg.Prefix, spName);
             return new SharedPayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0);
         }
@@ -496,6 +557,8 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
             return new SharedPayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0);
         }
     }
+
+    private bool IsCove() => _cfg.Prefix.Equals("Cove_", StringComparison.Ordinal);
 
     /// <summary>
     /// Reads (PanelName, PayerName, BilledYearMonth, ClaimCount, TotalCharges) rows into
@@ -601,7 +664,9 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
     {
         // When the lab's read SP is parameterised, call it. Otherwise fall back to the
         // legacy direct SELECT against the snapshot table (filters silently ignored).
-        var spName = $"dbo.usp_Get{_cfg.Prefix}PayerBreakdown";
+        var spName = IsCove()
+            ? "dbo.usp_GetCove_PayerBreakdown_FullCharges"
+            : $"dbo.usp_Get{_cfg.Prefix}PayerBreakdown";
 
         try
         {
@@ -631,43 +696,28 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                 cmd = new SqlCommand(legacySql, conn) { CommandTimeout = 120 };
             }
             await using var _cmd = cmd;
-            await using var rdr = await cmd.ExecuteReaderAsync(ct);
-
-            var payerMonth = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
-            var allMonths  = new SortedSet<string>();
-
-            while (await rdr.ReadAsync(ct))
+            try
             {
-                var payer = rdr.GetString(0);
-                var month = rdr.GetString(1);
-                var count = rdr.GetInt32(2);
-
-                allMonths.Add(month);
-                if (!payerMonth.TryGetValue(payer, out var mm)) payerMonth[payer] = mm = [];
-                mm[month] = mm.GetValueOrDefault(month) + count;
+                await using var rdr = await cmd.ExecuteReaderAsync(ct);
+                return await ReadPayerBreakdownChargesAsync(rdr, ct);
             }
-
-            var months       = allMonths.ToList();
-            var years        = months.Select(m => int.Parse(m[..4])).Distinct().OrderBy(y => y).ToList();
-            var grandByMonth = new Dictionary<string, int>();
-            var payerRows    = new List<PayerBreakdownRow>();
-
-            foreach (var (payer, mm) in payerMonth.OrderByDescending(x => x.Value.Values.Sum()))
+            catch (SqlException ex) when (IsCove() && ex.Number is 2812 or 208)
             {
-                var byYear = years.ToDictionary(y => y, y => mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value));
-                foreach (var (mk, cnt) in mm)
-                    grandByMonth[mk] = grandByMonth.GetValueOrDefault(mk) + cnt;
-
-                payerRows.Add(new PayerBreakdownRow
+                _logger.LogWarning(ex, "[Cove_] FullCharges SP missing; falling back to usp_GetCove_PayerBreakdown.");
+                await using var fb = new SqlCommand("dbo.usp_GetCove_PayerBreakdown", conn)
                 {
-                    PayerName  = payer,
-                    ByMonth    = mm,
-                    ByYear     = byYear,
-                    GrandTotal = mm.Values.Sum(),
-                });
+                    CommandType = CommandType.StoredProcedure,
+                    CommandTimeout = 180,
+                };
+                AddProductionFilterParameters(
+                    fb,
+                    filterPayerNames, filterPanelNames,
+                    filterDosFrom, filterDosTo,
+                    filterFirstBillFrom, filterFirstBillTo,
+                    filterFirstBilledFrom, filterFirstBilledTo);
+                await using var rdr = await fb.ExecuteReaderAsync(ct);
+                return await ReadPayerBreakdownChargesAsync(rdr, ct);
             }
-
-        return new SharedPayerBreakdownResult(months, years, payerRows, grandByMonth, grandByMonth.Values.Sum());
         }
         catch (Exception ex)
         {
@@ -676,7 +726,61 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
         }
     }
 
-    // ?? Payer × Panel ?????????????????????????????????????????????????????
+    private static async Task<SharedPayerBreakdownResult> ReadPayerBreakdownChargesAsync(
+        SqlDataReader rdr, CancellationToken ct)
+    {
+        var payerMonth = new Dictionary<string, Dictionary<string, (int c, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
+        var allMonths  = new SortedSet<string>();
+
+        while (await rdr.ReadAsync(ct))
+        {
+            var payer = rdr.GetString(0);
+            var month = rdr.GetString(1);
+            var count = rdr.GetInt32(2);
+            var charges = rdr.FieldCount > 3 && !rdr.IsDBNull(3)
+                ? Convert.ToDecimal(rdr.GetValue(3))
+                : 0m;
+
+            allMonths.Add(month);
+            if (!payerMonth.TryGetValue(payer, out var mm)) payerMonth[payer] = mm = [];
+            var prev = mm.GetValueOrDefault(month);
+            mm[month] = (prev.c + count, prev.ch + charges);
+        }
+
+        var months              = allMonths.ToList();
+        var years               = months.Select(m => int.Parse(m[..4])).Distinct().OrderBy(y => y).ToList();
+        var grandByMonth        = new Dictionary<string, int>();
+        var grandChargesByMonth = new Dictionary<string, decimal>();
+        var payerRows           = new List<PayerBreakdownRow>();
+
+        foreach (var (payer, mm) in payerMonth.OrderByDescending(x => x.Value.Values.Sum(v => v.c)))
+        {
+            var byYear = years.ToDictionary(y => y, y => mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.c));
+            var byYearCharges = years.ToDictionary(y => y, y => mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.ch));
+            foreach (var (mk, v) in mm)
+            {
+                grandByMonth[mk] = grandByMonth.GetValueOrDefault(mk) + v.c;
+                grandChargesByMonth[mk] = grandChargesByMonth.GetValueOrDefault(mk) + v.ch;
+            }
+
+            payerRows.Add(new PayerBreakdownRow
+            {
+                PayerName         = payer,
+                ByMonth           = mm.ToDictionary(kv => kv.Key, kv => kv.Value.c),
+                ByYear            = byYear,
+                GrandTotal        = mm.Values.Sum(v => v.c),
+                ByMonthCharges    = mm.ToDictionary(kv => kv.Key, kv => kv.Value.ch),
+                ByYearCharges     = byYearCharges,
+                GrandTotalCharges = mm.Values.Sum(v => v.ch),
+            });
+        }
+
+        return new SharedPayerBreakdownResult(
+            months, years, payerRows, grandByMonth, grandByMonth.Values.Sum(),
+            grandChargesByMonth, grandChargesByMonth.Values.Sum());
+    }
+
+    // ?? Payer ? Panel ?????????????????????????????????????????????????????
     /// <inheritdoc/>
     public async Task<SharedPayerPanelResult> GetPayerByPanelAsync(
         string connectionString,
@@ -692,7 +796,9 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
     {
         // When the lab's read SP is parameterised, call it. Otherwise fall back to the
         // legacy direct SELECT against the snapshot table (filters silently ignored).
-        var spName = $"dbo.usp_Get{_cfg.Prefix}PayerByPanel";
+        var spName = IsCove()
+            ? "dbo.usp_GetCove_PayerByPanel_FullClaims"
+            : $"dbo.usp_Get{_cfg.Prefix}PayerByPanel";
 
         try
         {
@@ -891,7 +997,9 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
     {
         // When the lab's read SP is parameterised, call it. Otherwise fall back to the
         // legacy direct SELECT against the snapshot table (filters silently ignored).
-        var spName = $"dbo.usp_Get{_cfg.Prefix}CPTBreakdown";
+        var spName = IsCove()
+            ? "dbo.usp_GetCove_CPTBreakdown_CountCpt"
+            : $"dbo.usp_Get{_cfg.Prefix}CPTBreakdown";
 
         try
         {
@@ -930,9 +1038,9 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
             {
                 var cpt     = rdr.GetString(0);
                 var month   = rdr.GetString(1);
-                // Column 2 = LineCount (claim count); Column 3 = BilledUnits (sum of Units field)
-                var count   = rdr.GetInt32(2);     // LineCount (index 2) - this is the claim count
-                var units   = rdr.GetDecimal(3);   // BilledUnits (index 3)
+                var count   = rdr.GetInt32(2);     // CPTCount
+                // Cove Count of CPT: never display SUM(Units) ? keep Units aligned with CPTCount.
+                var units   = IsCove() ? (decimal)count : rdr.GetDecimal(3);
                 var charges = rdr.GetDecimal(4);
 
                 allMonths.Add(month);
@@ -949,6 +1057,16 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
             foreach (var (cpt, mm) in cptMonth.OrderBy(x => x.Key))
             {
                 var byMonth = mm.ToDictionary(kv => kv.Key, kv => new CptBreakdownCell(kv.Value.u, kv.Value.ch, kv.Value.c));
+                var byYear = years.ToDictionary(
+                    y => y,
+                    y =>
+                    {
+                        var cells = byMonth.Where(kv => kv.Key.StartsWith($"{y:D4}", StringComparison.Ordinal));
+                        return new CptBreakdownCell(
+                            cells.Sum(kv => kv.Value.Units),
+                            cells.Sum(kv => kv.Value.BilledCharges),
+                            cells.Sum(kv => kv.Value.ClaimCount));
+                    });
                 foreach (var (mk, cell) in byMonth)
                 {
                     if (!grandByMonth.TryGetValue(mk, out var g)) grandByMonth[mk] = cell;
@@ -961,6 +1079,7 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                 {
                     CptCode           = cpt,
                     ByMonth           = byMonth,
+                    ByYear            = byYear,
                     GrandTotalUnits   = byMonth.Values.Sum(c => c.Units),
                     GrandTotalCharges = byMonth.Values.Sum(c => c.BilledCharges),
                     GrandTotalClaims  = byMonth.Values.Sum(c => c.ClaimCount),

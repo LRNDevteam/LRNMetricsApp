@@ -582,12 +582,22 @@ public class CollectionSummaryController : Controller
         var avgPaymentsTask = _repo.GetAvgPaymentsAsync(
             connStr, payerFilter, panelFilter,
             fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var avgPayments3Task = _repo.GetAvgPaymentsAsync(
+            connStr, payerFilter, panelFilter,
+            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct, lastMonths: 3);
         var statusSummaryTask = _repo.GetStatusSummaryAsync(
             connStr, payerFilter, panelFilter,
             fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
         var providerSummaryTask = _repo.GetProviderSummaryAsync(
             connStr, payerFilter, panelFilter,
             fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var repPaymentTask = _repo.GetRepPaymentAsync(
+            connStr, payerFilter, panelFilter,
+            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var insuranceVsPaymentTask = _repo.GetInsuranceVsPaymentAsync(
+            connStr, payerFilter, panelFilter,
+            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var analysisRangeTask = _analysisRange.GetAsync(connStr, ct);
 
         // Soft-fail per sheet when a Collection Summary SP is not deployed on a lab DB
         // (SqlException 2812). One missing SP must not fail the whole Collection Report.
@@ -645,10 +655,18 @@ public class CollectionSummaryController : Controller
                 panelAveragesTask, new PanelAveragesResult([]), "Panel Averages", selectedLab, _logger)).PanelRows,
             AvgPayments = await AwaitOrDefaultAsync(
                 avgPaymentsTask, new PanelAveragesResult([]), "Avg Payments", selectedLab, _logger),
+            AvgPaymentsLast3Months = await AwaitOrDefaultAsync(
+                avgPayments3Task, new PanelAveragesResult([]), "Avg payments_Last 3 Months", selectedLab, _logger),
             StatusSummary = await AwaitOrDefaultAsync(
                 statusSummaryTask, StatusSummaryResult.Empty, "Status Summary", selectedLab, _logger),
             ProviderSummary = await AwaitOrDefaultAsync(
                 providerSummaryTask, ProviderSummaryResult.Empty, "Provider Summary", selectedLab, _logger),
+            RepPayments = await AwaitOrDefaultAsync(
+                repPaymentTask, new RepPaymentResult([]), "Rep Vs Payment", selectedLab, _logger),
+            InsuranceVsPayment = await AwaitOrDefaultAsync(
+                insuranceVsPaymentTask, new List<InsuranceVsPaymentRow>(), "Insurance Vs Payments", selectedLab, _logger),
+            AnalysisRange = await AwaitOrDefaultAsync(
+                analysisRangeTask, AnalysisRangeInfo.Empty, "Analysis Range", selectedLab, _logger),
         };
     }
 
@@ -826,6 +844,7 @@ public class CollectionSummaryController : Controller
 
             var liveInsights = await InsightsExcelBuilder.LoadAsync(_notes, connStr, "Collection Report", ct);
             InsightsExcelBuilder.InsertAsFirstSheet(workbook, liveInsights, selectedLab, "Collection Report");
+            CollectionSummaryExcelExportBuilder.ApplySheetOrder(workbook);
 
             // Free raw data lists early to reduce peak memory before SaveAs
             claimRows.Clear();
@@ -833,7 +852,7 @@ public class CollectionSummaryController : Controller
 
             var stream = new MemoryStream();
             workbook.SaveAs(stream);
-            stream.Position = 0;
+            LRN.ProductionReports.Services.OpenXmlPivotCacheFix.Apply(stream);
 
             var safeLabName = string.Join("_", selectedLab.Split(
                 Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim('_');

@@ -43,7 +43,7 @@ public static class CollectionSummaryExcelExportBuilder
     {
         if (!result.HasData) return;
 
-        var worksheet = workbook.Worksheets.Add("Monthly Claim Volume");
+        var worksheet = workbook.Worksheets.Add("Insights");
         var years = result.Years.Where(y => y > 1900).ToList();
         var periodsByYear = result.Periods
             .Where(p => p.Year > 1900)
@@ -102,11 +102,11 @@ public static class CollectionSummaryExcelExportBuilder
     {
         if (!result.HasData) return;
 
-        var worksheet = workbook.Worksheets.Add("Weekly Claim Volume");
+        var existing = workbook.Worksheets.FirstOrDefault(s => s.Name.Equals("Insights", StringComparison.OrdinalIgnoreCase));
+        var worksheet = existing ?? workbook.Worksheets.Add("Insights");
         var colCount = 2 + result.Weeks.Count * 3 + 3;
-        WriteTitle(worksheet, 1, colCount, $"Weekly Claim Volume - {labName}");
-
-        var headerRow = 2;
+        var headerRow = existing is null ? 2 : (worksheet.LastRowUsed()?.RowNumber() ?? 1) + 3;
+        WriteTitle(worksheet, headerRow - 1, colCount, $"Weekly Claim Volume - {labName}");
         worksheet.Cell(headerRow, 1).Value = "#";
         worksheet.Cell(headerRow, 2).Value = "Panel / Insurance";
         worksheet.Range(headerRow, 1, headerRow + 1, 1).Merge();
@@ -134,12 +134,12 @@ public static class CollectionSummaryExcelExportBuilder
         }
 
         WriteWeeklyRow(worksheet, row, string.Empty, "Grand Total", result.GrandTotalByWeek, result.GrandTotalClaimCount, result.GrandTotalPaid, result.Weeks, true);
-        StyleBody(worksheet.Range(4, 1, row, col + 2));
-        // Index-based: Columns().AdjustToContents() can throw "Collection was modified".
+        StyleBody(worksheet.Range(headerRow + 2, 1, row, col + 2));
         var lastWeeklyCol = worksheet.LastColumnUsed()?.ColumnNumber() ?? 1;
         for (int c = 1; c <= lastWeeklyCol; c++)
             worksheet.Column(c).AdjustToContents();
-        worksheet.SheetView.FreezeRows(3);
+        if (existing is null)
+            worksheet.SheetView.FreezeRows(headerRow + 1);
     }
 
     private static void WriteMonthlyRow(

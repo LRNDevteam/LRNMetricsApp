@@ -328,12 +328,15 @@ public sealed partial class SqlCollectionSummaryRepository
     public async Task<PanelAveragesResult> GetPanelAveragesFromAggregatesAsync(
         string connectionString, string prefix, CancellationToken ct = default)
     {
-        // Try the SP first; fall back to direct snapshot table read if SP is not yet deployed.
+        // Try the SP first; Cove ClientLogic first, then legacy Get, then snapshot table.
         try
         {
+            var spName = string.Equals(prefix, "Cove", StringComparison.OrdinalIgnoreCase)
+                ? "dbo.usp_GetCove_CS_PanelAverages_ClientLogic"
+                : $"dbo.usp_Get{prefix}_CS_PanelAverages";
             return await GetPanelAveragesViaSpAsync(
                 connectionString,
-                $"dbo.usp_Get{prefix}_CS_PanelAverages",
+                spName,
                 filterPayerNames: null, filterPanelNames: null,
                 filterFirstBillFrom: null, filterFirstBillTo: null,
                 filterDosFrom: null, filterDosTo: null,
@@ -342,9 +345,27 @@ public sealed partial class SqlCollectionSummaryRepository
         }
         catch (SqlException ex) when (ex.Number == 2812) // SP not yet deployed
         {
+            if (string.Equals(prefix, "Cove", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    return await GetPanelAveragesViaSpAsync(
+                        connectionString,
+                        "dbo.usp_GetCove_CS_PanelAverages",
+                        filterPayerNames: null, filterPanelNames: null,
+                        filterFirstBillFrom: null, filterFirstBillTo: null,
+                        filterDosFrom: null, filterDosTo: null,
+                        filterCheckDateFrom: null, filterCheckDateTo: null,
+                        ct).ConfigureAwait(false);
+                }
+                catch (SqlException ex2) when (ex2.Number == 2812)
+                {
+                    // fall through to table read
+                }
+            }
             _logger.LogWarning(
-                "CollectionSummary PanelAverages({Prefix}): SP not found ({Sp}), falling back to direct table read.",
-                prefix, $"usp_Get{prefix}_CS_PanelAverages");
+                "CollectionSummary PanelAverages({Prefix}): SP not found, falling back to direct table read.",
+                prefix);
             return await ReadPanelAveragesAsync(
                 connectionString, $"{prefix}_CS_PanelAverages", prefix, "PanelAverages",
                 claimCountCol: "NoOfClaims",
@@ -682,11 +703,11 @@ public sealed partial class SqlCollectionSummaryRepository
         while (await r.ReadAsync(ct))
         {
             rows.Add(new PanelPaymentRow(
-                PanelName:         r.GetString(r.GetOrdinal("PanelName")),
-                NoOfClaims:        r.GetInt32 (r.GetOrdinal("NoOfClaims")),
-                InsurancePayments: r.GetDecimal(r.GetOrdinal("InsurancePayments")),
-                BillYear:          hasMonthlyGrain ? r.GetInt32(r.GetOrdinal("BilledYear")) : 0,
-                BillMonth:         hasMonthlyGrain ? Convert.ToInt32(r.GetValue(r.GetOrdinal("BilledMonth"))) : 0));
+                PanelName:         GetStringOrEmpty(r, "PanelName"),
+                NoOfClaims:        GetInt32OrDefault(r, "NoOfClaims"),
+                InsurancePayments: GetDecimalOrDefault(r, "InsurancePayments"),
+                BillYear:          hasMonthlyGrain ? GetInt32OrDefault(r, "BilledYear") : 0,
+                BillMonth:         hasMonthlyGrain ? GetInt32OrDefault(r, "BilledMonth") : 0));
         }
 
         _logger.LogInformation("CollectionSummary[Aggregate] PanelVsPayment({Prefix}): rows={N}, {Ms}ms",
@@ -1109,14 +1130,14 @@ public sealed partial class SqlCollectionSummaryRepository
             while (await r.ReadAsync(ct))
             {
                 flat.Add((
-                    r.GetString(r.GetOrdinal("ClaimStatus")),
-                    r.GetString(r.GetOrdinal("PanelName")),
-                    r.GetString(r.GetOrdinal("CptCode")),
-                    r.GetString(r.GetOrdinal("PayerName")),
-                    r.GetInt32 (r.GetOrdinal("NoOfClaims")),
-                    r.GetDecimal(r.GetOrdinal("InsurancePayment")),
-                    r.GetDecimal(r.GetOrdinal("InsuranceBalance")),
-                    r.GetDecimal(r.GetOrdinal("PatientBalance"))));
+                    GetStringOrEmpty(r, "ClaimStatus"),
+                    GetStringOrEmpty(r, "PanelName"),
+                    GetStringOrEmpty(r, "CptCode"),
+                    GetStringOrEmpty(r, "PayerName"),
+                    GetInt32OrDefault(r, "NoOfClaims"),
+                    GetDecimalOrDefault(r, "InsurancePayment"),
+                    GetDecimalOrDefault(r, "InsuranceBalance"),
+                    GetDecimalOrDefault(r, "PatientBalance")));
             }
         }
 

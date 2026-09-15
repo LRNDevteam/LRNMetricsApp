@@ -182,6 +182,24 @@ public sealed class SqlPhiExecutiveSummaryRepository
             : parentKey + scale * 50;   // non-numeric names: mid-slot; ThenBy separates them
     }
 
+    /// <summary>
+    /// CP Exception children are PanelType groups from LIMSMaster where
+    /// SubStatus = 'CP Exception'. The snapshot CROSS JOIN used every panel,
+    /// which filled the UI/Excel with empty combo rows. Keep only children
+    /// that have at least one non-zero value.
+    /// </summary>
+    private static void DropEmptyCpExceptionPanelRows(List<ExecSummaryRow> rows)
+    {
+        var cp = rows.FirstOrDefault(r =>
+            (r.Description ?? "").Trim().Equals("CP Exception", StringComparison.OrdinalIgnoreCase));
+        if (cp is null || string.IsNullOrWhiteSpace(cp.RowCode)) return;
+
+        var prefix = cp.RowCode + ".";
+        rows.RemoveAll(r =>
+            (r.RowCode ?? "").StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            && !r.ValuesByYearMonth.Values.Any(v => v != 0m));
+    }
+
     /// <summary>Checks whether a stored procedure exists in the target database.</summary>
     public async Task<bool> StoredProcedureExistsAsync(
         string connectionString, string spName, CancellationToken ct = default)
@@ -370,6 +388,8 @@ public sealed class SqlPhiExecutiveSummaryRepository
                 .OrderBy(r => GetSortKey(r.RowCode, orderIndex))
                 .ThenBy(r => r.RowCode, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+
+            DropEmptyCpExceptionPanelRows(vm.Rows);
 
             return vm;
         }
