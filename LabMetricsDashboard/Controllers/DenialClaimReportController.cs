@@ -9,20 +9,24 @@ using Microsoft.AspNetCore.Mvc;
 namespace LabMetricsDashboard.Controllers;
 
 /// <summary>
-/// Denial Claim Report - denial reporting whose system-of-record is the lab's own claim-level data
-/// (<c>dbo.ClaimLevelData WHERE DenialCode IS NOT NULL</c>). Weekly and monthly summaries are
-/// calculated from that dataset and grouped on DenialDate; the Denial Insights tab holds the
-/// analytical layer the client imports. The two stay distinct: an insight import never recalculates
-/// or overwrites claim-level data.
+/// Denial Claim Report - denial reporting whose system-of-record is the lab's own claim-level data.
+/// One page, three tabs: Monthly Summary, Weekly Summary and Denial Insight.
 ///
-/// Separate from DenialDashboardController by design - nothing here reads or writes that page's
-/// tables, so the existing Denial Dashboard is unaffected.
+/// <para>The summaries are aggregated in SQL straight from <c>dbo.ClaimLevelData</c> and rendered
+/// through the same pivot table the original Denial Summary page uses, so the two look and behave
+/// alike. The Denial Insight tab holds the analytical layer the client imports; an insight import
+/// never recalculates or overwrites claim-level data.</para>
+///
+/// <para>The page has no lab picker of its own. It follows the application's header lab selector,
+/// resolving through <see cref="LabSelectionHelper"/> exactly as the other content pages do, so a
+/// lab chosen anywhere carries onto this page and back off it.</para>
 /// </summary>
 [Authorize]
 public sealed class DenialClaimReportController : Controller
 {
-    /// <summary>Periods offered in the pickers. Older data is still queryable by URL.</summary>
-    private const int MaxPeriodOptions = 26;
+    /// <summary>Periods across a pivot before it stops fitting a laptop screen.</summary>
+    private const int MonthlyPeriods = 12;
+    private const int WeeklyPeriods = 8;
 
     private readonly LabSettings _labSettings;
     private readonly LabConfigOptions _labConfig;
@@ -46,7 +50,8 @@ public sealed class DenialClaimReportController : Controller
     private string CurrentUser => User.Identity?.Name?.Trim() is { Length: > 0 } u ? u : "system";
 
     private bool CanEditInsights() =>
-        IsAdmin || User.IsInRole("AR Manager") || User.IsInRole("ARManager") || User.IsInRole("Lab User") || User.IsInRole("LabUser");
+        IsAdmin || User.IsInRole("AR Manager") || User.IsInRole("ARManager")
+               || User.IsInRole("Lab User") || User.IsInRole("LabUser");
 
     /// <summary>Labs this user may open - the same visibility rule the rest of the app applies.</summary>
     private List<string> VisibleLabs()
@@ -58,20 +63,30 @@ public sealed class DenialClaimReportController : Controller
     }
 
     /// <summary>
-    /// Lab resolution is authorization, not convenience: an unassigned lab never resolves, so a
-    /// hand-edited drill-through URL cannot reach another lab's claims.
+    /// Resolves the lab from the application's own selector - the <c>?lab=</c> parameter it appends,
+    /// then the shared cookie, then the user's first lab - and writes the choice back so it carries
+    /// to the next page.
     /// </summary>
-    private bool TryResolveLab(string? lab, out string labName, out string connectionString, out string? masterConnectionString, out string error)
+    /// <remarks>
+    /// Lab resolution is authorization, not convenience: only a lab this user can see is ever
+    /// accepted, so a hand-edited <c>?lab=</c> cannot reach another lab's claims.
+    /// </remarks>
+    private bool TryResolveLab(string? lab, out string labName, out string connectionString, out string error)
     {
         labName = string.Empty;
         connectionString = string.Empty;
-        masterConnectionString = null;
         error = string.Empty;
 
         var labs = VisibleLabs();
         if (labs.Count == 0) { error = "No labs are available for your account."; return false; }
 
-        labName = labs.FirstOrDefault(x => string.Equals(x, lab?.Trim(), StringComparison.OrdinalIgnoreCase)) ?? labs[0];
+        // Only a lab on the visible list is passed through; anything else falls back rather than
+        // switching the user to a lab they cannot open.
+        var requested = labs.FirstOrDefault(x => string.Equals(x, lab?.Trim(), StringComparison.OrdinalIgnoreCase));
+        labName = LabSelectionHelper.Resolve(HttpContext, requested, labs);
+
+        // The header selector reads this back to show which lab is active.
+        ViewData["SelectedLab"] = labName;
 
         if (!_labSettings.Labs.TryGetValue(labName, out var config) || string.IsNullOrWhiteSpace(config.DbConnectionString))
         {
@@ -80,576 +95,105 @@ public sealed class DenialClaimReportController : Controller
         }
 
         connectionString = config.DbConnectionString!;
-        masterConnectionString = config.MasterDbConnectionString;
         return true;
     }
 
-    // ── Weekly / Monthly denial summary ───────────────────────────────────────
-
-    /// <summary>
-    /// How many denial codes the Top Denial pivot shows before the "show all" toggle - requirement
-    /// 4k / 5k, "filter the Top 3 Denial Code by Claim Count".
-    /// </summary>
-    private const int TopDenialCodes = 3;
-
-    /// <summary>How many periods sit across the top of a pivot before it gets unreadable.</summary>
-    private const int MaxPivotPeriods = 6;
+    // ── The page ──────────────────────────────────────────────────────────────
 
     [HttpGet]
-    public async Task<IActionResult> Index(string? lab, string? grain, string? period, bool showAll, CancellationToken ct)
+    public async Task<IActionResult> Index(string? lab, string? tab, string? bucket, CancellationToken ct)
     {
+        ViewData["PageLabel"] = "Denial Claim Report";
+
         var model = new DenialClaimReportViewModel
         {
-            Labs = VisibleLabs(),
-            Grain = string.Equals(grain, "weekly", StringComparison.OrdinalIgnoreCase) ? "weekly" : "monthly",
-            ShowAllDenials = showAll
+            ActiveTab = NormalizeTab(tab),
+            Insight = new DenialInsightPanelViewModel
+            {
+                CanEdit = CanEditInsights(),
+                Bucket = DenialInsightBuckets.Normalize(bucket),
+                CurrentWeekStart = SqlDenialClaimReportRepository.WeekStartOf(DateTime.Today)
+            }
         };
 
-        if (!TryResolveLab(lab, out var labName, out var connectionString, out var masterConnectionString, out var error))
+        if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
         {
             model.Error = error;
             model.CurrentLab = labName;
+            model.Insight.CurrentLab = labName;
             return View(model);
         }
 
         model.CurrentLab = labName;
+        model.Insight.CurrentLab = labName;
 
         try
         {
-            var claims = await _repo.GetDenialClaimsAsync(connectionString, ct);
-            var descriptions = await _repo.GetDescriptionsAsync(connectionString, masterConnectionString, ct);
+            var groups = await _repo.GetDenialSummaryAsync(connectionString, ct);
 
-            model.TotalDenials = claims.Count;
-            model.TotalClaims = DistinctClaims(claims);
-            model.TotalInsuranceBalance = claims.Sum(x => x.InsuranceBalance);
+            model.TotalClaims = groups.Sum(g => g.ClaimCount);
+            model.TotalInsuranceBalance = groups.Sum(g => g.InsuranceBalance);
+            model.DenialCodeCount = groups.Select(g => g.DenialCodeNormalized)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            model.PayerCount = groups.Select(g => g.PayerName)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            model.UndatedGroups = groups.Count(g => !g.DenialDate.HasValue);
 
-            // The two filters every summary in the requirements is built on: a blank denial code is
-            // not a denial, and a claim with nothing outstanding is not an open one.
-            var reportable = claims.Where(IsReportable).ToList();
-            model.ExcludedDenials = claims.Count - reportable.Count;
-
-            var weekly = model.Grain == "weekly";
-            model.UsesDeniedWeekColumn = weekly && reportable.Any(x => !string.IsNullOrWhiteSpace(x.DeniedWeek));
-
-            model.Periods = BuildPeriods(reportable, model.Grain);
-
-            var selected = model.Periods.FirstOrDefault(p => string.Equals(p.Key, period, StringComparison.OrdinalIgnoreCase))
-                           ?? model.Periods.FirstOrDefault();
-            model.SelectedPeriod = selected;
-
-            // Newest periods, then flipped so the pivot reads oldest-to-newest left to right.
-            var pivotPeriods = model.Periods.Take(MaxPivotPeriods).Reverse().ToList();
-
-            model.TopInsurance = BuildPayerPivot(reportable, pivotPeriods);
-            model.TopDenial = BuildDenialPivot(reportable, pivotPeriods, descriptions,
-                showAll ? int.MaxValue : TopDenialCodes);
-
-            if (selected is not null)
-                model.Summary = BuildDenialSummary(reportable.Where(selected.Contains).ToList(), descriptions);
+            model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods);
+            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Denial Claim Report failed for lab {Lab}.", labName);
-            model.Error = "The denial claim data could not be loaded for this lab.";
+            _logger.LogError(ex, "Denial Claim Report summary failed for lab {Lab}.", labName);
+            model.Error = "The denial summary could not be loaded for this lab.";
+        }
+
+        try
+        {
+            model.Insight.Rows = await _repo.GetInsightsAsync(connectionString, model.Insight.Bucket, ct);
+            model.Insight.BucketCounts = new Dictionary<string, int>(
+                await _repo.GetInsightCountsAsync(connectionString, ct), StringComparer.Ordinal);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Denial insights failed for lab {Lab}.", labName);
+            model.Error ??= "The denial insight rows could not be loaded for this lab.";
         }
 
         return View(model);
     }
 
-    /// <summary>
-    /// Requirements 4b/4c and 5b/5c: exclude a blank denial code, and keep only rows with an
-    /// insurance balance above zero. Applied once, before any summary is built, so every figure on
-    /// the page counts the same population.
-    /// </summary>
-    private static bool IsReportable(DenialClaimRow row) =>
-        !string.IsNullOrWhiteSpace(row.DenialCodeNormalized) && row.InsuranceBalance > 0m;
+    private static string NormalizeTab(string? tab) => tab?.Trim().ToLowerInvariant() switch
+    {
+        "weekly" => "weekly",
+        "insight" => "insight",
+        _ => "monthly"
+    };
 
-    private static int DistinctClaims(IEnumerable<DenialClaimRow> rows) => rows
-        .Select(x => x.ClaimId)
-        .Where(x => !string.IsNullOrWhiteSpace(x))
-        .Distinct(StringComparer.OrdinalIgnoreCase)
-        .Count();
+    // ── Denial Insight: import, edit, delete, copy, export ────────────────────
 
     /// <summary>
-    /// The periods the lab actually has denials in: months from Denial Date, weeks from the lab's
-    /// own DeniedWeek column where it has one.
-    /// </summary>
-    /// <remarks>
-    /// The weekly summary is specified against DeniedWeek, and a lab's week labels do not
-    /// necessarily line up with Monday-Sunday, so that column wins when it is populated. Grouping on
-    /// a derived week instead would quietly disagree with the lab's own reporting. Where the column
-    /// is absent or empty the week is derived from Denial Date, which keeps the page working rather
-    /// than showing an empty weekly view.
-    /// </remarks>
-    internal static List<DenialPeriodOption> BuildPeriods(IReadOnlyList<DenialClaimRow> rows, string grain)
-    {
-        var weekly = string.Equals(grain, "weekly", StringComparison.OrdinalIgnoreCase);
-
-        if (weekly && rows.Any(x => !string.IsNullOrWhiteSpace(x.DeniedWeek)))
-        {
-            return rows
-                .Where(x => !string.IsNullOrWhiteSpace(x.DeniedWeek))
-                .GroupBy(x => x.DeniedWeek.Trim(), StringComparer.OrdinalIgnoreCase)
-                .Select(g =>
-                {
-                    // Ordered by the dates behind the label, because a week label does not sort.
-                    var dates = g.Where(x => x.DenialDate.HasValue).Select(x => x.DenialDate!.Value.Date).ToList();
-                    return new DenialPeriodOption
-                    {
-                        DeniedWeekValue = g.Key,
-                        Start = dates.Count > 0 ? dates.Min() : DateTime.MinValue,
-                        End = dates.Count > 0 ? dates.Max() : DateTime.MinValue,
-                        Key = g.Key,
-                        Label = g.Key,
-                        DenialCount = g.Count()
-                    };
-                })
-                .OrderByDescending(p => p.Start)
-                .ThenByDescending(p => p.Key, StringComparer.OrdinalIgnoreCase)
-                .Take(MaxPeriodOptions)
-                .ToList();
-        }
-
-        return rows
-            .Where(x => x.DenialDate.HasValue)
-            .GroupBy(x => weekly ? WeekStart(x.DenialDate!.Value) : MonthStart(x.DenialDate!.Value))
-            .Select(g =>
-            {
-                var end = weekly ? g.Key.AddDays(6) : g.Key.AddMonths(1).AddDays(-1);
-                return new DenialPeriodOption
-                {
-                    Start = g.Key,
-                    End = end,
-                    Key = g.Key.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    Label = weekly
-                        ? $"{g.Key:dd MMM} - {end:dd MMM yyyy}"
-                        : g.Key.ToString("MMMM yyyy", CultureInfo.InvariantCulture),
-                    DenialCount = g.Count()
-                };
-            })
-            .OrderByDescending(p => p.Start)
-            .Take(MaxPeriodOptions)
-            .ToList();
-    }
-
-    /// <summary>
-    /// Top Insurance: rows are PayerName_Raw, columns are the reporting periods, every cell carries
-    /// Claim Count and Total Balance. Ordered by claim count, per requirements 4d/4g and 5d/5g.
-    /// </summary>
-    internal static DenialPivotTable BuildPayerPivot(
-        IReadOnlyList<DenialClaimRow> rows, IReadOnlyList<DenialPeriodOption> periods)
-    {
-        var groups = rows
-            .Where(x => !string.IsNullOrWhiteSpace(x.PayerName))
-            .GroupBy(x => x.PayerNameNormalized, StringComparer.OrdinalIgnoreCase)
-            .Select(g => (Key: g.First().PayerName, Label: g.First().PayerName, SubLabel: string.Empty, Rows: g.ToList()));
-
-        return BuildPivot("Top Insurance by Claim Count", "Insurance", groups, periods, int.MaxValue);
-    }
-
-    /// <summary>
-    /// Top Denial: rows are the common denial code, columns are the reporting periods. Cut to the
-    /// top <paramref name="topN"/> codes by claim count - requirement 4k / 5k.
-    /// </summary>
-    internal static DenialPivotTable BuildDenialPivot(
-        IReadOnlyList<DenialClaimRow> rows,
-        IReadOnlyList<DenialPeriodOption> periods,
-        DenialDescriptionLookup descriptions,
-        int topN)
-    {
-        var groups = rows
-            .GroupBy(x => x.DenialCodeNormalized, StringComparer.OrdinalIgnoreCase)
-            .Select(g => (
-                Key: g.Key,
-                Label: g.Key,
-                SubLabel: ResolveDescription(g.Key, g, descriptions),
-                Rows: g.ToList()));
-
-        return BuildPivot("Top Denial by Claim Count", "Denial Code", groups, periods, topN);
-    }
-
-    private static DenialPivotTable BuildPivot(
-        string title,
-        string rowHeader,
-        IEnumerable<(string Key, string Label, string SubLabel, List<DenialClaimRow> Rows)> groups,
-        IReadOnlyList<DenialPeriodOption> periods,
-        int topN)
-    {
-        var all = groups
-            .Select(g =>
-            {
-                var row = new DenialPivotRow
-                {
-                    Key = g.Key,
-                    Label = g.Label,
-                    SubLabel = g.SubLabel,
-                    // The row total counts DISTINCT claims across the whole range, so a claim
-                    // appearing in two periods is not double counted here even though each period's
-                    // own cell counts it.
-                    TotalClaimCount = DistinctClaims(g.Rows),
-                    TotalBalance = g.Rows.Sum(x => x.InsuranceBalance)
-                };
-
-                foreach (var period in periods)
-                {
-                    var inPeriod = g.Rows.Where(period.Contains).ToList();
-                    if (inPeriod.Count == 0) continue;
-
-                    row.Cells[period.Key] = new DenialPivotCell
-                    {
-                        ClaimCount = DistinctClaims(inPeriod),
-                        TotalBalance = inPeriod.Sum(x => x.InsuranceBalance)
-                    };
-                }
-
-                return row;
-            })
-            .OrderByDescending(r => r.TotalClaimCount)
-            .ThenByDescending(r => r.TotalBalance)
-            .ToList();
-
-        var shown = topN >= all.Count ? all : all.Take(topN).ToList();
-
-        // The total row sums what is SHOWN, so the column figures and the total agree on screen.
-        var total = new DenialPivotRow
-        {
-            Label = "Total",
-            TotalClaimCount = shown.Sum(r => r.TotalClaimCount),
-            TotalBalance = shown.Sum(r => r.TotalBalance)
-        };
-
-        foreach (var period in periods)
-        {
-            var cells = shown.Select(r => r.CellFor(period.Key)).ToList();
-            total.Cells[period.Key] = new DenialPivotCell
-            {
-                ClaimCount = cells.Sum(c => c.ClaimCount),
-                TotalBalance = cells.Sum(c => c.TotalBalance)
-            };
-        }
-
-        return new DenialPivotTable
-        {
-            Title = title,
-            RowHeader = rowHeader,
-            Periods = periods.ToList(),
-            Rows = shown,
-            Total = total,
-            IsTopNFiltered = shown.Count < all.Count,
-            RowsAvailable = all.Count
-        };
-    }
-
-    /// <summary>
-    /// One row per common denial code within the period: total distinct claims and insurance balance
-    /// for the denial, then the single most impacted payer by balance, with that payer's own claim
-    /// count and balance. Codes are rolled up first (CO45/PI45/PR45 -> 45) so the row and the
-    /// drill-through it links to describe the same population.
-    /// </summary>
-    internal static List<DenialSummaryRow> BuildDenialSummary(
-        IReadOnlyList<DenialClaimRow> rows,
-        DenialDescriptionLookup descriptions)
-    {
-        return rows
-            .Where(x => !string.IsNullOrWhiteSpace(x.DenialCodeNormalized))
-            .GroupBy(x => x.DenialCodeNormalized, StringComparer.OrdinalIgnoreCase)
-            .Select(g =>
-            {
-                var payer = g
-                    .Where(x => !string.IsNullOrWhiteSpace(x.PayerName))
-                    .GroupBy(x => x.PayerNameNormalized, StringComparer.OrdinalIgnoreCase)
-                    .Select(p => new
-                    {
-                        Name = p.First().PayerName,
-                        Balance = p.Sum(x => x.InsuranceBalance),
-                        Claims = DistinctClaims(p)
-                    })
-                    // Claim count, not balance: requirement 4d/5d names the claim count as the sort
-                    // for the top insurance, and the "highest impact" payer has to agree with it.
-                    .OrderByDescending(p => p.Claims)
-                    .ThenByDescending(p => p.Balance)
-                    .FirstOrDefault();
-
-                return new DenialSummaryRow
-                {
-                    DenialCode = g.Key,
-                    DenialDescription = ResolveDescription(g.Key, g, descriptions),
-                    DenialClassification = g.Select(x => x.DenialClassification)
-                        .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty,
-                    RawCodes = string.Join(", ", g.Select(x => x.DenialCode)
-                        .Where(x => !string.IsNullOrWhiteSpace(x))
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
-                        .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)),
-                    DenialCount = g.Count(),
-                    TotalClaims = DistinctClaims(g),
-                    InsuranceBalance = g.Sum(x => x.InsuranceBalance),
-                    TotalBalance = g.Sum(x => x.TotalBalance),
-                    HighlyImpactedPayer = payer?.Name ?? string.Empty,
-                    PayerClaimCount = payer?.Claims ?? 0,
-                    PayerInsuranceBalance = payer?.Balance ?? 0m
-                };
-            })
-            .OrderByDescending(r => r.TotalClaims)
-            .ThenByDescending(r => r.InsuranceBalance)
-            .ToList();
-    }
-
-    /// <summary>
-    /// The description for a common denial code, through the four-step cascade.
-    /// </summary>
-    /// <remarks>
-    /// Tried against each RAW code that rolled into this group before the normalized code, because
-    /// the cascade's first two steps are raw-code matches and a group built from CO45 has to get the
-    /// chance to match a master row stored as CO45. The description already on the claim row - which
-    /// the Master File Processor wrote using the same cascade - is the last resort, so a lab whose
-    /// master has since lost a code still shows what it showed at import time.
-    /// </remarks>
-    private static string ResolveDescription(
-        string normalizedCode,
-        IEnumerable<DenialClaimRow> rows,
-        DenialDescriptionLookup descriptions)
-    {
-        var claims = rows as IReadOnlyList<DenialClaimRow> ?? rows.ToList();
-
-        foreach (var rawCode in claims.Select(x => x.DenialCode)
-                                      .Where(x => !string.IsNullOrWhiteSpace(x))
-                                      .Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            if (descriptions.Resolve(rawCode) is { Length: > 0 } fromRaw) return fromRaw;
-        }
-
-        if (descriptions.Resolve(normalizedCode) is { Length: > 0 } fromNormalized) return fromNormalized;
-
-        return claims.Select(x => x.DenialDescription).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty;
-    }
-
-    private static DateTime MonthStart(DateTime date) => new(date.Year, date.Month, 1);
-
-    private static DateTime WeekStart(DateTime date)
-    {
-        var d = date.Date;
-        var daysSinceMonday = ((int)d.DayOfWeek + 6) % 7;
-        return d.AddDays(-daysSinceMonday);
-    }
-
-    // ── Claim Level Data (drill-through target) ───────────────────────────────
-
-    /// <summary>
-    /// The claim-level population behind a metric. Opened from a denial code, a claim count or a
-    /// payer balance, carrying the filter context that reproduces exactly that population; the view
-    /// shows the active filters and links back.
-    /// </summary>
-    [HttpGet]
-    public async Task<IActionResult> ClaimData(string? lab, string? denialCode, string? payerName, string? grain, string? period, string? from, string? bucket, CancellationToken ct)
-    {
-        var model = new DenialClaimDataViewModel
-        {
-            Labs = VisibleLabs(),
-            ReturnTo = string.Equals(from, "insights", StringComparison.OrdinalIgnoreCase) ? "insights" : "summary",
-            Grain = string.Equals(grain, "weekly", StringComparison.OrdinalIgnoreCase) ? "weekly" : "monthly",
-            Bucket = DenialInsightBuckets.Normalize(bucket)
-        };
-
-        if (!TryResolveLab(lab, out var labName, out var connectionString, out var masterConnectionString, out var error))
-        {
-            model.Error = error;
-            model.CurrentLab = labName;
-            return View(model);
-        }
-
-        model.CurrentLab = labName;
-
-        var filter = new ClaimDrillThroughFilter
-        {
-            DenialCode = string.IsNullOrWhiteSpace(denialCode) ? null : DenialCodeKey.Normalize(denialCode),
-            PayerName = string.IsNullOrWhiteSpace(payerName) ? null : payerName.Trim(),
-            PeriodKey = period
-        };
-
-        try
-        {
-            var claims = await _repo.GetDenialClaimsAsync(connectionString, ct);
-            var descriptions = await _repo.GetDescriptionsAsync(connectionString, masterConnectionString, ct);
-
-            // The same two filters the summaries use, so a drill-through returns exactly the rows
-            // the number on the previous screen was counted from.
-            IEnumerable<DenialClaimRow> filtered = claims.Where(IsReportable);
-
-            if (!string.IsNullOrWhiteSpace(filter.DenialCode))
-            {
-                var code = filter.DenialCode;
-                filtered = filtered.Where(x => string.Equals(x.DenialCodeNormalized, code, StringComparison.OrdinalIgnoreCase));
-                model.DenialDescription = descriptions.Resolve(code) ?? string.Empty;
-            }
-
-            if (!string.IsNullOrWhiteSpace(filter.PayerName))
-            {
-                // Matched on the normalized payer key so a display-name variation still resolves.
-                var payerKey = DenialCodeKey.NormalizePayer(filter.PayerName);
-                filtered = filtered.Where(x => string.Equals(x.PayerNameNormalized, payerKey, StringComparison.OrdinalIgnoreCase));
-            }
-
-            if (!string.IsNullOrWhiteSpace(period))
-            {
-                var weekly = string.Equals(model.Grain, "weekly", StringComparison.OrdinalIgnoreCase);
-
-                if (DateTime.TryParse(period, CultureInfo.InvariantCulture, DateTimeStyles.None, out var periodStart))
-                {
-                    var periodEnd = weekly ? periodStart.AddDays(6) : periodStart.AddMonths(1).AddDays(-1);
-
-                    filter.PeriodStart = periodStart;
-                    filter.PeriodEnd = periodEnd;
-                    filter.PeriodLabel = weekly
-                        ? $"{periodStart:dd MMM} - {periodEnd:dd MMM yyyy}"
-                        : periodStart.ToString("MMMM yyyy", CultureInfo.InvariantCulture);
-
-                    filtered = filtered.Where(x => x.DenialDate.HasValue
-                        && x.DenialDate.Value.Date >= periodStart && x.DenialDate.Value.Date <= periodEnd);
-                }
-                else
-                {
-                    // Not a date, so it is one of the lab's own DeniedWeek labels - matched as the
-                    // string it is rather than guessed at.
-                    var week = period.Trim();
-                    filter.PeriodLabel = week;
-                    filtered = filtered.Where(x => string.Equals(x.DeniedWeek, week, StringComparison.OrdinalIgnoreCase));
-                }
-            }
-
-            var list = filtered.OrderByDescending(x => x.InsuranceBalance).ToList();
-            model.Claims = list;
-            model.TotalClaims = DistinctClaims(list);
-            model.TotalInsuranceBalance = list.Sum(x => x.InsuranceBalance);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Claim Level Data drill-through failed for lab {Lab}.", labName);
-            model.Error = "The claim-level data could not be loaded for this lab.";
-        }
-
-        model.Filter = filter;
-        return View(model);
-    }
-
-    // ── Denial Insights ───────────────────────────────────────────────────────
-
-    [HttpGet]
-    public async Task<IActionResult> Insights(string? lab, string? bucket, CancellationToken ct)
-    {
-        var model = new DenialInsightClaimLevelViewModel
-        {
-            Labs = VisibleLabs(),
-            CanEdit = CanEditInsights(),
-            Bucket = DenialInsightBuckets.Normalize(bucket),
-            CurrentWeekStart = SqlDenialClaimReportRepository.WeekStartOf(DateTime.Today)
-        };
-
-        if (!TryResolveLab(lab, out var labName, out var connectionString, out _, out var error))
-        {
-            model.Error = error;
-            model.CurrentLab = labName;
-            return View(model);
-        }
-
-        model.CurrentLab = labName;
-
-        try
-        {
-            model.Rows = await _repo.GetInsightsAsync(connectionString, model.Bucket, ct);
-
-            // Every tab's count, so the user can see where their data is without opening each one.
-            foreach (var name in new[] { DenialInsightBuckets.Current, DenialInsightBuckets.Previous, DenialInsightBuckets.Archive })
-            {
-                model.BucketCounts[name] = name == model.Bucket
-                    ? model.Rows.Count
-                    : (await _repo.GetInsightsAsync(connectionString, name, ct)).Count;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Denial Insight Claim Level failed for lab {Lab}.", labName);
-            model.Error = "The denial insight rows could not be loaded for this lab.";
-        }
-
-        return View(model);
-    }
-
-    /// <summary>
-    /// Copies the Current Week insights into Previous Week and rolls anything past the 4-week
-    /// window into Archive. The confirmation the requirements ask for is in the view - this action
-    /// only runs once the user has already confirmed.
-    /// </summary>
-    [HttpPost]
-    [ValidateAntiForgeryToken]
-    public async Task<IActionResult> CopyToPreviousWeek(string? lab, CancellationToken ct)
-    {
-        if (!CanEditInsights())
-        {
-            TempData["DenialClaimReportError"] = "You do not have permission to move denial insights.";
-            return RedirectToAction(nameof(Insights), new { lab });
-        }
-
-        if (!TryResolveLab(lab, out var labName, out var connectionString, out _, out var error))
-        {
-            TempData["DenialClaimReportError"] = error;
-            return RedirectToAction(nameof(Insights), new { lab });
-        }
-
-        try
-        {
-            var result = await _repo.CopyCurrentToPreviousAsync(connectionString, CurrentUser, ct);
-
-            TempData["DenialClaimReportSuccess"] = result.Copied == 0
-                ? "There were no Current Week insights to copy."
-                : $"Copied {result.Copied:N0} insight row(s) to Previous Week "
-                  + $"({result.Inserted:N0} added, {result.Updated:N0} refreshed). "
-                  + (result.Archived > 0
-                      ? $"{result.Archived:N0} row(s) older than {DenialInsightBuckets.PreviousWeeksRetained} weeks moved to Archive. "
-                      : string.Empty)
-                  + "Current Week is unchanged.";
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Copy to Previous Week failed for lab {Lab}.", labName);
-            TempData["DenialClaimReportError"] = "The insights could not be copied to Previous Week. Nothing was changed.";
-        }
-
-        return RedirectToAction(nameof(Insights), new { lab = labName, bucket = DenialInsightBuckets.Previous });
-    }
-
-    /// <summary>
-    /// Imports the client's Denial Insight workbook. The file is validated in full BEFORE anything is
-    /// written: a missing mandatory column or an unreadable date is reported back and nothing is
-    /// committed, rather than leaving the table half-updated.
+    /// Imports the client's Denial Insight workbook into Current Week. The file is validated in full
+    /// BEFORE anything is written: a missing mandatory column or an unreadable date is reported back
+    /// and nothing is committed, rather than leaving the table half-updated.
     /// </summary>
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> UploadInsights(string? lab, IFormFile? insightFile, CancellationToken ct)
     {
         if (!CanEditInsights())
-        {
-            TempData["DenialClaimReportError"] = "You do not have permission to import denial insights.";
-            return RedirectToAction(nameof(Insights), new { lab });
-        }
+            return Redirect(InsightError("You do not have permission to import denial insights.", lab));
 
-        if (!TryResolveLab(lab, out var labName, out var connectionString, out _, out var error))
-        {
-            TempData["DenialClaimReportError"] = error;
-            return RedirectToAction(nameof(Insights), new { lab });
-        }
+        if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
+            return Redirect(InsightError(error, lab));
 
         if (insightFile is null || insightFile.Length == 0)
-        {
-            TempData["DenialClaimReportError"] = "Please choose an Excel file to import.";
-            return RedirectToAction(nameof(Insights), new { lab = labName });
-        }
+            return Redirect(InsightError("Please choose an Excel file to import.", labName));
 
         var uploadError = await FileUploadGuard.ValidateExcelAsync(insightFile, 25 * 1024 * 1024, ct);
-        if (uploadError != null)
-        {
-            TempData["DenialClaimReportError"] = uploadError;
-            return RedirectToAction(nameof(Insights), new { lab = labName });
-        }
+        if (uploadError != null) return Redirect(InsightError(uploadError, labName));
 
         DenialInsightValidationResult validation;
         try
@@ -658,21 +202,18 @@ public sealed class DenialClaimReportController : Controller
         }
         catch (Exception ex)
         {
-            TempData["DenialClaimReportError"] = $"Import failed: {ex.Message}";
-            return RedirectToAction(nameof(Insights), new { lab = labName });
+            return Redirect(InsightError($"Import failed: {ex.Message}", labName));
         }
 
         if (!validation.IsValid)
         {
-            TempData["DenialClaimReportError"] =
+            return Redirect(InsightError(
                 "The workbook does not match the Denial Insight template, so nothing was imported. "
                 + string.Join(" ", validation.Errors.Take(5))
-                + (validation.Errors.Count > 5 ? $" (+{validation.Errors.Count - 5} more)" : string.Empty);
-            return RedirectToAction(nameof(Insights), new { lab = labName });
+                + (validation.Errors.Count > 5 ? $" (+{validation.Errors.Count - 5} more)" : string.Empty),
+                labName));
         }
 
-        // An import always lands on Current Week - requirement 6d. The user moves it on with
-        // "Copy Data to Previous Week" when they are ready, not on import.
         var weekStart = SqlDenialClaimReportRepository.WeekStartOf(DateTime.Today);
         foreach (var row in validation.Rows)
         {
@@ -680,22 +221,34 @@ public sealed class DenialClaimReportController : Controller
             row.WeekStart = weekStart;
         }
 
-        var result = await _repo.SaveInsightsAsync(connectionString, validation.Rows, CurrentUser, ct);
+        try
+        {
+            // An import is a full replace of Current Week, not a merge: the workbook is the client's
+            // whole picture for the week, so a denial that has dropped out of it has to disappear
+            // from the tab rather than linger from the previous upload.
+            await _repo.ClearBucketAsync(connectionString, DenialInsightBuckets.Current, ct);
+            var result = await _repo.SaveInsightsAsync(connectionString, validation.Rows, CurrentUser, ct);
 
-        var message = $"Imported {validation.Rows.Count:N0} row(s) into Current Week for {labName}: {result.Inserted:N0} added, {result.Updated:N0} updated"
-            + (result.Skipped > 0 ? $", {result.Skipped:N0} skipped" : string.Empty)
-            + (result.Errors.Count > 0 ? $", {result.Errors.Count:N0} failed." : ".")
-            + (validation.Warnings.Count > 0 ? " " + string.Join(" ", validation.Warnings.Take(3)) : string.Empty);
+            var message = $"Imported {result.Inserted + result.Updated:N0} row(s) into Current Week for {labName}."
+                + (result.Skipped > 0 ? $" {result.Skipped:N0} row(s) had no denial code and were skipped." : string.Empty)
+                + (result.Errors.Count > 0 ? $" {result.Errors.Count:N0} row(s) failed." : string.Empty)
+                + (validation.Warnings.Count > 0 ? " " + string.Join(" ", validation.Warnings.Take(3)) : string.Empty);
 
-        TempData[result.Errors.Count > 0 ? "DenialClaimReportError" : "DenialClaimReportSuccess"] = message;
-        return RedirectToAction(nameof(Insights), new { lab = labName });
+            return Redirect(result.Errors.Count > 0 ? InsightError(message, labName) : InsightOk(message, labName));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Denial insight import failed for lab {Lab}.", labName);
+            return Redirect(InsightError("The import failed and nothing was saved.", labName));
+        }
     }
 
-    /// <summary>Saves the grid's edits - whatever is on screen wins for those rows.</summary>
+    /// <summary>Saves the grid's edits. Only Current Week is editable.</summary>
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> SaveInsights(
         string? lab,
+        [FromForm] long[] ids,
         [FromForm] string[] denialCodes,
         [FromForm] string[] payerNames,
         [FromForm] string[] observations,
@@ -709,81 +262,121 @@ public sealed class DenialClaimReportController : Controller
         CancellationToken ct)
     {
         if (!CanEditInsights())
-        {
-            TempData["DenialClaimReportError"] = "You do not have permission to edit denial insights.";
-            return RedirectToAction(nameof(Insights), new { lab });
-        }
+            return Redirect(InsightError("You do not have permission to edit denial insights.", lab));
 
-        if (!TryResolveLab(lab, out var labName, out var connectionString, out _, out var error))
-        {
-            TempData["DenialClaimReportError"] = error;
-            return RedirectToAction(nameof(Insights), new { lab });
-        }
+        if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
+            return Redirect(InsightError(error, lab));
 
-        // Only Current Week is editable: Previous and Archive are the record of what was said at
-        // the time, so an edit posted against them is rejected rather than silently applied.
         var existing = (await _repo.GetInsightsAsync(connectionString, DenialInsightBuckets.Current, ct))
-            .ToDictionary(r => $"{r.DenialCode}|{r.PayerName}", StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(r => r.Id);
 
-        var weekStart = existing.Values.Select(r => r.WeekStart).DefaultIfEmpty(
-            SqlDenialClaimReportRepository.WeekStartOf(DateTime.Today)).Max();
-
-        var rows = new List<DenialInsightClaimLevelRow>();
-        for (var i = 0; i < denialCodes.Length; i++)
+        var rows = new List<DenialInsightRow>();
+        for (var i = 0; i < ids.Length; i++)
         {
-            var code = denialCodes.ElementAtOrDefault(i)?.Trim();
-            if (string.IsNullOrWhiteSpace(code)) continue;
+            var id = ids[i];
 
-            var payer = payerNames.ElementAtOrDefault(i) ?? string.Empty;
-            var row = new DenialInsightClaimLevelRow
+            // A posted id that is not a Current Week row is ignored rather than written. Previous
+            // Week is read-only, and this is the gate that enforces it against a hand-made post.
+            if (!existing.TryGetValue(id, out var prior)) continue;
+
+            rows.Add(new DenialInsightRow
             {
-                Bucket = DenialInsightBuckets.Current,
-                WeekStart = weekStart,
-                DenialCode = code,
-                PayerName = payer,
+                Id = id,
+                Bucket = prior.Bucket,
+                WeekStart = prior.WeekStart,
+                SortOrder = prior.SortOrder,
+                DenialCode = Value(denialCodes, i, prior.DenialCode),
+                PayerName = Value(payerNames, i, prior.PayerName),
+                // The numeric columns come from the import and are not on the edit grid.
+                DenialDescription = prior.DenialDescription,
+                NoOfDenials = prior.NoOfDenials,
+                TotalBalance = prior.TotalBalance,
+                InsuranceBalance = prior.InsuranceBalance,
+                ImpactPercentage = prior.ImpactPercentage,
                 // The editors post HTML; sanitize on the way in, the same as an import does.
                 ObservationHtml = DenialInsightRichText.Sanitize(observations.ElementAtOrDefault(i)),
-                ActionCategory = actionCategories.ElementAtOrDefault(i) ?? string.Empty,
+                ActionCategory = Value(actionCategories, i, string.Empty),
                 ActionHtml = DenialInsightRichText.Sanitize(actions.ElementAtOrDefault(i)),
                 FeedbackResponse = feedbackResponses.ElementAtOrDefault(i) ?? string.Empty,
-                Responsibility = responsibilities.ElementAtOrDefault(i) ?? string.Empty,
+                Responsibility = Value(responsibilities, i, string.Empty),
                 DiscussionDate = ParseDate(discussionDates.ElementAtOrDefault(i)),
                 Eta = ParseDate(etas.ElementAtOrDefault(i)),
                 ClosedDate = ParseDate(closedDates.ElementAtOrDefault(i))
-            };
-
-            // The edit grid does not carry the numeric columns - keep whatever the import put there.
-            if (existing.TryGetValue($"{row.DenialCode}|{row.PayerName}", out var prior))
-            {
-                row.WeekStart = prior.WeekStart;
-                row.DenialDescription = prior.DenialDescription;
-                row.NoOfDenials = prior.NoOfDenials;
-                row.NoOfClaims = prior.NoOfClaims;
-                row.TotalBalance = prior.TotalBalance;
-                row.InsuranceBalance = prior.InsuranceBalance;
-                row.ImpactPercentage = prior.ImpactPercentage;
-            }
-
-            rows.Add(row);
+            });
         }
 
+        if (rows.Count == 0)
+            return Redirect(InsightError("There was nothing to save.", labName));
+
         var result = await _repo.SaveInsightsAsync(connectionString, rows, CurrentUser, ct);
-        TempData[result.Errors.Count > 0 ? "DenialClaimReportError" : "DenialClaimReportSuccess"] =
-            $"Saved {result.Updated + result.Inserted:N0} denial insight row(s) for {labName}."
+        var message = $"Saved {result.Updated + result.Inserted:N0} denial insight row(s) for {labName}."
             + (result.Errors.Count > 0 ? $" {result.Errors.Count} row(s) failed." : string.Empty);
 
-        return RedirectToAction(nameof(Insights), new { lab = labName });
+        return Redirect(result.Errors.Count > 0 ? InsightError(message, labName) : InsightOk(message, labName));
     }
 
-    /// <summary>Downloads the Denial Insight template - this tab's rows, in the shape the import expects.</summary>
+    /// <summary>Deletes one insight row.</summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> DeleteInsight(string? lab, long id, string? bucket, CancellationToken ct)
+    {
+        if (!CanEditInsights())
+            return Redirect(InsightError("You do not have permission to delete denial insights.", lab, bucket));
+
+        if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
+            return Redirect(InsightError(error, lab, bucket));
+
+        try
+        {
+            var deleted = await _repo.DeleteInsightAsync(connectionString, id, ct);
+
+            return Redirect(deleted
+                ? InsightOk("Insight row deleted.", labName, bucket)
+                : InsightError("That insight row no longer exists - it may already have been deleted.", labName, bucket));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Denial insight row {Id} could not be deleted for lab {Lab}.", id, labName);
+            return Redirect(InsightError("The insight row could not be deleted.", labName, bucket));
+        }
+    }
+
+    /// <summary>
+    /// Replaces Previous Week with a copy of Current Week. The confirmation the requirements ask for
+    /// is in the view; this action runs only once the user has confirmed.
+    /// </summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> CopyToPreviousWeek(string? lab, CancellationToken ct)
+    {
+        if (!CanEditInsights())
+            return Redirect(InsightError("You do not have permission to move denial insights.", lab));
+
+        if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
+            return Redirect(InsightError(error, lab));
+
+        try
+        {
+            var copied = await _repo.CopyCurrentToPreviousAsync(connectionString, CurrentUser, ct);
+
+            return Redirect(copied == 0
+                ? InsightError("There were no Current Week insights to copy.", labName)
+                : InsightOk($"Copied {copied:N0} insight row(s) to Previous Week. Current Week is unchanged.",
+                            labName, DenialInsightBuckets.Previous));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Copy to Previous Week failed for lab {Lab}.", labName);
+            return Redirect(InsightError("The insights could not be copied to Previous Week. Nothing was changed.", labName));
+        }
+    }
+
+    /// <summary>Downloads the open tab as the Denial Insight template, in the shape the import expects.</summary>
     [HttpGet]
     public async Task<IActionResult> ExportInsights(string? lab, string? bucket, CancellationToken ct)
     {
-        if (!TryResolveLab(lab, out var labName, out var connectionString, out _, out var error))
-        {
-            TempData["DenialClaimReportError"] = error;
-            return RedirectToAction(nameof(Insights), new { lab });
-        }
+        if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
+            return Redirect(InsightError(error, lab));
 
         var tab = DenialInsightBuckets.Normalize(bucket);
         var rows = await _repo.GetInsightsAsync(connectionString, tab, ct);
@@ -799,14 +392,15 @@ public sealed class DenialClaimReportController : Controller
         }
 
         var row = 2;
+        var index = 1;
         foreach (var r in rows)
         {
-            ws.Cell(row, 1).Value = r.DenialCode;
-            ws.Cell(row, 2).Value = r.DenialDescription;
-            ws.Cell(row, 3).Value = r.PayerName;
+            ws.Cell(row, 1).Value = index++;
+            ws.Cell(row, 2).Value = r.DenialCode;
+            ws.Cell(row, 3).Value = r.DenialDescription;
             ws.Cell(row, 4).Value = r.NoOfDenials;
-            ws.Cell(row, 5).Value = r.NoOfClaims;
-            ws.Cell(row, 6).Value = r.TotalBalance;
+            ws.Cell(row, 5).Value = r.TotalBalance;
+            ws.Cell(row, 6).Value = r.PayerName;
             ws.Cell(row, 7).Value = r.InsuranceBalance;
             ws.Cell(row, 8).Value = r.ImpactPercentage;
             ws.Cell(row, 9).Value = DenialInsightRichText.ToPlainText(r.ObservationHtml);
@@ -817,31 +411,66 @@ public sealed class DenialClaimReportController : Controller
             if (r.DiscussionDate.HasValue) ws.Cell(row, 14).Value = r.DiscussionDate.Value;
             if (r.Eta.HasValue) ws.Cell(row, 15).Value = r.Eta.Value;
             if (r.ClosedDate.HasValue) ws.Cell(row, 16).Value = r.ClosedDate.Value;
+
             ws.Cell(row, 9).Style.Alignment.WrapText = true;
             ws.Cell(row, 11).Style.Alignment.WrapText = true;
             row++;
         }
 
         ws.Columns().AdjustToContents();
+        ws.Column(3).Width = 38;
         ws.Column(9).Width = 45;
         ws.Column(11).Width = 45;
+        ws.SheetView.FreezeRows(1);
 
         await using var stream = new MemoryStream();
         workbook.SaveAs(stream);
         var safeLab = string.Join("_", labName.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
         return File(stream.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            $"{safeLab}_DenialInsightTemplate_{tab}_{DateTime.Now:yyyyMMdd}.xlsx");
+            $"{safeLab}_DenialInsight_{tab}Week_{DateTime.Now:yyyyMMdd}.xlsx");
     }
 
-    private const string InsightSheetName = "Denial Insights";
+    // ── Redirect helpers ──────────────────────────────────────────────────────
 
-    /// <summary>The template's columns. The first three are mandatory; the rest may be blank.</summary>
+    private string InsightOk(string message, string? lab, string? bucket = null)
+    {
+        TempData["DenialClaimReportSuccess"] = message;
+        return InsightUrl(lab, bucket);
+    }
+
+    private string InsightError(string message, string? lab, string? bucket = null)
+    {
+        TempData["DenialClaimReportError"] = message;
+        return InsightUrl(lab, bucket);
+    }
+
+    /// <summary>Back to the page with the Denial Insight tab open, on the sub-tab that was in use.</summary>
+    private string InsightUrl(string? lab, string? bucket) =>
+        Url.Action(nameof(Index), new
+        {
+            lab,
+            tab = "insight",
+            bucket = DenialInsightBuckets.Normalize(bucket)
+        }) ?? "/DenialClaimReport";
+
+    private const string InsightSheetName = "Denial Insight";
+
+    /// <summary>
+    /// The template's columns, in the client's own workbook order. Denial Codes and the payer are
+    /// mandatory; the rest may be blank.
+    /// </summary>
     private static readonly string[] TemplateHeaders =
     [
-        "Denial Codes", "Descriptions", "Highest $ Impact - Insurance", "# of Denial", "# of Claims",
-        "Total Balance ($)", "Ins. Balance ($)", "$ Impact (%)", "Observation", "Category", "Action",
-        "Feedback / Response", "Responsibility", "Discussion Date", "ETA", "Closed Date"
+        "#", "Denial Codes", "Descriptions", "# of Denial", "Total Balance ($)",
+        "Highest $ Impact - Insurance", "Ins. Balance ($)", "$ Impact (%)", "Observation", "Category",
+        "Action", "Feedback / Response", "Responsibility", "Discussion Date", "ETA", "Closed Date"
     ];
+
+    private static string Value(string[] source, int index, string fallback)
+    {
+        var value = source.ElementAtOrDefault(index)?.Trim();
+        return string.IsNullOrWhiteSpace(value) ? fallback : value;
+    }
 
     private static DateTime? ParseDate(string? value) => DateTime.TryParse(value, out var parsed) ? parsed : null;
 
@@ -869,7 +498,7 @@ public sealed class DenialClaimReportController : Controller
 
         if (headerRow is null)
         {
-            result.Errors.Add("No \"Denial Code\" column was found in any sheet - this does not look like the Denial Insight template.");
+            result.Errors.Add("No \"Denial Codes\" column was found in any sheet - this does not look like the Denial Insight template.");
             return result;
         }
 
@@ -889,16 +518,15 @@ public sealed class DenialClaimReportController : Controller
 
         var codeCol = Col("Denial Codes", "Denial Code");
         var payerCol = Col("Highest $ Impact - Insurance", "Insurance", "Payer Name", "Payer");
-        var observationCol = Col("Observation");
+        var observationCol = Col("Observation", "Observations");
 
         if (codeCol is null) result.Errors.Add("Mandatory column \"Denial Codes\" is missing.");
-        if (payerCol is null) result.Errors.Add("Mandatory column \"Highest $ Impact - Insurance\" (payer) is missing.");
-        if (observationCol is null) result.Warnings.Add("No \"Observation\" column was found; observations were left unchanged.");
+        if (payerCol is null) result.Errors.Add("Mandatory column \"Highest $ Impact - Insurance\" is missing.");
+        if (observationCol is null) result.Warnings.Add("No \"Observation\" column was found; observations were left blank.");
         if (result.Errors.Count > 0) return result;
 
         var descCol = Col("Descriptions", "Description", "Denial Description");
         var denialCountCol = Col("# of Denial", "No of Denial", "Denial Count");
-        var claimCountCol = Col("# of Claims", "No of Claims", "Claim Count");
         var totalBalanceCol = Col("Total Balance ($)", "Total Balance");
         var insBalanceCol = Col("Ins. Balance ($)", "Insurance Balance", "Ins Balance");
         var impactCol = Col("$ Impact (%)", "Impact");
@@ -931,20 +559,27 @@ public sealed class DenialClaimReportController : Controller
         }
 
         var lastRow = ws.LastRowUsed()?.RowNumber() ?? headerRow.RowNumber();
+        var order = 0;
 
         for (var r = headerRow.RowNumber() + 1; r <= lastRow; r++)
         {
             var code = Text(r, codeCol);
-            if (string.IsNullOrWhiteSpace(code) || code.Equals("Total", StringComparison.OrdinalIgnoreCase)) continue;
+            if (string.IsNullOrWhiteSpace(code)) continue;
 
-            result.Rows.Add(new DenialInsightClaimLevelRow
+            // The client's workbook carries a "Previously Discussed Items" banner mid-sheet and a
+            // Total row at the end. Neither is a denial, and both would otherwise import as one.
+            if (code.Equals("Total", StringComparison.OrdinalIgnoreCase)
+                || code.Contains("Previously Discussed", StringComparison.OrdinalIgnoreCase)) continue;
+
+            order++;
+            result.Rows.Add(new DenialInsightRow
             {
+                SortOrder = order,
                 DenialCode = code,
                 DenialCodeNormalized = DenialCodeKey.Normalize(code),
                 DenialDescription = Text(r, descCol),
                 PayerName = Text(r, payerCol),
                 NoOfDenials = (int)Num(r, denialCountCol),
-                NoOfClaims = (int)Num(r, claimCountCol),
                 TotalBalance = Num(r, totalBalanceCol),
                 InsuranceBalance = Num(r, insBalanceCol),
                 ImpactPercentage = Num(r, impactCol),

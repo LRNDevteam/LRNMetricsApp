@@ -532,7 +532,7 @@ builder.Services.AddScoped<IClaimLineRepository, SqlClaimLineRepository>();
 builder.Services.AddScoped<ICptSearchRepository, SqlCptSearchRepository>();
 builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRepository>();
 // Denial Claim Report + Denial Insight (Claim Level): reads each lab's own dbo.ClaimLevelData and
-// owns dbo.DenialInsightClaimLevel. Separate from the Denial Dashboard's tables and repositories.
+// owns dbo.DenialClaimLevelInsight. Separate from the Denial Dashboard's tables and repositories.
 builder.Services.AddScoped<IDenialClaimReportRepository, SqlDenialClaimReportRepository>();
 builder.Services.AddScoped<AllLabsCollectionExcelBuilder>();
 builder.Services.AddScoped<PayerPolicyValidationService>();

@@ -6,35 +6,42 @@ namespace LabMetricsDashboard.Services;
 
 public interface IDenialClaimReportRepository
 {
-    /// <summary>Denied claims straight from the lab's own dbo.ClaimLevelData - the system-of-record dataset.</summary>
-    Task<IReadOnlyList<DenialClaimRow>> GetDenialClaimsAsync(string connectionString, CancellationToken ct);
-
     /// <summary>
-    /// The four-step description cascade: the lab's own Denial-Action master then the Super Master,
-    /// each matched on the raw code before the normalized one.
+    /// The aggregated denial groups the Monthly and Weekly summaries are built from, straight out
+    /// of the lab's own dbo.ClaimLevelData.
     /// </summary>
-    Task<DenialDescriptionLookup> GetDescriptionsAsync(string connectionString, string? masterConnectionString, CancellationToken ct);
+    Task<IReadOnlyList<DenialSummaryGroup>> GetDenialSummaryAsync(string connectionString, CancellationToken ct);
 
-    /// <summary>The insight rows on one tab - Current, Previous or Archive.</summary>
-    Task<IReadOnlyList<DenialInsightClaimLevelRow>> GetInsightsAsync(string connectionString, string bucket, CancellationToken ct);
+    /// <summary>The insight rows on one tab - Current or Previous.</summary>
+    Task<IReadOnlyList<DenialInsightRow>> GetInsightsAsync(string connectionString, string bucket, CancellationToken ct);
+
+    /// <summary>Row counts per tab, without loading the rows.</summary>
+    Task<IReadOnlyDictionary<string, int>> GetInsightCountsAsync(string connectionString, CancellationToken ct);
 
     /// <summary>Upsert by (Bucket, WeekStart, DenialCode, PayerName) - a template row's identity.</summary>
-    Task<DenialInsightUploadResult> SaveInsightsAsync(string connectionString, IReadOnlyList<DenialInsightClaimLevelRow> rows, string userName, CancellationToken ct);
+    Task<DenialInsightUploadResult> SaveInsightsAsync(string connectionString, IReadOnlyList<DenialInsightRow> rows, string userName, CancellationToken ct);
 
-    /// <summary>Copies Current Week into Previous Week and archives anything past the 4-week window.</summary>
-    Task<DenialInsightCopyResult> CopyCurrentToPreviousAsync(string connectionString, string userName, CancellationToken ct);
+    /// <summary>Deletes one insight row by its id. Returns false when the row was already gone.</summary>
+    Task<bool> DeleteInsightAsync(string connectionString, long id, CancellationToken ct);
+
+    /// <summary>Replaces a whole tab's rows - used by an import, which is a full replace of that week.</summary>
+    Task<int> ClearBucketAsync(string connectionString, string bucket, CancellationToken ct);
+
+    /// <summary>Copies Current Week onto Previous Week, replacing whatever Previous held.</summary>
+    Task<int> CopyCurrentToPreviousAsync(string connectionString, string userName, CancellationToken ct);
 }
 
 /// <summary>
 /// Denial Claim Report data access, straight against each lab's own database.
 ///
-/// Reads <c>dbo.ClaimLevelData</c> for the denied claims every summary metric is calculated from,
-/// and owns <c>dbo.DenialInsightClaimLevel</c>, the per-lab table holding the insight rows a client
-/// imports and edits. The two stay distinct by design: importing insights never writes to, or
-/// recalculates, claim-level data.
+/// <para>Reads <c>dbo.ClaimLevelData</c> for the denial summaries, and owns
+/// <c>dbo.DenialClaimLevelInsight</c>, the per-lab table holding the insight rows a client imports
+/// and edits. The two stay distinct by design: importing insights never writes to, or recalculates,
+/// claim-level data.</para>
 ///
-/// Column selection is probed rather than assumed - lab databases differ in which optional
-/// ClaimLevelData columns they carry, so a lab missing one gets NULL for it instead of a failed query.
+/// <para>Column selection is probed rather than assumed - lab databases differ in which optional
+/// ClaimLevelData columns they carry, so a lab missing one gets a blank for it instead of a failed
+/// query.</para>
 /// </summary>
 public sealed class SqlDenialClaimReportRepository : IDenialClaimReportRepository
 {
@@ -42,192 +49,100 @@ public sealed class SqlDenialClaimReportRepository : IDenialClaimReportRepositor
 
     public SqlDenialClaimReportRepository(ILogger<SqlDenialClaimReportRepository> logger) => _logger = logger;
 
-    public async Task<IReadOnlyList<DenialClaimRow>> GetDenialClaimsAsync(string connectionString, CancellationToken ct)
+    // ── Denial summary ────────────────────────────────────────────────────────
+
+    public async Task<IReadOnlyList<DenialSummaryGroup>> GetDenialSummaryAsync(string connectionString, CancellationToken ct)
     {
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
 
-        if (!await TableExistsAsync(conn, "ClaimLevelData", ct)) return Array.Empty<DenialClaimRow>();
+        if (!await TableExistsAsync(conn, "ClaimLevelData", ct)) return Array.Empty<DenialSummaryGroup>();
 
         var cols = await GetColumnsAsync(conn, "ClaimLevelData", ct);
-        if (!cols.Contains("DenialCode")) return Array.Empty<DenialClaimRow>();
+        if (!cols.Contains("DenialCode")) return Array.Empty<DenialSummaryGroup>();
 
-        string Str(string alias, params string[] candidates)
-        {
-            var match = candidates.FirstOrDefault(cols.Contains);
-            return match is null
-                ? $"CAST('' AS nvarchar(255)) AS [{alias}]"
-                : $"ISNULL(CONVERT(nvarchar(255), [{match}]), '') AS [{alias}]";
-        }
-        string Money(string alias, params string[] candidates)
-        {
-            var match = candidates.FirstOrDefault(cols.Contains);
-            return match is null
-                ? $"CAST(0 AS decimal(18,2)) AS [{alias}]"
-                : $"ISNULL(TRY_CONVERT(decimal(18,2), [{match}]), 0) AS [{alias}]";
-        }
-        string Date(string alias, params string[] candidates)
-        {
-            var match = candidates.FirstOrDefault(cols.Contains);
-            return match is null
-                ? $"CAST(NULL AS date) AS [{alias}]"
-                : $"TRY_CONVERT(date, [{match}]) AS [{alias}]";
-        }
+        // PayerName_Raw is the payer as the lab billed it, and it is the column the requirements
+        // name for the Top Insurance rows. PayerName is the mapped/cleaned variant and is only a
+        // fallback, for a lab whose claim-level table does not carry the raw one.
+        var payerCol = FirstPresent(cols, "PayerName_Raw", "PayerName") ?? "DenialCode";
+        var claimIdCol = FirstPresent(cols, "ClaimID", "ClaimId", "VisitNumber", "AccessionNo");
 
+        // A lab that has not yet run the new claim-level import has neither derived column. The
+        // summary still works - it falls back to the raw code and an empty description - rather than
+        // showing the lab an error it cannot act on.
+        var normalizedExpr = cols.Contains("DenialCodeNormalized")
+            ? "LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(400), [DenialCodeNormalized]), '')))"
+            : "LTRIM(RTRIM(CONVERT(nvarchar(400), [DenialCode])))";
+
+        var descriptionExpr = cols.Contains("DenialDescription")
+            ? "ISNULL(CONVERT(nvarchar(4000), [DenialDescription]), '')"
+            : "CAST('' AS nvarchar(4000))";
+
+        // COUNT(DISTINCT ClaimId) needs a claim identifier. Without one, every row is its own claim -
+        // which is what COUNT(*) says, and is the honest answer for a table with no claim key.
+        var claimCountExpr = claimIdCol is null
+            ? "COUNT_BIG(1)"
+            : $"COUNT(DISTINCT CONVERT(nvarchar(255), [{claimIdCol}]))";
+
+        // TRY_CONVERT rather than CAST: a lab whose InsuranceBalance is stored as text with a
+        // currency symbol would fail the whole query on CAST. TRY_CONVERT yields NULL, and NULL is
+        // excluded by "> 0" - the same rows are kept, without the query ever erroring.
         var sql = $@"
-SELECT
-    {Str("ClaimId", "ClaimID", "VisitNumber", "AccessionNo")},
-    {Str("DenialCode", "DenialCode")},
-    {Str("NormalizedDenialCodeRaw", "DenialCodeNormalized", "NormalizedDenialCode")},
-    {Str("DenialDescription", "DenialDescription", "DenialDesc")},
-    {Str("DenialClassification", "DenialClassification", "DenialType")},
-    {Str("PayerName", "PayerName_Raw", "PayerName")},
-    {Str("PayerNameNormalizedRaw", "PayerNameNormalized", "PayerName_Normalized")},
-    {Date("DenialDate", "DenialDate")},
-    {Str("DeniedWeek", "DeniedWeek", "DenialWeek", "Denied Week")},
-    {Money("InsuranceBalance", "InsuranceBalance")},
-    {Money("TotalBalance", "TotalBalance")},
-    {Money("BilledAmount", "BilledAmount")},
-    {Str("CptCode", "CPTCode", "CptCode")},
-    {Str("PanelName", "PanelName", "PanelType", "PanelNew")},
-    {Date("DateOfService", "DateOfService")}
-FROM dbo.ClaimLevelData
-WHERE [DenialCode] IS NOT NULL AND LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> '';";
+SELECT  LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [{payerCol}]), ''))) AS PayerName,
+        {normalizedExpr}                                              AS DenialCodeNormalized,
+        {descriptionExpr}                                             AS DenialDescription,
+        TRY_CONVERT(date, [DenialDate])                               AS DenialDate,
+        {claimCountExpr}                                              AS ClaimCount,
+        SUM(TRY_CONVERT(decimal(18,2), [InsuranceBalance]))           AS InsuranceBalance
+FROM    dbo.ClaimLevelData
+WHERE   [DenialCode] IS NOT NULL
+  AND   LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> ''
+  AND   TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0
+GROUP BY LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [{payerCol}]), ''))),
+        {normalizedExpr},
+        {descriptionExpr},
+        TRY_CONVERT(date, [DenialDate]);";
 
-        var rows = new List<DenialClaimRow>();
+        var rows = new List<DenialSummaryGroup>();
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 };
         await using var reader = await cmd.ExecuteReaderAsync(ct);
+
         while (await reader.ReadAsync(ct))
         {
-            var payerName = reader.GetString(reader.GetOrdinal("PayerName"));
-            var storedNormalized = reader.GetString(reader.GetOrdinal("PayerNameNormalizedRaw"));
-            var denialCode = reader.GetString(reader.GetOrdinal("DenialCode"));
-
-            // The Master File Processor writes NormalizedDenialCode during the claim-level import,
-            // and it is the better value: it handles a multi-code cell ("CO10, CO189" -> "10, 189"),
-            // which the single-code fallback below cannot. The fallback keeps a lab that has not yet
-            // run the new import working, rather than showing it blank codes.
-            var storedDenialNormalized = reader.GetString(reader.GetOrdinal("NormalizedDenialCodeRaw"));
-
-            rows.Add(new DenialClaimRow
+            rows.Add(new DenialSummaryGroup
             {
-                ClaimId = reader.GetString(reader.GetOrdinal("ClaimId")),
-                DenialCode = denialCode,
-                DenialCodeNormalized = string.IsNullOrWhiteSpace(storedDenialNormalized)
-                    ? DenialCodeKey.Normalize(denialCode)
-                    : storedDenialNormalized,
-                DenialDescription = reader.GetString(reader.GetOrdinal("DenialDescription")),
-                DenialClassification = reader.GetString(reader.GetOrdinal("DenialClassification")),
-                PayerName = string.IsNullOrWhiteSpace(payerName) ? storedNormalized : payerName,
-                PayerNameNormalized = DenialCodeKey.NormalizePayer(
-                    string.IsNullOrWhiteSpace(storedNormalized) ? payerName : storedNormalized),
-                DenialDate = GetDate(reader, "DenialDate"),
-                DeniedWeek = reader.GetString(reader.GetOrdinal("DeniedWeek")),
-                InsuranceBalance = reader.GetDecimal(reader.GetOrdinal("InsuranceBalance")),
-                TotalBalance = reader.GetDecimal(reader.GetOrdinal("TotalBalance")),
-                BilledAmount = reader.GetDecimal(reader.GetOrdinal("BilledAmount")),
-                CptCode = reader.GetString(reader.GetOrdinal("CptCode")),
-                PanelName = reader.GetString(reader.GetOrdinal("PanelName")),
-                DateOfService = GetDate(reader, "DateOfService")
+                PayerName = reader.GetString(0),
+                DenialCodeNormalized = reader.GetString(1),
+                DenialDescription = reader.GetString(2),
+                DenialDate = reader.IsDBNull(3) ? null : reader.GetDateTime(3),
+                ClaimCount = reader.IsDBNull(4) ? 0 : Convert.ToInt32(reader.GetValue(4)),
+                InsuranceBalance = reader.IsDBNull(5) ? 0m : reader.GetDecimal(5)
             });
         }
 
         return rows;
     }
 
-    /// <summary>
-    /// Builds the four-step description cascade the requirements define: the lab's own
-    /// Denial-Action master then the Denial-Action Super Master, each matched on the raw code
-    /// before the normalized one.
-    /// </summary>
-    public async Task<DenialDescriptionLookup> GetDescriptionsAsync(
-        string connectionString, string? masterConnectionString, CancellationToken ct)
-    {
-        var lookup = new DenialDescriptionLookup();
+    // ── Denial insights ───────────────────────────────────────────────────────
 
-        // The lab's own Denial-Action master. Absent on a lab that has never imported a classifier,
-        // which is normal - the Super Master covers it.
-        try
-        {
-            await using var labConn = new SqlConnection(connectionString);
-            await labConn.OpenAsync(ct);
-            await ReadDescriptionsAsync(labConn, "DenialCodeMaster", isActiveFiltered: false,
-                lookup.AddLab, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "The lab's own DenialCodeMaster could not be read for descriptions.");
-        }
+    private const string InsightTable = "dbo.DenialClaimLevelInsight";
 
-        if (!string.IsNullOrWhiteSpace(masterConnectionString))
-        {
-            try
-            {
-                await using var masterConn = new SqlConnection(masterConnectionString);
-                await masterConn.OpenAsync(ct);
-                await ReadDescriptionsAsync(masterConn, "DenialMapperSuperMaster", isActiveFiltered: true,
-                    lookup.AddSuper, ct);
-            }
-            catch (Exception ex)
-            {
-                // A master lookup outage costs descriptions, not the report.
-                _logger.LogWarning(ex, "Denial descriptions could not be read from the Super Master.");
-            }
-        }
-
-        return lookup;
-    }
-
-    /// <summary>
-    /// Reads DenialCode/DenialDescription out of one master table, or does nothing when that table
-    /// is not present. A missing master is an expected state, not an error.
-    /// </summary>
-    private static async Task ReadDescriptionsAsync(
-        SqlConnection conn, string table, bool isActiveFiltered,
-        Action<string, string> add, CancellationToken ct)
-    {
-        if (!await TableExistsAsync(conn, table, ct)) return;
-
-        // IsActive exists on the Super Master but not on every lab's DenialCodeMaster, so the filter
-        // is only applied where the caller knows the column is there.
-        var activeFilter = isActiveFiltered ? "AND IsActive = 1" : string.Empty;
-
-        var sql = $@"
-SELECT DenialCode, DenialDescription
-FROM dbo.[{table}]
-WHERE DenialCode IS NOT NULL AND LTRIM(RTRIM(DenialCode)) <> ''
-  AND DenialDescription IS NOT NULL AND LTRIM(RTRIM(DenialDescription)) <> ''
-  {activeFilter};";
-
-        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            if (reader.IsDBNull(0) || reader.IsDBNull(1)) continue;
-            add(reader.GetString(0), reader.GetString(1));
-        }
-    }
-
-    /// <summary>
-    /// The insight rows on one tab. <paramref name="bucket"/> is Current, Previous or Archive -
-    /// see <see cref="DenialInsightBuckets"/>.
-    /// </summary>
-    public async Task<IReadOnlyList<DenialInsightClaimLevelRow>> GetInsightsAsync(
+    public async Task<IReadOnlyList<DenialInsightRow>> GetInsightsAsync(
         string connectionString, string bucket, CancellationToken ct)
     {
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
         await EnsureInsightTableAsync(conn, ct);
 
-        const string sql = @"
-SELECT Id, Bucket, WeekStart, DenialCode, DenialDescription, PayerName, NoOfDenials, NoOfClaims,
+        var sql = $@"
+SELECT Id, Bucket, WeekStart, SortOrder, DenialCode, DenialDescription, PayerName, NoOfDenials,
        TotalBalance, InsuranceBalance, ImpactPercentage, Observation, ActionCategory, Action,
        FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate, UpdatedOn, UpdatedBy
-FROM dbo.DenialInsightClaimLevel
+FROM {InsightTable}
 WHERE Bucket = @Bucket
-ORDER BY WeekStart DESC, InsuranceBalance DESC, DenialCode;";
+ORDER BY SortOrder, InsuranceBalance DESC, DenialCode;";
 
-        var rows = new List<DenialInsightClaimLevelRow>();
+        var rows = new List<DenialInsightRow>();
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
         cmd.Parameters.Add("@Bucket", SqlDbType.NVarChar, 20).Value = DenialInsightBuckets.Normalize(bucket);
 
@@ -235,17 +150,17 @@ ORDER BY WeekStart DESC, InsuranceBalance DESC, DenialCode;";
         while (await reader.ReadAsync(ct))
         {
             var code = Text(reader, "DenialCode");
-            rows.Add(new DenialInsightClaimLevelRow
+            rows.Add(new DenialInsightRow
             {
                 Id = reader.GetInt64(reader.GetOrdinal("Id")),
                 Bucket = Text(reader, "Bucket"),
                 WeekStart = GetDate(reader, "WeekStart") ?? default,
+                SortOrder = GetIntOrZero(reader, "SortOrder"),
                 DenialCode = code,
                 DenialCodeNormalized = DenialCodeKey.Normalize(code),
                 DenialDescription = Text(reader, "DenialDescription"),
                 PayerName = Text(reader, "PayerName"),
                 NoOfDenials = GetIntOrZero(reader, "NoOfDenials"),
-                NoOfClaims = GetIntOrZero(reader, "NoOfClaims"),
                 TotalBalance = GetDecimalOrZero(reader, "TotalBalance"),
                 InsuranceBalance = GetDecimalOrZero(reader, "InsuranceBalance"),
                 ImpactPercentage = GetDecimalOrZero(reader, "ImpactPercentage"),
@@ -266,7 +181,33 @@ ORDER BY WeekStart DESC, InsuranceBalance DESC, DenialCode;";
         return rows;
     }
 
-    public async Task<DenialInsightUploadResult> SaveInsightsAsync(string connectionString, IReadOnlyList<DenialInsightClaimLevelRow> rows, string userName, CancellationToken ct)
+    public async Task<IReadOnlyDictionary<string, int>> GetInsightCountsAsync(string connectionString, CancellationToken ct)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await EnsureInsightTableAsync(conn, ct);
+
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            [DenialInsightBuckets.Current] = 0,
+            [DenialInsightBuckets.Previous] = 0
+        };
+
+        var sql = $"SELECT Bucket, COUNT(1) FROM {InsightTable} GROUP BY Bucket;";
+
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 60 };
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var bucket = reader.IsDBNull(0) ? DenialInsightBuckets.Current : reader.GetString(0);
+            counts[bucket] = reader.GetInt32(1);
+        }
+
+        return counts;
+    }
+
+    public async Task<DenialInsightUploadResult> SaveInsightsAsync(
+        string connectionString, IReadOnlyList<DenialInsightRow> rows, string userName, CancellationToken ct)
     {
         var result = new DenialInsightUploadResult();
         if (rows.Count == 0) return result;
@@ -275,44 +216,52 @@ ORDER BY WeekStart DESC, InsuranceBalance DESC, DenialCode;";
         await conn.OpenAsync(ct);
         await EnsureInsightTableAsync(conn, ct);
 
-        // Upsert on (Bucket, WeekStart, DenialCode, PayerName): re-uploading the same workbook for
-        // the same week updates those rows in place rather than stacking a second copy of the file's
-        // contents, while a different week is a genuinely separate set of insights.
-        const string sql = @"
-UPDATE dbo.DenialInsightClaimLevel
-SET DenialDescription = @DenialDescription,
-    NoOfDenials = @NoOfDenials,
-    NoOfClaims = @NoOfClaims,
-    TotalBalance = @TotalBalance,
-    InsuranceBalance = @InsuranceBalance,
-    ImpactPercentage = @ImpactPercentage,
-    Observation = @Observation,
-    ActionCategory = @ActionCategory,
-    Action = @Action,
-    FeedbackResponse = @FeedbackResponse,
-    Responsibility = @Responsibility,
-    DiscussionDate = @DiscussionDate,
-    ETA = @Eta,
-    ClosedDate = @ClosedDate,
-    UpdatedOn = SYSUTCDATETIME(),
-    UpdatedBy = @UpdatedBy
-WHERE Bucket = @Bucket AND WeekStart = @WeekStart
-  AND DenialCode = @DenialCode AND ISNULL(PayerName, '') = ISNULL(@PayerName, '');
-
-IF @@ROWCOUNT = 0
+        // An edit carries the row's Id and updates that row. An import carries no Id and upserts on
+        // (Bucket, WeekStart, DenialCode, PayerName), so re-importing the same workbook refreshes
+        // those rows rather than stacking a second copy of the file.
+        var sql = $@"
+IF @Id > 0
 BEGIN
-    INSERT dbo.DenialInsightClaimLevel
-        (Bucket, WeekStart, DenialCode, DenialDescription, PayerName, NoOfDenials, NoOfClaims,
-         TotalBalance, InsuranceBalance, ImpactPercentage, Observation, ActionCategory, Action,
-         FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate, UpdatedOn, UpdatedBy)
-    VALUES
-        (@Bucket, @WeekStart, @DenialCode, @DenialDescription, @PayerName, @NoOfDenials, @NoOfClaims,
-         @TotalBalance, @InsuranceBalance, @ImpactPercentage, @Observation, @ActionCategory, @Action,
-         @FeedbackResponse, @Responsibility, @DiscussionDate, @Eta, @ClosedDate, SYSUTCDATETIME(), @UpdatedBy);
-    SELECT CAST(1 AS bit);
+    UPDATE {InsightTable}
+    SET SortOrder = @SortOrder, DenialCode = @DenialCode, DenialDescription = @DenialDescription,
+        PayerName = @PayerName, NoOfDenials = @NoOfDenials, TotalBalance = @TotalBalance,
+        InsuranceBalance = @InsuranceBalance, ImpactPercentage = @ImpactPercentage,
+        Observation = @Observation, ActionCategory = @ActionCategory, Action = @Action,
+        FeedbackResponse = @FeedbackResponse, Responsibility = @Responsibility,
+        DiscussionDate = @DiscussionDate, ETA = @Eta, ClosedDate = @ClosedDate,
+        UpdatedOn = SYSUTCDATETIME(), UpdatedBy = @UpdatedBy
+    WHERE Id = @Id;
+
+    SELECT CAST(0 AS bit);
 END
 ELSE
-    SELECT CAST(0 AS bit);";
+BEGIN
+    UPDATE {InsightTable}
+    SET SortOrder = @SortOrder, DenialDescription = @DenialDescription,
+        NoOfDenials = @NoOfDenials, TotalBalance = @TotalBalance,
+        InsuranceBalance = @InsuranceBalance, ImpactPercentage = @ImpactPercentage,
+        Observation = @Observation, ActionCategory = @ActionCategory, Action = @Action,
+        FeedbackResponse = @FeedbackResponse, Responsibility = @Responsibility,
+        DiscussionDate = @DiscussionDate, ETA = @Eta, ClosedDate = @ClosedDate,
+        UpdatedOn = SYSUTCDATETIME(), UpdatedBy = @UpdatedBy
+    WHERE Bucket = @Bucket AND WeekStart = @WeekStart
+      AND DenialCode = @DenialCode AND ISNULL(PayerName, '') = ISNULL(@PayerName, '');
+
+    IF @@ROWCOUNT = 0
+    BEGIN
+        INSERT {InsightTable}
+            (Bucket, WeekStart, SortOrder, DenialCode, DenialDescription, PayerName, NoOfDenials,
+             TotalBalance, InsuranceBalance, ImpactPercentage, Observation, ActionCategory, Action,
+             FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate, UpdatedOn, UpdatedBy)
+        VALUES
+            (@Bucket, @WeekStart, @SortOrder, @DenialCode, @DenialDescription, @PayerName, @NoOfDenials,
+             @TotalBalance, @InsuranceBalance, @ImpactPercentage, @Observation, @ActionCategory, @Action,
+             @FeedbackResponse, @Responsibility, @DiscussionDate, @Eta, @ClosedDate, SYSUTCDATETIME(), @UpdatedBy);
+        SELECT CAST(1 AS bit);
+    END
+    ELSE
+        SELECT CAST(0 AS bit);
+END";
 
         foreach (var row in rows)
         {
@@ -321,13 +270,14 @@ ELSE
             try
             {
                 await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+                cmd.Parameters.Add("@Id", SqlDbType.BigInt).Value = row.Id;
                 cmd.Parameters.Add("@Bucket", SqlDbType.NVarChar, 20).Value = DenialInsightBuckets.Normalize(row.Bucket);
                 cmd.Parameters.Add("@WeekStart", SqlDbType.Date).Value = row.WeekStart.Date;
+                cmd.Parameters.Add("@SortOrder", SqlDbType.Int).Value = row.SortOrder;
                 cmd.Parameters.Add("@DenialCode", SqlDbType.NVarChar, 100).Value = row.DenialCode.Trim();
                 cmd.Parameters.Add("@DenialDescription", SqlDbType.NVarChar, 1000).Value = Db(row.DenialDescription);
                 cmd.Parameters.Add("@PayerName", SqlDbType.NVarChar, 255).Value = Db(row.PayerName);
                 cmd.Parameters.Add("@NoOfDenials", SqlDbType.Int).Value = row.NoOfDenials;
-                cmd.Parameters.Add("@NoOfClaims", SqlDbType.Int).Value = row.NoOfClaims;
                 cmd.Parameters.Add("@TotalBalance", SqlDbType.Decimal).Value = row.TotalBalance;
                 cmd.Parameters.Add("@InsuranceBalance", SqlDbType.Decimal).Value = row.InsuranceBalance;
                 cmd.Parameters.Add("@ImpactPercentage", SqlDbType.Decimal).Value = row.ImpactPercentage;
@@ -354,80 +304,57 @@ ELSE
         return result;
     }
 
-    /// <summary>
-    /// Copies the Current Week insights into Previous Week, then rolls anything in Previous older
-    /// than the retention window into Archive.
-    /// </summary>
-    /// <remarks>
-    /// <para>A COPY, not a move: the Current Week rows stay exactly where they are. The button is
-    /// named "Copy Data to Previous Week" and the user is still working on that week, so removing
-    /// what they are looking at would be the wrong reading of it. Re-clicking is therefore safe -
-    /// the copy upserts onto the same (Previous, WeekStart, code, payer) rows.</para>
-    /// <para>All of it runs in one transaction, so a failure part way through cannot leave rows
-    /// copied but not archived.</para>
-    /// </remarks>
-    public async Task<DenialInsightCopyResult> CopyCurrentToPreviousAsync(
-        string connectionString, string userName, CancellationToken ct)
+    public async Task<bool> DeleteInsightAsync(string connectionString, long id, CancellationToken ct)
     {
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
         await EnsureInsightTableAsync(conn, ct);
 
-        // Anything whose week is older than this has left the "latest 4 weeks" window.
-        var archiveBefore = WeekStartOf(DateTime.Today).AddDays(-7 * DenialInsightBuckets.PreviousWeeksRetained);
+        await using var cmd = new SqlCommand($"DELETE FROM {InsightTable} WHERE Id = @Id;", conn) { CommandTimeout = 60 };
+        cmd.Parameters.Add("@Id", SqlDbType.BigInt).Value = id;
 
-        const string sql = @"
-UPDATE p
-SET    p.DenialDescription = c.DenialDescription,
-       p.NoOfDenials = c.NoOfDenials, p.NoOfClaims = c.NoOfClaims,
-       p.TotalBalance = c.TotalBalance, p.InsuranceBalance = c.InsuranceBalance,
-       p.ImpactPercentage = c.ImpactPercentage,
-       p.Observation = c.Observation, p.ActionCategory = c.ActionCategory, p.Action = c.Action,
-       p.FeedbackResponse = c.FeedbackResponse, p.Responsibility = c.Responsibility,
-       p.DiscussionDate = c.DiscussionDate, p.ETA = c.ETA, p.ClosedDate = c.ClosedDate,
-       p.UpdatedOn = SYSUTCDATETIME(), p.UpdatedBy = @UpdatedBy
-FROM   dbo.DenialInsightClaimLevel AS p
-JOIN   dbo.DenialInsightClaimLevel AS c
-       ON  c.Bucket = 'Current'
-       AND c.WeekStart = p.WeekStart
-       AND c.DenialCode = p.DenialCode
-       AND ISNULL(c.PayerName, '') = ISNULL(p.PayerName, '')
-WHERE  p.Bucket = 'Previous';
+        return await cmd.ExecuteNonQueryAsync(ct) > 0;
+    }
 
-SELECT @@ROWCOUNT;
+    public async Task<int> ClearBucketAsync(string connectionString, string bucket, CancellationToken ct)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await EnsureInsightTableAsync(conn, ct);
 
-INSERT dbo.DenialInsightClaimLevel
-    (Bucket, WeekStart, DenialCode, DenialDescription, PayerName, NoOfDenials, NoOfClaims,
+        await using var cmd = new SqlCommand($"DELETE FROM {InsightTable} WHERE Bucket = @Bucket;", conn) { CommandTimeout = 120 };
+        cmd.Parameters.Add("@Bucket", SqlDbType.NVarChar, 20).Value = DenialInsightBuckets.Normalize(bucket);
+
+        return await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
+    /// Replaces Previous Week with a copy of Current Week.
+    /// </summary>
+    /// <remarks>
+    /// Previous Week is cleared first, so it always holds exactly one week - the last one discussed -
+    /// rather than accumulating. Current Week is left in place: the button copies, and the user is
+    /// still working on that week. All of it runs in one transaction, so a failure part way cannot
+    /// leave Previous emptied but not refilled.
+    /// </remarks>
+    public async Task<int> CopyCurrentToPreviousAsync(string connectionString, string userName, CancellationToken ct)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await EnsureInsightTableAsync(conn, ct);
+
+        var sql = $@"
+DELETE FROM {InsightTable} WHERE Bucket = 'Previous';
+
+INSERT {InsightTable}
+    (Bucket, WeekStart, SortOrder, DenialCode, DenialDescription, PayerName, NoOfDenials,
      TotalBalance, InsuranceBalance, ImpactPercentage, Observation, ActionCategory, Action,
      FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate, UpdatedOn, UpdatedBy)
-SELECT 'Previous', c.WeekStart, c.DenialCode, c.DenialDescription, c.PayerName, c.NoOfDenials,
-       c.NoOfClaims, c.TotalBalance, c.InsuranceBalance, c.ImpactPercentage, c.Observation,
-       c.ActionCategory, c.Action, c.FeedbackResponse, c.Responsibility, c.DiscussionDate,
-       c.ETA, c.ClosedDate, SYSUTCDATETIME(), @UpdatedBy
-FROM   dbo.DenialInsightClaimLevel AS c
-WHERE  c.Bucket = 'Current'
-  AND  NOT EXISTS (
-           SELECT 1 FROM dbo.DenialInsightClaimLevel AS p
-           WHERE p.Bucket = 'Previous' AND p.WeekStart = c.WeekStart
-             AND p.DenialCode = c.DenialCode
-             AND ISNULL(p.PayerName, '') = ISNULL(c.PayerName, ''));
-
-SELECT @@ROWCOUNT;
-
--- Past the retention window: Previous keeps the latest 4 weeks, the rest becomes Archive.
--- A row already in Archive for that week would collide on the unique index, so it is removed
--- rather than duplicated - Archive holds one copy of each week, which is what it is for.
-DELETE a
-FROM   dbo.DenialInsightClaimLevel AS a
-JOIN   dbo.DenialInsightClaimLevel AS p
-       ON  p.Bucket = 'Previous' AND p.WeekStart < @ArchiveBefore
-       AND p.WeekStart = a.WeekStart AND p.DenialCode = a.DenialCode
-       AND ISNULL(p.PayerName, '') = ISNULL(a.PayerName, '')
-WHERE  a.Bucket = 'Archive';
-
-UPDATE dbo.DenialInsightClaimLevel
-SET    Bucket = 'Archive', UpdatedOn = SYSUTCDATETIME(), UpdatedBy = @UpdatedBy
-WHERE  Bucket = 'Previous' AND WeekStart < @ArchiveBefore;
+SELECT 'Previous', WeekStart, SortOrder, DenialCode, DenialDescription, PayerName, NoOfDenials,
+       TotalBalance, InsuranceBalance, ImpactPercentage, Observation, ActionCategory, Action,
+       FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate, SYSUTCDATETIME(), @UpdatedBy
+FROM   {InsightTable}
+WHERE  Bucket = 'Current';
 
 SELECT @@ROWCOUNT;";
 
@@ -436,20 +363,10 @@ SELECT @@ROWCOUNT;";
         {
             await using var cmd = new SqlCommand(sql, conn, tx) { CommandTimeout = 300 };
             cmd.Parameters.Add("@UpdatedBy", SqlDbType.NVarChar, 200).Value = Db(userName);
-            cmd.Parameters.Add("@ArchiveBefore", SqlDbType.Date).Value = archiveBefore;
 
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
-
-            var updated = await ReadCountAsync(reader, ct);
-            await reader.NextResultAsync(ct);
-            var inserted = await ReadCountAsync(reader, ct);
-            await reader.NextResultAsync(ct);
-            var archived = await ReadCountAsync(reader, ct);
-
-            await reader.CloseAsync();
+            var copied = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct) ?? 0);
             await tx.CommitAsync(ct);
-
-            return new DenialInsightCopyResult { Inserted = inserted, Updated = updated, Archived = archived };
+            return copied;
         }
         catch
         {
@@ -457,9 +374,6 @@ SELECT @@ROWCOUNT;";
             throw;
         }
     }
-
-    private static async Task<int> ReadCountAsync(SqlDataReader reader, CancellationToken ct) =>
-        await reader.ReadAsync(ct) && !reader.IsDBNull(0) ? reader.GetInt32(0) : 0;
 
     /// <summary>Monday of the week the date falls in - the week identity insights are stamped with.</summary>
     public static DateTime WeekStartOf(DateTime date)
@@ -471,21 +385,21 @@ SELECT @@ROWCOUNT;";
     private static async Task EnsureInsightTableAsync(SqlConnection conn, CancellationToken ct)
     {
         const string sql = """
-            IF OBJECT_ID('dbo.DenialInsightClaimLevel', 'U') IS NULL
+            IF OBJECT_ID('dbo.DenialClaimLevelInsight', 'U') IS NULL
             BEGIN
-                CREATE TABLE dbo.DenialInsightClaimLevel
+                CREATE TABLE dbo.DenialClaimLevelInsight
                 (
-                    Id                BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_DenialInsightClaimLevel PRIMARY KEY,
-                    Bucket            NVARCHAR(20)   NOT NULL CONSTRAINT DF_DICL_Bucket DEFAULT 'Current',
-                    WeekStart         DATE           NOT NULL CONSTRAINT DF_DICL_WeekStart DEFAULT CAST(SYSUTCDATETIME() AS date),
+                    Id                BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_DenialClaimLevelInsight PRIMARY KEY,
+                    Bucket            NVARCHAR(20)   NOT NULL CONSTRAINT DF_DCLI_Bucket DEFAULT 'Current',
+                    WeekStart         DATE           NOT NULL CONSTRAINT DF_DCLI_WeekStart DEFAULT CAST(SYSUTCDATETIME() AS date),
+                    SortOrder         INT            NOT NULL CONSTRAINT DF_DCLI_SortOrder DEFAULT 0,
                     DenialCode        NVARCHAR(100)  NOT NULL,
                     DenialDescription NVARCHAR(1000) NULL,
                     PayerName         NVARCHAR(255)  NULL,
-                    NoOfDenials       INT            NOT NULL CONSTRAINT DF_DICL_NoOfDenials DEFAULT 0,
-                    NoOfClaims        INT            NOT NULL CONSTRAINT DF_DICL_NoOfClaims DEFAULT 0,
-                    TotalBalance      DECIMAL(18,2)  NOT NULL CONSTRAINT DF_DICL_TotalBalance DEFAULT 0,
-                    InsuranceBalance  DECIMAL(18,2)  NOT NULL CONSTRAINT DF_DICL_InsuranceBalance DEFAULT 0,
-                    ImpactPercentage  DECIMAL(18,2)  NOT NULL CONSTRAINT DF_DICL_ImpactPercentage DEFAULT 0,
+                    NoOfDenials       INT            NOT NULL CONSTRAINT DF_DCLI_NoOfDenials DEFAULT 0,
+                    TotalBalance      DECIMAL(18,2)  NOT NULL CONSTRAINT DF_DCLI_TotalBalance DEFAULT 0,
+                    InsuranceBalance  DECIMAL(18,2)  NOT NULL CONSTRAINT DF_DCLI_InsuranceBalance DEFAULT 0,
+                    ImpactPercentage  DECIMAL(18,2)  NOT NULL CONSTRAINT DF_DCLI_ImpactPercentage DEFAULT 0,
                     Observation       NVARCHAR(MAX)  NULL,
                     ActionCategory    NVARCHAR(500)  NULL,
                     Action            NVARCHAR(MAX)  NULL,
@@ -497,37 +411,20 @@ SELECT @@ROWCOUNT;";
                     UpdatedOn         DATETIME2(3)   NULL,
                     UpdatedBy         NVARCHAR(200)  NULL
                 );
+
+                CREATE UNIQUE INDEX UX_DenialClaimLevelInsight_Bucket_Week_Code_Payer
+                    ON dbo.DenialClaimLevelInsight (Bucket, WeekStart, DenialCode, PayerName);
             END
-
-            -- A lab that took the first version of this table has neither column yet. Added rather
-            -- than recreated, so any insights it already holds survive - they become Current Week
-            -- of the week they were imported in, which is where they were being shown anyway.
-            IF COL_LENGTH('dbo.DenialInsightClaimLevel', 'Bucket') IS NULL
-                ALTER TABLE dbo.DenialInsightClaimLevel
-                    ADD Bucket NVARCHAR(20) NOT NULL CONSTRAINT DF_DICL_Bucket DEFAULT 'Current';
-
-            IF COL_LENGTH('dbo.DenialInsightClaimLevel', 'WeekStart') IS NULL
-                ALTER TABLE dbo.DenialInsightClaimLevel
-                    ADD WeekStart DATE NOT NULL CONSTRAINT DF_DICL_WeekStart DEFAULT CAST(SYSUTCDATETIME() AS date);
-
-            -- The old index keyed on (DenialCode, PayerName) alone, which would now reject the same
-            -- denial appearing in two different weeks. Replaced, not dropped: the tab and the week
-            -- are part of a row's identity.
-            IF EXISTS (SELECT 1 FROM sys.indexes
-                       WHERE object_id = OBJECT_ID('dbo.DenialInsightClaimLevel')
-                         AND name = 'UX_DenialInsightClaimLevel_Code_Payer')
-                DROP INDEX UX_DenialInsightClaimLevel_Code_Payer ON dbo.DenialInsightClaimLevel;
-
-            IF NOT EXISTS (SELECT 1 FROM sys.indexes
-                           WHERE object_id = OBJECT_ID('dbo.DenialInsightClaimLevel')
-                             AND name = 'UX_DenialInsightClaimLevel_Bucket_Week_Code_Payer')
-                CREATE UNIQUE INDEX UX_DenialInsightClaimLevel_Bucket_Week_Code_Payer
-                    ON dbo.DenialInsightClaimLevel (Bucket, WeekStart, DenialCode, PayerName);
             """;
 
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
         await cmd.ExecuteNonQueryAsync(ct);
     }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static string? FirstPresent(HashSet<string> cols, params string[] candidates) =>
+        candidates.FirstOrDefault(cols.Contains);
 
     private static async Task<bool> TableExistsAsync(SqlConnection conn, string table, CancellationToken ct)
     {
@@ -539,17 +436,40 @@ SELECT @@ROWCOUNT;";
     private static async Task<HashSet<string>> GetColumnsAsync(SqlConnection conn, string table, CancellationToken ct)
     {
         var cols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         await using var cmd = new SqlCommand(
-            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = @Table", conn);
+            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME=@Table;", conn);
         cmd.Parameters.AddWithValue("@Table", table);
+
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct)) cols.Add(reader.GetString(0));
+
         return cols;
     }
 
     private static object Db(string? value) => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
-    private static string Text(SqlDataReader r, string name) { var i = r.GetOrdinal(name); return r.IsDBNull(i) ? string.Empty : r.GetValue(i)?.ToString() ?? string.Empty; }
-    private static DateTime? GetDate(SqlDataReader r, string name) { var i = r.GetOrdinal(name); return r.IsDBNull(i) ? null : r.GetDateTime(i); }
-    private static int GetIntOrZero(SqlDataReader r, string name) { var i = r.GetOrdinal(name); return r.IsDBNull(i) ? 0 : Convert.ToInt32(r.GetValue(i)); }
-    private static decimal GetDecimalOrZero(SqlDataReader r, string name) { var i = r.GetOrdinal(name); return r.IsDBNull(i) ? 0m : Convert.ToDecimal(r.GetValue(i)); }
+
+    private static string Text(SqlDataReader reader, string column)
+    {
+        var i = reader.GetOrdinal(column);
+        return reader.IsDBNull(i) ? string.Empty : reader.GetValue(i)?.ToString()?.Trim() ?? string.Empty;
+    }
+
+    private static int GetIntOrZero(SqlDataReader reader, string column)
+    {
+        var i = reader.GetOrdinal(column);
+        return reader.IsDBNull(i) ? 0 : Convert.ToInt32(reader.GetValue(i));
+    }
+
+    private static decimal GetDecimalOrZero(SqlDataReader reader, string column)
+    {
+        var i = reader.GetOrdinal(column);
+        return reader.IsDBNull(i) ? 0m : Convert.ToDecimal(reader.GetValue(i));
+    }
+
+    private static DateTime? GetDate(SqlDataReader reader, string column)
+    {
+        var i = reader.GetOrdinal(column);
+        return reader.IsDBNull(i) ? null : Convert.ToDateTime(reader.GetValue(i));
+    }
 }

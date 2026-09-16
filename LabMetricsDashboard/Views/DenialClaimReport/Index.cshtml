@@ -1,226 +1,214 @@
 @model LabMetricsDashboard.ViewModels.DenialClaimReportViewModel
 @{
     ViewData["Title"] = "Denial Claim Report";
-    string Money(decimal v) => v.ToString("C2", System.Globalization.CultureInfo.GetCultureInfo("en-US"));
-    string Compact(decimal v) => v >= 1_000_000m ? $"${v / 1_000_000m:0.##}M"
-                               : v >= 1_000m ? $"${v / 1_000m:0.#}K"
-                               : v.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"));
-    var periodKey = Model.SelectedPeriod?.Key;
-    var grainLabel = Model.Grain == "weekly" ? "Weekly" : "Monthly";
+    ViewData["SelectedLab"] = Model.CurrentLab;
+
+    var tab = Model.ActiveTab;
 }
 
-<div class="container-fluid px-3 py-3 dcr">
+@* The layout has no Styles section, so these go in the body the same way the original Denial
+   Summary page links its own stylesheet. denial_dashboard.css carries the pivot table's frozen
+   columns and sticky header bands, which the Monthly and Weekly tabs reuse from that page. *@
+<link href="~/css/denial_dashboard.css" rel="stylesheet" />
+<link href="~/css/denial_claim_report.css" rel="stylesheet" />
+
+<div class="container-fluid px-3 py-3 dcr-page">
+
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
         <div>
             <h4 class="mb-1">Denial Claim Report</h4>
             <div class="text-muted" style="font-size:.85rem;">
-                Calculated from this lab&rsquo;s claim-level data, excluding blank denial codes and keeping only
-                claims with an insurance balance above zero. Codes roll up to their common code &mdash; CO45, PI45
-                and PR45 all count as 45. Claim counts are distinct Claim IDs; balances are Insurance Balance.
+                Calculated from <strong>@Model.CurrentLab</strong>&rsquo;s claim-level data &mdash; denied claims with an
+                insurance balance still outstanding, grouped on Denial Date. Denial codes roll up to their
+                common code, so CO45, PI45 and PR45 all count as 45.
             </div>
-        </div>
-        <div class="d-flex flex-wrap gap-2 align-items-center">
-            <form method="get" asp-action="Index" class="d-flex gap-2 align-items-center">
-                <select name="lab" class="form-select form-select-sm" style="min-width:170px;" onchange="this.form.submit()">
-                    @foreach (var lab in Model.Labs)
-                    {
-                        <option value="@lab" selected="@(string.Equals(lab, Model.CurrentLab, StringComparison.OrdinalIgnoreCase))">@lab</option>
-                    }
-                </select>
-                <select name="grain" class="form-select form-select-sm" style="min-width:110px;" onchange="this.form.submit()">
-                    <option value="monthly" selected="@(Model.Grain == "monthly")">Monthly</option>
-                    <option value="weekly" selected="@(Model.Grain == "weekly")">Weekly</option>
-                </select>
-                <select name="period" class="form-select form-select-sm" style="min-width:190px;" onchange="this.form.submit()">
-                    @foreach (var p in Model.Periods)
-                    {
-                        <option value="@p.Key" selected="@(string.Equals(p.Key, periodKey, StringComparison.Ordinal))">
-                            @p.Label (@p.DenialCount.ToString("N0"))
-                        </option>
-                    }
-                </select>
-                <input type="hidden" name="showAll" value="@Model.ShowAllDenials.ToString().ToLowerInvariant()" />
-            </form>
-            <a class="btn btn-sm btn-outline-primary" asp-action="Insights" asp-route-lab="@Model.CurrentLab">
-                <i class="bi bi-lightbulb"></i> Denial Insights
-            </a>
         </div>
     </div>
 
+    @if (TempData["DenialClaimReportSuccess"] is string ok)
+    {
+        <div class="alert alert-success py-2 d-flex align-items-center gap-2">
+            <i class="bi bi-check-circle-fill"></i><span>@ok</span>
+        </div>
+    }
+    @if (TempData["DenialClaimReportError"] is string err)
+    {
+        <div class="alert alert-danger py-2 d-flex align-items-center gap-2">
+            <i class="bi bi-exclamation-triangle-fill"></i><span>@err</span>
+        </div>
+    }
     @if (!string.IsNullOrWhiteSpace(Model.Error))
     {
-        <div class="alert alert-warning">@Model.Error</div>
+        <div class="alert alert-warning py-2">@Model.Error</div>
     }
 
     <div class="row g-2 mb-3">
         <div class="col-6 col-lg-3">
-            <div class="card border-0 shadow-sm"><div class="card-body py-2">
-                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Total Denials</div>
-                <div class="fw-bold fs-5">@Model.TotalDenials.ToString("N0")</div>
-            </div></div>
-        </div>
-        <div class="col-6 col-lg-3">
-            <div class="card border-0 shadow-sm"><div class="card-body py-2">
-                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Distinct Claims</div>
+            <div class="card border-0 shadow-sm h-100"><div class="card-body py-2">
+                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Denied Claims</div>
                 <div class="fw-bold fs-5">@Model.TotalClaims.ToString("N0")</div>
             </div></div>
         </div>
         <div class="col-6 col-lg-3">
-            <div class="card border-0 shadow-sm"><div class="card-body py-2">
+            <div class="card border-0 shadow-sm h-100"><div class="card-body py-2">
                 <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Insurance Balance</div>
-                <div class="fw-bold fs-5">@Money(Model.TotalInsuranceBalance)</div>
+                <div class="fw-bold fs-5">@Acct2(Model.TotalInsuranceBalance)</div>
             </div></div>
         </div>
         <div class="col-6 col-lg-3">
-            <div class="card border-0 shadow-sm"><div class="card-body py-2">
-                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">@(Model.Grain == "weekly" ? "Selected Week" : "Selected Month")</div>
-                <div class="fw-bold fs-6">@(Model.SelectedPeriod?.Label ?? "-")</div>
+            <div class="card border-0 shadow-sm h-100"><div class="card-body py-2">
+                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Denial Codes</div>
+                <div class="fw-bold fs-5">@Model.DenialCodeCount.ToString("N0")</div>
+            </div></div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card border-0 shadow-sm h-100"><div class="card-body py-2">
+                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Insurances</div>
+                <div class="fw-bold fs-5">@Model.PayerCount.ToString("N0")</div>
             </div></div>
         </div>
     </div>
 
-    @if (Model.ExcludedDenials > 0)
+    @if (Model.UndatedGroups > 0)
     {
         <div class="alert alert-info py-2" style="font-size:.85rem;">
             <i class="bi bi-info-circle"></i>
-            @Model.ExcludedDenials.ToString("N0") denied claim row(s) are excluded from the summaries below:
-            they have a blank denial code, or no insurance balance outstanding. They are still counted in
-            <strong>Total Denials</strong> above.
+            @Model.UndatedGroups.ToString("N0") denial group(s) have no Denial Date, so they cannot appear in any
+            month or week. They are counted in the totals above.
         </div>
     }
 
-    @if (Model.Grain == "weekly" && !Model.UsesDeniedWeekColumn)
-    {
-        <div class="alert alert-warning py-2" style="font-size:.85rem;">
-            <i class="bi bi-exclamation-triangle"></i>
-            This lab&rsquo;s claim-level data has no <code>DeniedWeek</code> value, so weeks are derived from
-            <strong>Denial Date</strong> (Monday&ndash;Sunday) instead.
-        </div>
-    }
+    <ul class="nav nav-pills denial-tabs mb-3" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link @(tab == "monthly" ? "active" : "")" data-bs-toggle="pill"
+                    data-bs-target="#dcr-monthly" type="button" data-tab-key="monthly">
+                <i class="bi bi-calendar-month me-2"></i>Monthly Summary
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link @(tab == "weekly" ? "active" : "")" data-bs-toggle="pill"
+                    data-bs-target="#dcr-weekly" type="button" data-tab-key="weekly">
+                <i class="bi bi-calendar-week me-2"></i>Weekly Summary
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link @(tab == "insight" ? "active" : "")" data-bs-toggle="pill"
+                    data-bs-target="#dcr-insight" type="button" data-tab-key="insight">
+                <i class="bi bi-lightbulb me-2"></i>Denial Insight
+                @if (Model.Insight.BucketCounts.Values.Sum() > 0)
+                {
+                    <span class="badge rounded-pill bg-light text-dark ms-2">@Model.Insight.BucketCounts.Values.Sum().ToString("N0")</span>
+                }
+            </button>
+        </li>
+    </ul>
 
-    @* ── Top Insurance and Top Denial pivots ─────────────────────────────── *@
-    @await Html.PartialAsync("_DenialPivot", new LabMetricsDashboard.ViewModels.DenialPivotRenderModel
-    {
-        Table = Model.TopInsurance,
-        Lab = Model.CurrentLab,
-        Grain = Model.Grain,
-        LinkKind = "payer",
-        SelectedPeriodKey = periodKey,
-        Caption = $"Rows are PayerName_Raw, columns are the {grainLabel.ToLowerInvariant()} periods. Ordered by claim count."
-    })
-
-    @await Html.PartialAsync("_DenialPivot", new LabMetricsDashboard.ViewModels.DenialPivotRenderModel
-    {
-        Table = Model.TopDenial,
-        Lab = Model.CurrentLab,
-        Grain = Model.Grain,
-        LinkKind = "denial",
-        SelectedPeriodKey = periodKey,
-        ShowAllDenials = Model.ShowAllDenials,
-        AllowShowAllToggle = true,
-        Caption = $"Rows are the common denial code, columns are the {grainLabel.ToLowerInvariant()} periods. Ordered by claim count."
-    })
-
-    @* ── The selected period, denial by denial ───────────────────────────── *@
-    <div class="card border-0 shadow-sm">
-        <div class="card-body">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <div class="fw-semibold">
-                    @grainLabel Denial Detail
-                    @if (Model.SelectedPeriod is not null)
-                    {
-                        <span class="text-muted fw-normal">&mdash; @Model.SelectedPeriod.Label</span>
-                    }
+    <div class="tab-content">
+        <div class="tab-pane fade @(tab == "monthly" ? "show active" : "")" id="dcr-monthly">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    @await Html.PartialAsync("../DenialDashboard/_BreakdownPivotTable", Model.Monthly)
                 </div>
-                <span class="text-muted" style="font-size:.82rem;">@Model.Summary.Count.ToString("N0") denial code(s)</span>
             </div>
+        </div>
 
-            <div class="text-muted mb-2" style="font-size:.8rem;">
-                <i class="bi bi-info-circle"></i>
-                The denial code, the claim count and the payer balance are clickable &mdash; each opens the
-                claim-level rows behind that number.
+        <div class="tab-pane fade @(tab == "weekly" ? "show active" : "")" id="dcr-weekly">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    @await Html.PartialAsync("../DenialDashboard/_BreakdownPivotTable", Model.Weekly)
+                </div>
             </div>
+        </div>
 
-            <div class="table-responsive" style="max-height:60vh;overflow:auto;">
-                <table class="table table-sm table-hover align-middle">
-                    <thead class="table-light">
-                        <tr>
-                            <th>Denial Code</th>
-                            <th>Description</th>
-                            <th>Classification</th>
-                            <th class="text-end">Total Claims</th>
-                            <th class="text-end">Insurance Balance</th>
-                            <th>Highly Impacted Payer</th>
-                            <th class="text-end">Payer Claims</th>
-                            <th class="text-end">Payer Ins. Balance</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @if (Model.Summary.Count == 0)
-                        {
-                            <tr><td colspan="8" class="text-center text-muted py-4">No denials match this period.</td></tr>
-                        }
-                        else
-                        {
-                            @foreach (var row in Model.Summary)
-                            {
-                                <tr>
-                                    <td class="fw-semibold">
-                                        <a asp-action="ClaimData" asp-route-lab="@Model.CurrentLab" asp-route-denialCode="@row.DenialCode"
-                                           asp-route-grain="@Model.Grain" asp-route-period="@periodKey" asp-route-from="summary"
-                                           title="View the claims for this denial code">@row.DenialCode</a>
-                                        @if (!string.IsNullOrWhiteSpace(row.RawCodes) && !string.Equals(row.RawCodes, row.DenialCode, StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            <div class="text-muted" style="font-size:.72rem;">@row.RawCodes</div>
-                                        }
-                                    </td>
-                                    <td class="text-wrap" style="max-width:320px;">@row.DenialDescription</td>
-                                    <td>@(string.IsNullOrWhiteSpace(row.DenialClassification) ? "-" : row.DenialClassification)</td>
-                                    <td class="text-end">
-                                        <a asp-action="ClaimData" asp-route-lab="@Model.CurrentLab" asp-route-denialCode="@row.DenialCode"
-                                           asp-route-grain="@Model.Grain" asp-route-period="@periodKey" asp-route-from="summary"
-                                           title="View these claims">@row.TotalClaims.ToString("N0")</a>
-                                    </td>
-                                    <td class="text-end">@Money(row.InsuranceBalance)</td>
-                                    <td>@(string.IsNullOrWhiteSpace(row.HighlyImpactedPayer) ? "-" : row.HighlyImpactedPayer)</td>
-                                    <td class="text-end">
-                                        @if (string.IsNullOrWhiteSpace(row.HighlyImpactedPayer))
-                                        {
-                                            <span>-</span>
-                                        }
-                                        else
-                                        {
-                                            <a asp-action="ClaimData" asp-route-lab="@Model.CurrentLab" asp-route-denialCode="@row.DenialCode"
-                                               asp-route-payerName="@row.HighlyImpactedPayer" asp-route-grain="@Model.Grain"
-                                               asp-route-period="@periodKey" asp-route-from="summary"
-                                               title="View this payer's claims for this denial">@row.PayerClaimCount.ToString("N0")</a>
-                                        }
-                                    </td>
-                                    <td class="text-end">
-                                        @if (string.IsNullOrWhiteSpace(row.HighlyImpactedPayer))
-                                        {
-                                            <span>-</span>
-                                        }
-                                        else
-                                        {
-                                            <a asp-action="ClaimData" asp-route-lab="@Model.CurrentLab" asp-route-denialCode="@row.DenialCode"
-                                               asp-route-payerName="@row.HighlyImpactedPayer" asp-route-grain="@Model.Grain"
-                                               asp-route-period="@periodKey" asp-route-from="summary"
-                                               title="View this payer's claims for this denial">@Money(row.PayerInsuranceBalance)</a>
-                                        }
-                                    </td>
-                                </tr>
-                            }
-                            <tr class="table-light fw-bold">
-                                <td colspan="3">Total</td>
-                                <td class="text-end">@Model.Summary.Sum(x => x.TotalClaims).ToString("N0")</td>
-                                <td class="text-end">@Money(Model.Summary.Sum(x => x.InsuranceBalance))</td>
-                                <td colspan="3"></td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
+        <div class="tab-pane fade @(tab == "insight" ? "show active" : "")" id="dcr-insight">
+            @await Html.PartialAsync("_DenialInsightPanel", Model.Insight)
         </div>
     </div>
 </div>
+
+@section Scripts {
+    <script nonce="@Context.Items["CspNonce"]">
+        (function () {
+            // Keep the open tab in the URL. A save, an import or a delete redirects back here, and
+            // without this the lab picker in the header would drop the user on Monthly Summary
+            // every time instead of where they were.
+            document.querySelectorAll('[data-tab-key]').forEach(function (btn) {
+                btn.addEventListener('shown.bs.tab', function () {
+                    var url = new URL(window.location.href);
+                    url.searchParams.set('tab', btn.dataset.tabKey);
+                    window.history.replaceState({}, '', url);
+                });
+            });
+
+            // Import submits as soon as a file is chosen — one click, not two.
+            var file = document.getElementById('insightFile');
+            if (file) {
+                file.addEventListener('change', function () {
+                    if (file.files && file.files.length) document.getElementById('insightUploadForm').submit();
+                });
+            }
+
+            // The Observation / Action cells are contenteditable so the workbook's bold and bullets
+            // stay visible while editing. They are not form fields, so their HTML is copied into the
+            // hidden input beside them just before the form serializes.
+            var editForm = document.getElementById('insightEditForm');
+            if (editForm) {
+                editForm.addEventListener('submit', function () {
+                    editForm.querySelectorAll('.rich-editor').forEach(function (editor) {
+                        var hidden = editor.parentElement
+                            ? editor.parentElement.querySelector('input[type="hidden"][name="' + editor.dataset.target + '"]')
+                            : null;
+                        if (hidden) hidden.value = editor.innerHTML;
+                    });
+                });
+            }
+
+            // Re-band the Category cell as it is typed, so the colour tracks the value instead of
+            // waiting for a save to catch up.
+            var bands = [
+                { test: function (t) { return t.indexOf('appeal') >= 0 && (t.indexOf('mr') >= 0 || t.indexOf('medical record') >= 0); }, cls: 'cat-appeal-mr' },
+                { test: function (t) { return t.indexOf('appeal') >= 0; }, cls: 'cat-appeal' },
+                { test: function (t) { return t.indexOf('rebill') >= 0 || t.indexOf('reprocess') >= 0; }, cls: 'cat-rebill' },
+                { test: function (t) { return t.indexOf('review') >= 0 || t.indexOf('write off') >= 0 || t.indexOf('write-off') >= 0; }, cls: 'cat-review' }
+            ];
+            var allBands = ['cat-appeal-mr', 'cat-appeal', 'cat-rebill', 'cat-review', 'cat-other'];
+
+            document.querySelectorAll('.cat-input').forEach(function (input) {
+                input.addEventListener('input', function () {
+                    var text = (input.value || '').trim().toLowerCase();
+                    var cls = 'cat-other';
+                    if (text.length) {
+                        for (var i = 0; i < bands.length; i++) {
+                            if (bands[i].test(text)) { cls = bands[i].cls; break; }
+                        }
+                    }
+                    var cell = input.closest('td');
+                    allBands.forEach(function (b) { input.classList.remove(b); if (cell) cell.classList.remove(b); });
+                    if (text.length) { input.classList.add(cls); if (cell) cell.classList.add(cls); }
+                });
+            });
+
+            // The delete button only opens the dialog; the POST fires from inside it, so a row
+            // cannot be deleted by a stray click on the grid.
+            var deleteModal = document.getElementById('confirmDeleteModal');
+            if (deleteModal) {
+                deleteModal.addEventListener('show.bs.modal', function (event) {
+                    var btn = event.relatedTarget;
+                    if (!btn) return;
+                    document.getElementById('deleteRowId').value = btn.dataset.rowId || '';
+                    document.getElementById('deleteRowCode').textContent = btn.dataset.rowCode || '';
+                    var payer = btn.dataset.rowPayer;
+                    document.getElementById('deleteRowPayer').textContent = payer ? ' (' + payer + ')' : '';
+                });
+            }
+
+            var confirmCopy = document.getElementById('confirmCopyBtn');
+            if (confirmCopy) {
+                confirmCopy.addEventListener('click', function () {
+                    confirmCopy.disabled = true;
+                    document.getElementById('copyPreviousForm').submit();
+                });
+            }
+        })();
+    </script>
+}
