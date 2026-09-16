@@ -41,14 +41,12 @@
 
                 @if (Model.CanEdit && isCurrent)
                 {
-                    <form method="post" asp-action="UploadInsights" asp-route-lab="@Model.CurrentLab"
-                          enctype="multipart/form-data" class="d-inline-block" id="insightUploadForm">
-                        @Html.AntiForgeryToken()
-                        <label class="btn btn-sm btn-outline-primary mb-0">
-                            <i class="bi bi-upload"></i> Import
-                            <input type="file" name="insightFile" accept=".xlsx,.xlsm" hidden id="insightFile" />
-                        </label>
-                    </form>
+                    @* The import opens a panel rather than firing on file-pick: it rewrites the whole
+                       of Current Week, and a destructive step needs a deliberate second gesture. *@
+                    <button type="button" class="btn btn-sm btn-outline-primary"
+                            data-bs-toggle="offcanvas" data-bs-target="#insightImportPanel">
+                        <i class="bi bi-upload"></i> Import
+                    </button>
 
                     <form method="post" asp-action="CopyToPreviousWeek" asp-route-lab="@Model.CurrentLab"
                           class="d-inline-block" id="copyPreviousForm">
@@ -153,20 +151,40 @@
                         }
                         else
                         {
-                            @for (var i = 0; i < Model.Rows.Count; i++)
+                            var colSpan = editable ? 17 : 16;
+
+                            @foreach (var week in Model.WeekGroups)
                             {
-                                var row = Model.Rows[i];
+                                @* Previous Week holds several weeks at once. Without a separator the
+                                   weeks read as one long list, and a date in row 40 means nothing
+                                   without knowing which week it belongs to. *@
+                                if (Model.HasMultipleWeeks)
+                                {
+                                    <tr class="week-divider">
+                                        <td colspan="@colSpan">
+                                            <span class="week-range"><i class="bi bi-calendar-week"></i> @week.RangeLabel</span>
+                                            <span class="week-meta">
+                                                @week.Rows.Count.ToString("N0") denial code(s) &middot;
+                                                @week.TotalDenials.ToString("N0") denial(s) &middot;
+                                                @Acct2(week.TotalInsuranceBalance) insurance balance
+                                            </span>
+                                        </td>
+                                    </tr>
+                                }
+
+                            @for (var i = 0; i < week.Rows.Count; i++)
+                            {
+                                var row = week.Rows[i];
                                 var catClass = DenialInsightCategory.CssClass(row.ActionCategory);
 
                                 <tr>
                                     <td class="col-idx">@(i + 1)</td>
                                     <td class="col-code">
                                         @* Requirement 6i: the denial code opens the claim-level data
-                                           filtered to that code. It hands off to Dashboard/ClaimLevel,
-                                           the application's one claim browser, rather than to a second
-                                           thinner claim list of this page's own. *@
-                                        <a href="@Url.Action("ClaimLevel", "Dashboard", DenialClaimDrillThrough.RouteValues(Model.CurrentLab, row.DenialCode))"
-                                           title="Open Claim Level Data filtered to denial code @row.DenialCode">@row.DenialCode</a>
+                                           filtered to that code - now the Claim Level tab on this
+                                           same page, so the filter and the figure stay together. *@
+                                        <a href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = row.DenialCode })"
+                                           title="Open Claim Level filtered to denial code @row.DenialCode">@row.DenialCode</a>
                                         @if (editable)
                                         {
                                             <input type="hidden" name="ids" value="@row.Id" />
@@ -181,10 +199,10 @@
                                     <td class="cell-impact num">
                                         @* Requirement 6i: the balance opens the claim-level data
                                            filtered by BOTH the denial code and the insurance. *@
-                                        <a href="@Url.Action("ClaimLevel", "Dashboard", DenialClaimDrillThrough.RouteValues(Model.CurrentLab, row.DenialCode, row.PayerName))"
+                                        <a href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = row.DenialCode, payerName = row.PayerName })"
                                            title="@(string.IsNullOrWhiteSpace(row.PayerName)
-                                                     ? $"Open Claim Level Data filtered to denial code {row.DenialCode}"
-                                                     : $"Open Claim Level Data filtered to {row.DenialCode} and {row.PayerName}")">@Acct2(row.InsuranceBalance)</a>
+                                                     ? $"Open Claim Level filtered to denial code {row.DenialCode}"
+                                                     : $"Open Claim Level filtered to {row.DenialCode} and {row.PayerName}")">@Acct2(row.InsuranceBalance)</a>
                                     </td>
                                     <td class="cell-impact num">@row.ImpactPercentage.ToString("0.##")%</td>
 
@@ -300,6 +318,7 @@
                                     }
                                 </tr>
                             }
+                            }
                         }
                     </tbody>
                     @if (Model.Rows.Count > 0)
@@ -343,6 +362,92 @@
         }
     </div>
 </div>
+
+@if (Model.CanEdit && isCurrent)
+{
+    @* ── Import panel ──────────────────────────────────────────────────────
+       Slides in from the right. The checkbox picks between the two things an
+       import can mean, and the note under it says what each one does to the
+       insights already on Current Week - before the file is sent, not after. *@
+    <div class="offcanvas offcanvas-end insight-import-panel" tabindex="-1" id="insightImportPanel"
+         aria-labelledby="insightImportLabel">
+        <div class="offcanvas-header">
+            <h5 class="offcanvas-title" id="insightImportLabel">
+                <i class="bi bi-upload me-2"></i>Import Denial Insight
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+        </div>
+
+        <form method="post" asp-action="UploadInsights" asp-route-lab="@Model.CurrentLab"
+              enctype="multipart/form-data" id="insightUploadForm" class="offcanvas-body d-flex flex-column">
+            @Html.AntiForgeryToken()
+
+            <div class="import-lab">
+                <span class="import-lab-label">Lab</span>
+                <span class="import-lab-name">@Model.CurrentLab</span>
+            </div>
+
+            <div class="import-field">
+                <label class="import-label" for="insightFile">Denial Insight workbook</label>
+                <input type="file" name="insightFile" accept=".xlsx,.xlsm" id="insightFile"
+                       class="form-control form-control-sm" required />
+                <div class="import-hint">
+                    Must match the Denial Insight template. Use <strong>Export</strong> on this tab to get it.
+                    The file is checked in full before anything is saved &mdash; if a column is missing,
+                    nothing is written.
+                </div>
+            </div>
+
+            <div class="import-choice">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="true" name="replaceCurrentWeek"
+                           id="replaceCurrentWeek" />
+                    <label class="form-check-label" for="replaceCurrentWeek">Current Week Replace</label>
+                </div>
+
+                @* Both notes are in the DOM; the checkbox shows one and hides the other, so the
+                   consequence is on screen before the user commits either way. *@
+                <div class="import-note import-note-roll" id="noteRollForward">
+                    <div class="import-note-head">
+                        <i class="bi bi-arrow-right-circle"></i> This import becomes the new Current Week
+                    </div>
+                    <ul>
+                        <li>
+                            The <strong>@Model.BucketCounts.GetValueOrDefault(DenialInsightBuckets.Current).ToString("N0")</strong>
+                            row(s) on Current Week move to <strong>Previous Week</strong> &mdash; nothing is lost.
+                        </li>
+                        <li>
+                            Previous Week keeps the last @DenialInsightBuckets.PreviousWeeksRetained weeks.
+                            Anything older moves to Archive, where it is retained but out of view.
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="import-note import-note-replace" id="noteReplace" hidden>
+                    <div class="import-note-head">
+                        <i class="bi bi-exclamation-triangle-fill"></i> Current Week will be replaced
+                    </div>
+                    <ul>
+                        <li>
+                            The
+                            <strong>@Model.BucketCounts.GetValueOrDefault(DenialInsightBuckets.Current).ToString("N0")</strong>
+                            row(s) on Current Week are <strong>discarded</strong> and this workbook takes their place.
+                        </li>
+                        <li>Previous Week is not touched.</li>
+                        <li>Any observations, actions or dates typed into Current Week and not exported are lost.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="mt-auto d-flex gap-2 pt-3">
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="offcanvas">Cancel</button>
+                <button type="submit" class="btn btn-sm btn-primary flex-grow-1" id="insightImportSubmit">
+                    <i class="bi bi-upload"></i> <span id="insightImportSubmitLabel">Import as new Current Week</span>
+                </button>
+            </div>
+        </form>
+    </div>
+}
 
 @if (Model.CanEdit)
 {

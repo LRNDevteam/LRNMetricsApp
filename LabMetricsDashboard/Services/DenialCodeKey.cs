@@ -18,7 +18,15 @@ public static class DenialCodeKey
     /// <summary>Claim adjustment group codes that prefix a denial code without changing which denial it is.</summary>
     private static readonly string[] GroupPrefixes = ["CO", "PI", "PR", "OA", "CR"];
 
-    private static readonly Regex PrefixedNumeric = new(@"^(CO|PI|PR|OA|CR)[\s\-]?(\d+[A-Za-z]?)$",
+    /// <summary>
+    /// A denial code carrying a group prefix. The tail is <c>[A-Z]{0,2}</c> then digits, not digits
+    /// alone, because remark codes are not numeric: "COM127" is CO + M127, and matching only a
+    /// numeric tail left it unstripped. At least one digit is required, so a word that merely starts
+    /// with a prefix ("CORE") is left alone.
+    /// <para>Kept in step with <c>LRN.MasterFileProcessorWorker.BulkLoad.DenialCodeNormalizer</c>,
+    /// which applies the same rule when it writes DenialCodeNormalized during the import.</para>
+    /// </summary>
+    private static readonly Regex PrefixedNumeric = new(@"^(CO|PI|PR|OA|CR)[\s\-]?([A-Z]{0,2}\d+[A-Za-z]?)$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>

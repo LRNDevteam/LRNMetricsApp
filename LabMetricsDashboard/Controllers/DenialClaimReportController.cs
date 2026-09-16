@@ -24,24 +24,32 @@ namespace LabMetricsDashboard.Controllers;
 [Authorize]
 public sealed class DenialClaimReportController : Controller
 {
-    /// <summary>Periods across a pivot before it stops fitting a laptop screen.</summary>
+    /// <summary>Periods across a pivot. Weekly is the last four weeks, per the reporting spec.</summary>
     private const int MonthlyPeriods = 12;
-    private const int WeeklyPeriods = 8;
+    private const int WeeklyPeriods = 4;
+
+    /// <summary>Claim rows per page on the Claim Level tab.</summary>
+    private const int ClaimPageSize = 50;
 
     private readonly LabSettings _labSettings;
     private readonly LabConfigOptions _labConfig;
     private readonly IDenialClaimReportRepository _repo;
+    private readonly IClaimLineRepository _claimLineRepo;
     private readonly ILogger<DenialClaimReportController> _logger;
 
     public DenialClaimReportController(
         LabSettings labSettings,
         LabConfigOptions labConfig,
         IDenialClaimReportRepository repo,
+        IClaimLineRepository claimLineRepo,
         ILogger<DenialClaimReportController> logger)
     {
         _labSettings = labSettings;
         _labConfig = labConfig;
         _repo = repo;
+        // The same repository the Dashboard's Claim Level page uses, so the tab here shows the same
+        // columns and the same rows rather than a second, differently-shaped claim list.
+        _claimLineRepo = claimLineRepo;
         _logger = logger;
     }
 
@@ -101,7 +109,9 @@ public sealed class DenialClaimReportController : Controller
     // ── The page ──────────────────────────────────────────────────────────────
 
     [HttpGet]
-    public async Task<IActionResult> Index(string? lab, string? tab, string? bucket, CancellationToken ct)
+    public async Task<IActionResult> Index(string? lab, string? tab, string? bucket,
+                                           string? denialCode, string? payerName, int claimPage,
+                                           CancellationToken ct)
     {
         ViewData["PageLabel"] = "Denial Claim Report";
 
@@ -113,6 +123,13 @@ public sealed class DenialClaimReportController : Controller
                 CanEdit = CanEditInsights(),
                 Bucket = DenialInsightBuckets.Normalize(bucket),
                 CurrentWeekStart = SqlDenialClaimReportRepository.WeekStartOf(DateTime.Today)
+            },
+            Claims = new DenialClaimLevelTabViewModel
+            {
+                DenialCode = denialCode?.Trim(),
+                PayerName = payerName?.Trim(),
+                Page = claimPage <= 0 ? 1 : claimPage,
+                PageSize = ClaimPageSize
             }
         };
 
@@ -121,11 +138,13 @@ public sealed class DenialClaimReportController : Controller
             model.Error = error;
             model.CurrentLab = labName;
             model.Insight.CurrentLab = labName;
+            model.Claims.CurrentLab = labName;
             return View(model);
         }
 
         model.CurrentLab = labName;
         model.Insight.CurrentLab = labName;
+        model.Claims.CurrentLab = labName;
 
         try
         {
@@ -162,13 +181,120 @@ public sealed class DenialClaimReportController : Controller
             model.Error ??= "The denial insight rows could not be loaded for this lab.";
         }
 
+        await LoadClaimTabAsync(model.Claims, labName, connectionString, ct);
+
         return View(model);
+    }
+
+    /// <summary>
+    /// Downloads the whole report as one workbook: Monthly Summary, Weekly Summary and Denial
+    /// Insight, a sheet each, carrying the page's own colours.
+    /// </summary>
+    /// <remarks>
+    /// Rebuilds the summaries rather than reusing whatever the last page render held, so the file
+    /// is the lab's position now. The Denial Insight sheet exports the tab the user is looking at -
+    /// Current or Previous Week - because that is the one they asked to download.
+    /// </remarks>
+    [HttpGet]
+    public async Task<IActionResult> ExportWorkbook(string? lab, string? bucket, CancellationToken ct)
+    {
+        if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
+            return Redirect(InsightError(error, lab));
+
+        var model = new DenialClaimReportViewModel
+        {
+            CurrentLab = labName,
+            Insight = new DenialInsightPanelViewModel
+            {
+                CurrentLab = labName,
+                Bucket = DenialInsightBuckets.Normalize(bucket)
+            }
+        };
+
+        try
+        {
+            var groups = await _repo.GetDenialSummaryAsync(connectionString, ct);
+            model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods);
+            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods);
+
+            model.Insight.Rows = await _repo.GetInsightsAsync(connectionString, model.Insight.Bucket, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Denial Claim Report export failed for lab {Lab}.", labName);
+            return Redirect(InsightError("The workbook could not be built for this lab.", labName));
+        }
+
+        using var workbook = DenialClaimReportExcelBuilder.Build(model);
+
+        await using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+
+        var safeLab = string.Join("_", labName.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
+        return File(stream.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"{safeLab}_DenialClaimReport_{DateTime.Now:yyyyMMdd}.xlsx");
+    }
+
+    /// <summary>
+    /// Fills the Claim Level tab, through the same repository the Dashboard's Claim Level page uses
+    /// so the columns and rows are identical.
+    /// </summary>
+    /// <remarks>
+    /// Loaded on every request rather than only when the tab is open: the tab is a Bootstrap pane
+    /// that is already in the DOM, and fetching it lazily would mean a second round trip for no
+    /// benefit on a page that has already paid for the summary query.
+    /// </remarks>
+    private async Task LoadClaimTabAsync(
+        DenialClaimLevelTabViewModel claims, string labName, string connectionString, CancellationToken ct)
+    {
+        // Denial reporting only ever looks at denied claims with money still outstanding, so the
+        // tab carries those two filters whether or not a denial code was clicked. Without them the
+        // tab would open on the lab's whole claim table, which is a different page's job.
+        claims.DisplayColumns = LabClaimLineColumnCatalog.GetClaimColumns(labName);
+
+        try
+        {
+            var result = await _claimLineRepo.GetClaimLevelAsync(
+                connectionString,
+                labName,
+                filterPayerName: null,
+                filterPayerTypes: null,
+                filterClaimStatuses: null,
+                filterClinicNames: null,
+                filterDenialCode: DenialClaimDrillThrough.BuildDenialCodeFilter(claims.DenialCode),
+                filterDenialCodeExcludeBlank: true,
+                filterPayerNames: string.IsNullOrWhiteSpace(claims.PayerName) ? null : [claims.PayerName!],
+                filterPayerExcludeBlank: false,
+                filterPanelNames: null,
+                filterPanelExcludeBlank: false,
+                filterAgingBuckets: null,
+                filterFirstBillFrom: null, filterFirstBillTo: null,
+                filterFirstBillNull: false, filterFirstBillExcludeBlank: false,
+                filterChargeEnteredFrom: null, filterChargeEnteredTo: null,
+                filterChargeEnteredNull: false, filterChargeEnteredExcludeBlank: false,
+                filterDosFrom: null, filterDosTo: null, filterDosNull: false,
+                page: claims.Page,
+                pageSize: claims.PageSize,
+                ct: ct);
+
+            claims.Records = result.Records;
+            claims.TotalFiltered = result.TotalFiltered;
+            claims.TotalAll = result.TotalAll;
+
+            if (result.DisplayColumns.Count > 0) claims.DisplayColumns = result.DisplayColumns;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Claim Level tab failed for lab {Lab}.", labName);
+            claims.Error = "The claim-level rows could not be loaded for this lab.";
+        }
     }
 
     private static string NormalizeTab(string? tab) => tab?.Trim().ToLowerInvariant() switch
     {
         "weekly" => "weekly",
         "insight" => "insight",
+        "claims" => "claims",
         _ => "monthly"
     };
 
@@ -179,9 +305,19 @@ public sealed class DenialClaimReportController : Controller
     /// BEFORE anything is written: a missing mandatory column or an unreadable date is reported back
     /// and nothing is committed, rather than leaving the table half-updated.
     /// </summary>
+    /// <param name="replaceCurrentWeek">
+    /// What happens to the insights already on Current Week.
+    /// <list type="bullet">
+    ///   <item><b>true</b> - they are discarded and the workbook replaces them. This is a correction
+    ///   to the week in progress.</item>
+    ///   <item><b>false</b> - they roll forward into Previous Week and the workbook becomes the new
+    ///   Current Week. This is the weekly cycle, and it is the default because it loses nothing.</item>
+    /// </list>
+    /// </param>
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> UploadInsights(string? lab, IFormFile? insightFile, CancellationToken ct)
+    public async Task<IActionResult> UploadInsights(string? lab, IFormFile? insightFile,
+                                                    bool replaceCurrentWeek, CancellationToken ct)
     {
         if (!CanEditInsights())
             return Redirect(InsightError("You do not have permission to import denial insights.", lab));
@@ -223,13 +359,34 @@ public sealed class DenialClaimReportController : Controller
 
         try
         {
-            // An import is a full replace of Current Week, not a merge: the workbook is the client's
-            // whole picture for the week, so a denial that has dropped out of it has to disappear
-            // from the tab rather than linger from the previous upload.
-            await _repo.ClearBucketAsync(connectionString, DenialInsightBuckets.Current, ct);
+            // Either way Current Week ends up holding only the workbook: it is the client's whole
+            // picture for the week, so a denial that has dropped out of it must disappear rather
+            // than linger from the previous upload. The two modes differ in what happens to the
+            // insights that were there - discarded, or rolled forward into Previous Week.
+            string outcome;
+
+            if (replaceCurrentWeek)
+            {
+                var cleared = await _repo.ClearBucketAsync(connectionString, DenialInsightBuckets.Current, ct);
+                outcome = cleared > 0
+                    ? $" The {cleared:N0} row(s) previously on Current Week were replaced."
+                    : string.Empty;
+            }
+            else
+            {
+                var rolled = await _repo.RollCurrentToPreviousAsync(connectionString, CurrentUser, ct);
+                outcome = rolled.RolledToPrevious > 0
+                    ? $" The {rolled.RolledToPrevious:N0} row(s) previously on Current Week moved to Previous Week."
+                      + (rolled.Archived > 0
+                          ? $" {rolled.Archived:N0} row(s) older than {DenialInsightBuckets.PreviousWeeksRetained} weeks moved to Archive."
+                          : string.Empty)
+                    : string.Empty;
+            }
+
             var result = await _repo.SaveInsightsAsync(connectionString, validation.Rows, CurrentUser, ct);
 
             var message = $"Imported {result.Inserted + result.Updated:N0} row(s) into Current Week for {labName}."
+                + outcome
                 + (result.Skipped > 0 ? $" {result.Skipped:N0} row(s) had no denial code and were skipped." : string.Empty)
                 + (result.Errors.Count > 0 ? $" {result.Errors.Count:N0} row(s) failed." : string.Empty)
                 + (validation.Warnings.Count > 0 ? " " + string.Join(" ", validation.Warnings.Take(3)) : string.Empty);
@@ -543,6 +700,23 @@ public sealed class DenialClaimReportController : Controller
             ws.Cell(r, c.Value).GetString().Replace("$", "").Replace(",", "").Replace("%", "").Trim(),
             out var d) ? d : 0m;
 
+        // A percent-formatted Excel cell showing "57%" holds 0.57, and GetString() hands back the
+        // stored number, not what the analyst sees. Taking it at face value stored 0.57 and the page
+        // then rendered "0.57%". Where the cell's format says percent, the value is scaled back to
+        // the number on screen; a cell typed as plain 57 is already that number and is left alone.
+        decimal Percent(int r, int? c)
+        {
+            if (!c.HasValue) return 0m;
+
+            var cell = ws.Cell(r, c.Value);
+            var value = Num(r, c);
+
+            var isPercentFormatted = cell.Style.NumberFormat.Format.Contains('%')
+                                     || cell.GetString().Contains('%');
+
+            return isPercentFormatted && cell.DataType == XLDataType.Number ? value * 100m : value;
+        }
+
         DateTime? Date(int r, int? c, string columnName, string code)
         {
             if (!c.HasValue) return null;
@@ -582,7 +756,7 @@ public sealed class DenialClaimReportController : Controller
                 NoOfDenials = (int)Num(r, denialCountCol),
                 TotalBalance = Num(r, totalBalanceCol),
                 InsuranceBalance = Num(r, insBalanceCol),
-                ImpactPercentage = Num(r, impactCol),
+                ImpactPercentage = Percent(r, impactCol),
                 // Rich text, not plain: the analyst's bold and bullets are the point of these columns.
                 ObservationHtml = DenialInsightRichText.FromCell(observationCol.HasValue ? ws.Cell(r, observationCol.Value) : null),
                 ActionCategory = Text(r, categoryCol),

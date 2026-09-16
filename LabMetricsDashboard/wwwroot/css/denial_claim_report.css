@@ -358,8 +358,328 @@
     .dcr-page .insight-table td.cat-rebill { color: #1f2d3d; }
 }
 
+/* ============================================================================
+   Monthly / Weekly pivot — the Grand Total column
+
+   The shared pivot sets .pivot-balance to a fixed 168px under table-layout:
+   fixed, which is enough for a period column but not for the Grand Total,
+   where the figure is the sum of every period and runs several digits longer.
+   At 168px a seven-figure total was clipping its last character.
+
+   Widening only the total column leaves the period columns exactly as the
+   Denial Summary page has them, so the two tables still line up.
+   ========================================================================= */
+.dcr-page .breakdown-pivot-table.denial-pivot-freeze .pivot-balance.total-col {
+    width: 210px !important;
+    min-width: 210px !important;
+    max-width: 210px !important;
+}
+
+.dcr-page .breakdown-pivot-table.denial-pivot-freeze .pivot-claims.total-col {
+    width: 132px !important;
+    min-width: 132px !important;
+    max-width: 132px !important;
+}
+
+/* The last column sat flush against the frame's rounded edge, so its final
+   digit read as cut even when the column itself was wide enough. */
+.dcr-page .breakdown-pivot-frame { padding-right: 2px; }
+
+.dcr-page .breakdown-pivot-table.denial-pivot-freeze .total-col {
+    padding-right: .65rem !important;
+}
+
+/* ── Fullscreen ───────────────────────────────────────────────────────── */
+/* .fs-host / .fs-bar / .fs-btn styling comes from denial_dashboard.css, which
+   this page also loads. Only the bits specific to this page are set here. */
+.dcr-page .fs-host.is-fs {
+    background: var(--ins-surface);
+    padding: .75rem;
+}
+
+.dcr-page .fs-host.is-fs .breakdown-pivot-frame,
+.dcr-page .fs-host.is-fs .claims-scroll {
+    max-height: calc(100vh - 5rem);
+}
+
+body.fs-open { overflow: hidden; }
+
+/* ── Previous Week: one band per week ─────────────────────────────────── */
+.dcr-page .insight-table tr.week-divider > td {
+    background: #eef3f8 !important;
+    border-top: 2px solid var(--ins-green);
+    border-bottom: 1px solid var(--ins-border);
+    padding: .5rem .65rem;
+    position: sticky;
+    left: 0;
+}
+
+.dcr-page .week-range {
+    font-weight: 800;
+    font-size: .8rem;
+    color: var(--ins-green);
+    letter-spacing: .01em;
+}
+
+.dcr-page .week-range .bi { margin-right: .3rem; }
+
+.dcr-page .week-meta {
+    margin-left: .75rem;
+    font-size: .74rem;
+    color: var(--ins-muted);
+}
+
+/* ── Import panel ─────────────────────────────────────────────────────── */
+.insight-import-panel {
+    width: min(460px, 100%);
+}
+
+.insight-import-panel .offcanvas-header {
+    background: var(--ins-green, #375623);
+    color: #fff;
+    padding: .85rem 1rem;
+}
+
+.insight-import-panel .offcanvas-title {
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.insight-import-panel .btn-close { filter: invert(1) grayscale(100%) brightness(200%); }
+
+.insight-import-panel .import-lab {
+    display: flex;
+    align-items: baseline;
+    gap: .5rem;
+    padding: .55rem .7rem;
+    background: #f1f5f9;
+    border-radius: .4rem;
+    margin-bottom: 1rem;
+}
+
+.insight-import-panel .import-lab-label {
+    font-size: .68rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #6b7a8c;
+}
+
+.insight-import-panel .import-lab-name {
+    font-weight: 700;
+    font-size: .9rem;
+    color: #1f2d3d;
+}
+
+.insight-import-panel .import-field { margin-bottom: 1.1rem; }
+
+.insight-import-panel .import-label {
+    display: block;
+    font-size: .74rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: #4e6070;
+    margin-bottom: .35rem;
+}
+
+.insight-import-panel .import-hint {
+    font-size: .76rem;
+    color: #6b7a8c;
+    line-height: 1.45;
+    margin-top: .4rem;
+}
+
+.insight-import-panel .import-choice {
+    border: 1px solid #dbe3ec;
+    border-radius: .5rem;
+    padding: .8rem;
+    background: #fbfcfe;
+}
+
+.insight-import-panel .form-check-label {
+    font-weight: 700;
+    font-size: .88rem;
+    color: #1f2d3d;
+}
+
+.insight-import-panel .import-note {
+    margin-top: .7rem;
+    border-radius: .4rem;
+    padding: .6rem .7rem;
+    font-size: .78rem;
+    line-height: 1.5;
+}
+
+.insight-import-panel .import-note ul {
+    margin: .35rem 0 0;
+    padding-left: 1.1rem;
+}
+
+.insight-import-panel .import-note li + li { margin-top: .25rem; }
+
+.insight-import-panel .import-note-head {
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+}
+
+/* Roll-forward is the safe path and reads as information. */
+.insight-import-panel .import-note-roll {
+    background: #e8f2ea;
+    border: 1px solid #b9d6c2;
+    color: #2b5738;
+}
+
+/* Replace destroys work, so it reads as a warning rather than a second option. */
+.insight-import-panel .import-note-replace {
+    background: #fdeceb;
+    border: 1px solid #f2b8b5;
+    color: #8f2a24;
+}
+
+/* ── Claim Level tab ──────────────────────────────────────────────────── */
+.dcr-page .claims-title {
+    font-size: 1.02rem;
+    font-weight: 800;
+    color: var(--ins-green);
+}
+
+.dcr-page .claims-count { font-size: .82rem; }
+
+.dcr-page .claims-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .4rem;
+    margin-bottom: .75rem;
+}
+
+.dcr-page .claims-filters-label {
+    font-size: .68rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--ins-muted);
+}
+
+.dcr-page .claims-chip {
+    background: #e7f0fa;
+    color: #1f4e79;
+    border: 1px solid #c3dbf2;
+    border-radius: 999px;
+    padding: .2rem .65rem;
+    font-size: .76rem;
+}
+
+.dcr-page .claims-chip-payer {
+    background: #fdf3e2;
+    color: #85540b;
+    border-color: #efd8ab;
+}
+
+.dcr-page .claims-scroll {
+    border: 1px solid var(--ins-border);
+    border-radius: .5rem;
+    overflow: auto;
+    max-height: 68vh;
+    background: var(--ins-surface);
+}
+
+.dcr-page .claims-table {
+    font-size: .76rem;
+    margin: 0;
+    white-space: nowrap;
+}
+
+.dcr-page .claims-table > thead > tr > th {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: var(--ins-green);
+    color: #fff;
+    font-weight: 700;
+    font-size: .71rem;
+    padding: .5rem .55rem;
+    white-space: nowrap;
+}
+
+.dcr-page .claims-table > tbody > tr > td {
+    padding: .35rem .55rem;
+    vertical-align: middle;
+}
+
+.dcr-page .claims-table > tbody > tr:nth-child(even) > td { background: var(--ins-row-alt); }
+.dcr-page .claims-table > tbody > tr:hover > td { background: var(--ins-row-hover); }
+
+.dcr-page .claims-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.dcr-page .claims-empty {
+    text-align: center;
+    padding: 2.6rem 1rem;
+    white-space: normal;
+}
+
+.dcr-page .claims-pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .75rem;
+    margin-top: .75rem;
+}
+
+.dcr-page .claims-pager-label { font-size: .8rem; color: var(--ins-muted); }
+
+.dcr-page .claims-sort-note {
+    margin-top: .6rem;
+    font-size: .74rem;
+    color: var(--ins-muted);
+}
+
+/* ── Sortable headers ─────────────────────────────────────────────────── */
+.dcr-page .claims-table th.sortable {
+    cursor: pointer;
+    user-select: none;
+    padding-right: 1.15rem;
+    position: sticky;
+    top: 0;
+}
+
+.dcr-page .claims-table th.sortable:hover { background: var(--ins-green-2, #4a7130); }
+
+.dcr-page .claims-table th.sortable:focus-visible {
+    outline: 2px solid #ffd479;
+    outline-offset: -2px;
+}
+
+/* A neutral chevron pair until sorted, so every column reads as sortable
+   without four dozen arrows competing with the header text. */
+.dcr-page .claims-table th.sortable .sort-arrow {
+    position: absolute;
+    right: .35rem;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: .4;
+    font-size: .6rem;
+    line-height: 1;
+}
+
+.dcr-page .claims-table th.sortable .sort-arrow::after { content: "\2195"; }
+.dcr-page .claims-table th.sorted .sort-arrow { opacity: 1; }
+.dcr-page .claims-table th.sorted[data-dir="asc"] .sort-arrow::after { content: "\2191"; }
+.dcr-page .claims-table th.sorted[data-dir="desc"] .sort-arrow::after { content: "\2193"; }
+
+.dcr-page .claims-table th.sorted { background: var(--ins-green-2, #4a7130); }
+
 /* ── Narrow screens ───────────────────────────────────────────────────── */
 @media (max-width: 768px) {
     .dcr-page .insight-scroll { max-height: 60vh; }
+    .dcr-page .claims-scroll { max-height: 60vh; }
     .dcr-page .insight-legend .legend-hint { margin-left: 0; width: 100%; }
+    .dcr-page .week-meta { display: block; margin-left: 0; }
+}
+
+@media (prefers-color-scheme: dark) {
+    .dcr-page:not([data-theme="light"]) .insight-table tr.week-divider > td { background: #1d2935 !important; }
 }

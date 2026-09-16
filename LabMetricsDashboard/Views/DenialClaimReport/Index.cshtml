@@ -1,3 +1,4 @@
+@using LabMetricsDashboard.Models
 @model LabMetricsDashboard.ViewModels.DenialClaimReportViewModel
 @{
     ViewData["Title"] = "Denial Claim Report";
@@ -23,6 +24,12 @@
                 common code, so CO45, PI45 and PR45 all count as 45.
             </div>
         </div>
+
+        <a class="btn btn-sm btn-success"
+           asp-action="ExportWorkbook" asp-route-lab="@Model.CurrentLab" asp-route-bucket="@Model.Insight.Bucket"
+           title="Download Monthly Summary, Weekly Summary and Denial Insight as one Excel workbook">
+            <i class="bi bi-file-earmark-excel"></i> Download Excel
+        </a>
     </div>
 
     @if (TempData["DenialClaimReportSuccess"] is string ok)
@@ -95,9 +102,25 @@
             <button class="nav-link @(tab == "insight" ? "active" : "")" data-bs-toggle="pill"
                     data-bs-target="#dcr-insight" type="button" data-tab-key="insight">
                 <i class="bi bi-lightbulb me-2"></i>Denial Insight
-                @if (Model.Insight.BucketCounts.Values.Sum() > 0)
+                @{
+                    // The two tabs only. Archived rows are retained but out of the working view, so
+                    // counting them here would claim more insights than the tab can show.
+                    var insightCount = Model.Insight.BucketCounts.GetValueOrDefault(DenialInsightBuckets.Current)
+                                     + Model.Insight.BucketCounts.GetValueOrDefault(DenialInsightBuckets.Previous);
+                }
+                @if (insightCount > 0)
                 {
-                    <span class="badge rounded-pill bg-light text-dark ms-2">@Model.Insight.BucketCounts.Values.Sum().ToString("N0")</span>
+                    <span class="badge rounded-pill bg-light text-dark ms-2">@insightCount.ToString("N0")</span>
+                }
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link @(tab == "claims" ? "active" : "")" data-bs-toggle="pill"
+                    data-bs-target="#dcr-claims" type="button" data-tab-key="claims">
+                <i class="bi bi-list-columns-reverse me-2"></i>Claim Level
+                @if (Model.Claims.HasFilter)
+                {
+                    <span class="badge rounded-pill bg-warning text-dark ms-2">Filtered</span>
                 }
             </button>
         </li>
@@ -107,7 +130,14 @@
         <div class="tab-pane fade @(tab == "monthly" ? "show active" : "")" id="dcr-monthly">
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
-                    @await Html.PartialAsync("../DenialDashboard/_BreakdownPivotTable", Model.Monthly)
+                    <div class="fs-host" id="monthlyFsHost">
+                        <div class="fs-bar">
+                            <button type="button" class="fs-btn" data-fs-target="#monthlyFsHost">
+                                <i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span>
+                            </button>
+                        </div>
+                        @await Html.PartialAsync("../DenialDashboard/_BreakdownPivotTable", Model.Monthly)
+                    </div>
                 </div>
             </div>
         </div>
@@ -115,13 +145,24 @@
         <div class="tab-pane fade @(tab == "weekly" ? "show active" : "")" id="dcr-weekly">
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
-                    @await Html.PartialAsync("../DenialDashboard/_BreakdownPivotTable", Model.Weekly)
+                    <div class="fs-host" id="weeklyFsHost">
+                        <div class="fs-bar">
+                            <button type="button" class="fs-btn" data-fs-target="#weeklyFsHost">
+                                <i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span>
+                            </button>
+                        </div>
+                        @await Html.PartialAsync("../DenialDashboard/_BreakdownPivotTable", Model.Weekly)
+                    </div>
                 </div>
             </div>
         </div>
 
         <div class="tab-pane fade @(tab == "insight" ? "show active" : "")" id="dcr-insight">
             @await Html.PartialAsync("_DenialInsightPanel", Model.Insight)
+        </div>
+
+        <div class="tab-pane fade @(tab == "claims" ? "show active" : "")" id="dcr-claims">
+            @await Html.PartialAsync("_DenialClaimLevelTab", Model.Claims)
         </div>
     </div>
 </div>
@@ -140,13 +181,119 @@
                 });
             });
 
-            // Import submits as soon as a file is chosen — one click, not two.
-            var file = document.getElementById('insightFile');
-            if (file) {
-                file.addEventListener('change', function () {
-                    if (file.files && file.files.length) document.getElementById('insightUploadForm').submit();
+            // The import panel's checkbox picks between replacing Current Week and rolling it
+            // forward. Both notes are already in the DOM; this shows the one that applies, so the
+            // consequence is on screen before the file is sent.
+            var replace = document.getElementById('replaceCurrentWeek');
+            if (replace) {
+                var noteRoll = document.getElementById('noteRollForward');
+                var noteReplace = document.getElementById('noteReplace');
+                var submit = document.getElementById('insightImportSubmit');
+                var submitLabel = document.getElementById('insightImportSubmitLabel');
+
+                var applyImportMode = function () {
+                    var replacing = replace.checked;
+                    noteRoll.hidden = replacing;
+                    noteReplace.hidden = !replacing;
+                    submitLabel.textContent = replacing
+                        ? 'Replace Current Week'
+                        : 'Import as new Current Week';
+                    // Replacing discards work, so the button carries the warning colour rather than
+                    // looking identical to the safe path.
+                    submit.classList.toggle('btn-primary', !replacing);
+                    submit.classList.toggle('btn-danger', replacing);
+                };
+
+                replace.addEventListener('change', applyImportMode);
+                applyImportMode();
+            }
+
+            // Click-to-sort on every Claim Level column. The rows on screen are reordered in place
+            // rather than reloaded, so sorting is instant; it orders the current page, which the
+            // note under the table says when there is more than one.
+            var claimsTable = document.getElementById('claimsTable');
+            if (claimsTable) {
+                var tbody = claimsTable.tBodies[0];
+
+                // Money and dates have to compare as values, not as the strings they are rendered
+                // as - "$9,100.00" sorts before "$103,472.40" alphabetically, which is nonsense.
+                var sortKey = function (cell, type) {
+                    var text = (cell.textContent || '').trim();
+                    if (type === 'number' || /^[-+$(]?[\d,]+(\.\d+)?\)?%?$/.test(text)) {
+                        var negative = /^\(.*\)$/.test(text);
+                        var n = parseFloat(text.replace(/[^0-9.\-]/g, ''));
+                        if (!isNaN(n)) return { n: negative ? -n : n };
+                    }
+                    var t = Date.parse(text);
+                    if (!isNaN(t) && /[\/\-]/.test(text) && text.length >= 6) return { n: t };
+                    return { s: text.toLowerCase() };
+                };
+
+                claimsTable.querySelectorAll('th.sortable').forEach(function (th, index) {
+                    var sortNow = function () {
+                        var ascending = th.dataset.dir !== 'asc';
+
+                        claimsTable.querySelectorAll('th.sortable').forEach(function (other) {
+                            if (other !== th) { delete other.dataset.dir; other.classList.remove('sorted'); }
+                        });
+                        th.dataset.dir = ascending ? 'asc' : 'desc';
+                        th.classList.add('sorted');
+
+                        var rows = Array.prototype.slice.call(tbody.rows)
+                            .filter(function (r) { return r.cells.length > 1; });
+
+                        rows.sort(function (a, b) {
+                            var x = sortKey(a.cells[index], th.dataset.sortType);
+                            var y = sortKey(b.cells[index], th.dataset.sortType);
+
+                            // Blanks sink to the bottom either way - an empty cell is not the
+                            // smallest value, it is the absence of one.
+                            var xEmpty = x.s === '' , yEmpty = y.s === '';
+                            if (xEmpty && !yEmpty) return 1;
+                            if (!xEmpty && yEmpty) return -1;
+
+                            var result;
+                            if ('n' in x && 'n' in y) result = x.n - y.n;
+                            else result = String('s' in x ? x.s : x.n).localeCompare(String('s' in y ? y.s : y.n));
+
+                            return ascending ? result : -result;
+                        });
+
+                        rows.forEach(function (r) { tbody.appendChild(r); });
+                    };
+
+                    th.addEventListener('click', sortNow);
+                    th.addEventListener('keydown', function (e) {
+                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortNow(); }
+                    });
                 });
             }
+
+            // Fullscreen for the wide tables, matching the Denial Summary page. The .fs-host /
+            // .fs-btn styling already ships in denial_dashboard.css, which this page loads.
+            document.querySelectorAll('.fs-btn[data-fs-target]').forEach(function (btn) {
+                var host = document.querySelector(btn.dataset.fsTarget);
+                if (!host) return;
+
+                var setState = function (on) {
+                    host.classList.toggle('is-fs', on);
+                    document.body.classList.toggle('fs-open', on);
+                    btn.innerHTML = on
+                        ? '<i class="bi bi-fullscreen-exit"></i><span class="fs-label">Exit fullscreen</span>'
+                        : '<i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span>';
+                    btn.setAttribute('title', on ? 'Exit fullscreen (Esc)' : 'View this table in fullscreen');
+                };
+
+                btn.addEventListener('click', function () {
+                    setState(!host.classList.contains('is-fs'));
+                });
+
+                // Esc is what people reach for, and without it a fullscreen table with no visible
+                // exit button after scrolling would be a trap.
+                document.addEventListener('keydown', function (e) {
+                    if (e.key === 'Escape' && host.classList.contains('is-fs')) setState(false);
+                });
+            });
 
             // The Observation / Action cells are contenteditable so the workbook's bold and bullets
             // stay visible while editing. They are not form fields, so their HTML is copied into the

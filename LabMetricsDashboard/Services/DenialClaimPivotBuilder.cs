@@ -22,8 +22,11 @@ public static class DenialClaimPivotBuilder
     /// </summary>
     public const int DefaultTopPayers = 15;
 
-    /// <summary>Denial codes shown under each payer, by insurance balance.</summary>
-    public const int DefaultTopDenialsPerPayer = 5;
+    /// <summary>
+    /// Denial codes shown under each payer. Three, per the reporting spec - the point of the
+    /// summary is what to work on next, and a longer list stops being a summary.
+    /// </summary>
+    public const int DefaultTopDenialsPerPayer = 3;
 
     private const string OtherPayersLabel = "All other insurances";
     private const string OtherDenialsLabel = "All other denial codes";
@@ -79,7 +82,10 @@ public static class DenialClaimPivotBuilder
                 Claims = p.Sum(x => x.ClaimCount),
                 Groups = p.ToList()
             })
-            .OrderByDescending(p => p.Balance)
+            // Ranked by the payer's total claim count, per the reporting spec. Balance breaks a tie,
+            // so two payers on the same count still order by what they are worth.
+            .OrderByDescending(p => p.Claims)
+            .ThenByDescending(p => p.Balance)
             .ToList();
 
         var grandBalance = payerTotals.Sum(p => p.Balance);
@@ -106,23 +112,21 @@ public static class DenialClaimPivotBuilder
                 {
                     Code = d.Key,
                     Description = FirstLabel(d.Select(x => x.DenialDescription), string.Empty),
+                    Claims = d.Sum(x => x.ClaimCount),
                     Balance = d.Sum(x => x.InsuranceBalance),
                     Groups = d.ToList()
                 })
-                .OrderByDescending(d => d.Balance)
+                // Same rule as the payer rank above: claim count first, balance to break a tie.
+                .OrderByDescending(d => d.Claims)
+                .ThenByDescending(d => d.Balance)
                 .ToList();
 
             var shown = denials.Take(topDenialsPerPayer).ToList();
             var rest = denials.Skip(topDenialsPerPayer).SelectMany(d => d.Groups).ToList();
 
             foreach (var denial in shown)
-            {
-                var label = string.IsNullOrWhiteSpace(denial.Description)
-                    ? denial.Code
-                    : $"{denial.Code} — {denial.Description}";
-
-                rows.Add(BuildRow(string.Empty, label, isInsurance: false, denial.Groups, periods, periodOf));
-            }
+                rows.Add(BuildRow(string.Empty, DenialLabel(denial.Code, denial.Description),
+                                  isInsurance: false, denial.Groups, periods, periodOf));
 
             if (rest.Count > 0)
                 rows.Add(BuildRow(string.Empty, OtherDenialsLabel, isInsurance: false, rest, periods, periodOf));
@@ -270,6 +274,27 @@ public static class DenialClaimPivotBuilder
             }
             return null;
         };
+    }
+
+    /// <summary>
+    /// A denial row's label: the code, then its description.
+    /// </summary>
+    /// <remarks>
+    /// The Master File Processor writes DenialDescription already prefixed with the code
+    /// ("M127 - Missing patient medical record..."), because a multi-code claim needs each
+    /// description paired with the code it belongs to. Prepending the code again produced
+    /// "M127 — M127 - Missing patient medical record...", so a description that already opens with
+    /// the code is used as it stands.
+    /// </remarks>
+    private static string DenialLabel(string code, string description)
+    {
+        if (string.IsNullOrWhiteSpace(description)) return code;
+
+        var text = description.Trim();
+
+        return text.StartsWith(code, StringComparison.OrdinalIgnoreCase)
+            ? text
+            : $"{code} — {text}";
     }
 
     private static string Key(string? value) =>

@@ -29,7 +29,16 @@ public interface IDenialClaimReportRepository
 
     /// <summary>Copies Current Week onto Previous Week, replacing whatever Previous held.</summary>
     Task<int> CopyCurrentToPreviousAsync(string connectionString, string userName, CancellationToken ct);
+
+    /// <summary>
+    /// Rolls the existing Current Week into Previous Week and archives anything beyond the retained
+    /// weeks. Used by an import that is NOT replacing the current week.
+    /// </summary>
+    Task<DenialInsightRollResult> RollCurrentToPreviousAsync(string connectionString, string userName, CancellationToken ct);
 }
+
+/// <summary>What an import's roll-forward moved, reported back on the page.</summary>
+public sealed record DenialInsightRollResult(int RolledToPrevious, int Archived);
 
 /// <summary>
 /// Denial Claim Report data access, straight against each lab's own database.
@@ -140,7 +149,9 @@ SELECT Id, Bucket, WeekStart, SortOrder, DenialCode, DenialDescription, PayerNam
        FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate, UpdatedOn, UpdatedBy
 FROM {InsightTable}
 WHERE Bucket = @Bucket
-ORDER BY SortOrder, InsuranceBalance DESC, DenialCode;";
+-- Newest week first, then the client's own ranking within the week. Previous Week draws a
+-- separator each time WeekStart changes, so the rows have to arrive already grouped by week.
+ORDER BY WeekStart DESC, SortOrder, InsuranceBalance DESC, DenialCode;";
 
         var rows = new List<DenialInsightRow>();
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
@@ -375,11 +386,101 @@ SELECT @@ROWCOUNT;";
         }
     }
 
-    /// <summary>Monday of the week the date falls in - the week identity insights are stamped with.</summary>
+    /// <summary>
+    /// Moves the existing Current Week rows into Previous Week, then pushes anything past the
+    /// retained window out to Archive. Run immediately before an import that is NOT replacing the
+    /// current week, so the incoming workbook lands on an empty Current Week.
+    /// </summary>
+    /// <remarks>
+    /// <para>Retention counts DISTINCT WEEKS, not days: the four most recent weeks present in
+    /// Previous stay, everything older is archived. Counting weeks rather than measuring back from
+    /// today means a lab that skips a week still keeps four real weeks of history instead of
+    /// silently losing one to the calendar.</para>
+    /// <para>Archived rows are kept, never deleted - a client's written observation is work, and
+    /// falling out of the working view is not a reason to destroy it.</para>
+    /// <para>One transaction: a failure part way cannot leave Current emptied but Previous not
+    /// filled, which would lose a week of insights outright.</para>
+    /// </remarks>
+    public async Task<DenialInsightRollResult> RollCurrentToPreviousAsync(
+        string connectionString, string userName, CancellationToken ct)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await EnsureInsightTableAsync(conn, ct);
+
+        var sql = $@"
+-- A week already sitting in Previous would collide with the incoming one on the unique index.
+-- The newer Current row is the one being kept, so the stale duplicate goes first.
+DELETE p
+FROM   {InsightTable} AS p
+JOIN   {InsightTable} AS c
+       ON  c.Bucket = 'Current'
+       AND c.WeekStart = p.WeekStart
+       AND c.DenialCode = p.DenialCode
+       AND ISNULL(c.PayerName, '') = ISNULL(p.PayerName, '')
+WHERE  p.Bucket = 'Previous';
+
+UPDATE {InsightTable}
+SET    Bucket = 'Previous', UpdatedOn = SYSUTCDATETIME(), UpdatedBy = @UpdatedBy
+WHERE  Bucket = 'Current';
+
+SELECT @@ROWCOUNT;
+
+-- Everything except the @Retain most recent weeks now in Previous.
+UPDATE {InsightTable}
+SET    Bucket = 'Archive', UpdatedOn = SYSUTCDATETIME(), UpdatedBy = @UpdatedBy
+WHERE  Bucket = 'Previous'
+  AND  WeekStart NOT IN (
+           SELECT TOP (@Retain) WeekStart
+           FROM   {InsightTable}
+           WHERE  Bucket = 'Previous'
+           GROUP BY WeekStart
+           ORDER BY WeekStart DESC);
+
+SELECT @@ROWCOUNT;";
+
+        await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct);
+        try
+        {
+            await using var cmd = new SqlCommand(sql, conn, tx) { CommandTimeout = 300 };
+            cmd.Parameters.Add("@UpdatedBy", SqlDbType.NVarChar, 200).Value = Db(userName);
+            cmd.Parameters.Add("@Retain", SqlDbType.Int).Value = DenialInsightBuckets.PreviousWeeksRetained;
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+            var rolled = await ReadCountAsync(reader, ct);
+            await reader.NextResultAsync(ct);
+            var archived = await ReadCountAsync(reader, ct);
+
+            await reader.CloseAsync();
+            await tx.CommitAsync(ct);
+
+            return new DenialInsightRollResult(rolled, archived);
+        }
+        catch
+        {
+            await tx.RollbackAsync(CancellationToken.None);
+            throw;
+        }
+    }
+
+    private static async Task<int> ReadCountAsync(SqlDataReader reader, CancellationToken ct) =>
+        await reader.ReadAsync(ct) && !reader.IsDBNull(0) ? reader.GetInt32(0) : 0;
+
+    /// <summary>
+    /// The day the reporting week begins. Denial weeks run <b>Wednesday to Tuesday</b>, which is the
+    /// lab's own reporting cycle rather than the calendar's - so a week reads "12 Aug - 18 Aug".
+    /// </summary>
+    private const DayOfWeek WeekStartsOn = DayOfWeek.Wednesday;
+
+    /// <summary>
+    /// The Wednesday that opens the week this date falls in. This is the week identity insights are
+    /// stamped with and the weekly summary groups on, so both agree on where a week begins.
+    /// </summary>
     public static DateTime WeekStartOf(DateTime date)
     {
         var d = date.Date;
-        return d.AddDays(-(((int)d.DayOfWeek + 6) % 7));
+        return d.AddDays(-(((int)d.DayOfWeek - (int)WeekStartsOn + 7) % 7));
     }
 
     private static async Task EnsureInsightTableAsync(SqlConnection conn, CancellationToken ct)

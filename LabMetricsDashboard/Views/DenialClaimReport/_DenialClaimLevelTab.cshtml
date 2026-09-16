@@ -1,0 +1,174 @@
+@using System.Globalization
+@using LabMetricsDashboard.Services
+@model LabMetricsDashboard.ViewModels.DenialClaimLevelTabViewModel
+
+@* The Claim Level tab. Columns come from LabClaimLineColumnCatalog and rows from the same
+   repository the Dashboard's Claim Level page uses, so this is that page's data - not a second,
+   differently-shaped claim list that could disagree with it. *@
+
+<div class="card border-0 shadow-sm">
+    <div class="card-body">
+
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+            <div>
+                <div class="claims-title">Claim Level</div>
+                <div class="text-muted" style="font-size:.82rem;">
+                    Denied claims with an insurance balance still outstanding, for
+                    <strong>@Model.CurrentLab</strong>.
+                    @if (!Model.HasFilter)
+                    {
+                        <span>Open a denial code or balance on the Denial Insight tab to filter this list.</span>
+                    }
+                </div>
+            </div>
+
+            <div class="d-flex align-items-center gap-2">
+                <span class="claims-count">
+                    <strong>@Model.TotalFiltered.ToString("N0")</strong>
+                    <span class="text-muted">of @Model.TotalAll.ToString("N0") claims</span>
+                </span>
+                @if (Model.HasFilter)
+                {
+                    <a class="btn btn-sm btn-outline-secondary"
+                       href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims" })">
+                        <i class="bi bi-x-lg"></i> Clear filters
+                    </a>
+                }
+            </div>
+        </div>
+
+        @if (Model.HasFilter)
+        {
+            <div class="claims-filters">
+                <span class="claims-filters-label">Filtered by</span>
+                @if (!string.IsNullOrWhiteSpace(Model.DenialCode))
+                {
+                    <span class="claims-chip">
+                        Denial Code: <strong>@Model.DenialCode</strong>
+                    </span>
+                }
+                @if (!string.IsNullOrWhiteSpace(Model.PayerName))
+                {
+                    <span class="claims-chip claims-chip-payer">
+                        Insurance: <strong>@Model.PayerName</strong>
+                    </span>
+                }
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(Model.Error))
+        {
+            <div class="alert alert-warning py-2">@Model.Error</div>
+        }
+
+        <div class="fs-host" id="claimsFsHost">
+            <div class="fs-bar">
+                <button type="button" class="fs-btn" data-fs-target="#claimsFsHost">
+                    <i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span>
+                </button>
+            </div>
+
+            <div class="claims-scroll">
+                <table class="table table-sm table-bordered align-middle claims-table mb-0" id="claimsTable">
+                    <thead>
+                        <tr>
+                            @foreach (var col in Model.DisplayColumns)
+                            {
+                                var money = LabClaimLineColumnCatalog.IsMoneyColumn(col);
+                                <th class="sortable @(money ? "num" : null)"
+                                    data-sort-type="@(money ? "number" : "auto")"
+                                    scope="col" role="button" tabindex="0"
+                                    title="Sort by @col">
+                                    <span class="th-text">@col</span><span class="sort-arrow" aria-hidden="true"></span>
+                                </th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (Model.DisplayColumns.Count == 0)
+                        {
+                            <tr>
+                                <td class="claims-empty">
+                                    No claim-level columns are configured for this lab.
+                                </td>
+                            </tr>
+                        }
+                        else if (Model.Records.Count == 0)
+                        {
+                            <tr>
+                                <td colspan="@Model.DisplayColumns.Count" class="claims-empty">
+                                    <i class="bi bi-search d-block mb-2" style="font-size:1.5rem;opacity:.45;"></i>
+                                    <div class="fw-semibold mb-1">No claims match these filters</div>
+                                    <div class="text-muted" style="font-size:.85rem;">
+                                        @if (Model.HasFilter)
+                                        {
+                                            <span>
+                                                The denial code or insurance may be spelled differently in the
+                                                claim data. Clear the filters to see every denied claim.
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span>This lab has no denied claims with an outstanding insurance balance.</span>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @foreach (var record in Model.Records)
+                            {
+                                <tr>
+                                    @foreach (var col in Model.DisplayColumns)
+                                    {
+                                        var value = record.Display(col);
+                                        if (LabClaimLineColumnCatalog.IsMoneyColumn(col)
+                                            && decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var amount))
+                                        {
+                                            <td class="num">@Acct2(amount)</td>
+                                        }
+                                        else if (LabClaimLineColumnCatalog.IsMoneyColumn(col))
+                                        {
+                                            <td class="num">@value</td>
+                                        }
+                                        else
+                                        {
+                                            <td>@value</td>
+                                        }
+                                    }
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        @if (Model.TotalPages > 1)
+        {
+            <div class="claims-sort-note">
+                <i class="bi bi-info-circle"></i>
+                Sorting orders the @Model.Records.Count.ToString("N0") row(s) on this page. Filter to a
+                denial code to bring the whole set onto one page.
+            </div>
+        }
+
+        @if (Model.TotalPages > 1)
+        {
+            <div class="claims-pager">
+                <a class="btn btn-sm btn-outline-secondary @(Model.HasPrevious ? "" : "disabled")"
+                   href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = Model.DenialCode, payerName = Model.PayerName, claimPage = Model.Page - 1 })">
+                    <i class="bi bi-chevron-left"></i> Previous
+                </a>
+                <span class="claims-pager-label">
+                    Page <strong>@Model.Page.ToString("N0")</strong> of @Model.TotalPages.ToString("N0")
+                </span>
+                <a class="btn btn-sm btn-outline-secondary @(Model.HasNext ? "" : "disabled")"
+                   href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = Model.DenialCode, payerName = Model.PayerName, claimPage = Model.Page + 1 })">
+                    Next <i class="bi bi-chevron-right"></i>
+                </a>
+            </div>
+        }
+    </div>
+</div>
