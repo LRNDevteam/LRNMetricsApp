@@ -255,8 +255,7 @@ ORDER BY {orderBy}
 OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
 
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 };
-        cmd.Parameters.Add("@Code", SqlDbType.NVarChar, 400).Value =
-            (object?)denialCode?.Trim().Replace(" ", "").ToUpperInvariant() ?? DBNull.Value;
+        cmd.Parameters.Add("@Code", SqlDbType.NVarChar, 400).Value = CodeKey(denialCode);
         cmd.Parameters.Add("@Payer", SqlDbType.NVarChar, 255).Value =
             hasPayerFilter ? PayerKey(payerName!) : (object)DBNull.Value;
         cmd.Parameters.Add("@Offset", SqlDbType.Int).Value = Math.Max(0, (page - 1) * pageSize);
@@ -343,8 +342,9 @@ WHERE  {codeMatch}
         }
 
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 };
-        cmd.Parameters.Add("@Code", SqlDbType.NVarChar, 400).Value =
-            (object?)denialCode?.Trim().Replace(" ", "").ToUpperInvariant() ?? DBNull.Value;
+        // Same key the real query uses, or the diagnosis would count a different population from
+        // the one that came back empty and send the reader somewhere useless.
+        cmd.Parameters.Add("@Code", SqlDbType.NVarChar, 400).Value = CodeKey(denialCode);
         cmd.Parameters.Add("@Payer", SqlDbType.NVarChar, 255).Value =
             hasPayer ? PayerKey(payerName!) : (object)DBNull.Value;
 
@@ -411,6 +411,33 @@ WHERE  {codeMatch}
             clauses.Add($"{raw} LIKE '%,{prefix}' + @Code + ',%'");
 
         return "(" + string.Join("\n       OR ", clauses) + ")";
+    }
+
+    /// <summary>
+    /// The denial code to filter on, reduced to its common form: "CO-204" and "CO204" both become
+    /// "204", "COM127" becomes "M127".
+    /// </summary>
+    /// <remarks>
+    /// <para>Two things depend on this. The SQL strips spaces and hyphens out of the column before
+    /// comparing, so a parameter still carrying a hyphen could never match a stripped column - that
+    /// alone broke every hyphenated code.</para>
+    /// <para>And the filter builds the prefixed spellings itself ("CO" + code), so the parameter has
+    /// to arrive WITHOUT a prefix or it would look for "COCO-204". The insight table stores the raw
+    /// code the client typed, so reducing it here is what lets the same link work whether the
+    /// workbook says "CO-204", "CO204" or "204".</para>
+    /// </remarks>
+    private static object CodeKey(string? denialCode)
+    {
+        var raw = (denialCode ?? string.Empty).Trim();
+        if (raw.Length == 0) return DBNull.Value;
+
+        var normalized = DenialCodeKey.Normalize(raw);
+
+        // Whatever punctuation survives normalization goes too, so the parameter is shaped exactly
+        // like the column expression it is compared against.
+        var key = new string(normalized.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+
+        return key.Length == 0 ? DBNull.Value : key;
     }
 
     /// <summary>

@@ -29,7 +29,15 @@ public sealed class DenialClaimReportController : Controller
     private const int WeeklyPeriods = 4;
 
     /// <summary>Claim rows per page on the Claim Level tab.</summary>
-    private const int ClaimPageSize = 50;
+    /// <summary>
+    /// Claim rows per page, held to the offered sizes so a hand-edited URL cannot ask for a page
+    /// big enough to pull a lab's whole claim table into memory. An unrecognised value falls back
+    /// to the first offered size, which is also what the select shows.
+    /// </summary>
+    private static int ResolvePageSize(int requested) =>
+        DenialClaimLevelTabViewModel.PageSizes.Contains(requested)
+            ? requested
+            : DenialClaimLevelTabViewModel.PageSizes[0];
 
     private readonly LabSettings _labSettings;
     private readonly LabConfigOptions _labConfig;
@@ -105,7 +113,8 @@ public sealed class DenialClaimReportController : Controller
 
     [HttpGet]
     public async Task<IActionResult> Index(string? lab, string? tab, string? bucket,
-                                           string? denialCode, string? payerName, int claimPage,
+                                           string? denialCode, string? payerName,
+                                           int claimPage, int claimPageSize,
                                            CancellationToken ct)
     {
         ViewData["PageLabel"] = "Denial Claim Report";
@@ -124,7 +133,7 @@ public sealed class DenialClaimReportController : Controller
                 DenialCode = denialCode?.Trim(),
                 PayerName = payerName?.Trim(),
                 Page = claimPage <= 0 ? 1 : claimPage,
-                PageSize = ClaimPageSize
+                PageSize = ResolvePageSize(claimPageSize)
             }
         };
 
@@ -323,14 +332,14 @@ public sealed class DenialClaimReportController : Controller
     /// <summary>The Claim Level panel on its own, for filtering and paging without a page reload.</summary>
     [HttpGet]
     public async Task<IActionResult> ClaimsPanel(string? lab, string? denialCode, string? payerName,
-                                                 int claimPage, CancellationToken ct)
+                                                 int claimPage, int claimPageSize, CancellationToken ct)
     {
         var claims = new DenialClaimLevelTabViewModel
         {
             DenialCode = denialCode?.Trim(),
             PayerName = payerName?.Trim(),
             Page = claimPage <= 0 ? 1 : claimPage,
-            PageSize = ClaimPageSize
+            PageSize = ResolvePageSize(claimPageSize)
         };
 
         if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
