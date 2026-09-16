@@ -34,22 +34,17 @@ public sealed class DenialClaimReportController : Controller
     private readonly LabSettings _labSettings;
     private readonly LabConfigOptions _labConfig;
     private readonly IDenialClaimReportRepository _repo;
-    private readonly IClaimLineRepository _claimLineRepo;
     private readonly ILogger<DenialClaimReportController> _logger;
 
     public DenialClaimReportController(
         LabSettings labSettings,
         LabConfigOptions labConfig,
         IDenialClaimReportRepository repo,
-        IClaimLineRepository claimLineRepo,
         ILogger<DenialClaimReportController> logger)
     {
         _labSettings = labSettings;
         _labConfig = labConfig;
         _repo = repo;
-        // The same repository the Dashboard's Claim Level page uses, so the tab here shows the same
-        // columns and the same rows rather than a second, differently-shaped claim list.
-        _claimLineRepo = claimLineRepo;
         _logger = logger;
     }
 
@@ -250,44 +245,92 @@ public sealed class DenialClaimReportController : Controller
         // Denial reporting only ever looks at denied claims with money still outstanding, so the
         // tab carries those two filters whether or not a denial code was clicked. Without them the
         // tab would open on the lab's whole claim table, which is a different page's job.
-        claims.DisplayColumns = LabClaimLineColumnCatalog.GetClaimColumns(labName);
+        // The same per-lab column set the Dashboard's Claim Level page shows.
+        var columns = LabClaimLineColumnCatalog.GetClaimColumns(labName);
+        claims.DisplayColumns = columns;
 
         try
         {
-            var result = await _claimLineRepo.GetClaimLevelAsync(
-                connectionString,
-                labName,
-                filterPayerName: null,
-                filterPayerTypes: null,
-                filterClaimStatuses: null,
-                filterClinicNames: null,
-                filterDenialCode: DenialClaimDrillThrough.BuildDenialCodeFilter(claims.DenialCode),
-                filterDenialCodeExcludeBlank: true,
-                filterPayerNames: string.IsNullOrWhiteSpace(claims.PayerName) ? null : [claims.PayerName!],
-                filterPayerExcludeBlank: false,
-                filterPanelNames: null,
-                filterPanelExcludeBlank: false,
-                filterAgingBuckets: null,
-                filterFirstBillFrom: null, filterFirstBillTo: null,
-                filterFirstBillNull: false, filterFirstBillExcludeBlank: false,
-                filterChargeEnteredFrom: null, filterChargeEnteredTo: null,
-                filterChargeEnteredNull: false, filterChargeEnteredExcludeBlank: false,
-                filterDosFrom: null, filterDosTo: null, filterDosNull: false,
-                page: claims.Page,
-                pageSize: claims.PageSize,
-                ct: ct);
+            var result = await _repo.GetClaimRowsAsync(
+                connectionString, columns, claims.DenialCode, claims.PayerName,
+                claims.Page, claims.PageSize, ct);
 
-            claims.Records = result.Records;
+            claims.Rows = result.Rows;
             claims.TotalFiltered = result.TotalFiltered;
             claims.TotalAll = result.TotalAll;
 
-            if (result.DisplayColumns.Count > 0) claims.DisplayColumns = result.DisplayColumns;
+            if (result.Columns.Count > 0) claims.DisplayColumns = result.Columns;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Claim Level tab failed for lab {Lab}.", labName);
             claims.Error = "The claim-level rows could not be loaded for this lab.";
         }
+    }
+
+    // ── AJAX panels ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The Denial Insight panel on its own, for switching Current/Previous Week without reloading
+    /// the page. The full page action serves the same content, so the links still work with
+    /// JavaScript off.
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> InsightPanel(string? lab, string? bucket, CancellationToken ct)
+    {
+        var panel = new DenialInsightPanelViewModel
+        {
+            CanEdit = CanEditInsights(),
+            Bucket = DenialInsightBuckets.Normalize(bucket),
+            CurrentWeekStart = SqlDenialClaimReportRepository.WeekStartOf(DateTime.Today)
+        };
+
+        if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
+        {
+            panel.CurrentLab = labName;
+            return PartialView("_DenialInsightPanel", panel);
+        }
+
+        panel.CurrentLab = labName;
+
+        try
+        {
+            panel.Rows = await _repo.GetInsightsAsync(connectionString, panel.Bucket, ct);
+            panel.BucketCounts = new Dictionary<string, int>(
+                await _repo.GetInsightCountsAsync(connectionString, ct), StringComparer.Ordinal);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Denial insight panel failed for lab {Lab}.", labName);
+        }
+
+        return PartialView("_DenialInsightPanel", panel);
+    }
+
+    /// <summary>The Claim Level panel on its own, for filtering and paging without a page reload.</summary>
+    [HttpGet]
+    public async Task<IActionResult> ClaimsPanel(string? lab, string? denialCode, string? payerName,
+                                                 int claimPage, CancellationToken ct)
+    {
+        var claims = new DenialClaimLevelTabViewModel
+        {
+            DenialCode = denialCode?.Trim(),
+            PayerName = payerName?.Trim(),
+            Page = claimPage <= 0 ? 1 : claimPage,
+            PageSize = ClaimPageSize
+        };
+
+        if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
+        {
+            claims.CurrentLab = labName;
+            claims.Error = error;
+            return PartialView("_DenialClaimLevelTab", claims);
+        }
+
+        claims.CurrentLab = labName;
+        await LoadClaimTabAsync(claims, labName, connectionString, ct);
+
+        return PartialView("_DenialClaimLevelTab", claims);
     }
 
     private static string NormalizeTab(string? tab) => tab?.Trim().ToLowerInvariant() switch

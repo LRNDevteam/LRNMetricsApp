@@ -12,6 +12,13 @@ public interface IDenialClaimReportRepository
     /// </summary>
     Task<IReadOnlyList<DenialSummaryGroup>> GetDenialSummaryAsync(string connectionString, CancellationToken ct);
 
+    /// <summary>
+    /// A page of denied claims for the Claim Level tab, filtered to a denial code and optionally an
+    /// insurance.
+    /// </summary>
+    Task<DenialClaimPage> GetClaimRowsAsync(string connectionString, IReadOnlyList<string> columns,
+        string? denialCode, string? payerName, int page, int pageSize, CancellationToken ct);
+
     /// <summary>The insight rows on one tab - Current or Previous.</summary>
     Task<IReadOnlyList<DenialInsightRow>> GetInsightsAsync(string connectionString, string bucket, CancellationToken ct);
 
@@ -39,6 +46,16 @@ public interface IDenialClaimReportRepository
 
 /// <summary>What an import's roll-forward moved, reported back on the page.</summary>
 public sealed record DenialInsightRollResult(int RolledToPrevious, int Archived);
+
+/// <summary>
+/// One page of claim rows, as name/value pairs keyed by the column the catalog asked for. Kept
+/// untyped because the column set is per-lab configuration, not a fixed shape.
+/// </summary>
+public sealed record DenialClaimPage(
+    IReadOnlyList<IReadOnlyDictionary<string, string>> Rows,
+    IReadOnlyList<string> Columns,
+    int TotalFiltered,
+    int TotalAll);
 
 /// <summary>
 /// Denial Claim Report data access, straight against each lab's own database.
@@ -131,6 +148,136 @@ GROUP BY LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [{payerCol}]), ''))),
 
         return rows;
     }
+
+    // ── Claim Level tab ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The denied claims behind a denial insight row.
+    /// </summary>
+    /// <remarks>
+    /// <para>Queried here rather than through the Dashboard's claim repository on purpose. That one
+    /// routes through <c>usp_GetClaimLevelDetails</c> or a CSV depending on the lab's
+    /// <c>LineClaimEnable</c> flag, and matches the denial code with <c>LIKE '%code%'</c> against the
+    /// RAW column - so a drill-through on a normalized code could return nothing at all, or return
+    /// 145 when asked for 45.</para>
+    /// <para>This matches <c>DenialCodeNormalized</c> as a whole token, so "45" finds the claim
+    /// whose cell reads "10, 45, 189" and does not find 145. The payer is compared on a stripped,
+    /// upper-cased form of BOTH payer columns, because the insight workbook spells the payer the way
+    /// the client writes it and the claim table may hold either the raw or the mapped name.</para>
+    /// </remarks>
+    public async Task<DenialClaimPage> GetClaimRowsAsync(
+        string connectionString, IReadOnlyList<string> columns,
+        string? denialCode, string? payerName, int page, int pageSize, CancellationToken ct)
+    {
+        var empty = new DenialClaimPage(Array.Empty<IReadOnlyDictionary<string, string>>(),
+                                        Array.Empty<string>(), 0, 0);
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+
+        if (!await TableExistsAsync(conn, "ClaimLevelData", ct)) return empty;
+
+        var present = await GetColumnsAsync(conn, "ClaimLevelData", ct);
+        if (!present.Contains("DenialCode")) return empty;
+
+        // Only the catalog columns this lab's table actually carries. A column configured but never
+        // loaded would otherwise fail the whole query with "Invalid column name".
+        var selected = columns.Where(present.Contains).ToList();
+        if (selected.Count == 0) selected.Add("DenialCode");
+
+        var selectList = string.Join(", ", selected.Select(c => $"[{c}]"));
+
+        // Denied, with money still outstanding - the same population every figure on this page is
+        // counted from, so a drill-through ties back to the number that was clicked.
+        var where = new List<string>
+        {
+            "[DenialCode] IS NOT NULL",
+            "LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> ''",
+            "TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0"
+        };
+
+        if (!string.IsNullOrWhiteSpace(denialCode))
+        {
+            where.Add(present.Contains("DenialCodeNormalized")
+                // Whole-token match inside a comma-separated list: ",10,45,189," LIKE '%,45,%'.
+                ? "(',' + REPLACE(REPLACE(ISNULL(CONVERT(nvarchar(400), [DenialCodeNormalized]), ''), ' ', ''), ';', ',') + ',')"
+                  + " LIKE '%,' + @Code + ',%'"
+                // A lab that has not run the new import yet has only the raw column to go on.
+                : "REPLACE(CONVERT(nvarchar(400), [DenialCode]), ' ', '') LIKE '%' + @Code + '%'");
+        }
+
+        var payerColumns = new[] { "PayerName_Raw", "PayerName" }.Where(present.Contains).ToList();
+        var hasPayerFilter = !string.IsNullOrWhiteSpace(payerName) && payerColumns.Count > 0;
+
+        if (hasPayerFilter)
+        {
+            // Spacing, punctuation and case drift between the workbook and the claim table, so the
+            // comparison strips all three rather than demanding an exact string.
+            var comparisons = payerColumns.Select(c =>
+                $"REPLACE(REPLACE(REPLACE(UPPER(ISNULL(CONVERT(nvarchar(255), [{c}]), '')), ' ', ''), '.', ''), ',', '') = @Payer");
+
+            where.Add($"({string.Join(" OR ", comparisons)})");
+        }
+
+        var filter = string.Join("\n  AND ", where);
+
+        // ORDER BY is required by OFFSET/FETCH. Highest balance first - the claims worth working.
+        var orderBy = present.Contains("InsuranceBalance")
+            ? "ISNULL(TRY_CONVERT(decimal(18,2), [InsuranceBalance]), 0) DESC"
+            : "(SELECT NULL)";
+
+        var sql = $@"
+SELECT COUNT_BIG(1) FROM dbo.ClaimLevelData
+WHERE [DenialCode] IS NOT NULL
+  AND LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> ''
+  AND TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0;
+
+SELECT COUNT_BIG(1) FROM dbo.ClaimLevelData WHERE {filter};
+
+SELECT {selectList}
+FROM   dbo.ClaimLevelData
+WHERE  {filter}
+ORDER BY {orderBy}
+OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
+
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 };
+        cmd.Parameters.Add("@Code", SqlDbType.NVarChar, 400).Value =
+            (object?)denialCode?.Trim().Replace(" ", "").ToUpperInvariant() ?? DBNull.Value;
+        cmd.Parameters.Add("@Payer", SqlDbType.NVarChar, 255).Value =
+            hasPayerFilter ? PayerKey(payerName!) : (object)DBNull.Value;
+        cmd.Parameters.Add("@Offset", SqlDbType.Int).Value = Math.Max(0, (page - 1) * pageSize);
+        cmd.Parameters.Add("@PageSize", SqlDbType.Int).Value = pageSize;
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        var totalAll = await reader.ReadAsync(ct) ? Convert.ToInt32(reader.GetValue(0)) : 0;
+        await reader.NextResultAsync(ct);
+        var totalFiltered = await reader.ReadAsync(ct) ? Convert.ToInt32(reader.GetValue(0)) : 0;
+        await reader.NextResultAsync(ct);
+
+        var rows = new List<IReadOnlyDictionary<string, string>>();
+        while (await reader.ReadAsync(ct))
+        {
+            var row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                row[reader.GetName(i)] = reader.IsDBNull(i)
+                    ? string.Empty
+                    : reader.GetValue(i)?.ToString()?.Trim() ?? string.Empty;
+            }
+            rows.Add(row);
+        }
+
+        return new DenialClaimPage(rows, selected, totalFiltered, totalAll);
+    }
+
+    /// <summary>
+    /// Payer comparison key. Strips exactly what the SQL above strips - space, full stop, comma -
+    /// and upper-cases. The two have to agree character for character or the filter silently
+    /// matches nothing, which is how this went wrong the first time.
+    /// </summary>
+    private static string PayerKey(string payer) =>
+        payer.ToUpperInvariant().Replace(" ", "").Replace(".", "").Replace(",", "");
 
     // ── Denial insights ───────────────────────────────────────────────────────
 

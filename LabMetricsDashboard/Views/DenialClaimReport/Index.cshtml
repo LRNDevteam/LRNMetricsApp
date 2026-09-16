@@ -181,6 +181,66 @@
                 });
             });
 
+            // ── Panel swapping ───────────────────────────────────────────────
+            // Switching insight weeks, paging claims and drilling through from an insight all
+            // replace one panel instead of reloading the page. Every such link still carries a real
+            // href to the full page, so this is an enhancement - with JavaScript off the links
+            // navigate as they always did.
+            var panes = { insight: document.getElementById('dcr-insight'), claims: document.getElementById('dcr-claims') };
+
+            var showTab = function (key) {
+                var btn = document.querySelector('[data-tab-key="' + key + '"]');
+                if (btn && window.bootstrap) bootstrap.Tab.getOrCreateInstance(btn).show();
+            };
+
+            var loadPanel = function (link) {
+                var key = link.dataset.panel;
+                var pane = panes[key];
+                if (!pane) return false;
+
+                pane.classList.add('panel-loading');
+
+                fetch(link.dataset.panelUrl, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                    .then(function (r) {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.text();
+                    })
+                    .then(function (html) {
+                        pane.innerHTML = html;
+                        // The replaced markup has no handlers of its own - rebind before the user
+                        // can click anything in it.
+                        initPanels();
+                        if (link.dataset.panelTab) showTab(link.dataset.panelTab);
+                        // The address bar follows the panel, so a refresh or a copied link lands
+                        // back on what is actually on screen.
+                        window.history.replaceState({}, '', link.getAttribute('href'));
+                        pane.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                    })
+                    .catch(function () {
+                        // A failed swap falls back to the ordinary navigation rather than leaving
+                        // the user looking at a panel that did not change.
+                        window.location.href = link.getAttribute('href');
+                    })
+                    .finally(function () { pane.classList.remove('panel-loading'); });
+
+                return true;
+            };
+
+            // Delegated, so links inside a freshly swapped panel work without rebinding this.
+            document.addEventListener('click', function (e) {
+                var link = e.target.closest ? e.target.closest('a[data-panel-url]') : null;
+                if (!link) return;
+                if (link.classList.contains('disabled')) { e.preventDefault(); return; }
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;  // let new-tab work
+
+                if (loadPanel(link)) e.preventDefault();
+            });
+
+            // Everything below binds to markup that a panel swap replaces, so it lives in one
+            // function that is called on load and again after every swap. Elements already wired
+            // carry data-bound so a re-run does not stack duplicate handlers on them.
+            function initPanels() {
+
             // The import panel's checkbox picks between replacing Current Week and rolling it
             // forward. Both notes are already in the DOM; this shows the one that applies, so the
             // consequence is on screen before the file is sent.
@@ -208,47 +268,65 @@
                 applyImportMode();
             }
 
-            // Click-to-sort on every Claim Level column. The rows on screen are reordered in place
-            // rather than reloaded, so sorting is instant; it orders the current page, which the
-            // note under the table says when there is more than one.
-            var claimsTable = document.getElementById('claimsTable');
-            if (claimsTable) {
-                var tbody = claimsTable.tBodies[0];
+            // Click-to-sort, used by both the Claim Level grid and the Denial Insight grid. Rows are
+            // reordered in place rather than reloaded, so sorting is instant.
+            //
+            // Money and dates have to compare as values, not as the strings they are rendered as:
+            // "$9,100.00" sorts above "$103,472.40" alphabetically, which is nonsense.
+            var sortKey = function (cell, type) {
+                var text = (cell.textContent || '').trim();
+                if (type === 'number' || /^[-+$(]?[\d,]+(\.\d+)?\)?%?$/.test(text)) {
+                    var negative = /^\(.*\)$/.test(text);
+                    var n = parseFloat(text.replace(/[^0-9.\-]/g, ''));
+                    if (!isNaN(n)) return { n: negative ? -n : n };
+                }
+                var t = Date.parse(text);
+                if (!isNaN(t) && /[\/\-]/.test(text) && text.length >= 6) return { n: t };
+                return { s: text.toLowerCase() };
+            };
 
-                // Money and dates have to compare as values, not as the strings they are rendered
-                // as - "$9,100.00" sorts before "$103,472.40" alphabetically, which is nonsense.
-                var sortKey = function (cell, type) {
-                    var text = (cell.textContent || '').trim();
-                    if (type === 'number' || /^[-+$(]?[\d,]+(\.\d+)?\)?%?$/.test(text)) {
-                        var negative = /^\(.*\)$/.test(text);
-                        var n = parseFloat(text.replace(/[^0-9.\-]/g, ''));
-                        if (!isNaN(n)) return { n: negative ? -n : n };
-                    }
-                    var t = Date.parse(text);
-                    if (!isNaN(t) && /[\/\-]/.test(text) && text.length >= 6) return { n: t };
-                    return { s: text.toLowerCase() };
-                };
+            var makeSortable = function (table) {
+                if (!table) return;
+                var tbody = table.tBodies[0];
+                if (!tbody) return;
 
-                claimsTable.querySelectorAll('th.sortable').forEach(function (th, index) {
+                table.querySelectorAll('th.sortable:not([data-bound])').forEach(function (th, index) {
+                    th.dataset.bound = '1';
+                    th.setAttribute('role', 'button');
+                    th.setAttribute('tabindex', '0');
+
                     var sortNow = function () {
                         var ascending = th.dataset.dir !== 'asc';
 
-                        claimsTable.querySelectorAll('th.sortable').forEach(function (other) {
+                        table.querySelectorAll('th.sortable').forEach(function (other) {
                             if (other !== th) { delete other.dataset.dir; other.classList.remove('sorted'); }
                         });
                         th.dataset.dir = ascending ? 'asc' : 'desc';
                         th.classList.add('sorted');
 
-                        var rows = Array.prototype.slice.call(tbody.rows)
-                            .filter(function (r) { return r.cells.length > 1; });
+                        // Previous Week is split into week blocks by a divider row. Sorting across
+                        // the dividers would destroy the grouping, so each week is sorted on its
+                        // own and the dividers stay where they are.
+                        var blocks = [];
+                        var current = { divider: null, rows: [] };
 
-                        rows.sort(function (a, b) {
+                        Array.prototype.slice.call(tbody.rows).forEach(function (r) {
+                            if (r.classList.contains('week-divider')) {
+                                blocks.push(current);
+                                current = { divider: r, rows: [] };
+                            } else if (r.cells.length > 1) {
+                                current.rows.push(r);
+                            }
+                        });
+                        blocks.push(current);
+
+                        var compare = function (a, b) {
                             var x = sortKey(a.cells[index], th.dataset.sortType);
                             var y = sortKey(b.cells[index], th.dataset.sortType);
 
                             // Blanks sink to the bottom either way - an empty cell is not the
                             // smallest value, it is the absence of one.
-                            var xEmpty = x.s === '' , yEmpty = y.s === '';
+                            var xEmpty = x.s === '', yEmpty = y.s === '';
                             if (xEmpty && !yEmpty) return 1;
                             if (!xEmpty && yEmpty) return -1;
 
@@ -257,9 +335,13 @@
                             else result = String('s' in x ? x.s : x.n).localeCompare(String('s' in y ? y.s : y.n));
 
                             return ascending ? result : -result;
-                        });
+                        };
 
-                        rows.forEach(function (r) { tbody.appendChild(r); });
+                        blocks.forEach(function (block) {
+                            block.rows.sort(compare);
+                            if (block.divider) tbody.appendChild(block.divider);
+                            block.rows.forEach(function (r) { tbody.appendChild(r); });
+                        });
                     };
 
                     th.addEventListener('click', sortNow);
@@ -267,13 +349,34 @@
                         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortNow(); }
                     });
                 });
+            };
+
+            makeSortable(document.getElementById('claimsTable'));
+            makeSortable(document.getElementById('insightTable'));
+
+            // Rows-per-page. Rebuilds the panel URL with the chosen size and reuses the same swap
+            // path the links use, so changing it does not reload the page either.
+            var pageSize = document.getElementById('claimsPageSize');
+            if (pageSize && !pageSize.dataset.bound) {
+                pageSize.dataset.bound = '1';
+                pageSize.addEventListener('change', function () {
+                    var withSize = function (base) {
+                        return base + (base.indexOf('?') >= 0 ? '&' : '?') + 'claimPageSize=' + pageSize.value;
+                    };
+                    var link = document.createElement('a');
+                    link.dataset.panel = 'claims';
+                    link.dataset.panelUrl = withSize(pageSize.dataset.panelUrlTemplate);
+                    link.setAttribute('href', withSize(pageSize.dataset.pageUrlTemplate));
+                    if (!loadPanel(link)) window.location.href = link.getAttribute('href');
+                });
             }
 
             // Fullscreen for the wide tables, matching the Denial Summary page. The .fs-host /
             // .fs-btn styling already ships in denial_dashboard.css, which this page loads.
-            document.querySelectorAll('.fs-btn[data-fs-target]').forEach(function (btn) {
+            document.querySelectorAll('.fs-btn[data-fs-target]:not([data-bound])').forEach(function (btn) {
                 var host = document.querySelector(btn.dataset.fsTarget);
                 if (!host) return;
+                btn.dataset.bound = '1';
 
                 var setState = function (on) {
                     host.classList.toggle('is-fs', on);
@@ -320,7 +423,8 @@
             ];
             var allBands = ['cat-appeal-mr', 'cat-appeal', 'cat-rebill', 'cat-review', 'cat-other'];
 
-            document.querySelectorAll('.cat-input').forEach(function (input) {
+            document.querySelectorAll('.cat-input:not([data-bound])').forEach(function (input) {
+                input.dataset.bound = '1';
                 input.addEventListener('input', function () {
                     var text = (input.value || '').trim().toLowerCase();
                     var cls = 'cat-other';
@@ -350,12 +454,17 @@
             }
 
             var confirmCopy = document.getElementById('confirmCopyBtn');
-            if (confirmCopy) {
+            if (confirmCopy && !confirmCopy.dataset.bound) {
+                confirmCopy.dataset.bound = '1';
                 confirmCopy.addEventListener('click', function () {
                     confirmCopy.disabled = true;
                     document.getElementById('copyPreviousForm').submit();
                 });
             }
+
+            }
+
+            initPanels();
         })();
     </script>
 }

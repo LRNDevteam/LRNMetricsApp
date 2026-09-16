@@ -359,35 +359,34 @@
 }
 
 /* ============================================================================
-   Monthly / Weekly pivot — the Grand Total column
+/* ============================================================================
+   Monthly / Weekly pivot - column widths
 
-   The shared pivot sets .pivot-balance to a fixed 168px under table-layout:
-   fixed, which is enough for a period column but not for the Grand Total,
-   where the figure is the sum of every period and runs several digits longer.
-   At 168px a seven-figure total was clipping its last character.
+   Widths are set on <col>, not on the cells. Under table-layout: fixed the
+   column widths come from <col> first and otherwise from the FIRST row - which
+   in this table is a band of colspans - so a width declared on a <td> never
+   reached the layout at all. That is why the Grand Total balance kept clipping
+   its last digit however wide the cell rule said it was.
 
-   Widening only the total column leaves the period columns exactly as the
-   Denial Summary page has them, so the two tables still line up.
-   ========================================================================= */
-.dcr-page .breakdown-pivot-table.denial-pivot-freeze .pivot-balance.total-col {
-    width: 210px !important;
-    min-width: 210px !important;
-    max-width: 210px !important;
-}
+   Scoped to .dcr-page so the original Denial Summary page, which is happy with
+   its distributed widths, is left exactly as it is. */
+.dcr-page .breakdown-pivot-table.denial-pivot-freeze .pivot-col-index { width: 52px; }
+.dcr-page .breakdown-pivot-table.denial-pivot-freeze .pivot-col-label { width: 360px; }
+.dcr-page .breakdown-pivot-table.denial-pivot-freeze .pivot-col-claims { width: 120px; }
+.dcr-page .breakdown-pivot-table.denial-pivot-freeze .pivot-col-balance { width: 172px; }
 
-.dcr-page .breakdown-pivot-table.denial-pivot-freeze .pivot-claims.total-col {
-    width: 132px !important;
-    min-width: 132px !important;
-    max-width: 132px !important;
-}
-
-/* The last column sat flush against the frame's rounded edge, so its final
-   digit read as cut even when the column itself was wide enough. */
-.dcr-page .breakdown-pivot-frame { padding-right: 2px; }
+/* The Grand Total sums every period, so it carries more digits than any single
+   period column and needs the extra room. */
+.dcr-page .breakdown-pivot-table.denial-pivot-freeze .pivot-col-claims.pivot-col-total { width: 136px; }
+.dcr-page .breakdown-pivot-table.denial-pivot-freeze .pivot-col-balance.pivot-col-total { width: 220px; }
 
 .dcr-page .breakdown-pivot-table.denial-pivot-freeze .total-col {
-    padding-right: .65rem !important;
+    padding-right: .7rem !important;
 }
+
+/* Trailing slack inside the scroll area. Without it the final column ends flush
+   against the frame's rounded border and reads as cut even when it is not. */
+.dcr-page .breakdown-pivot-frame > .breakdown-pivot-table { margin-right: 14px; }
 
 /* ── Fullscreen ───────────────────────────────────────────────────────── */
 /* .fs-host / .fs-bar / .fs-btn styling comes from denial_dashboard.css, which
@@ -631,6 +630,14 @@ body.fs-open { overflow: hidden; }
 
 .dcr-page .claims-pager-label { font-size: .8rem; color: var(--ins-muted); }
 
+/* While a panel is being swapped it dims rather than disappearing, so the page
+   does not jump and the user can see something is happening. */
+.dcr-page .panel-loading {
+    opacity: .55;
+    pointer-events: none;
+    transition: opacity .12s ease;
+}
+
 .dcr-page .claims-sort-note {
     margin-top: .6rem;
     font-size: .74rem;
@@ -683,3 +690,49 @@ body.fs-open { overflow: hidden; }
 @media (prefers-color-scheme: dark) {
     .dcr-page:not([data-theme="light"]) .insight-table tr.week-divider > td { background: #1d2935 !important; }
 }
+
+/* ── Denial Insight: sortable headers & page-size selector ────────────── */
+.dcr-page .insight-table th.sortable {
+    cursor: pointer;
+    user-select: none;
+    padding-right: 1.1rem;
+    position: sticky;
+    top: 0;
+}
+
+.dcr-page .insight-table th.sortable:focus-visible {
+    outline: 2px solid #ffd479;
+    outline-offset: -2px;
+}
+
+.dcr-page .insight-table th.sortable .sort-arrow {
+    position: absolute;
+    right: .3rem;
+    top: .55rem;
+    opacity: .4;
+    font-size: .6rem;
+    line-height: 1;
+}
+
+.dcr-page .insight-table th.sortable .sort-arrow::after { content: "\2195"; }
+.dcr-page .insight-table th.sorted .sort-arrow { opacity: 1; }
+.dcr-page .insight-table th.sorted[data-dir="asc"] .sort-arrow::after { content: "\2191"; }
+.dcr-page .insight-table th.sorted[data-dir="desc"] .sort-arrow::after { content: "\2193"; }
+
+.dcr-page .claims-size {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    margin: 0;
+    font-size: .74rem;
+    color: var(--ins-muted);
+    white-space: nowrap;
+}
+
+.dcr-page .claims-size select { width: auto; font-size: .76rem; }
+
+/* Fullscreen on the insight takes the whole section, so the grid inside it has
+   to give back the height the toolbar, sub-tabs and legend occupy. */
+.dcr-page .fs-host.is-fs .insight-card { border-radius: 0; box-shadow: none; }
+.dcr-page .fs-host.is-fs .insight-scroll { max-height: calc(100vh - 15rem); }
+.dcr-page .fs-host.is-fs { overflow: auto; }

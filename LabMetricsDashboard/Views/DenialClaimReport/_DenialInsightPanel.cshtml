@@ -12,6 +12,9 @@
    rendered as markup. Sanitizing happens on the way in AND on the way out of the database - see
    DenialInsightRichText - so a row edited directly in SQL cannot inject script here. *@
 
+@* fs-host wraps the WHOLE section - toolbar, sub-tabs, grid and legend - so fullscreen gives the
+   entire Denial Insight, not just the scrolling table inside it. *@
+<div class="fs-host" id="insightFsHost">
 <div class="card border-0 shadow-sm insight-card">
     <div class="card-body pb-2">
 
@@ -34,6 +37,10 @@
             </div>
 
             <div class="d-flex flex-wrap gap-2 align-items-center">
+                <button type="button" class="fs-btn" data-fs-target="#insightFsHost">
+                    <i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span>
+                </button>
+
                 <a class="btn btn-sm btn-outline-secondary" asp-action="ExportInsights"
                    asp-route-lab="@Model.CurrentLab" asp-route-bucket="@Model.Bucket">
                     <i class="bi bi-download"></i> Export
@@ -63,7 +70,9 @@
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
             <ul class="nav nav-tabs insight-subtabs">
                 <li class="nav-item">
-                    <a class="nav-link @(isCurrent ? "active" : "")" asp-action="Index"
+                    <a class="nav-link @(isCurrent ? "active" : "")" data-panel="insight"
+                       data-panel-url="@Url.Action("InsightPanel", new { lab = Model.CurrentLab, bucket = DenialInsightBuckets.Current })"
+                       asp-action="Index"
                        asp-route-lab="@Model.CurrentLab" asp-route-tab="insight"
                        asp-route-bucket="@DenialInsightBuckets.Current">
                         Current Week
@@ -71,7 +80,9 @@
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link @(!isCurrent ? "active" : "")" asp-action="Index"
+                    <a class="nav-link @(!isCurrent ? "active" : "")" data-panel="insight"
+                       data-panel-url="@Url.Action("InsightPanel", new { lab = Model.CurrentLab, bucket = DenialInsightBuckets.Previous })"
+                       asp-action="Index"
                        asp-route-lab="@Model.CurrentLab" asp-route-tab="insight"
                        asp-route-bucket="@DenialInsightBuckets.Previous">
                         Previous Week
@@ -98,27 +109,25 @@
             @Html.AntiForgeryToken()
 
             <div class="insight-scroll">
-                <table class="table table-sm insight-table mb-0">
+                <table class="table table-sm insight-table mb-0" id="insightTable">
                     <thead>
                         <tr>
-                            <th class="col-idx">#</th>
-                            <th class="col-code">Denial Codes</th>
-                            <th class="col-desc">Descriptions</th>
-                            <th class="num">
-                                <span class="th-wrap"># of Denial</span>
-                            </th>
-                            <th class="num">Total Balance ($)</th>
-                            <th class="band-impact">Highest $ Impact - Insurance</th>
-                            <th class="band-impact num">Ins. Balance ($)</th>
-                            <th class="band-impact num">$ Impact (%)</th>
+                            <th class="col-idx sortable" data-sort-type="number">#<span class="sort-arrow"></span></th>
+                            <th class="col-code sortable">Denial Codes<span class="sort-arrow"></span></th>
+                            <th class="col-desc sortable">Descriptions<span class="sort-arrow"></span></th>
+                            <th class="num sortable" data-sort-type="number"># of Denial<span class="sort-arrow"></span></th>
+                            <th class="num sortable" data-sort-type="number">Total Balance ($)<span class="sort-arrow"></span></th>
+                            <th class="band-impact sortable">Highest $ Impact - Insurance<span class="sort-arrow"></span></th>
+                            <th class="band-impact num sortable" data-sort-type="number">Ins. Balance ($)<span class="sort-arrow"></span></th>
+                            <th class="band-impact num sortable" data-sort-type="number">$ Impact (%)<span class="sort-arrow"></span></th>
                             <th class="col-rich">Observation</th>
-                            <th class="band-action col-cat">Category</th>
+                            <th class="band-action col-cat sortable">Category<span class="sort-arrow"></span></th>
                             <th class="band-action col-rich">Action</th>
                             <th class="col-feedback">Feedback / Response</th>
-                            <th class="col-resp">Responsibility</th>
-                            <th class="col-date">Discussion Date</th>
-                            <th class="col-date">ETA</th>
-                            <th class="band-closed col-date">Closed Date</th>
+                            <th class="col-resp sortable">Responsibility<span class="sort-arrow"></span></th>
+                            <th class="col-date sortable">Discussion Date<span class="sort-arrow"></span></th>
+                            <th class="col-date sortable">ETA<span class="sort-arrow"></span></th>
+                            <th class="band-closed col-date sortable">Closed Date<span class="sort-arrow"></span></th>
                             @if (editable)
                             {
                                 <th class="col-actions"></th>
@@ -183,7 +192,9 @@
                                         @* Requirement 6i: the denial code opens the claim-level data
                                            filtered to that code - now the Claim Level tab on this
                                            same page, so the filter and the figure stay together. *@
-                                        <a href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = row.DenialCode })"
+                                        <a data-panel="claims" data-panel-tab="claims"
+                                           data-panel-url="@Url.Action("ClaimsPanel", new { lab = Model.CurrentLab, denialCode = row.DenialCode })"
+                                           href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = row.DenialCode })"
                                            title="Open Claim Level filtered to denial code @row.DenialCode">@row.DenialCode</a>
                                         @if (editable)
                                         {
@@ -199,7 +210,9 @@
                                     <td class="cell-impact num">
                                         @* Requirement 6i: the balance opens the claim-level data
                                            filtered by BOTH the denial code and the insurance. *@
-                                        <a href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = row.DenialCode, payerName = row.PayerName })"
+                                        <a data-panel="claims" data-panel-tab="claims"
+                                           data-panel-url="@Url.Action("ClaimsPanel", new { lab = Model.CurrentLab, denialCode = row.DenialCode, payerName = row.PayerName })"
+                                           href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = row.DenialCode, payerName = row.PayerName })"
                                            title="@(string.IsNullOrWhiteSpace(row.PayerName)
                                                      ? $"Open Claim Level filtered to denial code {row.DenialCode}"
                                                      : $"Open Claim Level filtered to {row.DenialCode} and {row.PayerName}")">@Acct2(row.InsuranceBalance)</a>
@@ -361,6 +374,7 @@
             </div>
         }
     </div>
+</div>
 </div>
 
 @if (Model.CanEdit && isCurrent)

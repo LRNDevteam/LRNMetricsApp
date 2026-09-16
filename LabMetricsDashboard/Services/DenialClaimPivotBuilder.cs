@@ -5,22 +5,26 @@ using LabMetricsDashboard.ViewModels;
 namespace LabMetricsDashboard.Services;
 
 /// <summary>
-/// Turns the aggregated denial groups into the same pivot the Denial Summary page has always shown:
-/// an insurance row, its denial codes underneath, reporting periods across the top, and No. of
-/// Claims / Insurance Balance in every cell.
+/// Builds the Top Payors &amp; Denials pivot in the shape the client's own workbook uses: an
+/// insurance row lettered A, B, C, its top denial codes numbered underneath it, reporting periods
+/// across the top, and No. of Claims / Denial Balance in every cell.
+///
+/// <para>Monthly carries a year band with a per-year subtotal column ("2025 | Total") before the
+/// Grand Total, matching the workbook. Weekly shows its four weeks plain - a subtotal band over
+/// four weeks of one month would be a column that repeats the total beside it.</para>
 ///
 /// <para>It builds <see cref="BreakdownPivotViewModel"/> so the existing
 /// <c>_BreakdownPivotTable</c> partial renders it - the frozen first columns, the collapsible payer
-/// groups and the sticky header bands all come free, and the two pages cannot drift apart visually
-/// because they are the same table.</para>
+/// groups and the sticky header bands all come free.</para>
 /// </summary>
 public static class DenialClaimPivotBuilder
 {
     /// <summary>
-    /// How many payers get their own row. The rest roll into one "All other insurances" row rather
-    /// than being dropped, so the column totals still add up to the lab's real position.
+    /// How many payers get a row. The rest are dropped rather than rolled into an "all other" row:
+    /// the workbook this mirrors reports the payers that carry the AR, and a catch-all row is not
+    /// something anyone works.
     /// </summary>
-    public const int DefaultTopPayers = 15;
+    public const int DefaultTopPayers = 10;
 
     /// <summary>
     /// Denial codes shown under each payer. Three, per the reporting spec - the point of the
@@ -28,8 +32,21 @@ public static class DenialClaimPivotBuilder
     /// </summary>
     public const int DefaultTopDenialsPerPayer = 3;
 
-    private const string OtherPayersLabel = "All other insurances";
-    private const string OtherDenialsLabel = "All other denial codes";
+    /// <summary>Row-label letters for the payers: A, B, C … then AA, AB on the unlikely overflow.</summary>
+    private static string PayerLetter(int index)
+    {
+        var label = string.Empty;
+        var n = index;
+
+        do
+        {
+            label = (char)('A' + n % 26) + label;
+            n = n / 26 - 1;
+        }
+        while (n >= 0);
+
+        return label;
+    }
 
     public static BreakdownPivotViewModel Build(
         IReadOnlyList<DenialSummaryGroup> groups,
@@ -51,27 +68,24 @@ public static class DenialClaimPivotBuilder
         var dated = groups.Where(g => g.DenialDate.HasValue && !string.IsNullOrWhiteSpace(g.DenialCodeNormalized)).ToList();
         if (dated.Count == 0) return model;
 
-        var periods = BuildPeriods(dated, weekly, maxPeriods);
-        if (periods.Count == 0) return model;
-
-        model.Periods = periods;
-        model.HeaderTitle = periods.Count == 1
-            ? periods[0].Label
-            : $"{periods[0].Label} — {periods[^1].Label}";
+        var months = BuildBasePeriods(dated, weekly, maxPeriods);
+        if (months.Count == 0) return model;
 
         // Only what the columns can show. A group outside the window would otherwise inflate the row
         // total past the sum of its own cells.
-        var earliest = periods[0].StartDate;
-        var latest = periods[^1].EndDate;
+        var earliest = months[0].Start;
+        var latest = months[^1].End;
         var inWindow = dated
             .Where(g => g.DenialDate!.Value.Date >= earliest && g.DenialDate.Value.Date <= latest)
             .ToList();
 
         if (inWindow.Count == 0) return model;
 
-        model.ColumnGroups = BuildColumnGroups(periods, weekly, model.GrandTotalTitle);
+        // Monthly gains a subtotal column per year; weekly stays as its four weeks.
+        var columns = weekly ? months : WithYearTotals(months);
 
-        var periodOf = BuildPeriodIndex(periods);
+        model.Periods = columns.Select(c => c.ToPeriod()).ToList();
+        model.ColumnGroups = BuildColumnGroups(columns, weekly, model.GrandTotalTitle);
 
         var payerTotals = inWindow
             .GroupBy(g => Key(g.PayerName), StringComparer.OrdinalIgnoreCase)
@@ -89,22 +103,23 @@ public static class DenialClaimPivotBuilder
             .ToList();
 
         var grandBalance = payerTotals.Sum(p => p.Balance);
-
         var ranked = payerTotals.Take(topPayers).ToList();
-        var remainder = payerTotals.Skip(topPayers).SelectMany(p => p.Groups).ToList();
 
+        // "Covering N% of the AR" in the caption - the share of the balance these payers hold.
         model.CoveragePercentage = grandBalance <= 0m
             ? 0m
-            : Math.Round(ranked.Sum(p => p.Balance) / grandBalance * 100m, 1);
+            : Math.Round(ranked.Sum(p => p.Balance) / grandBalance * 100m, 0);
+
+        model.HeaderTitle = $"Top Payors & Denials | Covering {model.CoveragePercentage:0}% of the AR | Denial Posted Date";
 
         var rows = new List<BreakdownPivotRow>();
-        var index = 0;
+        var payerIndex = 0;
+        var denialNumber = 0;
 
         foreach (var payer in ranked)
         {
-            index++;
-            rows.Add(BuildRow(index.ToString(CultureInfo.InvariantCulture), payer.Label,
-                isInsurance: true, payer.Groups, periods, periodOf));
+            rows.Add(BuildRow(PayerLetter(payerIndex++), payer.Label, isInsurance: true,
+                              payer.Groups, columns));
 
             var denials = payer.Groups
                 .GroupBy(g => g.DenialCodeNormalized, StringComparer.OrdinalIgnoreCase)
@@ -119,59 +134,155 @@ public static class DenialClaimPivotBuilder
                 // Same rule as the payer rank above: claim count first, balance to break a tie.
                 .OrderByDescending(d => d.Claims)
                 .ThenByDescending(d => d.Balance)
+                .Take(topDenialsPerPayer)
                 .ToList();
 
-            var shown = denials.Take(topDenialsPerPayer).ToList();
-            var rest = denials.Skip(topDenialsPerPayer).SelectMany(d => d.Groups).ToList();
-
-            foreach (var denial in shown)
-                rows.Add(BuildRow(string.Empty, DenialLabel(denial.Code, denial.Description),
-                                  isInsurance: false, denial.Groups, periods, periodOf));
-
-            if (rest.Count > 0)
-                rows.Add(BuildRow(string.Empty, OtherDenialsLabel, isInsurance: false, rest, periods, periodOf));
-        }
-
-        if (remainder.Count > 0)
-        {
-            index++;
-            rows.Add(BuildRow(index.ToString(CultureInfo.InvariantCulture), OtherPayersLabel,
-                isInsurance: true, remainder, periods, periodOf));
+            foreach (var denial in denials)
+            {
+                // The numbering runs continuously down the whole table, as it does in the workbook -
+                // it is a reference for "row 14", not a rank within the payer.
+                rows.Add(BuildRow((++denialNumber).ToString(CultureInfo.InvariantCulture),
+                                  DenialLabel(denial.Code, denial.Description),
+                                  isInsurance: false, denial.Groups, columns));
+            }
         }
 
         model.Rows = rows;
 
-        model.TotalsByPeriod = periods
-            .Select(p => Cell(inWindow.Where(g => periodOf(g.DenialDate!.Value) == p.Key)))
-            .ToList();
+        // Totals sum the payers SHOWN, so the footer and the rows above it agree. Dropping the
+        // "all other" row means this is the top-N total, which is what the caption says it is.
+        var shownGroups = ranked.SelectMany(p => p.Groups).ToList();
 
-        model.GrandTotalClaimCount = inWindow.Sum(g => g.ClaimCount);
-        model.GrandTotalBalance = inWindow.Sum(g => g.InsuranceBalance);
+        model.TotalsByPeriod = columns.Select(c => Cell(c.Rows(shownGroups))).ToList();
+        model.GrandTotalClaimCount = shownGroups.Sum(g => g.ClaimCount);
+        model.GrandTotalBalance = shownGroups.Sum(g => g.InsuranceBalance);
 
         return model;
     }
+
+    // ── Columns ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// One column pair in the pivot: either a real reporting period, or a year subtotal that
+    /// aggregates the periods of that year which are on screen.
+    /// </summary>
+    private sealed record PivotColumn(string Key, string Label, DateTime Start, DateTime End, int Year, bool IsYearTotal)
+    {
+        /// <summary>The groups this column covers.</summary>
+        public IReadOnlyList<DenialSummaryGroup> Rows(IEnumerable<DenialSummaryGroup> source) =>
+            source.Where(g => g.DenialDate.HasValue
+                              && g.DenialDate.Value.Date >= Start
+                              && g.DenialDate.Value.Date <= End).ToList();
+
+        public BreakdownPivotPeriod ToPeriod() => new()
+        {
+            Key = Key,
+            Label = Label,
+            StartDate = Start,
+            EndDate = End,
+            Year = Year,
+            Month = IsYearTotal ? null : Start.Month,
+            IsYearTotal = IsYearTotal
+        };
+    }
+
+    /// <summary>
+    /// The newest <paramref name="maxPeriods"/> periods the lab has denials in, oldest first.
+    /// </summary>
+    /// <remarks>
+    /// Built from the periods that actually carry data rather than from a calendar range, so a lab
+    /// with a gap in its history does not get empty columns taking up the width.
+    /// </remarks>
+    private static List<PivotColumn> BuildBasePeriods(
+        IReadOnlyList<DenialSummaryGroup> groups, bool weekly, int maxPeriods)
+    {
+        return groups
+            .Select(g => weekly
+                ? SqlDenialClaimReportRepository.WeekStartOf(g.DenialDate!.Value)
+                : new DateTime(g.DenialDate!.Value.Year, g.DenialDate.Value.Month, 1))
+            .Distinct()
+            .OrderByDescending(d => d)
+            .Take(maxPeriods)
+            .OrderBy(d => d)
+            .Select(start =>
+            {
+                var end = weekly ? start.AddDays(6) : start.AddMonths(1).AddDays(-1);
+                return new PivotColumn(
+                    start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    weekly ? $"{start:dd MMM} - {end:dd MMM}" : start.ToString("MMM", CultureInfo.InvariantCulture),
+                    start, end, start.Year, IsYearTotal: false);
+            })
+            .ToList();
+    }
+
+    /// <summary>
+    /// Inserts a "2025 | Total" column after the last month of each year.
+    /// <para>The subtotal covers only the months on screen, not the whole calendar year - so a view
+    /// showing Nov and Dec reports a 2025 total of Nov + Dec, which is what the two columns beside
+    /// it add up to.</para>
+    /// </summary>
+    private static List<PivotColumn> WithYearTotals(IReadOnlyList<PivotColumn> months)
+    {
+        var columns = new List<PivotColumn>();
+
+        foreach (var year in months.Select(m => m.Year).Distinct().OrderBy(y => y))
+        {
+            var inYear = months.Where(m => m.Year == year).ToList();
+            columns.AddRange(inYear);
+
+            columns.Add(new PivotColumn(
+                $"total-{year}",
+                $"{year} | Total",
+                inYear[0].Start,
+                inYear[^1].End,
+                year,
+                IsYearTotal: true));
+        }
+
+        return columns;
+    }
+
+    /// <summary>
+    /// The band above the period headers: the year on a monthly pivot, spanning its months and that
+    /// year's subtotal column. The partial renders it only when a year-total column is present, so
+    /// weekly gets nothing and needs nothing.
+    /// </summary>
+    private static List<BreakdownPivotColumnGroup> BuildColumnGroups(
+        IReadOnlyList<PivotColumn> columns, bool weekly, string grandTotalTitle)
+    {
+        var groups = new List<BreakdownPivotColumnGroup>();
+
+        if (!weekly)
+        {
+            foreach (var year in columns.Select(c => c.Year).Distinct().OrderBy(y => y))
+            {
+                groups.Add(new BreakdownPivotColumnGroup
+                {
+                    Label = year.ToString(CultureInfo.InvariantCulture),
+                    ColumnSpan = columns.Count(c => c.Year == year) * 2
+                });
+            }
+        }
+
+        groups.Add(new BreakdownPivotColumnGroup { Label = grandTotalTitle, ColumnSpan = 2 });
+        return groups;
+    }
+
+    // ── Rows ──────────────────────────────────────────────────────────────────
 
     private static BreakdownPivotRow BuildRow(
         string indexLabel,
         string label,
         bool isInsurance,
         IReadOnlyList<DenialSummaryGroup> groups,
-        IReadOnlyList<BreakdownPivotPeriod> periods,
-        Func<DateTime, string?> periodOf)
+        IReadOnlyList<PivotColumn> columns)
     {
-        var byPeriod = groups
-            .GroupBy(g => periodOf(g.DenialDate!.Value))
-            .Where(g => g.Key is not null)
-            .ToDictionary(g => g.Key!, g => Cell(g), StringComparer.Ordinal);
-
         return new BreakdownPivotRow
         {
             IndexLabel = indexLabel,
             Label = label,
             IsInsuranceRow = isInsurance,
-            Cells = periods
-                .Select(p => byPeriod.TryGetValue(p.Key, out var cell) ? cell : new BreakdownPivotCell())
-                .ToList(),
+            Cells = columns.Select(c => Cell(c.Rows(groups))).ToList(),
             TotalClaimCount = groups.Sum(g => g.ClaimCount),
             TotalBalance = groups.Sum(g => g.InsuranceBalance)
         };
@@ -188,103 +299,14 @@ public static class DenialClaimPivotBuilder
     }
 
     /// <summary>
-    /// The newest <paramref name="maxPeriods"/> periods the lab has denials in, oldest first.
+    /// A denial row's label: the code, then its description - "M127 - Missing patient medical
+    /// record for this service."
     /// </summary>
     /// <remarks>
-    /// Built from the periods that actually carry data rather than from a calendar range, so a lab
-    /// with a gap in its history does not get empty columns taking up the width.
-    /// </remarks>
-    private static List<BreakdownPivotPeriod> BuildPeriods(
-        IReadOnlyList<DenialSummaryGroup> groups, bool weekly, int maxPeriods)
-    {
-        return groups
-            .Select(g => weekly
-                ? SqlDenialClaimReportRepository.WeekStartOf(g.DenialDate!.Value)
-                : new DateTime(g.DenialDate!.Value.Year, g.DenialDate.Value.Month, 1))
-            .Distinct()
-            .OrderByDescending(d => d)
-            .Take(maxPeriods)
-            .OrderBy(d => d)
-            .Select(start =>
-            {
-                var end = weekly ? start.AddDays(6) : start.AddMonths(1).AddDays(-1);
-                return new BreakdownPivotPeriod
-                {
-                    Key = start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    Label = weekly
-                        ? $"{start:dd MMM} - {end:dd MMM}"
-                        : start.ToString("MMM yyyy", CultureInfo.InvariantCulture),
-                    StartDate = start,
-                    EndDate = end,
-                    Year = start.Year,
-                    Month = weekly ? null : start.Month,
-                    IsYearTotal = false
-                };
-            })
-            .ToList();
-    }
-
-    /// <summary>
-    /// The band above the period headers: the year on a monthly pivot, the month on a weekly one.
-    /// <para>The partial only renders this band when a period reports <c>IsYearTotal</c>, which none
-    /// of these do, so it is supplied for the Excel export and left unrendered on screen.</para>
-    /// </summary>
-    private static List<BreakdownPivotColumnGroup> BuildColumnGroups(
-        IReadOnlyList<BreakdownPivotPeriod> periods, bool weekly, string grandTotalTitle)
-    {
-        var groups = new List<BreakdownPivotColumnGroup>();
-        string? current = null;
-
-        foreach (var period in periods)
-        {
-            var label = weekly
-                ? period.StartDate.ToString("MMM yyyy", CultureInfo.InvariantCulture)
-                : period.Year.ToString(CultureInfo.InvariantCulture);
-
-            if (label == current && groups.Count > 0)
-            {
-                groups[^1].ColumnSpan += 2;
-                continue;
-            }
-
-            groups.Add(new BreakdownPivotColumnGroup { Label = label, ColumnSpan = 2 });
-            current = label;
-        }
-
-        groups.Add(new BreakdownPivotColumnGroup { Label = grandTotalTitle, ColumnSpan = 2 });
-        return groups;
-    }
-
-    /// <summary>Maps a denial date onto its period key, or null when it falls outside the window.</summary>
-    private static Func<DateTime, string?> BuildPeriodIndex(IReadOnlyList<BreakdownPivotPeriod> periods)
-    {
-        var byKey = periods.ToDictionary(
-            p => p.Key,
-            p => (p.StartDate, p.EndDate),
-            StringComparer.Ordinal);
-
-        var ordered = periods.Select(p => p.Key).ToList();
-
-        return date =>
-        {
-            foreach (var key in ordered)
-            {
-                var (start, end) = byKey[key];
-                if (date.Date >= start && date.Date <= end) return key;
-            }
-            return null;
-        };
-    }
-
-    /// <summary>
-    /// A denial row's label: the code, then its description.
-    /// </summary>
-    /// <remarks>
-    /// The Master File Processor writes DenialDescription already prefixed with the code
-    /// ("M127 - Missing patient medical record..."), because a multi-code claim needs each
-    /// description paired with the code it belongs to. Prepending the code again produced
-    /// "M127 — M127 - Missing patient medical record...", so a description that already opens with
-    /// the code is used as it stands.
+    /// The Master File Processor writes DenialDescription already prefixed with the code, because a
+    /// multi-code claim needs each description paired with the code it belongs to. Prepending the
+    /// code again produced "M127 - M127 - Missing...", so a description that already opens with the
+    /// code is used as it stands.
     /// </remarks>
     private static string DenialLabel(string code, string description)
     {
@@ -294,7 +316,7 @@ public static class DenialClaimPivotBuilder
 
         return text.StartsWith(code, StringComparison.OrdinalIgnoreCase)
             ? text
-            : $"{code} — {text}";
+            : $"{code} - {text}";
     }
 
     private static string Key(string? value) =>

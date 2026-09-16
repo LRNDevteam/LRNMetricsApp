@@ -108,10 +108,19 @@ public sealed class DenialClaimLevelTabViewModel
     public string? PayerName { get; set; }
 
     public IReadOnlyList<string> DisplayColumns { get; set; } = Array.Empty<string>();
-    public IReadOnlyList<ClaimRecord> Records { get; set; } = Array.Empty<ClaimRecord>();
+
+    /// <summary>Claim rows keyed by column name - the column set is per-lab config, not a fixed shape.</summary>
+    public IReadOnlyList<IReadOnlyDictionary<string, string>> Rows { get; set; } =
+        Array.Empty<IReadOnlyDictionary<string, string>>();
+
+    /// <summary>
+    /// Rows-per-page choices. A larger page is also how the column sort covers the whole result
+    /// set rather than one page of it, so the range runs well past a comfortable screenful.
+    /// </summary>
+    public static readonly int[] PageSizes = [100, 500, 1000, 2500];
 
     public int Page { get; set; } = 1;
-    public int PageSize { get; set; } = 50;
+    public int PageSize { get; set; } = 100;
     public int TotalFiltered { get; set; }
     public int TotalAll { get; set; }
 
