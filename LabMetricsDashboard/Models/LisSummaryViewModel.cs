@@ -104,7 +104,8 @@ public sealed class LisSummaryFilters
     public DateOnly? CollectedFrom { get; set; }
     public DateOnly? CollectedTo { get; set; }
     public string DateType { get; set; } = "Collected";
-    public string DateRange { get; set; } = "last-month";
+    // Default: Custom range with no From/To → repository applies no date filter (all data).
+    public string DateRange { get; set; } = "custom";
     public DateOnly? DateFrom { get; set; }
     public DateOnly? DateTo { get; set; }
     public string? Panel { get; set; }
@@ -162,6 +163,10 @@ public sealed class LisSummaryFilters
                 var firstOfLastMonth = firstOfThisMonth.AddMonths(-1);
                 DateFrom = firstOfLastMonth;
                 DateTo = firstOfThisMonth.AddDays(-1);
+                break;
+            case "custom":
+                // Explicit all-data mode: never invent From/To when custom is selected.
+                // Both null → repository applies no date-range filter.
                 break;
             default:
                 if (DateFrom.HasValue && !DateTo.HasValue)

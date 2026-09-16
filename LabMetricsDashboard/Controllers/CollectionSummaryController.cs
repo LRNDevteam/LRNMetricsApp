@@ -441,12 +441,8 @@ public class CollectionSummaryController : Controller
                     return PartialView("_CsTabWcv", vm);
 
                 case "panelavg":
-                    var pa = useAggregates
-                        ? await _repo.GetPanelAveragesFromAggregatesAsync(connStr, aggregatePrefix!, ct)
-                        : await _repo.GetPanelAveragesAsync(connStr, payerFilter, panelFilter,
-                            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-                    vm.PanelAverages = pa.PanelRows;
-                    return PartialView("_CsTabPanelAvg", vm);
+                    // Panel Averages tab is hidden from Collection Summary UI.
+                    return Content(string.Empty);
 
                 case "avgpay":
                     var ap = useAggregates
@@ -576,9 +572,7 @@ public class CollectionSummaryController : Controller
         var cptPaymentPctTask = _repo.GetCptPaymentPctAsync(
             connStr, payerFilter, panelFilter,
             fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-        var panelAveragesTask = _repo.GetPanelAveragesAsync(
-            connStr, payerFilter, panelFilter,
-            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        // Panel Averages omitted from Excel / UI — do not load.
         var avgPaymentsTask = _repo.GetAvgPaymentsAsync(
             connStr, payerFilter, panelFilter,
             fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
@@ -651,8 +645,7 @@ public class CollectionSummaryController : Controller
                 insurancePaymentPctTask, new InsurancePaymentPctResult([]), "Insurance vs Payment %", selectedLab, _logger)).Rows,
             CptPaymentPct = (await AwaitOrDefaultAsync(
                 cptPaymentPctTask, new CptPaymentPctResult([]), "CPT vs Payment %", selectedLab, _logger)).Rows,
-            PanelAverages = (await AwaitOrDefaultAsync(
-                panelAveragesTask, new PanelAveragesResult([]), "Panel Averages", selectedLab, _logger)).PanelRows,
+            PanelAverages = [],
             AvgPayments = await AwaitOrDefaultAsync(
                 avgPaymentsTask, new PanelAveragesResult([]), "Avg Payments", selectedLab, _logger),
             AvgPaymentsLast3Months = await AwaitOrDefaultAsync(

@@ -117,7 +117,12 @@
         expandBtn: document.getElementById("riExpandBtn"),
         expandBody: document.getElementById("riExpandBody"),
         floatWin: document.getElementById("riFloat"),
-        minimizeBtn: document.getElementById("riMinimizeBtn")
+        minimizeBtn: document.getElementById("riMinimizeBtn"),
+        deleteRiskBadge: document.getElementById("riDeleteRiskBadge"),
+        deleteStatusBadge: document.getElementById("riDeleteStatusBadge"),
+        deleteEntry: document.getElementById("riDeleteEntry"),
+        deleteInsightPreview: document.getElementById("riDeleteInsightPreview"),
+        deleteConfirmBtn: document.getElementById("riDeleteConfirmBtn")
     };
 
     let lookups = { risks: [], statuses: [], responsibleParties: [] };
@@ -130,6 +135,8 @@
     let modal = null;
     let historyModal = null;
     let archiveModal = null;
+    let deleteModal = null;
+    let pendingDeleteId = null;
 
     function showAlert(msg, kind) {
         if (!el.alert) return;
@@ -251,6 +258,75 @@
         container.querySelectorAll("[data-hist]").forEach(btn => {
             btn.onclick = () => openHistory(+btn.getAttribute("data-hist"));
         });
+        container.querySelectorAll("[data-del]").forEach(btn => {
+            btn.onclick = () => deleteNote(+btn.getAttribute("data-del"));
+        });
+    }
+
+    function openDeleteConfirm(noteId) {
+        if (!noteId) return;
+        const row = rows.find(r => Number(r.noteId) === Number(noteId));
+        if (row && row.archiveStatus === "Archived") {
+            showAlert("Archived notes cannot be deleted.", "error");
+            return;
+        }
+        pendingDeleteId = noteId;
+        const risk = riskDisplay(row || {});
+        const riskCodeVal = (row && row.riskCode) || (risk === "High" ? "Red" : risk === "Low" ? "Green" : "Yellow");
+        const st = (row && (row.statusLabel || row.statusCode)) || "—";
+        if (el.deleteRiskBadge) {
+            el.deleteRiskBadge.textContent = risk || "Risk";
+            el.deleteRiskBadge.className = "ri-badge risk-" + riskCodeVal;
+        }
+        if (el.deleteStatusBadge) {
+            el.deleteStatusBadge.textContent = st;
+            const code = (row && row.statusCode) || "";
+            el.deleteStatusBadge.className = "ri-badge status-" + (/discuss/i.test(st) || /discuss/i.test(code) ? "Discuss" : (code || "Open"));
+        }
+        if (el.deleteEntry) el.deleteEntry.textContent = row && row.entryNo != null ? ("#" + row.entryNo) : ("#" + noteId);
+        if (el.deleteInsightPreview) {
+            const text = stripHtml((row && row.insights) || "").trim();
+            el.deleteInsightPreview.textContent = text || "No insight text for this row.";
+        }
+        if (el.deleteConfirmBtn) {
+            el.deleteConfirmBtn.disabled = false;
+            el.deleteConfirmBtn.innerHTML = '<i class="bi bi-trash3" aria-hidden="true"></i> Delete insight';
+        }
+        if (!deleteModal && window.bootstrap) {
+            const node = document.getElementById("riDeleteModal");
+            if (node) deleteModal = new bootstrap.Modal(node);
+        }
+        deleteModal && deleteModal.show();
+    }
+
+    async function confirmDeleteInsight() {
+        const noteId = pendingDeleteId;
+        if (!noteId) return;
+        if (el.deleteConfirmBtn) {
+            el.deleteConfirmBtn.disabled = true;
+            el.deleteConfirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Deleting…';
+        }
+        try {
+            await postJson(`${apiBase}/Notes/Delete?${q({ lab: ctx.lab, id: noteId })}`);
+            pendingDeleteId = null;
+            deleteModal && deleteModal.hide();
+            showAlert("Insight deleted.", "ok");
+            await loadRows();
+            if (editing && Number(editing.noteId) === Number(noteId)) {
+                editing = null;
+                if (modal) modal.hide();
+            }
+        } catch (e) {
+            showAlert(e.message || "Delete failed.", "error");
+            if (el.deleteConfirmBtn) {
+                el.deleteConfirmBtn.disabled = false;
+                el.deleteConfirmBtn.innerHTML = '<i class="bi bi-trash3" aria-hidden="true"></i> Delete insight';
+            }
+        }
+    }
+
+    function deleteNote(noteId) {
+        openDeleteConfirm(noteId);
     }
 
     function buildTableHtml(opts) {
@@ -271,9 +347,11 @@
             const discuss = /yet to discuss|discuss/i.test(st);
             const link = n.dataLink ? `<a class="ri-link" href="${esc(n.dataLink)}" target="_blank" rel="noopener">Link</a>` : "";
             const carry = n.archiveStatus === "Carry Forward" ? `<span class="ri-carry">Carry Forward</span>` : "";
+            const canDelete = n.archiveStatus !== "Archived";
             const acts = float ? "" : `<td class="ri-row-acts">
                     <button type="button" class="btn btn-sm btn-outline-secondary" data-view="${n.noteId}">View</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" data-hist="${n.noteId}">History</button>
+                    ${canDelete ? `<button type="button" class="btn btn-sm btn-outline-danger" data-del="${n.noteId}">Delete</button>` : ""}
                 </td>`;
             return `<tr>
                 <td>${esc(n.entryNo ?? "")}${carry}</td>
@@ -782,6 +860,7 @@
         openDetail(null, false);
     });
     el.save.addEventListener("click", save);
+    if (el.deleteConfirmBtn) el.deleteConfirmBtn.addEventListener("click", () => { confirmDeleteInsight(); });
     if (el.archiveBtn) el.archiveBtn.addEventListener("click", () => { ensureLoaded().then(openArchive); });
     if (el.expandBtn) el.expandBtn.addEventListener("click", async () => {
         setOpen(true);

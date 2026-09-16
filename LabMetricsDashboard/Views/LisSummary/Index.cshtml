@@ -1616,9 +1616,7 @@ else
             customDateBlocks.forEach(block => block.classList.toggle('is-hidden', !isCustom));
 
             if (isCustom) {
-                if (fromInput.value && !toInput.value) {
-                    toInput.value = formatDate(today);
-                }
+                // Custom with blank dates = ALL records (do not invent From/To).
                 return;
             }
 

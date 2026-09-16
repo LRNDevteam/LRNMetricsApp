@@ -227,9 +227,7 @@ public sealed class AllLabsCollectionExcelBuilder
         var cptPctTask      = useAggregates
             ? _repo.GetCptPaymentPctFromAggregatesAsync(connStr, aggregatePrefix!, ct)
             : _repo.GetCptPaymentPctAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
-        var panelAvgTask    = useAggregates
-            ? _repo.GetPanelAveragesFromAggregatesAsync(connStr, aggregatePrefix!, ct)
-            : _repo.GetPanelAveragesAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
+        // Panel Averages omitted from Excel / UI — do not load.
         var avgPayTask      = useAggregates
             ? _repo.GetAvgPaymentsFromAggregatesAsync(connStr, aggregatePrefix!, ct)
             : _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
@@ -254,7 +252,7 @@ public sealed class AllLabsCollectionExcelBuilder
         await Task.WhenAll(
             monthlyTask, weeklyTask, reimbTask, totPayTask,
             agingTask, panelPayTask, insPctTask,
-            cptPctTask, panelAvgTask, avgPayTask, avgPay3Task, statusTask, providerTask,
+            cptPctTask, avgPayTask, avgPay3Task, statusTask, providerTask,
             repPayTask, insVsPayTask,
             claimCountTask, lineCountTask);
 
@@ -286,7 +284,7 @@ public sealed class AllLabsCollectionExcelBuilder
             PanelPayments         = (await panelPayTask).Rows,
             InsurancePaymentPct   = (await insPctTask).Rows,
             CptPaymentPct         = (await cptPctTask).Rows,
-            PanelAverages         = (await panelAvgTask).PanelRows,
+            PanelAverages         = [],
             AvgPayments           = await avgPayTask,
             AvgPaymentsLast3Months = await avgPay3Task,
             StatusSummary         = await statusTask,

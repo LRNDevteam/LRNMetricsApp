@@ -101,7 +101,8 @@
    its data-ag-group id; the handler is delegated from document further down this
    file so it also works for lazily-loaded tab partials.
    These rules sit after the striping rules on purpose: same specificity, later wins. */
-.cs-rpt-table tbody tr.cs-ag-group { cursor: pointer; user-select: none; }
+.cs-rpt-table tbody tr.cs-ag-group,
+.cs-pr-table tbody tr.cs-ag-group { cursor: pointer; user-select: none; }
 .cs-rpt-table tbody tr.cs-ag-group td { background: #f0fdf4; }
 .cs-rpt-table tbody tr.cs-ag-group:hover td { background: #dcfce7; }
 .cs-ag-chevron {
@@ -110,8 +111,11 @@
     transition: transform .18s ease;
 }
 tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
-.cs-rpt-table tbody tr.cs-ag-child { display: none; }
-.cs-rpt-table tbody tr.cs-ag-child.cs-ag-shown { display: table-row; }
+/* Default CLOSED — works for both legacy .cs-rpt-table and Monthly .cs-pr-table */
+.cs-rpt-table tbody tr.cs-ag-child,
+.cs-pr-table tbody tr.cs-ag-child { display: none !important; }
+.cs-rpt-table tbody tr.cs-ag-child.cs-ag-shown,
+.cs-pr-table tbody tr.cs-ag-child.cs-ag-shown { display: table-row !important; }
 .cs-rpt-table tbody tr:hover td { background: #eef4ff; }
 
 /* Reimbursement bar */
@@ -400,40 +404,120 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
     border-right: 2px solid #0a2a4a;
 }
 
-/* ?? Monthly Claim Volume sticky columns ???????????????????????? */
-#mcv-pane .cs-rpt-table thead tr:first-child th:nth-child(1),
-#mcv-pane .cs-rpt-table thead tr:first-child th:nth-child(2) {
-    position: sticky; z-index: 10;
+/* Monthly + Weekly Claim Volume — match Production Summary col widths + Grand Total colors */
+#mcv-pane .cs-pr-table,
+#wcv-pane .cs-pr-table {
+    border-collapse: separate; border-spacing: 0;
+    font-size: .72rem; table-layout: fixed; width: 100%;
+}
+#mcv-pane .cs-pr-table thead th,
+#wcv-pane .cs-pr-table thead th {
     background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+    color: rgba(255,255,255,.92); font-weight: 700; font-size: .62rem;
+    letter-spacing: .04em; text-transform: uppercase;
+    padding: .5rem .4rem; text-align: center;
+    white-space: normal; word-wrap: break-word;
+    position: sticky; top: 0; z-index: 5;
+    border-bottom: 1px solid #0a2a4a;
+    border-right: 1px solid rgba(255,255,255,.08);
+    line-height: 1.25;
 }
-#mcv-pane .cs-rpt-table thead tr:first-child th:nth-child(1) { left: 0; min-width: 40px; }
-#mcv-pane .cs-rpt-table thead tr:first-child th:nth-child(2) { left: 40px; min-width: 260px; border-right: 2px solid #0a2a4a; }
-#mcv-pane .cs-rpt-table tbody td:nth-child(1),
-#mcv-pane .cs-rpt-table tbody td:nth-child(2) {
-    position: sticky; z-index: 3;
+#mcv-pane .cs-pr-table thead tr:nth-child(2) th,
+#wcv-pane .cs-pr-table thead tr:nth-child(2) th {
+    top: 30px; z-index: 4;
+    background: linear-gradient(135deg, #162d50 0%, #1b4a6c 100%);
+    font-size: .58rem;
 }
-#mcv-pane .cs-rpt-table tbody td:nth-child(1) { left: 0; }
-#mcv-pane .cs-rpt-table tbody td:nth-child(2) { left: 40px; border-right: 2px solid #d4dde9; }
-#mcv-pane .cs-rpt-table tbody tr:nth-child(odd) td:nth-child(1),
-#mcv-pane .cs-rpt-table tbody tr:nth-child(odd) td:nth-child(2) { background: #f8fafc; }
-#mcv-pane .cs-rpt-table tbody tr:nth-child(even) td:nth-child(1),
-#mcv-pane .cs-rpt-table tbody tr:nth-child(even) td:nth-child(2) { background: #fff; }
-#mcv-pane .cs-rpt-table tbody tr:hover td:nth-child(1),
-#mcv-pane .cs-rpt-table tbody tr:hover td:nth-child(2) { background: #eef4ff; }
-#mcv-pane .cs-rpt-table tfoot td:nth-child(1),
-#mcv-pane .cs-rpt-table tfoot td:nth-child(2) {
-    position: sticky; z-index: 3;
-    background: #0e3460;
+#mcv-pane .cs-pr-table thead tr:nth-child(3) th,
+#wcv-pane .cs-pr-table thead tr:nth-child(3) th {
+    top: 56px; z-index: 3;
+    background: #1e5a8a;
+    font-size: .56rem; font-weight: 600;
 }
-#mcv-pane .cs-rpt-table tfoot td:nth-child(1) { left: 0; }
-#mcv-pane .cs-rpt-table tfoot td:nth-child(2) { left: 40px; border-right: 2px solid #0a2a4a; }
-/* MCV data columns: compact and uniform */
-#mcv-pane .cs-rpt-table { width: auto; }
-#mcv-pane .cs-rpt-table thead th:nth-child(n+3) { white-space: nowrap; padding: .4rem .4rem; font-size: .62rem; width: 100px; min-width: 100px; max-width: 100px; }
-#mcv-pane .cs-rpt-table td:nth-child(n+3) { white-space: nowrap; padding: .4rem .4rem; width: 100px; min-width: 100px; max-width: 100px; }
-/* Drill-down payer rows */
+#mcv-pane .cs-pr-table thead th:first-child,
+#wcv-pane .cs-pr-table thead th:first-child {
+    text-align: left; position: sticky; left: 0; z-index: 7; min-width: 200px;
+}
+#mcv-pane .cs-pr-table thead tr:nth-child(2) th:first-child,
+#wcv-pane .cs-pr-table thead tr:nth-child(2) th:first-child { z-index: 6; }
+#mcv-pane .cs-pr-table thead tr:nth-child(3) th:first-child,
+#wcv-pane .cs-pr-table thead tr:nth-child(3) th:first-child { z-index: 5; }
+#mcv-pane .cs-pr-table td,
+#wcv-pane .cs-pr-table td {
+    padding: .35rem .5rem; vertical-align: middle;
+    text-align: right; white-space: nowrap;
+    border-right: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
+    overflow: hidden; text-overflow: ellipsis;
+    font-variant-numeric: tabular-nums;
+    font-size: .60rem;
+}
+#mcv-pane .cs-pr-table td:first-child,
+#wcv-pane .cs-pr-table td:first-child {
+    text-align: left; font-weight: 600; color: #1e293b;
+    position: sticky; left: 0; z-index: 1;
+    background: #fff; min-width: 200px; max-width: 260px;
+    overflow: hidden; text-overflow: ellipsis;
+}
+/* Metric leaf cols — same narrowed padding as Production .pr-month-data */
+#mcv-pane .cs-pr-table th.cs-pr-metric,
+#mcv-pane .cs-pr-table td.cs-pr-metric,
+#wcv-pane .cs-pr-table th.cs-pr-metric,
+#wcv-pane .cs-pr-table td.cs-pr-metric {
+    padding-left: .2rem; padding-right: .2rem; font-size: .60rem;
+}
+#mcv-pane .cs-pr-panel td,
+#wcv-pane .cs-pr-panel td { background: #f0fdf4; font-weight: 700; }
+#mcv-pane .cs-pr-panel td:first-child,
+#wcv-pane .cs-pr-panel td:first-child { background: #f0fdf4; color: #166534; }
+#mcv-pane .cs-pr-panel:hover td,
+#wcv-pane .cs-pr-panel:hover td { background: #dcfce7; }
+#mcv-pane .cs-pr-panel:hover td:first-child,
+#wcv-pane .cs-pr-panel:hover td:first-child { background: #dcfce7; }
+#mcv-pane .cs-pr-payer td,
+#wcv-pane .cs-pr-payer td { background: #fff; color: #475569; font-weight: 400; }
+#mcv-pane .cs-pr-payer td:first-child,
+#wcv-pane .cs-pr-payer td:first-child {
+    padding-left: 1.5rem; font-weight: 500; color: #64748b; background: #fff;
+}
+#mcv-pane .cs-pr-table tbody tr.cs-ag-child:not(.cs-ag-shown),
+#wcv-pane .cs-pr-table tbody tr.cs-ag-child:not(.cs-ag-shown) { display: none !important; }
+
+/* Year totals — Production .pr-year-total */
+#mcv-pane .cs-pr-year { background-color: #fefce8 !important; }
+#mcv-pane .cs-pr-table thead th.cs-pr-year {
+    background: linear-gradient(135deg, #854d0e 0%, #a16207 100%) !important;
+    color: #fff !important;
+}
+#mcv-pane .cs-pr-table thead tr:nth-child(3) th.cs-pr-year {
+    background: #a16207 !important;
+}
+
+/* Grand Total columns — Production .pr-grand-total (amber), not navy */
+#mcv-pane .cs-pr-grand,
+#wcv-pane .cs-pr-grand { background-color: #fef3c7 !important; font-weight: 800; }
+#mcv-pane .cs-pr-table thead th.cs-pr-grand,
+#wcv-pane .cs-pr-table thead th.cs-pr-grand {
+    background: linear-gradient(135deg, #78350f 0%, #92400e 100%) !important;
+    color: #fff !important;
+}
+#mcv-pane .cs-pr-table thead tr:nth-child(3) th.cs-pr-grand,
+#wcv-pane .cs-pr-table thead tr:nth-child(3) th.cs-pr-grand {
+    background: #92400e !important;
+}
+
+/* Footer Grand Total row — Production .pr-total-row (navy) */
+#mcv-pane .cs-pr-table tfoot td,
+#wcv-pane .cs-pr-table tfoot td {
+    background: #0e3460 !important; color: #fff !important;
+    font-weight: 800; border-top: 2px solid #0a2a4a;
+}
+#mcv-pane .cs-pr-table tfoot td:first-child,
+#wcv-pane .cs-pr-table tfoot td:first-child {
+    position: sticky; left: 0; z-index: 3;
+    background: #0e3460 !important; color: #fff !important;
+}
 .mcv-drilldown td { font-size: .72rem !important; color: #475569; }
-.mcv-drilldown td:nth-child(2) { padding-left: 1.8rem !important; font-weight: 500 !important; }
 
 /* Payer rank badge (1 / 2 / 3) in drill-down rows */
 .mcv-payer-rank {
@@ -443,37 +527,6 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
     background: linear-gradient(135deg, #0e3460, #0d5c74);
     flex-shrink: 0;
 }
-
-/* ?? Weekly Claim Volume sticky columns ????????????????????????? */
-#wcv-pane .cs-rpt-table thead tr:first-child th:nth-child(1),
-#wcv-pane .cs-rpt-table thead tr:first-child th:nth-child(2) {
-    position: sticky; z-index: 10;
-    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
-}
-#wcv-pane .cs-rpt-table thead tr:first-child th:nth-child(1) { left: 0; min-width: 40px; }
-#wcv-pane .cs-rpt-table thead tr:first-child th:nth-child(2) { left: 40px; min-width: 260px; border-right: 2px solid #0a2a4a; }
-#wcv-pane .cs-rpt-table tbody td:nth-child(1),
-#wcv-pane .cs-rpt-table tbody td:nth-child(2) {
-    position: sticky; z-index: 3;
-}
-#wcv-pane .cs-rpt-table tbody td:nth-child(1) { left: 0; }
-#wcv-pane .cs-rpt-table tbody td:nth-child(2) { left: 40px; border-right: 2px solid #d4dde9; }
-#wcv-pane .cs-rpt-table tbody tr:nth-child(odd) td:nth-child(1),
-#wcv-pane .cs-rpt-table tbody tr:nth-child(odd) td:nth-child(2) { background: #f8fafc; }
-#wcv-pane .cs-rpt-table tbody tr:nth-child(even) td:nth-child(1),
-#wcv-pane .cs-rpt-table tbody tr:nth-child(even) td:nth-child(2) { background: #fff; }
-#wcv-pane .cs-rpt-table tbody tr:hover td:nth-child(1),
-#wcv-pane .cs-rpt-table tbody tr:hover td:nth-child(2) { background: #eef4ff; }
-#wcv-pane .cs-rpt-table tfoot td:nth-child(1),
-#wcv-pane .cs-rpt-table tfoot td:nth-child(2) {
-    position: sticky; z-index: 3;
-    background: #0e3460;
-}
-#wcv-pane .cs-rpt-table tfoot td:nth-child(1) { left: 0; }
-#wcv-pane .cs-rpt-table tfoot td:nth-child(2) { left: 40px; border-right: 2px solid #0a2a4a; }
-#wcv-pane .cs-rpt-table { width: auto; }
-#wcv-pane .cs-rpt-table thead th:nth-child(n+3) { white-space: nowrap; padding: .4rem .4rem; font-size: .62rem; width: 100px; min-width: 100px; max-width: 100px; }
-#wcv-pane .cs-rpt-table td:nth-child(n+3) { white-space: nowrap; padding: .4rem .4rem; width: 100px; min-width: 100px; max-width: 100px; }
 
 /* ?? Panel Averages sticky columns ?????????????????????????????? */
 #panelavg-pane .cs-rpt-table thead tr:first-child th:nth-child(1),
@@ -957,13 +1010,6 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             </button>
         </li>
         <li class="nav-item" role="presentation">
-            <button class="nav-link" id="panelavg-tab" data-bs-toggle="pill"
-                    data-bs-target="#panelavg-pane" type="button" role="tab"
-                    aria-controls="panelavg-pane" aria-selected="false">
-                <i class="bi bi-bar-chart-line"></i> Panel Averages
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
             <button class="nav-link" id="avgpay-tab" data-bs-toggle="pill"
                     data-bs-target="#avgpay-pane" type="button" role="tab"
                     aria-controls="avgpay-pane" aria-selected="false">
@@ -1052,63 +1098,71 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     => d is not null && d.TryGetValue(mk, out var c) ? c.EncounterCount : 0;
                 decimal McvCellPaid(Dictionary<string, CollectionMonthlyCell>? d, string mk)
                     => d is not null && d.TryGetValue(mk, out var c) ? c.InsurancePaidAmount : 0m;
-                decimal McvCellAvg(Dictionary<string, CollectionMonthlyCell>? d, string mk)
-                    => d is not null && d.TryGetValue(mk, out var c) ? c.AveragePaidAmount : 0m;
                 int McvYearEnc(Dictionary<int, CollectionYearTotal>? d, int y)
                     => d is not null && d.TryGetValue(y, out var t) ? t.EncounterCount : 0;
                 decimal McvYearPaid(Dictionary<int, CollectionYearTotal>? d, int y)
                     => d is not null && d.TryGetValue(y, out var t) ? t.InsurancePaidAmount : 0m;
-                decimal McvYearAvg(Dictionary<int, CollectionYearTotal>? d, int y)
-                    => d is not null && d.TryGetValue(y, out var t) ? t.AveragePaidAmount : 0m;
-
-                <div class="d-flex align-items-center justify-content-between mb-2" style="font-size:.78rem;color:#475569">
-                    <div>
-                        <i class="bi bi-info-circle me-1" style="color:#1565c0"></i>
-                        <strong>Data based on Posted Date</strong>
-                        <span class="text-muted">(CheckDate)</span>
-                    </div>
-                </div>
 
                 <div class="cs-rpt-wrap">
                     <div class="cs-rpt-scroll">
-                        <table class="cs-rpt-table">
+                        @{
+                            var mcvMetricCols = mcvPeriods.Count * 2;
+                            var mcvYearCols = mcvYears.Count * 2;
+                            var mcvMinWidth = 200 + (mcvMetricCols * 60) + (mcvYearCols * 79) + 158;
+                        }
+                        <table class="cs-pr-table" style="min-width:@(mcvMinWidth)px;">
+                            <colgroup>
+                                <col style="width:200px" />
+                                @foreach (var year in mcvYears)
+                                {
+                                    var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
+                                    @foreach (var _ in monthsInYear)
+                                    {
+                                        <col style="width:52px" />
+                                        <col style="width:68px" />
+                                    }
+                                    <col style="width:72px" />
+                                    <col style="width:86px" />
+                                }
+                                <col style="width:72px" />
+                                <col style="width:86px" />
+                            </colgroup>
                             <thead>
-                                @* Row 1: year spans *@
                                 <tr>
-                                    <th rowspan="2" style="min-width:40px">&nbsp;</th>
-                                    <th rowspan="2" style="text-align:left;min-width:260px">Panel &amp; Insurance</th>
+                                    <th rowspan="3">Panel &amp; Insurance</th>
                                     @foreach (var year in mcvYears)
                                     {
                                         var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
-                                        <th colspan="@(monthsInYear.Count * 3)">@year</th>
-                                        <th colspan="3">@year Total</th>
+                                        <th colspan="@(monthsInYear.Count * 2 + 2)">Data based on Posted Date &mdash; @year</th>
                                     }
-                                    <th colspan="3">Grand Total</th>
+                                    <th colspan="2" class="cs-pr-grand">Grand Total</th>
                                 </tr>
-                                @* Row 2: month sub-headers *@
-                                @{
-                                    var encLabel      = "No. of Encounters";
-                                    var encTotalLabel = "No. of Encounters";
-                                    var paidLabel     = "Insurance Paid Amount";
-                                    var avgLabel      = "Average Paid";
-                                }
                                 <tr>
                                     @foreach (var year in mcvYears)
                                     {
                                         var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
                                         @foreach (var p in monthsInYear)
                                         {
-                                            <th>@p.MonthLabel @encLabel</th>
-                                            <th>@p.MonthLabel @paidLabel</th>
-                                            <th>@p.MonthLabel @avgLabel</th>
+                                            <th colspan="2">@p.MonthLabel</th>
                                         }
-                                        <th>@encTotalLabel</th>
-                                        <th>@paidLabel</th>
-                                        <th>@avgLabel</th>
+                                        <th colspan="2" class="cs-pr-year">@year Total</th>
                                     }
-                                    <th>@encTotalLabel</th>
-                                    <th>@paidLabel</th>
-                                    <th>@avgLabel</th>
+                                    <th colspan="2" class="cs-pr-grand"></th>
+                                </tr>
+                                <tr>
+                                    @foreach (var year in mcvYears)
+                                    {
+                                        var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
+                                        @foreach (var p in monthsInYear)
+                                        {
+                                            <th class="cs-pr-metric">No. of Claims</th>
+                                            <th class="cs-pr-metric">Insurance Paid Amount</th>
+                                        }
+                                        <th class="cs-pr-year">No. of Claims</th>
+                                        <th class="cs-pr-year">Insurance Paid Amount</th>
+                                    }
+                                    <th class="cs-pr-grand">No. of Claims</th>
+                                    <th class="cs-pr-grand">Insurance Paid Amount</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1118,81 +1172,68 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                                     mcvIdx++;
                                     var letter = mcvIdx <= 26 ? ((char)('A' + mcvIdx - 1)).ToString() : mcvIdx.ToString();
                                     var mcvGroupId = $"cs-mcv-{mcvIdx}";
-                                    @* Panel row *@
-                                    <tr class="cs-ag-group" data-ag-group="@mcvGroupId" role="button"
+                                    <tr class="cs-pr-panel cs-ag-group" data-ag-group="@mcvGroupId" role="button"
                                         aria-expanded="false" title="Open / close payers">
-                                        <td style="font-weight:700">@letter</td>
-                                        <td style="text-align:left;font-weight:700">
-                                            <i class="bi bi-chevron-right cs-ag-chevron" aria-hidden="true"></i>@panel.PanelName
+                                        <td>
+                                            <i class="bi bi-chevron-right cs-ag-chevron" aria-hidden="true"></i>@letter &nbsp; @panel.PanelName
                                         </td>
                                         @foreach (var year in mcvYears)
                                         {
                                             var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
                                             @foreach (var p in monthsInYear)
                                             {
-                                                <td style="text-align:right;font-weight:600">@McvCellEnc(panel.ByMonth, p.Key).ToString("N0")</td>
-                                                <td style="text-align:right;font-weight:600">@Acct(McvCellPaid(panel.ByMonth, p.Key))</td>
-                                                <td style="text-align:right;font-weight:600">@Acct(McvCellAvg(panel.ByMonth, p.Key))</td>
+                                                <td class="cs-pr-metric">@McvCellEnc(panel.ByMonth, p.Key).ToString("N0")</td>
+                                                <td class="cs-pr-metric">@Acct(McvCellPaid(panel.ByMonth, p.Key))</td>
                                             }
-                                            <td style="text-align:right;font-weight:700">@McvYearEnc(panel.ByYear, year).ToString("N0")</td>
-                                            <td style="text-align:right;font-weight:700">@Acct(McvYearPaid(panel.ByYear, year))</td>
-                                            <td style="text-align:right;font-weight:700">@Acct(McvYearAvg(panel.ByYear, year))</td>
+                                            <td class="cs-pr-year">@McvYearEnc(panel.ByYear, year).ToString("N0")</td>
+                                            <td class="cs-pr-year">@Acct(McvYearPaid(panel.ByYear, year))</td>
                                         }
-                                        <td style="text-align:right;font-weight:700">@panel.TotalEncounters.ToString("N0")</td>
-                                        <td style="text-align:right;font-weight:700">@Acct(panel.TotalInsurancePaid)</td>
-                                        <td style="text-align:right;font-weight:700">@Acct(panel.TotalAveragePaidAmount)</td>
+                                        <td class="cs-pr-grand">@panel.TotalEncounters.ToString("N0")</td>
+                                        <td class="cs-pr-grand">@Acct(panel.TotalInsurancePaid)</td>
                                     </tr>
-                                    @* Payer drill-down rows (all payers when table1 mode, top 3 otherwise) *@
                                     @foreach (var payer in panel.TopPayers)
                                     {
-                                        <tr class="mcv-drilldown cs-ag-child" data-ag-parent="@mcvGroupId">
-                                            <td style="text-align:center">
+                                        <tr class="cs-pr-payer cs-ag-child" data-ag-parent="@mcvGroupId">
+                                            <td>
                                                 @if (payer.PayerRank > 0)
                                                 {
                                                     <span class="mcv-payer-rank">@payer.PayerRank</span>
                                                 }
+                                                @payer.PayerName
                                             </td>
-                                            <td style="text-align:left">@payer.PayerName</td>
                                             @foreach (var year in mcvYears)
                                             {
                                                 var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
                                                 @foreach (var p in monthsInYear)
                                                 {
-                                                    <td style="text-align:right">@McvCellEnc(payer.ByMonth, p.Key).ToString("N0")</td>
-                                                    <td style="text-align:right">@Acct(McvCellPaid(payer.ByMonth, p.Key))</td>
-                                                    <td style="text-align:right">@Acct(McvCellAvg(payer.ByMonth, p.Key))</td>
+                                                    <td class="cs-pr-metric">@McvCellEnc(payer.ByMonth, p.Key).ToString("N0")</td>
+                                                    <td class="cs-pr-metric">@Acct(McvCellPaid(payer.ByMonth, p.Key))</td>
                                                 }
-                                                <td style="text-align:right;font-weight:600">@McvYearEnc(payer.ByYear, year).ToString("N0")</td>
-                                                <td style="text-align:right;font-weight:600">@Acct(McvYearPaid(payer.ByYear, year))</td>
-                                                <td style="text-align:right;font-weight:600">@Acct(McvYearAvg(payer.ByYear, year))</td>
+                                                <td class="cs-pr-year">@McvYearEnc(payer.ByYear, year).ToString("N0")</td>
+                                                <td class="cs-pr-year">@Acct(McvYearPaid(payer.ByYear, year))</td>
                                             }
-                                            <td style="text-align:right;font-weight:600">@payer.TotalEncounters.ToString("N0")</td>
-                                            <td style="text-align:right;font-weight:600">@Acct(payer.TotalInsurancePaid)</td>
-                                            <td style="text-align:right;font-weight:600">@Acct(payer.TotalAveragePaidAmount)</td>
+                                            <td class="cs-pr-grand">@payer.TotalEncounters.ToString("N0")</td>
+                                            <td class="cs-pr-grand">@Acct(payer.TotalInsurancePaid)</td>
                                         </tr>
                                     }
                                 }
                             </tbody>
                             <tfoot>
-                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
-                                    <td style="color:#fff"></td>
-                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                <tr>
+                                    <td>Grand Total</td>
                                     @foreach (var year in mcvYears)
                                     {
                                         var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
                                         @foreach (var p in monthsInYear)
                                         {
-                                            <td style="text-align:right;color:#fff">@McvCellEnc(mcvPivot.GrandTotalByMonth, p.Key).ToString("N0")</td>
-                                            <td style="text-align:right;color:#fff">@Acct(McvCellPaid(mcvPivot.GrandTotalByMonth, p.Key))</td>
-                                            <td style="text-align:right;color:#fff">@Acct(McvCellAvg(mcvPivot.GrandTotalByMonth, p.Key))</td>
+                                            <td class="cs-pr-metric">@McvCellEnc(mcvPivot.GrandTotalByMonth, p.Key).ToString("N0")</td>
+                                            <td class="cs-pr-metric">@Acct(McvCellPaid(mcvPivot.GrandTotalByMonth, p.Key))</td>
                                         }
-                                        <td style="text-align:right;color:#fff">@McvYearEnc(mcvPivot.GrandTotalByYear, year).ToString("N0")</td>
-                                        <td style="text-align:right;color:#fff">@Acct(McvYearPaid(mcvPivot.GrandTotalByYear, year))</td>
-                                        <td style="text-align:right;color:#fff">@Acct(McvYearAvg(mcvPivot.GrandTotalByYear, year))</td>
+                                        <td>@McvYearEnc(mcvPivot.GrandTotalByYear, year).ToString("N0")</td>
+                                        <td>@Acct(McvYearPaid(mcvPivot.GrandTotalByYear, year))</td>
                                     }
-                                    <td style="text-align:right;color:#fff">@mcvPivot.GrandTotalEncounters.ToString("N0")</td>
-                                    <td style="text-align:right;color:#fff">@Acct(mcvPivot.GrandTotalInsurancePaid)</td>
-                                    <td style="text-align:right;color:#fff">@Acct(mcvPivot.GrandTotalAveragePaidAmount)</td>
+                                    <td>@mcvPivot.GrandTotalEncounters.ToString("N0")</td>
+                                    <td>@Acct(mcvPivot.GrandTotalInsurancePaid)</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -1201,11 +1242,11 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
 
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> ClaimLevelData (all rows) &bull;
-                    <strong>Filter (base):</strong> InsurancePayment &gt; 0 &nbsp;�&nbsp; CheckDate not blank/invalid &bull;
-                    <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) � @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &nbsp;|&nbsp; DOS: @(string.IsNullOrWhiteSpace(Model.FilterDosFrom) ? "-" : Model.FilterDosFrom) � @(string.IsNullOrWhiteSpace(Model.FilterDosTo) ? "-" : Model.FilterDosTo) &nbsp;|&nbsp; CheckDate: @(string.IsNullOrWhiteSpace(Model.FilterCheckDateFrom) ? "-" : Model.FilterCheckDateFrom) � @(string.IsNullOrWhiteSpace(Model.FilterCheckDateTo) ? "-" : Model.FilterCheckDateTo) &bull;
+                    <strong>Filter (base):</strong> InsurancePayment &gt; 0 &nbsp;·&nbsp; CheckDate not blank/invalid &bull;
+                    <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) – @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &nbsp;|&nbsp; DOS: @(string.IsNullOrWhiteSpace(Model.FilterDosFrom) ? "-" : Model.FilterDosFrom) – @(string.IsNullOrWhiteSpace(Model.FilterDosTo) ? "-" : Model.FilterDosTo) &nbsp;|&nbsp; CheckDate: @(string.IsNullOrWhiteSpace(Model.FilterCheckDateFrom) ? "-" : Model.FilterCheckDateFrom) – @(string.IsNullOrWhiteSpace(Model.FilterCheckDateTo) ? "-" : Model.FilterCheckDateTo) &bull;
                     <strong>Rows:</strong> PanelName &bull;
                     <strong>Drill-down:</strong> Top 3 PayerName_Raw by Unique ClaimID count &bull;
-                    <strong>Columns:</strong> CheckDate (Year, Month) &bull;
+                    <strong>Columns:</strong> CheckDate (Year, Month) — No. of Claims + Insurance Paid Amount &bull;
                     <strong>Sorted by:</strong> Grand Total (Unique ClaimID count) DESC
                 </div>
             }
@@ -1229,9 +1270,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         {
         <!-- Weekly Claim Volume tab -->
         <div class="tab-pane fade" id="wcv-pane"           role="tabpanel" aria-labelledby="wcv-tab"           data-cs-tab="wcv">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabWcv",          Model) } else { <div class="cs-lazy-pane" data-lazy-tab="wcv"></div> }</div>
-        <!-- Panel Averages tab -->
-        <div class="tab-pane fade" id="panelavg-pane"      role="tabpanel" aria-labelledby="panelavg-tab"      data-cs-tab="panelavg">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabPanelAvg",     Model) } else { <div class="cs-lazy-pane" data-lazy-tab="panelavg"></div> }</div>
-        <!-- Average Payments tab -->
+        <!-- Average Payments tab (Panel Averages tab hidden from UI) -->
         <div class="tab-pane fade" id="avgpay-pane"        role="tabpanel" aria-labelledby="avgpay-tab"        data-cs-tab="avgpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabAvgPayments",  Model) } else { <div class="cs-lazy-pane" data-lazy-tab="avgpay"></div> }</div>
         <!-- Insurance vs Aging tab -->
         <div class="tab-pane fade" id="aging-pane"         role="tabpanel" aria-labelledby="aging-tab"         data-cs-tab="aging">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabAging",        Model) } else { <div class="cs-lazy-pane" data-lazy-tab="aging"></div> }</div>

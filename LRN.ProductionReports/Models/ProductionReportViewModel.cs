@@ -131,6 +131,11 @@ public sealed class ProductionReportViewModel
         SelectedLab.Equals("NorthWest", StringComparison.OrdinalIgnoreCase)
         || SelectedLab.Equals("NorthWest_Labs", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>True when this page is the Cove Production Summary (lab-specific logic; not Rules).</summary>
+    public bool IsCoveLab =>
+        SelectedLab.Equals("Cove", StringComparison.OrdinalIgnoreCase)
+        || SelectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>True when this page is the Augustus Production Summary.</summary>
     public bool IsAugustusLab =>
         SelectedLab.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)

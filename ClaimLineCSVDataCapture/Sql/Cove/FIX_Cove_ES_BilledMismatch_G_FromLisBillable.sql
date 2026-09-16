@@ -1,6 +1,6 @@
 /* =====================================================================
    Cove — usp_RefreshCove_ExecutiveSummary
-   FIX : Billed Mismatches (RoleID G) = PMS F − LIS Billable Samples (RoleID B)
+   FIX : Billed Mismatches (RoleID G) = LIS RoleID C − PMS F (No. of Billed Claims)
 
    DB  : CoveLRN
 
@@ -54,7 +54,7 @@ BEGIN
 
     -- ────────────────────────────────────────────────────────────────────
     --  Cove_ES_PMS  -  F, G(placeholder), H, I, J, K, L, M, N, N.1, N.2, N.3
-    --  G is recomputed after insert: F − Cove_ES_LIS RoleID B (Billable Samples)
+    --  G is recomputed after insert: Cove_ES_LIS RoleID C − PMS F
     -- ────────────────────────────────────────────────────────────────────
     INSERT INTO dbo.Cove_ES_PMS (RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt)
     SELECT RoleID, Description, ESYear, ESMonth, ClaimCount, 0, GETDATE()
@@ -68,7 +68,7 @@ BEGIN
                           AND b.BillStatus IN ('Billed','Billed-Client','Billed - Client')
         GROUP BY p.ESYear, p.ESMonth
 
-        -- G  placeholder (updated below from F − LIS Billable Samples)
+        -- G  placeholder (updated below from LIS C − PMS F)
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'G', 'Billed Mismatches - Accessions NA / Other Sample',
                0

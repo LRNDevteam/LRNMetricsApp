@@ -89,10 +89,9 @@
 
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> Claim Level Data &bull;
-                    <strong>Date Range:</strong> Last 6 months by Date of Service &bull;
-                    <strong>Rows:</strong> PanelName &rarr; PayerName drill-down (click a panel to open / close its payers) &bull;
-                    <strong>Adjudicated Statuses:</strong> Fully Paid, Partially Paid, Complete W/O, Fully Adjusted, Fully Denied, Denied, Partially Denied, Partially Adjusted, Patient Responsibility &bull;
-                    <strong>30/60 Days:</strong> Adjudicated claims where DaysToDOS ? 30 / 60 &bull;
+                    <strong>Date Range:</strong> Last 6 months by CheckDate (Deposit / Posted Date) through MAX(CheckDate) &bull;
+                    <strong>Rows:</strong> Panel totals = all payers; drill-down = Top 3 payers (click a panel to open / close) &bull;
+                    <strong>Fully Paid / Adjudicated / 30/60:</strong> flag columns not blank (ClientLogic) &bull;
                     <strong>Sorted by:</strong> No of Claims DESC
                 </div>
             }

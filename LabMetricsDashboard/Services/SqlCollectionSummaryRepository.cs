@@ -418,7 +418,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             while (await r.ReadAsync(ct));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rawRows.Count, sw.ElapsedMilliseconds);
-        return BuildPanelAveragesResult(rawRows);
+        // Panel totals prefer blank-PayerName rows from SP; drill-down shows Top 3 only.
+        return BuildPanelAveragesResult(rawRows, topPayersForDrilldown: 3);
     }
 
     /// <summary>
@@ -447,7 +448,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         DateOnly? filterFirstBillFrom, DateOnly? filterFirstBillTo,
         DateOnly? filterDosFrom, DateOnly? filterDosTo,
         DateOnly? filterCheckDateFrom, DateOnly? filterCheckDateTo,
-        CancellationToken ct)
+        CancellationToken ct,
+        int? lastMonths = null)
     {
         var rawRows = new List<PanelAveragesRawRow>();
         var sw = Stopwatch.StartNew();
@@ -458,11 +460,14 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             CommandType = System.Data.CommandType.StoredProcedure,
             CommandTimeout = 180
         };
-        cmd.Parameters.AddRange(BuildCollectionReadSpParameters(
+        var spParams = BuildCollectionReadSpParameters(
             filterPayerNames, filterPanelNames,
             filterFirstBillFrom, filterFirstBillTo,
             filterDosFrom, filterDosTo,
-            filterCheckDateFrom, filterCheckDateTo));
+            filterCheckDateFrom, filterCheckDateTo).ToList();
+        if (lastMonths is 3 or 6)
+            spParams.Add(new SqlParameter("@LastMonths", lastMonths.Value));
+        cmd.Parameters.AddRange(spParams.ToArray());
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
         {
@@ -482,7 +487,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 Days60Amount:      GetDecimalOrDefault(r, "Days60Amount")));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rawRows.Count, sw.ElapsedMilliseconds);
-        return BuildPanelAveragesResult(rawRows);
+        // Panel totals = ALL payers returned by SP; drill-down shows Top 3 only.
+        return BuildPanelAveragesResult(rawRows, topPayersForDrilldown: 3);
     }
 
     /// <summary>
@@ -2454,7 +2460,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         _logger.LogInformation(
             "CollectionSummary PanelAverages: rawRows={Count}, elapsed={Ms}ms", rawRows.Count, sw.ElapsedMilliseconds);
 
-        return BuildPanelAveragesResult(rawRows);
+        return BuildPanelAveragesResult(rawRows, topPayersForDrilldown: 3);
     }
 
     private sealed record PanelAveragesRawRow(
@@ -2466,10 +2472,25 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         int Days60Count, decimal Days60Amount);
 
     private static PanelAveragesResult BuildPanelAveragesResult(
-        List<PanelAveragesRawRow> rawRows)
+        List<PanelAveragesRawRow> rawRows,
+        int? topPayersForDrilldown = null)
     {
         if (rawRows.Count == 0)
             return new PanelAveragesResult([]);
+
+        // Cove Avg Payments SP emits a panel-total row with blank PayerName (PayerRank=0).
+        // Prefer that for panel metrics so Top-3 drill-down rows never under-count the panel.
+        static bool IsPanelTotalRow(PanelAveragesRawRow r) =>
+            string.IsNullOrWhiteSpace(r.PayerName)
+            || r.PayerName.Equals("(All)", StringComparison.OrdinalIgnoreCase)
+            || r.PayerName.Equals("(Panel Total)", StringComparison.OrdinalIgnoreCase);
+
+        static PanelAveragesMetrics ToMetrics(PanelAveragesRawRow r) =>
+            new(r.ClaimCount, r.TotalCharges, r.CarrierPayment,
+                r.FullyPaidCount, r.FullyPaidAmount,
+                r.AdjudicatedCount, r.AdjudicatedAmount,
+                r.Days30Count, r.Days30Amount,
+                r.Days60Count, r.Days60Amount);
 
         static PanelAveragesMetrics Aggregate(IEnumerable<PanelAveragesRawRow> rows)
         {
@@ -2499,24 +2520,31 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         var panelRows = new List<PanelAveragesRow>();
         foreach (var pg in panelGroups)
         {
-            var payerRows = pg
+            var totalRows = pg.Where(IsPanelTotalRow).ToList();
+            var payerRowsRaw = pg.Where(r => !IsPanelTotalRow(r))
                 .OrderByDescending(r => r.ClaimCount)
+                .ToList();
+
+            var metrics = totalRows.Count > 0
+                ? Aggregate(totalRows)
+                : Aggregate(payerRowsRaw);
+
+            var drillRows = topPayersForDrilldown is > 0
+                ? payerRowsRaw.Take(topPayersForDrilldown.Value)
+                : payerRowsRaw;
+
+            var payerRows = drillRows
                 .Select(r => new PanelAveragesPayerRow
                 {
                     PayerName = r.PayerName,
-                    Metrics = new PanelAveragesMetrics(
-                        r.ClaimCount, r.TotalCharges, r.CarrierPayment,
-                        r.FullyPaidCount, r.FullyPaidAmount,
-                        r.AdjudicatedCount, r.AdjudicatedAmount,
-                        r.Days30Count, r.Days30Amount,
-                        r.Days60Count, r.Days60Amount)
+                    Metrics = ToMetrics(r)
                 })
                 .ToList();
 
             panelRows.Add(new PanelAveragesRow
             {
                 PanelName = pg.Key,
-                Metrics = Aggregate(pg),
+                Metrics = metrics,
                 Payers = payerRows
             });
         }
@@ -2543,6 +2571,17 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
         var prefix = LabCollectionPrefix.GetPrefix(labName);
+        if (IsCoveCollectionPrefix(prefix))
+            return await GetAvgPaymentsViaSpAsync(
+                connectionString,
+                "dbo.usp_GetCove_CS_AvgPayments",
+                filterPayerNames, filterPanelNames,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterDosFrom, filterDosTo,
+                filterCheckDateFrom, filterCheckDateTo,
+                ct,
+                lastMonths: lastMonths is 3 or 6 ? lastMonths : 6).ConfigureAwait(false);
+
         if (!string.IsNullOrWhiteSpace(prefix) && lastMonths == 6)
             return await GetAvgPaymentsViaSpAsync(
                 connectionString,
@@ -2555,8 +2594,6 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
 
         var cutoffDate    = DateTime.Today.AddMonths(-Math.Max(1, lastMonths));
         var adjStatusList = string.Join(", ", AdjudicatedStatuses.Select((_, i) => $"@apAdjSt_{i}"));
-
-        const string visitKey = "COALESCE(NULLIF(LTRIM(RTRIM(AccessionNumber)), ''), ClaimID)";
 
         var whereClauses = new List<string>
         {
@@ -2586,28 +2623,27 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             SELECT
                 LTRIM(RTRIM(PanelName))                                                AS PanelName,
                 ISNULL(LTRIM(RTRIM(PayerName_Raw)), '(blank)')                          AS PayerName,
-                COUNT(DISTINCT ClaimID)                                                 AS ClaimCount,
-                COUNT(DISTINCT {visitKey})                                              AS VisitCount,
+                COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), ''))                                 AS ClaimCount,
                 ISNULL(SUM(TRY_CAST(ChargeAmount     AS DECIMAL(18,2))), 0)            AS TotalCharges,
                 ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)            AS CarrierPayment,
 
-                COUNT(DISTINCT CASE WHEN LTRIM(RTRIM(ClaimStatus)) = 'Fully Paid'
-                    THEN ClaimID END)                                                   AS FullyPaidCount,
+                COUNT(CASE WHEN LTRIM(RTRIM(ClaimStatus)) = 'Fully Paid'
+                    THEN NULLIF(LTRIM(RTRIM(ClaimID)), '') END)                          AS FullyPaidCount,
                 ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) = 'Fully Paid'
                     THEN TRY_CAST(InsurancePayment AS DECIMAL(18,2)) ELSE 0 END), 0)   AS FullyPaidAmount,
 
-                COUNT(DISTINCT CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ({adjStatusList})
-                    THEN ClaimID END)                                                   AS AdjudicatedCount,
+                COUNT(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ({adjStatusList})
+                    THEN NULLIF(LTRIM(RTRIM(ClaimID)), '') END)                          AS AdjudicatedCount,
                 ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ({adjStatusList})
                     THEN TRY_CAST(InsurancePayment AS DECIMAL(18,2)) ELSE 0 END), 0)   AS AdjudicatedAmount,
 
-                COUNT(DISTINCT CASE WHEN ISNULL(TRY_CAST(DaysToDOS AS INT), 9999) <= 30
-                    THEN ClaimID END)                                                   AS Days30Count,
+                COUNT(CASE WHEN ISNULL(TRY_CAST(DaysToDOS AS INT), 9999) <= 30
+                    THEN NULLIF(LTRIM(RTRIM(ClaimID)), '') END)                          AS Days30Count,
                 ISNULL(SUM(CASE WHEN ISNULL(TRY_CAST(DaysToDOS AS INT), 9999) <= 30
                     THEN TRY_CAST(InsurancePayment AS DECIMAL(18,2)) ELSE 0 END), 0)   AS Days30Amount,
 
-                COUNT(DISTINCT CASE WHEN ISNULL(TRY_CAST(DaysToDOS AS INT), 9999) <= 60
-                    THEN ClaimID END)                                                   AS Days60Count,
+                COUNT(CASE WHEN ISNULL(TRY_CAST(DaysToDOS AS INT), 9999) <= 60
+                    THEN NULLIF(LTRIM(RTRIM(ClaimID)), '') END)                          AS Days60Count,
                 ISNULL(SUM(CASE WHEN ISNULL(TRY_CAST(DaysToDOS AS INT), 9999) <= 60
                     THEN TRY_CAST(InsurancePayment AS DECIMAL(18,2)) ELSE 0 END), 0)   AS Days60Amount
             FROM dbo.ClaimLevelData
@@ -2647,7 +2683,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         _logger.LogInformation(
             "CollectionSummary AvgPayments: rawRows={Count}, elapsed={Ms}ms", rawRows.Count, sw.ElapsedMilliseconds);
 
-        return BuildPanelAveragesResult(rawRows);
+        return BuildPanelAveragesResult(rawRows, topPayersForDrilldown: 3);
     }
 
     // ?? Excel Export ??????????????????????????????????????????????

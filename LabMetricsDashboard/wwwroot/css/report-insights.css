@@ -250,6 +250,48 @@
     border: 1px solid #c8dff5; background: #eef6ff; color: #255d94;
 }
 .ri-detail-footer { background: #f8fafc; gap: 8px; }
+
+/* Delete confirmation — rich modal (replaces browser confirm) */
+.ri-confirm-dialog { max-width: 460px; }
+.ri-confirm-modal { box-shadow: 0 24px 60px rgba(15, 23, 42, .28); }
+.ri-confirm-head { background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 45%, #b91c1c 100%); }
+.ri-confirm-icon {
+    width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.28);
+    font-size: 1.15rem; color: #fff;
+}
+.ri-confirm-body { padding: 1rem 1.15rem 0.85rem; }
+.ri-confirm-warn {
+    display: flex; gap: 8px; align-items: flex-start;
+    border-radius: 8px; padding: 10px 12px; margin-bottom: 12px;
+    font-size: 12px; font-weight: 650; line-height: 1.45;
+    border: 1px solid #fecaca; background: #fef2f2; color: #991b1b;
+}
+.ri-confirm-warn i { margin-top: 1px; flex-shrink: 0; }
+.ri-confirm-preview {
+    border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc;
+    padding: 12px 14px;
+}
+.ri-confirm-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.ri-confirm-entry {
+    margin-left: auto; font-size: .72rem; font-weight: 700; color: #64748b;
+    letter-spacing: .02em;
+}
+.ri-confirm-insight {
+    font-size: .88rem; color: #1e293b; line-height: 1.45;
+    max-height: 4.8em; overflow: hidden;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+}
+.ri-confirm-footer { justify-content: flex-end; padding: .85rem 1.15rem; }
+.ri-btn-delete {
+    background: #b91c1c; border-color: #991b1b; color: #fff;
+    font-weight: 700; display: inline-flex; align-items: center; gap: .4rem;
+}
+.ri-btn-delete:hover, .ri-btn-delete:focus {
+    background: #991b1b; border-color: #7f1d1d; color: #fff;
+}
+.ri-btn-delete:disabled { opacity: .65; }
 .ri-version-note { font-size: 11px; color: #65758b; font-weight: 700; margin-right: auto; }
 .ri-history-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0 0 12px; }
 .ri-timeline { display: flex; flex-direction: column; }

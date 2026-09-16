@@ -76,18 +76,55 @@
                             </tr>
                         }
                     }
+                    @{
+                        var tot = Model.AvgPayments.PanelRows.Aggregate(
+                            new PanelAveragesMetrics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+                            (acc, p) => new PanelAveragesMetrics(
+                                acc.ClaimCount + p.Metrics.ClaimCount,
+                                acc.TotalCharges + p.Metrics.TotalCharges,
+                                acc.CarrierPayment + p.Metrics.CarrierPayment,
+                                acc.FullyPaidCount + p.Metrics.FullyPaidCount,
+                                acc.FullyPaidAmount + p.Metrics.FullyPaidAmount,
+                                acc.AdjudicatedCount + p.Metrics.AdjudicatedCount,
+                                acc.AdjudicatedAmount + p.Metrics.AdjudicatedAmount,
+                                acc.Days30Count + p.Metrics.Days30Count,
+                                acc.Days30Amount + p.Metrics.Days30Amount,
+                                acc.Days60Count + p.Metrics.Days60Count,
+                                acc.Days60Amount + p.Metrics.Days60Amount));
+                    }
                 </tbody>
+                <tfoot>
+                    <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                        <td style="color:#fff"></td>
+                        <td style="text-align:left;color:#fff">Total</td>
+                        <td style="text-align:right;color:#fff">@tot.ClaimCount.ToString("N0")</td>
+                        <td style="text-align:right;color:#fff">@Acct(tot.TotalCharges)</td>
+                        <td style="text-align:right;color:#fff">@Acct2(tot.AvgBilled)</td>
+                        <td style="text-align:right;color:#fff">@tot.FullyPaidCount.ToString("N0")</td>
+                        <td style="text-align:right;color:#fff">@Acct(tot.FullyPaidAmount)</td>
+                        <td style="text-align:right;color:#fff">@Acct2(tot.AvgFullyPaid)</td>
+                        <td style="text-align:right;color:#fff">@tot.AdjudicatedCount.ToString("N0")</td>
+                        <td style="text-align:right;color:#fff">@Acct(tot.AdjudicatedAmount)</td>
+                        <td style="text-align:right;color:#fff">@Acct2(tot.AvgAdjudicated)</td>
+                        <td style="text-align:right;color:#fff">@tot.Days30Count.ToString("N0")</td>
+                        <td style="text-align:right;color:#fff">@Acct(tot.Days30Amount)</td>
+                        <td style="text-align:right;color:#fff">@Acct2(tot.AvgDays30)</td>
+                        <td style="text-align:right;color:#fff">@tot.Days60Count.ToString("N0")</td>
+                        <td style="text-align:right;color:#fff">@Acct(tot.Days60Amount)</td>
+                        <td style="text-align:right;color:#fff">@Acct2(tot.AvgDays60)</td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
     </div>
 
     <div class="mt-2" style="font-size:.68rem;color:#94a3b8">
-        <strong>Source:</strong> ClaimLevelData WHERE InsurancePayment &gt; 0 &bull;
-        <strong>Date Range:</strong> Last 6 months by CheckDate (Posted Date) &bull;
-        <strong>Rows:</strong> PanelName &rarr; PayerName_Raw drill-down (click a panel to open / close its payers) &bull;
-        <strong>Adjudicated Statuses:</strong> Fully Paid, Partially Paid, Complete W/O, Fully Adjusted, Fully Denied, Denied, Partially Denied, Partially Adjusted, Patient Responsibility &bull;
-        <strong>30/60 Days:</strong> Claims where DaysToDOS &le; 30 / 60 &bull;
-        <strong>Sorted by:</strong> No of Claims (Unique Visit) DESC
+        <strong>Source:</strong> ClaimLevelData &bull;
+        <strong>Date Range:</strong> Last 6 months by CheckDate (Deposit / Posted Date) through MAX(CheckDate) &bull;
+        <strong>Panel totals:</strong> ALL payers &bull;
+        <strong>Drill-down:</strong> Top 3 PayerName_Raw by claim count &bull;
+        <strong>Flags:</strong> FullyPaidCount / AdjucticatedCount / Bucket30Count / Bucket60Count not blank &bull;
+        <strong>Counts:</strong> Count(ClaimID) — not DISTINCT
     </div>
 }
 else
@@ -95,6 +132,6 @@ else
     <div class="text-center py-5 text-muted">
         <div style="font-size:2rem;opacity:.4">&#128184;</div>
         <div class="fw-semibold mt-2">No Average Payments data available</div>
-        <div class="small mt-1">No claims with InsurancePayment &gt; 0 found for the last 6 months by Posted Date. Try adjusting your filters.</div>
+        <div class="small mt-1">No claims found for the last 6 months by CheckDate (Deposit / Posted Date). Try adjusting your filters.</div>
     </div>
 }

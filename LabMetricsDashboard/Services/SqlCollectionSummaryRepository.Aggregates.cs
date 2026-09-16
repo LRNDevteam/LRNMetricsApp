@@ -386,14 +386,19 @@ public sealed partial class SqlCollectionSummaryRepository
         // Try the SP first; fall back to direct snapshot table read if SP is not yet deployed.
         try
         {
+            var spName = string.Equals(prefix, "Cove", StringComparison.OrdinalIgnoreCase)
+                ? "dbo.usp_GetCove_CS_AvgPayments"
+                : $"dbo.usp_Get{prefix}_CS_AvgPayments";
             return await GetAvgPaymentsViaSpAsync(
                 connectionString,
-                $"dbo.usp_Get{prefix}_CS_AvgPayments",
+                spName,
                 filterPayerNames: null, filterPanelNames: null,
                 filterFirstBillFrom: null, filterFirstBillTo: null,
                 filterDosFrom: null, filterDosTo: null,
                 filterCheckDateFrom: null, filterCheckDateTo: null,
-                ct).ConfigureAwait(false);
+                ct,
+                lastMonths: string.Equals(prefix, "Cove", StringComparison.OrdinalIgnoreCase) ? 6 : null)
+                .ConfigureAwait(false);
         }
         catch (SqlException ex) when (ex.Number == 2812) // SP not yet deployed
         {
@@ -499,8 +504,18 @@ public sealed partial class SqlCollectionSummaryRepository
         var panelRows = new List<PanelAveragesRow>();
         foreach (var (panelName, payerList) in grouped)
         {
-            // Roll up the panel-level metrics by summing across payers
-            var rolled = payerList.Aggregate(
+            static bool IsPanelTotal(string payer) =>
+                string.IsNullOrWhiteSpace(payer)
+                || payer.Equals("(All)", StringComparison.OrdinalIgnoreCase)
+                || payer.Equals("(Panel Total)", StringComparison.OrdinalIgnoreCase);
+
+            var totalRows = payerList.Where(p => IsPanelTotal(p.Payer)).ToList();
+            var payerOnly = payerList.Where(p => !IsPanelTotal(p.Payer))
+                .OrderByDescending(p => p.M.ClaimCount)
+                .ToList();
+
+            // Prefer explicit panel-total row (PayerName blank / PayerRank 0) when present.
+            var rolled = (totalRows.Count > 0 ? totalRows : payerOnly).Aggregate(
                 new PanelAveragesMetrics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
                 (acc, p) => new PanelAveragesMetrics(
                     acc.ClaimCount        + p.M.ClaimCount,
@@ -515,11 +530,18 @@ public sealed partial class SqlCollectionSummaryRepository
                     acc.Days60Count       + p.M.Days60Count,
                     acc.Days60Amount      + p.M.Days60Amount));
 
+            // Panel Averages + Avg Payments: panel metrics from all payers / blank total row;
+            // drill-down shows Top 3 payers only (matches client Excel).
+            var drillPayers = string.Equals(tag, "AvgPayments", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(tag, "PanelAverages", StringComparison.OrdinalIgnoreCase)
+                ? payerOnly.Take(3).ToList()
+                : payerOnly;
+
             panelRows.Add(new PanelAveragesRow
             {
                 PanelName = panelName,
                 Metrics   = rolled,
-                Payers    = [.. payerList.Select(p => new PanelAveragesPayerRow
+                Payers    = [.. drillPayers.Select(p => new PanelAveragesPayerRow
                 {
                     PayerName = p.Payer,
                     Metrics   = p.M,

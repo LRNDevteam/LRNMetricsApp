@@ -90,6 +90,11 @@ public sealed class CollectionSummaryViewModel
         SelectedLab.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
         || SelectedLab.Equals("Augustus", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Cove Collection Insurance Vs Payments is payer-flat (no CheckDate month columns).</summary>
+    public bool IsCoveLab =>
+        SelectedLab.Equals("Cove", StringComparison.OrdinalIgnoreCase)
+        || SelectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase);
+
     // ?? CPT vs Payment % ???????????????????????????????????????
     public List<CptPaymentPctRow> CptPaymentPct { get; set; } = [];
 

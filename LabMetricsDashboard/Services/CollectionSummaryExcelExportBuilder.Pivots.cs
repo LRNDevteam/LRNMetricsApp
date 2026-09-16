@@ -99,38 +99,62 @@ public static partial class CollectionSummaryExcelExportBuilder
         ApplyCovePivotStyle(pt);
     }
 
-    /// <summary>Formatted payer × year/month grid (no PivotTable) — matches Collection UI.</summary>
+    /// <summary>Formatted payer × year/month grid (no PivotTable) — matches Collection UI.
+    /// Cove client report is payer-flat only (no CheckDate month columns).</summary>
     private static void BuildInsuranceVsPaymentFlatSheet(
         XLWorkbook wb, List<InsuranceVsPaymentRow> rows, string labName)
     {
-        var periods = rows
-            .Where(r => r.BillYear > 1900 && r.BillMonth is >= 1 and <= 12)
-            .Select(r => (Year: r.BillYear, Month: r.BillMonth))
-            .Distinct()
-            .OrderBy(p => p.Year).ThenBy(p => p.Month)
-            .ToList();
+        var isCove = labName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
+            || labName.Contains("Cove", StringComparison.OrdinalIgnoreCase);
+
+        var periods = isCove
+            ? []
+            : rows
+                .Where(r => r.BillYear > 1900 && r.BillMonth is >= 1 and <= 12)
+                .Select(r => (Year: r.BillYear, Month: r.BillMonth))
+                .Distinct()
+                .OrderBy(p => p.Year).ThenBy(p => p.Month)
+                .ToList();
 
         if (periods.Count == 0)
         {
-            // Flat fallback when year/month grain is missing.
+            // Cove / flat: Row Labels | Count of ClaimID | Sum of Insurance Payment.
             var wsFlat = wb.AddWorksheet("Insurance Vs Payments");
             wsFlat.TabColor = ExcelTheme.Collection.TabYellow;
             ExcelTheme.ApplyDefaults(wsFlat);
-            string[] headers = ["Payer Name", "No. of Paid Claims", "Insurance Payment", "Payment %"];
+            string[] headers = isCove
+                ? ["Row Labels", "Count of ClaimID", "Sum of Insurance Payment"]
+                : ["Payer Name", "No. of Paid Claims", "Insurance Payment", "Payment %"];
             int row0 = 1;
             ExcelTheme.Collection.WriteTitleBar(wsFlat, row0, headers.Length, $"Insurance Vs Payments — {labName}");
             row0++;
             ExcelTheme.WriteHeaderRow(wsFlat, row0, 1, headers, ExcelTheme.Collection.HeaderBg);
             row0++;
-            foreach (var g in rows.GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
-                         .OrderByDescending(g => g.Sum(x => x.InsurancePayment)))
+            var groups = rows.GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
+                .Select(g => new
+                {
+                    Payer = g.Key,
+                    Claims = g.Sum(x => x.NoOfPaidClaims),
+                    Pay = g.Sum(x => x.InsurancePayment),
+                    Pct = g.Average(x => x.PaymentPct),
+                })
+                .OrderByDescending(g => g.Pay)
+                .ToList();
+            foreach (var g in groups)
             {
-                WriteCell(wsFlat, row0, 1, g.Key, XLColor.White, isText: true);
-                WriteCell(wsFlat, row0, 2, g.Sum(x => x.NoOfPaidClaims), XLColor.White);
-                WriteCell(wsFlat, row0, 3, g.Sum(x => x.InsurancePayment), XLColor.White, isCurrency: true);
-                WriteCell(wsFlat, row0, 4, g.Average(x => x.PaymentPct), XLColor.White, isPct: true);
+                WriteCell(wsFlat, row0, 1, g.Payer, XLColor.White, isText: true);
+                WriteCell(wsFlat, row0, 2, g.Claims, XLColor.White);
+                WriteCell(wsFlat, row0, 3, g.Pay, XLColor.White, isCurrency: true);
+                if (!isCove)
+                    WriteCell(wsFlat, row0, 4, g.Pct, XLColor.White, isPct: true);
                 row0++;
             }
+            // Grand Total row (matches client report)
+            WriteCell(wsFlat, row0, 1, "Grand Total", ExcelTheme.Collection.TotalRowBg, isText: true);
+            WriteCell(wsFlat, row0, 2, groups.Sum(g => g.Claims), ExcelTheme.Collection.TotalRowBg);
+            WriteCell(wsFlat, row0, 3, groups.Sum(g => g.Pay), ExcelTheme.Collection.TotalRowBg, isCurrency: true);
+            if (!isCove)
+                WriteCell(wsFlat, row0, 4, "", ExcelTheme.Collection.TotalRowBg, isText: true);
             AutoFitColumns(wsFlat);
             return;
         }

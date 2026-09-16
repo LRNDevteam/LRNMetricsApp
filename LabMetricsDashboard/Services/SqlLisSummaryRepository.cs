@@ -1138,29 +1138,18 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			$"YEAR({dateExpr}) > 1900"
 		};
 
-		// Unbounded group-by on LIMSMaster (especially Cove DateOfCollection) can run for
-		// minutes and leave the page on "Loading LIS Summary...". Cap to recent months when
-		// the user left the date filters blank.
-		var effectiveFrom = dateFrom;
-		var effectiveTo = dateTo;
-		if (!effectiveFrom.HasValue && !effectiveTo.HasValue)
-		{
-			var today = DateOnly.FromDateTime(DateTime.Today);
-			effectiveFrom = new DateOnly(today.Year, today.Month, 1).AddMonths(-5);
-			effectiveTo = today;
-		}
-
+		// No default date window — blank From/To means ALL records (user requirement).
 		var parameters = new List<SqlParameter>();
-		if (effectiveFrom.HasValue)
+		if (dateFrom.HasValue)
 		{
 			where.Add($"{dateExpr} >= @fromDate");
-			parameters.Add(new SqlParameter("@fromDate", SqlDbType.Date) { Value = effectiveFrom.Value.ToDateTime(TimeOnly.MinValue) });
+			parameters.Add(new SqlParameter("@fromDate", SqlDbType.Date) { Value = dateFrom.Value.ToDateTime(TimeOnly.MinValue) });
 		}
 
-		if (effectiveTo.HasValue)
+		if (dateTo.HasValue)
 		{
 			where.Add($"{dateExpr} <= @toDate");
-			parameters.Add(new SqlParameter("@toDate", SqlDbType.Date) { Value = effectiveTo.Value.ToDateTime(TimeOnly.MinValue) });
+			parameters.Add(new SqlParameter("@toDate", SqlDbType.Date) { Value = dateTo.Value.ToDateTime(TimeOnly.MinValue) });
 		}
 
 		AddOptionalFilter(where, parameters, filterColumns.PanelExpression, "@panel", panel);
@@ -1207,7 +1196,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
             """;
 
 		var raw = new List<RawLisGroup>();
-		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 90 };
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 240 };
 		foreach (var p in parameters) cmd.Parameters.Add(p);
 
 		await using var rdr = await cmd.ExecuteReaderAsync(ct);

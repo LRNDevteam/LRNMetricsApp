@@ -125,4 +125,39 @@
     </div>
 </div>
 
+<div class="modal fade" id="riDeleteModal" tabindex="-1" aria-labelledby="riDeleteTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered ri-confirm-dialog">
+        <div class="modal-content ri-detail-modal ri-confirm-modal">
+            <div class="modal-header ri-detail-head ri-confirm-head">
+                <div class="ri-confirm-icon" aria-hidden="true"><i class="bi bi-trash3"></i></div>
+                <div class="ri-detail-title-block">
+                    <div class="ri-detail-title" id="riDeleteTitle">Delete insight?</div>
+                    <div class="ri-detail-sub">This removes the note from Active Insights. It cannot be undone.</div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body ri-confirm-body">
+                <div class="ri-confirm-warn">
+                    <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+                    <span>Permanent delete — revision history for this note will no longer be available from the grid.</span>
+                </div>
+                <div class="ri-confirm-preview">
+                    <div class="ri-confirm-meta">
+                        <span class="ri-badge" id="riDeleteRiskBadge">Risk</span>
+                        <span class="ri-badge" id="riDeleteStatusBadge">Status</span>
+                        <span class="ri-confirm-entry" id="riDeleteEntry">#</span>
+                    </div>
+                    <div class="ri-confirm-insight" id="riDeleteInsightPreview">—</div>
+                </div>
+            </div>
+            <div class="modal-footer ri-detail-footer ri-confirm-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" id="riDeleteCancelBtn">Cancel</button>
+                <button type="button" class="btn ri-btn-delete" id="riDeleteConfirmBtn">
+                    <i class="bi bi-trash3" aria-hidden="true"></i> Delete insight
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="~/js/report-insights.js" asp-append-version="true" nonce="@Context.Items["CspNonce"]"></script>

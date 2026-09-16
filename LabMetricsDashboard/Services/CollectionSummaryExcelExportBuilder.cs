@@ -53,7 +53,7 @@ public static partial class CollectionSummaryExcelExportBuilder
         BuildInsurancePaymentPctSheet(wb, vm.InsurancePaymentPct, labName);
         BuildInsuranceVsPaymentSheet(wb, vm.InsuranceVsPayment, labName);
         BuildCptPaymentPctSheet(wb, vm.CptPaymentPct, labName);
-        BuildPanelAveragesSheet(wb, vm.PanelAverages, labName);
+        // Panel Averages sheet intentionally omitted (hidden from UI + Excel).
         BuildAvgPaymentsSheet(wb, vm.AvgPayments, labName, lastMonths: 6);
         BuildStatusSummarySheet(wb, vm.StatusSummary, labName);
         BuildRepVsPaymentSheet(wb, vm.RepPayments, labName);
@@ -127,14 +127,14 @@ public static partial class CollectionSummaryExcelExportBuilder
             .OrderBy(g => g.Key)
             .ToDictionary(g => g.Key, g => g.OrderBy(p => p.Month).ToList());
 
-        // Calculate total columns: Panel name + per-year(month*3 + yearTotal*3) + grandTotal*3
+        // Calculate total columns: Panel name + per-year(month*2 + yearTotal*2) + grandTotal*2
         int colCount = 1;
         foreach (var year in validYears)
         {
             var months = periodsByYear.GetValueOrDefault(year, []);
-            colCount += months.Count * 3 + 3;
+            colCount += months.Count * 2 + 2;
         }
-        colCount += 3;
+        colCount += 2;
 
         int row = ExcelTheme.Collection.WriteReportMetaHeader(ws, colCount, CollectionInsightsMeta(vm, labName));
         ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, $"Monthly Claim Volume \u2014 {labName}");
@@ -147,12 +147,12 @@ public static partial class CollectionSummaryExcelExportBuilder
         foreach (var year in validYears)
         {
             var months = periodsByYear.GetValueOrDefault(year, []);
-            int span = months.Count * 3 + 3;
+            int span = months.Count * 2 + 2;
             WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + span - 1,
                 $"Data based on Check Date \u2014 {year}", ColHeader);
             hCol += span;
         }
-        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 2, "Grand Total", ColHeader);
+        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1, "Grand Total", ColHeader);
 
         // Header Row 2: month names + year total
         int hRow2 = hRow1 + 1;
@@ -162,15 +162,15 @@ public static partial class CollectionSummaryExcelExportBuilder
             var months = periodsByYear.GetValueOrDefault(year, []);
             foreach (var p in months)
             {
-                WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 2, p.MonthLabel, ColMonth);
-                hCol += 3;
+                WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, p.MonthLabel, ColMonth);
+                hCol += 2;
             }
-            WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 2, $"{year} Total", ColHeader);
-            hCol += 3;
+            WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, $"{year} Total", ColHeader);
+            hCol += 2;
         }
-        WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 2, "", ColHeader);
+        WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, "", ColHeader);
 
-        // Header Row 3: sub-column labels
+        // Header Row 3: sub-column labels (no Average Paid)
         int hRow3 = hRow1 + 2;
         hCol = 2;
         foreach (var year in validYears)
@@ -178,17 +178,14 @@ public static partial class CollectionSummaryExcelExportBuilder
             var months = periodsByYear.GetValueOrDefault(year, []);
             foreach (var _ in months)
             {
-                WriteHeaderCell(ws, hRow3, hCol++, "Encounters", ColMetric);
+                WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ColMetric);
                 WriteHeaderCell(ws, hRow3, hCol++, "Insurance Paid", ColMetric);
-                WriteHeaderCell(ws, hRow3, hCol++, "Average Paid", ColMetric);
             }
-            WriteHeaderCell(ws, hRow3, hCol++, "Encounters", ColHeader);
+            WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ColHeader);
             WriteHeaderCell(ws, hRow3, hCol++, "Insurance Paid", ColHeader);
-            WriteHeaderCell(ws, hRow3, hCol++, "Average Paid", ColHeader);
         }
-        WriteHeaderCell(ws, hRow3, hCol++, "Encounters", ColHeader);
-        WriteHeaderCell(ws, hRow3, hCol++, "Insurance Paid", ColHeader);
-        WriteHeaderCell(ws, hRow3, hCol, "Average Paid", ColHeader);
+        WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ColHeader);
+        WriteHeaderCell(ws, hRow3, hCol, "Insurance Paid", ColHeader);
 
         row = hRow3 + 1;
 
@@ -207,16 +204,13 @@ public static partial class CollectionSummaryExcelExportBuilder
                     var cell = panel.ByMonth.GetValueOrDefault(p.Key);
                     WriteCell(ws, row, col++, cell?.EncounterCount ?? 0, bg, wholeDollars: true);
                     WriteCell(ws, row, col++, cell?.InsurancePaidAmount ?? 0m, bg, isCurrency: true, wholeDollars: true);
-                    WriteCell(ws, row, col++, cell?.AveragePaidAmount ?? 0m, bg, isCurrency: true, wholeDollars: true);
                 }
                 var yt = panel.ByYear.GetValueOrDefault(year);
                 WriteCell(ws, row, col++, yt?.EncounterCount ?? 0, bg, wholeDollars: true);
                 WriteCell(ws, row, col++, yt?.InsurancePaidAmount ?? 0m, bg, isCurrency: true, wholeDollars: true);
-                WriteCell(ws, row, col++, yt?.AveragePaidAmount ?? 0m, bg, isCurrency: true, wholeDollars: true);
             }
             WriteCell(ws, row, col++, panel.TotalEncounters, bg, wholeDollars: true);
-            WriteCell(ws, row, col++, panel.TotalInsurancePaid, bg, isCurrency: true, wholeDollars: true);
-            WriteCell(ws, row, col, panel.TotalAveragePaidAmount, bg, isCurrency: true, wholeDollars: true);
+            WriteCell(ws, row, col, panel.TotalInsurancePaid, bg, isCurrency: true, wholeDollars: true);
             row++;
 
             int firstChild = row;
@@ -232,16 +226,13 @@ public static partial class CollectionSummaryExcelExportBuilder
                         var cell = payer.ByMonth.GetValueOrDefault(p.Key);
                         WriteCell(ws, row, col++, cell?.EncounterCount ?? 0, ColChild, wholeDollars: true);
                         WriteCell(ws, row, col++, cell?.InsurancePaidAmount ?? 0m, ColChild, isCurrency: true, wholeDollars: true);
-                        WriteCell(ws, row, col++, cell?.AveragePaidAmount ?? 0m, ColChild, isCurrency: true, wholeDollars: true);
                     }
                     var yt = payer.ByYear.GetValueOrDefault(year);
                     WriteCell(ws, row, col++, yt?.EncounterCount ?? 0, ColChild, wholeDollars: true);
                     WriteCell(ws, row, col++, yt?.InsurancePaidAmount ?? 0m, ColChild, isCurrency: true, wholeDollars: true);
-                    WriteCell(ws, row, col++, yt?.AveragePaidAmount ?? 0m, ColChild, isCurrency: true, wholeDollars: true);
                 }
                 WriteCell(ws, row, col++, payer.TotalEncounters, ColChild, wholeDollars: true);
-                WriteCell(ws, row, col++, payer.TotalInsurancePaid, ColChild, isCurrency: true, wholeDollars: true);
-                WriteCell(ws, row, col, payer.TotalAveragePaidAmount, ColChild, isCurrency: true, wholeDollars: true);
+                WriteCell(ws, row, col, payer.TotalInsurancePaid, ColChild, isCurrency: true, wholeDollars: true);
                 row++;
             }
             ExcelTheme.GroupChildRows(ws, firstChild, row - 1);
@@ -260,16 +251,13 @@ public static partial class CollectionSummaryExcelExportBuilder
                     var cell = pivot.GrandTotalByMonth.GetValueOrDefault(p.Key);
                     WriteCell(ws, row, col++, cell?.EncounterCount ?? 0, bg, bold: true, wholeDollars: true);
                     WriteCell(ws, row, col++, cell?.InsurancePaidAmount ?? 0m, bg, isCurrency: true, bold: true, wholeDollars: true);
-                    WriteCell(ws, row, col++, cell?.AveragePaidAmount ?? 0m, bg, isCurrency: true, bold: true, wholeDollars: true);
                 }
                 var yt = pivot.GrandTotalByYear.GetValueOrDefault(year);
                 WriteCell(ws, row, col++, yt?.EncounterCount ?? 0, bg, bold: true, wholeDollars: true);
                 WriteCell(ws, row, col++, yt?.InsurancePaidAmount ?? 0m, bg, isCurrency: true, bold: true, wholeDollars: true);
-                WriteCell(ws, row, col++, yt?.AveragePaidAmount ?? 0m, bg, isCurrency: true, bold: true, wholeDollars: true);
             }
             WriteCell(ws, row, col++, pivot.GrandTotalEncounters, bg, bold: true, wholeDollars: true);
-            WriteCell(ws, row, col++, pivot.GrandTotalInsurancePaid, bg, isCurrency: true, bold: true, wholeDollars: true);
-            WriteCell(ws, row, col, pivot.GrandTotalAveragePaidAmount, bg, isCurrency: true, bold: true, wholeDollars: true);
+            WriteCell(ws, row, col, pivot.GrandTotalInsurancePaid, bg, isCurrency: true, bold: true, wholeDollars: true);
         }
 
         AutoFitColumns(ws);
@@ -305,7 +293,7 @@ public static partial class CollectionSummaryExcelExportBuilder
         var pivot = vm.WeeklyClaimVolume;
         if (!pivot.HasData) return;
 
-        int colCount = 1 + pivot.Weeks.Count * 3 + 3; // Panel + weeks*3 + Grand*3
+        int colCount = 1 + pivot.Weeks.Count * 2 + 2; // Panel + weeks*2 + Grand*2
         var appended = insightsWs is not null;
         var ws = insightsWs
                  ?? wb.Worksheets.FirstOrDefault(s => s.Name.Equals("Insights", StringComparison.OrdinalIgnoreCase))
@@ -331,23 +319,21 @@ public static partial class CollectionSummaryExcelExportBuilder
         int hCol = 2;
         foreach (var w in pivot.Weeks)
         {
-            WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 2, w.Label, ColMonth);
-            hCol += 3;
+            WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1, w.Label, ColMonth);
+            hCol += 2;
         }
-        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 2, "Grand Total", ColHeader);
+        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1, "Grand Total", ColHeader);
 
-        // Header Row 2: sub-columns
+        // Header Row 2: sub-columns (no Average Paid)
         int hRow2 = hRow1 + 1;
         hCol = 2;
         foreach (var _ in pivot.Weeks)
         {
-            WriteHeaderCell(ws, hRow2, hCol++, "Encounters", ColMetric);
+            WriteHeaderCell(ws, hRow2, hCol++, "No. of Claims", ColMetric);
             WriteHeaderCell(ws, hRow2, hCol++, "Insurance Paid", ColMetric);
-            WriteHeaderCell(ws, hRow2, hCol++, "Average Paid", ColMetric);
         }
-        WriteHeaderCell(ws, hRow2, hCol++, "Encounters", ColHeader);
-        WriteHeaderCell(ws, hRow2, hCol++, "Insurance Paid", ColHeader);
-        WriteHeaderCell(ws, hRow2, hCol, "Average Paid", ColHeader);
+        WriteHeaderCell(ws, hRow2, hCol++, "No. of Claims", ColHeader);
+        WriteHeaderCell(ws, hRow2, hCol, "Insurance Paid", ColHeader);
 
         row = hRow2 + 1;
 
@@ -361,11 +347,9 @@ public static partial class CollectionSummaryExcelExportBuilder
                 var cell = panel.ByWeek.GetValueOrDefault(w.Key);
                 WriteCell(ws, row, col++, cell?.EncounterCount ?? 0, bg, wholeDollars: true);
                 WriteCell(ws, row, col++, cell?.InsurancePaidAmount ?? 0m, bg, isCurrency: true, wholeDollars: true);
-                WriteCell(ws, row, col++, cell?.AveragePaidAmount ?? 0m, bg, isCurrency: true, wholeDollars: true);
             }
             WriteCell(ws, row, col++, panel.TotalEncounters, bg, wholeDollars: true);
-            WriteCell(ws, row, col++, panel.TotalInsurancePaid, bg, isCurrency: true, wholeDollars: true);
-            WriteCell(ws, row, col, panel.TotalAveragePaidAmount, bg, isCurrency: true, wholeDollars: true);
+            WriteCell(ws, row, col, panel.TotalInsurancePaid, bg, isCurrency: true, wholeDollars: true);
             row++;
 
             int firstChild = row;
@@ -378,11 +362,9 @@ public static partial class CollectionSummaryExcelExportBuilder
                     var cell = payer.ByWeek.GetValueOrDefault(w.Key);
                     WriteCell(ws, row, col++, cell?.EncounterCount ?? 0, ColChild, wholeDollars: true);
                     WriteCell(ws, row, col++, cell?.InsurancePaidAmount ?? 0m, ColChild, isCurrency: true, wholeDollars: true);
-                    WriteCell(ws, row, col++, cell?.AveragePaidAmount ?? 0m, ColChild, isCurrency: true, wholeDollars: true);
                 }
                 WriteCell(ws, row, col++, payer.TotalEncounters, ColChild, wholeDollars: true);
-                WriteCell(ws, row, col++, payer.TotalInsurancePaid, ColChild, isCurrency: true, wholeDollars: true);
-                WriteCell(ws, row, col, payer.TotalAveragePaidAmount, ColChild, isCurrency: true, wholeDollars: true);
+                WriteCell(ws, row, col, payer.TotalInsurancePaid, ColChild, isCurrency: true, wholeDollars: true);
                 row++;
             }
             ExcelTheme.GroupChildRows(ws, firstChild, row - 1);
@@ -398,11 +380,9 @@ public static partial class CollectionSummaryExcelExportBuilder
                 var cell = pivot.GrandTotalByWeek.GetValueOrDefault(w.Key);
                 WriteCell(ws, row, col++, cell?.EncounterCount ?? 0, bg, bold: true, wholeDollars: true);
                 WriteCell(ws, row, col++, cell?.InsurancePaidAmount ?? 0m, bg, isCurrency: true, bold: true, wholeDollars: true);
-                WriteCell(ws, row, col++, cell?.AveragePaidAmount ?? 0m, bg, isCurrency: true, bold: true, wholeDollars: true);
             }
             WriteCell(ws, row, col++, pivot.GrandTotalEncounters, bg, bold: true, wholeDollars: true);
-            WriteCell(ws, row, col++, pivot.GrandTotalInsurancePaid, bg, isCurrency: true, bold: true, wholeDollars: true);
-            WriteCell(ws, row, col, pivot.GrandTotalAveragePaidAmount, bg, isCurrency: true, bold: true, wholeDollars: true);
+            WriteCell(ws, row, col, pivot.GrandTotalInsurancePaid, bg, isCurrency: true, bold: true, wholeDollars: true);
         }
 
         AutoFitColumns(ws);
@@ -859,7 +839,7 @@ public static partial class CollectionSummaryExcelExportBuilder
 
         int row = 1;
         ExcelTheme.Collection.WriteTitleBar(ws, row, colCount,
-            $"Panel Averages \u2014 Last 6 Months | Billed / DOS \u2014 {labName}");
+            $"Panel Averages \u2014 Last 6 Months | Deposit / Posted Date \u2014 {labName}");
         row++;
         ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ColHeader);
         row++;
@@ -970,6 +950,27 @@ public static partial class CollectionSummaryExcelExportBuilder
                 ws.Rows(firstChild, row - 1).Group();
                 ws.Rows(firstChild, row - 1).Collapse();
             }
+        }
+
+        // Client Excel includes a Total row (sum of panel metrics; averages = sum/count).
+        if (result.PanelRows.Count > 0)
+        {
+            var total = result.PanelRows.Aggregate(
+                new PanelAveragesMetrics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+                (acc, p) => new PanelAveragesMetrics(
+                    acc.ClaimCount + p.Metrics.ClaimCount,
+                    acc.TotalCharges + p.Metrics.TotalCharges,
+                    acc.CarrierPayment + p.Metrics.CarrierPayment,
+                    acc.FullyPaidCount + p.Metrics.FullyPaidCount,
+                    acc.FullyPaidAmount + p.Metrics.FullyPaidAmount,
+                    acc.AdjudicatedCount + p.Metrics.AdjudicatedCount,
+                    acc.AdjudicatedAmount + p.Metrics.AdjudicatedAmount,
+                    acc.Days30Count + p.Metrics.Days30Count,
+                    acc.Days30Amount + p.Metrics.Days30Amount,
+                    acc.Days60Count + p.Metrics.Days60Count,
+                    acc.Days60Amount + p.Metrics.Days60Amount));
+            WriteAvgPayMetricsRow(ws, row, "Total", total, XLColor.FromHtml("#D9D9D9"), bold: true);
+            row++;
         }
 
         AutoFitColumns(ws);
@@ -1146,33 +1147,149 @@ public static partial class CollectionSummaryExcelExportBuilder
         if (TryBuildRepVsPaymentPivot(wb, result, labName)) return;
         if (result.Rows.Count == 0) return;
 
+        // CheckDate year/month across columns (matches Insurance Vs Payments layout).
+        BuildRepVsPaymentFlatSheet(wb, result.Rows, labName);
+    }
+
+    /// <summary>Sales Rep × CheckDate year/month grid (no PivotTable) — columns = CheckDate periods.</summary>
+    private static void BuildRepVsPaymentFlatSheet(
+        XLWorkbook wb, List<RepPaymentFlatRow> rows, string labName)
+    {
+        var periods = rows
+            .Where(r => r.Year > 1900 && r.Month is >= 1 and <= 12)
+            .Select(r => (Year: r.Year, Month: r.Month))
+            .Distinct()
+            .OrderBy(p => p.Year).ThenBy(p => p.Month)
+            .ToList();
+
+        if (periods.Count == 0)
+        {
+            var wsFlat = wb.AddWorksheet("Rep Vs Payment");
+            wsFlat.TabColor = ExcelTheme.Collection.TabYellow;
+            ExcelTheme.ApplyDefaults(wsFlat);
+            string[] headers = ["Sales Rep", "No. of Claims", "Insurance Payments"];
+            int row0 = 1;
+            ExcelTheme.Collection.WriteTitleBar(wsFlat, row0, headers.Length, $"Rep Vs Payment — {labName}");
+            row0++;
+            ExcelTheme.WriteHeaderRow(wsFlat, row0, 1, headers, ExcelTheme.Collection.HeaderBg);
+            row0++;
+            foreach (var g in rows.GroupBy(r => r.SalesRepName, StringComparer.OrdinalIgnoreCase)
+                         .OrderByDescending(g => g.Sum(x => x.InsurancePayments)))
+            {
+                WriteCell(wsFlat, row0, 1, g.Key, XLColor.White, isText: true);
+                WriteCell(wsFlat, row0, 2, g.Sum(x => x.NoOfClaims), XLColor.White);
+                WriteCell(wsFlat, row0, 3, g.Sum(x => x.InsurancePayments), XLColor.White, isCurrency: true);
+                row0++;
+            }
+            AutoFitColumns(wsFlat);
+            return;
+        }
+
+        var years = periods.Select(p => p.Year).Distinct().OrderBy(y => y).ToList();
+        var pivotRows = rows
+            .Where(r => r.Year > 1900 && r.Month is >= 1 and <= 12)
+            .GroupBy(r => r.SalesRepName, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new
+            {
+                SalesRepName = g.Key,
+                Cells = g.GroupBy(r => (Year: r.Year, Month: r.Month))
+                    .ToDictionary(
+                        cg => cg.Key,
+                        cg => (Count: cg.Sum(x => x.NoOfClaims), Payment: cg.Sum(x => x.InsurancePayments))),
+                TotalClaims = g.Sum(x => x.NoOfClaims),
+                TotalPay = g.Sum(x => x.InsurancePayments),
+            })
+            .OrderByDescending(r => r.TotalPay)
+            .ToList();
+
+        const int metrics = 2;
+        int colCount = 1 + periods.Count * metrics + years.Count * metrics + metrics;
+
         var ws = wb.AddWorksheet("Rep Vs Payment");
         ws.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
 
-        string[] headers = ["Sales Rep", "Year", "Month", "No. of Claims", "Insurance Payments"];
-        int colCount = headers.Length;
         int row = 1;
-        ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, $"Rep Vs Payment \u2014 {labName}");
-        row++;
-        ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ColHeader);
+        ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, $"Rep Vs Payment — {labName}");
         row++;
 
-        foreach (var r in result.Rows
-                     .OrderBy(x => x.SalesRepName, StringComparer.OrdinalIgnoreCase)
-                     .ThenBy(x => x.Year)
-                     .ThenBy(x => x.Month))
+        int hRow1 = row;
+        WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, "Sales Rep", ExcelTheme.Collection.HeaderBg);
+        int hCol = 2;
+        foreach (var year in years)
         {
-            WriteCell(ws, row, 1, r.SalesRepName, XLColor.White, isText: true);
-            WriteCell(ws, row, 2, r.Year, XLColor.White);
-            WriteCell(ws, row, 3, new DateTime(2000, Math.Clamp(r.Month, 1, 12), 1).ToString("MMM"), XLColor.White, isText: true);
-            WriteCell(ws, row, 4, r.NoOfClaims, XLColor.White);
-            WriteCell(ws, row, 5, r.InsurancePayments, XLColor.White, isCurrency: true);
+            var mons = periods.Where(p => p.Year == year).ToList();
+            int span = mons.Count * metrics + metrics;
+            WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + span - 1, year.ToString(), ExcelTheme.Collection.HeaderBg);
+            hCol += span;
+        }
+        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + metrics - 1, "Grand Total", ExcelTheme.Collection.HeaderBg);
+
+        int hRow2 = hRow1 + 1;
+        hCol = 2;
+        foreach (var year in years)
+        {
+            foreach (var p in periods.Where(x => x.Year == year))
+            {
+                var mk = new DateTime(p.Year, p.Month, 1).ToString("MMM");
+                WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, mk, ExcelTheme.Collection.HeaderBg);
+                hCol += 2;
+            }
+            WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, $"Year {year}", ExcelTheme.Collection.HeaderBg);
+            hCol += 2;
+        }
+        WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, "", ExcelTheme.Collection.HeaderBg);
+
+        int hRow3 = hRow2 + 1;
+        hCol = 2;
+        void WriteMetricPair()
+        {
+            WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ExcelTheme.Collection.HeaderBg);
+            WriteHeaderCell(ws, hRow3, hCol++, "Insurance Payments", ExcelTheme.Collection.HeaderBg);
+        }
+        foreach (var year in years)
+        {
+            foreach (var _ in periods.Where(x => x.Year == year))
+                WriteMetricPair();
+            WriteMetricPair();
+        }
+        WriteMetricPair();
+
+        ws.Range(hRow1, 1, hRow3, 1).Merge();
+        ws.Cell(hRow1, 1).Value = "Sales Rep";
+        ws.Cell(hRow1, 1).Style.Fill.BackgroundColor = ExcelTheme.Collection.HeaderBg;
+        ws.Cell(hRow1, 1).Style.Font.Bold = true;
+        ws.Cell(hRow1, 1).Style.Font.FontColor = XLColor.White;
+
+        row = hRow3 + 1;
+        foreach (var pr in pivotRows)
+        {
+            var bg = XLColor.White;
+            int col = 1;
+            WriteCell(ws, row, col++, pr.SalesRepName, bg, isText: true);
+            foreach (var year in years)
+            {
+                int yClaims = 0;
+                decimal yPay = 0m;
+                foreach (var p in periods.Where(x => x.Year == year))
+                {
+                    pr.Cells.TryGetValue((p.Year, p.Month), out var cell);
+                    WriteCell(ws, row, col++, cell.Count, bg);
+                    WriteCell(ws, row, col++, cell.Payment, bg, isCurrency: true);
+                    yClaims += cell.Count;
+                    yPay += cell.Payment;
+                }
+                WriteCell(ws, row, col++, yClaims, bg);
+                WriteCell(ws, row, col++, yPay, bg, isCurrency: true);
+            }
+            WriteCell(ws, row, col++, pr.TotalClaims, bg);
+            WriteCell(ws, row, col, pr.TotalPay, bg, isCurrency: true);
             row++;
         }
 
         AutoFitColumns(ws);
-        ws.SheetView.FreezeRows(3);
+        ws.SheetView.FreezeRows(hRow3);
+        ws.SheetView.FreezeColumns(1);
     }
 
     // ?? Provider Summary ??????????????????????????????????????????????

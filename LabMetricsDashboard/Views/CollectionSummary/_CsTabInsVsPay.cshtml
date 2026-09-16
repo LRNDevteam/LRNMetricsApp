@@ -1,7 +1,24 @@
 @model LabMetricsDashboard.Models.CollectionSummaryViewModel
 @{
     var rowsData = Model.InsuranceVsPayment;
+
+    // Cove client report: Row Labels | Count of ClaimID | Sum of Insurance Payment (no month columns).
+    // Other labs keep CheckDate year/month pivot.
+    var usePayerFlat = Model.IsCoveLab;
+
+    var flatRows = rowsData
+        .GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
+        .Select(g => new
+        {
+            PayerName = g.Key,
+            TotalCount = g.Sum(x => x.NoOfPaidClaims),
+            TotalPayment = g.Sum(x => x.InsurancePayment)
+        })
+        .OrderByDescending(r => Model.IsAugustusLab ? r.TotalCount : r.TotalPayment)
+        .ToList();
+
     var periods = rowsData
+        .Where(r => r.BillYear > 1900 && r.BillMonth is >= 1 and <= 12)
         .Select(r => (Year: r.BillYear, Month: r.BillMonth))
         .Distinct()
         .OrderBy(p => p.Year)
@@ -28,7 +45,45 @@
         .ToList();
 }
 
-@if (rowsData.Count > 0)
+@if (rowsData.Count > 0 && usePayerFlat)
+{
+    <div class="cs-rpt-wrap">
+        <div class="cs-rpt-scroll">
+            <table class="cs-rpt-table">
+                <thead>
+                    <tr>
+                        <th style="text-align:left;min-width:280px">Row Labels</th>
+                        <th style="min-width:140px">Count of ClaimID</th>
+                        <th style="min-width:180px">Sum of Insurance Payment</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in flatRows)
+                    {
+                        <tr>
+                            <td style="text-align:left;font-weight:600">@row.PayerName</td>
+                            <td style="text-align:right">@row.TotalCount.ToString("N0")</td>
+                            <td style="text-align:right">@Acct2(row.TotalPayment)</td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot>
+                    <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                        <td style="text-align:left;color:#fff">Grand Total</td>
+                        <td style="text-align:right;color:#fff">@flatRows.Sum(r => r.TotalCount).ToString("N0")</td>
+                        <td style="text-align:right;color:#fff">@Acct2(flatRows.Sum(r => r.TotalPayment))</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+
+    <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+        <strong>Source:</strong> Aggregate snapshot <code>Cove_CS_InsuranceVsPayment</code>
+        — filter InsurancePayment &gt; 0; payer totals (no month columns).
+    </div>
+}
+else if (rowsData.Count > 0)
 {
     <div class="cs-rpt-wrap">
         <div class="cs-rpt-scroll">

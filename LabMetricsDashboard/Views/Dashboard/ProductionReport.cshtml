@@ -311,22 +311,19 @@ th.pr-month-data, td.pr-month-data {
 .pr-payer-row:hover td { background: #f8fafc; }
 .pr-payer-row:hover td:first-child { background: #f8fafc; }
 
-.pr-hp-toggle {
-    cursor: pointer;
-    user-select: none;
-}
-.pr-hp-toggle td:first-child {
-    cursor: pointer;
-}
+/* Panel / payer open-close — same pattern as Collection .cs-ag-*.
+   Specificity must beat any later tbody striping / sticky-cell rules. */
+.pr-table tbody tr.pr-hp-toggle { cursor: pointer; user-select: none; }
+.pr-table tbody tr.pr-hp-toggle td:first-child { cursor: pointer; }
 .pr-hp-chevron {
     display: inline-block;
     margin-right: .35rem;
     font-size: .7rem;
     transition: transform .18s ease;
 }
-.pr-hp-toggle.pr-hp-open .pr-hp-chevron { transform: rotate(90deg); }
-.pr-hp-child { display: none; }
-.pr-hp-child.pr-hp-shown { display: table-row; }
+.pr-table tbody tr.pr-hp-toggle.pr-hp-open .pr-hp-chevron { transform: rotate(90deg); }
+.pr-table tbody tr.pr-hp-child { display: none !important; }
+.pr-table tbody tr.pr-hp-child.pr-hp-shown { display: table-row !important; }
 
 .pr-total-row td {
     background: #0e3460 !important; color: #fff !important;
@@ -634,15 +631,14 @@ th.pr-month-data, td.pr-month-data {
                     </div>
 
                     @{
-                        // Rule1/Rule2/Rule4 group and filter by ChargeEnteredDate → label shows "CHARGE ENTERED DATE".
-                        // Rule3 (Augustus) groups by ChargeEnteredDate but filters by FirstBilledDate → label shows "FIRST BILLED DATE".
-                        // Default/Rule5 always uses FirstBilledDate for both.
+                        // Cove: ChargeEnteredDate axis — lab-specific (do not use ProductionSummary.Rule).
+                        // Other labs still use Rule1–4 → ChargeEnteredDate; Default/Rule5 → FirstBilledDate.
                         var rule = Model.ProductionSummaryRule;
-                        var dateFilterUsesChargeEntered =
-                            string.Equals(rule, "Rule1", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(rule, "Rule2", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(rule, "Rule3", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(rule, "Rule4", StringComparison.OrdinalIgnoreCase);
+                        var dateFilterUsesChargeEntered = Model.IsCoveLab
+                            || string.Equals(rule, "Rule1", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(rule, "Rule2", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(rule, "Rule3", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(rule, "Rule4", StringComparison.OrdinalIgnoreCase);
                         var dateFilterFromLabel = dateFilterUsesChargeEntered ? "CHARGE ENTERED DATE FROM" : "FIRST BILLED DATE FROM";
                         var dateFilterToLabel   = dateFilterUsesChargeEntered ? "CHARGE ENTERED DATE TO"   : "FIRST BILLED DATE TO";
                     }
@@ -966,8 +962,10 @@ th.pr-month-data, td.pr-month-data {
                     
                     <div class="px-3 py-2 small text-muted">
                         @{
+                            // Cove Monthly: Charge Entered Date (lab-specific). Other labs still follow Rule.
                             var ppRule = Model.ProductionSummaryRule;
-                            var ppUsesCharge = string.Equals(ppRule, "Rule1", StringComparison.OrdinalIgnoreCase)
+                            var ppUsesCharge = Model.IsCoveLab
+                                || string.Equals(ppRule, "Rule1", StringComparison.OrdinalIgnoreCase)
                                 || string.Equals(ppRule, "Rule2", StringComparison.OrdinalIgnoreCase)
                                 || string.Equals(ppRule, "Rule3", StringComparison.OrdinalIgnoreCase)
                                 || string.Equals(ppRule, "Rule4", StringComparison.OrdinalIgnoreCase);
@@ -1498,17 +1496,29 @@ th.pr-month-data, td.pr-month-data {
                 <div class="pr-wrap">
                     <div class="pr-filter-summary">
                         @{
+                            // Cove: full ClaimLevelData (no FirstBilled blank gate) — lab-specific, not Rules.
                             var ppRuleLocal = Model.ProductionSummaryRule;
-                            var ppUsesChargeLocal = string.Equals(ppRuleLocal, "Rule1", StringComparison.OrdinalIgnoreCase)
+                            var ppUsesChargeLocal = Model.IsCoveLab
+                                || string.Equals(ppRuleLocal, "Rule1", StringComparison.OrdinalIgnoreCase)
                                 || string.Equals(ppRuleLocal, "Rule2", StringComparison.OrdinalIgnoreCase)
                                 || string.Equals(ppRuleLocal, "Rule3", StringComparison.OrdinalIgnoreCase)
                                 || string.Equals(ppRuleLocal, "Rule4", StringComparison.OrdinalIgnoreCase);
                             var ppDateColLocal = ppUsesChargeLocal ? "ChargeEnteredDate" : "FirstBilledDate";
                         }
                         <span class="filter-dot">•</span>
+                        @if (Model.IsCoveLab)
+                        {
+                        <span><span class="filter-label">Source:</span>
+                            <span class="filter-key-2">ClaimLevelData [All]</span>
+                            &nbsp;·&nbsp; Rows: <span class="filter-key">PayerName_Raw</span>
+                            &nbsp;·&nbsp; Columns: <span class="filter-key">Panelname</span>
+                            &nbsp;·&nbsp; Rank: <span class="filter-key">COUNT(DISTINCT ClaimID)</span></span>
+                        }
+                        else
+                        {
                         <span><span class="filter-label">Filter:</span>
-                          @*   <span class="filter-key">PayerName</span> not blank &nbsp;·&nbsp; *@
                             <span class="filter-key-2">@ppDateColLocal</span> is a valid date</span>
+                        }
                     </div>
                     <div class="pr-scroll">
                         <table class="pr-table">
@@ -1574,13 +1584,21 @@ th.pr-month-data, td.pr-month-data {
             }
             else
             {
-                var ppRuleLocal = Model.ProductionSummaryRule;
-                var ppUsesChargeLocal = string.Equals(ppRuleLocal, "Rule1", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(ppRuleLocal, "Rule2", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(ppRuleLocal, "Rule3", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(ppRuleLocal, "Rule4", StringComparison.OrdinalIgnoreCase);
-                var ppDateColLocal = ppUsesChargeLocal ? "ChargeEnteredDate" : "FirstBilledDate";
-                var ppReason = $"No rows match: PayerName_Raw not blank · {ppDateColLocal} is a valid date";
+                string ppReason;
+                if (Model.IsCoveLab)
+                {
+                    ppReason = "No ClaimLevelData rows found for Payor × Panel";
+                }
+                else
+                {
+                    var ppRuleLocal = Model.ProductionSummaryRule;
+                    var ppUsesChargeLocal = string.Equals(ppRuleLocal, "Rule1", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(ppRuleLocal, "Rule2", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(ppRuleLocal, "Rule3", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(ppRuleLocal, "Rule4", StringComparison.OrdinalIgnoreCase);
+                    var ppDateColLocal = ppUsesChargeLocal ? "ChargeEnteredDate" : "FirstBilledDate";
+                    ppReason = $"No rows match: PayerName_Raw not blank · {ppDateColLocal} is a valid date";
+                }
                 <div class="text-center py-5 text-muted">
                     <div style="font-size:2rem;opacity:.4">&#128202;</div>
                     <div class="fw-semibold mt-2">No payer x panel data available</div>
@@ -2447,6 +2465,31 @@ th.pr-month-data, td.pr-month-data {
     </div>
 }
 
+@* Panel/payer expand — own IIFE so a throw in the larger PR script cannot kill toggles.
+   Document-delegated so lazy tab HTML (monthly/weekly/etc.) still works. *@
+@if (prChrome)
+{
+<script nonce='@Context.Items["CspNonce"]'>
+(function () {
+    'use strict';
+    document.addEventListener('click', function (e) {
+        var row = e.target && e.target.closest ? e.target.closest('tr.pr-hp-toggle') : null;
+        if (!row) return;
+        var group = row.getAttribute('data-hp-group');
+        if (!group) return;
+        var table = row.closest('table');
+        if (!table) return;
+        var open = row.classList.toggle('pr-hp-open');
+        row.setAttribute('aria-expanded', open ? 'true' : 'false');
+        var sel = 'tr.pr-hp-child[data-hp-parent="' + group.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]';
+        table.querySelectorAll(sel).forEach(function (child) {
+            child.classList.toggle('pr-hp-shown', open);
+        });
+    });
+}());
+</script>
+}
+
 @if (prChrome)
 {
 <script nonce='@Context.Items["CspNonce"]'>
@@ -2806,26 +2849,13 @@ th.pr-month-data, td.pr-month-data {
 
         document.addEventListener('click', function (e) {
             var srcBtn = e.target.closest ? e.target.closest('.pr-source-toggle-btn') : null;
-            if (srcBtn) {
-                var toggle = srcBtn.closest('.pr-source-toggle');
-                if (toggle) {
-                    toggle.querySelectorAll('.pr-source-toggle-btn').forEach(function (b) {
-                        var on = b === srcBtn;
-                        b.classList.toggle('active', on);
-                        b.setAttribute('aria-selected', on ? 'true' : 'false');
-                    });
-                }
-            }
-            var row = e.target.closest ? e.target.closest('.pr-hp-toggle') : null;
-            if (!row) return;
-            var group = row.getAttribute('data-hp-group');
-            if (!group) return;
-            var table = row.closest('table');
-            var open = row.classList.toggle('pr-hp-open');
-            row.setAttribute('aria-expanded', open ? 'true' : 'false');
-            var children = (table || document).querySelectorAll('.pr-hp-child[data-hp-parent="' + group + '"]');
-            children.forEach(function (child) {
-                child.classList.toggle('pr-hp-shown', open);
+            if (!srcBtn) return;
+            var toggle = srcBtn.closest('.pr-source-toggle');
+            if (!toggle) return;
+            toggle.querySelectorAll('.pr-source-toggle-btn').forEach(function (b) {
+                var on = b === srcBtn;
+                b.classList.toggle('active', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
             });
         });
 
