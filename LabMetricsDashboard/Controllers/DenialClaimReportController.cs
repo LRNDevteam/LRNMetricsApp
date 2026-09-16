@@ -258,6 +258,19 @@ public sealed class DenialClaimReportController : Controller
             claims.Rows = result.Rows;
             claims.TotalFiltered = result.TotalFiltered;
             claims.TotalAll = result.TotalAll;
+            claims.Diagnosis = result.Diagnosis;
+
+            if (result.Diagnosis is { } d)
+            {
+                // Logged as well as shown: an empty drill-through is the kind of thing a user
+                // reports days later, by which time the screen is gone.
+                _logger.LogWarning(
+                    "Claim Level tab for lab {Lab} returned nothing. Code '{Code}' matched {CodeRows} row(s); "
+                    + "insurance '{Payer}' matched {PayerRows}; {Normalized} row(s) carry DenialCodeNormalized. "
+                    + "Insurances on the matching claims: {Samples}",
+                    labName, claims.DenialCode, d.MatchingCode, claims.PayerName, d.MatchingPayer,
+                    d.NormalizedPopulated, string.Join(", ", d.SamplePayers));
+            }
 
             if (result.Columns.Count > 0) claims.DisplayColumns = result.Columns;
         }
@@ -743,21 +756,29 @@ public sealed class DenialClaimReportController : Controller
             ws.Cell(r, c.Value).GetString().Replace("$", "").Replace(",", "").Replace("%", "").Trim(),
             out var d) ? d : 0m;
 
-        // A percent-formatted Excel cell showing "57%" holds 0.57, and GetString() hands back the
-        // stored number, not what the analyst sees. Taking it at face value stored 0.57 and the page
-        // then rendered "0.57%". Where the cell's format says percent, the value is scaled back to
-        // the number on screen; a cell typed as plain 57 is already that number and is left alone.
+        // A percent-formatted Excel cell showing "57%" holds 0.57, so taking the stored number at
+        // face value put 0.57 in the database and the page rendered "0.57%".
+        //
+        // Detecting that is fiddlier than it looks. Excel's BUILT-IN percent formats carry an empty
+        // format string and only a NumberFormatId (9 = "0%", 10 = "0.00%"), so checking the format
+        // text alone - which is what the first attempt at this did - never fired for the very cells
+        // that needed it. Both are checked here.
         decimal Percent(int r, int? c)
         {
             if (!c.HasValue) return 0m;
 
             var cell = ws.Cell(r, c.Value);
             var value = Num(r, c);
+            if (value == 0m) return 0m;
 
-            var isPercentFormatted = cell.Style.NumberFormat.Format.Contains('%')
+            var format = cell.Style.NumberFormat;
+            var isPercentFormatted = format.NumberFormatId is 9 or 10
+                                     || (format.Format?.Contains('%') ?? false)
                                      || cell.GetString().Contains('%');
 
-            return isPercentFormatted && cell.DataType == XLDataType.Number ? value * 100m : value;
+            if (isPercentFormatted && cell.DataType == XLDataType.Number) return value * 100m;
+
+            return DenialInsightPercent.Normalize(value);
         }
 
         DateTime? Date(int r, int? c, string columnName, string code)

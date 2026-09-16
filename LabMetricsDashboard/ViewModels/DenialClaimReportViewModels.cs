@@ -1,4 +1,5 @@
 using LabMetricsDashboard.Models;
+using LabMetricsDashboard.Services;
 
 namespace LabMetricsDashboard.ViewModels;
 
@@ -129,4 +130,7 @@ public sealed class DenialClaimLevelTabViewModel
     public bool HasNext => Page < TotalPages;
 
     public bool HasFilter => !string.IsNullOrWhiteSpace(DenialCode) || !string.IsNullOrWhiteSpace(PayerName);
+
+    /// <summary>Set only when a filtered result came back empty - says which filter emptied it.</summary>
+    public DenialClaimDiagnosis? Diagnosis { get; set; }
 }

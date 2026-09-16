@@ -55,7 +55,28 @@ public sealed record DenialClaimPage(
     IReadOnlyList<IReadOnlyDictionary<string, string>> Rows,
     IReadOnlyList<string> Columns,
     int TotalFiltered,
-    int TotalAll);
+    int TotalAll)
+{
+    /// <summary>
+    /// Why a filtered result came back empty, worked out only when it does. Each filter is counted
+    /// on its own, so the page can say which one eliminated everything instead of leaving the user
+    /// to guess - the failure this was written for looked identical whichever filter was at fault.
+    /// </summary>
+    public DenialClaimDiagnosis? Diagnosis { get; init; }
+}
+
+/// <param name="MatchingCode">Denied rows matching the denial code alone.</param>
+/// <param name="MatchingPayer">Denied rows matching the insurance alone.</param>
+/// <param name="NormalizedPopulated">
+/// Denied rows that actually carry a DenialCodeNormalized value. Zero means the column exists but
+/// the claim-level import has not run since it was added.
+/// </param>
+/// <param name="SamplePayers">Insurance names present on rows matching the code, to compare against.</param>
+public sealed record DenialClaimDiagnosis(
+    int MatchingCode,
+    int MatchingPayer,
+    int NormalizedPopulated,
+    IReadOnlyList<string> SamplePayers);
 
 /// <summary>
 /// Denial Claim Report data access, straight against each lab's own database.
@@ -196,15 +217,8 @@ GROUP BY LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [{payerCol}]), ''))),
             "TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0"
         };
 
-        if (!string.IsNullOrWhiteSpace(denialCode))
-        {
-            where.Add(present.Contains("DenialCodeNormalized")
-                // Whole-token match inside a comma-separated list: ",10,45,189," LIKE '%,45,%'.
-                ? "(',' + REPLACE(REPLACE(ISNULL(CONVERT(nvarchar(400), [DenialCodeNormalized]), ''), ' ', ''), ';', ',') + ',')"
-                  + " LIKE '%,' + @Code + ',%'"
-                // A lab that has not run the new import yet has only the raw column to go on.
-                : "REPLACE(CONVERT(nvarchar(400), [DenialCode]), ' ', '') LIKE '%' + @Code + '%'");
-        }
+        var codeMatch = BuildDenialCodeMatch(present);
+        if (!string.IsNullOrWhiteSpace(denialCode)) where.Add(codeMatch);
 
         var payerColumns = new[] { "PayerName_Raw", "PayerName" }.Where(present.Contains).ToList();
         var hasPayerFilter = !string.IsNullOrWhiteSpace(payerName) && payerColumns.Count > 0;
@@ -268,13 +282,141 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
             rows.Add(row);
         }
 
-        return new DenialClaimPage(rows, selected, totalFiltered, totalAll);
+        var result = new DenialClaimPage(rows, selected, totalFiltered, totalAll);
+
+        // Only when it matters. This is a second pass over the denied rows, which is not worth
+        // paying for on a result that already has something in it.
+        if (totalFiltered == 0 && (!string.IsNullOrWhiteSpace(denialCode) || hasPayerFilter))
+        {
+            result = result with
+            {
+                Diagnosis = await DiagnoseAsync(conn, codeMatch, payerColumns, denialCode, payerName, ct)
+            };
+        }
+
+        return result;
     }
 
     /// <summary>
-    /// Payer comparison key. Strips exactly what the SQL above strips - space, full stop, comma -
-    /// and upper-cases. The two have to agree character for character or the filter silently
-    /// matches nothing, which is how this went wrong the first time.
+    /// Counts each filter on its own so an empty result can say which one emptied it.
+    /// </summary>
+    private static async Task<DenialClaimDiagnosis> DiagnoseAsync(
+        SqlConnection conn, string codeMatch, IReadOnlyList<string> payerColumns,
+        string? denialCode, string? payerName, CancellationToken ct)
+    {
+        var hasCode = !string.IsNullOrWhiteSpace(denialCode);
+        var hasPayer = !string.IsNullOrWhiteSpace(payerName) && payerColumns.Count > 0;
+
+        var payerMatch = hasPayer
+            ? "(" + string.Join(" OR ", payerColumns.Select(c =>
+                $"REPLACE(REPLACE(REPLACE(UPPER(ISNULL(CONVERT(nvarchar(255), [{c}]), '')), ' ', ''), '.', ''), ',', '') = @Payer")) + ")"
+            : "1 = 0";
+
+        var normalizedPopulated = "CASE WHEN "
+            + "ISNULL(CONVERT(nvarchar(400), [DenialCodeNormalized]), '') <> '' THEN 1 ELSE 0 END";
+
+        // The column may not exist at all on a lab that has never run the deployment script.
+        var hasNormalizedColumn = payerColumns is not null
+            && await ColumnExistsAsync(conn, "ClaimLevelData", "DenialCodeNormalized", ct);
+
+        var payerSample = payerColumns.Count > 0 ? payerColumns[0] : null;
+
+        var sql = $@"
+SELECT SUM(CASE WHEN {(hasCode ? codeMatch : "1 = 0")} THEN 1 ELSE 0 END),
+       SUM(CASE WHEN {payerMatch} THEN 1 ELSE 0 END),
+       SUM({(hasNormalizedColumn ? normalizedPopulated : "0")})
+FROM   dbo.ClaimLevelData
+WHERE  [DenialCode] IS NOT NULL
+  AND  LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> ''
+  AND  TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0;";
+
+        if (hasCode && payerSample is not null)
+        {
+            // The insurance names actually on the matching claims - the fastest way to see that the
+            // workbook says "HUMANA" and the claim table says something else.
+            sql += $@"
+SELECT DISTINCT TOP (5) LTRIM(RTRIM(CONVERT(nvarchar(255), [{payerSample}])))
+FROM   dbo.ClaimLevelData
+WHERE  {codeMatch}
+  AND  TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0
+  AND  ISNULL(CONVERT(nvarchar(255), [{payerSample}]), '') <> '';";
+        }
+
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 };
+        cmd.Parameters.Add("@Code", SqlDbType.NVarChar, 400).Value =
+            (object?)denialCode?.Trim().Replace(" ", "").ToUpperInvariant() ?? DBNull.Value;
+        cmd.Parameters.Add("@Payer", SqlDbType.NVarChar, 255).Value =
+            hasPayer ? PayerKey(payerName!) : (object)DBNull.Value;
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        int code = 0, payer = 0, normalized = 0;
+        if (await reader.ReadAsync(ct))
+        {
+            code = reader.IsDBNull(0) ? 0 : Convert.ToInt32(reader.GetValue(0));
+            payer = reader.IsDBNull(1) ? 0 : Convert.ToInt32(reader.GetValue(1));
+            normalized = reader.IsDBNull(2) ? 0 : Convert.ToInt32(reader.GetValue(2));
+        }
+
+        var samples = new List<string>();
+        if (await reader.NextResultAsync(ct))
+        {
+            while (await reader.ReadAsync(ct))
+                if (!reader.IsDBNull(0)) samples.Add(reader.GetString(0));
+        }
+
+        return new DenialClaimDiagnosis(code, payer, normalized, samples);
+    }
+
+    private static async Task<bool> ColumnExistsAsync(
+        SqlConnection conn, string table, string column, CancellationToken ct)
+    {
+        await using var cmd = new SqlCommand(
+            "SELECT CASE WHEN COL_LENGTH('dbo.' + @Table, @Column) IS NULL THEN 0 ELSE 1 END", conn);
+        cmd.Parameters.AddWithValue("@Table", table);
+        cmd.Parameters.AddWithValue("@Column", column);
+
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)) == 1;
+    }
+
+    /// <summary>
+    /// Matches one denial code against a claim row, on the derived column OR the raw one.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Both, always - never one or the other.</b> An earlier version picked the derived
+    /// column whenever it EXISTED, which is not the same as it being POPULATED: the deployment
+    /// script adds <c>DenialCodeNormalized</c>, but only a claim-level import fills it. Between
+    /// those two events every row held NULL and the filter matched nothing, so the tab came back
+    /// empty with no indication why.</para>
+    /// <para>The raw side tries the bare code and each group prefix as a whole comma-delimited
+    /// token, so "45" finds a cell reading "CO45, CO16" and does not find 145 or CO450. Spaces and
+    /// the prefix hyphen are removed first, so "CO-45" and "CO 45" both reduce to "CO45".</para>
+    /// </remarks>
+    private static string BuildDenialCodeMatch(HashSet<string> present)
+    {
+        // ",CO45,CO16," - a comma-delimited, punctuation-free form of whichever column.
+        static string Tokens(string column) =>
+            $"(',' + REPLACE(REPLACE(REPLACE(REPLACE(UPPER(ISNULL(CONVERT(nvarchar(400), [{column}]), '')), ' ', ''), '-', ''), ';', ','), '|', ',') + ',')";
+
+        var clauses = new List<string>();
+
+        if (present.Contains("DenialCodeNormalized"))
+            clauses.Add($"{Tokens("DenialCodeNormalized")} LIKE '%,' + @Code + ',%'");
+
+        var raw = Tokens("DenialCode");
+        clauses.Add($"{raw} LIKE '%,' + @Code + ',%'");
+
+        // The claim stores the prefixed spelling the payer sent; the filter carries the common code.
+        foreach (var prefix in new[] { "CO", "PI", "PR", "OA", "CR" })
+            clauses.Add($"{raw} LIKE '%,{prefix}' + @Code + ',%'");
+
+        return "(" + string.Join("\n       OR ", clauses) + ")";
+    }
+
+    /// <summary>
+    /// Payer comparison key. Strips exactly what the SQL strips - space, full stop, comma - and
+    /// upper-cases. The two have to agree character for character or the filter silently matches
+    /// nothing, which is how this went wrong the first time.
     /// </summary>
     private static string PayerKey(string payer) =>
         payer.ToUpperInvariant().Replace(" ", "").Replace(".", "").Replace(",", "");
@@ -321,7 +463,9 @@ ORDER BY WeekStart DESC, SortOrder, InsuranceBalance DESC, DenialCode;";
                 NoOfDenials = GetIntOrZero(reader, "NoOfDenials"),
                 TotalBalance = GetDecimalOrZero(reader, "TotalBalance"),
                 InsuranceBalance = GetDecimalOrZero(reader, "InsuranceBalance"),
-                ImpactPercentage = GetDecimalOrZero(reader, "ImpactPercentage"),
+                // Normalized on read as well as on import, so rows stored as a fraction by an
+                // earlier import show as 57% without anyone re-uploading. Idempotent - 57 stays 57.
+                ImpactPercentage = DenialInsightPercent.Normalize(GetDecimalOrZero(reader, "ImpactPercentage")),
                 // Sanitized again on read: a row written directly in SQL must not reach a browser raw.
                 ObservationHtml = DenialInsightRichText.Sanitize(Text(reader, "Observation")),
                 ActionCategory = Text(reader, "ActionCategory"),

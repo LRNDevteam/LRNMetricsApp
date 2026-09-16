@@ -1,4 +1,5 @@
 @using System.Globalization
+@using LabMetricsDashboard.Models
 @using LabMetricsDashboard.Services
 @model LabMetricsDashboard.ViewModels.DenialClaimLevelTabViewModel
 
@@ -116,8 +117,60 @@
                                 <td colspan="@Model.DisplayColumns.Count" class="claims-empty">
                                     <i class="bi bi-search d-block mb-2" style="font-size:1.5rem;opacity:.45;"></i>
                                     <div class="fw-semibold mb-1">No claims match these filters</div>
-                                    <div class="text-muted" style="font-size:.85rem;">
-                                        @if (Model.HasFilter)
+                                    <div class="text-muted claims-diagnosis">
+                                        @if (Model.Diagnosis is { } d)
+                                        {
+                                            <ul class="diag-list">
+                                                <li>
+                                                    <strong>@Model.TotalAll.ToString("N0")</strong> denied claim(s) with an
+                                                    outstanding insurance balance in this lab.
+                                                </li>
+                                                @if (!string.IsNullOrWhiteSpace(Model.DenialCode))
+                                                {
+                                                    <li class="@(d.MatchingCode == 0 ? "diag-bad" : "diag-ok")">
+                                                        <strong>@d.MatchingCode.ToString("N0")</strong> match denial code
+                                                        <strong>@Model.DenialCode</strong> on its own.
+                                                    </li>
+                                                }
+                                                @if (!string.IsNullOrWhiteSpace(Model.PayerName))
+                                                {
+                                                    <li class="@(d.MatchingPayer == 0 ? "diag-bad" : "diag-ok")">
+                                                        <strong>@d.MatchingPayer.ToString("N0")</strong> match insurance
+                                                        <strong>@Model.PayerName</strong> on its own.
+                                                    </li>
+                                                }
+                                            </ul>
+
+                                            @if (d.NormalizedPopulated == 0)
+                                            {
+                                                <div class="diag-hint">
+                                                    <i class="bi bi-exclamation-triangle-fill"></i>
+                                                    No claim carries a <code>DenialCodeNormalized</code> value yet. The column
+                                                    exists but the <strong>claim-level import has not run since it was added</strong>,
+                                                    so codes are being matched against the raw column only. Run the Master File
+                                                    Processor for this lab to populate it.
+                                                </div>
+                                            }
+                                            else if (d.MatchingCode > 0 && d.MatchingPayer == 0 && d.SamplePayers.Count > 0)
+                                            {
+                                                <div class="diag-hint">
+                                                    <i class="bi bi-info-circle-fill"></i>
+                                                    The denial code matches, but the insurance does not. Claims for
+                                                    <strong>@Model.DenialCode</strong> are billed to:
+                                                    <strong>@string.Join(", ", d.SamplePayers)</strong> &mdash; the insight
+                                                    workbook spells it <strong>@Model.PayerName</strong>.
+                                                </div>
+                                            }
+                                            else if (d.MatchingCode == 0)
+                                            {
+                                                <div class="diag-hint">
+                                                    <i class="bi bi-info-circle-fill"></i>
+                                                    No claim carries this denial code. It may exist only in the insight
+                                                    workbook, or be spelled differently in the claim data.
+                                                </div>
+                                            }
+                                        }
+                                        else if (Model.HasFilter)
                                         {
                                             <span>
                                                 The denial code or insurance may be spelled differently in the
