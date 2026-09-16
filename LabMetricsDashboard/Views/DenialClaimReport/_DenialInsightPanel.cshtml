@@ -1,0 +1,409 @@
+@using LabMetricsDashboard.Models
+@using LabMetricsDashboard.Services
+@model LabMetricsDashboard.ViewModels.DenialInsightPanelViewModel
+@{
+    var editable = Model.IsEditableTab;
+    var isCurrent = Model.Bucket == DenialInsightBuckets.Current;
+    var currentCount = Model.BucketCounts.GetValueOrDefault(DenialInsightBuckets.Current);
+    var previousCount = Model.BucketCounts.GetValueOrDefault(DenialInsightBuckets.Previous);
+}
+
+@* Observation and Action hold sanitized HTML (bold, bullets) from the client's workbook, so they are
+   rendered as markup. Sanitizing happens on the way in AND on the way out of the database - see
+   DenialInsightRichText - so a row edited directly in SQL cannot inject script here. *@
+
+<div class="card border-0 shadow-sm insight-card">
+    <div class="card-body pb-2">
+
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+            <div>
+                <div class="insight-title">Key Observations &amp; Highlights</div>
+                <div class="text-muted" style="font-size:.82rem;">
+                    @if (isCurrent)
+                    {
+                        <span>
+                            Import your Denial Insight workbook, edit it here, and save. Week of
+                            <strong>@Model.CurrentWeekStart.ToString("dd MMM yyyy")</strong>.
+                        </span>
+                    }
+                    else
+                    {
+                        <span>Previously discussed items, kept as they were when they were copied across.</span>
+                    }
+                </div>
+            </div>
+
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+                <a class="btn btn-sm btn-outline-secondary" asp-action="ExportInsights"
+                   asp-route-lab="@Model.CurrentLab" asp-route-bucket="@Model.Bucket">
+                    <i class="bi bi-download"></i> Export
+                </a>
+
+                @if (Model.CanEdit && isCurrent)
+                {
+                    <form method="post" asp-action="UploadInsights" asp-route-lab="@Model.CurrentLab"
+                          enctype="multipart/form-data" class="d-inline-block" id="insightUploadForm">
+                        @Html.AntiForgeryToken()
+                        <label class="btn btn-sm btn-outline-primary mb-0">
+                            <i class="bi bi-upload"></i> Import
+                            <input type="file" name="insightFile" accept=".xlsx,.xlsm" hidden id="insightFile" />
+                        </label>
+                    </form>
+
+                    <form method="post" asp-action="CopyToPreviousWeek" asp-route-lab="@Model.CurrentLab"
+                          class="d-inline-block" id="copyPreviousForm">
+                        @Html.AntiForgeryToken()
+                        <button type="button" class="btn btn-sm btn-warning" data-bs-toggle="modal"
+                                data-bs-target="#confirmCopyModal" @(currentCount == 0 ? "disabled" : "")>
+                            <i class="bi bi-arrow-right-circle"></i> Copy to Previous Week
+                        </button>
+                    </form>
+                }
+            </div>
+        </div>
+
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+            <ul class="nav nav-tabs insight-subtabs">
+                <li class="nav-item">
+                    <a class="nav-link @(isCurrent ? "active" : "")" asp-action="Index"
+                       asp-route-lab="@Model.CurrentLab" asp-route-tab="insight"
+                       asp-route-bucket="@DenialInsightBuckets.Current">
+                        Current Week
+                        <span class="badge rounded-pill @(isCurrent ? "bg-primary" : "bg-secondary-subtle text-secondary-emphasis")">@currentCount.ToString("N0")</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link @(!isCurrent ? "active" : "")" asp-action="Index"
+                       asp-route-lab="@Model.CurrentLab" asp-route-tab="insight"
+                       asp-route-bucket="@DenialInsightBuckets.Previous">
+                        Previous Week
+                        <span class="badge rounded-pill @(!isCurrent ? "bg-primary" : "bg-secondary-subtle text-secondary-emphasis")">@previousCount.ToString("N0")</span>
+                    </a>
+                </li>
+            </ul>
+
+            @if (editable && Model.Rows.Count > 0)
+            {
+                <button type="submit" form="insightEditForm" class="btn btn-sm btn-primary">
+                    <i class="bi bi-save"></i> Save Changes
+                </button>
+            }
+            else if (!editable && Model.Rows.Count > 0)
+            {
+                <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">
+                    <i class="bi bi-lock"></i> Read-only
+                </span>
+            }
+        </div>
+
+        <form method="post" asp-action="SaveInsights" asp-route-lab="@Model.CurrentLab" id="insightEditForm">
+            @Html.AntiForgeryToken()
+
+            <div class="insight-scroll">
+                <table class="table table-sm insight-table mb-0">
+                    <thead>
+                        <tr>
+                            <th class="col-idx">#</th>
+                            <th class="col-code">Denial Codes</th>
+                            <th class="col-desc">Descriptions</th>
+                            <th class="num">
+                                <span class="th-wrap"># of Denial</span>
+                            </th>
+                            <th class="num">Total Balance ($)</th>
+                            <th class="band-impact">Highest $ Impact - Insurance</th>
+                            <th class="band-impact num">Ins. Balance ($)</th>
+                            <th class="band-impact num">$ Impact (%)</th>
+                            <th class="col-rich">Observation</th>
+                            <th class="band-action col-cat">Category</th>
+                            <th class="band-action col-rich">Action</th>
+                            <th class="col-feedback">Feedback / Response</th>
+                            <th class="col-resp">Responsibility</th>
+                            <th class="col-date">Discussion Date</th>
+                            <th class="col-date">ETA</th>
+                            <th class="band-closed col-date">Closed Date</th>
+                            @if (editable)
+                            {
+                                <th class="col-actions"></th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (Model.Rows.Count == 0)
+                        {
+                            <tr>
+                                <td colspan="@(editable ? 17 : 16)" class="insight-empty">
+                                    @if (isCurrent)
+                                    {
+                                        <i class="bi bi-inbox d-block mb-2" style="font-size:1.6rem;opacity:.45;"></i>
+                                        <div class="fw-semibold mb-1">No denial insights imported yet</div>
+                                        <div class="text-muted" style="font-size:.85rem;">
+                                            Use <strong>Export</strong> to get the template, fill it in, then <strong>Import</strong>.
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <i class="bi bi-clock-history d-block mb-2" style="font-size:1.6rem;opacity:.45;"></i>
+                                        <div class="fw-semibold mb-1">Nothing discussed previously</div>
+                                        <div class="text-muted" style="font-size:.85rem;">
+                                            Rows arrive here when <strong>Copy to Previous Week</strong> is used on Current Week.
+                                        </div>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @for (var i = 0; i < Model.Rows.Count; i++)
+                            {
+                                var row = Model.Rows[i];
+                                var catClass = DenialInsightCategory.CssClass(row.ActionCategory);
+
+                                <tr>
+                                    <td class="col-idx">@(i + 1)</td>
+                                    <td class="col-code">
+                                        @* Requirement 6i: the denial code opens the claim-level data
+                                           filtered to that code. It hands off to Dashboard/ClaimLevel,
+                                           the application's one claim browser, rather than to a second
+                                           thinner claim list of this page's own. *@
+                                        <a href="@Url.Action("ClaimLevel", "Dashboard", DenialClaimDrillThrough.RouteValues(Model.CurrentLab, row.DenialCode))"
+                                           title="Open Claim Level Data filtered to denial code @row.DenialCode">@row.DenialCode</a>
+                                        @if (editable)
+                                        {
+                                            <input type="hidden" name="ids" value="@row.Id" />
+                                            <input type="hidden" name="denialCodes" value="@row.DenialCode" />
+                                            <input type="hidden" name="payerNames" value="@row.PayerName" />
+                                        }
+                                    </td>
+                                    <td class="col-desc">@row.DenialDescription</td>
+                                    <td class="num">@row.NoOfDenials.ToString("N0")</td>
+                                    <td class="num">@Acct2(row.TotalBalance)</td>
+                                    <td class="cell-impact">@row.PayerName</td>
+                                    <td class="cell-impact num">
+                                        @* Requirement 6i: the balance opens the claim-level data
+                                           filtered by BOTH the denial code and the insurance. *@
+                                        <a href="@Url.Action("ClaimLevel", "Dashboard", DenialClaimDrillThrough.RouteValues(Model.CurrentLab, row.DenialCode, row.PayerName))"
+                                           title="@(string.IsNullOrWhiteSpace(row.PayerName)
+                                                     ? $"Open Claim Level Data filtered to denial code {row.DenialCode}"
+                                                     : $"Open Claim Level Data filtered to {row.DenialCode} and {row.PayerName}")">@Acct2(row.InsuranceBalance)</a>
+                                    </td>
+                                    <td class="cell-impact num">@row.ImpactPercentage.ToString("0.##")%</td>
+
+                                    <td class="col-rich">
+                                        @if (editable)
+                                        {
+                                            <div class="rich-editor" contenteditable="true" data-target="observations">@Html.Raw(row.ObservationHtml)</div>
+                                            <input type="hidden" name="observations" value="@row.ObservationHtml" />
+                                        }
+                                        else if (string.IsNullOrWhiteSpace(row.ObservationHtml))
+                                        {
+                                            <span class="text-muted">&mdash;</span>
+                                        }
+                                        else
+                                        {
+                                            @Html.Raw(row.ObservationHtml)
+                                        }
+                                    </td>
+
+                                    <td class="col-cat @catClass">
+                                        @if (editable)
+                                        {
+                                            <input type="text" name="actionCategories" class="cat-input @catClass"
+                                                   value="@row.ActionCategory" list="insightCategories" maxlength="120" />
+                                        }
+                                        else if (string.IsNullOrWhiteSpace(row.ActionCategory))
+                                        {
+                                            <span class="text-muted">&mdash;</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="cat-pill">@row.ActionCategory</span>
+                                        }
+                                    </td>
+
+                                    <td class="col-rich">
+                                        @if (editable)
+                                        {
+                                            <div class="rich-editor" contenteditable="true" data-target="actions">@Html.Raw(row.ActionHtml)</div>
+                                            <input type="hidden" name="actions" value="@row.ActionHtml" />
+                                        }
+                                        else if (string.IsNullOrWhiteSpace(row.ActionHtml))
+                                        {
+                                            <span class="text-muted">&mdash;</span>
+                                        }
+                                        else
+                                        {
+                                            @Html.Raw(row.ActionHtml)
+                                        }
+                                    </td>
+
+                                    <td class="col-feedback">
+                                        @if (editable)
+                                        {
+                                            <textarea name="feedbackResponses" rows="2">@row.FeedbackResponse</textarea>
+                                        }
+                                        else
+                                        {
+                                            @(string.IsNullOrWhiteSpace(row.FeedbackResponse) ? "—" : row.FeedbackResponse)
+                                        }
+                                    </td>
+                                    <td class="col-resp">
+                                        @if (editable)
+                                        {
+                                            <input type="text" name="responsibilities" value="@row.Responsibility" maxlength="255" />
+                                        }
+                                        else
+                                        {
+                                            @(string.IsNullOrWhiteSpace(row.Responsibility) ? "—" : row.Responsibility)
+                                        }
+                                    </td>
+                                    <td class="col-date">
+                                        @if (editable)
+                                        {
+                                            <input type="date" name="discussionDates" value="@(row.DiscussionDate?.ToString("yyyy-MM-dd"))" />
+                                        }
+                                        else
+                                        {
+                                            @(row.DiscussionDate?.ToString("dd-MMM") ?? "—")
+                                        }
+                                    </td>
+                                    <td class="col-date">
+                                        @if (editable)
+                                        {
+                                            <input type="date" name="etas" value="@(row.Eta?.ToString("yyyy-MM-dd"))" />
+                                        }
+                                        else
+                                        {
+                                            @(row.Eta?.ToString("dd-MMM") ?? "—")
+                                        }
+                                    </td>
+                                    <td class="col-date cell-closed">
+                                        @if (editable)
+                                        {
+                                            <input type="date" name="closedDates" value="@(row.ClosedDate?.ToString("yyyy-MM-dd"))" />
+                                        }
+                                        else
+                                        {
+                                            @(row.ClosedDate?.ToString("dd-MMM") ?? "—")
+                                        }
+                                    </td>
+
+                                    @if (editable)
+                                    {
+                                        <td class="col-actions">
+                                            <button type="button" class="row-delete" title="Delete this insight row"
+                                                    data-bs-toggle="modal" data-bs-target="#confirmDeleteModal"
+                                                    data-row-id="@row.Id" data-row-code="@row.DenialCode"
+                                                    data-row-payer="@row.PayerName">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </td>
+                                    }
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                    @if (Model.Rows.Count > 0)
+                    {
+                        <tfoot>
+                            <tr>
+                                <th colspan="3">Total</th>
+                                <th class="num">@Model.TotalDenials.ToString("N0")</th>
+                                <th class="num">@Acct2(Model.TotalBalance)</th>
+                                <th></th>
+                                <th class="num">@Acct2(Model.TotalInsuranceBalance)</th>
+                                <th colspan="@(editable ? 10 : 9)"></th>
+                            </tr>
+                        </tfoot>
+                    }
+                </table>
+            </div>
+        </form>
+
+        <datalist id="insightCategories">
+            <option value="Appeal / MR"></option>
+            <option value="Appeal / Review"></option>
+            <option value="Review"></option>
+            <option value="Review &amp; Write Off"></option>
+            <option value="Review / Rebill"></option>
+            <option value="Review / Reprocess"></option>
+        </datalist>
+
+        @if (Model.Rows.Count > 0)
+        {
+            <div class="insight-legend">
+                <span class="legend-label">Category</span>
+                <span class="cat-pill cat-appeal-mr">Appeal / MR</span>
+                <span class="cat-pill cat-appeal">Appeal / Review</span>
+                <span class="cat-pill cat-review">Review &amp; Write Off</span>
+                <span class="cat-pill cat-rebill">Review / Rebill</span>
+                <span class="legend-hint">
+                    Denial Codes and Ins. Balance ($) are links &mdash; they open the claims behind the number.
+                </span>
+            </div>
+        }
+    </div>
+</div>
+
+@if (Model.CanEdit)
+{
+    <div class="modal fade" id="confirmDeleteModal" tabindex="-1" aria-labelledby="confirmDeleteLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-sm">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="confirmDeleteLabel">Delete this row?</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" style="font-size:.9rem;">
+                    <p class="mb-1">
+                        Denial code <strong id="deleteRowCode"></strong><span id="deleteRowPayer"></span>
+                        will be removed from this tab.
+                    </p>
+                    <p class="mb-0 text-muted">Unsaved edits elsewhere in the grid are not saved by this.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <form method="post" asp-action="DeleteInsight" asp-route-lab="@Model.CurrentLab" id="deleteRowForm">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="id" id="deleteRowId" value="" />
+                        <input type="hidden" name="bucket" value="@Model.Bucket" />
+                        <button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i> Delete</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="confirmCopyModal" tabindex="-1" aria-labelledby="confirmCopyLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="confirmCopyLabel">Copy to Previous Week?</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" style="font-size:.9rem;">
+                    <p class="mb-2">
+                        This copies all <strong>@currentCount.ToString("N0")</strong> Current Week row(s) for
+                        <strong>@Model.CurrentLab</strong> into <strong>Previous Week</strong>.
+                    </p>
+                    <ul class="mb-2 ps-3">
+                        <li>Current Week is <strong>not</strong> emptied &mdash; the rows stay where they are.</li>
+                        @if (previousCount > 0)
+                        {
+                            <li class="text-danger">
+                                The @previousCount.ToString("N0") row(s) currently in Previous Week are
+                                <strong>replaced</strong>.
+                            </li>
+                        }
+                    </ul>
+                    <p class="mb-0 text-muted">Save any grid edits first &mdash; only what is saved gets copied.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-sm btn-warning" id="confirmCopyBtn">
+                        <i class="bi bi-arrow-right-circle"></i> Yes, copy
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}

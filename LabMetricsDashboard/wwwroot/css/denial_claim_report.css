@@ -1,0 +1,365 @@
+/* ============================================================================
+   Denial Claim Report — Denial Insight grid
+
+   The colour banding is taken from the client's own "Key Observations &
+   Highlights" workbook, not invented here. An AR analyst reads that sheet by
+   band and category colour before they read the words, so the page has to band
+   the same way or the two stop being recognisably the same document:
+
+     dark green  the standard columns
+     gold        the "$ impact" group (insurance, balance, percentage)
+     red         Category and Action — the two columns that say what to DO
+     green       Closed Date — the column that says it is finished
+
+   Category fills are the workbook's own: blue for Appeal / MR, amber for a
+   plain appeal, peach for Review and Write Off, green for Rebill / Reprocess.
+   ========================================================================= */
+
+.dcr-page {
+    --ins-green: #375623;
+    --ins-green-2: #4a7130;
+    --ins-gold: #bf8f00;
+    --ins-gold-2: #d4a017;
+    --ins-red: #b91c1c;
+    --ins-red-2: #d13a3a;
+    --ins-closed: #1f7a3d;
+    --ins-closed-2: #2f9a52;
+
+    --ins-border: #cfd8e3;
+    --ins-border-soft: #e4eaf1;
+    --ins-row-alt: #f8fafc;
+    --ins-row-hover: #eef5fc;
+    --ins-text: #1f2d3d;
+    --ins-muted: #6b7a8c;
+    --ins-surface: #ffffff;
+    --ins-link: #1766bf;
+
+    /* Category fills, straight from the workbook */
+    --cat-blue-bg: #ddebf7;
+    --cat-blue-fg: #1f4e79;
+    --cat-amber-bg: #fff2cc;
+    --cat-amber-fg: #7f5f00;
+    --cat-peach-bg: #fce4d6;
+    --cat-peach-fg: #843c0c;
+    --cat-green-bg: #e2efda;
+    --cat-green-fg: #375623;
+    --cat-grey-bg: #eef1f5;
+    --cat-grey-fg: #5a6a7a;
+}
+
+/* ── Tabs ─────────────────────────────────────────────────────────────── */
+.dcr-page .denial-tabs .nav-link {
+    border-radius: .65rem;
+    font-weight: 600;
+    font-size: .88rem;
+    color: #35506d;
+    background: #fff;
+    border: 1px solid #d9e3ef;
+    margin-right: .5rem;
+}
+
+.dcr-page .denial-tabs .nav-link.active {
+    background: linear-gradient(135deg, #1766bf 0%, #3e9cf1 100%);
+    border-color: #1766bf;
+    color: #fff;
+}
+
+.dcr-page .insight-subtabs {
+    border-bottom: 2px solid var(--ins-border);
+    gap: .25rem;
+}
+
+.dcr-page .insight-subtabs .nav-link {
+    border: 0;
+    border-bottom: 3px solid transparent;
+    border-radius: 0;
+    font-weight: 600;
+    font-size: .85rem;
+    color: var(--ins-muted);
+    padding: .45rem .9rem;
+}
+
+.dcr-page .insight-subtabs .nav-link:hover { color: var(--ins-link); }
+
+.dcr-page .insight-subtabs .nav-link.active {
+    color: var(--ins-green);
+    border-bottom-color: var(--ins-green);
+    background: transparent;
+}
+
+/* ── Card ─────────────────────────────────────────────────────────────── */
+.dcr-page .insight-title {
+    font-size: 1.02rem;
+    font-weight: 800;
+    color: var(--ins-green);
+    letter-spacing: .01em;
+}
+
+.dcr-page .insight-scroll {
+    border: 1px solid var(--ins-border);
+    border-radius: .5rem;
+    overflow: auto;
+    max-height: 70vh;
+    background: var(--ins-surface);
+}
+
+/* ── The grid ─────────────────────────────────────────────────────────── */
+.dcr-page .insight-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: .78rem;
+    color: var(--ins-text);
+    min-width: 2100px;
+    margin: 0;
+}
+
+.dcr-page .insight-table > thead > tr > th {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: var(--ins-green);
+    color: #fff;
+    font-weight: 700;
+    font-size: .72rem;
+    line-height: 1.25;
+    text-align: left;
+    vertical-align: middle;
+    padding: .55rem .5rem;
+    border-right: 1px solid rgba(255, 255, 255, .22);
+    white-space: normal;
+}
+
+/* The three banded groups. Colour is the grouping — there is no spare row of
+   height for a second header band, and the workbook groups by fill too. */
+.dcr-page .insight-table > thead > tr > th.band-impact { background: var(--ins-gold); }
+.dcr-page .insight-table > thead > tr > th.band-action { background: var(--ins-red); }
+.dcr-page .insight-table > thead > tr > th.band-closed { background: var(--ins-closed); }
+
+.dcr-page .insight-table > thead > tr > th.num,
+.dcr-page .insight-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.dcr-page .insight-table > tbody > tr > td {
+    padding: .45rem .5rem;
+    border-bottom: 1px solid var(--ins-border-soft);
+    border-right: 1px solid var(--ins-border-soft);
+    vertical-align: top;
+}
+
+.dcr-page .insight-table > tbody > tr:nth-child(even) > td { background: var(--ins-row-alt); }
+.dcr-page .insight-table > tbody > tr:hover > td { background: var(--ins-row-hover); }
+
+/* The gold and green bands carry a whisper of their header colour into the body
+   so the group stays legible while scrolling, without shouting. */
+.dcr-page .insight-table td.cell-impact { background: #fdf8ec !important; }
+.dcr-page .insight-table tr:hover td.cell-impact { background: #faf0d8 !important; }
+.dcr-page .insight-table td.cell-closed { background: #f2f9f4 !important; }
+
+.dcr-page .insight-table > tfoot > tr > th {
+    position: sticky;
+    bottom: 0;
+    background: #eef2f7;
+    border-top: 2px solid var(--ins-border);
+    font-size: .76rem;
+    font-weight: 800;
+    padding: .5rem;
+    z-index: 2;
+}
+
+/* Column widths. Set on the header so body cells inherit and nothing jumps. */
+.dcr-page .insight-table .col-idx { width: 42px; text-align: center; color: var(--ins-muted); }
+.dcr-page .insight-table .col-code { width: 96px; font-weight: 700; }
+.dcr-page .insight-table .col-desc { width: 210px; }
+.dcr-page .insight-table .col-rich { width: 280px; }
+.dcr-page .insight-table .col-cat { width: 132px; }
+.dcr-page .insight-table .col-feedback { width: 190px; }
+.dcr-page .insight-table .col-resp { width: 120px; }
+.dcr-page .insight-table .col-date { width: 118px; }
+.dcr-page .insight-table .col-actions { width: 46px; }
+
+.dcr-page .insight-table .col-code a,
+.dcr-page .insight-table .cell-impact a {
+    color: var(--ins-link);
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.dcr-page .insight-table .col-code a:hover,
+.dcr-page .insight-table .cell-impact a:hover { color: #0b4f96; }
+
+/* ── Rich text ────────────────────────────────────────────────────────── */
+.dcr-page .insight-table .col-rich ul {
+    margin: 0;
+    padding-left: 1rem;
+}
+
+.dcr-page .insight-table .col-rich li { margin-bottom: .15rem; }
+.dcr-page .insight-table .col-rich b,
+.dcr-page .insight-table .col-rich strong { font-weight: 700; }
+
+.dcr-page .rich-editor {
+    min-height: 3.1rem;
+    max-height: 9rem;
+    overflow-y: auto;
+    border: 1px solid var(--ins-border);
+    border-radius: .3rem;
+    padding: .3rem .4rem;
+    background: #fff;
+    font-size: .78rem;
+    line-height: 1.4;
+}
+
+.dcr-page .rich-editor:focus {
+    outline: 2px solid #9ec5f0;
+    outline-offset: -1px;
+    border-color: var(--ins-link);
+}
+
+.dcr-page .rich-editor ul { margin: 0; padding-left: 1rem; }
+
+/* ── Inputs ───────────────────────────────────────────────────────────── */
+.dcr-page .insight-table input[type="text"],
+.dcr-page .insight-table input[type="date"],
+.dcr-page .insight-table textarea {
+    width: 100%;
+    border: 1px solid var(--ins-border);
+    border-radius: .3rem;
+    padding: .25rem .4rem;
+    font-size: .76rem;
+    background: #fff;
+    color: var(--ins-text);
+}
+
+.dcr-page .insight-table textarea { resize: vertical; min-height: 2.6rem; }
+
+.dcr-page .insight-table input:focus,
+.dcr-page .insight-table textarea:focus {
+    outline: 2px solid #9ec5f0;
+    outline-offset: -1px;
+    border-color: var(--ins-link);
+}
+
+/* ── Category banding ─────────────────────────────────────────────────── */
+.dcr-page .cat-pill {
+    display: inline-block;
+    padding: .2rem .5rem;
+    border-radius: .35rem;
+    font-size: .72rem;
+    font-weight: 700;
+    line-height: 1.3;
+    background: var(--cat-grey-bg);
+    color: var(--cat-grey-fg);
+}
+
+.dcr-page .cat-pill.cat-appeal-mr, .dcr-page td.cat-appeal-mr .cat-pill { background: var(--cat-blue-bg);  color: var(--cat-blue-fg); }
+.dcr-page .cat-pill.cat-appeal,    .dcr-page td.cat-appeal .cat-pill    { background: var(--cat-amber-bg); color: var(--cat-amber-fg); }
+.dcr-page .cat-pill.cat-review,    .dcr-page td.cat-review .cat-pill    { background: var(--cat-peach-bg); color: var(--cat-peach-fg); }
+.dcr-page .cat-pill.cat-rebill,    .dcr-page td.cat-rebill .cat-pill    { background: var(--cat-green-bg); color: var(--cat-green-fg); }
+
+/* The whole cell carries the fill, exactly as the workbook does. */
+.dcr-page .insight-table td.cat-appeal-mr { background: var(--cat-blue-bg) !important; }
+.dcr-page .insight-table td.cat-appeal    { background: var(--cat-amber-bg) !important; }
+.dcr-page .insight-table td.cat-review    { background: var(--cat-peach-bg) !important; }
+.dcr-page .insight-table td.cat-rebill    { background: var(--cat-green-bg) !important; }
+
+/* While editing, the input itself takes the band so the colour survives. */
+.dcr-page .cat-input { font-weight: 700; }
+.dcr-page .cat-input.cat-appeal-mr { background: var(--cat-blue-bg)  !important; color: var(--cat-blue-fg)  !important; }
+.dcr-page .cat-input.cat-appeal    { background: var(--cat-amber-bg) !important; color: var(--cat-amber-fg) !important; }
+.dcr-page .cat-input.cat-review    { background: var(--cat-peach-bg) !important; color: var(--cat-peach-fg) !important; }
+.dcr-page .cat-input.cat-rebill    { background: var(--cat-green-bg) !important; color: var(--cat-green-fg) !important; }
+
+/* ── Row delete ───────────────────────────────────────────────────────── */
+.dcr-page .row-delete {
+    border: 1px solid transparent;
+    background: transparent;
+    color: #b0bac6;
+    border-radius: .3rem;
+    width: 26px;
+    height: 26px;
+    line-height: 1;
+    cursor: pointer;
+    transition: color .12s ease, background .12s ease, border-color .12s ease;
+}
+
+.dcr-page .row-delete:hover {
+    color: #fff;
+    background: var(--ins-red);
+    border-color: var(--ins-red);
+}
+
+.dcr-page .row-delete:focus-visible {
+    outline: 2px solid var(--ins-red-2);
+    outline-offset: 1px;
+}
+
+/* ── Empty state & legend ─────────────────────────────────────────────── */
+.dcr-page .insight-empty {
+    text-align: center;
+    padding: 2.6rem 1rem;
+    color: var(--ins-text);
+    background: #fff !important;
+}
+
+.dcr-page .insight-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .4rem;
+    padding: .6rem .1rem .2rem;
+    font-size: .74rem;
+}
+
+.dcr-page .insight-legend .legend-label {
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--ins-muted);
+    font-size: .68rem;
+    margin-right: .2rem;
+}
+
+.dcr-page .insight-legend .legend-hint {
+    color: var(--ins-muted);
+    margin-left: auto;
+}
+
+/* ── Dark theme ───────────────────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+    .dcr-page:not([data-theme="light"]) {
+        --ins-border: #33404f;
+        --ins-border-soft: #2a3644;
+        --ins-row-alt: #1b2531;
+        --ins-row-hover: #22303f;
+        --ins-text: #dfe7ef;
+        --ins-muted: #92a3b3;
+        --ins-surface: #16202b;
+    }
+
+    .dcr-page .insight-table td.cell-impact { background: #2a2416 !important; }
+    .dcr-page .insight-table td.cell-closed { background: #16291d !important; }
+
+    .dcr-page .insight-table > tfoot > tr > th { background: #1d2935; }
+
+    .dcr-page .rich-editor,
+    .dcr-page .insight-table input[type="text"],
+    .dcr-page .insight-table input[type="date"],
+    .dcr-page .insight-table textarea {
+        background: #1b2531;
+        color: var(--ins-text);
+    }
+
+    /* The category fills stay as the workbook has them — they are how the sheet
+       is read, and a muted dark variant would lose the match. Text is forced
+       dark so it still sits legibly on those light fills. */
+    .dcr-page .insight-table td.cat-appeal-mr,
+    .dcr-page .insight-table td.cat-appeal,
+    .dcr-page .insight-table td.cat-review,
+    .dcr-page .insight-table td.cat-rebill { color: #1f2d3d; }
+}
+
+/* ── Narrow screens ───────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .dcr-page .insight-scroll { max-height: 60vh; }
+    .dcr-page .insight-legend .legend-hint { margin-left: 0; width: 100%; }
+}

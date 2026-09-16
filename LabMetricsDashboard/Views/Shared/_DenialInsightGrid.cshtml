@@ -90,12 +90,11 @@
                                 {
                                     <input type="hidden" name="denialCodes" class="insight-row-code" value="@item.DenialCodes" />
                                     <input type="hidden" name="payerNames" class="insight-row-payer" value="@item.HighImpactInsurance" />
-                                    <div class="insight-richtext" contenteditable="true" data-role="feedback-editor">@Html.Raw(item.Feedback)</div>
-                                    <input type="hidden" name="feedbackHtmls" class="insight-feedback-input" value="@item.Feedback" />
+                                    <textarea name="feedbackHtmls" class="form-control form-control-sm insight-feedback-input" rows="2" placeholder="Observations">@item.Feedback</textarea>
                                 }
                                 else
                                 {
-                                    @Html.Raw(string.IsNullOrWhiteSpace(item.Feedback) ? "-" : item.Feedback)
+                                    @(string.IsNullOrWhiteSpace(item.Feedback) ? "-" : item.Feedback)
                                 }
                             </td>
                             <td class="insight-editable-cell">
@@ -149,7 +148,7 @@
                             @if (Model.IsArManager)
                             {
                                 <td class="insight-save-cell">
-                                    <button type="button" class="btn btn-sm btn-outline-primary insight-row-save"><i class="bi bi-save"></i> Save</button>
+                                    <button type="button" class="insight-row-save-btn insight-row-save" title="Save this row"><i class="bi bi-save"></i></button>
                                     <span class="insight-row-status"></span>
                                 </td>
                             }

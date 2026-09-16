@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { money, canAssignRole } from '../utils/formatters';
+import { money, canAssignRole, isLabUserRole } from '../utils/formatters';
 import { denialWorkflowService } from '../services/denialWorkflowService';
 import RichTextEditor from '../components/RichTextEditor';
 
@@ -326,7 +326,11 @@ function SummaryTable({ title, hint, firstHeader, rows, nameOf, summaryType, obs
 export default function DenialSummaryPage({ data, labId, role = '', canAssign = false, setMessage, onClassificationClick, onActionCategoryClick }) {
   const classifications = data.denialClassifications || [];
   const actions = data.actionCategories || [];
-  const canEdit = canAssignRole(role);
+  // Lab User is read-only everywhere else in this app (see isLabUserRole's own comment in
+  // utils/formatters.js), but explicitly gets write access to this page's Observations -
+  // scoped to just this page rather than broadening the shared canAssignRole helper, which
+  // also gates reviewer assignment on Denial Code Master and claim/task queues elsewhere.
+  const canEdit = canAssignRole(role) || isLabUserRole(role);
   const [observations, setObservations] = useState({});
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);

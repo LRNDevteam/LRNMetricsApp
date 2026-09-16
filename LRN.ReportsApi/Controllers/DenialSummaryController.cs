@@ -131,7 +131,11 @@ public sealed class DenialSummaryController : ControllerBase
     internal static bool CanWriteRole(string? role)
     {
         var token = new string((role ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
-        return token.Contains("ADMIN") || token.Contains("ARMANAGER");
+        // Lab User is otherwise read-only across the Denial Workflow app (see
+        // DenialWorkflowController.DenyWriteForLabUser and its callers), but is explicitly given
+        // write access to just this page's Observations - scoped to this one controller, not a
+        // change to DenyWriteForLabUser's broader read-only policy.
+        return token.Contains("ADMIN") || token.Contains("ARMANAGER") || token.Contains("LABUSER");
     }
 
     private async Task<ActionResult?> GuardReadAsync(int labId, CancellationToken ct)

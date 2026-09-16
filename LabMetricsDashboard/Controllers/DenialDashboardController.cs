@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Security.Claims;
 using CsvHelper;
 using CsvHelper.Configuration;
@@ -49,7 +49,7 @@ public class DenialDashboardController : Controller
 	}
 
 	/// <summary>
-	/// Dashboard LabId → LabSettings config key (LabConfig:LabsID), which is what the report
+	/// Dashboard LabId ? LabSettings config key (LabConfig:LabsID), which is what the report
 	/// queue keys connection strings by. Falls back to the display name when unmapped.
 	/// </summary>
 	private string ResolveConfiguredLabKey(int labId, string displayName)
@@ -89,7 +89,7 @@ public class DenialDashboardController : Controller
 		// tab SET itself is the same for every role now - Task Board, SLA Tracker, Filter Panel and
 		// the Dashboard task-stat strip were retired, along with the role-scoped filtering that
 		// used to narrow GetByLabAsync's rows for AR Reviewer sessions.
-		var isArManager = HasAnyRole("AR Manager", "ARManager");
+		var isArManager = HasAnyRole("AR Manager", "ARManager", "Admin");
 
 		// The task-board dataset itself is no longer rendered anywhere on this page, but it is
 		// still the only source for the Global filters bar's Status / Priority / Action Category /
@@ -131,7 +131,7 @@ public class DenialDashboardController : Controller
 		var monthlyPivot = BuildBreakdownPivot(breakdownSource, monthly: true);
 
 		var reviewerOptions = isArManager
-			? (await _userRepository.GetUsersByRoleNamesAsync(new[] { "AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer" })).ToList()
+			? (await _userRepository.GetUsersByRoleNamesAsync(new[] { "AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer" }, selectedLabId)).ToList()
 			: new List<ReviewerOption>();
 
 		var viewModel = new DashboardPageViewModel
@@ -220,7 +220,7 @@ public class DenialDashboardController : Controller
 		var normalized = Normalize(filters, currentLab.LabId);
 		var currentRunId = await _dashboardApi.GetCurrentRunIdAsync(currentLab.LabId, cancellationToken) ?? string.Empty;
 
-		var isArManager = HasAnyRole("AR Manager", "ARManager");
+		var isArManager = HasAnyRole("AR Manager", "ARManager", "Admin");
 		var allInsights = (await _dashboardApi.GetInsightTableByLabAsync(currentLab.LabId, cancellationToken)).ToList();
 		var insights = FilterInsights(allInsights, normalized);
 
@@ -231,7 +231,7 @@ public class DenialDashboardController : Controller
 		var paged = insights.Skip((page - 1) * pageSize).Take(pageSize).ToList();
 
 		var reviewerOptions = isArManager
-			? (await _userRepository.GetUsersByRoleNamesAsync(new[] { "AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer" })).ToList()
+			? (await _userRepository.GetUsersByRoleNamesAsync(new[] { "AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer" }, currentLab.LabId)).ToList()
 			: new List<ReviewerOption>();
 
 		var grid = BuildInsightGrid(paged, insights, page, pageSize, totalPages, count, normalized, currentLab.LabName, currentRunId, isArManager, reviewerOptions);
@@ -446,71 +446,8 @@ public class DenialDashboardController : Controller
 		return File(stream.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileNameFiltered);
 	}
 
-	[HttpPost]
-	[ValidateAntiForgeryToken]
-	public async Task<IActionResult> AssignInsightReviewersOverall(
-		int labId,
-		string? lab,
-		string? runId,
-		[FromForm] string[] denialCodes,
-		[FromForm] string[] payerNames,
-		[FromForm] string[] reviewerUserNames,
-		[FromForm] DenialDashboardFilters filters,
-		CancellationToken cancellationToken)
-	{
-		filters ??= new DenialDashboardFilters();
-		filters.ActiveTab = "denial-insight";
-
-		if (!HasAnyRole("AR Manager", "ARManager", "Admin"))
-		{
-			TempData["DenialDashboardError"] = "Only AR Manager can assign denial insight rows.";
-			return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
-		}
-
-		if (denialCodes.Length == 0 || payerNames.Length == 0 || reviewerUserNames.Length == 0)
-		{
-			TempData["DenialDashboardError"] = "No denial insight rows were submitted for assignment.";
-			return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
-		}
-
-		var rowCount = Math.Min(denialCodes.Length, Math.Min(payerNames.Length, reviewerUserNames.Length));
-		var totalUpdated = 0;
-		var selectedRows = 0;
-		var assignedUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-		for (var i = 0; i < rowCount; i++)
-		{
-			var denialCode = denialCodes[i]?.Trim();
-			var payerName = payerNames[i]?.Trim();
-			var reviewerUserName = reviewerUserNames[i]?.Trim();
-
-			if (string.IsNullOrWhiteSpace(denialCode) || string.IsNullOrWhiteSpace(payerName) || string.IsNullOrWhiteSpace(reviewerUserName))
-			{
-				continue;
-			}
-
-			selectedRows++;
-			assignedUsers.Add(reviewerUserName);
-			totalUpdated += await _dashboardApi.AssignReviewerByInsightAsync(labId, denialCode, payerName, reviewerUserName, runId, cancellationToken);
-		}
-
-		if (selectedRows == 0)
-		{
-			TempData["DenialDashboardError"] = "Please select at least one AR Reviewer before submitting.";
-		}
-		else if (totalUpdated > 0)
-		{
-			TempData["DenialDashboardSuccess"] = $"Submitted {selectedRows:N0} insight assignment row(s). Assigned {totalUpdated:N0} denial task(s) to {assignedUsers.Count:N0} reviewer(s).";
-		}
-		else
-		{
-			TempData["DenialDashboardError"] = "Assignments were submitted, but no matching denial tasks were found for the selected denial code and payer rows.";
-		}
-
-		return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
-	}
-
-	/// <summary>AJAX single-row save for Observations/Responsible Person/Discussion Date/ETA (spec item 1).</summary>
+	/// <summary>AJAX single-row save for Observations/Responsible Person/Discussion Date/ETA/AR Reviewer.
+	/// Reviewer assignment now lives here instead of a separate bulk-only action - one Save per row.</summary>
 	[HttpPost]
 	[ValidateAntiForgeryToken]
 	public async Task<IActionResult> SaveInsightDetail(
@@ -521,6 +458,7 @@ public class DenialDashboardController : Controller
 		string? responsibility,
 		DateTime? discussionDate,
 		string? eta,
+		string? reviewerUserName,
 		string? runId,
 		CancellationToken cancellationToken)
 	{
@@ -531,12 +469,16 @@ public class DenialDashboardController : Controller
 			return Json(new { saved = false, message = "This row is missing its Denial Code or Payer Name." });
 
 		var updated = await _dashboardApi.UpdateInsightDetailAsync(labId, denialCode.Trim(), payerName.Trim(), feedbackHtml, responsibility, discussionDate, eta, runId, cancellationToken);
+		if (!string.IsNullOrWhiteSpace(reviewerUserName))
+			await _dashboardApi.AssignReviewerByInsightAsync(labId, denialCode.Trim(), payerName.Trim(), reviewerUserName.Trim(), runId, cancellationToken);
+
 		return Json(updated > 0
 			? new { saved = true, message = "Saved." }
 			: new { saved = false, message = "No matching denial insight row was found to update." });
 	}
 
-	/// <summary>Bulk "Save All" for every row on the current page (spec item 1) - same shape as AssignInsightReviewersOverall.</summary>
+	/// <summary>Bulk "Save All" for every row on the current page - Observations, Responsible Person,
+	/// Discussion Date, ETA and AR Reviewer together.</summary>
 	[HttpPost]
 	[ValidateAntiForgeryToken]
 	public async Task<IActionResult> SaveInsightDetailsOverall(
@@ -549,6 +491,7 @@ public class DenialDashboardController : Controller
 		[FromForm] string[] responsibilities,
 		[FromForm] string[] discussionDates,
 		[FromForm] string[] etas,
+		[FromForm] string[] reviewerUserNames,
 		[FromForm] DenialDashboardFilters filters,
 		CancellationToken cancellationToken)
 	{
@@ -570,6 +513,7 @@ public class DenialDashboardController : Controller
 		var rowCount = denialCodes.Length;
 		var savedRows = 0;
 		var totalUpdated = 0;
+		var assignedReviewers = 0;
 
 		for (var i = 0; i < rowCount; i++)
 		{
@@ -580,16 +524,23 @@ public class DenialDashboardController : Controller
 			var feedbackHtml = feedbackHtmls.ElementAtOrDefault(i);
 			var responsibility = responsibilities.ElementAtOrDefault(i);
 			var eta = etas.ElementAtOrDefault(i);
+			var reviewerUserName = reviewerUserNames.ElementAtOrDefault(i)?.Trim();
 			DateTime? discussionDate = DateTime.TryParse(discussionDates.ElementAtOrDefault(i), out var parsed) ? parsed : null;
 
 			savedRows++;
 			totalUpdated += await _dashboardApi.UpdateInsightDetailAsync(labId, denialCode, payerName, feedbackHtml, responsibility, discussionDate, eta, runId, cancellationToken);
+
+			if (!string.IsNullOrWhiteSpace(reviewerUserName))
+			{
+				await _dashboardApi.AssignReviewerByInsightAsync(labId, denialCode, payerName, reviewerUserName, runId, cancellationToken);
+				assignedReviewers++;
+			}
 		}
 
-		TempData[totalUpdated > 0 ? "DenialDashboardSuccess" : "DenialDashboardError"] = savedRows == 0
+		TempData[totalUpdated > 0 || assignedReviewers > 0 ? "DenialDashboardSuccess" : "DenialDashboardError"] = savedRows == 0
 			? "No denial insight rows were submitted."
-			: totalUpdated > 0
-				? $"Saved {totalUpdated:N0} of {savedRows:N0} denial insight row(s)."
+			: totalUpdated > 0 || assignedReviewers > 0
+				? $"Saved {totalUpdated:N0} of {savedRows:N0} denial insight row(s)" + (assignedReviewers > 0 ? $", assigned {assignedReviewers:N0} reviewer(s)." : ".")
 				: "No matching denial insight rows were found to update.";
 
 		return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
@@ -693,7 +644,7 @@ public class DenialDashboardController : Controller
 			.ThenBy(x => x.TaskId)
 			.ToList();
 
-		var isArManager = HasAnyRole("AR Manager", "ARManager");
+		var isArManager = HasAnyRole("AR Manager", "ARManager", "Admin");
 		var isArReviewer = HasAnyRole("AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer");
 		var currentUserName = User.Identity?.Name?.Trim() ?? string.Empty;
 		if (isArReviewer && !isArManager)
@@ -995,7 +946,7 @@ public class DenialDashboardController : Controller
 		// 3) The shared cross-report cookie. The standard reports store a LabConfig KEY here (e.g.
 		//    "Inhealth_DTR", "Augustus_Labs"), which is a DIFFERENT namespace from the denial API's
 		//    lab NAMES (e.g. "InHealth", "Augustus"), so match tolerantly. Read-only on purpose: never
-		//    overwrite this cookie with a denial name — the standard reports resolve it as a config key,
+		//    overwrite this cookie with a denial name � the standard reports resolve it as a config key,
 		//    so clobbering it made an InHealth selection reopen as the first lab (Augustus) everywhere.
 		if (httpContext.Request.Cookies.TryGetValue(SelectedLabCookieName, out var cookieLab)
 			&& !string.IsNullOrWhiteSpace(cookieLab))
@@ -1114,7 +1065,7 @@ public class DenialDashboardController : Controller
 
 	/// <summary>
 	/// Aggregates one lab's denial data into the six exported tabs exactly the way
-	/// <see cref="Index"/> aggregates them for the page — filters, breakdowns and pivots all
+	/// <see cref="Index"/> aggregates them for the page � filters, breakdowns and pivots all
 	/// come from the same helpers. Shared by the synchronous download and by
 	/// LRN.ReportWorker's queued DenialDashboard report, so the two can never drift.
 	/// </summary>
@@ -1151,7 +1102,7 @@ public class DenialDashboardController : Controller
 			ActionCategoryBreakdown: BuildBreakdown(filteredRecords, x => x.EffectiveActionCategory),
 			ClassificationBreakdown: BuildBreakdown(filteredRecords, x => x.DenialClassification),
 			DeadlineBreakdown: BuildDeadlineBreakdown(filteredRecords),
-			// "(Unassigned)" rather than "(Blank)" — an unclaimed denial is the actionable case.
+			// "(Unassigned)" rather than "(Blank)" � an unclaimed denial is the actionable case.
 			AssignedToBreakdown: BuildBreakdown(filteredRecords,
 				x => string.IsNullOrWhiteSpace(x.AssignedTo) ? "(Unassigned)" : x.AssignedTo.Trim()),
 			// Notes/assignment come from the UNFILTERED task board: a line item still carries its

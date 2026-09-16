@@ -1,0 +1,214 @@
+@model LabMetricsDashboard.ViewModels.DenialClaimReportViewModel
+@{
+    ViewData["Title"] = "Denial Claim Report";
+    ViewData["SelectedLab"] = Model.CurrentLab;
+
+    var tab = Model.ActiveTab;
+}
+
+@* The layout has no Styles section, so these go in the body the same way the original Denial
+   Summary page links its own stylesheet. denial_dashboard.css carries the pivot table's frozen
+   columns and sticky header bands, which the Monthly and Weekly tabs reuse from that page. *@
+<link href="~/css/denial_dashboard.css" rel="stylesheet" />
+<link href="~/css/denial_claim_report.css" rel="stylesheet" />
+
+<div class="container-fluid px-3 py-3 dcr-page">
+
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+        <div>
+            <h4 class="mb-1">Denial Claim Report</h4>
+            <div class="text-muted" style="font-size:.85rem;">
+                Calculated from <strong>@Model.CurrentLab</strong>&rsquo;s claim-level data &mdash; denied claims with an
+                insurance balance still outstanding, grouped on Denial Date. Denial codes roll up to their
+                common code, so CO45, PI45 and PR45 all count as 45.
+            </div>
+        </div>
+    </div>
+
+    @if (TempData["DenialClaimReportSuccess"] is string ok)
+    {
+        <div class="alert alert-success py-2 d-flex align-items-center gap-2">
+            <i class="bi bi-check-circle-fill"></i><span>@ok</span>
+        </div>
+    }
+    @if (TempData["DenialClaimReportError"] is string err)
+    {
+        <div class="alert alert-danger py-2 d-flex align-items-center gap-2">
+            <i class="bi bi-exclamation-triangle-fill"></i><span>@err</span>
+        </div>
+    }
+    @if (!string.IsNullOrWhiteSpace(Model.Error))
+    {
+        <div class="alert alert-warning py-2">@Model.Error</div>
+    }
+
+    <div class="row g-2 mb-3">
+        <div class="col-6 col-lg-3">
+            <div class="card border-0 shadow-sm h-100"><div class="card-body py-2">
+                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Denied Claims</div>
+                <div class="fw-bold fs-5">@Model.TotalClaims.ToString("N0")</div>
+            </div></div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card border-0 shadow-sm h-100"><div class="card-body py-2">
+                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Insurance Balance</div>
+                <div class="fw-bold fs-5">@Acct2(Model.TotalInsuranceBalance)</div>
+            </div></div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card border-0 shadow-sm h-100"><div class="card-body py-2">
+                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Denial Codes</div>
+                <div class="fw-bold fs-5">@Model.DenialCodeCount.ToString("N0")</div>
+            </div></div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card border-0 shadow-sm h-100"><div class="card-body py-2">
+                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Insurances</div>
+                <div class="fw-bold fs-5">@Model.PayerCount.ToString("N0")</div>
+            </div></div>
+        </div>
+    </div>
+
+    @if (Model.UndatedGroups > 0)
+    {
+        <div class="alert alert-info py-2" style="font-size:.85rem;">
+            <i class="bi bi-info-circle"></i>
+            @Model.UndatedGroups.ToString("N0") denial group(s) have no Denial Date, so they cannot appear in any
+            month or week. They are counted in the totals above.
+        </div>
+    }
+
+    <ul class="nav nav-pills denial-tabs mb-3" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link @(tab == "monthly" ? "active" : "")" data-bs-toggle="pill"
+                    data-bs-target="#dcr-monthly" type="button" data-tab-key="monthly">
+                <i class="bi bi-calendar-month me-2"></i>Monthly Summary
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link @(tab == "weekly" ? "active" : "")" data-bs-toggle="pill"
+                    data-bs-target="#dcr-weekly" type="button" data-tab-key="weekly">
+                <i class="bi bi-calendar-week me-2"></i>Weekly Summary
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link @(tab == "insight" ? "active" : "")" data-bs-toggle="pill"
+                    data-bs-target="#dcr-insight" type="button" data-tab-key="insight">
+                <i class="bi bi-lightbulb me-2"></i>Denial Insight
+                @if (Model.Insight.BucketCounts.Values.Sum() > 0)
+                {
+                    <span class="badge rounded-pill bg-light text-dark ms-2">@Model.Insight.BucketCounts.Values.Sum().ToString("N0")</span>
+                }
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content">
+        <div class="tab-pane fade @(tab == "monthly" ? "show active" : "")" id="dcr-monthly">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    @await Html.PartialAsync("../DenialDashboard/_BreakdownPivotTable", Model.Monthly)
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade @(tab == "weekly" ? "show active" : "")" id="dcr-weekly">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    @await Html.PartialAsync("../DenialDashboard/_BreakdownPivotTable", Model.Weekly)
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade @(tab == "insight" ? "show active" : "")" id="dcr-insight">
+            @await Html.PartialAsync("_DenialInsightPanel", Model.Insight)
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script nonce="@Context.Items["CspNonce"]">
+        (function () {
+            // Keep the open tab in the URL. A save, an import or a delete redirects back here, and
+            // without this the lab picker in the header would drop the user on Monthly Summary
+            // every time instead of where they were.
+            document.querySelectorAll('[data-tab-key]').forEach(function (btn) {
+                btn.addEventListener('shown.bs.tab', function () {
+                    var url = new URL(window.location.href);
+                    url.searchParams.set('tab', btn.dataset.tabKey);
+                    window.history.replaceState({}, '', url);
+                });
+            });
+
+            // Import submits as soon as a file is chosen — one click, not two.
+            var file = document.getElementById('insightFile');
+            if (file) {
+                file.addEventListener('change', function () {
+                    if (file.files && file.files.length) document.getElementById('insightUploadForm').submit();
+                });
+            }
+
+            // The Observation / Action cells are contenteditable so the workbook's bold and bullets
+            // stay visible while editing. They are not form fields, so their HTML is copied into the
+            // hidden input beside them just before the form serializes.
+            var editForm = document.getElementById('insightEditForm');
+            if (editForm) {
+                editForm.addEventListener('submit', function () {
+                    editForm.querySelectorAll('.rich-editor').forEach(function (editor) {
+                        var hidden = editor.parentElement
+                            ? editor.parentElement.querySelector('input[type="hidden"][name="' + editor.dataset.target + '"]')
+                            : null;
+                        if (hidden) hidden.value = editor.innerHTML;
+                    });
+                });
+            }
+
+            // Re-band the Category cell as it is typed, so the colour tracks the value instead of
+            // waiting for a save to catch up.
+            var bands = [
+                { test: function (t) { return t.indexOf('appeal') >= 0 && (t.indexOf('mr') >= 0 || t.indexOf('medical record') >= 0); }, cls: 'cat-appeal-mr' },
+                { test: function (t) { return t.indexOf('appeal') >= 0; }, cls: 'cat-appeal' },
+                { test: function (t) { return t.indexOf('rebill') >= 0 || t.indexOf('reprocess') >= 0; }, cls: 'cat-rebill' },
+                { test: function (t) { return t.indexOf('review') >= 0 || t.indexOf('write off') >= 0 || t.indexOf('write-off') >= 0; }, cls: 'cat-review' }
+            ];
+            var allBands = ['cat-appeal-mr', 'cat-appeal', 'cat-rebill', 'cat-review', 'cat-other'];
+
+            document.querySelectorAll('.cat-input').forEach(function (input) {
+                input.addEventListener('input', function () {
+                    var text = (input.value || '').trim().toLowerCase();
+                    var cls = 'cat-other';
+                    if (text.length) {
+                        for (var i = 0; i < bands.length; i++) {
+                            if (bands[i].test(text)) { cls = bands[i].cls; break; }
+                        }
+                    }
+                    var cell = input.closest('td');
+                    allBands.forEach(function (b) { input.classList.remove(b); if (cell) cell.classList.remove(b); });
+                    if (text.length) { input.classList.add(cls); if (cell) cell.classList.add(cls); }
+                });
+            });
+
+            // The delete button only opens the dialog; the POST fires from inside it, so a row
+            // cannot be deleted by a stray click on the grid.
+            var deleteModal = document.getElementById('confirmDeleteModal');
+            if (deleteModal) {
+                deleteModal.addEventListener('show.bs.modal', function (event) {
+                    var btn = event.relatedTarget;
+                    if (!btn) return;
+                    document.getElementById('deleteRowId').value = btn.dataset.rowId || '';
+                    document.getElementById('deleteRowCode').textContent = btn.dataset.rowCode || '';
+                    var payer = btn.dataset.rowPayer;
+                    document.getElementById('deleteRowPayer').textContent = payer ? ' (' + payer + ')' : '';
+                });
+            }
+
+            var confirmCopy = document.getElementById('confirmCopyBtn');
+            if (confirmCopy) {
+                confirmCopy.addEventListener('click', function () {
+                    confirmCopy.disabled = true;
+                    document.getElementById('copyPreviousForm').submit();
+                });
+            }
+        })();
+    </script>
+}

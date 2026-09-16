@@ -911,7 +911,25 @@
                     </div>
                 </div>
 
-                <form asp-action="AssignInsightReviewersOverall" asp-controller="DenialDashboard" method="post" id="denialInsightAssignmentForm">
+                @if (Model.IsArManager)
+                {
+                    <form asp-action="UploadInsightDetailsExcel" asp-controller="DenialDashboard" method="post" enctype="multipart/form-data" class="d-inline-block" id="insightUploadForm">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="labId" value="@Model.Filters.LabId" />
+                        <input type="hidden" name="lab" value="@Model.CurrentLabName" />
+                        <input type="hidden" name="runId" value="@Model.CurrentRunId" />
+                        <input type="hidden" name="ActiveTab" value="denial-insight" />
+                        <input type="hidden" name="InsightPage" value="@Model.InsightGrid.InsightPage" />
+                        <input type="hidden" name="InsightPageSize" value="@Model.InsightGrid.InsightPageSize" />
+                        <input type="hidden" name="DenialCode" value="@Model.Filters.DenialCode" />
+                        <label class="btn btn-sm btn-outline-secondary rounded-pill px-3 mb-0" title="Re-upload a Denial Insight export with edited Observations / Responsible Person / Discussion Date / ETA">
+                            <i class="bi bi-upload me-1"></i> Upload Denial Insight
+                            <input type="file" name="insightExcel" accept=".xlsx,.xlsm" hidden onchange="this.form.submit()" />
+                        </label>
+                    </form>
+                }
+
+                <form asp-action="SaveInsightDetailsOverall" asp-controller="DenialDashboard" method="post" id="denialInsightAssignmentForm">
                     @Html.AntiForgeryToken()
                     <input type="hidden" name="labId" value="@Model.Filters.LabId" />
                     <input type="hidden" name="lab" value="@Model.CurrentLabName" />
@@ -930,25 +948,21 @@
                                 }
                                 @if (Model.IsArManager)
                                 {
-                                    <span class="ms-1">Pick AR Reviewers across rows, then submit once to assign all matching tasks. Edit Observations / Responsible Person / Discussion Date / ETA inline, then Save that row or Save All.</span>
+                                    <span class="ms-1">Edit Observations / Responsible Person / Discussion Date / ETA / AR Reviewer inline, then Save that row or Save All.</span>
                                 }
                             </div>
                         </div>
                         <div class="d-flex flex-wrap gap-2 align-items-center">
+                            <a class="btn btn-sm btn-outline-secondary rounded-pill px-3" href="@Url.Action("ExportToExcel", "DenialDashboard", new { lab = Model.CurrentLabName, LabId = Model.Filters.LabId, ActiveTab = "denial-insight" })" title="Download the Monthly Summary, Weekly Summary and Denial Insight workbook">
+                                <i class="bi bi-download me-1"></i> Download Insight
+                            </a>
                             @if (Model.IsArManager)
                             {
-                                <div class="insight-richtext-toolbar btn-group btn-group-sm" role="toolbar" aria-label="Observation formatting">
-                                    <button type="button" class="btn btn-outline-secondary" data-rt-cmd="bold" title="Bold"><i class="bi bi-type-bold"></i></button>
-                                    <button type="button" class="btn btn-outline-secondary" data-rt-cmd="italic" title="Italic"><i class="bi bi-type-italic"></i></button>
-                                    <button type="button" class="btn btn-outline-secondary" data-rt-cmd="underline" title="Underline"><i class="bi bi-type-underline"></i></button>
-                                    <button type="button" class="btn btn-outline-secondary" data-rt-cmd="insertUnorderedList" title="Bullet list"><i class="bi bi-list-ul"></i></button>
-                                    <button type="button" class="btn btn-outline-secondary" data-rt-cmd="insertOrderedList" title="Numbered list"><i class="bi bi-list-ol"></i></button>
-                                </div>
-                                <button type="submit" formaction="@Url.Action("SaveInsightDetailsOverall", "DenialDashboard")" class="btn btn-sm btn-outline-primary rounded-pill px-3">
-                                    <i class="bi bi-save me-1"></i> Save All
+                                <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3" id="insightSnapshotsBtn">
+                                    <i class="bi bi-clock-history me-1"></i> Saved Snapshots
                                 </button>
-                                <button type="submit" class="btn btn-sm btn-primary rounded-pill px-3">
-                                    <i class="bi bi-check2-circle me-1"></i> Submit Reviewer Assignments
+                                <button type="submit" class="btn btn-sm btn-outline-primary rounded-pill px-3">
+                                    <i class="bi bi-save me-1"></i> Save All
                                 </button>
                             }
                             <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Quick search loaded rows…" data-target-table="denialInsightTable" /></div>
@@ -966,24 +980,6 @@
                         <div class="grid-loading" hidden><div class="page-loader-spinner"></div></div>
                     </div>
                 </form>
-
-                @if (Model.IsArManager)
-                {
-                    <form asp-action="UploadInsightDetailsExcel" asp-controller="DenialDashboard" method="post" enctype="multipart/form-data" class="d-inline-block mt-2" id="insightUploadForm">
-                        @Html.AntiForgeryToken()
-                        <input type="hidden" name="labId" value="@Model.Filters.LabId" />
-                        <input type="hidden" name="lab" value="@Model.CurrentLabName" />
-                        <input type="hidden" name="runId" value="@Model.CurrentRunId" />
-                        <input type="hidden" name="ActiveTab" value="denial-insight" />
-                        <label class="btn btn-sm btn-outline-secondary rounded-pill px-3 mb-0" title="Re-upload a Denial Insight export with edited Observations / Responsible Person / Discussion Date / ETA">
-                            <i class="bi bi-upload me-1"></i> Upload Denial Insight
-                            <input type="file" name="insightExcel" accept=".xlsx,.xlsm" hidden onchange="this.form.submit()" />
-                        </label>
-                    </form>
-                    <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3 mt-2 ms-2" id="insightSnapshotsBtn">
-                        <i class="bi bi-clock-history me-1"></i> Saved Snapshots
-                    </button>
-                }
             </div>
         </div>
     </div>
@@ -1640,9 +1636,9 @@
             });
         })();
 
-        // Denial Insight inline editing: Observations (rich text), Responsible Person, Discussion
-        // Date and ETA. The grid body is swapped in via AJAX (setupAjaxGrids above), so every
-        // listener here is delegated from `document` rather than bound to elements that get replaced.
+        // Denial Insight inline editing: Observations, Responsible Person, Discussion Date, ETA and
+        // AR Reviewer. The grid body is swapped in via AJAX (setupAjaxGrids above), so every listener
+        // here is delegated from `document` rather than bound to elements that get replaced.
         (function setupInsightEditing() {
             const form = document.getElementById('denialInsightAssignmentForm');
             if (!form) return;
@@ -1652,35 +1648,6 @@
                 return input ? input.value : '';
             }
 
-            // The contenteditable Observations div is not itself a form field - sync its current
-            // HTML into the hidden `feedbackHtmls` input beside it before anything reads that input.
-            function syncFeedbackInputs(scope) {
-                (scope || document).querySelectorAll('.insight-richtext').forEach(function (editor) {
-                    const cell = editor.closest('td');
-                    const hidden = cell ? cell.querySelector('.insight-feedback-input') : null;
-                    if (hidden) hidden.value = editor.innerHTML;
-                });
-            }
-
-            // "Save All" is a native form submit (see formaction on the button) - sync right before
-            // the browser serializes the form so it picks up the latest edited text.
-            form.addEventListener('submit', function () { syncFeedbackInputs(form); });
-
-            // Rich text toolbar: mousedown + preventDefault keeps focus (and the text selection) on
-            // whichever Observations cell the user was editing, so execCommand lands in the right place.
-            let activeEditor = null;
-            document.addEventListener('focusin', function (e) {
-                if (e.target.classList && e.target.classList.contains('insight-richtext')) activeEditor = e.target;
-            });
-            document.querySelectorAll('.insight-richtext-toolbar [data-rt-cmd]').forEach(function (btn) {
-                btn.addEventListener('mousedown', function (e) {
-                    e.preventDefault();
-                    if (!activeEditor) return;
-                    document.execCommand(btn.getAttribute('data-rt-cmd'), false, null);
-                    syncFeedbackInputs(activeEditor.closest('tr'));
-                });
-            });
-
             // Per-row Save (AJAX): posts just this row's edited fields, no full page reload.
             document.addEventListener('click', function (e) {
                 const btn = e.target.closest('.insight-row-save');
@@ -1689,7 +1656,6 @@
                 const row = btn.closest('tr');
                 if (!row) return;
 
-                syncFeedbackInputs(row);
                 const status = row.querySelector('.insight-row-status');
                 const denialCode = row.querySelector('.insight-row-code');
                 const payerName = row.querySelector('.insight-row-payer');
@@ -1697,6 +1663,7 @@
                 const responsibility = row.querySelector('.insight-responsibility-input');
                 const discussionDate = row.querySelector('input[name="discussionDates"]');
                 const eta = row.querySelector('input[name="etas"]');
+                const reviewer = row.querySelector('select[name="reviewerUserNames"]');
                 if (!denialCode || !payerName) return;
 
                 btn.disabled = true;
@@ -1710,6 +1677,7 @@
                     responsibility: responsibility ? responsibility.value : '',
                     discussionDate: discussionDate ? discussionDate.value : '',
                     eta: eta ? eta.value : '',
+                    reviewerUserName: reviewer ? reviewer.value : '',
                     runId: (form.querySelector('input[name="runId"]') || {}).value || ''
                 });
 

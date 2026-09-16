@@ -1590,31 +1590,47 @@ footer {
 .insight-stat.stat-red { border-left-color: var(--red); }
 .insight-stat.stat-orange { border-left-color: #e08a1e; }
 
-.insight-editable-cell { min-width: 160px; }
-
-.insight-richtext {
-	min-height: 2.4rem;
-	max-height: 8rem;
+/* Denial Claim Report - Observation / Action cells keep the workbook's own formatting while
+   they are edited, so they are contenteditable rather than a plain textarea. */
+.insight-html-editor {
+	min-height: 3rem;
+	max-height: 10rem;
 	overflow-y: auto;
-	padding: .35rem .5rem;
-	border: 1px solid #ced4da;
-	border-radius: .35rem;
-	background: #fff;
+	white-space: normal;
 	font-size: .82rem;
 }
 
-.insight-richtext:focus {
+.insight-html-editor:focus {
 	outline: none;
-	border-color: var(--blue);
+	border-color: var(--blue, #0d6efd);
 	box-shadow: 0 0 0 .15rem rgba(13, 110, 253, .15);
 }
 
-.insight-richtext p, .insight-richtext div { margin: 0 0 .25rem; }
-.insight-richtext ul, .insight-richtext ol { margin: 0 0 .25rem 1.1rem; padding: 0; }
+.insight-html-editor ul, .insight-html-editor ol { margin: 0 0 .25rem 1.1rem; padding: 0; }
+.insight-html-editor p { margin: 0 0 .25rem; }
 
-.insight-richtext-toolbar .btn { padding: .25rem .5rem; }
+.insight-editable-cell { min-width: 160px; }
+
+.insight-feedback-input { min-height: 2.4rem; resize: vertical; }
 
 .insight-save-cell { white-space: nowrap; }
+
+.insight-row-save-btn {
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: 1px solid var(--blue, #0d6efd);
+	border-radius: .25rem;
+	background: #fff;
+	color: var(--blue, #0d6efd);
+	line-height: 1;
+}
+
+.insight-row-save-btn:hover { background: var(--blue, #0d6efd); color: #fff; }
+.insight-row-save-btn:disabled { opacity: .6; cursor: not-allowed; }
 
 .insight-row-status {
 	display: inline-block;

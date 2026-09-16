@@ -60,6 +60,7 @@ public sealed class LineClaimImportService
     private readonly LineClaimFileLogRepository _fileLog;
     private readonly ReportRunIdInfoLogger _runInfo;
     private readonly ReportsWorkflowTrackerRepository _tracker;
+    private readonly DenialDescriptionEnricher _denialEnricher;
     private readonly LineClaimImportOptions _options;
     private readonly ILogger<LineClaimImportService> _logger;
 
@@ -68,6 +69,7 @@ public sealed class LineClaimImportService
         LineClaimFileLogRepository fileLog,
         ReportRunIdInfoLogger runInfo,
         ReportsWorkflowTrackerRepository tracker,
+        DenialDescriptionEnricher denialEnricher,
         IOptions<LineClaimImportOptions> options,
         ILogger<LineClaimImportService> logger)
     {
@@ -75,6 +77,7 @@ public sealed class LineClaimImportService
         _fileLog = fileLog;
         _runInfo = runInfo;
         _tracker = tracker;
+        _denialEnricher = denialEnricher;
         _options = options.Value ?? new LineClaimImportOptions();
         _logger = logger;
     }
@@ -321,6 +324,11 @@ public sealed class LineClaimImportService
                 $"{fileType} bulk copy completed. Rows={result.RowsInTable}, Table={level!.SqlTableName}, Duration={stopwatch.ElapsedMilliseconds} ms.", ct, logSourceName)
                 .ConfigureAwait(false);
 
+            // Derived denial columns, claim level only. The rows are committed by this point, so a
+            // failure here is reported and dropped rather than turning a good load into a failed one.
+            await EnrichDenialCodesAsync(lab, request, fileType, level, sourceSystem, logSourceName, ct)
+                .ConfigureAwait(false);
+
             if (result.MissingCsvHeaders.Count > 0 || result.UnmappedCsvHeaders.Count > 0)
             {
                 await _runInfo.WarningAsync(request.RunId, fileType, sourceSystem,
@@ -358,6 +366,69 @@ public sealed class LineClaimImportService
                 $"{fileType} processing ended with failure for lab {lab.LabName} ({lab.LabId}).", ct, logSourceName).ConfigureAwait(false);
 
             return new LineClaimImportOutcome(fileType, false, false, 0, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Populates NormalizedDenialCode and DenialDescription on the claim-level table just loaded.
+    /// </summary>
+    /// <remarks>
+    /// <para>Claim level only. The line-level table carries its own denial code, but the denial
+    /// reporting built on this reads claim level - that is the level the requirement names, and
+    /// running it on both would double the cost for a column nothing reads yet.</para>
+    /// <para>Never throws. The bulk copy has already committed when this runs, so a master-table
+    /// outage or a missing permission must cost the descriptions and nothing else: the failure is
+    /// written to the run log as a warning and the import still reports Success.</para>
+    /// </remarks>
+    private async Task EnrichDenialCodesAsync(
+        ResolvedLab lab,
+        LineClaimImportRequest request,
+        string fileType,
+        LevelMapping level,
+        string sourceSystem,
+        string logSourceName,
+        CancellationToken ct)
+    {
+        if (!string.Equals(fileType, FileTypes.ClaimLevel, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        try
+        {
+            var enrichment = await _denialEnricher
+                .EnrichAsync(lab, level.SqlTableName, ct)
+                .ConfigureAwait(false);
+
+            if (enrichment.Skipped)
+            {
+                await _runInfo.InfoAsync(request.RunId, fileType, sourceSystem,
+                    $"Denial normalization skipped: {enrichment.Message}", ct, logSourceName).ConfigureAwait(false);
+                return;
+            }
+
+            await _runInfo.InfoAsync(request.RunId, fileType, sourceSystem,
+                $"Denial normalization completed. Distinct denial code cells={enrichment.DistinctCodes}, " +
+                $"rows with {DenialDescriptionEnricher.NormalizedColumn}={enrichment.RowsUpdated}, " +
+                $"rows with {DenialDescriptionEnricher.DescriptionColumn}={enrichment.RowsDescribed}.",
+                ct, logSourceName).ConfigureAwait(false);
+
+            if (enrichment.UnresolvedCodes.Count > 0)
+            {
+                await _runInfo.WarningAsync(request.RunId, fileType, sourceSystem,
+                    $"{enrichment.UnresolvedCodes.Count} denial code(s) have no description in " +
+                    $"LRNMaster.dbo.DenialMapperSuperMaster: [{string.Join("; ", enrichment.UnresolvedCodes)}]",
+                    ct, logSourceName).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Lab {LabId} [{FileType}]: denial normalization failed. The loaded rows are unaffected.",
+                lab.LabId, fileType);
+
+            await _runInfo.WarningAsync(request.RunId, fileType, sourceSystem,
+                $"Denial normalization failed for lab {lab.LabName} ({lab.LabId}): {ex.Message}. " +
+                "The claim-level rows loaded successfully and are unaffected.", ct, logSourceName)
+                .ConfigureAwait(false);
         }
     }
 

@@ -24,6 +24,11 @@ public interface IUserManagementRepository
     Task<IEnumerable<LabMetricsDashboard.Models.Lab>> GetAllLabsAsync();
     Task<IEnumerable<ReviewerOption>> GetUsersByRoleNamesAsync(IEnumerable<string> roleNames);
 
+    /// <summary>Same as <see cref="GetUsersByRoleNamesAsync(IEnumerable{string})"/> but scoped to users
+    /// assigned to the given lab via dbo.UserLabs - the AR Reviewer picker on Denial Insight uses
+    /// this so it never offers a reviewer from a different lab.</summary>
+    Task<IEnumerable<ReviewerOption>> GetUsersByRoleNamesAsync(IEnumerable<string> roleNames, int labId);
+
     /// <summary>
     /// AR Reporting Requirements GAP-2: username -&gt; manager username / team, for reports to
     /// LEFT JOIN against a lab's free-text DenialTaskBoard.AssignedTo. Matches case-insensitively
