@@ -1,0 +1,130 @@
+@model LabMetricsDashboard.ViewModels.DenialPivotRenderModel
+@{
+    var t = Model.Table;
+    var isPayer = string.Equals(Model.LinkKind, "payer", StringComparison.OrdinalIgnoreCase);
+    string Money(decimal v) => v.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"));
+
+    // Every cell links to the claims it was counted from, carrying that cell's own period plus
+    // either the row's payer or the row's denial code - the same filters the number came from.
+    string? RowDenial(LabMetricsDashboard.Models.DenialPivotRow r) => isPayer ? null : r.Key;
+    string? RowPayer(LabMetricsDashboard.Models.DenialPivotRow r) => isPayer ? r.Key : null;
+}
+
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+            <div>
+                <div class="fw-semibold">@t.Title</div>
+                <div class="text-muted" style="font-size:.78rem;">@Model.Caption</div>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                @if (t.IsTopNFiltered)
+                {
+                    <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">
+                        Top @t.Rows.Count of @t.RowsAvailable.ToString("N0")
+                    </span>
+                }
+                @if (Model.AllowShowAllToggle && (t.IsTopNFiltered || Model.ShowAllDenials))
+                {
+                    <a class="btn btn-sm btn-outline-secondary" asp-action="Index" asp-route-lab="@Model.Lab"
+                       asp-route-grain="@Model.Grain" asp-route-period="@Model.SelectedPeriodKey"
+                       asp-route-showAll="@(!Model.ShowAllDenials)">
+                        @(Model.ShowAllDenials ? "Show top 3 only" : "Show all denial codes")
+                    </a>
+                }
+            </div>
+        </div>
+
+        @if (t.Rows.Count == 0 || t.Periods.Count == 0)
+        {
+            <div class="text-center text-muted py-4">No data for this summary.</div>
+        }
+        else
+        {
+            <div class="table-responsive" style="max-height:52vh;overflow:auto;">
+                <table class="table table-sm table-bordered table-hover align-middle mb-0" style="min-width:820px;">
+                    <thead class="table-light">
+                        <tr>
+                            <th rowspan="2" style="min-width:200px;vertical-align:middle;">@t.RowHeader</th>
+                            @foreach (var p in t.Periods)
+                            {
+                                <th colspan="2" class="text-center" style="white-space:nowrap;">@p.Label</th>
+                            }
+                            <th colspan="2" class="text-center table-secondary" style="white-space:nowrap;">Total</th>
+                        </tr>
+                        <tr>
+                            @foreach (var p in t.Periods)
+                            {
+                                <th class="text-end" style="font-size:.72rem;font-weight:600;">Claims</th>
+                                <th class="text-end" style="font-size:.72rem;font-weight:600;">Balance</th>
+                            }
+                            <th class="text-end table-secondary" style="font-size:.72rem;font-weight:600;">Claims</th>
+                            <th class="text-end table-secondary" style="font-size:.72rem;font-weight:600;">Balance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in t.Rows)
+                        {
+                            <tr>
+                                <td class="fw-semibold">
+                                    <a asp-action="ClaimData" asp-route-lab="@Model.Lab"
+                                       asp-route-denialCode="@RowDenial(r)" asp-route-payerName="@RowPayer(r)"
+                                       asp-route-grain="@Model.Grain" asp-route-from="summary"
+                                       title="View every claim behind this row">@r.Label</a>
+                                    @if (!string.IsNullOrWhiteSpace(r.SubLabel))
+                                    {
+                                        <div class="text-muted fw-normal text-wrap" style="font-size:.72rem;max-width:280px;">@r.SubLabel</div>
+                                    }
+                                </td>
+                                @foreach (var p in t.Periods)
+                                {
+                                    var cell = r.CellFor(p.Key);
+                                    if (cell.IsEmpty)
+                                    {
+                                        <td class="text-end text-muted">-</td>
+                                        <td class="text-end text-muted">-</td>
+                                    }
+                                    else
+                                    {
+                                        <td class="text-end">
+                                            <a asp-action="ClaimData" asp-route-lab="@Model.Lab"
+                                               asp-route-denialCode="@RowDenial(r)" asp-route-payerName="@RowPayer(r)"
+                                               asp-route-grain="@Model.Grain" asp-route-period="@p.Key" asp-route-from="summary"
+                                               title="View these claims">@cell.ClaimCount.ToString("N0")</a>
+                                        </td>
+                                        <td class="text-end">@Money(cell.TotalBalance)</td>
+                                    }
+                                }
+                                <td class="text-end table-secondary fw-semibold">@r.TotalClaimCount.ToString("N0")</td>
+                                <td class="text-end table-secondary fw-semibold">@Money(r.TotalBalance)</td>
+                            </tr>
+                        }
+                        <tr class="table-light fw-bold">
+                            <td>Total</td>
+                            @foreach (var p in t.Periods)
+                            {
+                                var cell = t.Total.CellFor(p.Key);
+                                <td class="text-end">@cell.ClaimCount.ToString("N0")</td>
+                                <td class="text-end">@Money(cell.TotalBalance)</td>
+                            }
+                            <td class="text-end table-secondary">@t.Total.TotalClaimCount.ToString("N0")</td>
+                            <td class="text-end table-secondary">@Money(t.Total.TotalBalance)</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="text-muted mt-2" style="font-size:.75rem;">
+                Claims are distinct Claim IDs and Balance is the Insurance Balance. A row&rsquo;s Total counts
+                distinct claims across the whole range, so it can be lower than that row&rsquo;s periods added
+                together when a claim appears in more than one period.
+                @if (!isPayer)
+                {
+                    <text>
+                        The Total row adds the codes shown; a claim denied under more than one code is counted
+                        against each of them, so it can exceed the distinct claim count.
+                    </text>
+                }
+            </div>
+        }
+    </div>
+</div>

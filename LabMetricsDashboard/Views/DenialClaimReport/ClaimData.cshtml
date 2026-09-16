@@ -1,0 +1,147 @@
+@model LabMetricsDashboard.ViewModels.DenialClaimDataViewModel
+@{
+    ViewData["Title"] = "Claim Level Data";
+    string Money(decimal v) => v.ToString("C2", System.Globalization.CultureInfo.GetCultureInfo("en-US"));
+    var preview = Model.Claims.Take(1000).ToList();
+}
+
+<div class="container-fluid px-3 py-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+        <div>
+            <h4 class="mb-1">Claim Level Data</h4>
+            <div class="text-muted" style="font-size:.85rem;">
+                The claims behind the metric you selected, from <code>ClaimLevelData</code>.
+            </div>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            @if (Model.ReturnTo == "insights")
+            {
+                <a class="btn btn-sm btn-outline-secondary" asp-action="Insights" asp-route-lab="@Model.CurrentLab"
+                   asp-route-bucket="@Model.Bucket">
+                    <i class="bi bi-arrow-left"></i> Back to Denial Insights
+                </a>
+            }
+            else
+            {
+                <a class="btn btn-sm btn-outline-secondary" asp-action="Index" asp-route-lab="@Model.CurrentLab"
+                   asp-route-grain="@Model.Grain" asp-route-period="@Model.Filter.PeriodKey">
+                    <i class="bi bi-arrow-left"></i> Back to Denial Summary
+                </a>
+            }
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Model.Error))
+    {
+        <div class="alert alert-warning">@Model.Error</div>
+    }
+
+    @if (Model.Filter.HasAny)
+    {
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body py-2 d-flex flex-wrap align-items-center gap-2">
+                <span class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Active filters</span>
+
+                @if (!string.IsNullOrWhiteSpace(Model.Filter.DenialCode))
+                {
+                    <span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle">
+                        Denial Code: @Model.Filter.DenialCode
+                        @if (!string.IsNullOrWhiteSpace(Model.DenialDescription))
+                        {
+                            <span class="fw-normal">&mdash; @Model.DenialDescription</span>
+                        }
+                    </span>
+                }
+                @if (!string.IsNullOrWhiteSpace(Model.Filter.PayerName))
+                {
+                    <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">
+                        Payer: @Model.Filter.PayerName
+                    </span>
+                }
+                @if (!string.IsNullOrWhiteSpace(Model.Filter.PeriodLabel))
+                {
+                    <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">
+                        Period: @Model.Filter.PeriodLabel
+                    </span>
+                }
+
+                <a class="btn btn-sm btn-link ms-auto" asp-action="ClaimData" asp-route-lab="@Model.CurrentLab">
+                    Clear filters
+                </a>
+            </div>
+        </div>
+    }
+
+    <div class="row g-2 mb-3">
+        <div class="col-6 col-lg-3">
+            <div class="card border-0 shadow-sm"><div class="card-body py-2">
+                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Denial Rows</div>
+                <div class="fw-bold fs-5">@Model.Claims.Count.ToString("N0")</div>
+            </div></div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card border-0 shadow-sm"><div class="card-body py-2">
+                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Distinct Claims</div>
+                <div class="fw-bold fs-5">@Model.TotalClaims.ToString("N0")</div>
+            </div></div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card border-0 shadow-sm"><div class="card-body py-2">
+                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Insurance Balance</div>
+                <div class="fw-bold fs-5">@Money(Model.TotalInsuranceBalance)</div>
+            </div></div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            @if (Model.Claims.Count > preview.Count)
+            {
+                <div class="text-muted mb-2" style="font-size:.82rem;">
+                    Showing the first @preview.Count.ToString("N0") of @Model.Claims.Count.ToString("N0") rows, highest balance first.
+                </div>
+            }
+            <div class="table-responsive" style="max-height:65vh;overflow:auto;">
+                <table class="table table-sm table-hover align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Claim ID</th><th>Denial Code</th><th>Description</th><th>Payer</th>
+                            <th>Denial Date</th><th>Date of Service</th><th>CPT</th><th>Panel</th>
+                            <th class="text-end">Insurance Balance</th><th class="text-end">Total Balance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (preview.Count == 0)
+                        {
+                            <tr><td colspan="10" class="text-center text-muted py-4">No claims match these filters.</td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var claim in preview)
+                            {
+                                <tr>
+                                    <td>@claim.ClaimId</td>
+                                    <td class="fw-semibold">
+                                        @claim.DenialCode
+                                        @if (!string.Equals(claim.DenialCode, claim.DenialCodeNormalized, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            <span class="text-muted" style="font-size:.72rem;">(@claim.DenialCodeNormalized)</span>
+                                        }
+                                    </td>
+                                    <td class="text-wrap" style="max-width:280px;">@claim.DenialDescription</td>
+                                    <td>@claim.PayerName</td>
+                                    <td>@(claim.DenialDate?.ToString("dd MMM yyyy") ?? "-")</td>
+                                    <td>@(claim.DateOfService?.ToString("dd MMM yyyy") ?? "-")</td>
+                                    <td>@claim.CptCode</td>
+                                    <td>@claim.PanelName</td>
+                                    <td class="text-end">@Money(claim.InsuranceBalance)</td>
+                                    <td class="text-end">@Money(claim.TotalBalance)</td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>

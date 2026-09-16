@@ -51,6 +51,9 @@ public static class SelfTests
         LabDatabaseGateRequiresAllThreeFileTypes();
         LabDatabaseSourceLabelling();
         RerunBypassesMarkersButNotReadiness();
+        DenialCodeNormalization();
+        DenialCodeDescriptions();
+        DenialDescriptionCascade();
 
         Console.WriteLine(new string('-', 70));
 
@@ -1481,6 +1484,146 @@ public static class SelfTests
 
         Check("a changed file is processed either way",
             !AlreadyProcessed(false, false) && !AlreadyProcessed(false, true));
+    }
+
+    // ---------------- Denial code normalization ----------------
+
+    private static void DenialCodeNormalization()
+    {
+        Check("Denial: CO10 -> 10", DenialCodeNormalizer.Normalize("CO10") == "10");
+        Check("Denial: CO189 -> 189", DenialCodeNormalizer.Normalize("CO189") == "189");
+        Check("Denial: PR45 / PI45 / CO45 all -> 45",
+            DenialCodeNormalizer.Normalize("PR45") == "45" &&
+            DenialCodeNormalizer.Normalize("PI45") == "45" &&
+            DenialCodeNormalizer.Normalize("CO45") == "45");
+
+        Check("Denial: the prefix may be spaced or hyphenated",
+            DenialCodeNormalizer.Normalize("CO-45") == "45" &&
+            DenialCodeNormalizer.Normalize("CO 45") == "45" &&
+            DenialCodeNormalizer.Normalize(" co45 ") == "45");
+
+        Check("Denial: OA and CR are group prefixes too",
+            DenialCodeNormalizer.Normalize("OA23") == "23" &&
+            DenialCodeNormalizer.Normalize("CR1") == "1");
+
+        // A remark code is not a group-prefixed code and must survive intact - stripping "MA" would
+        // merge MA130 into a "130" that means something else entirely.
+        Check("Denial: a non-prefixed code is left alone",
+            DenialCodeNormalizer.Normalize("MA130") == "MA130" &&
+            DenialCodeNormalizer.Normalize("N130") == "N130");
+
+        Check("Denial: a trailing letter is kept", DenialCodeNormalizer.Normalize("CO45A") == "45A");
+        Check("Denial: blank normalizes to empty",
+            DenialCodeNormalizer.Normalize(null) == "" && DenialCodeNormalizer.Normalize("   ") == "");
+
+        Check("Denial: a multi-code cell normalizes every code",
+            DenialCodeNormalizer.NormalizeAll("CO10, CO189") == "10, 189");
+
+        Check("Denial: separators other than comma split too",
+            DenialCodeNormalizer.NormalizeAll("CO10; CO189") == "10, 189" &&
+            DenialCodeNormalizer.NormalizeAll("CO10|CO189") == "10, 189" &&
+            DenialCodeNormalizer.NormalizeAll("CO10/CO189") == "10, 189");
+
+        // "CO 45" is one code written loosely. Splitting on the space would make it "CO" and "45".
+        Check("Denial: a bare space does not split a code",
+            DenialCodeNormalizer.NormalizeAll("CO 45") == "45");
+
+        Check("Denial: the same denial under two groups collapses to one code",
+            DenialCodeNormalizer.NormalizeAll("CO45, PR45") == "45");
+
+        Check("Denial: a cell with no code normalizes to null",
+            DenialCodeNormalizer.NormalizeAll("") is null && DenialCodeNormalizer.NormalizeAll(null) is null);
+    }
+
+    private static void DenialCodeDescriptions()
+    {
+        // The Super Master stores CO10/PR10/PI10 and never a bare 10 - that is what makes the
+        // normalized fallback necessary.
+        var lookup = new DenialDescriptionLookup();
+        lookup.AddSuper("CO10", "The diagnosis is inconsistent with the patient's gender.");
+        lookup.AddSuper("CO189", "This non-covered service was not deemed medically necessary.");
+        lookup.AddSuper("PR45", "Charge exceeds fee schedule/maximum allowable.");
+
+        Check("Denial: one code is described with its code in front",
+            DenialCodeNormalizer.DescribeAll("CO10", lookup)
+                == "10 - The diagnosis is inconsistent with the patient's gender.");
+
+        Check("Denial: every code in a multi-code cell gets its own description",
+            DenialCodeNormalizer.DescribeAll("CO10, CO189", lookup)
+                == "10 - The diagnosis is inconsistent with the patient's gender."
+                 + "; 189 - This non-covered service was not deemed medically necessary.");
+
+        // The master has only PR45. CO45 and PI45 have to reach it through the normalized step.
+        Check("Denial: CO45, PI45 and PR45 all resolve to the same description",
+            DenialCodeNormalizer.DescribeAll("CO45", lookup)
+                == "45 - Charge exceeds fee schedule/maximum allowable." &&
+            DenialCodeNormalizer.DescribeAll("PI45", lookup)
+                == DenialCodeNormalizer.DescribeAll("CO45", lookup));
+
+        var unresolved = new List<string>();
+
+        Check("Denial: a code no master has is reported, not invented",
+            DenialCodeNormalizer.DescribeAll("CO10, MA130", lookup, unresolved)
+                == "10 - The diagnosis is inconsistent with the patient's gender."
+            && unresolved.Count == 1 && unresolved[0] == "MA130");
+
+        Check("Denial: a cell with no described code yields null",
+            DenialCodeNormalizer.DescribeAll("MA130", lookup) is null);
+
+        Check("Denial: an empty lookup describes nothing rather than failing",
+            DenialCodeNormalizer.DescribeAll("CO10", new DenialDescriptionLookup()) is null);
+    }
+
+    /// <summary>
+    /// The four-step cascade from requirement 3: lab master then super master, raw code before
+    /// normalized code.
+    /// </summary>
+    private static void DenialDescriptionCascade()
+    {
+        var both = new DenialDescriptionLookup();
+        both.AddLab("CO10", "Lab wording for CO10.");
+        both.AddSuper("CO10", "Super Master wording for CO10.");
+
+        Check("Cascade 1: the lab's own master beats the Super Master on the raw code",
+            both.Resolve("CO10") == "Lab wording for CO10.");
+
+        var superOnly = new DenialDescriptionLookup();
+        superOnly.AddSuper("CO10", "Super Master wording for CO10.");
+
+        Check("Cascade 2: the Super Master answers when the lab master has no raw match",
+            superOnly.Resolve("CO10") == "Super Master wording for CO10.");
+
+        // The lab master holds PR10; the claim carries CO10. Only the normalized step connects them.
+        var labNormalized = new DenialDescriptionLookup();
+        labNormalized.AddLab("PR10", "Lab wording for 10.");
+        labNormalized.AddSuper("MA130", "Unrelated.");
+
+        Check("Cascade 3: the lab master is retried on the normalized code",
+            labNormalized.Resolve("CO10") == "Lab wording for 10.");
+
+        var superNormalized = new DenialDescriptionLookup();
+        superNormalized.AddSuper("PI10", "Super Master wording for 10.");
+
+        Check("Cascade 4: the Super Master is retried on the normalized code last",
+            superNormalized.Resolve("CO10") == "Super Master wording for 10.");
+
+        // Ordering that matters: a raw hit in the SUPER master must still beat a normalized hit in
+        // the LAB master, because the raw code is the more specific match.
+        var ordering = new DenialDescriptionLookup();
+        ordering.AddLab("PR10", "Lab, normalized match only.");
+        ordering.AddSuper("CO10", "Super, exact raw match.");
+
+        Check("Cascade: a raw Super Master match beats a normalized lab match",
+            ordering.Resolve("CO10") == "Super, exact raw match.");
+
+        Check("Cascade: an unknown code resolves to null",
+            both.Resolve("ZZ999") is null && both.Resolve("") is null && both.Resolve(null) is null);
+
+        var blank = new DenialDescriptionLookup();
+        blank.AddLab("CO10", "   ");
+        blank.AddSuper("CO10", null);
+
+        Check("Cascade: a blank description is not stored as a match", blank.Resolve("CO10") is null);
     }
 
     private static void Check(string name, bool condition, string? detail = null)

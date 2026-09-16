@@ -1590,6 +1590,25 @@ footer {
 .insight-stat.stat-red { border-left-color: var(--red); }
 .insight-stat.stat-orange { border-left-color: #e08a1e; }
 
+/* Denial Claim Report - Observation / Action cells keep the workbook's own formatting while
+   they are edited, so they are contenteditable rather than a plain textarea. */
+.insight-html-editor {
+	min-height: 3rem;
+	max-height: 10rem;
+	overflow-y: auto;
+	white-space: normal;
+	font-size: .82rem;
+}
+
+.insight-html-editor:focus {
+	outline: none;
+	border-color: var(--blue, #0d6efd);
+	box-shadow: 0 0 0 .15rem rgba(13, 110, 253, .15);
+}
+
+.insight-html-editor ul, .insight-html-editor ol { margin: 0 0 .25rem 1.1rem; padding: 0; }
+.insight-html-editor p { margin: 0 0 .25rem; }
+
 .insight-editable-cell { min-width: 160px; }
 
 .insight-feedback-input { min-height: 2.4rem; resize: vertical; }

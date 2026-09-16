@@ -121,5 +121,52 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DenialDashboardSnapsho
     INCLUDE (PeriodType, PeriodEnd, FileName, SizeBytes, ArchivedOn, CreatedOn, CreatedBy);
 GO
 
+/* ----------------------------------------------------------------------------
+   2) dbo.DenialInsightClaimLevel
+   Per-lab denial insights for the NEW Denial Claim Report pages
+   (DenialClaimReport/Insights). The client imports their own insight workbook
+   here, edits the rows in the grid, and saves - upserted on
+   (DenialCode, PayerName), so re-importing the same workbook updates in place.
+
+   Deliberately NOT dbo.DenialInsight: that table belongs to the existing Denial
+   Dashboard and is left exactly as it is.
+
+   Created lazily on first use by
+   LabMetricsDashboard\Services\SqlDenialClaimReportRepository.cs - this script
+   is here for a reviewable, versioned record and for applying ahead of a deploy.
+---------------------------------------------------------------------------- */
+IF OBJECT_ID('dbo.DenialInsightClaimLevel', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.DenialInsightClaimLevel
+    (
+        Id                BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_DenialInsightClaimLevel PRIMARY KEY,
+        DenialCode        NVARCHAR(100)  NOT NULL,
+        DenialDescription NVARCHAR(1000) NULL,
+        PayerName         NVARCHAR(255)  NULL,
+        NoOfDenials       INT            NOT NULL CONSTRAINT DF_DICL_NoOfDenials DEFAULT 0,
+        NoOfClaims        INT            NOT NULL CONSTRAINT DF_DICL_NoOfClaims DEFAULT 0,
+        TotalBalance      DECIMAL(18,2)  NOT NULL CONSTRAINT DF_DICL_TotalBalance DEFAULT 0,
+        InsuranceBalance  DECIMAL(18,2)  NOT NULL CONSTRAINT DF_DICL_InsuranceBalance DEFAULT 0,
+        ImpactPercentage  DECIMAL(18,2)  NOT NULL CONSTRAINT DF_DICL_ImpactPercentage DEFAULT 0,
+        Observation       NVARCHAR(MAX)  NULL,
+        ActionCategory    NVARCHAR(500)  NULL,
+        Action            NVARCHAR(MAX)  NULL,
+        FeedbackResponse  NVARCHAR(MAX)  NULL,
+        Responsibility    NVARCHAR(255)  NULL,
+        DiscussionDate    DATE           NULL,
+        ETA               DATE           NULL,
+        ClosedDate        DATE           NULL,
+        UpdatedOn         DATETIME2(3)   NULL,
+        UpdatedBy         NVARCHAR(200)  NULL
+    );
+    PRINT 'Created dbo.DenialInsightClaimLevel';
+END;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_DenialInsightClaimLevel_Code_Payer' AND object_id = OBJECT_ID('dbo.DenialInsightClaimLevel'))
+    CREATE UNIQUE INDEX UX_DenialInsightClaimLevel_Code_Payer
+    ON dbo.DenialInsightClaimLevel (DenialCode, PayerName);
+GO
+
 PRINT 'Lab database Denial Workflow objects are up to date.';
 GO

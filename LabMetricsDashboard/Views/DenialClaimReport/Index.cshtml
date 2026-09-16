@@ -1,0 +1,226 @@
+@model LabMetricsDashboard.ViewModels.DenialClaimReportViewModel
+@{
+    ViewData["Title"] = "Denial Claim Report";
+    string Money(decimal v) => v.ToString("C2", System.Globalization.CultureInfo.GetCultureInfo("en-US"));
+    string Compact(decimal v) => v >= 1_000_000m ? $"${v / 1_000_000m:0.##}M"
+                               : v >= 1_000m ? $"${v / 1_000m:0.#}K"
+                               : v.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"));
+    var periodKey = Model.SelectedPeriod?.Key;
+    var grainLabel = Model.Grain == "weekly" ? "Weekly" : "Monthly";
+}
+
+<div class="container-fluid px-3 py-3 dcr">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+        <div>
+            <h4 class="mb-1">Denial Claim Report</h4>
+            <div class="text-muted" style="font-size:.85rem;">
+                Calculated from this lab&rsquo;s claim-level data, excluding blank denial codes and keeping only
+                claims with an insurance balance above zero. Codes roll up to their common code &mdash; CO45, PI45
+                and PR45 all count as 45. Claim counts are distinct Claim IDs; balances are Insurance Balance.
+            </div>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <form method="get" asp-action="Index" class="d-flex gap-2 align-items-center">
+                <select name="lab" class="form-select form-select-sm" style="min-width:170px;" onchange="this.form.submit()">
+                    @foreach (var lab in Model.Labs)
+                    {
+                        <option value="@lab" selected="@(string.Equals(lab, Model.CurrentLab, StringComparison.OrdinalIgnoreCase))">@lab</option>
+                    }
+                </select>
+                <select name="grain" class="form-select form-select-sm" style="min-width:110px;" onchange="this.form.submit()">
+                    <option value="monthly" selected="@(Model.Grain == "monthly")">Monthly</option>
+                    <option value="weekly" selected="@(Model.Grain == "weekly")">Weekly</option>
+                </select>
+                <select name="period" class="form-select form-select-sm" style="min-width:190px;" onchange="this.form.submit()">
+                    @foreach (var p in Model.Periods)
+                    {
+                        <option value="@p.Key" selected="@(string.Equals(p.Key, periodKey, StringComparison.Ordinal))">
+                            @p.Label (@p.DenialCount.ToString("N0"))
+                        </option>
+                    }
+                </select>
+                <input type="hidden" name="showAll" value="@Model.ShowAllDenials.ToString().ToLowerInvariant()" />
+            </form>
+            <a class="btn btn-sm btn-outline-primary" asp-action="Insights" asp-route-lab="@Model.CurrentLab">
+                <i class="bi bi-lightbulb"></i> Denial Insights
+            </a>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Model.Error))
+    {
+        <div class="alert alert-warning">@Model.Error</div>
+    }
+
+    <div class="row g-2 mb-3">
+        <div class="col-6 col-lg-3">
+            <div class="card border-0 shadow-sm"><div class="card-body py-2">
+                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Total Denials</div>
+                <div class="fw-bold fs-5">@Model.TotalDenials.ToString("N0")</div>
+            </div></div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card border-0 shadow-sm"><div class="card-body py-2">
+                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Distinct Claims</div>
+                <div class="fw-bold fs-5">@Model.TotalClaims.ToString("N0")</div>
+            </div></div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card border-0 shadow-sm"><div class="card-body py-2">
+                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">Insurance Balance</div>
+                <div class="fw-bold fs-5">@Money(Model.TotalInsuranceBalance)</div>
+            </div></div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card border-0 shadow-sm"><div class="card-body py-2">
+                <div class="text-muted text-uppercase" style="font-size:.7rem;font-weight:800;">@(Model.Grain == "weekly" ? "Selected Week" : "Selected Month")</div>
+                <div class="fw-bold fs-6">@(Model.SelectedPeriod?.Label ?? "-")</div>
+            </div></div>
+        </div>
+    </div>
+
+    @if (Model.ExcludedDenials > 0)
+    {
+        <div class="alert alert-info py-2" style="font-size:.85rem;">
+            <i class="bi bi-info-circle"></i>
+            @Model.ExcludedDenials.ToString("N0") denied claim row(s) are excluded from the summaries below:
+            they have a blank denial code, or no insurance balance outstanding. They are still counted in
+            <strong>Total Denials</strong> above.
+        </div>
+    }
+
+    @if (Model.Grain == "weekly" && !Model.UsesDeniedWeekColumn)
+    {
+        <div class="alert alert-warning py-2" style="font-size:.85rem;">
+            <i class="bi bi-exclamation-triangle"></i>
+            This lab&rsquo;s claim-level data has no <code>DeniedWeek</code> value, so weeks are derived from
+            <strong>Denial Date</strong> (Monday&ndash;Sunday) instead.
+        </div>
+    }
+
+    @* ── Top Insurance and Top Denial pivots ─────────────────────────────── *@
+    @await Html.PartialAsync("_DenialPivot", new LabMetricsDashboard.ViewModels.DenialPivotRenderModel
+    {
+        Table = Model.TopInsurance,
+        Lab = Model.CurrentLab,
+        Grain = Model.Grain,
+        LinkKind = "payer",
+        SelectedPeriodKey = periodKey,
+        Caption = $"Rows are PayerName_Raw, columns are the {grainLabel.ToLowerInvariant()} periods. Ordered by claim count."
+    })
+
+    @await Html.PartialAsync("_DenialPivot", new LabMetricsDashboard.ViewModels.DenialPivotRenderModel
+    {
+        Table = Model.TopDenial,
+        Lab = Model.CurrentLab,
+        Grain = Model.Grain,
+        LinkKind = "denial",
+        SelectedPeriodKey = periodKey,
+        ShowAllDenials = Model.ShowAllDenials,
+        AllowShowAllToggle = true,
+        Caption = $"Rows are the common denial code, columns are the {grainLabel.ToLowerInvariant()} periods. Ordered by claim count."
+    })
+
+    @* ── The selected period, denial by denial ───────────────────────────── *@
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="fw-semibold">
+                    @grainLabel Denial Detail
+                    @if (Model.SelectedPeriod is not null)
+                    {
+                        <span class="text-muted fw-normal">&mdash; @Model.SelectedPeriod.Label</span>
+                    }
+                </div>
+                <span class="text-muted" style="font-size:.82rem;">@Model.Summary.Count.ToString("N0") denial code(s)</span>
+            </div>
+
+            <div class="text-muted mb-2" style="font-size:.8rem;">
+                <i class="bi bi-info-circle"></i>
+                The denial code, the claim count and the payer balance are clickable &mdash; each opens the
+                claim-level rows behind that number.
+            </div>
+
+            <div class="table-responsive" style="max-height:60vh;overflow:auto;">
+                <table class="table table-sm table-hover align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Denial Code</th>
+                            <th>Description</th>
+                            <th>Classification</th>
+                            <th class="text-end">Total Claims</th>
+                            <th class="text-end">Insurance Balance</th>
+                            <th>Highly Impacted Payer</th>
+                            <th class="text-end">Payer Claims</th>
+                            <th class="text-end">Payer Ins. Balance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (Model.Summary.Count == 0)
+                        {
+                            <tr><td colspan="8" class="text-center text-muted py-4">No denials match this period.</td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var row in Model.Summary)
+                            {
+                                <tr>
+                                    <td class="fw-semibold">
+                                        <a asp-action="ClaimData" asp-route-lab="@Model.CurrentLab" asp-route-denialCode="@row.DenialCode"
+                                           asp-route-grain="@Model.Grain" asp-route-period="@periodKey" asp-route-from="summary"
+                                           title="View the claims for this denial code">@row.DenialCode</a>
+                                        @if (!string.IsNullOrWhiteSpace(row.RawCodes) && !string.Equals(row.RawCodes, row.DenialCode, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            <div class="text-muted" style="font-size:.72rem;">@row.RawCodes</div>
+                                        }
+                                    </td>
+                                    <td class="text-wrap" style="max-width:320px;">@row.DenialDescription</td>
+                                    <td>@(string.IsNullOrWhiteSpace(row.DenialClassification) ? "-" : row.DenialClassification)</td>
+                                    <td class="text-end">
+                                        <a asp-action="ClaimData" asp-route-lab="@Model.CurrentLab" asp-route-denialCode="@row.DenialCode"
+                                           asp-route-grain="@Model.Grain" asp-route-period="@periodKey" asp-route-from="summary"
+                                           title="View these claims">@row.TotalClaims.ToString("N0")</a>
+                                    </td>
+                                    <td class="text-end">@Money(row.InsuranceBalance)</td>
+                                    <td>@(string.IsNullOrWhiteSpace(row.HighlyImpactedPayer) ? "-" : row.HighlyImpactedPayer)</td>
+                                    <td class="text-end">
+                                        @if (string.IsNullOrWhiteSpace(row.HighlyImpactedPayer))
+                                        {
+                                            <span>-</span>
+                                        }
+                                        else
+                                        {
+                                            <a asp-action="ClaimData" asp-route-lab="@Model.CurrentLab" asp-route-denialCode="@row.DenialCode"
+                                               asp-route-payerName="@row.HighlyImpactedPayer" asp-route-grain="@Model.Grain"
+                                               asp-route-period="@periodKey" asp-route-from="summary"
+                                               title="View this payer's claims for this denial">@row.PayerClaimCount.ToString("N0")</a>
+                                        }
+                                    </td>
+                                    <td class="text-end">
+                                        @if (string.IsNullOrWhiteSpace(row.HighlyImpactedPayer))
+                                        {
+                                            <span>-</span>
+                                        }
+                                        else
+                                        {
+                                            <a asp-action="ClaimData" asp-route-lab="@Model.CurrentLab" asp-route-denialCode="@row.DenialCode"
+                                               asp-route-payerName="@row.HighlyImpactedPayer" asp-route-grain="@Model.Grain"
+                                               asp-route-period="@periodKey" asp-route-from="summary"
+                                               title="View this payer's claims for this denial">@Money(row.PayerInsuranceBalance)</a>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                            <tr class="table-light fw-bold">
+                                <td colspan="3">Total</td>
+                                <td class="text-end">@Model.Summary.Sum(x => x.TotalClaims).ToString("N0")</td>
+                                <td class="text-end">@Money(Model.Summary.Sum(x => x.InsuranceBalance))</td>
+                                <td colspan="3"></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
