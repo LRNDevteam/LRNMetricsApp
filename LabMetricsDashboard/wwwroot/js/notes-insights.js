@@ -81,6 +81,15 @@
     const q = (obj) => Object.entries(obj).filter(([, v]) => v !== null && v !== undefined && v !== "").map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
     const stripHtml = s => { if (!s) return ""; const d = document.createElement("div"); d.innerHTML = s; return d.textContent || d.innerText || ""; };
     const debounce = (fn, ms) => { let t; return function () { clearTimeout(t); t = setTimeout(fn, ms); }; };
+    function parseClaims(v) {
+        if (v == null || v === "") return null;
+        const n = parseInt(String(v).replace(/,/g, "").replace(/\s/g, ""), 10);
+        return Number.isFinite(n) ? n : null;
+    }
+    function formatClaims(v) {
+        const n = typeof v === "number" ? v : parseClaims(v);
+        return n == null ? "" : n.toLocaleString("en-US");
+    }
 
     function toast(msg) {
         let t = document.querySelector(".ni-toast");
@@ -185,7 +194,12 @@
         try {
             const data = await getJson(`${apiBase}/Notes/Active?${q({ lab: ctx.lab, report: ctx.reportName })}`);
             reportKeyId = data.reportKeyId;
-            state.rows = (data.rows || []).map(mapServerRow);
+            state.rows = (data.rows || []).map(mapServerRow).sort((a, b) => {
+                const ea = a.entryNo ?? a.noteId ?? 0;
+                const eb = b.entryNo ?? b.noteId ?? 0;
+                if (ea !== eb) return ea - eb;
+                return (a.noteId || 0) - (b.noteId || 0);
+            });
             state.filters = {};
             renderActiveBody();
         } catch (e) { el.body.innerHTML = `<div class="ni-empty">⚠ ${esc(e.message)}</div>`; }
@@ -214,7 +228,7 @@
     }
 
     function addRow() {
-        state.rows.unshift({
+        state.rows.push({
             _rid: ridSeq++, _new: true, _dirty: true,
             noteId: null, entryNo: null,
             weekRangeText: ctx.weekText, weekRangeStart: ctx.weekStart, weekRangeEnd: ctx.weekEnd,
@@ -320,23 +334,23 @@
     function renderGrid(rows) {
         if (!rows.length) return `<div class="ni-empty">No active notes match. Use “＋ Add Insight Row” to create one.</div>`;
         const head = `<tr>
-            <th>#</th><th>Week Range</th><th>Risk</th><th>Responsible Party</th><th>Insights</th><th>#Smp</th>
+            <th>#</th><th>Week Range</th><th>Risk</th><th>Responsible Party</th><th>Insights</th><th># of Claims</th>
             <th>Action / Solution</th><th>Feedback / Response</th><th>Responsibility</th>
             <th>Discussion</th><th>ETA</th><th>Closed</th><th>Status</th><th>Action</th></tr>`;
-        const body = rows.map(r => {
+        const body = rows.map((r, i) => {
             const rid = r._rid;
             const overdue = r.isOverdueETA && r.statusCode !== "Closed" ? `<span class="ni-pill ni-overdue">Overdue</span>` : "";
             const winPill = r._new ? `<span class="ni-pill ni-current">New Row</span>`
                 : r.archiveStatus === "Carry Forward" ? `<span class="ni-pill ni-carry">Carry Forward</span>`
                 : `<span class="ni-pill ni-current">Current Window</span>`;
             return `<tr data-rid="${rid}" class="ni-row-main">
-                <td class="ni-num">${r._new ? "new" : esc(r.entryNo ?? "")}</td>
+                <td class="ni-num">${i + 1}</td>
                 <td class="ni-week">${esc(r.weekRangeText || "")}<div class="ni-week-pills">${winPill}${overdue}</div></td>
                 <td class="ni-td-risk"><select data-rid="${rid}" data-field="riskCode" class="ni-risk">${riskOptions(r.riskCode)}</select>
                     <div class="ni-risk-pill">${riskPill(r.riskCode, r.riskCode)}</div></td>
                 <td class="ni-td-party"><select data-rid="${rid}" data-field="responsibleParty">${partyOptions(r.responsibleParty)}</select></td>
                 <td class="ni-td-insights"><textarea data-rid="${rid}" data-field="insights" class="ni-insights-box" wrap="off" placeholder="Enter insight…">${esc(r.insights)}</textarea></td>
-                <td class="ni-td-smp"><input data-rid="${rid}" data-field="noOfSamples" type="text" size="6" class="ni-smp" value="${esc(r.noOfSamples)}" /></td>
+                <td class="ni-td-smp"><input data-rid="${rid}" data-field="noOfSamples" type="text" inputmode="numeric" size="8" class="ni-smp" value="${esc(formatClaims(r.noOfSamples))}" /></td>
                 <td class="ni-td-text"><textarea data-rid="${rid}" data-field="actionSolution" placeholder="Action…">${esc(r.actionSolution)}</textarea></td>
                 <td class="ni-td-text"><textarea data-rid="${rid}" data-field="feedbackResponse" placeholder="Feedback…">${esc(r.feedbackResponse)}</textarea></td>
                 <td class="ni-td-party"><select data-rid="${rid}" data-field="responsibility">${partyOptions(r.responsibility)}</select></td>
@@ -362,7 +376,9 @@
             if (!t.dataset || !t.dataset.field) return;
             const row = rowByRid(t.dataset.rid);
             if (!row) return;
-            row[t.dataset.field] = t.value;
+            row[t.dataset.field] = t.dataset.field === "noOfSamples" ? (parseClaims(t.value) ?? "") : t.value;
+            if (t.dataset.field === "noOfSamples" && (e.type === "change" || e.type === "blur"))
+                t.value = formatClaims(row.noOfSamples);
             if (!row._new) row._dirty = true;
             if (t.dataset.field === "riskCode") {
                 const cell = t.closest("td");
@@ -372,6 +388,7 @@
         };
         grid.addEventListener("input", onEdit);
         grid.addEventListener("change", onEdit);
+        grid.addEventListener("focusout", onEdit);
         grid.querySelectorAll("[data-rowact]").forEach(b => {
             b.onclick = () => {
                 const row = rowByRid(b.dataset.rid);
@@ -399,7 +416,7 @@
             const iso = isoDate(s);
             return iso || (s.length >= 10 ? s.slice(0, 10) : s);
         };
-        const nClaims = r.noOfSamples !== "" && r.noOfSamples != null ? parseInt(r.noOfSamples, 10) : null;
+        const nClaims = parseClaims(r.noOfSamples);
         return {
             noteId: r._new ? null : r.noteId,
             reportName: ctx.reportName, reportRunId: ctx.runId || null,
@@ -479,8 +496,8 @@
             const rows = data.rows || [];
             const table = rows.length ? `<table class="ni-table"><thead>
                 <tr><th>#</th><th>Week Range</th><th>Risk</th><th>Responsible</th><th>Insights</th><th>Status</th><th>Closed</th><th>Archived</th><th></th></tr></thead>
-                <tbody>${rows.map(n => `<tr>
-                    <td>${esc(n.entryNo ?? "")}</td><td>${esc(n.weekRangeText || "")}</td>
+                <tbody>${rows.map((n, i) => `<tr>
+                    <td>${i + 1}</td><td>${esc(n.weekRangeText || "")}</td>
                     <td>${riskPill(n.riskCode, n.riskCode)}</td><td>${esc(n.responsibleParty || "")}</td>
                     <td><div class="ni-truncate">${esc(stripHtml(n.insights))}</div></td>
                     <td>${statusPill(n.statusCode, n.statusLabel)}</td>
@@ -517,7 +534,7 @@
           <div class="ni-section"><h6>Insight</h6><div class="ni-grid">
             <div class="ni-field"><label>Risk</label><div class="ni-ro">${esc(n.riskCode)}</div><small class="ni-watermark">${esc(n.riskLabel)}</small></div>
             <div class="ni-field"><label>Responsible Party</label>${ro(n.responsibleParty)}</div>
-            <div class="ni-field"><label># of Samples</label>${ro(n.noOfSamples)}</div>
+            <div class="ni-field"><label># of Claims</label>${ro(formatClaims(n.noOfSamples) || n.noOfSamples)}</div>
             <div class="ni-field"><label>Status</label>${ro(n.statusLabel || n.statusCode)}</div>
             <div class="ni-field full"><label>Insights</label><div class="ni-ro">${esc(stripHtml(n.insights)) || "—"}</div></div></div></div>
           <div class="ni-section"><h6>Action &amp; Response</h6><div class="ni-grid">

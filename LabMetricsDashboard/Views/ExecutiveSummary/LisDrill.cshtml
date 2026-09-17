@@ -443,7 +443,7 @@
             @if (Model.SelectedValue is { } svMis && svMis != 0)
             {
                 <div class="mt-2" style="font-size:.9rem">
-                    Executive Summary cell showed <strong>@(((long)svMis).ToString("N0"))</strong>.
+                    Executive Summary cell showed <strong>@(((long)svMis).N0OrDash())</strong>.
                     Summary KPIs could not be loaded from <code>usp_Get*_ExecutiveSummary</code> for this lab/year.
                 </div>
             }
@@ -456,7 +456,7 @@
             @if (Model.SelectedValue is { } sv && sv != 0)
             {
                 <div class="mt-2" style="font-size:.9rem">
-                    Executive Summary cell showed <strong>@(isCash ? Text(sv) : ((long)sv).ToString("N0"))</strong>.
+                    Executive Summary cell showed <strong>@(isCash ? Text(sv) : ((long)sv).N0OrDash())</strong>.
                 </div>
             }
         </div>

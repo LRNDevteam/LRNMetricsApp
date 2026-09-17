@@ -138,10 +138,20 @@
     min-width: 44rem;
     width: 44rem;
     max-width: 48rem;
-    white-space: pre-wrap;
+    white-space: normal;
     word-break: break-word;
     line-height: 1.35;
 }
+.ri-insights-html { color: inherit; }
+.ri-insights-html ul,
+.ri-insights-html ol {
+    margin: .1rem 0 .1rem 1.2rem;
+    padding: 0;
+}
+.ri-insights-html li { margin: 0; padding: 0; }
+.ri-insights-html p { margin: 0 0 .2rem; }
+.ri-insights-html div { margin: 0; }
+.ri-archive-table .ri-insights-html { max-width: 36rem; }
 .ri-table td.ri-action-cell {
     min-width: 18rem;
     max-width: 24rem;

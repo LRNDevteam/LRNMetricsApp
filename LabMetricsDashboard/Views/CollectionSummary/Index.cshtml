@@ -839,7 +839,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     <div class="top5-kpi-boxes">
                         <div class="top5-kpi-box">
                             <div class="top5-kpi-box-label"><i class="bi bi-hash"></i> Total Visits</div>
-                            <div class="top5-kpi-box-value">@reimbTotalVisits.ToString("N0")</div>
+                            <div class="top5-kpi-box-value">@reimbTotalVisits.N0OrDash()</div>
                         </div>
                         <div class="top5-kpi-box">
                             <div class="top5-kpi-box-label"><i class="bi bi-currency-dollar"></i> Total Paid</div>
@@ -865,7 +865,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                             <div class="top5-payer-rank reimb-rank">@row.Rank</div>
                             <div class="top5-payer-name" title="@row.PayerName">@row.PayerName</div>
                             <div class="top5-payer-detail">
-                                <span title="Visits">@row.UniqueVisitCount.ToString("N0")</span>
+                                <span title="Visits">@row.UniqueVisitCount.N0OrDash()</span>
                                 <span title="Paid">@Acct(row.SumInsurancePayment)</span>
                             </div>
                             <div class="top5-payer-bar-wrap">
@@ -924,7 +924,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     <div class="top5-kpi-boxes">
                         <div class="top5-kpi-box">
                             <div class="top5-kpi-box-label"><i class="bi bi-hash"></i> Total Visits</div>
-                            <div class="top5-kpi-box-value">@payTotalVisits.ToString("N0")</div>
+                            <div class="top5-kpi-box-value">@payTotalVisits.N0OrDash()</div>
                         </div>
                         <div class="top5-kpi-box">
                             <div class="top5-kpi-box-label"><i class="bi bi-currency-dollar"></i> Total Paid</div>
@@ -949,7 +949,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                             <div class="top5-payer-rank totpay-rank">@row.Rank</div>
                             <div class="top5-payer-name" title="@row.PayerName">@row.PayerName</div>
                             <div class="top5-payer-detail">
-                                <span title="Visits">@row.UniqueVisitCount.ToString("N0")</span>
+                                <span title="Visits">@row.UniqueVisitCount.N0OrDash()</span>
                             </div>
                             <div class="top5-payer-bar-wrap">
                                 <div class="top5-payer-bar-bg">
@@ -1182,13 +1182,13 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                                             var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
                                             @foreach (var p in monthsInYear)
                                             {
-                                                <td class="cs-pr-metric">@McvCellEnc(panel.ByMonth, p.Key).ToString("N0")</td>
+                                                <td class="cs-pr-metric">@McvCellEnc(panel.ByMonth, p.Key).N0OrDash()</td>
                                                 <td class="cs-pr-metric">@Acct(McvCellPaid(panel.ByMonth, p.Key))</td>
                                             }
-                                            <td class="cs-pr-year">@McvYearEnc(panel.ByYear, year).ToString("N0")</td>
+                                            <td class="cs-pr-year">@McvYearEnc(panel.ByYear, year).N0OrDash()</td>
                                             <td class="cs-pr-year">@Acct(McvYearPaid(panel.ByYear, year))</td>
                                         }
-                                        <td class="cs-pr-grand">@panel.TotalEncounters.ToString("N0")</td>
+                                        <td class="cs-pr-grand">@panel.TotalEncounters.N0OrDash()</td>
                                         <td class="cs-pr-grand">@Acct(panel.TotalInsurancePaid)</td>
                                     </tr>
                                     @foreach (var payer in panel.TopPayers)
@@ -1206,13 +1206,13 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                                                 var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
                                                 @foreach (var p in monthsInYear)
                                                 {
-                                                    <td class="cs-pr-metric">@McvCellEnc(payer.ByMonth, p.Key).ToString("N0")</td>
+                                                    <td class="cs-pr-metric">@McvCellEnc(payer.ByMonth, p.Key).N0OrDash()</td>
                                                     <td class="cs-pr-metric">@Acct(McvCellPaid(payer.ByMonth, p.Key))</td>
                                                 }
-                                                <td class="cs-pr-year">@McvYearEnc(payer.ByYear, year).ToString("N0")</td>
+                                                <td class="cs-pr-year">@McvYearEnc(payer.ByYear, year).N0OrDash()</td>
                                                 <td class="cs-pr-year">@Acct(McvYearPaid(payer.ByYear, year))</td>
                                             }
-                                            <td class="cs-pr-grand">@payer.TotalEncounters.ToString("N0")</td>
+                                            <td class="cs-pr-grand">@payer.TotalEncounters.N0OrDash()</td>
                                             <td class="cs-pr-grand">@Acct(payer.TotalInsurancePaid)</td>
                                         </tr>
                                     }
@@ -1226,13 +1226,13 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                                         var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
                                         @foreach (var p in monthsInYear)
                                         {
-                                            <td class="cs-pr-metric">@McvCellEnc(mcvPivot.GrandTotalByMonth, p.Key).ToString("N0")</td>
+                                            <td class="cs-pr-metric">@McvCellEnc(mcvPivot.GrandTotalByMonth, p.Key).N0OrDash()</td>
                                             <td class="cs-pr-metric">@Acct(McvCellPaid(mcvPivot.GrandTotalByMonth, p.Key))</td>
                                         }
-                                        <td>@McvYearEnc(mcvPivot.GrandTotalByYear, year).ToString("N0")</td>
+                                        <td>@McvYearEnc(mcvPivot.GrandTotalByYear, year).N0OrDash()</td>
                                         <td>@Acct(McvYearPaid(mcvPivot.GrandTotalByYear, year))</td>
                                     }
-                                    <td>@mcvPivot.GrandTotalEncounters.ToString("N0")</td>
+                                    <td>@mcvPivot.GrandTotalEncounters.N0OrDash()</td>
                                     <td>@Acct(mcvPivot.GrandTotalInsurancePaid)</td>
                                 </tr>
                             </tfoot>

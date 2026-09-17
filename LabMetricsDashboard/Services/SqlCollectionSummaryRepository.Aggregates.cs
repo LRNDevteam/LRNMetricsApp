@@ -791,6 +791,9 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
+        if (string.Equals(prefix, "Cove", StringComparison.OrdinalIgnoreCase))
+            return await GetInsurancePaymentPctAsync(connectionString, ct: ct).ConfigureAwait(false);
+
         if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
@@ -850,6 +853,11 @@ public sealed partial class SqlCollectionSummaryRepository
                 var payer  = r.GetString(r.GetOrdinal("PayerName"));
                 var insPay = r.GetDecimal(r.GetOrdinal("InsurancePayment"));
                 var pct    = r.GetDecimal(r.GetOrdinal("PaymentPct"));
+                var paidChg = 0m;
+                if (ColumnExists(r, "PaidChargeAmount") && !r.IsDBNull(r.GetOrdinal("PaidChargeAmount")))
+                    paidChg = r.GetDecimal(r.GetOrdinal("PaidChargeAmount"));
+                else if (ColumnExists(r, "ChargeAmount") && !r.IsDBNull(r.GetOrdinal("ChargeAmount")))
+                    paidChg = r.GetDecimal(r.GetOrdinal("ChargeAmount"));
 
                 int? summaryId = null;
                 int? panelGroupCount = null;
@@ -874,10 +882,8 @@ public sealed partial class SqlCollectionSummaryRepository
                     claims = noOfPaidClaims ?? panelGroupCount ?? 0;
                 }
 
-                // Snapshot stores PaymentPct directly. Back-compute Paid Charge so the
-                // record's derived PaymentPct property equals the snapshot value.
-                decimal paidChg = pct > 0 ? Math.Round(insPay * 100m / pct, 2) : 0m;
-
+                // Prefer SUM(InsurancePayment)/SUM(ChargeAmount). Do not reverse-engineer
+                // ChargeAmount from the snapshot PaymentPct (that value is AVG of file %).
                 rows.Add(new InsurancePaymentPctRow(
                     SummaryId:            summaryId,
                     PayerName:            payer,
@@ -890,7 +896,7 @@ public sealed partial class SqlCollectionSummaryRepository
                     RefreshedAt:          refreshedAt,
                     BillYear:             billYear,
                     BillMonth:            billMonth,
-                    SnapshotPaymentPct:   pct));
+                    SnapshotPaymentPct:   paidChg != 0m ? null : pct));
             }
         }
 

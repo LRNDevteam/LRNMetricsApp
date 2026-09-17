@@ -287,10 +287,18 @@ public sealed record InsurancePaymentPctRow(
     int? BillMonth = null,
     decimal? SnapshotPaymentPct = null)
 {
-    /// <summary>Payment % = SUM(InsurancePayment) / SUM(ChargeAmount) × 100 (Fully Paid + Partially Paid only).</summary>
-    public decimal PaymentPct => SnapshotPaymentPct ?? (PaidChargeAmount == 0
-        ? 0m
-        : Math.Round(PaidInsurancePayment / PaidChargeAmount * 100m, 2));
+    /// <summary>Payment % = SUM(InsurancePayment) / SUM(ChargeAmount) × 100 (same as Reimbursement Rate). Ignores file PaymentPercent when charges are present.</summary>
+    public decimal PaymentPct
+    {
+        get
+        {
+            if (PaidChargeAmount != 0m)
+                return Math.Round(PaidInsurancePayment / PaidChargeAmount * 100m, 2);
+            var snap = SnapshotPaymentPct ?? 0m;
+            if (snap == 0m) return 0m;
+            return snap is > 0m and <= 1m ? Math.Round(snap * 100m, 2) : snap;
+        }
+    }
 }
 
 /// <summary>

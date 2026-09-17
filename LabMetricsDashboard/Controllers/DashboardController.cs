@@ -3129,8 +3129,9 @@ public class DashboardController : Controller
                 var insights = await InsightsExcelBuilder.LoadAsync(_notes, connStr, "Production Report", ct);
                 try
                 {
+                    var tplCols = await InsightsExcelBuilder.LoadTemplateColumnsAsync(_notes, connStr, "Production Report", ct);
                     var bytes = InsightsExcelBuilder.InjectIntoExistingWorkbook(
-                        recentReport.FullName, insights, selectedLab, "Production Report");
+                        recentReport.FullName, insights, selectedLab, "Production Report", tplCols);
                     return File(
                         bytes,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -3393,7 +3394,8 @@ public class DashboardController : Controller
                 exportWeekFolder, exportRunId, _logger);
 
             var liveInsights = await InsightsExcelBuilder.LoadAsync(_notes, connStr, "Production Report", ct);
-            InsightsExcelBuilder.InsertAsFirstSheet(workbook, liveInsights, selectedLab, "Production Report");
+            var tplCols = await InsightsExcelBuilder.LoadTemplateColumnsAsync(_notes, connStr, "Production Report", ct);
+            InsightsExcelBuilder.InsertAsFirstSheet(workbook, liveInsights, selectedLab, "Production Report", tplCols);
 
             _logger.LogInformation(
                 "[ProdExcelExport] Phase 4 DONE in {Ms}ms ({Sec:N1}s) — " +
@@ -3659,7 +3661,8 @@ public class DashboardController : Controller
                 using (var workbook = NorthWestProductionSummaryExcelExportBuilder.CreateWorkbook(vm, selectedLab))
                 {
                     var nwInsights = await InsightsExcelBuilder.LoadAsync(_notes, connStr, "Production Report", ct);
-                    InsightsExcelBuilder.InsertAsFirstSheet(workbook, nwInsights, selectedLab, "Production Report");
+                    var tplCols = await InsightsExcelBuilder.LoadTemplateColumnsAsync(_notes, connStr, "Production Report", ct);
+                    InsightsExcelBuilder.InsertAsFirstSheet(workbook, nwInsights, selectedLab, "Production Report", tplCols);
                     _logger.LogInformation(
                         "[NWExcelExport] Summary workbook built in {Ms}ms — {Sheets} sheets; streaming Claim/Line next",
                         sw.ElapsedMilliseconds, workbook.Worksheets.Count);

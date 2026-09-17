@@ -424,7 +424,7 @@ BEGIN
     LEFT JOIN dbo.Cove_ES_LIS AS lis
         ON  lis.ESYear  = g.ESYear
         AND lis.ESMonth = g.ESMonth
-        AND lis.RoleID  = 'B'
+        AND lis.RoleID  = 'C'
     WHERE g.RoleID = 'G';
 END;
 GO

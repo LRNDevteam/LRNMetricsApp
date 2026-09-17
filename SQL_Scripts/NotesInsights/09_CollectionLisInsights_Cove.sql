@@ -30,7 +30,7 @@ BEGIN
 END
 GO
 
--- Collection: # of Cases, Total Bill, Case Link, Response By
+-- Collection: # of Cases, Total Balance, Case Link, Response By
 DECLARE @CollKey INT = (SELECT ReportKeyId FROM dbo.NotesReport WHERE ReportName = N'Collection Report');
 DECLARE @CollTpl INT = (SELECT TOP 1 TemplateId FROM dbo.NotesTemplate WHERE ReportKeyId = @CollKey AND TemplateName = N'Key Insights & Highlights');
 
@@ -49,7 +49,7 @@ BEGIN
         (@CollTpl, N'Responsible Party',               N'Text',     0, 2,  1, N'ResponsibleParty'),
         (@CollTpl, N'Insights',                        N'Text',     1, 3,  1, N'Insights'),
         (@CollTpl, N'# of Cases',                      N'Text',     0, 4,  1, N'NoOfClaims'),
-        (@CollTpl, N'Total Bill',                      N'Text',     0, 5,  1, N'TotalCharge'),
+        (@CollTpl, N'Total Balance',                   N'Text',     0, 5,  1, N'TotalCharge'),
         (@CollTpl, N'Case Link',                       N'Text',     0, 6,  1, N'DataLink'),
         (@CollTpl, N'Action / Solution / Suggestion',  N'Text',     0, 7,  1, N'ActionSolution'),
         (@CollTpl, N'Feedback / Response',             N'Text',     0, 8,  1, N'FeedbackResponse'),

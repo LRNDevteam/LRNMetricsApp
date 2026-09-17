@@ -538,29 +538,10 @@ BEGIN
     DROP TABLE IF EXISTS #PanelTypes;
     DROP TABLE IF EXISTS #CpExceptionPanels;
 
-    -- PMS RoleID G (Billed Mismatches) = F − Billable Samples (this SP's RoleID B).
-    -- Capture runs LIS_Alt after usp_RefreshCove_ExecutiveSummary, so recompute G here.
-    IF OBJECT_ID('dbo.Cove_ES_PMS', 'U') IS NOT NULL
-    BEGIN
-        UPDATE g
-        SET g.ESMonthClaimCount =
-                CASE
-                    WHEN ISNULL(f.ESMonthClaimCount, 0) - ISNULL(lis.ESMonthClaimCount, 0) > 0
-                    THEN ISNULL(f.ESMonthClaimCount, 0) - ISNULL(lis.ESMonthClaimCount, 0)
-                    ELSE 0
-                END,
-            g.RefreshedAt = GETDATE()
-        FROM dbo.Cove_ES_PMS AS g
-        INNER JOIN dbo.Cove_ES_PMS AS f
-            ON  f.ESYear  = g.ESYear
-            AND f.ESMonth = g.ESMonth
-            AND f.RoleID  = 'F'
-        LEFT JOIN dbo.Cove_ES_LIS AS lis
-            ON  lis.ESYear  = g.ESYear
-            AND lis.ESMonth = g.ESMonth
-            AND lis.RoleID  = 'B'   -- Billable Samples
-        WHERE g.RoleID = 'G';
-    END
+    -- G is owned by usp_Cove_ES_UpdatePmsBilledMismatch (F − LIS C).
+    -- Must run after Cove_ES_LIS is rebuilt.
+    IF OBJECT_ID('dbo.usp_Cove_ES_UpdatePmsBilledMismatch', 'P') IS NOT NULL
+        EXEC dbo.usp_Cove_ES_UpdatePmsBilledMismatch;
 
     PRINT 'usp_RefreshCove_ExecutiveSummary_LIS_Alt completed.';
 END;

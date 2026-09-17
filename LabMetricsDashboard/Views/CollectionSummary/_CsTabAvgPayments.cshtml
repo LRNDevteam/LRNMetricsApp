@@ -36,19 +36,19 @@
                             <td style="text-align:left;font-weight:700">
                                 <i class="bi bi-chevron-right cs-ag-chevron" aria-hidden="true"></i>@panel.PanelName
                             </td>
-                            <td style="text-align:right;font-weight:600">@m.ClaimCount.ToString("N0")</td>
+                            <td style="text-align:right;font-weight:600">@m.ClaimCount.N0OrDash()</td>
                             <td style="text-align:right;font-weight:600">@Acct(m.TotalCharges)</td>
                             <td style="text-align:right;font-weight:600">@Acct2(m.AvgBilled)</td>
-                            <td style="text-align:right;font-weight:600">@m.FullyPaidCount.ToString("N0")</td>
+                            <td style="text-align:right;font-weight:600">@m.FullyPaidCount.N0OrDash()</td>
                             <td style="text-align:right;font-weight:600">@Acct(m.FullyPaidAmount)</td>
                             <td style="text-align:right;font-weight:600">@Acct2(m.AvgFullyPaid)</td>
-                            <td style="text-align:right;font-weight:600">@m.AdjudicatedCount.ToString("N0")</td>
+                            <td style="text-align:right;font-weight:600">@m.AdjudicatedCount.N0OrDash()</td>
                             <td style="text-align:right;font-weight:600">@Acct(m.AdjudicatedAmount)</td>
                             <td style="text-align:right;font-weight:600">@Acct2(m.AvgAdjudicated)</td>
-                            <td style="text-align:right;font-weight:600">@m.Days30Count.ToString("N0")</td>
+                            <td style="text-align:right;font-weight:600">@m.Days30Count.N0OrDash()</td>
                             <td style="text-align:right;font-weight:600">@Acct(m.Days30Amount)</td>
                             <td style="text-align:right;font-weight:600">@Acct2(m.AvgDays30)</td>
-                            <td style="text-align:right;font-weight:600">@m.Days60Count.ToString("N0")</td>
+                            <td style="text-align:right;font-weight:600">@m.Days60Count.N0OrDash()</td>
                             <td style="text-align:right;font-weight:600">@Acct(m.Days60Amount)</td>
                             <td style="text-align:right;font-weight:600">@Acct2(m.AvgDays60)</td>
                         </tr>
@@ -58,19 +58,19 @@
                             <tr class="mcv-drilldown cs-ag-child" data-ag-parent="@apGroupId">
                                 <td></td>
                                 <td style="text-align:left">@payer.PayerName</td>
-                                <td style="text-align:right">@pm.ClaimCount.ToString("N0")</td>
+                                <td style="text-align:right">@pm.ClaimCount.N0OrDash()</td>
                                 <td style="text-align:right">@Acct(pm.TotalCharges)</td>
                                 <td style="text-align:right">@Acct2(pm.AvgBilled)</td>
-                                <td style="text-align:right">@pm.FullyPaidCount.ToString("N0")</td>
+                                <td style="text-align:right">@pm.FullyPaidCount.N0OrDash()</td>
                                 <td style="text-align:right">@Acct(pm.FullyPaidAmount)</td>
                                 <td style="text-align:right">@Acct2(pm.AvgFullyPaid)</td>
-                                <td style="text-align:right">@pm.AdjudicatedCount.ToString("N0")</td>
+                                <td style="text-align:right">@pm.AdjudicatedCount.N0OrDash()</td>
                                 <td style="text-align:right">@Acct(pm.AdjudicatedAmount)</td>
                                 <td style="text-align:right">@Acct2(pm.AvgAdjudicated)</td>
-                                <td style="text-align:right">@pm.Days30Count.ToString("N0")</td>
+                                <td style="text-align:right">@pm.Days30Count.N0OrDash()</td>
                                 <td style="text-align:right">@Acct(pm.Days30Amount)</td>
                                 <td style="text-align:right">@Acct2(pm.AvgDays30)</td>
-                                <td style="text-align:right">@pm.Days60Count.ToString("N0")</td>
+                                <td style="text-align:right">@pm.Days60Count.N0OrDash()</td>
                                 <td style="text-align:right">@Acct(pm.Days60Amount)</td>
                                 <td style="text-align:right">@Acct2(pm.AvgDays60)</td>
                             </tr>
@@ -97,19 +97,19 @@
                     <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
                         <td style="color:#fff"></td>
                         <td style="text-align:left;color:#fff">Total</td>
-                        <td style="text-align:right;color:#fff">@tot.ClaimCount.ToString("N0")</td>
+                        <td style="text-align:right;color:#fff">@tot.ClaimCount.N0OrDash()</td>
                         <td style="text-align:right;color:#fff">@Acct(tot.TotalCharges)</td>
                         <td style="text-align:right;color:#fff">@Acct2(tot.AvgBilled)</td>
-                        <td style="text-align:right;color:#fff">@tot.FullyPaidCount.ToString("N0")</td>
+                        <td style="text-align:right;color:#fff">@tot.FullyPaidCount.N0OrDash()</td>
                         <td style="text-align:right;color:#fff">@Acct(tot.FullyPaidAmount)</td>
                         <td style="text-align:right;color:#fff">@Acct2(tot.AvgFullyPaid)</td>
-                        <td style="text-align:right;color:#fff">@tot.AdjudicatedCount.ToString("N0")</td>
+                        <td style="text-align:right;color:#fff">@tot.AdjudicatedCount.N0OrDash()</td>
                         <td style="text-align:right;color:#fff">@Acct(tot.AdjudicatedAmount)</td>
                         <td style="text-align:right;color:#fff">@Acct2(tot.AvgAdjudicated)</td>
-                        <td style="text-align:right;color:#fff">@tot.Days30Count.ToString("N0")</td>
+                        <td style="text-align:right;color:#fff">@tot.Days30Count.N0OrDash()</td>
                         <td style="text-align:right;color:#fff">@Acct(tot.Days30Amount)</td>
                         <td style="text-align:right;color:#fff">@Acct2(tot.AvgDays30)</td>
-                        <td style="text-align:right;color:#fff">@tot.Days60Count.ToString("N0")</td>
+                        <td style="text-align:right;color:#fff">@tot.Days60Count.N0OrDash()</td>
                         <td style="text-align:right;color:#fff">@Acct(tot.Days60Amount)</td>
                         <td style="text-align:right;color:#fff">@Acct2(tot.AvgDays60)</td>
                     </tr>

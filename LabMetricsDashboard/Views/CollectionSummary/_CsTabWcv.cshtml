@@ -60,10 +60,10 @@
                             </td>
                             @foreach (var w in wcvWeeks)
                             {
-                                <td class="cs-pr-metric">@WcvCellEnc(panel.ByWeek, w.Key).ToString("N0")</td>
+                                <td class="cs-pr-metric">@WcvCellEnc(panel.ByWeek, w.Key).N0OrDash()</td>
                                 <td class="cs-pr-metric">@Acct(WcvCellPaid(panel.ByWeek, w.Key))</td>
                             }
-                            <td class="cs-pr-grand">@panel.TotalEncounters.ToString("N0")</td>
+                            <td class="cs-pr-grand">@panel.TotalEncounters.N0OrDash()</td>
                             <td class="cs-pr-grand">@Acct(panel.TotalInsurancePaid)</td>
                         </tr>
                         @foreach (var payer in panel.TopPayers)
@@ -78,10 +78,10 @@
                                 </td>
                                 @foreach (var w in wcvWeeks)
                                 {
-                                    <td class="cs-pr-metric">@WcvCellEnc(payer.ByWeek, w.Key).ToString("N0")</td>
+                                    <td class="cs-pr-metric">@WcvCellEnc(payer.ByWeek, w.Key).N0OrDash()</td>
                                     <td class="cs-pr-metric">@Acct(WcvCellPaid(payer.ByWeek, w.Key))</td>
                                 }
-                                <td class="cs-pr-grand">@payer.TotalEncounters.ToString("N0")</td>
+                                <td class="cs-pr-grand">@payer.TotalEncounters.N0OrDash()</td>
                                 <td class="cs-pr-grand">@Acct(payer.TotalInsurancePaid)</td>
                             </tr>
                         }
@@ -92,10 +92,10 @@
                         <td>Grand Total</td>
                         @foreach (var w in wcvWeeks)
                         {
-                            <td class="cs-pr-metric">@WcvCellEnc(wcvPivot.GrandTotalByWeek, w.Key).ToString("N0")</td>
+                            <td class="cs-pr-metric">@WcvCellEnc(wcvPivot.GrandTotalByWeek, w.Key).N0OrDash()</td>
                             <td class="cs-pr-metric">@Acct(WcvCellPaid(wcvPivot.GrandTotalByWeek, w.Key))</td>
                         }
-                        <td>@wcvPivot.GrandTotalEncounters.ToString("N0")</td>
+                        <td>@wcvPivot.GrandTotalEncounters.N0OrDash()</td>
                         <td>@Acct(wcvPivot.GrandTotalInsurancePaid)</td>
                     </tr>
                 </tfoot>

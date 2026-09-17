@@ -38,6 +38,13 @@
         .OrderBy(g => g.Key)
         .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
 
+    var monthlyUsesChargeEntered = Model.IsCoveLab
+        || string.Equals(Model.ProductionSummaryRule, "Rule1", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(Model.ProductionSummaryRule, "Rule2", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(Model.ProductionSummaryRule, "Rule3", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(Model.ProductionSummaryRule, "Rule4", StringComparison.OrdinalIgnoreCase);
+    var monthlyDateBasis = monthlyUsesChargeEntered ? "Charge Entered Date" : "Billed Date";
+
     string MonthLabel(string ym)
     {
         var parts = ym.Split('-');
@@ -860,7 +867,7 @@ th.pr-month-data, td.pr-month-data {
                                         int monthDataCols = mons.Count * 2;
                                         int yearTotalCols = 2;
                                         <th colspan="@(monthDataCols + yearTotalCols)">
-                                            Data based on Billed Date &mdash; @year
+                                            Data based on @monthlyDateBasis &mdash; @year
                                         </th>
                                     }
                                     <th colspan="2" class="pr-grand-total">Grand Total</th>
@@ -906,13 +913,13 @@ th.pr-month-data, td.pr-month-data {
                                             var mons = monthsByYear.ContainsKey(year) ? monthsByYear[year] : new List<string>();
                                             foreach (var mk in mons)
                                             {
-                                                <td class="pr-month-data">@CellClaims(panel.ByMonth, mk).ToString("N0")</td>
+                                                <td class="pr-month-data">@CellClaims(panel.ByMonth, mk).N0OrDash()</td>
                                                 <td class="pr-month-data">@Acct(CellCharges(panel.ByMonth, mk))</td>
                                             }
-                                            <td class="pr-year-total">@YearClaims(panel.ByYear, year).ToString("N0")</td>
+                                            <td class="pr-year-total">@YearClaims(panel.ByYear, year).N0OrDash()</td>
                                             <td class="pr-year-total">@Acct(YearCharges(panel.ByYear, year))</td>
                                         }
-                                        <td class="pr-grand-total">@panel.TotalClaims.ToString("N0")</td>
+                                        <td class="pr-grand-total">@panel.TotalClaims.N0OrDash()</td>
                                         <td class="pr-grand-total">@Acct(panel.TotalCharges)</td>
                                     </tr>
 
@@ -925,13 +932,13 @@ th.pr-month-data, td.pr-month-data {
                                                 var mons = monthsByYear.ContainsKey(year) ? monthsByYear[year] : new List<string>();
                                                 foreach (var mk in mons)
                                                 {
-                                                    <td class="pr-month-data">@CellClaims(payer.ByMonth, mk).ToString("N0")</td>
+                                                    <td class="pr-month-data">@CellClaims(payer.ByMonth, mk).N0OrDash()</td>
                                                     <td class="pr-month-data">@Acct(CellCharges(payer.ByMonth, mk))</td>
                                                 }
-                                                <td class="pr-year-total">@YearClaims(payer.ByYear, year).ToString("N0")</td>
+                                                <td class="pr-year-total">@YearClaims(payer.ByYear, year).N0OrDash()</td>
                                                 <td class="pr-year-total">@Acct(YearCharges(payer.ByYear, year))</td>
                                             }
-                                            <td class="pr-grand-total">@payer.TotalClaims.ToString("N0")</td>
+                                            <td class="pr-grand-total">@payer.TotalClaims.N0OrDash()</td>
                                             <td class="pr-grand-total">@Acct(payer.TotalCharges)</td>
                                         </tr>
                                     }
@@ -947,13 +954,13 @@ th.pr-month-data, td.pr-month-data {
                                         var mons = monthsByYear.ContainsKey(year) ? monthsByYear[year] : new List<string>();
                                         foreach (var mk in mons)
                                         {
-                                            <td class="pr-month-data">@CellClaims(Model.GrandTotalByMonth, mk).ToString("N0")</td>
+                                            <td class="pr-month-data">@CellClaims(Model.GrandTotalByMonth, mk).N0OrDash()</td>
                                             <td class="pr-month-data">@Acct(CellCharges(Model.GrandTotalByMonth, mk))</td>
                                         }
-                                        <td class="pr-year-total">@GrandYearClaims(year).ToString("N0")</td>
+                                        <td class="pr-year-total">@GrandYearClaims(year).N0OrDash()</td>
                                         <td class="pr-year-total">@Acct(GrandYearCharges(year))</td>
                                     }
-                                    <td class="pr-grand-total">@grandClaims.ToString("N0")</td>
+                                    <td class="pr-grand-total">@grandClaims.N0OrDash()</td>
                                     <td class="pr-grand-total">@Acct(grandCharges)</td>
                                 </tr>
                             </tfoot>
@@ -1137,10 +1144,10 @@ th.pr-month-data, td.pr-month-data {
                                         <td><i class="bi bi-chevron-right pr-hp-chevron" aria-hidden="true"></i>@wLetter &nbsp; @panel.PanelName</td>
                                         @foreach (var wk in weeks)
                                         {
-                                            <td class="pr-month-data">@CellClaims(panel.ByWeek, wk.Key).ToString("N0")</td>
+                                            <td class="pr-month-data">@CellClaims(panel.ByWeek, wk.Key).N0OrDash()</td>
                                             <td class="pr-month-data">@Acct(CellCharges(panel.ByWeek, wk.Key))</td>
                                         }
-                                        <td class="pr-grand-total">@panel.TotalClaims.ToString("N0")</td>
+                                        <td class="pr-grand-total">@panel.TotalClaims.N0OrDash()</td>
                                         <td class="pr-grand-total">@Acct(panel.TotalCharges)</td>
                                     </tr>
 
@@ -1150,10 +1157,10 @@ th.pr-month-data, td.pr-month-data {
                                             <td>@payer.PayerName</td>
                                             @foreach (var wk in weeks)
                                             {
-                                                <td class="pr-month-data">@CellClaims(payer.ByWeek, wk.Key).ToString("N0")</td>
+                                                <td class="pr-month-data">@CellClaims(payer.ByWeek, wk.Key).N0OrDash()</td>
                                                 <td class="pr-month-data">@Acct(CellCharges(payer.ByWeek, wk.Key))</td>
                                             }
-                                            <td class="pr-grand-total">@payer.TotalClaims.ToString("N0")</td>
+                                            <td class="pr-grand-total">@payer.TotalClaims.N0OrDash()</td>
                                             <td class="pr-grand-total">@Acct(payer.TotalCharges)</td>
                                         </tr>
                                     }
@@ -1166,10 +1173,10 @@ th.pr-month-data, td.pr-month-data {
                                     <td>Grand Total</td>
                                     @foreach (var wk in weeks)
                                     {
-                                        <td class="pr-month-data">@CellClaims(Model.WeeklyGrandTotalByWeek, wk.Key).ToString("N0")</td>
+                                        <td class="pr-month-data">@CellClaims(Model.WeeklyGrandTotalByWeek, wk.Key).N0OrDash()</td>
                                         <td class="pr-month-data">@Acct(CellCharges(Model.WeeklyGrandTotalByWeek, wk.Key))</td>
                                     }
-                                    <td class="pr-grand-total">@Model.WeeklyGrandTotalClaims.ToString("N0")</td>
+                                    <td class="pr-grand-total">@Model.WeeklyGrandTotalClaims.N0OrDash()</td>
                                     <td class="pr-grand-total">@Acct(Model.WeeklyGrandTotalCharges)</td>
                                 </tr>
                             </tfoot>
@@ -1278,7 +1285,7 @@ th.pr-month-data, td.pr-month-data {
                                     var codingGroupId = $"coding-{cPanelIdx}";
                                     <tr class="pr-panel-row pr-hp-toggle" data-hp-group="@codingGroupId" role="button" aria-expanded="false" title="Open / close CPT rows">
                                         <td><i class="bi bi-chevron-right pr-hp-chevron" aria-hidden="true"></i>@cLetter &nbsp; @panel.PanelName</td>
-                                        <td>@panel.ClaimCount.ToString("N0")</td>
+                                        <td>@panel.ClaimCount.N0OrDash()</td>
                                         <td>@Acct(panel.TotalCharges)</td>
                                     </tr>
 
@@ -1288,7 +1295,7 @@ th.pr-month-data, td.pr-month-data {
                                         cptIdx++;
                                         <tr class="pr-payer-row pr-hp-child" data-hp-parent="@codingGroupId">
                                             <td>@cptIdx &nbsp; @cpt.CptCodeUnitsModifier</td>
-                                            <td>@cpt.ClaimCount.ToString("N0")</td>
+                                            <td>@cpt.ClaimCount.N0OrDash()</td>
                                             <td>@Acct(cpt.TotalCharges)</td>
                                         </tr>
                                     }
@@ -1299,7 +1306,7 @@ th.pr-month-data, td.pr-month-data {
                             <tfoot>
                                 <tr class="pr-total-row">
                                     <td>Grand Total</td>
-                                    <td>@Model.CodingGrandTotalClaims.ToString("N0")</td>
+                                    <td>@Model.CodingGrandTotalClaims.N0OrDash()</td>
                                     <td>@Acct(Model.CodingGrandTotalCharges)</td>
                                 </tr>
                             </tfoot>
@@ -1415,19 +1422,19 @@ th.pr-month-data, td.pr-month-data {
                                             var pbMons = pbMonthsByYear.ContainsKey(year) ? pbMonthsByYear[year] : new List<string>();
                                             foreach (var mk in pbMons)
                                             {
-                                                <td class="pr-month-data">@PbCell(payer.ByMonth, mk).ToString("N0")</td>
+                                                <td class="pr-month-data">@PbCell(payer.ByMonth, mk).N0OrDash()</td>
                                                 @if (pbShowCharges)
                                                 {
                                                     <td class="pr-month-data">@Acct(PbCharges(payer.ByMonthCharges, mk))</td>
                                                 }
                                             }
-                                            <td class="pr-year-total">@PbYear(payer.ByYear, year).ToString("N0")</td>
+                                            <td class="pr-year-total">@PbYear(payer.ByYear, year).N0OrDash()</td>
                                             @if (pbShowCharges)
                                             {
                                                 <td class="pr-year-total">@Acct(PbYearCharges(payer.ByYearCharges, year))</td>
                                             }
                                         }
-                                        <td class="pr-grand-total">@payer.GrandTotal.ToString("N0")</td>
+                                        <td class="pr-grand-total">@payer.GrandTotal.N0OrDash()</td>
                                         @if (pbShowCharges)
                                         {
                                             <td class="pr-grand-total">@Acct(payer.GrandTotalCharges)</td>
@@ -1443,19 +1450,19 @@ th.pr-month-data, td.pr-month-data {
                                         var pbMons = pbMonthsByYear.ContainsKey(year) ? pbMonthsByYear[year] : new List<string>();
                                         foreach (var mk in pbMons)
                                         {
-                                            <td class="pr-month-data">@PbCell(Model.PayerBreakdownGrandByMonth, mk).ToString("N0")</td>
+                                            <td class="pr-month-data">@PbCell(Model.PayerBreakdownGrandByMonth, mk).N0OrDash()</td>
                                             @if (pbShowCharges)
                                             {
                                                 <td class="pr-month-data">@Acct(PbCharges(Model.PayerBreakdownGrandChargesByMonth, mk))</td>
                                             }
                                         }
-                                        <td class="pr-year-total">@PbGrandYear(year).ToString("N0")</td>
+                                        <td class="pr-year-total">@PbGrandYear(year).N0OrDash()</td>
                                         @if (pbShowCharges)
                                         {
                                             <td class="pr-year-total">@Acct(PbGrandYearCharges(year))</td>
                                         }
                                     }
-                                    <td class="pr-grand-total">@pbGrandTotal.ToString("N0")</td>
+                                    <td class="pr-grand-total">@pbGrandTotal.N0OrDash()</td>
                                     @if (pbShowCharges)
                                     {
                                         <td class="pr-grand-total">@Acct(pbGrandTotalCharges)</td>
@@ -1558,10 +1565,10 @@ th.pr-month-data, td.pr-month-data {
                                         <td>@payer.PayerName</td>
                                         @foreach (var panel in pxpPanels)
                                         {
-                                            <td class="pr-month-data">@PxpClaims(payer.ByPanel, panel).ToString("N0")</td>
+                                            <td class="pr-month-data">@PxpClaims(payer.ByPanel, panel).N0OrDash()</td>
                                             <td class="pr-month-data">@Acct(PxpCharges(payer.ByPanel, panel))</td>
                                         }
-                                        <td class="pr-grand-total">@payer.GrandTotalClaims.ToString("N0")</td>
+                                        <td class="pr-grand-total">@payer.GrandTotalClaims.N0OrDash()</td>
                                         <td class="pr-grand-total">@Acct(payer.GrandTotalCharges)</td>
                                     </tr>
                                 }
@@ -1571,10 +1578,10 @@ th.pr-month-data, td.pr-month-data {
                                     <td>Grand Total</td>
                                     @foreach (var panel in pxpPanels)
                                     {
-                                        <td class="pr-month-data">@PxpClaims(Model.PayerPanelGrandByPanel, panel).ToString("N0")</td>
+                                        <td class="pr-month-data">@PxpClaims(Model.PayerPanelGrandByPanel, panel).N0OrDash()</td>
                                         <td class="pr-month-data">@Acct(PxpCharges(Model.PayerPanelGrandByPanel, panel))</td>
                                     }
-                                    <td class="pr-grand-total">@Model.PayerPanelGrandTotalClaims.ToString("N0")</td>
+                                    <td class="pr-grand-total">@Model.PayerPanelGrandTotalClaims.N0OrDash()</td>
                                     <td class="pr-grand-total">@Acct(Model.PayerPanelGrandTotalCharges)</td>
                                 </tr>
                             </tfoot>
@@ -1670,10 +1677,10 @@ th.pr-month-data, td.pr-month-data {
                                         <td>@row.PanelName</td>
                                         @foreach (var bk in agingBuckets)
                                         {
-                                            <td class="pr-month-data">@UaClaims(row.ByBucket, bk).ToString("N0")</td>
+                                            <td class="pr-month-data">@UaClaims(row.ByBucket, bk).N0OrDash()</td>
                                             <td class="pr-month-data">@Acct(UaCharges(row.ByBucket, bk))</td>
                                         }
-                                        <td class="pr-grand-total">@row.GrandTotalClaims.ToString("N0")</td>
+                                        <td class="pr-grand-total">@row.GrandTotalClaims.N0OrDash()</td>
                                         <td class="pr-grand-total">@Acct(row.GrandTotalCharges)</td>
                                     </tr>
                                 }
@@ -1683,10 +1690,10 @@ th.pr-month-data, td.pr-month-data {
                                     <td>Grand Total</td>
                                     @foreach (var bk in agingBuckets)
                                     {
-                                        <td class="pr-month-data">@UaClaims(Model.UnbilledAgingGrandByBucket, bk).ToString("N0")</td>
+                                        <td class="pr-month-data">@UaClaims(Model.UnbilledAgingGrandByBucket, bk).N0OrDash()</td>
                                         <td class="pr-month-data">@Acct(UaCharges(Model.UnbilledAgingGrandByBucket, bk))</td>
                                     }
-                                    <td class="pr-grand-total">@Model.UnbilledAgingGrandTotalClaims.ToString("N0")</td>
+                                    <td class="pr-grand-total">@Model.UnbilledAgingGrandTotalClaims.N0OrDash()</td>
                                     <td class="pr-grand-total">@Acct(Model.UnbilledAgingGrandTotalCharges)</td>
                                 </tr>
                             </tfoot>
@@ -1830,13 +1837,13 @@ th.pr-month-data, td.pr-month-data {
                                                         var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                                         foreach (var mk in mons)
                                                         {
-                                                            <td class="pr-month-data">@(cptShowCountOfUnits || !cptShowUnits ? CptClaims(row.ByMonth, mk).ToString("N0") : CptUnits(row.ByMonth, mk).ToString("N0"))</td>
+                                                            <td class="pr-month-data">@(cptShowCountOfUnits || !cptShowUnits ? CptClaims(row.ByMonth, mk).N0OrDash() : CptUnits(row.ByMonth, mk).N0OrDash())</td>
                                                             <td class="pr-month-data">@Acct(CptCharges(row.ByMonth, mk))</td>
                                                         }
-                                                        <td class="pr-year-total">@(cptShowCountOfUnits || !cptShowUnits ? CptYearClaims(row.ByYear, year).ToString("N0") : CptYearUnits(row.ByYear, year).ToString("N0"))</td>
+                                                        <td class="pr-year-total">@(cptShowCountOfUnits || !cptShowUnits ? CptYearClaims(row.ByYear, year).N0OrDash() : CptYearUnits(row.ByYear, year).N0OrDash())</td>
                                                         <td class="pr-year-total">@Acct(CptYearCharges(row.ByYear, year))</td>
                                                     }
-                                                    <td class="pr-grand-total">@(cptShowCountOfUnits || !cptShowUnits ? row.GrandTotalClaims.ToString("N0") : row.GrandTotalUnits.ToString("N0"))</td>
+                                                    <td class="pr-grand-total">@(cptShowCountOfUnits || !cptShowUnits ? row.GrandTotalClaims.N0OrDash() : row.GrandTotalUnits.N0OrDash())</td>
                                                     <td class="pr-grand-total">@Acct(row.GrandTotalCharges)</td>
                                                 </tr>
                                             }
@@ -1849,13 +1856,13 @@ th.pr-month-data, td.pr-month-data {
                                                     var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                                     foreach (var mk in mons)
                                                     {
-                                                        <td class="pr-month-data">@(cptShowCountOfUnits || !cptShowUnits ? CptClaims(tab.GrandByMonth, mk).ToString("N0") : CptUnits(tab.GrandByMonth, mk).ToString("N0"))</td>
+                                                        <td class="pr-month-data">@(cptShowCountOfUnits || !cptShowUnits ? CptClaims(tab.GrandByMonth, mk).N0OrDash() : CptUnits(tab.GrandByMonth, mk).N0OrDash())</td>
                                                         <td class="pr-month-data">@Acct(CptCharges(tab.GrandByMonth, mk))</td>
                                                     }
-                                                    <td class="pr-year-total">@(cptShowCountOfUnits || !cptShowUnits ? CptYearClaims(tab.GrandByYear, year).ToString("N0") : CptYearUnits(tab.GrandByYear, year).ToString("N0"))</td>
+                                                    <td class="pr-year-total">@(cptShowCountOfUnits || !cptShowUnits ? CptYearClaims(tab.GrandByYear, year).N0OrDash() : CptYearUnits(tab.GrandByYear, year).N0OrDash())</td>
                                                     <td class="pr-year-total">@Acct(CptYearCharges(tab.GrandByYear, year))</td>
                                                 }
-                                                <td class="pr-grand-total">@(cptShowCountOfUnits || !cptShowUnits ? tab.GrandClaims.ToString("N0") : tab.GrandUnits.ToString("N0"))</td>
+                                                <td class="pr-grand-total">@(cptShowCountOfUnits || !cptShowUnits ? tab.GrandClaims.N0OrDash() : tab.GrandUnits.N0OrDash())</td>
                                                 <td class="pr-grand-total">@Acct(tab.GrandCharges)</td>
                                             </tr>
                                         </tfoot>
@@ -1944,13 +1951,13 @@ th.pr-month-data, td.pr-month-data {
                                             var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                             foreach (var mk in mons)
                                             {
-                                                <td class="pr-month-data">@(cptShowCountOfUnits || !cptShowUnits ? CptClaims(row.ByMonth, mk).ToString("N0") : CptUnits(row.ByMonth, mk).ToString("N0"))</td>
+                                                <td class="pr-month-data">@(cptShowCountOfUnits || !cptShowUnits ? CptClaims(row.ByMonth, mk).N0OrDash() : CptUnits(row.ByMonth, mk).N0OrDash())</td>
                                                 <td class="pr-month-data">@Acct(CptCharges(row.ByMonth, mk))</td>
                                             }
-                                            <td class="pr-year-total">@(cptShowCountOfUnits || !cptShowUnits ? CptYearClaims(row.ByYear, year).ToString("N0") : CptYearUnits(row.ByYear, year).ToString("N0"))</td>
+                                            <td class="pr-year-total">@(cptShowCountOfUnits || !cptShowUnits ? CptYearClaims(row.ByYear, year).N0OrDash() : CptYearUnits(row.ByYear, year).N0OrDash())</td>
                                             <td class="pr-year-total">@Acct(CptYearCharges(row.ByYear, year))</td>
                                         }
-                                        <td class="pr-grand-total">@(cptShowCountOfUnits || !cptShowUnits ? row.GrandTotalClaims.ToString("N0") : row.GrandTotalUnits.ToString("N0"))</td>
+                                        <td class="pr-grand-total">@(cptShowCountOfUnits || !cptShowUnits ? row.GrandTotalClaims.N0OrDash() : row.GrandTotalUnits.N0OrDash())</td>
                                         <td class="pr-grand-total">@Acct(row.GrandTotalCharges)</td>
                                     </tr>
                                 }
@@ -1963,13 +1970,13 @@ th.pr-month-data, td.pr-month-data {
                                         var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                         foreach (var mk in mons)
                                         {
-                                            <td class="pr-month-data">@(cptShowCountOfUnits || !cptShowUnits ? CptClaims(Model.CptBreakdownGrandByMonth, mk).ToString("N0") : CptUnits(Model.CptBreakdownGrandByMonth, mk).ToString("N0"))</td>
+                                            <td class="pr-month-data">@(cptShowCountOfUnits || !cptShowUnits ? CptClaims(Model.CptBreakdownGrandByMonth, mk).N0OrDash() : CptUnits(Model.CptBreakdownGrandByMonth, mk).N0OrDash())</td>
                                             <td class="pr-month-data">@Acct(CptCharges(Model.CptBreakdownGrandByMonth, mk))</td>
                                         }
-                                        <td class="pr-year-total">@(cptShowCountOfUnits || !cptShowUnits ? CptGrandYearClaims(year).ToString("N0") : CptGrandYearUnits(year).ToString("N0"))</td>
+                                        <td class="pr-year-total">@(cptShowCountOfUnits || !cptShowUnits ? CptGrandYearClaims(year).N0OrDash() : CptGrandYearUnits(year).N0OrDash())</td>
                                         <td class="pr-year-total">@Acct(CptGrandYearCharges(year))</td>
                                     }
-                                    <td class="pr-grand-total">@(cptShowCountOfUnits || !cptShowUnits ? cptGrandClaims.ToString("N0") : cptGrandUnits.ToString("N0"))</td>
+                                    <td class="pr-grand-total">@(cptShowCountOfUnits || !cptShowUnits ? cptGrandClaims.N0OrDash() : cptGrandUnits.N0OrDash())</td>
                                     <td class="pr-grand-total">@Acct(cptGrandCharges)</td>
                                 </tr>
                             </tfoot>
@@ -2086,13 +2093,13 @@ th.pr-month-data, td.pr-month-data {
                                             var pnlMons = pnlMonthsByYear.ContainsKey(year) ? pnlMonthsByYear[year] : new List<string>();
                                             foreach (var mk in pnlMons)
                                             {
-                                                <td class="pr-month-data">@PbCell(panel.ByMonth, mk).ToString("N0")</td>
+                                                <td class="pr-month-data">@PbCell(panel.ByMonth, mk).N0OrDash()</td>
                                                 <td class="pr-month-data">@Acct(PbCharges(panel.ByMonthCharges, mk))</td>
                                             }
-                                            <td class="pr-year-total">@PbYear(panel.ByYear, year).ToString("N0")</td>
+                                            <td class="pr-year-total">@PbYear(panel.ByYear, year).N0OrDash()</td>
                                             <td class="pr-year-total">@Acct(PbYearCharges(panel.ByYearCharges, year))</td>
                                         }
-                                        <td class="pr-grand-total">@panel.GrandTotal.ToString("N0")</td>
+                                        <td class="pr-grand-total">@panel.GrandTotal.N0OrDash()</td>
                                         <td class="pr-grand-total">@Acct(panel.GrandTotalCharges)</td>
                                     </tr>
 
@@ -2105,13 +2112,13 @@ th.pr-month-data, td.pr-month-data {
                                                 var pnlMons = pnlMonthsByYear.ContainsKey(year) ? pnlMonthsByYear[year] : new List<string>();
                                                 foreach (var mk in pnlMons)
                                                 {
-                                                    <td class="pr-month-data">@PbCell(payer.ByMonth, mk).ToString("N0")</td>
+                                                    <td class="pr-month-data">@PbCell(payer.ByMonth, mk).N0OrDash()</td>
                                                     <td class="pr-month-data">@Acct(PbCharges(payer.ByMonthCharges, mk))</td>
                                                 }
-                                                <td class="pr-year-total">@PbYear(payer.ByYear, year).ToString("N0")</td>
+                                                <td class="pr-year-total">@PbYear(payer.ByYear, year).N0OrDash()</td>
                                                 <td class="pr-year-total">@Acct(PbYearCharges(payer.ByYearCharges, year))</td>
                                             }
-                                            <td class="pr-grand-total">@payer.GrandTotal.ToString("N0")</td>
+                                            <td class="pr-grand-total">@payer.GrandTotal.N0OrDash()</td>
                                             <td class="pr-grand-total">@Acct(payer.GrandTotalCharges)</td>
                                         </tr>
                                     }
@@ -2125,13 +2132,13 @@ th.pr-month-data, td.pr-month-data {
                                         var pnlMons = pnlMonthsByYear.ContainsKey(year) ? pnlMonthsByYear[year] : new List<string>();
                                         foreach (var mk in pnlMons)
                                         {
-                                            <td class="pr-month-data">@PbCell(Model.PanelBreakdownGrandByMonth, mk).ToString("N0")</td>
+                                            <td class="pr-month-data">@PbCell(Model.PanelBreakdownGrandByMonth, mk).N0OrDash()</td>
                                             <td class="pr-month-data">@Acct(PbCharges(Model.PanelBreakdownGrandChargesByMonth, mk))</td>
                                         }
-                                        <td class="pr-year-total">@PnlGrandYear(year).ToString("N0")</td>
+                                        <td class="pr-year-total">@PnlGrandYear(year).N0OrDash()</td>
                                         <td class="pr-year-total">@Acct(PnlGrandYearCharges(year))</td>
                                     }
-                                    <td class="pr-grand-total">@pnlGrandTotal.ToString("N0")</td>
+                                    <td class="pr-grand-total">@pnlGrandTotal.N0OrDash()</td>
                                     <td class="pr-grand-total">@Acct(pnlGrandTotalCharges)</td>
                                 </tr>
                             </tfoot>
@@ -2274,13 +2281,13 @@ th.pr-month-data, td.pr-month-data {
                                                     var insMons = tab.MonthsByYear.ContainsKey(year) ? tab.MonthsByYear[year] : new List<string>();
                                                     foreach (var mk in insMons)
                                                     {
-                                                        <td class="pr-month-data">@PbCell(payer.ByMonth, mk).ToString("N0")</td>
+                                                        <td class="pr-month-data">@PbCell(payer.ByMonth, mk).N0OrDash()</td>
                                                         <td class="pr-month-data">@Acct(PbCharges(payer.ByMonthCharges, mk))</td>
                                                     }
-                                                    <td class="pr-year-total">@PbYear(payer.ByYear, year).ToString("N0")</td>
+                                                    <td class="pr-year-total">@PbYear(payer.ByYear, year).N0OrDash()</td>
                                                     <td class="pr-year-total">@Acct(PbYearCharges(payer.ByYearCharges, year))</td>
                                                 }
-                                                <td class="pr-grand-total">@payer.GrandTotal.ToString("N0")</td>
+                                                <td class="pr-grand-total">@payer.GrandTotal.N0OrDash()</td>
                                                 <td class="pr-grand-total">@Acct(payer.GrandTotalCharges)</td>
                                             </tr>
                                         }
@@ -2293,13 +2300,13 @@ th.pr-month-data, td.pr-month-data {
                                                 var insMons = tab.MonthsByYear.ContainsKey(year) ? tab.MonthsByYear[year] : new List<string>();
                                                 foreach (var mk in insMons)
                                                 {
-                                                    <td class="pr-month-data">@PbCell(tab.GrandByMonth, mk).ToString("N0")</td>
+                                                    <td class="pr-month-data">@PbCell(tab.GrandByMonth, mk).N0OrDash()</td>
                                                     <td class="pr-month-data">@Acct(PbCharges(tab.GrandChargesByMonth, mk))</td>
                                                 }
-                                                <td class="pr-year-total">@InsightGrandYear(tab.GrandByMonth, year).ToString("N0")</td>
+                                                <td class="pr-year-total">@InsightGrandYear(tab.GrandByMonth, year).N0OrDash()</td>
                                                 <td class="pr-year-total">@Acct(InsightGrandYearCharges(tab.GrandChargesByMonth, year))</td>
                                             }
-                                            <td class="pr-grand-total">@tab.GrandTotal.ToString("N0")</td>
+                                            <td class="pr-grand-total">@tab.GrandTotal.N0OrDash()</td>
                                             <td class="pr-grand-total">@Acct(tab.GrandTotalCharges)</td>
                                         </tr>
                                     </tfoot>
@@ -2398,13 +2405,13 @@ th.pr-month-data, td.pr-month-data {
                                             var hpMons = hpMonthsByYear.ContainsKey(year) ? hpMonthsByYear[year] : new List<string>();
                                             foreach (var mk in hpMons)
                                             {
-                                                <td class="pr-month-data">@CellClaims(src.ByMonth, mk).ToString("N0")</td>
+                                                <td class="pr-month-data">@CellClaims(src.ByMonth, mk).N0OrDash()</td>
                                                 <td class="pr-month-data">@Acct(CellCharges(src.ByMonth, mk))</td>
                                             }
-                                            <td class="pr-year-total">@YearClaims(src.ByYear, year).ToString("N0")</td>
+                                            <td class="pr-year-total">@YearClaims(src.ByYear, year).N0OrDash()</td>
                                             <td class="pr-year-total">@Acct(YearCharges(src.ByYear, year))</td>
                                         }
-                                        <td class="pr-grand-total">@src.TotalClaims.ToString("N0")</td>
+                                        <td class="pr-grand-total">@src.TotalClaims.N0OrDash()</td>
                                         <td class="pr-grand-total">@Acct(src.TotalCharges)</td>
                                     </tr>
                                     @foreach (var payer in src.TopPayers)
@@ -2416,13 +2423,13 @@ th.pr-month-data, td.pr-month-data {
                                                 var hpMons = hpMonthsByYear.ContainsKey(year) ? hpMonthsByYear[year] : new List<string>();
                                                 foreach (var mk in hpMons)
                                                 {
-                                                    <td class="pr-month-data">@CellClaims(payer.ByMonth, mk).ToString("N0")</td>
+                                                    <td class="pr-month-data">@CellClaims(payer.ByMonth, mk).N0OrDash()</td>
                                                     <td class="pr-month-data">@Acct(CellCharges(payer.ByMonth, mk))</td>
                                                 }
-                                                <td class="pr-year-total">@YearClaims(payer.ByYear, year).ToString("N0")</td>
+                                                <td class="pr-year-total">@YearClaims(payer.ByYear, year).N0OrDash()</td>
                                                 <td class="pr-year-total">@Acct(YearCharges(payer.ByYear, year))</td>
                                             }
-                                            <td class="pr-grand-total">@payer.TotalClaims.ToString("N0")</td>
+                                            <td class="pr-grand-total">@payer.TotalClaims.N0OrDash()</td>
                                             <td class="pr-grand-total">@Acct(payer.TotalCharges)</td>
                                         </tr>
                                     }
@@ -2436,13 +2443,13 @@ th.pr-month-data, td.pr-month-data {
                                         var hpMons = hpMonthsByYear.ContainsKey(year) ? hpMonthsByYear[year] : new List<string>();
                                         foreach (var mk in hpMons)
                                         {
-                                            <td class="pr-month-data">@CellClaims(Model.HighestPayerGrandByMonth, mk).ToString("N0")</td>
+                                            <td class="pr-month-data">@CellClaims(Model.HighestPayerGrandByMonth, mk).N0OrDash()</td>
                                             <td class="pr-month-data">@Acct(CellCharges(Model.HighestPayerGrandByMonth, mk))</td>
                                         }
-                                        <td class="pr-year-total">@HpGrandYearClaims(year).ToString("N0")</td>
+                                        <td class="pr-year-total">@HpGrandYearClaims(year).N0OrDash()</td>
                                         <td class="pr-year-total">@Acct(HpGrandYearCharges(year))</td>
                                     }
-                                    <td class="pr-grand-total">@hpGrandClaims.ToString("N0")</td>
+                                    <td class="pr-grand-total">@hpGrandClaims.N0OrDash()</td>
                                     <td class="pr-grand-total">@Acct(hpGrandCharges)</td>
                                 </tr>
                             </tfoot>

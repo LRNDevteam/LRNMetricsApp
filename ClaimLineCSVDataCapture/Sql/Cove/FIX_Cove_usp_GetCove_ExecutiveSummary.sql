@@ -1,37 +1,18 @@
 -- ============================================================
--- Cove – Executive Summary Read SP
--- File : 17_Cove_ExecutiveSummary_Read.sql
--- DB   : Cove_LRN
+-- Cove — FIX: usp_GetCove_ExecutiveSummary
+-- File : FIX_Cove_usp_GetCove_ExecutiveSummary.sql
+-- Date : 2026-09-17
+-- DB   : CoveLRN
 --
--- usp_GetCove_ExecutiveSummary
+-- Run on CoveLRN (CREATE OR ALTER — replaces live read SP):
+--   sqlcmd -S <server> -d CoveLRN -E -I -i this file
 --
--- Parameters (all optional / default to "no filter"):
---   @YearFrom      INT  = 0        DEPRECATED — ignored (not in UI)
---   @YearTo        INT  = 0        DEPRECATED — ignored (not in UI)
---   @MonthFrom     INT  = 0        DEPRECATED — ignored (not in UI)
---   @MonthTo       INT  = 0        DEPRECATED — ignored (not in UI)
---   @DosFrom       DATE = NULL     Date-of-Service lower bound (exact date)
---   @DosTo         DATE = NULL     Date-of-Service upper bound
---   @ReceivedFrom  DATE = NULL     Samples-Received (LIMSMaster date) lower bound
---   @ReceivedTo    DATE = NULL     Samples-Received upper bound
---   @BilledFrom    DATE = NULL     First-Billed-Date lower bound
---   @BilledTo      DATE = NULL     First-Billed-Date upper bound
---   @Panels        NVARCHAR(MAX) = NULL  Comma-separated PanelName list (NULL = all)
---   @Clinics       NVARCHAR(MAX) = NULL  Comma-separated ClinicName list
---   @Providers     NVARCHAR(MAX) = NULL  Comma-separated ReferringProvider list
---   @Reps          NVARCHAR(MAX) = NULL  Comma-separated SalesRepname list
---
--- No-filter path (fast read): UNION ALL of the 4 aggregate tables
--- (Cove_ES_LIS, Cove_ES_PMS, Cove_ES_Cash, Cove_ES_Avg) — unchanged from v1.
--- Used when ALL parameters are at their "no filter" default values.
---
--- Filtered path (live re-aggregation): re-derives all RowCodes directly
--- from dbo.LIMSMaster (LIS section) and dbo.ClaimLevelData (PMS/Cash/Avg)
--- applying every active filter. Returns (Year=0, Month=0) sentinel rows
--- (a single "filtered total" bucket) — same as the grand-total convention.
---
--- No inline queries — all SQL in this SP, sp_executesql used only for
--- dynamic column name resolution on LIMSMaster (schema varies per env).
+-- Bug: any Executive Summary filter that livescans LIMSMaster
+-- (Panel, Clinic, Provider, Sales Rep, FirstBilledDate) failed with:
+--   The multi-part identifier "pt.PanelType" could not be bound.
+-- Cause: D.6 / D.5 grand-total UNION ALL used pt.PanelType with no pt alias.
+-- Also: panel (and other) filters can leave ClaimLevelData #Base empty.
+-- SUM() over zero rows is NULL; #LisRows.MetricValue is NOT NULL. ISNULL those amounts.
 -- ============================================================
 SET NOCOUNT ON;
 GO
@@ -1062,5 +1043,5 @@ BEGIN
 END;
 GO
 
-PRINT '17_Cove_ExecutiveSummary_Read.sql completed.';
+PRINT 'FIX_Cove_usp_GetCove_ExecutiveSummary.sql completed.';
 GO

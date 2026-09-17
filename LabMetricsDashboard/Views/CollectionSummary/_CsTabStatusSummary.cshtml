@@ -43,7 +43,7 @@
                             else { <span style="display:inline-block;width:20px"></span> }
                             @csRow.ClaimStatus
                         </td>
-                        <td style="text-align:right">@csRow.NoClaims.ToString("N0")</td>
+                        <td style="text-align:right">@csRow.NoClaims.N0OrDash()</td>
                         <td style="text-align:right">@Acct2(csRow.InsurancePayments)</td>
                         <td style="text-align:right">@Acct2(csRow.InsuranceBalance)</td>
                         <td style="text-align:right">@Acct2(csRow.PatientBalance)</td>
@@ -60,7 +60,7 @@
                                 else { <span style="display:inline-block;width:20px"></span> }
                                 <i class="bi bi-grid-3x3-gap" style="font-size:.7rem;opacity:.55;margin-right:3px"></i>@panelRow.PanelName
                             </td>
-                            <td style="text-align:right">@panelRow.NoClaims.ToString("N0")</td>
+                            <td style="text-align:right">@panelRow.NoClaims.N0OrDash()</td>
                             <td style="text-align:right">@Acct2(panelRow.InsurancePayments)</td>
                             <td style="text-align:right">@Acct2(panelRow.InsuranceBalance)</td>
                             <td style="text-align:right">@Acct2(panelRow.PatientBalance)</td>
@@ -77,7 +77,7 @@
                                     else { <span style="display:inline-block;width:20px"></span> }
                                     <i class="bi bi-tag" style="font-size:.65rem;opacity:.45;margin-right:3px"></i>@cptRow.CptCode
                                 </td>
-                                <td style="text-align:right">@cptRow.NoClaims.ToString("N0")</td>
+                                <td style="text-align:right">@cptRow.NoClaims.N0OrDash()</td>
                                 <td style="text-align:right">@Acct2(cptRow.InsurancePayments)</td>
                                 <td style="text-align:right">@Acct2(cptRow.InsuranceBalance)</td>
                                 <td style="text-align:right">@Acct2(cptRow.PatientBalance)</td>
@@ -88,7 +88,7 @@
                                     <td style="text-align:left;padding-left:4.4rem;white-space:nowrap">
                                         <i class="bi bi-building" style="font-size:.65rem;opacity:.4;margin-right:3px"></i>@payerRow.PayerName
                                     </td>
-                                    <td style="text-align:right">@payerRow.NoClaims.ToString("N0")</td>
+                                    <td style="text-align:right">@payerRow.NoClaims.N0OrDash()</td>
                                     <td style="text-align:right">@Acct2(payerRow.InsurancePayments)</td>
                                     <td style="text-align:right">@Acct2(payerRow.InsuranceBalance)</td>
                                     <td style="text-align:right">@Acct2(payerRow.PatientBalance)</td>
@@ -101,7 +101,7 @@
                 <tfoot>
                     <tr style="background:#0d3460;color:#fff;font-weight:600;font-size:.79rem">
                         <td style="text-align:left;padding-left:.5rem">Grand Total</td>
-                        <td style="text-align:right">@Model.StatusSummary.GrandNoClaims.ToString("N0")</td>
+                        <td style="text-align:right">@Model.StatusSummary.GrandNoClaims.N0OrDash()</td>
                         <td style="text-align:right">@Acct2(Model.StatusSummary.GrandInsurancePayments)</td>
                         <td style="text-align:right">@Acct2(Model.StatusSummary.GrandInsuranceBalance)</td>
                         <td style="text-align:right">@Acct2(Model.StatusSummary.GrandPatientBalance)</td>

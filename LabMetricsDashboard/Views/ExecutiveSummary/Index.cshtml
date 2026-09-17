@@ -28,12 +28,12 @@
     // "% of the claim submitted in the last 30 Days" showed all zeros.
     IHtmlContent FmtCount(decimal v, string cat, string? rowCode = null) =>
         IsAriaPctRow(rowCode)
-            ? new HtmlString(v.ToString("0.####"))
+            ? new HtmlString(v == 0m ? "-" : v.ToString("0.####"))
             : (cat == "Cash" || cat == "Avg")
                 ? Acct(v)
                 : new HtmlString(v is >= long.MinValue and <= long.MaxValue
-                    ? ((long)v).ToString("N0")
-                    : v.ToString("N0"));
+                    ? ((long)v).N0OrDash()
+                    : v.N0OrDash());
 
     bool IsDollar(string cat) => cat is "Cash" or "Avg";
 
@@ -173,6 +173,7 @@
         text-align: right; white-space: nowrap;
         border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0;
         overflow: hidden; text-overflow: ellipsis;
+        font-variant-numeric: tabular-nums;
     }
     .es-table td.col-desc {
         text-align: left; font-weight: 600; color: #1e293b;
@@ -201,6 +202,10 @@
     }
     tr.es-cp-exception:hover td,
     tr.es-cp-exception:hover td.col-desc { background: #FFE699 !important; }
+    tr.es-cp-exception td.es-year-total,
+    tr.es-cp-exception td.es-grand { background: #FFF2CC !important; }
+    tr.es-cp-exception:hover td.es-year-total,
+    tr.es-cp-exception:hover td.es-grand { background: #FFE699 !important; }
     tr.es-cp-exception-child td,
     tr.es-cp-exception-child td.col-desc {
         background: #E2EFDA !important;
@@ -209,6 +214,10 @@
     }
     tr.es-cp-exception-child:hover td,
     tr.es-cp-exception-child:hover td.col-desc { background: #D4E6C8 !important; }
+    tr.es-cp-exception-child td.es-year-total,
+    tr.es-cp-exception-child td.es-grand { background: #E2EFDA !important; }
+    tr.es-cp-exception-child:hover td.es-year-total,
+    tr.es-cp-exception-child:hover td.es-grand { background: #D4E6C8 !important; }
 
     /* ── Collapsible sub-rows ─────────────────────────────────── */
     tr.es-cat-row.has-children td.col-desc { cursor: pointer; user-select: none; }
@@ -255,31 +264,15 @@
         padding: 1px 4px; margin-right: 4px; }
 
     a.es-drill-link {
-        display: inline-block;
-        color: #0e3460; font-weight: 700; text-decoration: none;
-        background: #e8f1fb; border: 1px solid #c7ddf5; border-radius: 999px;
-        padding: 1px 10px; line-height: 1.4; min-width: 2.2em; text-align: center;
-        cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+        color: inherit; font-weight: 700; text-decoration: none;
+        background: none; border: 0; padding: 0; min-width: 0;
+        border-radius: 0; display: inline; line-height: inherit;
+        cursor: pointer;
     }
     a.es-drill-link:hover {
-        background: #0e3460; border-color: #0e3460; color: #fff; text-decoration: none;
+        color: #0e3460; text-decoration: underline; background: none;
     }
-
-    /* Non-clickable "pill" for zero-value / non-drillable cells, matching
-       .es-drill-link's box model so columns stay visually aligned. */
-    span.es-pill {
-        display: inline-block;
-        color: #6c757d; font-weight: 700;
-        background: #f1f3f5; border: 1px solid #e2e6ea; border-radius: 999px;
-        padding: 1px 10px; line-height: 1.4; min-width: 2.2em; text-align: center;
-    }
-
-    /* Tighter pill/link sizing for dollar-formatted cells (Cash/Avg rows) so
-       larger currency values like "$2,045,975" aren't clipped by the
-       fixed-width columns. */
-    .es-pill.es-pill-dollar, a.es-drill-link.es-link-dollar {
-        padding: 1px 3px; min-width: 0; font-size: .68rem; letter-spacing: -0.02em;
-    }
+    td.es-cell-dollar { font-size: .68rem; }
 
     /* ── Single-grid section separator rows (LIS / PMS / Cash / Avg) ──── */
     tr.es-section-row td.es-section-cell {
@@ -1044,7 +1037,7 @@
                                                 IHtmlContent cellVal = FmtCount(v, row.Category, row.RowCode);
                                                 // Monthly cells are display-only — drill links live on the
                                                 // Year Total / Grand Total cells of the two LIS rows only.
-                                                <td><span class="es-pill@(dollarRow ? " es-pill-dollar" : "")">@cellVal</span></td>
+                                                <td class="@(dollarRow ? "es-cell-dollar" : null)">@cellVal</td>
                                             }
                                             var yrTot = RowYearTotal(row, year);
                                             @* Prefer rowCode (lab-specific LisDrillRowDef) over generic
@@ -1059,8 +1052,8 @@
                                                     year,
                                                     value    = yrTot,
                                                 })!;
-                                                <td class="es-year-total">
-                                                    <a href="@yrRowUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(yrTot, row.Category, row.RowCode)</a>
+                                                <td class="es-year-total@(dollarRow ? " es-cell-dollar" : "")">
+                                                    <a href="@yrRowUrl" class="es-drill-link">@FmtCount(yrTot, row.Category, row.RowCode)</a>
                                                 </td>
                                             }
                                             else if (!isPanelSpecificRow && lisDrillMetric != null && yrTot != 0)
@@ -1071,13 +1064,13 @@
                                                     year,
                                                     value  = yrTot,
                                                 })!;
-                                                <td class="es-year-total">
-                                                    <a href="@yrDrillUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(yrTot, row.Category, row.RowCode)</a>
+                                                <td class="es-year-total@(dollarRow ? " es-cell-dollar" : "")">
+                                                    <a href="@yrDrillUrl" class="es-drill-link">@FmtCount(yrTot, row.Category, row.RowCode)</a>
                                                 </td>
                                             }
                                             else
                                             {
-                                                <td class="es-year-total"><span class="es-pill@(dollarRow ? " es-pill-dollar" : "")">@FmtCount(yrTot, row.Category, row.RowCode)</span></td>
+                                                <td class="es-year-total@(dollarRow ? " es-cell-dollar" : "")">@FmtCount(yrTot, row.Category, row.RowCode)</td>
                                             }
                                         }
                                         @if (!isPanelSpecificRow && (row.Category == "LIS" || row.Category == "PMS" || row.Category == "Cash") && !string.IsNullOrEmpty(row.RowCode) && gTot != 0)
@@ -1090,8 +1083,8 @@
                                                 year     = 0,
                                                 value    = gTot,
                                             })!;
-                                            <td class="es-grand">
-                                                <a href="@gtRowUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(gTot, row.Category, row.RowCode)</a>
+                                            <td class="es-grand@(dollarRow ? " es-cell-dollar" : "")">
+                                                <a href="@gtRowUrl" class="es-drill-link">@FmtCount(gTot, row.Category, row.RowCode)</a>
                                             </td>
                                         }
                                         else if (!isPanelSpecificRow && lisDrillMetric != null && gTot != 0)
@@ -1102,13 +1095,13 @@
                                                 year   = 0,
                                                 value  = gTot,
                                             })!;
-                                            <td class="es-grand">
-                                                <a href="@gtDrillUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(gTot, row.Category, row.RowCode)</a>
+                                            <td class="es-grand@(dollarRow ? " es-cell-dollar" : "")">
+                                                <a href="@gtDrillUrl" class="es-drill-link">@FmtCount(gTot, row.Category, row.RowCode)</a>
                                             </td>
                                         }
                                         else
                                         {
-                                            <td class="es-grand"><span class="es-pill@(dollarRow ? " es-pill-dollar" : "")">@FmtCount(gTot, row.Category, row.RowCode)</span></td>
+                                            <td class="es-grand@(dollarRow ? " es-cell-dollar" : "")">@FmtCount(gTot, row.Category, row.RowCode)</td>
                                         }
                                     </tr>
                                 }

@@ -17,6 +17,13 @@ public static class AccountingHtml
 
     public static IHtmlContent Acct2(decimal? value) => Acct(value, 2);
 
+    /// <summary>Integer/count cells: zero as a dash, otherwise thousands-grouped.</summary>
+    public static string N0OrDash(this int value) => value == 0 ? "-" : value.ToString("N0");
+
+    public static string N0OrDash(this long value) => value == 0L ? "-" : value.ToString("N0");
+
+    public static string N0OrDash(this decimal value) => value == 0m ? "-" : value.ToString("N0");
+
     /// <summary>Plain-text Accounting for badges, titles, and view-model strings.</summary>
     public static string Text(decimal value, int decimals = 0)
     {

@@ -48,7 +48,15 @@ BEGIN
     BEGIN TRY
         BEGIN TRANSACTION;
 
-        DECLARE @NextEntryNo INT = ISNULL((SELECT MAX(EntryNo) FROM dbo.NotesInsight), 0) + 1;
+        DECLARE @NextEntryNo INT =
+        (
+            SELECT COUNT(*) + 1
+            FROM dbo.NotesInsight
+            WHERE ReportKeyId = @ReportKeyId
+              AND WeekRangeStart = @WeekRangeStart
+              AND IsDeleted = 0
+              AND ArchiveStatus <> 'Archived'
+        );
 
         INSERT INTO dbo.NotesInsight
         (
@@ -239,7 +247,7 @@ BEGIN
              OR n.ActionSolution   LIKE '%' + @SearchText + '%'
              OR n.FeedbackResponse LIKE '%' + @SearchText + '%'
              OR n.ResponsibleParty LIKE '%' + @SearchText + '%')
-    ORDER BY n.WeekRangeStart DESC, n.EntryNo DESC;
+    ORDER BY n.WeekRangeStart DESC, n.EntryNo ASC, n.NoteId ASC;
 END
 GO
 
@@ -284,13 +292,12 @@ BEGIN
     );
     DECLARE @WindowStart DATE = DATEADD(DAY, -27, ISNULL(@LatestWeekEnd, CAST(GETDATE() AS DATE)));
 
-    SELECT  n.EntryNo               AS [#],
+    SELECT  ROW_NUMBER() OVER (ORDER BY n.WeekRangeStart, n.EntryNo, n.NoteId) AS [#],
             CASE r.RiskCode WHEN 'Red' THEN N'High' WHEN 'Green' THEN N'Low' ELSE N'Medium' END AS [Risk],
             n.ResponsibleParty      AS [Responsible Party],
             n.Insights              AS [Insights],
             n.NoOfSamples           AS [# of Claims],
             n.TotalCharge           AS [Total Charge],
-            n.DataLink              AS [Data],
             n.ActionSolution        AS [Action / Solution / Suggestions],
             n.FeedbackResponse      AS [Feedback / Response],
             n.Responsibility        AS [Responsibility],
@@ -305,7 +312,7 @@ BEGIN
         AND n.IsDeleted   = 0
         AND n.ArchiveStatus <> 'Archived'
         AND (n.WeekRangeStart >= @WindowStart OR s.IsClosedState = 0)
-    ORDER BY n.WeekRangeStart DESC, n.EntryNo DESC;
+    ORDER BY n.WeekRangeStart, n.EntryNo, n.NoteId;
 END
 GO
 

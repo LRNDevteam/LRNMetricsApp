@@ -1435,7 +1435,7 @@ BEGIN
             LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) AS PayerName,
             LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) AS PanelName,
             TRY_CAST(InsurancePayment AS DECIMAL(18,2))    AS InsPay,
-            TRY_CAST(PaymentPercent   AS DECIMAL(9,4))     AS PayPct
+            TRY_CAST(ChargeAmount     AS DECIMAL(18,2))    AS ChgAmt
         FROM dbo.ClaimLevelData
         WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
           AND NULLIF(LTRIM(RTRIM(PayerName_Raw)), '') IS NOT NULL
@@ -1444,7 +1444,11 @@ BEGIN
         PayerName,
         COUNT(PanelName)                       AS PanelGroupCount,
         ISNULL(SUM(InsPay), 0)                 AS InsurancePayment,
-        ROUND(ISNULL(AVG(PayPct), 0) * 100, 0) AS PaymentPct
+        CAST(
+            CASE WHEN ISNULL(SUM(ChgAmt), 0) = 0 THEN 0
+                 ELSE ROUND(SUM(InsPay) * 100.0 / SUM(ChgAmt), 2)
+            END AS DECIMAL(9,4)
+        )                                      AS PaymentPct
     INTO #out
     FROM base
     GROUP BY PayerName;

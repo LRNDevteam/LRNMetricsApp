@@ -62,7 +62,7 @@
                     {
                         <tr>
                             <td style="text-align:left;font-weight:600">@row.PayerName</td>
-                            <td style="text-align:right">@row.TotalCount.ToString("N0")</td>
+                            <td style="text-align:right">@row.TotalCount.N0OrDash()</td>
                             <td style="text-align:right">@Acct2(row.TotalPayment)</td>
                         </tr>
                     }
@@ -70,7 +70,7 @@
                 <tfoot>
                     <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
                         <td style="text-align:left;color:#fff">Grand Total</td>
-                        <td style="text-align:right;color:#fff">@flatRows.Sum(r => r.TotalCount).ToString("N0")</td>
+                        <td style="text-align:right;color:#fff">@flatRows.Sum(r => r.TotalCount).N0OrDash()</td>
                         <td style="text-align:right;color:#fff">@Acct2(flatRows.Sum(r => r.TotalPayment))</td>
                     </tr>
                 </tfoot>
@@ -141,13 +141,13 @@ else if (rowsData.Count > 0)
                                     var payment = cell?.Payment ?? 0m;
                                     yearCount += count;
                                     yearPayment += payment;
-                                    <td style="text-align:right">@count.ToString("N0")</td>
+                                    <td style="text-align:right">@count.N0OrDash()</td>
                                     <td style="text-align:right">@Acct2(payment)</td>
                                 }
-                                <td style="text-align:right;font-weight:700">@yearCount.ToString("N0")</td>
+                                <td style="text-align:right;font-weight:700">@yearCount.N0OrDash()</td>
                                 <td style="text-align:right;font-weight:700">@Acct2(yearPayment)</td>
                             }
-                            <td style="text-align:right;font-weight:700">@row.TotalCount.ToString("N0")</td>
+                            <td style="text-align:right;font-weight:700">@row.TotalCount.N0OrDash()</td>
                             <td style="text-align:right;font-weight:700">@Acct2(row.TotalPayment)</td>
                         </tr>
                     }
@@ -166,13 +166,13 @@ else if (rowsData.Count > 0)
                                 var payment = monthRows.Sum(r => r.InsurancePayment);
                                 yearCount += count;
                                 yearPayment += payment;
-                                <td style="text-align:right;color:#fff">@count.ToString("N0")</td>
+                                <td style="text-align:right;color:#fff">@count.N0OrDash()</td>
                                 <td style="text-align:right;color:#fff">@Acct2(payment)</td>
                             }
-                            <td style="text-align:right;color:#fff">@yearCount.ToString("N0")</td>
+                            <td style="text-align:right;color:#fff">@yearCount.N0OrDash()</td>
                             <td style="text-align:right;color:#fff">@Acct2(yearPayment)</td>
                         }
-                        <td style="text-align:right;color:#fff">@pivotRows.Sum(r => r.TotalCount).ToString("N0")</td>
+                        <td style="text-align:right;color:#fff">@pivotRows.Sum(r => r.TotalCount).N0OrDash()</td>
                         <td style="text-align:right;color:#fff">@Acct2(pivotRows.Sum(r => r.TotalPayment))</td>
                     </tr>
                 </tfoot>

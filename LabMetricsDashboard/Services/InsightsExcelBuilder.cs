@@ -15,7 +15,6 @@ public static class InsightsExcelBuilder
     private static readonly XLColor RiskRed = XLColor.FromHtml("#C00000");
     private static readonly XLColor StatusPeach = XLColor.FromHtml("#FCE4D6");
     private static readonly XLColor FooterGray = XLColor.FromHtml("#D9D9D9");
-    private static readonly XLColor LinkBlue = XLColor.FromHtml("#0563C1");
 
     public const string SheetName = "Insights";
     public const string LegacyNotesSheetName = "Key Insights & Highlights";
@@ -25,7 +24,8 @@ public static class InsightsExcelBuilder
         XLWorkbook workbook,
         IReadOnlyList<NoteInsight> insights,
         string? labName = null,
-        string? reportName = null)
+        string? reportName = null,
+        IReadOnlyList<NotesTemplateColumnDef>? templateColumns = null)
     {
         ArgumentNullException.ThrowIfNull(workbook);
         insights ??= [];
@@ -50,7 +50,7 @@ public static class InsightsExcelBuilder
 
         var lastRow = ws.LastRowUsed()?.RowNumber() ?? 0;
         var startRow = lastRow <= 1 ? 1 : lastRow + 3;
-        WriteSheet(ws, insights, labName, reportName, startRow);
+        WriteSheet(ws, insights, labName, reportName, startRow, templateColumns);
         ws.Position = 1;
         if ((reportName ?? "").Contains("Collection", StringComparison.OrdinalIgnoreCase))
             CollectionSummaryExcelExportBuilder.ApplySheetOrder(workbook);
@@ -61,10 +61,11 @@ public static class InsightsExcelBuilder
         string workbookPath,
         IReadOnlyList<NoteInsight> insights,
         string? labName = null,
-        string? reportName = null)
+        string? reportName = null,
+        IReadOnlyList<NotesTemplateColumnDef>? templateColumns = null)
     {
         using var wb = new XLWorkbook(workbookPath);
-        InsertAsFirstSheet(wb, insights, labName, reportName);
+        InsertAsFirstSheet(wb, insights, labName, reportName, templateColumns);
         ExcelTheme.ConvertCurrencyFormatsToAccounting(wb);
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
@@ -87,42 +88,122 @@ public static class InsightsExcelBuilder
         }
     }
 
-    public static InsightsSheetLayout LayoutFor(string? reportName)
+    public static async Task<IReadOnlyList<NotesTemplateColumnDef>> LoadTemplateColumnsAsync(
+        INotesRepository notes, string connectionString, string reportName, CancellationToken ct = default)
+    {
+        try
+        {
+            if (!await notes.IsFeatureAvailableAsync(connectionString, ct))
+                return [];
+            var reportKeyId = await notes.EnsureReportAsync(connectionString, reportName, ct);
+            var templates = await notes.GetTemplatesByReportAsync(connectionString, reportKeyId, ct);
+            var tpl = templates.FirstOrDefault(t =>
+                    string.Equals(t.TemplateName, "Key Insights & Highlights", StringComparison.OrdinalIgnoreCase))
+                ?? templates.FirstOrDefault(t => t.IsActive)
+                ?? templates.FirstOrDefault();
+            return tpl?.Columns ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    public static InsightsSheetLayout LayoutFor(
+        string? reportName, IReadOnlyList<NotesTemplateColumnDef>? columns = null)
     {
         var name = reportName ?? "";
+        InsightsSheetLayout layout;
         if (name.Contains("Collection", StringComparison.OrdinalIgnoreCase))
         {
-            return new InsightsSheetLayout(
-                ["#", "Risk", "Responsible Party", "Insights", "# of Cases", "Total Bill", "Case Link",
+            layout = new InsightsSheetLayout(
+                ["#", "Risk", "Responsible Party", "Insights", "# of Cases", "Total Billed",
                  "Action / Solution / Suggestion", "Feedback / Response", "Response By",
                  "Discussion Date", "ETA", "Closed Date", "Status"],
                 "Previously Analysed Data - Pending Items",
                 "(Refer Old Reports for Data Links)");
         }
-        if (name.Contains("LIS", StringComparison.OrdinalIgnoreCase))
+        else if (name.Contains("LIS", StringComparison.OrdinalIgnoreCase))
         {
-            return new InsightsSheetLayout(
-                ["#", "Risk", "Responsible Party", "Insights", "# of Claims", "Expected Reimbursement ($)", "Data Link",
+            layout = new InsightsSheetLayout(
+                ["#", "Risk", "Responsible Party", "Insights", "# of Claims", "Expected Reimbursement ($)",
                  "Action / Solution / Suggestions", "Feedback / Response", "Responsibility",
                  "Discussion Date", "ETA", "Closed Date", "Status"],
                 "Previously Analyzed Data - All Data",
                 "(Refer Old Reports for Data Links)");
         }
-        return new InsightsSheetLayout(
-            ["#", "Risk", "Responsible Party", "Insights", "# of Claims", "Total Charge", "Data",
-             "Action / Solution / Suggestions", "Feedback / Response", "Responsibility",
-             "Discussion Date", "ETA", "Closed Date", "Status"],
-            "Previously Analysed Data - Pending Items",
-            "(Refer Old Reports for Data Links)");
+        else
+        {
+            layout = new InsightsSheetLayout(
+                ["#", "Risk", "Responsible Party", "Insights", "# of Claims", "Total Charge",
+                 "Action / Solution / Suggestions", "Feedback / Response", "Responsibility",
+                 "Discussion Date", "ETA", "Closed Date", "Status"],
+                "Previously Analysed Data - Pending Items",
+                "(Refer Old Reports for Data Links)");
+        }
+
+        if (columns is not { Count: > 0 })
+            return layout;
+
+        var headers = (string[])layout.Headers.Clone();
+        OverlayHeader(headers, 1, "Risk", columns);
+        OverlayHeader(headers, 2, "ResponsibleParty", columns);
+        OverlayHeader(headers, 3, "Insights", columns);
+        OverlayHeader(headers, 4, "NoOfClaims", columns);
+        OverlayHeader(headers, 5, "TotalCharge", columns);
+        OverlayHeader(headers, 6, "ActionSolution", columns);
+        OverlayHeader(headers, 7, "FeedbackResponse", columns);
+        OverlayHeader(headers, 8, "Responsibility", columns);
+        OverlayHeader(headers, 9, "DiscussionDate", columns);
+        OverlayHeader(headers, 10, "ETA", columns);
+        OverlayHeader(headers, 11, "ClosedDate", columns);
+        OverlayHeader(headers, 12, "Status", columns);
+        return layout with { Headers = headers };
+    }
+
+    private static void OverlayHeader(
+        string[] headers, int index, string fieldKey, IReadOnlyList<NotesTemplateColumnDef> columns)
+    {
+        var hit = columns.FirstOrDefault(c =>
+            string.Equals((c.FieldKey ?? "").Trim(), fieldKey, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(GuessFieldKey(c), fieldKey, StringComparison.OrdinalIgnoreCase));
+        var name = hit?.ColumnName?.Trim();
+        if (!string.IsNullOrEmpty(name))
+            headers[index] = name;
+    }
+
+    private static string GuessFieldKey(NotesTemplateColumnDef col)
+    {
+        var n = (col.ColumnName ?? "").Trim().ToLowerInvariant();
+        if (n == "risk") return "Risk";
+        if (n.Contains("responsible party")) return "ResponsibleParty";
+        if (n == "insights") return "Insights";
+        if (n.Contains("link") || n == "data") return "DataLink";
+        if (n.Contains("claim") || n.Contains("sample") || n.Contains("case")) return "NoOfClaims";
+        if (n.Contains("charge") || n.Contains("bill") || n.Contains("reimbursement") || n.Contains("balance"))
+            return "TotalCharge";
+        if (n.Contains("action")) return "ActionSolution";
+        if (n.Contains("feedback")) return "FeedbackResponse";
+        if (n.Contains("response by") || n == "responsibility") return "Responsibility";
+        if (n.Contains("discussion")) return "DiscussionDate";
+        if (n == "eta") return "ETA";
+        if (n.Contains("closed")) return "ClosedDate";
+        if (n == "status") return "Status";
+        return col.ColumnName ?? "";
     }
 
     public sealed record InsightsSheetLayout(string[] Headers, string FooterTitle, string FooterSub);
 
     private static void WriteSheet(
-        IXLWorksheet ws, IReadOnlyList<NoteInsight> insights, string? labName, string? reportName, int startRow = 1)
+        IXLWorksheet ws,
+        IReadOnlyList<NoteInsight> insights,
+        string? labName,
+        string? reportName,
+        int startRow = 1,
+        IReadOnlyList<NotesTemplateColumnDef>? templateColumns = null)
     {
-        var layout = LayoutFor(reportName);
-        const int colCount = 14;
+        var layout = LayoutFor(reportName, templateColumns);
+        const int colCount = 13;
         var isProduction = (reportName ?? "").Contains("Production", StringComparison.OrdinalIgnoreCase);
         var isCollection = (reportName ?? "").Contains("Collection", StringComparison.OrdinalIgnoreCase);
         var splitTitle = isProduction || isCollection;
@@ -133,7 +214,7 @@ public static class InsightsExcelBuilder
         var titleRow = startRow;
         if (splitTitle)
         {
-            var leftTitle = ws.Range(titleRow, 1, titleRow, 7);
+            var leftTitle = ws.Range(titleRow, 1, titleRow, 6);
             leftTitle.Merge();
             ws.Cell(titleRow, 1).Value = "Key Insights & Highlights";
             ws.Cell(titleRow, 1).Style.Font.Bold = true;
@@ -143,12 +224,12 @@ public static class InsightsExcelBuilder
             leftTitle.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             leftTitle.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
 
-            var rightTitle = ws.Range(titleRow, 8, titleRow, colCount);
+            var rightTitle = ws.Range(titleRow, 7, titleRow, colCount);
             rightTitle.Merge();
-            ws.Cell(titleRow, 8).Value = "Active Priorities / Suggestions";
-            ws.Cell(titleRow, 8).Style.Font.Bold = true;
-            ws.Cell(titleRow, 8).Style.Font.FontSize = 12;
-            ws.Cell(titleRow, 8).Style.Font.FontColor = XLColor.White;
+            ws.Cell(titleRow, 7).Value = "Active Priorities / Suggestions";
+            ws.Cell(titleRow, 7).Style.Font.Bold = true;
+            ws.Cell(titleRow, 7).Style.Font.FontSize = 12;
+            ws.Cell(titleRow, 7).Style.Font.FontColor = XLColor.White;
             rightTitle.Style.Fill.BackgroundColor = ActionRed;
             rightTitle.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             rightTitle.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
@@ -178,8 +259,8 @@ public static class InsightsExcelBuilder
             cell.Style.Font.Bold = true;
             cell.Style.Font.FontColor = XLColor.White;
             cell.Style.Fill.BackgroundColor = splitTitle
-                ? (c >= 8 ? ActionRed : HeaderGreen)
-                : (c == 8 ? ActionRed : HeaderGreen);
+                ? (c >= 7 ? ActionRed : HeaderGreen)
+                : (c == 7 ? ActionRed : HeaderGreen);
             cell.Style.Alignment.WrapText = true;
             cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
@@ -192,11 +273,15 @@ public static class InsightsExcelBuilder
         var displayNo = 1;
         foreach (var n in insights.OrderBy(x => x.EntryNo ?? int.MaxValue).ThenBy(x => x.NoteId))
         {
-            ws.Cell(row, 1).Value = n.EntryNo ?? displayNo;
+            ws.Cell(row, 1).Value = displayNo;
             ws.Cell(row, 2).Value = ExcelTheme.SanitizeText(DisplayRisk(n));
             ws.Cell(row, 3).Value = ExcelTheme.SanitizeText(n.ResponsibleParty ?? "");
             ws.Cell(row, 4).Value = ExcelTheme.SanitizeText(StripHtml(n.Insights));
-            if (n.NoOfSamples.HasValue) ws.Cell(row, 5).Value = n.NoOfSamples.Value;
+            if (n.NoOfSamples.HasValue)
+            {
+                ws.Cell(row, 5).Value = n.NoOfSamples.Value;
+                ws.Cell(row, 5).Style.NumberFormat.Format = "#,##0";
+            }
             if (n.TotalCharge.HasValue)
             {
                 ws.Cell(row, 6).Value = n.TotalCharge.Value;
@@ -204,35 +289,13 @@ public static class InsightsExcelBuilder
                 ws.Cell(row, 6).Style.Font.Bold = true;
             }
 
-            if (!string.IsNullOrWhiteSpace(n.DataLink))
-            {
-                var dataCell = ws.Cell(row, 7);
-                var link = n.DataLink.Trim();
-                dataCell.Value = ExcelTheme.SanitizeText(link);
-                if (Uri.TryCreate(link, UriKind.Absolute, out var uri)
-                    && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeMailto))
-                {
-                    try
-                    {
-                        dataCell.Value = "Link";
-                        dataCell.SetHyperlink(new XLHyperlink(uri.AbsoluteUri));
-                        dataCell.Style.Font.FontColor = LinkBlue;
-                        dataCell.Style.Font.Underline = XLFontUnderlineValues.Single;
-                    }
-                    catch
-                    {
-                        dataCell.Value = ExcelTheme.SanitizeText(link);
-                    }
-                }
-            }
-
-            ws.Cell(row, 8).Value = ExcelTheme.SanitizeText(StripHtml(n.ActionSolution));
-            ws.Cell(row, 9).Value = ExcelTheme.SanitizeText(StripHtml(n.FeedbackResponse));
-            ws.Cell(row, 10).Value = ExcelTheme.SanitizeText(n.Responsibility ?? "");
-            WriteDate(ws.Cell(row, 11), n.DiscussionDate);
-            WriteDate(ws.Cell(row, 12), n.ETA);
-            WriteDate(ws.Cell(row, 13), n.ClosedDate);
-            ws.Cell(row, 14).Value = ExcelTheme.SanitizeText(n.StatusLabel ?? n.StatusCode);
+            ws.Cell(row, 7).Value = ExcelTheme.SanitizeText(StripHtml(n.ActionSolution));
+            ws.Cell(row, 8).Value = ExcelTheme.SanitizeText(StripHtml(n.FeedbackResponse));
+            ws.Cell(row, 9).Value = ExcelTheme.SanitizeText(n.Responsibility ?? "");
+            WriteDate(ws.Cell(row, 10), n.DiscussionDate);
+            WriteDate(ws.Cell(row, 11), n.ETA);
+            WriteDate(ws.Cell(row, 12), n.ClosedDate);
+            ws.Cell(row, 13).Value = ExcelTheme.SanitizeText(n.StatusLabel ?? n.StatusCode);
 
             var rowBg = splitTitle && row % 2 == 0
                 ? XLColor.FromHtml("#F2F2F2")
@@ -245,11 +308,11 @@ public static class InsightsExcelBuilder
                 cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
                 cell.Style.Border.OutsideBorderColor = XLColor.FromHtml("#CCCCCC");
                 cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
-                cell.Style.Alignment.WrapText = c is 4 or 8 or 9;
+                cell.Style.Alignment.WrapText = c is 4 or 7 or 8;
             }
 
             ApplyRiskStyle(ws.Cell(row, 2), n);
-            ApplyStatusStyle(ws.Cell(row, 14), n);
+            ApplyStatusStyle(ws.Cell(row, 13), n);
 
             row++;
             displayNo++;
@@ -284,14 +347,13 @@ public static class InsightsExcelBuilder
             ws.Column(4).Width = 48;
             ws.Column(5).Width = 14;
             ws.Column(6).Width = 16;
-            ws.Column(7).Width = 12;
-            ws.Column(8).Width = 42;
-            ws.Column(9).Width = 28;
+            ws.Column(7).Width = 42;
+            ws.Column(8).Width = 28;
+            ws.Column(9).Width = 16;
             ws.Column(10).Width = 16;
-            ws.Column(11).Width = 16;
-            ws.Column(12).Width = 12;
-            ws.Column(13).Width = 14;
-            ws.Column(14).Width = 16;
+            ws.Column(11).Width = 12;
+            ws.Column(12).Width = 14;
+            ws.Column(13).Width = 16;
             ws.TabColor = ActionRed;
         }
     }

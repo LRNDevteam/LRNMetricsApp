@@ -862,9 +862,8 @@ GO
 
 -- =====================================================================
 -- 10. Insurance vs Payment %
--- Source: dbo.ClaimLevelData / dbo.Cove_CS_InsuranceVsPaymentPct
--- No-filter returns PanelGroupCount AS NoOfClaims (snapshot column).
--- Filter re-aggregates using AVG(PaymentPercent) * 100 (matches refresh SP).
+-- Payment % = SUM(InsurancePayment) / SUM(ChargeAmount) × 100
+-- (same as Reimbursement Rate). Do not AVG ClaimLevelData.PaymentPercent.
 -- =====================================================================
 CREATE OR ALTER PROCEDURE dbo.usp_GetCove_CS_InsuranceVsPaymentPct
     @PayerNames      NVARCHAR(MAX) = NULL,
@@ -878,27 +877,6 @@ CREATE OR ALTER PROCEDURE dbo.usp_GetCove_CS_InsuranceVsPaymentPct
 AS
 BEGIN
     SET NOCOUNT ON;
-
-    DECLARE @HasFilter BIT =
-        CASE
-            WHEN NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL THEN 1
-            WHEN NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL THEN 1
-            WHEN @DosFrom       IS NOT NULL OR @DosTo       IS NOT NULL THEN 1
-            WHEN @FirstBillFrom IS NOT NULL OR @FirstBillTo IS NOT NULL THEN 1
-            WHEN @CheckDateFrom IS NOT NULL OR @CheckDateTo IS NOT NULL THEN 1
-            ELSE 0
-        END;
-
-    IF @HasFilter = 0
-    BEGIN
-        SELECT  PayerName,
-                PanelGroupCount AS NoOfClaims,
-                InsurancePayment,
-                PaymentPct
-        FROM    dbo.Cove_CS_InsuranceVsPaymentPct
-        ORDER BY InsurancePayment DESC;
-        RETURN;
-    END;
 
     DECLARE @PayerList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
     DECLARE @PanelList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
@@ -917,11 +895,12 @@ BEGIN
     ;WITH base AS (
         SELECT
             LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) AS PayerName,
-            LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) AS PanelName,
             TRY_CAST(InsurancePayment AS DECIMAL(18,2))    AS InsPay,
-            TRY_CAST(PaymentPercent   AS DECIMAL(9,4))     AS PayPct
+            TRY_CAST(ChargeAmount     AS DECIMAL(18,2))    AS ChgAmt,
+            NULLIF(LTRIM(RTRIM(ClaimID)), '')              AS ClaimID
         FROM dbo.ClaimLevelData
         WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+          AND NULLIF(LTRIM(RTRIM(PayerName_Raw)), '') IS NOT NULL
           AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
           AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
           AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
@@ -933,9 +912,14 @@ BEGIN
     )
     SELECT
         PayerName,
-        COUNT(PanelName)                              AS NoOfClaims,
-        ISNULL(SUM(InsPay), 0)                        AS InsurancePayment,
-        ROUND(ISNULL(AVG(PayPct), 0) * 100, 0)        AS PaymentPct
+        COUNT(DISTINCT ClaimID)                                           AS NoOfClaims,
+        ISNULL(SUM(InsPay), 0)                                            AS InsurancePayment,
+        ISNULL(SUM(ChgAmt), 0)                                            AS PaidChargeAmount,
+        CAST(
+            CASE WHEN ISNULL(SUM(ChgAmt), 0) = 0 THEN 0
+                 ELSE ROUND(SUM(InsPay) * 100.0 / SUM(ChgAmt), 2)
+            END AS DECIMAL(9,4)
+        )                                                                 AS PaymentPct
     FROM base
     GROUP BY PayerName
     ORDER BY InsurancePayment DESC;

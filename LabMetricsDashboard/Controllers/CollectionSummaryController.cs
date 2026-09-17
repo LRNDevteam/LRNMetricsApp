@@ -750,8 +750,9 @@ public class CollectionSummaryController : Controller
                 var insights = await InsightsExcelBuilder.LoadAsync(_notes, connStr, "Collection Report", ct);
                 try
                 {
+                    var tplCols = await InsightsExcelBuilder.LoadTemplateColumnsAsync(_notes, connStr, "Collection Report", ct);
                     var bytes = InsightsExcelBuilder.InjectIntoExistingWorkbook(
-                        preGenFile, insights, selectedLab, "Collection Report");
+                        preGenFile, insights, selectedLab, "Collection Report", tplCols);
                     return File(bytes,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         downloadName);
@@ -836,7 +837,8 @@ public class CollectionSummaryController : Controller
                 lineRowsOmitted:  !includeLineRaw  ? lineCount  : null);
 
             var liveInsights = await InsightsExcelBuilder.LoadAsync(_notes, connStr, "Collection Report", ct);
-            InsightsExcelBuilder.InsertAsFirstSheet(workbook, liveInsights, selectedLab, "Collection Report");
+            var tplCols = await InsightsExcelBuilder.LoadTemplateColumnsAsync(_notes, connStr, "Collection Report", ct);
+            InsightsExcelBuilder.InsertAsFirstSheet(workbook, liveInsights, selectedLab, "Collection Report", tplCols);
             CollectionSummaryExcelExportBuilder.ApplySheetOrder(workbook);
 
             // Free raw data lists early to reduce peak memory before SaveAs

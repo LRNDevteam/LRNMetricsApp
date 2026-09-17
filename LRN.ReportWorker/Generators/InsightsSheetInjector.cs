@@ -19,6 +19,7 @@ internal static class InsightsSheetInjector
         CancellationToken ct)
     {
         var insights = await InsightsExcelBuilder.LoadAsync(notes, connectionString, reportName, ct);
-        InsightsExcelBuilder.InsertAsFirstSheet(workbook, insights, labName, reportName);
+        var columns = await InsightsExcelBuilder.LoadTemplateColumnsAsync(notes, connectionString, reportName, ct);
+        InsightsExcelBuilder.InsertAsFirstSheet(workbook, insights, labName, reportName, columns);
     }
 }

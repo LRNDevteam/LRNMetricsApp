@@ -424,7 +424,8 @@ public class LisSummaryController : Controller
 				filters.Collector);
 
 			var lisInsights = await InsightsExcelBuilder.LoadAsync(_notes, config.DbConnectionString, "LIS Report", cancellationToken);
-			InsightsExcelBuilder.InsertAsFirstSheet(workbook, lisInsights, selectedLabName, "LIS Report");
+			var lisTplCols = await InsightsExcelBuilder.LoadTemplateColumnsAsync(_notes, config.DbConnectionString, "LIS Report", cancellationToken);
+			InsightsExcelBuilder.InsertAsFirstSheet(workbook, lisInsights, selectedLabName, "LIS Report", lisTplCols);
 
 			await using var stream = new MemoryStream();
 			workbook.SaveAs(stream);

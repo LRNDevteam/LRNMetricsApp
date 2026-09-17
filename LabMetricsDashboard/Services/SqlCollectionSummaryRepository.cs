@@ -718,8 +718,14 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             var insPayOrd = r.GetOrdinal("InsurancePayment");
             var insPay    = r.IsDBNull(insPayOrd) ? 0m : Convert.ToDecimal(r.GetValue(insPayOrd));
 
-            var pctOrd = r.GetOrdinal("PaymentPct");
-            var pct    = r.IsDBNull(pctOrd) ? 0m : Convert.ToDecimal(r.GetValue(pctOrd));
+            var pctOrd = HasColumn(r, "PaymentPct") ? r.GetOrdinal("PaymentPct") : -1;
+            var pct    = pctOrd >= 0 && !r.IsDBNull(pctOrd) ? Convert.ToDecimal(r.GetValue(pctOrd)) : 0m;
+
+            var paidChg = GetDecimalOrNull(r, "PaidChargeAmount")
+                ?? GetDecimalOrNull(r, "ChargeAmount")
+                ?? GetDecimalOrNull(r, "SumChargeAmount")
+                ?? GetDecimalOrNull(r, "PaidChargeAmt")
+                ?? 0m;
 
             int? billYear  = null;
             int? billMonth = null;
@@ -750,7 +756,6 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 var ord = r.GetOrdinal("PanelGroupCount");
                 if (!r.IsDBNull(ord)) claims = Convert.ToInt32(r.GetValue(ord));
             }
-            decimal paidChg = pct > 0 ? Math.Round(insPay * 100m / pct, 2) : 0m;
             rows.Add(new InsurancePaymentPctRow(
                 SummaryId:            null,
                 PayerName:            payer,
@@ -763,7 +768,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 RefreshedAt:          null,
                 BillYear:             billYear,
                 BillMonth:            billMonth,
-                SnapshotPaymentPct:   pct));
+                SnapshotPaymentPct:   paidChg != 0m ? null : pct));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
         return new InsurancePaymentPctResult(rows);
@@ -2173,7 +2178,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
         var prefix = LabCollectionPrefix.GetPrefix(labName);
-        if (!string.IsNullOrWhiteSpace(prefix))
+        if (!string.IsNullOrWhiteSpace(prefix) && !IsCoveCollectionPrefix(prefix))
             return await GetInsurancePaymentPctViaSpAsync(
                 connectionString,
                 CollectionGetSp(prefix, "CS_InsuranceVsPaymentPct"),
@@ -2199,21 +2204,15 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
 
         var whereStr = string.Join(" AND ", whereClauses);
 
-        // ?? Insurance vs Payment % query ????????????????????????
-        // Total claims and payments from all rows (InsurancePayment > 0).
-        // Payment % numerator/denominator from Fully Paid + Partially Paid only
-        // (conditional aggregation avoids a second pass).
+        // Payment % = SUM(InsurancePayment) / SUM(ChargeAmount) × 100
+        // (same as Reimbursement Rate). Do not use ClaimLevelData.PaymentPercent.
         var dataSql = $"""
             SELECT
                 LTRIM(RTRIM(PayerName))                                                AS PayerName,
                 COUNT(DISTINCT ClaimID)                                                 AS TotalClaims,
                 ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)            AS InsurancePayments,
-                ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
-                                THEN TRY_CAST(InsurancePayment AS DECIMAL(18,2)) ELSE 0 END), 0)
-                                                                                        AS PaidInsPayment,
-                ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
-                                THEN TRY_CAST(ChargeAmount AS DECIMAL(18,2)) ELSE 0 END), 0)
-                                                                                        AS PaidChargeAmt
+                ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)            AS PaidInsPayment,
+                ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)                AS PaidChargeAmt
             FROM dbo.ClaimLevelData
             WHERE {whereStr}
             GROUP BY LTRIM(RTRIM(PayerName))
