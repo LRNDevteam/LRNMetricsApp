@@ -226,6 +226,19 @@ if (!string.IsNullOrWhiteSpace(labConfigFolder) && Directory.Exists(labConfigFol
 {
     labConfigFileProvider = new PhysicalFileProvider(Path.GetFullPath(labConfigFolder));
 }
+else
+{
+    // The tracked LabConfigFolder is the deploy server's drive, so on a developer machine this
+    // is usually the whole story: the folder is absent, every lab is skipped, and the site comes
+    // up with an empty lab picker and no obvious cause. Say so once, naming the folder, rather
+    // than leaving it to be inferred from thirteen "file not found" lines.
+    LogStartupWarning(
+        string.IsNullOrWhiteSpace(labConfigFolder)
+            ? "LabConfig:LabConfigFolder is not set, so no lab will load and the lab picker will be empty."
+            : $"LabConfig:LabConfigFolder '{labConfigFolder}' does not exist on this machine, so every lab "
+              + "will be skipped and the lab picker will be empty. Point it at a folder holding the per-lab "
+              + "JSON files (see docs/LOCAL_DEV.md).");
+}
 
 foreach (var labName in labNamesToLoad)
 {

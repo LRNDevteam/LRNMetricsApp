@@ -31,6 +31,11 @@
     var logicTemplateCss = string.Empty;
     string DateValue(DateOnly? value) => value?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty;
     string RowCss(int level) => level <= 0 ? "lis-summary-section-row" : level == 1 ? "lis-summary-level-one" : level == 2 ? "lis-summary-level-two" : "lis-summary-level-three";
+    string StatusKey(string? value) => new string((value ?? string.Empty).ToUpperInvariant().Where(char.IsLetterOrDigit).ToArray());
+    // The workbook colours only the billed split that sits directly under the billable
+    // section; the same wording repeats under Self Pay, Client Bill and the rest.
+    bool IsBillableSection(string? description) => StatusKey(description) is "BILLABLE" or "INSURANCEBILL" or "INSURANCEBILLS";
+    bool IsBilledSplitRow(string? description) => StatusKey(description) is "BILLED" or "NOTBILLED" or "UNBILLED";
     var filters = Model.Filters;
     var isInHealth = Model.CurrentLabName.Contains("InHealth", StringComparison.OrdinalIgnoreCase);
     var activeTab = filters.EffectiveActiveTab;
@@ -160,52 +165,72 @@
     .lis-km {
         position: relative;
         overflow: hidden;
-        box-shadow: 0 10px 28px rgba(15, 39, 71, .06);
+        box-shadow: 0 6px 18px rgba(15, 39, 71, .05);
     }
 
     .lis-km::before {
         content: "";
         position: absolute;
         inset: 0 auto 0 0;
-        width: 4px;
+        width: 3px;
         background: linear-gradient(180deg, #1b3a5c 0%, #4f7fad 100%);
     }
 
     .lis-km-body {
-        padding: 1.15rem 1.25rem 1.2rem;
+        padding: .65rem .85rem .7rem;
     }
 
     .lis-km-header {
         display: flex;
-        align-items: flex-start;
+        align-items: center;
         justify-content: space-between;
-        gap: .85rem 1.25rem;
+        gap: .4rem .9rem;
         flex-wrap: wrap;
-        margin-bottom: 1rem;
+        margin-bottom: .55rem;
+    }
+
+    .lis-km-title {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: .1rem .45rem;
+        min-width: 0;
+    }
+
+    .lis-km-title .section-title {
+        font-size: .95rem;
+        line-height: 1.2;
+    }
+
+    .lis-km-title .section-subtitle {
+        margin: 0;
+        color: #8496ab;
+        font-size: .72rem;
+        line-height: 1.2;
     }
 
     .lis-km-filter {
         display: inline-flex;
         align-items: center;
-        gap: .45rem;
+        gap: .35rem;
         max-width: 100%;
-        padding: .4rem .7rem;
-        border-radius: .7rem;
+        padding: .16rem .45rem .16rem .18rem;
+        border-radius: 999px;
         background: #f3f7fb;
         border: 1px solid #e2ebf4;
         color: #5b6f86;
-        font-size: .75rem;
+        font-size: .68rem;
         font-weight: 500;
-        line-height: 1.25;
+        line-height: 1.3;
     }
 
     .lis-km-filter-label {
         flex: 0 0 auto;
-        padding: .12rem .45rem;
-        border-radius: .45rem;
+        padding: .06rem .38rem;
+        border-radius: 999px;
         background: #1b3a5c;
         color: #fff;
-        font-size: .65rem;
+        font-size: .6rem;
         font-weight: 700;
         letter-spacing: .04em;
         text-transform: uppercase;
@@ -213,9 +238,8 @@
 
     .lis-km-panel {
         border: 1px solid #e4edf6;
-        border-radius: .9rem;
-        background:
-            linear-gradient(180deg, #f8fbfe 0%, #ffffff 42%);
+        border-radius: .55rem;
+        background: linear-gradient(180deg, #f8fbfe 0%, #ffffff 42%);
         overflow: hidden;
     }
 
@@ -228,14 +252,14 @@
     }
 
     .lis-km-table thead th {
-        padding: .7rem 1rem;
+        padding: .32rem .6rem;
         border: 0;
         border-bottom: 1px solid #e4edf6;
         background: transparent;
-        color: #6a7f97;
-        font-size: .68rem;
+        color: #7b8ea4;
+        font-size: .62rem;
         font-weight: 700;
-        letter-spacing: .08em;
+        letter-spacing: .07em;
         text-transform: uppercase;
         text-align: right;
         white-space: nowrap;
@@ -243,12 +267,12 @@
 
     .lis-km-table .lis-km-metric-head {
         text-align: left;
-        width: 28%;
+        width: 30%;
     }
 
     .lis-km-table tbody th,
     .lis-km-table tbody td {
-        padding: 1rem;
+        padding: .42rem .6rem;
         border: 0;
         border-bottom: 1px solid #edf2f7;
         vertical-align: middle;
@@ -263,49 +287,55 @@
     .lis-km-metric-name {
         text-align: left;
         font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .lis-km-metric-title {
-        display: block;
         color: #14324f;
-        font-size: .92rem;
+        font-size: .78rem;
         font-weight: 700;
-        line-height: 1.2;
+        line-height: 1.25;
     }
 
     .lis-km-metric-unit {
-        display: block;
-        margin-top: .18rem;
-        color: #8496ab;
-        font-size: .7rem;
+        margin-left: .3rem;
+        color: #9aaabc;
+        font-size: .64rem;
         font-weight: 500;
-        letter-spacing: .02em;
+        letter-spacing: .01em;
     }
 
     .lis-km-table tbody td {
         text-align: right;
     }
 
+    /* Value and delta share one line so each metric stays a single compact row. */
+    .lis-km-cell {
+        display: inline-flex;
+        align-items: baseline;
+        justify-content: flex-end;
+        gap: .3rem;
+    }
+
     .lis-km-value {
-        display: block;
         color: #001b44;
-        font-size: 1.28rem;
+        font-size: .95rem;
         font-weight: 800;
         font-variant-numeric: tabular-nums;
-        letter-spacing: -.02em;
-        line-height: 1.1;
+        letter-spacing: -.01em;
+        line-height: 1.2;
     }
 
     .lis-km-delta {
-        display: inline-block;
-        margin-top: .28rem;
-        padding: .08rem .4rem;
+        padding: .02rem .3rem;
         border-radius: 999px;
-        font-size: .68rem;
+        font-size: .62rem;
         font-weight: 700;
         font-variant-numeric: tabular-nums;
-        letter-spacing: .01em;
-        line-height: 1.2;
+        line-height: 1.3;
+        white-space: nowrap;
     }
 
     .lis-km-delta.is-better {
@@ -344,11 +374,21 @@
         .lis-km-table thead th,
         .lis-km-table tbody th,
         .lis-km-table tbody td {
-            padding: .75rem .7rem;
+            padding: .4rem .45rem;
+        }
+
+        /* Narrow columns cannot hold the value and its delta side by side. */
+        .lis-km-cell {
+            display: block;
+        }
+
+        .lis-km-delta {
+            display: inline-block;
+            margin-top: .15rem;
         }
 
         .lis-km-value {
-            font-size: 1.08rem;
+            font-size: .88rem;
         }
 
         .lis-km-table .lis-km-metric-head {
@@ -588,9 +628,10 @@
         max-height: min(76vh, calc(100vh - 210px));
         overflow: auto;
         position: relative;
-        border: 1px solid #cbd8e6;
-        border-radius: .85rem;
+        border: 1px solid #e0e6ed;
+        border-radius: 14px;
         background: #fff;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, .05);
         scrollbar-gutter: stable both-edges;
     }
 
@@ -604,9 +645,11 @@
         color: #00214d;
     }
 
+        /* Header bands, grid lines and total colours below are the Production Summary
+           palette (.pr-table), so the two reports read as one family. */
         .lis-summary-table.lis-freeze-table th,
         .lis-summary-table.lis-freeze-table td {
-            border: 1px solid #d5e1ef !important;
+            border: 1px solid #e2e8f0 !important;
             padding: .38rem .45rem;
             background-clip: padding-box;
             height: 29px;
@@ -616,35 +659,47 @@
             position: sticky;
             top: var(--lis-sticky-top, 0px);
             z-index: 40;
-            background: #123b63 !important;
-            color: #fff !important;
-            font-weight: 800;
+            background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%) !important;
+            color: rgba(255, 255, 255, .92) !important;
+            font-weight: 700;
             text-align: center;
             vertical-align: middle;
             text-transform: uppercase;
-            font-size: .67rem;
-            letter-spacing: .015em;
+            font-size: .64rem;
+            letter-spacing: .04em;
             white-space: nowrap;
-            border-color: #284f75 !important;
+            border-color: #0a2a4a !important;
         }
 
         .lis-summary-table.lis-freeze-table thead .year-header th {
-            background: #08294d !important;
+            background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%) !important;
             color: #fff !important;
         }
 
         .lis-summary-table.lis-freeze-table thead .month-header th {
-            background: #174c76 !important;
+            background: linear-gradient(135deg, #162d50 0%, #1b4a6c 100%) !important;
             color: #fff !important;
+            font-size: .6rem;
         }
 
         .lis-summary-table.lis-freeze-table thead .sample-header th {
-            background: #0d5f93 !important;
+            background: #1e5a8a !important;
             color: #fff !important;
+            font-size: .58rem;
+            font-weight: 600;
         }
 
         .lis-summary-table.lis-freeze-table thead th.year-total-head {
-            background: #a46500 !important;
+            background: linear-gradient(135deg, #854d0e 0%, #a16207 100%) !important;
+            color: #fff !important;
+        }
+
+        .lis-summary-table.lis-freeze-table thead .sample-header th.year-total-head {
+            background: #a16207 !important;
+        }
+
+        .lis-summary-table.lis-freeze-table thead th.grand-total-cell {
+            background: linear-gradient(135deg, #78350f 0%, #92400e 100%) !important;
             color: #fff !important;
         }
 
@@ -716,33 +771,38 @@
         font-weight: 700;
     }
 
-    .lis-summary-level-two td:nth-child(2) {
-        padding-left: 1.5rem !important;
+    /* The manual workbook bands the Billed / Not Billed split under Billable in light
+       green, and analysts find that split by colour before they read the labels. The
+       year and grand-total columns keep their own gold banding. */
+    .lis-summary-billed-split td:not(.year-total-cell):not(.grand-total-cell),
+    .lis-summary-billed-split .sticky-col-1,
+    .lis-summary-billed-split .sticky-col-2 {
+        background: #e2efda !important;
+        color: #23431a;
     }
 
     .year-total-cell {
-        background: #fff8df !important;
+        background: #fefce8 !important;
         font-weight: 800;
         color: #001b44;
     }
 
-    .grand-total-cell,
-    .grand-total-row td {
-        background: #fff2cc !important;
-        font-weight: 900;
+    .grand-total-cell {
+        background: #fef3c7 !important;
+        font-weight: 800;
         color: #001b44;
     }
 
+    /* Production Summary closes its pivot with a solid navy total band. */
+    .grand-total-row td,
     .grand-total-row .sticky-col-1,
-    .grand-total-row .sticky-col-2 {
-        background: #fff2cc !important;
-    }
-
-    .lis-summary-table.lis-freeze-table tbody tr:last-child td,
-    .lis-summary-table.lis-freeze-table tbody tr.lis-summary-section-row:last-child td {
-        background: #e5f4ee !important;
-        color: #007044;
-        font-weight: 900;
+    .grand-total-row .sticky-col-2,
+    .grand-total-row .sticky-col-3,
+    .lis-summary-table.lis-freeze-table tbody tr.grand-total-row td {
+        background: #0e3460 !important;
+        color: #fff !important;
+        font-weight: 800;
+        border-top: 2px solid #0a2a4a !important;
     }
 
     .lis-filter-shell .card-body {
@@ -1129,6 +1189,18 @@
         overflow: hidden;
         text-overflow: ellipsis;
     }
+
+    /* Sized in rem rather than em so the lab name keeps one size instead of
+       growing with the responsive h2 it sits in. */
+    .rpt-page-head .lis-lab-badge {
+        vertical-align: middle;
+        padding: .2rem .55rem;
+        border-radius: 999px;
+        font-size: .72rem;
+        font-weight: 700;
+        letter-spacing: .02em;
+        line-height: 1.35;
+    }
 </style>
 
 @if (TempData["LisSummaryError"] is string error && !string.IsNullOrWhiteSpace(error))
@@ -1140,8 +1212,7 @@
     <div class="rpt-page-head-main">
         <h2 class="mb-0 fw-bold">
             LIS Summary
-            <span class="badge bg-primary bg-gradient fw-semibold"
-                  style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">
+            <span class="badge bg-primary bg-gradient lis-lab-badge">
                 @(string.IsNullOrWhiteSpace(Model.CurrentLabName) ? "-" : Model.CurrentLabName)
             </span>
         </h2>
@@ -1460,12 +1531,20 @@ else if (activeTab == "summary")
                         </tr>
                     </thead>
                     <tbody>
+                        @{ var inBillableSection = false; }
                         @for (var rowIndex = 0; rowIndex < result.Rows.Count; rowIndex++)
                         {
                             var row = result.Rows[rowIndex];
                             var hasChildren = rowIndex + 1 < result.Rows.Count && result.Rows[rowIndex + 1].Level > row.Level;
                             var startExpanded = !hasChildren;
-                            <tr class="@RowCss(row.Level) @(hasChildren ? "lis-summary-has-children" : "")" data-lis-row="true" data-level="@row.Level" data-expanded="@(startExpanded ? "true" : "false")">
+                            if (row.Level <= 0)
+                            {
+                                inBillableSection = IsBillableSection(row.Description);
+                            }
+                            var billedSplitCss = inBillableSection && row.Level == 1 && IsBilledSplitRow(row.Description)
+                                ? "lis-summary-billed-split"
+                                : string.Empty;
+                            <tr class="@RowCss(row.Level) @billedSplitCss @(hasChildren ? "lis-summary-has-children" : "")" data-lis-row="true" data-level="@row.Level" data-expanded="@(startExpanded ? "true" : "false")">
                                 <td class="lis-code-col sticky-col-1">@row.Code</td>
                                 <td class="desc-col sticky-col-2">
                                     <span class="lis-summary-desc-content" style="--lis-row-level:@row.Level">

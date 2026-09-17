@@ -324,38 +324,17 @@
     margin-left: auto;
 }
 
-/* ── Dark theme ───────────────────────────────────────────────────────── */
-@media (prefers-color-scheme: dark) {
-    .dcr-page:not([data-theme="light"]) {
-        --ins-border: #33404f;
-        --ins-border-soft: #2a3644;
-        --ins-row-alt: #1b2531;
-        --ins-row-hover: #22303f;
-        --ins-text: #dfe7ef;
-        --ins-muted: #92a3b3;
-        --ins-surface: #16202b;
-    }
+/* ── Theme ────────────────────────────────────────────────────────────────
+   The grid renders light whatever the browser is set to. It reproduces the
+   client's workbook, whose band and category fills are light by definition, so
+   a dark surface behind them only ever half-converted: the workbook fills and
+   the dark green / red header bands stayed put while the rows, inputs and
+   scrollbars went dark around them, which is what made the page look broken.
 
-    .dcr-page .insight-table td.cell-impact { background: #2a2416 !important; }
-    .dcr-page .insight-table td.cell-closed { background: #16291d !important; }
-
-    .dcr-page .insight-table > tfoot > tr > th { background: #1d2935; }
-
-    .dcr-page .rich-editor,
-    .dcr-page .insight-table input[type="text"],
-    .dcr-page .insight-table input[type="date"],
-    .dcr-page .insight-table textarea {
-        background: #1b2531;
-        color: var(--ins-text);
-    }
-
-    /* The category fills stay as the workbook has them — they are how the sheet
-       is read, and a muted dark variant would lose the match. Text is forced
-       dark so it still sits legibly on those light fills. */
-    .dcr-page .insight-table td.cat-appeal-mr,
-    .dcr-page .insight-table td.cat-appeal,
-    .dcr-page .insight-table td.cat-review,
-    .dcr-page .insight-table td.cat-rebill { color: #1f2d3d; }
+   color-scheme also keeps the browser from darkening the controls it paints
+   itself — text boxes, date pickers and scrollbars inside the grid. */
+.dcr-page {
+    color-scheme: light;
 }
 
 /* ============================================================================
@@ -547,6 +526,227 @@ body.fs-open { overflow: hidden; }
 
 .dcr-page .claims-count { font-size: .82rem; }
 
+/* ── Claim Level: the filter bar ──────────────────────────────────────── */
+.dcr-page .claims-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: .5rem .75rem;
+    padding: .6rem .75rem;
+    margin-bottom: .75rem;
+    border: 1px solid var(--ins-border-soft);
+    border-radius: .6rem;
+    background: #f7fafd;
+}
+
+.dcr-page .claims-filter {
+    display: flex;
+    flex-direction: column;
+    gap: .2rem;
+    margin: 0;
+    min-width: 0;
+    flex: 1 1 11rem;
+    max-width: 16rem;
+}
+
+.dcr-page .claims-filter {
+    position: relative;
+}
+
+.dcr-page .claims-filter-label {
+    font-size: .66rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--ins-muted);
+}
+
+/* ── Searchable multi-select ──────────────────────────────────────────────
+   The closed control shows the first choice and a count rather than every
+   value: a payer list runs to hundreds of characters and would wrap the
+   filter bar to three rows before anyone had finished choosing. */
+.dcr-page .claims-ms-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .4rem;
+    width: 100%;
+    padding: .28rem .5rem;
+    border: 1px solid #ced4da;
+    border-radius: .375rem;
+    background: #fff;
+    color: var(--ins-text);
+    font-size: .78rem;
+    line-height: 1.5;
+    text-align: left;
+    cursor: pointer;
+}
+
+.dcr-page .claims-ms-toggle:hover { border-color: #adb5bd; }
+
+.dcr-page .claims-ms-toggle:focus-visible {
+    outline: 2px solid #9ec5f0;
+    outline-offset: -1px;
+    border-color: var(--ins-link);
+}
+
+.dcr-page .claims-ms-toggle.is-set {
+    border-color: var(--ins-link);
+    background: #f2f8ff;
+    font-weight: 600;
+}
+
+.dcr-page .claims-ms-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dcr-page .claims-ms-toggle .bi-chevron-down {
+    flex: 0 0 auto;
+    font-size: .66rem;
+    color: var(--ins-muted);
+    transition: transform .15s ease;
+}
+
+.dcr-page .claims-ms-toggle[aria-expanded="true"] .bi-chevron-down { transform: rotate(180deg); }
+
+.dcr-page .claims-ms-panel {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + .25rem);
+    left: 0;
+    width: 100%;
+    min-width: 15rem;
+    border: 1px solid var(--ins-border);
+    border-radius: .45rem;
+    background: #fff;
+    box-shadow: 0 8px 22px rgba(15, 39, 71, .16);
+    overflow: hidden;
+}
+
+.dcr-page .claims-ms-search {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    padding: .4rem .5rem;
+    border-bottom: 1px solid var(--ins-border-soft);
+    color: var(--ins-muted);
+}
+
+.dcr-page .claims-ms-search input {
+    flex: 1 1 auto;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    font-size: .78rem;
+    color: var(--ins-text);
+    background: transparent;
+}
+
+.dcr-page .claims-ms-tools {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .3rem .5rem;
+    border-bottom: 1px solid var(--ins-border-soft);
+    background: #f7fafd;
+}
+
+.dcr-page .claims-ms-tools button {
+    border: 0;
+    background: none;
+    padding: 0;
+    font-size: .7rem;
+    font-weight: 700;
+    color: var(--ins-link);
+    cursor: pointer;
+}
+
+.dcr-page .claims-ms-tools button:hover { text-decoration: underline; }
+
+.dcr-page .claims-ms-count {
+    margin-left: auto;
+    font-size: .68rem;
+    color: var(--ins-muted);
+}
+
+.dcr-page .claims-ms-list {
+    max-height: 15rem;
+    overflow-y: auto;
+}
+
+.dcr-page .claims-ms-option {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    margin: 0;
+    padding: .3rem .55rem;
+    font-size: .78rem;
+    line-height: 1.35;
+    cursor: pointer;
+}
+
+.dcr-page .claims-ms-option:hover { background: var(--ins-row-hover); }
+.dcr-page .claims-ms-option input { flex: 0 0 auto; margin: 0; }
+.dcr-page .claims-ms-option span { word-break: break-word; }
+
+.dcr-page .claims-ms-empty {
+    padding: .6rem .55rem;
+    font-size: .76rem;
+    color: var(--ins-muted);
+    text-align: center;
+}
+
+/* What the filter is worth, at the end of the chip row. Pushed right so the chips read as
+   "what you asked for" and these as "what it came to". */
+.dcr-page .claims-filter-totals {
+    display: inline-flex;
+    align-items: center;
+    gap: .9rem;
+    margin-left: auto;
+    padding-left: .6rem;
+}
+
+.dcr-page .claims-filter-total {
+    display: inline-flex;
+    align-items: baseline;
+    gap: .3rem;
+    white-space: nowrap;
+}
+
+.dcr-page .claims-filter-total-value {
+    color: var(--ins-green);
+    font-size: .9rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+.dcr-page .claims-filter-total-label {
+    color: var(--ins-muted);
+    font-size: .7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+}
+
+@media (max-width: 768px) {
+    .dcr-page .claims-filter-totals {
+        margin-left: 0;
+        padding-left: 0;
+        width: 100%;
+    }
+}
+
+.dcr-page .claims-chip-more {
+    margin-left: .3rem;
+    padding: 0 .3rem;
+    border-radius: 999px;
+    background: rgba(31, 78, 121, .12);
+    font-size: .68rem;
+    font-weight: 700;
+}
+
 .dcr-page .claims-filters {
     display: flex;
     flex-wrap: wrap;
@@ -685,10 +885,6 @@ body.fs-open { overflow: hidden; }
     .dcr-page .claims-scroll { max-height: 60vh; }
     .dcr-page .insight-legend .legend-hint { margin-left: 0; width: 100%; }
     .dcr-page .week-meta { display: block; margin-left: 0; }
-}
-
-@media (prefers-color-scheme: dark) {
-    .dcr-page:not([data-theme="light"]) .insight-table tr.week-divider > td { background: #1d2935 !important; }
 }
 
 /* ── Denial Insight: sortable headers & page-size selector ────────────── */

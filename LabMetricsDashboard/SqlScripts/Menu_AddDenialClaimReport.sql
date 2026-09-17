@@ -1,5 +1,9 @@
 /* ============================================================================
-   Adds the "Denial Claim Report" menu item (LRNMaster.dbo.MenuItems).
+   Adds the "Denial Summary" menu item (LRNMaster.dbo.MenuItems).
+
+   The report was renamed from "Denial Claim Report" to "Denial Summary"; the
+   controller and route keep their original names so existing links still work.
+   Re-run this script on an installed database to rename the existing menu row.
 
    The page itself is DenialClaimReportController/Index in LabMetricsDashboard;
    this row drives visibility, order and placement only, the same way
@@ -32,7 +36,7 @@ BEGIN TRY
     ORDER BY MenuItemId;
 
     -- Sits with the other denial entries: same MenuOrder, and MenuService breaks the tie on
-    -- MenuName ("Denial Claim Report" sorts just after "Denial Dashboard").
+    -- MenuName ("Denial Summary" sorts just after "Denial Dashboard").
     SELECT @MenuOrder = ISNULL((SELECT MenuOrder FROM dbo.MenuItems WHERE MenuItemId = @DenialDashboardId),
                                ISNULL((SELECT MAX(MenuOrder) FROM dbo.MenuItems
                                        WHERE ParentMenuItemId IS NULL AND IsDeleted = 0), 0) + 1);
@@ -49,7 +53,7 @@ BEGIN TRY
             (ParentMenuItemId, MenuName, ControllerName, ActionName, AreaName,
              IconClass, MenuOrder, IsDisabled, IsDeleted, CreatedBy, CreatedOn)
         VALUES
-            (NULL, 'Denial Claim Report', 'DenialClaimReport', 'Index', NULL,
+            (NULL, 'Denial Summary', 'DenialClaimReport', 'Index', NULL,
              'bi-file-earmark-medical', @MenuOrder, 0, 0, 'system', SYSUTCDATETIME());
 
         SET @MenuItemId = SCOPE_IDENTITY();
@@ -59,7 +63,7 @@ BEGIN TRY
     ELSE
     BEGIN
         UPDATE dbo.MenuItems
-        SET MenuName   = 'Denial Claim Report',
+        SET MenuName   = 'Denial Summary',
             IconClass  = 'bi-file-earmark-medical',
             MenuOrder  = @MenuOrder,
             IsDisabled = 0,

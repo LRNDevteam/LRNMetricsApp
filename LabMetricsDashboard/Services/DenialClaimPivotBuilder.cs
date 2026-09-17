@@ -48,12 +48,19 @@ public static class DenialClaimPivotBuilder
         return label;
     }
 
+    /// <param name="loadedThrough">
+    /// The last date the lab's claim data covers, from ClaimLevelData.WeekFolder. Denials dated after
+    /// it are dropped before the columns are chosen: they are ahead of the load rather than part of
+    /// it, and a single such row is enough to open a column for a week nothing was loaded for and
+    /// push the oldest real week off the other end. Null leaves every dated row in.
+    /// </param>
     public static BreakdownPivotViewModel Build(
         IReadOnlyList<DenialSummaryGroup> groups,
         bool weekly,
         int maxPeriods,
         int topPayers = DefaultTopPayers,
-        int topDenialsPerPayer = DefaultTopDenialsPerPayer)
+        int topDenialsPerPayer = DefaultTopDenialsPerPayer,
+        DateTime? loadedThrough = null)
     {
         var model = new BreakdownPivotViewModel
         {
@@ -67,6 +74,14 @@ public static class DenialClaimPivotBuilder
         // page reports how many were dropped.
         var dated = groups.Where(g => g.DenialDate.HasValue && !string.IsNullOrWhiteSpace(g.DenialCodeNormalized)).ToList();
         if (dated.Count == 0) return model;
+
+        // Before the columns are picked, so the newest column is the newest week the data covers
+        // rather than the newest week a stray denial date happens to fall in.
+        if (loadedThrough is { } cutoff)
+        {
+            dated = dated.Where(g => g.DenialDate!.Value.Date <= cutoff.Date).ToList();
+            if (dated.Count == 0) return model;
+        }
 
         var months = BuildBasePeriods(dated, weekly, maxPeriods);
         if (months.Count == 0) return model;
@@ -149,13 +164,13 @@ public static class DenialClaimPivotBuilder
 
         model.Rows = rows;
 
-        // Totals sum the payers SHOWN, so the footer and the rows above it agree. Dropping the
-        // "all other" row means this is the top-N total, which is what the caption says it is.
-        var shownGroups = ranked.SelectMany(p => p.Groups).ToList();
-
-        model.TotalsByPeriod = columns.Select(c => Cell(c.Rows(shownGroups))).ToList();
-        model.GrandTotalClaimCount = shownGroups.Sum(g => g.ClaimCount);
-        model.GrandTotalBalance = shownGroups.Sum(g => g.InsuranceBalance);
+        // Totals cover every payer in the window, not just the top-N rows listed above them. The
+        // footer is read as "what the lab is carrying this period", so a total that silently
+        // excluded payer 11 onwards under-reported the AR - and the rows are a ranked extract of
+        // the data, never a claim to be all of it.
+        model.TotalsByPeriod = columns.Select(c => Cell(c.Rows(inWindow))).ToList();
+        model.GrandTotalClaimCount = inWindow.Sum(g => g.ClaimCount);
+        model.GrandTotalBalance = inWindow.Sum(g => g.InsuranceBalance);
 
         return model;
     }

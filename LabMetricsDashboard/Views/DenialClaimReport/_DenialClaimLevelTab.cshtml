@@ -7,7 +7,47 @@
    repository the Dashboard's Claim Level page uses, so this is that page's data - not a second,
    differently-shaped claim list that could disagree with it. *@
 
-<div class="card border-0 shadow-sm">
+@{
+    // The filters are lists now, so the panel and page URLs cannot be built from a single
+    // Url.Action anonymous object - it has no way to repeat a key. Appended by hand instead.
+    string FilterQuery()
+    {
+        var parts = new List<string>();
+
+        void Add(string key, IEnumerable<string> values)
+        {
+            foreach (var value in values)
+            {
+                parts.Add($"{key}={Uri.EscapeDataString(value)}");
+            }
+        }
+
+        Add("denialCode", Model.DenialCodes);
+        Add("payerName", Model.PayerNames);
+        Add("panelName", Model.PanelNames);
+        Add("clinicName", Model.ClinicNames);
+
+        return parts.Count == 0 ? string.Empty : "&" + string.Join("&", parts);
+    }
+
+    var filterQuery = FilterQuery();
+
+    // The chip names the first value and counts the rest, the same way the closed dropdown does -
+    // a row of twenty payer names would push the grid off the screen.
+    void Chip(string label, IReadOnlyList<string> values, string? extraCss = null)
+    {
+        if (values.Count == 0) return;
+
+        <span class="claims-chip @extraCss" title="@string.Join(", ", values)">
+            @label: <strong>@values[0]</strong>@if (values.Count > 1)
+            {
+                <span class="claims-chip-more">+@(values.Count - 1)</span>
+            }
+        </span>
+    }
+}
+
+<div class="card border-0 shadow-sm" data-has-filter="@(Model.HasFilter ? "true" : "false")">
     <div class="card-body">
 
         <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
@@ -34,8 +74,8 @@
                 <label class="claims-size">
                     <span>Rows</span>
                     <select class="form-select form-select-sm" data-panel="claims" id="claimsPageSize"
-                            data-panel-url-template="@Url.Action("ClaimsPanel", new { lab = Model.CurrentLab, denialCode = Model.DenialCode, payerName = Model.PayerName, claimPage = 1 })"
-                            data-page-url-template="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = Model.DenialCode, payerName = Model.PayerName, claimPage = 1 })">
+                            data-panel-url-template="@(Url.Action("ClaimsPanel", new { lab = Model.CurrentLab, claimPage = 1 }) + filterQuery)"
+                            data-page-url-template="@(Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", claimPage = 1 }) + filterQuery)">
                         @foreach (var size in LabMetricsDashboard.ViewModels.DenialClaimLevelTabViewModel.PageSizes)
                         {
                             <option value="@size" selected="@(size == Model.PageSize)">@size.ToString("N0")</option>
@@ -55,22 +95,104 @@
             </div>
         </div>
 
+        @* The four filters. A list comes back empty when this lab's claim table has no column for
+           it, and that filter is then left out rather than offered as a control that does nothing.
+           Submitting as GET keeps every filtered view a shareable URL. *@
+        <form method="get" asp-action="Index" class="claims-filter-bar">
+            <input type="hidden" name="lab" value="@Model.CurrentLab" />
+            <input type="hidden" name="tab" value="claims" />
+            <input type="hidden" name="claimPageSize" value="@Model.PageSize" />
+
+            @{
+                // One filter. The checkboxes carry the field name, so the browser posts the key once
+                // per selected value and the controller binds them as an array.
+                void Filter(string label, string field, IReadOnlyList<string> options, IReadOnlyList<string> selected)
+                {
+                    var selectedSet = new HashSet<string>(selected, StringComparer.OrdinalIgnoreCase);
+                    var summary = selected.Count == 0
+                        ? "All"
+                        : selected.Count == 1 ? selected[0] : $"{selected[0]}  +{selected.Count - 1}";
+
+                    <div class="claims-filter" data-ms>
+                        <span class="claims-filter-label">@label</span>
+
+                        <button type="button" class="claims-ms-toggle @(selected.Count > 0 ? "is-set" : null)"
+                                data-ms-toggle aria-expanded="false" aria-haspopup="listbox"
+                                title="@(selected.Count == 0 ? "All" : string.Join(", ", selected))">
+                            <span class="claims-ms-text" data-ms-text>@summary</span>
+                            <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                        </button>
+
+                        <div class="claims-ms-panel" data-ms-panel hidden>
+                            <div class="claims-ms-search">
+                                <i class="bi bi-search" aria-hidden="true"></i>
+                                <input type="search" data-ms-search autocomplete="off" spellcheck="false"
+                                       placeholder="Search @label.ToLowerInvariant()" aria-label="Search @label" />
+                            </div>
+
+                            <div class="claims-ms-tools">
+                                <button type="button" data-ms-all>Select all</button>
+                                <button type="button" data-ms-none>Clear</button>
+                                <span class="claims-ms-count" data-ms-counter></span>
+                            </div>
+
+                            <div class="claims-ms-list" data-ms-list role="listbox" aria-multiselectable="true">
+                                @foreach (var option in options)
+                                {
+                                    <label class="claims-ms-option" data-ms-option>
+                                        <input type="checkbox" name="@field" value="@option"
+                                               checked="@selectedSet.Contains(option)" />
+                                        <span data-ms-label>@option</span>
+                                    </label>
+                                }
+                            </div>
+
+                            <div class="claims-ms-empty" data-ms-empty hidden>No match</div>
+                        </div>
+                    </div>
+                }
+            }
+
+            @{ Filter("Denial Code", "denialCode", Model.FilterOptions.DenialCodes, Model.DenialCodes); }
+            @{ Filter("Payer", "payerName", Model.FilterOptions.Payers, Model.PayerNames); }
+
+            @if (Model.FilterOptions.Panels.Count > 0)
+            {
+                Filter("Panel", "panelName", Model.FilterOptions.Panels, Model.PanelNames);
+            }
+
+            @if (Model.FilterOptions.Clinics.Count > 0)
+            {
+                Filter("Clinic", "clinicName", Model.FilterOptions.Clinics, Model.ClinicNames);
+            }
+
+            <button type="submit" class="btn btn-sm btn-primary">
+                <i class="bi bi-funnel"></i> Apply
+            </button>
+        </form>
+
         @if (Model.HasFilter)
         {
             <div class="claims-filters">
                 <span class="claims-filters-label">Filtered by</span>
-                @if (!string.IsNullOrWhiteSpace(Model.DenialCode))
-                {
-                    <span class="claims-chip">
-                        Denial Code: <strong>@Model.DenialCode</strong>
+                @{ Chip("Denial Code", Model.DenialCodes); }
+                @{ Chip("Insurance", Model.PayerNames, "claims-chip-payer"); }
+                @{ Chip("Panel", Model.PanelNames); }
+                @{ Chip("Clinic", Model.ClinicNames); }
+
+                @* What the filter is actually worth. Both cover the whole filtered set, not the
+                   page on screen, and claims are DISTINCT - a claim denied on three lines is three
+                   rows in the grid but one claim to work. *@
+                <span class="claims-filter-totals">
+                    <span class="claims-filter-total">
+                        <span class="claims-filter-total-value">@Model.FilteredClaims.ToString("N0")</span>
+                        <span class="claims-filter-total-label">claims</span>
                     </span>
-                }
-                @if (!string.IsNullOrWhiteSpace(Model.PayerName))
-                {
-                    <span class="claims-chip claims-chip-payer">
-                        Insurance: <strong>@Model.PayerName</strong>
+                    <span class="claims-filter-total">
+                        <span class="claims-filter-total-value">@Acct2(Model.FilteredInsuranceBalance)</span>
+                        <span class="claims-filter-total-label">insurance balance</span>
                     </span>
-                }
+                </span>
             </div>
         }
 
@@ -229,8 +351,8 @@
             <div class="claims-pager">
                 <a class="btn btn-sm btn-outline-secondary @(Model.HasPrevious ? "" : "disabled")"
                    data-panel="claims"
-                   data-panel-url="@Url.Action("ClaimsPanel", new { lab = Model.CurrentLab, denialCode = Model.DenialCode, payerName = Model.PayerName, claimPage = Model.Page - 1, claimPageSize = Model.PageSize })"
-                   href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = Model.DenialCode, payerName = Model.PayerName, claimPage = Model.Page - 1, claimPageSize = Model.PageSize })">
+                   data-panel-url="@(Url.Action("ClaimsPanel", new { lab = Model.CurrentLab, claimPage = Model.Page - 1, claimPageSize = Model.PageSize }) + filterQuery)"
+                   href="@(Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", claimPage = Model.Page - 1, claimPageSize = Model.PageSize }) + filterQuery)">
                     <i class="bi bi-chevron-left"></i> Previous
                 </a>
                 <span class="claims-pager-label">
@@ -238,8 +360,8 @@
                 </span>
                 <a class="btn btn-sm btn-outline-secondary @(Model.HasNext ? "" : "disabled")"
                    data-panel="claims"
-                   data-panel-url="@Url.Action("ClaimsPanel", new { lab = Model.CurrentLab, denialCode = Model.DenialCode, payerName = Model.PayerName, claimPage = Model.Page + 1, claimPageSize = Model.PageSize })"
-                   href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = Model.DenialCode, payerName = Model.PayerName, claimPage = Model.Page + 1, claimPageSize = Model.PageSize })">
+                   data-panel-url="@(Url.Action("ClaimsPanel", new { lab = Model.CurrentLab, claimPage = Model.Page + 1, claimPageSize = Model.PageSize }) + filterQuery)"
+                   href="@(Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", claimPage = Model.Page + 1, claimPageSize = Model.PageSize }) + filterQuery)">
                     Next <i class="bi bi-chevron-right"></i>
                 </a>
             </div>

@@ -2241,14 +2241,44 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		var billedCount = FindInsuranceBillSummaryTotal(summaryRows, "BILLED", "BILLEDTOINSURANCE");
 		var unbilledCount = FindInsuranceBillSummaryTotal(summaryRows, "UNBILLED", "NOTBILLED");
 
-		var selfPayCount = raw
-			.Where(x => IsSelfPay(GetField(x, "Bill To"))
-				|| IsSelfPay(GetField(x, "Payment Method"))
-				|| IsSelfPay(GetField(x, "Client Status")))
-			.Sum(x => x.TotalClaims);
+		// Read the self-pay total off the summary rows too. Scanning the raw groups instead
+		// counted a sample whenever any one of three fields said self pay, so the card could
+		// not agree with the Self Pay row the table shows right below it.
+		var selfPayCount = FindSelfPaySummaryTotal(summaryRows)
+			?? raw
+				.Where(x => IsSelfPay(GetField(x, "Bill To"))
+					|| IsSelfPay(GetField(x, "Payment Method"))
+					|| IsSelfPay(GetField(x, "Client Status")))
+				.Sum(x => x.TotalClaims);
 
 		return new LisSummaryKpiCards(totalSamples, billedCount, unbilledCount, selfPayCount);
 	}
+
+	private static int? FindSelfPaySummaryTotal(List<LisSummaryRow> rows)
+	{
+		var candidates = rows.Where(row => IsSelfPayDescription(row.Description)).ToList();
+		if (candidates.Count == 0) return null;
+
+		// Most lab templates give self pay its own lettered section. The rest split it across
+		// numbered rows (resulted / not resulted), which are disjoint and so add up.
+		var sections = candidates.Where(row => row.Level == 0).ToList();
+		if (sections.Count == 0)
+		{
+			sections = candidates.Where(row => row.Level == 1).ToList();
+
+			// The dynamic layout used by labs without a template repeats self pay under both
+			// the bill-to and the final-status groupings; adding both would double the count.
+			var billToRows = sections
+				.Where(row => row.Logic.StartsWith(DynamicBillToSection, StringComparison.OrdinalIgnoreCase))
+				.ToList();
+			if (billToRows.Count > 0) sections = billToRows;
+		}
+
+		return sections.Count == 0 ? null : sections.Sum(row => row.Total);
+	}
+
+	private static bool IsSelfPayDescription(string? value)
+		=> CompareKey(value) is "SELFPAY" or "SELFPAID" or "PATIENTPAY" or "PATIENTPAID";
 
 	private static int FindInsuranceBillSummaryTotal(List<LisSummaryRow> rows, params string[] descriptions)
 	{
@@ -2317,7 +2347,76 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			ApplyNwlChargesCreatedRows(rows, raw);
 		}
 
+		if (logicSheetName.Equals("Cove", StringComparison.OrdinalIgnoreCase))
+		{
+			AppendUncoveredSubStatusRows(rows, raw, CoveNotBilledLogic);
+		}
+
 		return rows;
+	}
+
+	private const string CoveNotBilledLogic = "Final Status = [Billable] AND Billed/Not = [Not Billed]";
+
+	/// <summary>
+	/// Adds a bullet row for every Sub Status the data carries under <paramref name="parentLogic"/>
+	/// that no template bullet already covers.
+	/// </summary>
+	/// <remarks>
+	/// The template lists the sub statuses by name, so a status the lab renames or introduces after
+	/// the template was written simply stops being reported - the parent keeps counting it, but no
+	/// breakdown row shows where it went. That is how "Bill Facility" and the Tarshann discovery
+	/// files disappeared while the template still carried the old Medlytix wording.
+	/// </remarks>
+	private static void AppendUncoveredSubStatusRows(List<LisSummaryRow> rows, List<RawLisGroup> raw, string parentLogic)
+	{
+		var parentIndex = rows.FindIndex(row => CompareKey(row.Logic) == CompareKey(parentLogic));
+		if (parentIndex < 0) return;
+
+		var parentLevel = rows[parentIndex].Level;
+		var insertAt = parentIndex + 1;
+		var covered = new List<string>();
+
+		while (insertAt < rows.Count && rows[insertAt].Level > parentLevel)
+		{
+			if (rows[insertAt].Level == parentLevel + 1)
+			{
+				covered.AddRange(ReadSubStatusExpectations(rows[insertAt].Logic));
+			}
+
+			insertAt++;
+		}
+
+		var matches = raw.Where(x => MatchesTemplateLogic(x, parentLogic)).ToList();
+		if (matches.Count == 0) return;
+
+		var uncovered = matches
+			.GroupBy(x => CleanValue(GetField(x, "Sub Status")))
+			.Where(group => !string.IsNullOrWhiteSpace(group.Key) && !IsBlankValue(group.Key))
+			.Where(group => !covered.Any(expected => ValueMatches("Sub Status", group.Key, expected)))
+			.OrderByDescending(group => group.Sum(x => x.TotalClaims))
+			.ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+			.ToList();
+
+		foreach (var group in uncovered)
+		{
+			rows.Insert(insertAt, BuildRow("•", group.Key, $"{parentLogic} AND Sub Status = [{group.Key}]", parentLevel + 1, group.ToList()));
+			insertAt++;
+		}
+	}
+
+	private static List<string> ReadSubStatusExpectations(string logic)
+	{
+		var expectations = new List<string>();
+
+		foreach (var condition in SplitConditions(logic))
+		{
+			if (!TryParseCondition(condition, out var field, out var expectedText, out var negate)) continue;
+			if (negate || CanonicalFieldName(field) != "Sub Status") continue;
+
+			expectations.AddRange(ParseExpectedValues(expectedText));
+		}
+
+		return expectations;
 	}
 
 	private const string AugustusReadyToBillCountLogic = "Bill to = Insurance Bills AND Bill status = Unbilled AND Final Status =  Resulted yet to be billed";
@@ -2651,6 +2750,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		   && template.Logic.Contains("Final Status = [Billable]", StringComparison.OrdinalIgnoreCase)
 		   && template.Logic.Contains("Panel Type =", StringComparison.OrdinalIgnoreCase);
 
+	private const string DynamicBillToSection = "Bill To / Payment Type";
+
 	private static List<LisSummaryRow> BuildDynamicPivotRows(List<RawLisGroup> raw)
 	{
 		var rows = new List<LisSummaryRow>
@@ -2659,7 +2760,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		};
 
 		AddDimensionRows(rows, raw, "Result Status", x => GetField(x, "Resulted / Not"), "Result Status", 1);
-		AddNestedRows(rows, raw, "Bill To / Payment Type", x => GetField(x, "Bill To"), "Billed Status", x => GetField(x, "Billing Status"), "B");
+		AddNestedRows(rows, raw, DynamicBillToSection, x => GetField(x, "Bill To"), "Billed Status", x => GetField(x, "Billing Status"), "B");
 		AddNestedRows(rows, raw, "Final / Client Status", x => GetField(x, "Final Status"), "Sample / Category", x => GetField(x, "Sample Status"), "C");
 
 		RecalculateParentRowsFromChildren(rows);

@@ -61,6 +61,7 @@ public sealed class DenialInsightPanelViewModel
     // Column totals for the footer row.
     public int TotalDenials => Rows.Sum(r => r.NoOfDenials);
     public decimal TotalBalance => Rows.Sum(r => r.TotalBalance);
+    public int TotalClaimCount => Rows.Sum(r => r.ClaimCount);
     public decimal TotalInsuranceBalance => Rows.Sum(r => r.InsuranceBalance);
 
     /// <summary>
@@ -102,11 +103,26 @@ public sealed class DenialClaimLevelTabViewModel
     public string CurrentLab { get; set; } = string.Empty;
     public string? Error { get; set; }
 
-    /// <summary>The denial code the tab is filtered to, or null for every denied claim.</summary>
-    public string? DenialCode { get; set; }
+    /// <summary>
+    /// The filters in force. Each holds any number of values - alternatives within one filter,
+    /// narrowing across them - and an empty list means that filter is not applied.
+    /// </summary>
+    public List<string> DenialCodes { get; set; } = [];
+    public List<string> PayerNames { get; set; } = [];
+    public List<string> PanelNames { get; set; } = [];
+    public List<string> ClinicNames { get; set; } = [];
 
-    /// <summary>The insurance the tab is filtered to, or null for every payer.</summary>
-    public string? PayerName { get; set; }
+    /// <summary>
+    /// The first selected value of each filter, for the places that name a single one - the
+    /// drill-through links and the empty-result diagnosis.
+    /// </summary>
+    public string? DenialCode => DenialCodes.Count > 0 ? DenialCodes[0] : null;
+    public string? PayerName => PayerNames.Count > 0 ? PayerNames[0] : null;
+    public string? PanelName => PanelNames.Count > 0 ? PanelNames[0] : null;
+    public string? ClinicName => ClinicNames.Count > 0 ? ClinicNames[0] : null;
+
+    /// <summary>What the filter dropdowns offer, read from this lab's denied claims.</summary>
+    public DenialClaimFilterOptions FilterOptions { get; set; } = new([], [], [], []);
 
     public IReadOnlyList<string> DisplayColumns { get; set; } = Array.Empty<string>();
 
@@ -125,11 +141,21 @@ public sealed class DenialClaimLevelTabViewModel
     public int TotalFiltered { get; set; }
     public int TotalAll { get; set; }
 
+    /// <summary>
+    /// What the filtered set holds: distinct claims, and the insurance balance across all of it -
+    /// not just the rows on the current page.
+    /// </summary>
+    public int FilteredClaims { get; set; }
+    public decimal FilteredInsuranceBalance { get; set; }
+
     public int TotalPages => PageSize <= 0 ? 1 : Math.Max(1, (int)Math.Ceiling(TotalFiltered / (double)PageSize));
     public bool HasPrevious => Page > 1;
     public bool HasNext => Page < TotalPages;
 
-    public bool HasFilter => !string.IsNullOrWhiteSpace(DenialCode) || !string.IsNullOrWhiteSpace(PayerName);
+    public bool HasFilter => DenialCodes.Count > 0
+        || PayerNames.Count > 0
+        || PanelNames.Count > 0
+        || ClinicNames.Count > 0;
 
     /// <summary>Set only when a filtered result came back empty - says which filter emptied it.</summary>
     public DenialClaimDiagnosis? Diagnosis { get; set; }

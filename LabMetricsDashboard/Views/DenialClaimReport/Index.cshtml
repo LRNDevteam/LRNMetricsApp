@@ -1,7 +1,7 @@
 @using LabMetricsDashboard.Models
 @model LabMetricsDashboard.ViewModels.DenialClaimReportViewModel
 @{
-    ViewData["Title"] = "Denial Claim Report";
+    ViewData["Title"] = "Denial Summary";
     ViewData["SelectedLab"] = Model.CurrentLab;
 
     var tab = Model.ActiveTab;
@@ -17,7 +17,7 @@
 
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
         <div>
-            <h4 class="mb-1">Denial Claim Report</h4>
+            <h4 class="mb-1">Denial Summary</h4>
             <div class="text-muted" style="font-size:.85rem;">
                 Calculated from <strong>@Model.CurrentLab</strong>&rsquo;s claim-level data &mdash; denied claims with an
                 insurance balance still outstanding, grouped on Denial Date. Denial codes roll up to their
@@ -118,10 +118,11 @@
             <button class="nav-link @(tab == "claims" ? "active" : "")" data-bs-toggle="pill"
                     data-bs-target="#dcr-claims" type="button" data-tab-key="claims">
                 <i class="bi bi-list-columns-reverse me-2"></i>Claim Level
-                @if (Model.Claims.HasFilter)
-                {
-                    <span class="badge rounded-pill bg-warning text-dark ms-2">Filtered</span>
-                }
+                @* Always rendered, shown or hidden. The panel below is swapped by AJAX while this
+                   button is not, so clearing the filters has to be able to hide the badge without
+                   a full page load - which is why it used to stay lit on a cleared list. *@
+                <span class="badge rounded-pill bg-warning text-dark ms-2" id="claimsFilteredBadge"
+                      hidden="@(!Model.Claims.HasFilter)">Filtered</span>
             </button>
         </li>
     </ul>
@@ -193,6 +194,20 @@
                 if (btn && window.bootstrap) bootstrap.Tab.getOrCreateInstance(btn).show();
             };
 
+            // The Claim Level tab button lives outside the panel that AJAX replaces, so its
+            // "Filtered" badge has to be told when the filters change. The swapped markup carries
+            // data-has-filter for exactly this.
+            var syncClaimsBadge = function () {
+                var badge = document.getElementById('claimsFilteredBadge');
+                var pane = document.getElementById('dcr-claims');
+                if (!badge || !pane) return;
+
+                var source = pane.querySelector('[data-has-filter]');
+                if (!source) return;
+
+                badge.hidden = source.dataset.hasFilter !== 'true';
+            };
+
             var loadPanel = function (link) {
                 var key = link.dataset.panel;
                 var pane = panes[key];
@@ -210,6 +225,7 @@
                         // The replaced markup has no handlers of its own - rebind before the user
                         // can click anything in it.
                         initPanels();
+                        syncClaimsBadge();
                         if (link.dataset.panelTab) showTab(link.dataset.panelTab);
                         // The address bar follows the panel, so a refresh or a copied link lands
                         // back on what is actually on screen.
@@ -225,6 +241,32 @@
 
                 return true;
             };
+
+            // Closing an open filter dropdown. Delegated once, rather than per dropdown, so a panel
+            // swap cannot leave stale document-level handlers behind.
+            document.addEventListener('click', function (e) {
+                var inside = e.target.closest ? e.target.closest('[data-ms]') : null;
+
+                document.querySelectorAll('[data-ms]').forEach(function (root) {
+                    if (root === inside) return;
+                    var panel = root.querySelector('[data-ms-panel]');
+                    if (!panel || panel.hidden) return;
+
+                    panel.hidden = true;
+                    var toggle = root.querySelector('[data-ms-toggle]');
+                    if (toggle) toggle.setAttribute('aria-expanded', 'false');
+                });
+            });
+
+            document.addEventListener('keydown', function (e) {
+                if (e.key !== 'Escape') return;
+
+                document.querySelectorAll('[data-ms] [data-ms-panel]:not([hidden])').forEach(function (panel) {
+                    panel.hidden = true;
+                    var toggle = panel.parentElement.querySelector('[data-ms-toggle]');
+                    if (toggle) toggle.setAttribute('aria-expanded', 'false');
+                });
+            });
 
             // Delegated, so links inside a freshly swapped panel work without rebinding this.
             document.addEventListener('click', function (e) {
@@ -370,6 +412,111 @@
                     if (!loadPanel(link)) window.location.href = link.getAttribute('href');
                 });
             }
+
+            // Searchable multi-select for the Claim Level filters. The checkboxes are the real
+            // state and carry the field name, so the form still posts correctly with this script
+            // absent - the dropdown only decides what is on screen.
+            document.querySelectorAll('[data-ms]:not([data-bound])').forEach(function (root) {
+                root.dataset.bound = '1';
+
+                var toggle = root.querySelector('[data-ms-toggle]');
+                var panel = root.querySelector('[data-ms-panel]');
+                var search = root.querySelector('[data-ms-search]');
+                var list = root.querySelector('[data-ms-list]');
+                var text = root.querySelector('[data-ms-text]');
+                var counter = root.querySelector('[data-ms-counter]');
+                var empty = root.querySelector('[data-ms-empty]');
+                if (!toggle || !panel || !list) return;
+
+                var options = Array.prototype.slice.call(list.querySelectorAll('[data-ms-option]'));
+                var boxes = options.map(function (o) { return o.querySelector('input'); });
+
+                var refresh = function () {
+                    var picked = boxes.filter(function (b) { return b.checked; });
+                    var names = picked.map(function (b) { return b.value; });
+
+                    // First choice plus a count, never the whole list.
+                    text.textContent = names.length === 0
+                        ? 'All'
+                        : names.length === 1 ? names[0] : names[0] + '  +' + (names.length - 1);
+
+                    toggle.classList.toggle('is-set', names.length > 0);
+                    toggle.title = names.length === 0 ? 'All' : names.join(', ');
+                    if (counter) counter.textContent = names.length ? names.length + ' selected' : '';
+                };
+
+                var filter = function () {
+                    var q = (search ? search.value : '').trim().toLowerCase();
+                    var shown = 0;
+
+                    options.forEach(function (option, i) {
+                        // A selected value always stays visible, so a search can never hide a
+                        // choice the user has already made and leave them unable to undo it.
+                        var match = q === ''
+                            || boxes[i].checked
+                            || boxes[i].value.toLowerCase().indexOf(q) >= 0;
+
+                        option.hidden = !match;
+                        if (match) shown++;
+                    });
+
+                    if (empty) empty.hidden = shown > 0;
+                };
+
+                var close = function () {
+                    panel.hidden = true;
+                    toggle.setAttribute('aria-expanded', 'false');
+                };
+
+                var open = function () {
+                    // One open at a time, or two panels overlap in a four-filter row.
+                    document.querySelectorAll('[data-ms] [data-ms-panel]:not([hidden])').forEach(function (other) {
+                        if (other !== panel) {
+                            other.hidden = true;
+                            var otherToggle = other.parentElement.querySelector('[data-ms-toggle]');
+                            if (otherToggle) otherToggle.setAttribute('aria-expanded', 'false');
+                        }
+                    });
+
+                    panel.hidden = false;
+                    toggle.setAttribute('aria-expanded', 'true');
+                    if (search) { search.value = ''; filter(); search.focus(); }
+                };
+
+                toggle.addEventListener('click', function () {
+                    if (panel.hidden) { open(); } else { close(); }
+                });
+
+                if (search) {
+                    search.addEventListener('input', filter);
+                    search.addEventListener('keydown', function (e) {
+                        if (e.key === 'Escape') { e.stopPropagation(); close(); toggle.focus(); }
+                    });
+                }
+
+                list.addEventListener('change', refresh);
+
+                var selectAll = root.querySelector('[data-ms-all]');
+                if (selectAll) {
+                    selectAll.addEventListener('click', function () {
+                        // Only what the search is showing, so "select all" after typing means
+                        // "all of these" rather than all several hundred.
+                        options.forEach(function (o, i) { if (!o.hidden) boxes[i].checked = true; });
+                        refresh();
+                    });
+                }
+
+                var clear = root.querySelector('[data-ms-none]');
+                if (clear) {
+                    clear.addEventListener('click', function () {
+                        boxes.forEach(function (b) { b.checked = false; });
+                        refresh();
+                        filter();
+                    });
+                }
+
+                refresh();
+            });
 
             // Fullscreen for the wide tables, matching the Denial Summary page. The .fs-host /
             // .fs-btn styling already ships in denial_dashboard.css, which this page loads.

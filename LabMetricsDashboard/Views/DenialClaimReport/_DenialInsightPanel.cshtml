@@ -64,6 +64,16 @@
                         </button>
                     </form>
                 }
+
+                @if (Model.CanEdit && !isCurrent)
+                {
+                    @* Previous Week takes the same template. It is imported a week at a time, so the
+                       panel asks which week rather than assuming the one just gone. *@
+                    <button type="button" class="btn btn-sm btn-outline-primary"
+                            data-bs-toggle="offcanvas" data-bs-target="#insightPreviousImportPanel">
+                        <i class="bi bi-upload"></i> Import
+                    </button>
+                }
             </div>
         </div>
 
@@ -118,6 +128,8 @@
                             <th class="num sortable" data-sort-type="number"># of Denial<span class="sort-arrow"></span></th>
                             <th class="num sortable" data-sort-type="number">Total Balance ($)<span class="sort-arrow"></span></th>
                             <th class="band-impact sortable">Highest $ Impact - Insurance<span class="sort-arrow"></span></th>
+                            <th class="band-impact num sortable" data-sort-type="number"
+                                title="Claims behind the highest-impact payer's balance">Claim Count<span class="sort-arrow"></span></th>
                             <th class="band-impact num sortable" data-sort-type="number">Ins. Balance ($)<span class="sort-arrow"></span></th>
                             <th class="band-impact num sortable" data-sort-type="number">$ Impact (%)<span class="sort-arrow"></span></th>
                             <th class="col-rich">Observation</th>
@@ -138,7 +150,7 @@
                         @if (Model.Rows.Count == 0)
                         {
                             <tr>
-                                <td colspan="@(editable ? 17 : 16)" class="insight-empty">
+                                <td colspan="@(editable ? 18 : 17)" class="insight-empty">
                                     @if (isCurrent)
                                     {
                                         <i class="bi bi-inbox d-block mb-2" style="font-size:1.6rem;opacity:.45;"></i>
@@ -160,7 +172,7 @@
                         }
                         else
                         {
-                            var colSpan = editable ? 17 : 16;
+                            var colSpan = editable ? 18 : 17;
 
                             @foreach (var week in Model.WeekGroups)
                             {
@@ -207,6 +219,7 @@
                                     <td class="num">@row.NoOfDenials.ToString("N0")</td>
                                     <td class="num">@Acct2(row.TotalBalance)</td>
                                     <td class="cell-impact">@row.PayerName</td>
+                                    <td class="cell-impact num">@(row.ClaimCount == 0 ? "—" : row.ClaimCount.ToString("N0"))</td>
                                     <td class="cell-impact num">
                                         @* Requirement 6i: the balance opens the claim-level data
                                            filtered by BOTH the denial code and the insurance. *@
@@ -342,6 +355,7 @@
                                 <th class="num">@Model.TotalDenials.ToString("N0")</th>
                                 <th class="num">@Acct2(Model.TotalBalance)</th>
                                 <th></th>
+                                <th class="num">@Model.TotalClaimCount.ToString("N0")</th>
                                 <th class="num">@Acct2(Model.TotalInsuranceBalance)</th>
                                 <th colspan="@(editable ? 10 : 9)"></th>
                             </tr>
@@ -457,6 +471,73 @@
                 <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="offcanvas">Cancel</button>
                 <button type="submit" class="btn btn-sm btn-primary flex-grow-1" id="insightImportSubmit">
                     <i class="bi bi-upload"></i> <span id="insightImportSubmitLabel">Import as new Current Week</span>
+                </button>
+            </div>
+        </form>
+    </div>
+}
+
+@if (Model.CanEdit && !isCurrent)
+{
+    @* ── Previous Week import panel ────────────────────────────────────────
+       Same template and the same validation as Current Week. It replaces only
+       the week being imported, so the other weeks on this tab are untouched. *@
+    <div class="offcanvas offcanvas-end insight-import-panel" tabindex="-1" id="insightPreviousImportPanel"
+         aria-labelledby="insightPreviousImportLabel">
+        <div class="offcanvas-header">
+            <h5 class="offcanvas-title" id="insightPreviousImportLabel">
+                <i class="bi bi-upload me-2"></i>Import into Previous Week
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+        </div>
+
+        <form method="post" asp-action="UploadInsights" asp-route-lab="@Model.CurrentLab"
+              enctype="multipart/form-data" class="offcanvas-body d-flex flex-column">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="bucket" value="@DenialInsightBuckets.Previous" />
+
+            <div class="import-lab">
+                <span class="import-lab-label">Lab</span>
+                <span class="import-lab-name">@Model.CurrentLab</span>
+            </div>
+
+            <div class="import-field">
+                <label class="import-label" for="previousInsightFile">Denial Insight workbook</label>
+                <input type="file" name="insightFile" accept=".xlsx,.xlsm" id="previousInsightFile"
+                       class="form-control form-control-sm" required />
+                <div class="import-hint">
+                    The same template Current Week uses. Use <strong>Export</strong> on this tab to get it.
+                    The file is checked in full before anything is saved.
+                </div>
+            </div>
+
+            <div class="import-field">
+                <label class="import-label" for="previousWeekOf">Week of</label>
+                <input type="date" name="weekOf" id="previousWeekOf" class="form-control form-control-sm"
+                       value="@DateTime.Today.AddDays(-7).ToString("yyyy-MM-dd")"
+                       max="@DateTime.Today.AddDays(-7).ToString("yyyy-MM-dd")" required />
+                <div class="import-hint">
+                    Any date inside the week the workbook describes &mdash; it is filed under that week&rsquo;s Monday.
+                </div>
+            </div>
+
+            <div class="import-choice">
+                <div class="import-note import-note-replace">
+                    <div class="import-note-head">
+                        <i class="bi bi-info-circle-fill"></i> What this import does
+                    </div>
+                    <ul>
+                        <li>Rows already held for <strong>that week</strong> are replaced by this workbook.</li>
+                        <li>Other weeks on Previous Week are left as they are.</li>
+                        <li><strong>Current Week is not touched.</strong></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="mt-auto d-flex gap-2 pt-3">
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="offcanvas">Cancel</button>
+                <button type="submit" class="btn btn-sm btn-primary flex-grow-1">
+                    <i class="bi bi-upload"></i> Import into Previous Week
                 </button>
             </div>
         </form>

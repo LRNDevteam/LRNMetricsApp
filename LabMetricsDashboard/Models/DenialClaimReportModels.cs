@@ -92,6 +92,13 @@ public sealed class DenialInsightRow
     public decimal InsuranceBalance { get; set; }
     public decimal ImpactPercentage { get; set; }
 
+    /// <summary>
+    /// "Claim Count" on the client's template - how many claims sit behind
+    /// <see cref="InsuranceBalance"/> for the highest-impact payer, as against
+    /// <see cref="NoOfDenials"/>, which counts the denial across every payer.
+    /// </summary>
+    public int ClaimCount { get; set; }
+
     /// <summary>Sanitized HTML: the workbook's bold / bullets / line breaks are kept, not flattened.</summary>
     public string ObservationHtml { get; set; } = string.Empty;
 
