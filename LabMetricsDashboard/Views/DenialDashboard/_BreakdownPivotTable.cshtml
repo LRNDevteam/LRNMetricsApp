@@ -13,6 +13,23 @@
     {
         <div class="table-frame breakdown-pivot-frame denial-pivot-scroll" id="@tableId">
             <table class="table table-sm app-table breakdown-pivot-table denial-pivot-freeze mb-0">
+                @* The table is table-layout:fixed, where column widths come from <col> first and
+                   otherwise from the FIRST row - which here is a band of colspans, so the widths
+                   declared on the body cells never applied and the last column could clip its
+                   value. These <col>s give the fixed algorithm something real to work from.
+                   They are inert unless a stylesheet sizes them, so pages that were happy with the
+                   distributed widths are unaffected. *@
+                <colgroup>
+                    <col class="pivot-col-index" />
+                    <col class="pivot-col-label" />
+                    @foreach (var period in Model.Periods)
+                    {
+                        <col class="pivot-col-claims" />
+                        <col class="pivot-col-balance" />
+                    }
+                    <col class="pivot-col-claims pivot-col-total" />
+                    <col class="pivot-col-balance pivot-col-total" />
+                </colgroup>
                 <thead>
                     @* Two header bands were stacked here: a full-width one carrying the coverage
                        caption ("All Months | Top N Payers | Covering X% of the AR | ..."), and

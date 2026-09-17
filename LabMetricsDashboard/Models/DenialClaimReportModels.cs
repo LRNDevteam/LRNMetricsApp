@@ -35,15 +35,31 @@ public static class DenialInsightBuckets
     /// <summary>What the user most recently imported and is working on.</summary>
     public const string Current = "Current";
 
-    /// <summary>Previously discussed items, copied out of Current Week.</summary>
+    /// <summary>Previously discussed items - the most recent weeks, shown week by week.</summary>
     public const string Previous = "Previous";
 
+    /// <summary>
+    /// Older than the weeks Previous keeps. Not a tab: the rows are retained rather than deleted,
+    /// so nothing a client wrote is ever lost, but they are out of the working view.
+    /// </summary>
+    public const string Archive = "Archive";
+
+    /// <summary>How many distinct weeks Previous Week holds before the oldest rolls into Archive.</summary>
+    public const int PreviousWeeksRetained = 4;
+
+    /// <summary>The two buckets that have a tab. Archive is storage only.</summary>
     public static bool IsValid(string? bucket) => bucket is Current or Previous;
 
     public static string Normalize(string? bucket) => IsValid(bucket) ? bucket! : Current;
 
     public static string Label(string bucket) =>
         bucket == Previous ? "Previous Week" : "Current Week";
+
+    /// <summary>The week a set of insight rows covers, as the Previous Week separators show it.</summary>
+    public static string WeekRangeLabel(DateTime weekStart) =>
+        weekStart == default
+            ? "Undated"
+            : $"{weekStart:dd MMM} – {weekStart.AddDays(6):dd MMM yyyy}";
 }
 
 /// <summary>

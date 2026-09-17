@@ -1,4 +1,5 @@
 using LabMetricsDashboard.Models;
+using LabMetricsDashboard.Services;
 
 namespace LabMetricsDashboard.ViewModels;
 
@@ -13,13 +14,14 @@ public sealed class DenialClaimReportViewModel
     public string CurrentLab { get; set; } = string.Empty;
     public string? Error { get; set; }
 
-    /// <summary>"monthly", "weekly" or "insight" - which tab opens.</summary>
+    /// <summary>"monthly", "weekly", "insight" or "claims" - which tab opens.</summary>
     public string ActiveTab { get; set; } = "monthly";
 
     public BreakdownPivotViewModel Monthly { get; set; } = new();
     public BreakdownPivotViewModel Weekly { get; set; } = new();
 
     public DenialInsightPanelViewModel Insight { get; set; } = new();
+    public DenialClaimLevelTabViewModel Claims { get; set; } = new();
 
     // Headline figures, across everything the summaries are built from.
     public int TotalClaims { get; set; }
@@ -60,4 +62,75 @@ public sealed class DenialInsightPanelViewModel
     public int TotalDenials => Rows.Sum(r => r.NoOfDenials);
     public decimal TotalBalance => Rows.Sum(r => r.TotalBalance);
     public decimal TotalInsuranceBalance => Rows.Sum(r => r.InsuranceBalance);
+
+    /// <summary>
+    /// The rows split by the week they describe, newest first.
+    /// <para>Previous Week holds several weeks at once, and an undivided list of them would read as
+    /// one long week. Each group gets a separator row carrying its date range.</para>
+    /// </summary>
+    public IReadOnlyList<DenialInsightWeekGroup> WeekGroups => Rows
+        .GroupBy(r => r.WeekStart.Date)
+        .OrderByDescending(g => g.Key)
+        .Select(g => new DenialInsightWeekGroup
+        {
+            WeekStart = g.Key,
+            Rows = g.ToList()
+        })
+        .ToList();
+
+    /// <summary>True when the open tab holds more than one week, so separators are worth drawing.</summary>
+    public bool HasMultipleWeeks => WeekGroups.Count > 1;
+}
+
+/// <summary>One week's worth of insight rows on the Previous Week tab.</summary>
+public sealed class DenialInsightWeekGroup
+{
+    public DateTime WeekStart { get; set; }
+    public IReadOnlyList<DenialInsightRow> Rows { get; set; } = Array.Empty<DenialInsightRow>();
+
+    public string RangeLabel => DenialInsightBuckets.WeekRangeLabel(WeekStart);
+    public int TotalDenials => Rows.Sum(r => r.NoOfDenials);
+    public decimal TotalInsuranceBalance => Rows.Sum(r => r.InsuranceBalance);
+}
+
+/// <summary>
+/// The Claim Level tab: the same columns and rows the Dashboard's Claim Level page shows, filtered
+/// to the denial (and optionally the insurance) that was clicked.
+/// </summary>
+public sealed class DenialClaimLevelTabViewModel
+{
+    public string CurrentLab { get; set; } = string.Empty;
+    public string? Error { get; set; }
+
+    /// <summary>The denial code the tab is filtered to, or null for every denied claim.</summary>
+    public string? DenialCode { get; set; }
+
+    /// <summary>The insurance the tab is filtered to, or null for every payer.</summary>
+    public string? PayerName { get; set; }
+
+    public IReadOnlyList<string> DisplayColumns { get; set; } = Array.Empty<string>();
+
+    /// <summary>Claim rows keyed by column name - the column set is per-lab config, not a fixed shape.</summary>
+    public IReadOnlyList<IReadOnlyDictionary<string, string>> Rows { get; set; } =
+        Array.Empty<IReadOnlyDictionary<string, string>>();
+
+    /// <summary>
+    /// Rows-per-page choices. A larger page is also how the column sort covers the whole result
+    /// set rather than one page of it, so the range runs well past a comfortable screenful.
+    /// </summary>
+    public static readonly int[] PageSizes = [100, 500, 1000, 2500];
+
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 100;
+    public int TotalFiltered { get; set; }
+    public int TotalAll { get; set; }
+
+    public int TotalPages => PageSize <= 0 ? 1 : Math.Max(1, (int)Math.Ceiling(TotalFiltered / (double)PageSize));
+    public bool HasPrevious => Page > 1;
+    public bool HasNext => Page < TotalPages;
+
+    public bool HasFilter => !string.IsNullOrWhiteSpace(DenialCode) || !string.IsNullOrWhiteSpace(PayerName);
+
+    /// <summary>Set only when a filtered result came back empty - says which filter emptied it.</summary>
+    public DenialClaimDiagnosis? Diagnosis { get; set; }
 }

@@ -1512,6 +1512,26 @@ public static class SelfTests
             DenialCodeNormalizer.Normalize("MA130") == "MA130" &&
             DenialCodeNormalizer.Normalize("N130") == "N130");
 
+        // The group prefix also attaches to remark codes. COM127 is CO + M127, and the master holds
+        // M127 - never COM127 - so leaving the prefix on loses the description entirely.
+        Check("Denial: a group prefix strips off a remark code too",
+            DenialCodeNormalizer.Normalize("COM127") == "M127" &&
+            DenialCodeNormalizer.Normalize("CON130") == "N130" &&
+            DenialCodeNormalizer.Normalize("COMA130") == "MA130" &&
+            DenialCodeNormalizer.Normalize("PRM127") == "M127");
+
+        Check("Denial: a prefixed remark code may be hyphenated or spaced",
+            DenialCodeNormalizer.Normalize("CO-M127") == "M127" &&
+            DenialCodeNormalizer.Normalize("CO M127") == "M127" &&
+            DenialCodeNormalizer.Normalize("CO-B9") == "B9");
+
+        // The digit requirement is what keeps the rule safe: without it, any word starting with a
+        // group prefix would be silently truncated.
+        Check("Denial: a word that merely starts with a prefix is untouched",
+            DenialCodeNormalizer.Normalize("CORE") == "CORE" &&
+            DenialCodeNormalizer.Normalize("PRIOR") == "PRIOR" &&
+            DenialCodeNormalizer.Normalize("CO") == "CO");
+
         Check("Denial: a trailing letter is kept", DenialCodeNormalizer.Normalize("CO45A") == "45A");
         Check("Denial: blank normalizes to empty",
             DenialCodeNormalizer.Normalize(null) == "" && DenialCodeNormalizer.Normalize("   ") == "");
@@ -1552,6 +1572,14 @@ public static class SelfTests
             DenialCodeNormalizer.DescribeAll("CO10, CO189", lookup)
                 == "10 - The diagnosis is inconsistent with the patient's gender."
                  + "; 189 - This non-covered service was not deemed medically necessary.");
+
+        // The case from the field: the claim carries COM127, the master holds only M127.
+        var remark = new DenialDescriptionLookup();
+        remark.AddSuper("M127", "Missing patient medical record for this service.");
+
+        Check("Denial: COM127 picks up M127's description",
+            DenialCodeNormalizer.DescribeAll("COM127", remark)
+                == "M127 - Missing patient medical record for this service.");
 
         // The master has only PR45. CO45 and PI45 have to reach it through the normalized step.
         Check("Denial: CO45, PI45 and PR45 all resolve to the same description",

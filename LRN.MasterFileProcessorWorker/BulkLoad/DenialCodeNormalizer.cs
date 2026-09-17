@@ -26,9 +26,19 @@ namespace LRN.MasterFileProcessorWorker.BulkLoad;
 /// </summary>
 public static class DenialCodeNormalizer
 {
-    /// <summary>Claim adjustment group codes that prefix a denial code without changing which denial it is.</summary>
+    /// <summary>
+    /// A denial code carrying a claim adjustment group prefix, which strips to the code underneath.
+    ///
+    /// <para>The tail is <c>[A-Z]{0,2}</c> then digits, not digits alone, because the codes the
+    /// group prefixes attach to are not all numeric. CARC codes are (45, 189), but remark codes are
+    /// not: M127, MA130, N130, B9. "COM127" is CO + M127, and matching only a numeric tail left it
+    /// unstripped, so it found no description - the master holds M127, never COM127.</para>
+    ///
+    /// <para>At least one digit is required, which is what keeps the rule safe: a word beginning
+    /// with a prefix ("CORE") has no digits and is left alone.</para>
+    /// </summary>
     private static readonly Regex PrefixedNumeric = new(
-        @"^(CO|PI|PR|OA|CR)[\s\-]?(\d+[A-Za-z]?)$",
+        @"^(CO|PI|PR|OA|CR)[\s\-]?([A-Z]{0,2}\d+[A-Za-z]?)$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>

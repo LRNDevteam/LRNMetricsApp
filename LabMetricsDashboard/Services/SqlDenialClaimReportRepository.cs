@@ -12,6 +12,13 @@ public interface IDenialClaimReportRepository
     /// </summary>
     Task<IReadOnlyList<DenialSummaryGroup>> GetDenialSummaryAsync(string connectionString, CancellationToken ct);
 
+    /// <summary>
+    /// A page of denied claims for the Claim Level tab, filtered to a denial code and optionally an
+    /// insurance.
+    /// </summary>
+    Task<DenialClaimPage> GetClaimRowsAsync(string connectionString, IReadOnlyList<string> columns,
+        string? denialCode, string? payerName, int page, int pageSize, CancellationToken ct);
+
     /// <summary>The insight rows on one tab - Current or Previous.</summary>
     Task<IReadOnlyList<DenialInsightRow>> GetInsightsAsync(string connectionString, string bucket, CancellationToken ct);
 
@@ -29,7 +36,47 @@ public interface IDenialClaimReportRepository
 
     /// <summary>Copies Current Week onto Previous Week, replacing whatever Previous held.</summary>
     Task<int> CopyCurrentToPreviousAsync(string connectionString, string userName, CancellationToken ct);
+
+    /// <summary>
+    /// Rolls the existing Current Week into Previous Week and archives anything beyond the retained
+    /// weeks. Used by an import that is NOT replacing the current week.
+    /// </summary>
+    Task<DenialInsightRollResult> RollCurrentToPreviousAsync(string connectionString, string userName, CancellationToken ct);
 }
+
+/// <summary>What an import's roll-forward moved, reported back on the page.</summary>
+public sealed record DenialInsightRollResult(int RolledToPrevious, int Archived);
+
+/// <summary>
+/// One page of claim rows, as name/value pairs keyed by the column the catalog asked for. Kept
+/// untyped because the column set is per-lab configuration, not a fixed shape.
+/// </summary>
+public sealed record DenialClaimPage(
+    IReadOnlyList<IReadOnlyDictionary<string, string>> Rows,
+    IReadOnlyList<string> Columns,
+    int TotalFiltered,
+    int TotalAll)
+{
+    /// <summary>
+    /// Why a filtered result came back empty, worked out only when it does. Each filter is counted
+    /// on its own, so the page can say which one eliminated everything instead of leaving the user
+    /// to guess - the failure this was written for looked identical whichever filter was at fault.
+    /// </summary>
+    public DenialClaimDiagnosis? Diagnosis { get; init; }
+}
+
+/// <param name="MatchingCode">Denied rows matching the denial code alone.</param>
+/// <param name="MatchingPayer">Denied rows matching the insurance alone.</param>
+/// <param name="NormalizedPopulated">
+/// Denied rows that actually carry a DenialCodeNormalized value. Zero means the column exists but
+/// the claim-level import has not run since it was added.
+/// </param>
+/// <param name="SamplePayers">Insurance names present on rows matching the code, to compare against.</param>
+public sealed record DenialClaimDiagnosis(
+    int MatchingCode,
+    int MatchingPayer,
+    int NormalizedPopulated,
+    IReadOnlyList<string> SamplePayers);
 
 /// <summary>
 /// Denial Claim Report data access, straight against each lab's own database.
@@ -123,6 +170,284 @@ GROUP BY LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [{payerCol}]), ''))),
         return rows;
     }
 
+    // ── Claim Level tab ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The denied claims behind a denial insight row.
+    /// </summary>
+    /// <remarks>
+    /// <para>Queried here rather than through the Dashboard's claim repository on purpose. That one
+    /// routes through <c>usp_GetClaimLevelDetails</c> or a CSV depending on the lab's
+    /// <c>LineClaimEnable</c> flag, and matches the denial code with <c>LIKE '%code%'</c> against the
+    /// RAW column - so a drill-through on a normalized code could return nothing at all, or return
+    /// 145 when asked for 45.</para>
+    /// <para>This matches <c>DenialCodeNormalized</c> as a whole token, so "45" finds the claim
+    /// whose cell reads "10, 45, 189" and does not find 145. The payer is compared on a stripped,
+    /// upper-cased form of BOTH payer columns, because the insight workbook spells the payer the way
+    /// the client writes it and the claim table may hold either the raw or the mapped name.</para>
+    /// </remarks>
+    public async Task<DenialClaimPage> GetClaimRowsAsync(
+        string connectionString, IReadOnlyList<string> columns,
+        string? denialCode, string? payerName, int page, int pageSize, CancellationToken ct)
+    {
+        var empty = new DenialClaimPage(Array.Empty<IReadOnlyDictionary<string, string>>(),
+                                        Array.Empty<string>(), 0, 0);
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+
+        if (!await TableExistsAsync(conn, "ClaimLevelData", ct)) return empty;
+
+        var present = await GetColumnsAsync(conn, "ClaimLevelData", ct);
+        if (!present.Contains("DenialCode")) return empty;
+
+        // Only the catalog columns this lab's table actually carries. A column configured but never
+        // loaded would otherwise fail the whole query with "Invalid column name".
+        var selected = columns.Where(present.Contains).ToList();
+        if (selected.Count == 0) selected.Add("DenialCode");
+
+        var selectList = string.Join(", ", selected.Select(c => $"[{c}]"));
+
+        // Denied, with money still outstanding - the same population every figure on this page is
+        // counted from, so a drill-through ties back to the number that was clicked.
+        var where = new List<string>
+        {
+            "[DenialCode] IS NOT NULL",
+            "LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> ''",
+            "TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0"
+        };
+
+        var codeMatch = BuildDenialCodeMatch(present);
+        if (!string.IsNullOrWhiteSpace(denialCode)) where.Add(codeMatch);
+
+        var payerColumns = new[] { "PayerName_Raw", "PayerName" }.Where(present.Contains).ToList();
+        var hasPayerFilter = !string.IsNullOrWhiteSpace(payerName) && payerColumns.Count > 0;
+
+        if (hasPayerFilter)
+        {
+            // Spacing, punctuation and case drift between the workbook and the claim table, so the
+            // comparison strips all three rather than demanding an exact string.
+            var comparisons = payerColumns.Select(c =>
+                $"REPLACE(REPLACE(REPLACE(UPPER(ISNULL(CONVERT(nvarchar(255), [{c}]), '')), ' ', ''), '.', ''), ',', '') = @Payer");
+
+            where.Add($"({string.Join(" OR ", comparisons)})");
+        }
+
+        var filter = string.Join("\n  AND ", where);
+
+        // ORDER BY is required by OFFSET/FETCH. Highest balance first - the claims worth working.
+        var orderBy = present.Contains("InsuranceBalance")
+            ? "ISNULL(TRY_CONVERT(decimal(18,2), [InsuranceBalance]), 0) DESC"
+            : "(SELECT NULL)";
+
+        var sql = $@"
+SELECT COUNT_BIG(1) FROM dbo.ClaimLevelData
+WHERE [DenialCode] IS NOT NULL
+  AND LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> ''
+  AND TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0;
+
+SELECT COUNT_BIG(1) FROM dbo.ClaimLevelData WHERE {filter};
+
+SELECT {selectList}
+FROM   dbo.ClaimLevelData
+WHERE  {filter}
+ORDER BY {orderBy}
+OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
+
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 };
+        cmd.Parameters.Add("@Code", SqlDbType.NVarChar, 400).Value = CodeKey(denialCode);
+        cmd.Parameters.Add("@Payer", SqlDbType.NVarChar, 255).Value =
+            hasPayerFilter ? PayerKey(payerName!) : (object)DBNull.Value;
+        cmd.Parameters.Add("@Offset", SqlDbType.Int).Value = Math.Max(0, (page - 1) * pageSize);
+        cmd.Parameters.Add("@PageSize", SqlDbType.Int).Value = pageSize;
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        var totalAll = await reader.ReadAsync(ct) ? Convert.ToInt32(reader.GetValue(0)) : 0;
+        await reader.NextResultAsync(ct);
+        var totalFiltered = await reader.ReadAsync(ct) ? Convert.ToInt32(reader.GetValue(0)) : 0;
+        await reader.NextResultAsync(ct);
+
+        var rows = new List<IReadOnlyDictionary<string, string>>();
+        while (await reader.ReadAsync(ct))
+        {
+            var row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                row[reader.GetName(i)] = reader.IsDBNull(i)
+                    ? string.Empty
+                    : reader.GetValue(i)?.ToString()?.Trim() ?? string.Empty;
+            }
+            rows.Add(row);
+        }
+
+        var result = new DenialClaimPage(rows, selected, totalFiltered, totalAll);
+
+        // Only when it matters. This is a second pass over the denied rows, which is not worth
+        // paying for on a result that already has something in it.
+        if (totalFiltered == 0 && (!string.IsNullOrWhiteSpace(denialCode) || hasPayerFilter))
+        {
+            result = result with
+            {
+                Diagnosis = await DiagnoseAsync(conn, codeMatch, payerColumns, denialCode, payerName, ct)
+            };
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Counts each filter on its own so an empty result can say which one emptied it.
+    /// </summary>
+    private static async Task<DenialClaimDiagnosis> DiagnoseAsync(
+        SqlConnection conn, string codeMatch, IReadOnlyList<string> payerColumns,
+        string? denialCode, string? payerName, CancellationToken ct)
+    {
+        var hasCode = !string.IsNullOrWhiteSpace(denialCode);
+        var hasPayer = !string.IsNullOrWhiteSpace(payerName) && payerColumns.Count > 0;
+
+        var payerMatch = hasPayer
+            ? "(" + string.Join(" OR ", payerColumns.Select(c =>
+                $"REPLACE(REPLACE(REPLACE(UPPER(ISNULL(CONVERT(nvarchar(255), [{c}]), '')), ' ', ''), '.', ''), ',', '') = @Payer")) + ")"
+            : "1 = 0";
+
+        var normalizedPopulated = "CASE WHEN "
+            + "ISNULL(CONVERT(nvarchar(400), [DenialCodeNormalized]), '') <> '' THEN 1 ELSE 0 END";
+
+        // The column may not exist at all on a lab that has never run the deployment script.
+        var hasNormalizedColumn = payerColumns is not null
+            && await ColumnExistsAsync(conn, "ClaimLevelData", "DenialCodeNormalized", ct);
+
+        var payerSample = payerColumns.Count > 0 ? payerColumns[0] : null;
+
+        var sql = $@"
+SELECT SUM(CASE WHEN {(hasCode ? codeMatch : "1 = 0")} THEN 1 ELSE 0 END),
+       SUM(CASE WHEN {payerMatch} THEN 1 ELSE 0 END),
+       SUM({(hasNormalizedColumn ? normalizedPopulated : "0")})
+FROM   dbo.ClaimLevelData
+WHERE  [DenialCode] IS NOT NULL
+  AND  LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> ''
+  AND  TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0;";
+
+        if (hasCode && payerSample is not null)
+        {
+            // The insurance names actually on the matching claims - the fastest way to see that the
+            // workbook says "HUMANA" and the claim table says something else.
+            sql += $@"
+SELECT DISTINCT TOP (5) LTRIM(RTRIM(CONVERT(nvarchar(255), [{payerSample}])))
+FROM   dbo.ClaimLevelData
+WHERE  {codeMatch}
+  AND  TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0
+  AND  ISNULL(CONVERT(nvarchar(255), [{payerSample}]), '') <> '';";
+        }
+
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 };
+        // Same key the real query uses, or the diagnosis would count a different population from
+        // the one that came back empty and send the reader somewhere useless.
+        cmd.Parameters.Add("@Code", SqlDbType.NVarChar, 400).Value = CodeKey(denialCode);
+        cmd.Parameters.Add("@Payer", SqlDbType.NVarChar, 255).Value =
+            hasPayer ? PayerKey(payerName!) : (object)DBNull.Value;
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        int code = 0, payer = 0, normalized = 0;
+        if (await reader.ReadAsync(ct))
+        {
+            code = reader.IsDBNull(0) ? 0 : Convert.ToInt32(reader.GetValue(0));
+            payer = reader.IsDBNull(1) ? 0 : Convert.ToInt32(reader.GetValue(1));
+            normalized = reader.IsDBNull(2) ? 0 : Convert.ToInt32(reader.GetValue(2));
+        }
+
+        var samples = new List<string>();
+        if (await reader.NextResultAsync(ct))
+        {
+            while (await reader.ReadAsync(ct))
+                if (!reader.IsDBNull(0)) samples.Add(reader.GetString(0));
+        }
+
+        return new DenialClaimDiagnosis(code, payer, normalized, samples);
+    }
+
+    private static async Task<bool> ColumnExistsAsync(
+        SqlConnection conn, string table, string column, CancellationToken ct)
+    {
+        await using var cmd = new SqlCommand(
+            "SELECT CASE WHEN COL_LENGTH('dbo.' + @Table, @Column) IS NULL THEN 0 ELSE 1 END", conn);
+        cmd.Parameters.AddWithValue("@Table", table);
+        cmd.Parameters.AddWithValue("@Column", column);
+
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)) == 1;
+    }
+
+    /// <summary>
+    /// Matches one denial code against a claim row, on the derived column OR the raw one.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Both, always - never one or the other.</b> An earlier version picked the derived
+    /// column whenever it EXISTED, which is not the same as it being POPULATED: the deployment
+    /// script adds <c>DenialCodeNormalized</c>, but only a claim-level import fills it. Between
+    /// those two events every row held NULL and the filter matched nothing, so the tab came back
+    /// empty with no indication why.</para>
+    /// <para>The raw side tries the bare code and each group prefix as a whole comma-delimited
+    /// token, so "45" finds a cell reading "CO45, CO16" and does not find 145 or CO450. Spaces and
+    /// the prefix hyphen are removed first, so "CO-45" and "CO 45" both reduce to "CO45".</para>
+    /// </remarks>
+    private static string BuildDenialCodeMatch(HashSet<string> present)
+    {
+        // ",CO45,CO16," - a comma-delimited, punctuation-free form of whichever column.
+        static string Tokens(string column) =>
+            $"(',' + REPLACE(REPLACE(REPLACE(REPLACE(UPPER(ISNULL(CONVERT(nvarchar(400), [{column}]), '')), ' ', ''), '-', ''), ';', ','), '|', ',') + ',')";
+
+        var clauses = new List<string>();
+
+        if (present.Contains("DenialCodeNormalized"))
+            clauses.Add($"{Tokens("DenialCodeNormalized")} LIKE '%,' + @Code + ',%'");
+
+        var raw = Tokens("DenialCode");
+        clauses.Add($"{raw} LIKE '%,' + @Code + ',%'");
+
+        // The claim stores the prefixed spelling the payer sent; the filter carries the common code.
+        foreach (var prefix in new[] { "CO", "PI", "PR", "OA", "CR" })
+            clauses.Add($"{raw} LIKE '%,{prefix}' + @Code + ',%'");
+
+        return "(" + string.Join("\n       OR ", clauses) + ")";
+    }
+
+    /// <summary>
+    /// The denial code to filter on, reduced to its common form: "CO-204" and "CO204" both become
+    /// "204", "COM127" becomes "M127".
+    /// </summary>
+    /// <remarks>
+    /// <para>Two things depend on this. The SQL strips spaces and hyphens out of the column before
+    /// comparing, so a parameter still carrying a hyphen could never match a stripped column - that
+    /// alone broke every hyphenated code.</para>
+    /// <para>And the filter builds the prefixed spellings itself ("CO" + code), so the parameter has
+    /// to arrive WITHOUT a prefix or it would look for "COCO-204". The insight table stores the raw
+    /// code the client typed, so reducing it here is what lets the same link work whether the
+    /// workbook says "CO-204", "CO204" or "204".</para>
+    /// </remarks>
+    private static object CodeKey(string? denialCode)
+    {
+        var raw = (denialCode ?? string.Empty).Trim();
+        if (raw.Length == 0) return DBNull.Value;
+
+        var normalized = DenialCodeKey.Normalize(raw);
+
+        // Whatever punctuation survives normalization goes too, so the parameter is shaped exactly
+        // like the column expression it is compared against.
+        var key = new string(normalized.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+
+        return key.Length == 0 ? DBNull.Value : key;
+    }
+
+    /// <summary>
+    /// Payer comparison key. Strips exactly what the SQL strips - space, full stop, comma - and
+    /// upper-cases. The two have to agree character for character or the filter silently matches
+    /// nothing, which is how this went wrong the first time.
+    /// </summary>
+    private static string PayerKey(string payer) =>
+        payer.ToUpperInvariant().Replace(" ", "").Replace(".", "").Replace(",", "");
+
     // ── Denial insights ───────────────────────────────────────────────────────
 
     private const string InsightTable = "dbo.DenialClaimLevelInsight";
@@ -140,7 +465,9 @@ SELECT Id, Bucket, WeekStart, SortOrder, DenialCode, DenialDescription, PayerNam
        FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate, UpdatedOn, UpdatedBy
 FROM {InsightTable}
 WHERE Bucket = @Bucket
-ORDER BY SortOrder, InsuranceBalance DESC, DenialCode;";
+-- Newest week first, then the client's own ranking within the week. Previous Week draws a
+-- separator each time WeekStart changes, so the rows have to arrive already grouped by week.
+ORDER BY WeekStart DESC, SortOrder, InsuranceBalance DESC, DenialCode;";
 
         var rows = new List<DenialInsightRow>();
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
@@ -163,7 +490,9 @@ ORDER BY SortOrder, InsuranceBalance DESC, DenialCode;";
                 NoOfDenials = GetIntOrZero(reader, "NoOfDenials"),
                 TotalBalance = GetDecimalOrZero(reader, "TotalBalance"),
                 InsuranceBalance = GetDecimalOrZero(reader, "InsuranceBalance"),
-                ImpactPercentage = GetDecimalOrZero(reader, "ImpactPercentage"),
+                // Normalized on read as well as on import, so rows stored as a fraction by an
+                // earlier import show as 57% without anyone re-uploading. Idempotent - 57 stays 57.
+                ImpactPercentage = DenialInsightPercent.Normalize(GetDecimalOrZero(reader, "ImpactPercentage")),
                 // Sanitized again on read: a row written directly in SQL must not reach a browser raw.
                 ObservationHtml = DenialInsightRichText.Sanitize(Text(reader, "Observation")),
                 ActionCategory = Text(reader, "ActionCategory"),
@@ -375,11 +704,101 @@ SELECT @@ROWCOUNT;";
         }
     }
 
-    /// <summary>Monday of the week the date falls in - the week identity insights are stamped with.</summary>
+    /// <summary>
+    /// Moves the existing Current Week rows into Previous Week, then pushes anything past the
+    /// retained window out to Archive. Run immediately before an import that is NOT replacing the
+    /// current week, so the incoming workbook lands on an empty Current Week.
+    /// </summary>
+    /// <remarks>
+    /// <para>Retention counts DISTINCT WEEKS, not days: the four most recent weeks present in
+    /// Previous stay, everything older is archived. Counting weeks rather than measuring back from
+    /// today means a lab that skips a week still keeps four real weeks of history instead of
+    /// silently losing one to the calendar.</para>
+    /// <para>Archived rows are kept, never deleted - a client's written observation is work, and
+    /// falling out of the working view is not a reason to destroy it.</para>
+    /// <para>One transaction: a failure part way cannot leave Current emptied but Previous not
+    /// filled, which would lose a week of insights outright.</para>
+    /// </remarks>
+    public async Task<DenialInsightRollResult> RollCurrentToPreviousAsync(
+        string connectionString, string userName, CancellationToken ct)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await EnsureInsightTableAsync(conn, ct);
+
+        var sql = $@"
+-- A week already sitting in Previous would collide with the incoming one on the unique index.
+-- The newer Current row is the one being kept, so the stale duplicate goes first.
+DELETE p
+FROM   {InsightTable} AS p
+JOIN   {InsightTable} AS c
+       ON  c.Bucket = 'Current'
+       AND c.WeekStart = p.WeekStart
+       AND c.DenialCode = p.DenialCode
+       AND ISNULL(c.PayerName, '') = ISNULL(p.PayerName, '')
+WHERE  p.Bucket = 'Previous';
+
+UPDATE {InsightTable}
+SET    Bucket = 'Previous', UpdatedOn = SYSUTCDATETIME(), UpdatedBy = @UpdatedBy
+WHERE  Bucket = 'Current';
+
+SELECT @@ROWCOUNT;
+
+-- Everything except the @Retain most recent weeks now in Previous.
+UPDATE {InsightTable}
+SET    Bucket = 'Archive', UpdatedOn = SYSUTCDATETIME(), UpdatedBy = @UpdatedBy
+WHERE  Bucket = 'Previous'
+  AND  WeekStart NOT IN (
+           SELECT TOP (@Retain) WeekStart
+           FROM   {InsightTable}
+           WHERE  Bucket = 'Previous'
+           GROUP BY WeekStart
+           ORDER BY WeekStart DESC);
+
+SELECT @@ROWCOUNT;";
+
+        await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct);
+        try
+        {
+            await using var cmd = new SqlCommand(sql, conn, tx) { CommandTimeout = 300 };
+            cmd.Parameters.Add("@UpdatedBy", SqlDbType.NVarChar, 200).Value = Db(userName);
+            cmd.Parameters.Add("@Retain", SqlDbType.Int).Value = DenialInsightBuckets.PreviousWeeksRetained;
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+            var rolled = await ReadCountAsync(reader, ct);
+            await reader.NextResultAsync(ct);
+            var archived = await ReadCountAsync(reader, ct);
+
+            await reader.CloseAsync();
+            await tx.CommitAsync(ct);
+
+            return new DenialInsightRollResult(rolled, archived);
+        }
+        catch
+        {
+            await tx.RollbackAsync(CancellationToken.None);
+            throw;
+        }
+    }
+
+    private static async Task<int> ReadCountAsync(SqlDataReader reader, CancellationToken ct) =>
+        await reader.ReadAsync(ct) && !reader.IsDBNull(0) ? reader.GetInt32(0) : 0;
+
+    /// <summary>
+    /// The day the reporting week begins. Denial weeks run <b>Wednesday to Tuesday</b>, which is the
+    /// lab's own reporting cycle rather than the calendar's - so a week reads "12 Aug - 18 Aug".
+    /// </summary>
+    private const DayOfWeek WeekStartsOn = DayOfWeek.Wednesday;
+
+    /// <summary>
+    /// The Wednesday that opens the week this date falls in. This is the week identity insights are
+    /// stamped with and the weekly summary groups on, so both agree on where a week begins.
+    /// </summary>
     public static DateTime WeekStartOf(DateTime date)
     {
         var d = date.Date;
-        return d.AddDays(-(((int)d.DayOfWeek + 6) % 7));
+        return d.AddDays(-(((int)d.DayOfWeek - (int)WeekStartsOn + 7) % 7));
     }
 
     private static async Task EnsureInsightTableAsync(SqlConnection conn, CancellationToken ct)

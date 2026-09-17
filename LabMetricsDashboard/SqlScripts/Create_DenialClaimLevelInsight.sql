@@ -5,7 +5,11 @@
     One row per denial code / insurance on one of the two tabs:
 
       Bucket     'Current'  — what the client imported and is working on this week
-                 'Previous' — the previously discussed items, copied across from Current
+                 'Previous' — previously discussed items, the most recent 4 weeks, shown week
+                              by week with a date-range separator between them
+                 'Archive'  — older than those 4 weeks. Not a tab: the rows are retained rather
+                              than deleted, because a client's written observation is work and
+                              falling out of the working view is no reason to destroy it
 
       WeekStart  Monday of the week the insights describe.
       SortOrder  The rank the client put the rows in. Their workbook is ranked by impact and
@@ -116,15 +120,17 @@ BEGIN
 END
 GO
 
-/* Archive is no longer a tab. Those rows are previously discussed items, so they join Previous. */
+/* Anything not one of the three known buckets is previously discussed content of unknown age,
+   so it joins Archive - retained and out of the way, rather than silently shown as current. */
 IF OBJECT_ID('dbo.DenialClaimLevelInsight', 'U') IS NOT NULL
-   AND EXISTS (SELECT 1 FROM dbo.DenialClaimLevelInsight WHERE Bucket NOT IN ('Current', 'Previous'))
+   AND EXISTS (SELECT 1 FROM dbo.DenialClaimLevelInsight
+               WHERE Bucket NOT IN ('Current', 'Previous', 'Archive'))
 BEGIN
     UPDATE dbo.DenialClaimLevelInsight
-    SET    Bucket = 'Previous'
-    WHERE  Bucket NOT IN ('Current', 'Previous');
+    SET    Bucket = 'Archive'
+    WHERE  Bucket NOT IN ('Current', 'Previous', 'Archive');
 
-    PRINT 'Folded Archive rows into Previous Week.';
+    PRINT 'Moved rows with an unrecognised bucket into Archive.';
 END
 GO
 
