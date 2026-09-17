@@ -3129,9 +3129,9 @@ public class DashboardController : Controller
                 var insights = await InsightsExcelBuilder.LoadAsync(_notes, connStr, "Production Report", ct);
                 try
                 {
-                    var tplCols = await InsightsExcelBuilder.LoadTemplateColumnsAsync(_notes, connStr, "Production Report", ct);
+                    var injectTplCols = await InsightsExcelBuilder.LoadTemplateColumnsAsync(_notes, connStr, "Production Report", ct);
                     var bytes = InsightsExcelBuilder.InjectIntoExistingWorkbook(
-                        recentReport.FullName, insights, selectedLab, "Production Report", tplCols);
+                        recentReport.FullName, insights, selectedLab, "Production Report", injectTplCols);
                     return File(
                         bytes,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
