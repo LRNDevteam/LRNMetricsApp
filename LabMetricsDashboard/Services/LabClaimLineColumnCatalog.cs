@@ -34,6 +34,14 @@ public static class LabClaimLineColumnCatalog
         ["RisingTides"] = "RisingTides",
         ["Rising_Tides"] = "RisingTides",
         ["Rishing_Tides"] = "RisingTides",
+
+        // Demo labs take the column shape of the lab they were cloned from. Without these
+        // they fall through to DefaultClaim - 34 columns against Cove's 108 - so the demo
+        // would show a visibly different report from the lab it is meant to be showing.
+        // The identifying columns are still withheld: the privacy filter in GetClaimColumns
+        // matches on the lab's OWN name, not this alias.
+        ["LRNDemo"] = "Cove",          // cloned from CoveLRN
+        ["LRNLabDemo"] = "PCRLOA",     // cloned from PCRLabsofAmerica
     };
 
     private static readonly string[] DefaultClaim =
@@ -477,11 +485,39 @@ public static class LabClaimLineColumnCatalog
         return LabAliases.TryGetValue(labName.Trim(), out var key) ? key : labName.Trim();
     }
 
-    public static IReadOnlyList<string> GetClaimColumns(string? labName)
-        => ClaimByLab.TryGetValue(NormalizeLab(labName), out var cols) ? cols : DefaultClaim;
+    /// <summary>
+    /// Withholds identifying columns from the demo labs. Set once at startup from
+    /// <c>Program.cs</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>A static hook on a static catalog, rather than making the catalog injectable.
+    /// This class is called from static contexts all over the app - views, export builders,
+    /// repositories - and threading a dependency through all of them to serve one demo lab
+    /// would be a large change to code that works.</para>
+    /// <para>Null until configured, and null means "behave exactly as before", so nothing
+    /// changes for any real lab whether the policy is registered or not.</para>
+    /// </remarks>
+    public static DemoLabPrivacy? Privacy { get; set; }
 
+    /// <summary>
+    /// The claim-level columns for a lab.
+    /// <para>Demo labs get the list minus anything that identifies a patient, a clinic, a
+    /// sales rep or a referring provider. Filtering HERE rather than in the views is what
+    /// makes it stick: <see cref="GetExportSelectList"/> reads this same list, so a withheld
+    /// column never reaches the SELECT and therefore never reaches the Excel download.</para>
+    /// </summary>
+    public static IReadOnlyList<string> GetClaimColumns(string? labName)
+    {
+        var cols = ClaimByLab.TryGetValue(NormalizeLab(labName), out var c) ? c : DefaultClaim;
+        return Privacy?.Filter(labName, cols) ?? cols;
+    }
+
+    /// <summary>The line-level columns for a lab, withheld the same way as the claim columns.</summary>
     public static IReadOnlyList<string> GetLineColumns(string? labName)
-        => LineByLab.TryGetValue(NormalizeLab(labName), out var cols) ? cols : DefaultLine;
+    {
+        var cols = LineByLab.TryGetValue(NormalizeLab(labName), out var c) ? c : DefaultLine;
+        return Privacy?.Filter(labName, cols) ?? cols;
+    }
 
     /// <summary>
     /// SELECT list for Excel / page exports: Select_Script columns with the same

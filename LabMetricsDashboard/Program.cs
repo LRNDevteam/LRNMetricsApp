@@ -547,6 +547,18 @@ builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRep
 // Denial Claim Report + Denial Insight (Claim Level): reads each lab's own dbo.ClaimLevelData and
 // owns dbo.DenialClaimLevelInsight. Separate from the Denial Dashboard's tables and repositories.
 builder.Services.AddScoped<IDenialClaimReportRepository, SqlDenialClaimReportRepository>();
+
+// Demo labs withhold identifying columns from their reports. Bound as a singleton and also
+// handed to LabClaimLineColumnCatalog, which is static and reached from views and export
+// builders that have no DI container to ask.
+builder.Services.AddSingleton(sp =>
+{
+    var options = builder.Configuration
+        .GetSection(DemoLabPrivacyOptions.SectionName)
+        .Get<DemoLabPrivacyOptions>() ?? new DemoLabPrivacyOptions();
+
+    return new DemoLabPrivacy(options);
+});
 builder.Services.AddScoped<AllLabsCollectionExcelBuilder>();
 builder.Services.AddScoped<PayerPolicyValidationService>();
 
@@ -856,6 +868,11 @@ builder.Services
     });
 
 var app = builder.Build();
+
+// Wire the demo-lab column policy into the static column catalog. Done once, here, because
+// the catalog is called from static contexts (views, export builders) that cannot resolve
+// services. Left null the policy is inert and every lab behaves exactly as before.
+LabClaimLineColumnCatalog.Privacy = app.Services.GetRequiredService<DemoLabPrivacy>();
 
 // Log skipped labs into normal logger after DI is ready.
 if (skippedLabNames.Count > 0)
