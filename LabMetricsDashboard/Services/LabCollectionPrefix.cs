@@ -37,10 +37,6 @@ public static class LabCollectionPrefix
         ["Phi_Life"]           = "Phi",
         ["PCRLabsofAmerica"]   = "PCR",
         ["PCR_Labs_of_America"]= "PCR",
-        // Demo lab: a clone of PCR, so its database carries PCR's own PCR_CS_* aggregate
-        // tables. Without this entry GetPrefix returns null and the Collection Summary
-        // tabs silently fall back to live queries on a lab whose config says otherwise.
-        ["LRNLabDemo"]         = "PCR",
         ["RisingTides"]        = "RT",
         ["Rising_Tides"]       = "RT",
         ["InHealthDTR"]        = "IHD",
@@ -58,10 +54,15 @@ public static class LabCollectionPrefix
     public static string? GetPrefix(string? labName)
     {
         if (string.IsNullOrWhiteSpace(labName)) return null;
-        if (_map.TryGetValue(labName, out var p)) return p;
+
+        // A demo lab's aggregate tables carry the clone source's prefix, so it resolves under that
+        // lab's entry rather than needing one of its own. See LabLogicAlias.
+        var resolved = LabLogicAlias.Resolve(labName)!;
+
+        if (_map.TryGetValue(resolved, out var p)) return p;
 
         // Fallback: strip underscores/spaces and re-try (handles "Beech Tree" → "BeechTree").
-        var normalized = labName.Replace("_", string.Empty).Replace(" ", string.Empty);
+        var normalized = resolved.Replace("_", string.Empty).Replace(" ", string.Empty);
         return _map.TryGetValue(normalized, out var p2) ? p2 : null;
     }
 
@@ -94,7 +95,8 @@ public static class LabCollectionPrefix
     {
         if (string.IsNullOrWhiteSpace(labName)) return "PanelName";
 
-        var normalized = labName.Replace("_", string.Empty).Replace(" ", string.Empty);
+        // Aliased for the same reason as the prefix: the column that exists is the clone source's.
+        var normalized = LabLogicAlias.Resolve(labName)!.Replace("_", string.Empty).Replace(" ", string.Empty);
 
         return normalized.Equals("NorthWest", StringComparison.OrdinalIgnoreCase)
             || normalized.Equals("NW", StringComparison.OrdinalIgnoreCase)

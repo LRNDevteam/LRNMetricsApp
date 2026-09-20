@@ -4360,6 +4360,11 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             "Beech_Tree" => BeechTreePrefix,
             "PCRLabsofAmerica" => PcrPrefix,
             "PCRLOA" => PcrPrefix,
+            // The demo databases are clones of Cove and carry its Cove_* objects. Matched here
+            // before the generic contains-checks below, where "LRNDemoLab" would match nothing and
+            // leave the prefix empty - which is how the demo lab ended up with no report at all.
+            "LRNDemoLab" => CovePrefix,
+            "LRNLabDemo" => CovePrefix,
             "CoveLRN" => CovePrefix,
             "Elixir_LRN" => ElixirPrefix,
             "Certus_LRN" => CertusPrefix,

@@ -534,6 +534,9 @@ builder.Services.AddSingleton<IReadOnlyDictionary<string, ILabProductionSummaryR
         ["Rising_Tides"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.RisingTides),
         ["Phi_Life"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PhiLife),
         ["Inhealth_DTR"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.InHealthDTR),
+
+        // Demo lab: its own database, under Cove's object names. See LabLogicAlias.
+        ["LRNLabDemo"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Cove),
     };
 });
 // The lab list lives in LabProductionSummaryRepositoryMap so LRN.ReportWorker

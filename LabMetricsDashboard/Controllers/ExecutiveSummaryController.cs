@@ -58,6 +58,10 @@ public sealed class ExecutiveSummaryController : Controller
             ["PCRAL"]            = "PCR",
             ["PCRCO"]            = "PCR",
             ["Beech_Tree"]       = "BT",
+
+            // Demo lab, cloned from Cove: its Cove_ES_* tables are the ones that exist.
+            // See LabLogicAlias.
+            ["LRNLabDemo"]       = "Cove",
         };
 
     public ExecutiveSummaryController(

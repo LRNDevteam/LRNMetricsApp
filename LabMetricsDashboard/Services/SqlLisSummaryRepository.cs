@@ -2903,6 +2903,14 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 	private static string ResolveLogicSheet(string labName, int? labId)
 	{
+		// A demo lab's LIMSMaster is a clone, so it matches the source lab's template rather than
+		// anything of its own - by name and by LabId, since the clone is registered under its own
+		// id. Without this it fell through to "Dynamic" and the summary lost its lettered sections.
+		if (LabLogicAlias.IsAliased(labName))
+		{
+			return ResolveLogicSheetByName(LabLogicAlias.Resolve(labName)!);
+		}
+
 		if (labId.HasValue)
 		{
 			return labId.Value switch

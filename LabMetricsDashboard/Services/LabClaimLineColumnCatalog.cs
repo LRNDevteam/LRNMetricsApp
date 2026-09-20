@@ -41,7 +41,7 @@ public static class LabClaimLineColumnCatalog
         // The identifying columns are still withheld: the privacy filter in GetClaimColumns
         // matches on the lab's OWN name, not this alias.
         ["LRNDemo"] = "Cove",          // cloned from CoveLRN
-        ["LRNLabDemo"] = "PCRLOA",     // cloned from PCRLabsofAmerica
+        ["LRNLabDemo"] = "Cove",       // re-cloned from Cove - LRNDemoLab carries Cove_* objects
     };
 
     private static readonly string[] DefaultClaim =

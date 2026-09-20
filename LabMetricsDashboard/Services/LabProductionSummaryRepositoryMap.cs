@@ -28,5 +28,10 @@ public static class LabProductionSummaryRepositoryMap
             ["Rising_Tides"]     = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.RisingTides),
             ["Phi_Life"]         = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PhiLife),
             ["Inhealth_DTR"]     = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.InHealthDTR),
+
+            // The demo lab reads its own database, which carries Cove's object names because it is
+            // a clone of Cove. Absent from this map it had no repository at all, which is why every
+            // Production Summary tab came up empty for it. See LabLogicAlias.
+            ["LRNLabDemo"]       = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Cove),
         };
 }

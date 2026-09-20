@@ -22,14 +22,24 @@
     "CSVs, Excel exports and insight JSON - production data again, which the database scrub",
     "does nothing about. Copy the files across once from PCR's folders.",
     "",
-    "Flags and rules are copied verbatim from PCRLabsofAmerica.json so the demo behaves",
-    "identically in the UI. Do not tune them here."
+    "THE DEMO DATABASE IS LRNDemoLab ON THE AZURE MANAGED INSTANCE, and it is a clone of COVE,",
+    "not of PCR - it carries Cove_* tables and usp_GetCove_* procedures. The code resolves that",
+    "through LabLogicAlias, which maps LRNLabDemo to Cove for prefixes, the claim column set and",
+    "the LIS template. A LRNLabDemo database also exists on ReportEngine\\SQLEXPRESS and is an",
+    "older PCR clone: pointing this config at it brings back the empty reports, because the alias",
+    "asks for Cove objects that database does not have. If the demo is ever re-cloned from a",
+    "different lab, change the alias to match - one entry, not five prefix maps.",
+    "",
+    "Every report is ON. A demo lab with a page switched off shows the audience a product that",
+    "does not have that page."
   ],
 
   "LRNLabDemo": {
-    "//DbLabName": "Not set on purpose - step 4 re-stamps the demo data to LabName 'LRNLabDemo', so the config key already matches the data. Only add DbLabName if you skip the re-stamp.",
+    "//DbLabName": "MUST equal the LabName the demo data actually carries, because that is what queries filter on. The live LRNDemoLab clone was de-identified to 'LRN LAB', not to 'LRNLabDemo' - with the config key here instead, every page that filters by lab name matched nothing. Check with: SELECT DISTINCT LabName FROM dbo.ClaimLevelData.",
+    "DbLabName": "LRN LAB",
 
-    "DbConnectionString": "Server=ReportEngine\\SQLEXPRESS;Database=LRNLabDemo;User Id=sa;Password=<demo-password>;TrustServerCertificate=True;",
+    "//DbConnectionString": "LRNDemoLab on the managed instance - the Cove clone. NOT the ReportEngine LRNLabDemo database, which is an older PCR clone and does not carry the Cove_* objects the code now asks for.",
+    "DbConnectionString": "Server=<managed-instance-host>,3342;Initial Catalog=LRNDemoLab;User ID=<user>;Password=<demo-password>;Encrypt=True;TrustServerCertificate=True;",
 
     "//paths": "Demo copies, NOT PCR's live folders. Create these and copy PCR's current files in once.",
     "ProductionMasterCsvPath": "C:\\LRN-Files\\Automation\\LRN-Demo\\LRN-Input\\LRNLabDemo\\",
@@ -39,15 +49,15 @@
     "Reports": "C:\\LRN-Files\\Automation\\LRN-Demo\\LRN-Output\\Coding_Validation_Report\\LRNLabDemo",
     "Avgs": "C:\\LRN-Files\\Automation\\LRN-Demo\\LRN-Output\\Averages\\LRNLabDemo",
 
-    "//flags": "Verbatim from PCRLabsofAmerica.json.",
+    "//flags": "Every report is ON. The demo lab exists to show the product, so a page turned off here reads to the audience as a product that does not have it - which is how Clinic Summary came to answer 'not enabled for LRNLabDemo' during a demo.",
     "DBEnabled": true,
     "LineClaimEnable": true,
     "CollectionOutput": "table1",
     "EnableCoding": true,
     "EnablePrediction": true,
     "EnableForcast": true,
-    "EnableClinicsummary": false,
-    "EnableSalesRepsummary": false,
+    "EnableClinicsummary": true,
+    "EnableSalesRepsummary": true,
     "EnableProductionReport": true,
     "EnableCollectionReport": true,
     "EnableProductionSummaryReport": true,
