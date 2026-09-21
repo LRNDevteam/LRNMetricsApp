@@ -1,0 +1,341 @@
+{
+  "SchemaName": "Line Level",
+  "HeaderRow": 1,
+  "Columns": [
+    {
+      "Name": "VisitNum",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "T/F",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "UID",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Accession No",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Panel type",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Plan Type",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Patient Ac No",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Patient First Name",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Patient Last Name",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "DOB",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Service From Date",
+      "Required": false,
+      "DataType": "date"
+    },
+    {
+      "Name": "Aging DOS",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Service To Date",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Created On",
+      "Required": false,
+      "DataType": "date"
+    },
+    {
+      "Name": "Aging DOE",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Facility",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Ordering Physician Last Name",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Ordering Physician First Name",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "RenderingPhysician First Name",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Rendering Physician Last Name",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Service Location Code",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Service Location Name",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Primary Payer",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Primary Sub ID",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Billed Date",
+      "Required": false,
+      "DataType": "date"
+    },
+    {
+      "Name": "Billed Week",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "CPT",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Units",
+      "Required": false,
+      "DataType": "int"
+    },
+    {
+      "Name": "Modifiers",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "CPT X MOD X UNITS",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Line Level CPT",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Claim Level CPT",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Deposit Date",
+      "Required": false,
+      "DataType": "date"
+    },
+    {
+      "Name": "Deposit Week",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Denial Date",
+      "Required": false,
+      "DataType": "date"
+    },
+    {
+      "Name": "Denied Week",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Denial Code",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Line Level Denial Code",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Claim Level Denial Code",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Line Level ICD",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Claim Level ICD",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "POS",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "TOS",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "TotalCharge",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "TotalAllowed",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Insurance Paid",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Patient Paid",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Insurance Balance",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Patient Balance",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Total Balance",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Carrier WO",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Patient WO",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Billing Option",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "CPT STATUS",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Current Status",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Payment %",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Last Billed Date",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Bill Status",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Active Bucket",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Balance Responsibility",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Primary Deposit Date",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Secondary Deposit Date",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Patient Deposit Date",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Last Updated Date",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Created By",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Updated On",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Updated By",
+      "Required": false,
+      "DataType": "string"
+    }
+  ]
+}
