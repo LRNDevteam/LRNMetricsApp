@@ -1,6 +1,7 @@
 using System.Globalization;
 using ClosedXML.Excel;
 using LabMetricsDashboard.Models;
+using LabMetricsDashboard.Services.Security;
 using LabMetricsDashboard.Services;
 using LabMetricsDashboard.ViewModels;
 using Microsoft.AspNetCore.Authorization;
@@ -56,7 +57,7 @@ public sealed class DenialClaimReportController : Controller
         _logger = logger;
     }
 
-    private bool IsAdmin => User.IsInRole("Admin") || User.IsInRole("LRN Admin") || User.IsInRole("LRNAdmin");
+    private bool IsAdmin => AppRoles.IsSuperAdmin(User);
 
     private string CurrentUser => User.Identity?.Name?.Trim() is { Length: > 0 } u ? u : "system";
 

@@ -576,6 +576,10 @@ builder.Services.AddScoped<BeechTreeRevenuePipelineLisService>();
 builder.Services.AddScoped<INotesRepository, SqlNotesRepository>();
 builder.Services.AddScoped<ExecutiveSummaryExcelBuilder>();
 
+// Lab Master Configuration: reads the master schema files and generates a new lab's schema JSON
+// and landing-table DDL. Singleton because the master schemas are read once and cached.
+builder.Services.AddSingleton<ILabSchemaMappingService, LabSchemaMappingService>();
+
 // User management repository (uses DefaultConnection from appsettings.json)
 builder.Services.AddScoped<IUserManagementRepository, SqlUserManagementRepository>();
 builder.Services.AddScoped<WorkflowJwtIssuer>();
@@ -759,6 +763,16 @@ builder.Services.AddControllersWithViews(options =>
         .Build();
     options.Filters.Add(new AuthorizeFilter(policy));
 });
+
+// ── Administrative policies ───────────────────────────────────────
+// Named rather than [Authorize(Roles = "Admin")] so the accepted spellings live in one place:
+// the old "Admin" name is still in issued cookies after the Super Admin rename, and Lab Admin
+// reaches only the user screens. See Services/Security/AppRoles.cs.
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy(AppRoles.SuperAdminPolicy, policy =>
+        policy.RequireAssertion(context => AppRoles.IsSuperAdmin(context.User)))
+    .AddPolicy(AppRoles.UserAdministrationPolicy, policy =>
+        policy.RequireAssertion(context => AppRoles.CanAdministerUsers(context.User)));
 
 builder.Services.AddRequestTimeouts();
 

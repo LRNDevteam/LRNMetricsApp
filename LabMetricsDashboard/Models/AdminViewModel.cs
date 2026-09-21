@@ -16,10 +16,20 @@ public sealed class AdminViewModel
 
     public Role NewRole { get; set; } = new Role();
 
-    // For create-user form: optionally select a role and labs to assign after creating the user
+    // For create-user form: optionally select roles and labs to assign after creating the user.
+    // NewUserRoleId is the single-role form this screen shipped with; it is still bound so an
+    // older cached page keeps working, and is folded into NewUserRoleIds on the way in.
     public int? NewUserRoleId { get; set; }
+    public List<int> NewUserRoleIds { get; set; } = new();
     public int? NewUserLabId { get; set; }
     public List<int> NewUserLabIds { get; set; } = new();
+
+    /// <summary>Every role the form asked for, de-duplicated - the multi-select plus the legacy single value.</summary>
+    public IReadOnlyList<int> SelectedRoleIds => NewUserRoleIds
+        .Concat(NewUserRoleId.HasValue ? [NewUserRoleId.Value] : Array.Empty<int>())
+        .Where(id => id > 0)
+        .Distinct()
+        .ToList();
 
     // List of available labs (populated by controller)
     public IEnumerable<Lab> Labs { get; set; } = new List<Lab>();

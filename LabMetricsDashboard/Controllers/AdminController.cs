@@ -1,11 +1,13 @@
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Models.Menu;
 using LabMetricsDashboard.Services;
+using LabMetricsDashboard.Services.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LabMetricsDashboard.Controllers;
 
+[Authorize(Policy = AppRoles.UserAdministrationPolicy)]
 public class AdminController : Controller
 {
     private static readonly SemaphoreSlim CreateUserGate = new(1, 1);
@@ -23,15 +25,103 @@ public class AdminController : Controller
         _menuService = menuService;
     }
 
+    // ── Lab Admin scoping ─────────────────────────────────────────────────────
+    // A Super Admin sees the estate. A Lab Admin sees only its own labs, and every list and
+    // every write below is filtered or checked against that set - the lists so the screen never
+    // offers what it may not touch, the checks because a hidden option is not a control.
+
+    private bool IsSuperAdmin => AppRoles.IsSuperAdmin(User);
+
+    /// <summary>The lab ids the signed-in administrator may act within, or null for "all labs".</summary>
+    private async Task<HashSet<int>?> ScopedLabIdsAsync()
+    {
+        if (IsSuperAdmin) return null;
+
+        var userId = CurrentLabUserId();
+        if (userId is null) return [];
+
+        return (await _repo.GetUserLabsAsync(userId.Value)).Select(l => l.LabId).ToHashSet();
+    }
+
+    private int? CurrentLabUserId()
+        => int.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id)
+            ? id
+            : null;
+
+    /// <summary>Labs the administrator may assign. A Lab Admin can never widen anyone past itself.</summary>
+    private async Task<IEnumerable<Lab>> VisibleLabsAsync()
+    {
+        var labs = await _repo.GetAllLabsAsync();
+        var scope = await ScopedLabIdsAsync();
+        return scope is null ? labs : labs.Where(l => scope.Contains(l.LabId)).ToList();
+    }
+
+    /// <summary>
+    /// Roles the administrator may grant. A Lab Admin is refused the administrative ones, so it
+    /// cannot promote an account to its own level or above.
+    /// </summary>
+    private async Task<IEnumerable<Role>> AssignableRolesAsync()
+    {
+        var roles = await _repo.GetAllRolesAsync();
+        return IsSuperAdmin ? roles : roles.Where(r => !AppRoles.IsAdministrativeRole(r.RoleName)).ToList();
+    }
+
+    /// <summary>
+    /// Users the administrator may see. A Lab Admin sees a user only when that user is in at least
+    /// one of its labs; a user with no lab at all is visible to Super Admin only, since there is no
+    /// lab to judge them by.
+    /// </summary>
+    private async Task<List<LabUser>> VisibleUsersAsync()
+    {
+        var users = (await _repo.GetAllUsersAsync()).ToList();
+        var scope = await ScopedLabIdsAsync();
+        if (scope is null) return users;
+
+        var visible = new List<LabUser>();
+        foreach (var user in users)
+        {
+            var labs = await _repo.GetUserLabsAsync(user.LabUserID);
+            if (labs.Any(l => scope.Contains(l.LabId))) visible.Add(user);
+        }
+
+        return visible;
+    }
+
+    private async Task<bool> CanAdministerUserAsync(int labUserId)
+    {
+        var scope = await ScopedLabIdsAsync();
+        if (scope is null) return true;
+        if (scope.Count == 0) return false;
+
+        var labs = await _repo.GetUserLabsAsync(labUserId);
+        return labs.Any(l => scope.Contains(l.LabId));
+    }
+
+    private async Task<bool> CanAssignLabAsync(int labId)
+    {
+        var scope = await ScopedLabIdsAsync();
+        return scope is null || scope.Contains(labId);
+    }
+
+    private async Task<bool> CanAssignRoleAsync(int roleId)
+    {
+        if (IsSuperAdmin) return true;
+
+        var role = (await _repo.GetAllRolesAsync()).FirstOrDefault(r => r.RoleID == roleId);
+        return role is not null && !AppRoles.IsAdministrativeRole(role.RoleName);
+    }
+
+    private IActionResult OutOfScope(string what)
+        => StatusCode(StatusCodes.Status403Forbidden,
+            new { success = false, errors = new[] { $"{what} is outside the labs you administer." } });
+
     [HttpGet]
     public async Task<IActionResult> Index()
     {
-        var users = await _repo.GetAllUsersAsync();
-        var roles = await _repo.GetAllRolesAsync();
         var vm = new AdminViewModel
         {
-            Users = users,
-            Roles = roles
+            Users = await VisibleUsersAsync(),
+            Roles = await AssignableRolesAsync()
         };
         return View(vm);
     }
@@ -41,9 +131,9 @@ public class AdminController : Controller
     {
         var vm = new AdminViewModel
         {
-            Users = await _repo.GetAllUsersAsync(),
-            Roles = await _repo.GetAllRolesAsync(),
-            Labs = await _repo.GetAllLabsAsync()
+            Users = await VisibleUsersAsync(),
+            Roles = await AssignableRolesAsync(),
+            Labs = await VisibleLabsAsync()
         };
         // keep existing Users view for backward compatibility
         return View(vm);
@@ -54,8 +144,8 @@ public class AdminController : Controller
     {
         var vm = new AdminViewModel
         {
-            Roles = await _repo.GetAllRolesAsync(),
-            Labs = await _repo.GetAllLabsAsync()
+            Roles = await AssignableRolesAsync(),
+            Labs = await VisibleLabsAsync()
         };
         return View(vm);
     }
@@ -65,14 +155,16 @@ public class AdminController : Controller
     {
         var vm = new AdminViewModel
         {
-            Users = await _repo.GetAllUsersAsync(),
-            Roles = await _repo.GetAllRolesAsync(),
-            Labs = await _repo.GetAllLabsAsync()
+            Users = await VisibleUsersAsync(),
+            Roles = await AssignableRolesAsync(),
+            Labs = await VisibleLabsAsync()
         };
         // Populate user -> labs map for server-side rendering
         var map = new Dictionary<int, IEnumerable<UserLab>>();
         var roleMap = new Dictionary<int, IEnumerable<Role>>();
-        var rolesById = vm.Roles.ToDictionary(r => r.RoleID);
+        // Every role, for DISPLAY. vm.Roles is the assignable subset and drives the pickers; using
+        // it here too would blank out a role the viewer may not grant but the user genuinely holds.
+        var rolesById = (await _repo.GetAllRolesAsync()).ToDictionary(r => r.RoleID);
         var activeLabIds = vm.Labs.Where(lab => lab.IsActive).Select(lab => lab.LabId).ToHashSet();
         foreach (var u in vm.Users)
         {
@@ -94,7 +186,9 @@ public class AdminController : Controller
         return View(vm);
     }
 
+    /// <summary>Role administration itself stays with Super Admin - a Lab Admin grants roles, it does not define them.</summary>
     [HttpGet]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     public async Task<IActionResult> Roles()
     {
         var vm = new AdminViewModel
@@ -109,9 +203,9 @@ public class AdminController : Controller
     {
         var vm = new AdminViewModel
         {
-            Users = await _repo.GetAllUsersAsync(),
-            Roles = await _repo.GetAllRolesAsync(),
-            Labs = await _repo.GetAllLabsAsync()
+            Users = await VisibleUsersAsync(),
+            Roles = await AssignableRolesAsync(),
+            Labs = await VisibleLabsAsync()
         };
         return View(vm);
     }
@@ -121,9 +215,9 @@ public class AdminController : Controller
     {
         var vm = new AdminViewModel
         {
-            Users = await _repo.GetAllUsersAsync(),
-            Roles = await _repo.GetAllRolesAsync(),
-            Labs = await _repo.GetAllLabsAsync()
+            Users = await VisibleUsersAsync(),
+            Roles = await AssignableRolesAsync(),
+            Labs = await VisibleLabsAsync()
         };
         return View(vm);
     }
@@ -131,11 +225,11 @@ public class AdminController : Controller
     [HttpGet]
     public async Task<IActionResult> GetUsersJson()
     {
-        var users = (await _repo.GetAllUsersAsync()).ToList();
+        var users = await VisibleUsersAsync();
 
         var result = new List<object>();
         var allRoles = (await _repo.GetAllRolesAsync()).ToDictionary(r => r.RoleID);
-        var activeLabIds = (await _repo.GetAllLabsAsync()).Where(lab => lab.IsActive).Select(lab => lab.LabId).ToHashSet();
+        var activeLabIds = (await VisibleLabsAsync()).Where(lab => lab.IsActive).Select(lab => lab.LabId).ToHashSet();
         foreach (var u in users)
         {
             var labs = (await _repo.GetUserLabsAsync(u.LabUserID))
@@ -172,14 +266,14 @@ public class AdminController : Controller
     [HttpGet]
     public async Task<IActionResult> GetRolesJson()
     {
-        var roles = await _repo.GetAllRolesAsync();
+        var roles = await AssignableRolesAsync();
         return Json(roles);
     }
 
     [HttpGet]
     public async Task<IActionResult> GetLabsJson()
     {
-        var labs = await _repo.GetAllLabsAsync();
+        var labs = await VisibleLabsAsync();
         return Json(labs);
     }
 
@@ -187,6 +281,8 @@ public class AdminController : Controller
     public async Task<IActionResult> GetUserRolesJson(int userId)
     {
         if (userId <= 0) return BadRequest();
+        if (!await CanAdministerUserAsync(userId)) return OutOfScope("That user");
+
         var urs = await _repo.GetUserRolesAsync(userId);
         return Json(urs);
     }
@@ -195,6 +291,8 @@ public class AdminController : Controller
     public async Task<IActionResult> GetUserLabsJson(int userId)
     {
         if (userId <= 0) return BadRequest();
+        if (!await CanAdministerUserAsync(userId)) return OutOfScope("That user");
+
         var uls = await _repo.GetUserLabsAsync(userId);
         return Json(uls);
     }
@@ -231,13 +329,29 @@ public class AdminController : Controller
             if (await _repo.GetUserByUserNameAsync(user.UserName) != null)
                 return Conflict(new { success = false, errors = new[] { $"UserName '{user.UserName}' already exists" } });
 
+            // Checked before the user exists, so a refused request cannot leave a half-built
+            // account behind: a Lab Admin may only place people in its own labs and may not hand
+            // out an administrative role.
+            var requestedLabs = GetSelectedLabIds(vm).ToList();
+            var requestedRoles = vm.SelectedRoleIds;
+
+            foreach (var labId in requestedLabs)
+                if (!await CanAssignLabAsync(labId)) return OutOfScope("That lab");
+
+            foreach (var roleId in requestedRoles)
+                if (!await CanAssignRoleAsync(roleId)) return OutOfScope("That role");
+
+            // A Lab Admin creating a user with no lab would create one it cannot then see.
+            if (!IsSuperAdmin && requestedLabs.Count == 0)
+                return OutOfScope("A user with no lab");
+
             user.PasswordHash = _hasher.Hash(vm.NewUserPassword!);
             var id = await _repo.CreateUserAsync(user);
 
-            if (vm.NewUserRoleId.HasValue && vm.NewUserRoleId.Value > 0)
-                await _repo.AssignRoleAsync(id, vm.NewUserRoleId.Value);
+            foreach (var roleId in requestedRoles)
+                await _repo.AssignRoleAsync(id, roleId);
 
-            foreach (var labId in GetSelectedLabIds(vm))
+            foreach (var labId in requestedLabs)
                 await _repo.AssignUserLabAsync(new UserLab { LabUserID = id, LabId = labId });
 
             return Json(new { success = true, id });
@@ -248,7 +362,9 @@ public class AdminController : Controller
         }
     }
 
+    /// <summary>Defining roles is estate-wide, so it stays with Super Admin.</summary>
     [HttpPost]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     public async Task<IActionResult> CreateRoleAjax([FromForm] AdminViewModel vm)
     {
         var role = vm?.NewRole;
@@ -261,6 +377,9 @@ public class AdminController : Controller
     public async Task<IActionResult> AssignRoleAjax([FromForm] int assignUserId, [FromForm] int assignRoleId)
     {
         if (assignUserId <= 0 || assignRoleId <= 0) return BadRequest(new { success = false, errors = new[] { "Invalid user or role" } });
+        if (!await CanAdministerUserAsync(assignUserId)) return OutOfScope("That user");
+        if (!await CanAssignRoleAsync(assignRoleId)) return OutOfScope("That role");
+
         await _repo.AssignRoleAsync(assignUserId, assignRoleId);
         return Json(new { success = true });
     }
@@ -269,6 +388,9 @@ public class AdminController : Controller
     public async Task<IActionResult> AssignUserLabAjax([FromForm] int assignUserId, [FromForm] int labId)
     {
         if (assignUserId <= 0 || labId <= 0) return BadRequest(new { success = false, errors = new[] { "Invalid user or lab" } });
+        if (!await CanAdministerUserAsync(assignUserId)) return OutOfScope("That user");
+        if (!await CanAssignLabAsync(labId)) return OutOfScope("That lab");
+
         var ul = new UserLab { LabId = labId, LabUserID = assignUserId };
         await _repo.AssignUserLabAsync(ul);
         return Json(new { success = true });
@@ -278,6 +400,14 @@ public class AdminController : Controller
     public async Task<IActionResult> RemoveUserRole([FromForm] int userRoleId)
     {
         if (userRoleId <= 0) return BadRequest();
+
+        // The row carries the user, so the scope check has to start from it rather than from a
+        // user id the caller supplies - otherwise a Lab Admin could strip a role off anyone by id.
+        var target = await FindUserRoleAsync(userRoleId);
+        if (target is null) return Json(new { success = true });
+        if (!await CanAdministerUserAsync(target.LabUserID)) return OutOfScope("That user");
+        if (!await CanAssignRoleAsync(target.RoleID)) return OutOfScope("That role");
+
         await _repo.RemoveUserRoleAsync(userRoleId);
         return Json(new { success = true });
     }
@@ -286,6 +416,12 @@ public class AdminController : Controller
     public async Task<IActionResult> RemoveUserLab([FromForm] int ulid)
     {
         if (ulid <= 0) return BadRequest();
+
+        var target = await FindUserLabAsync(ulid);
+        if (target is null) return Json(new { success = true });
+        if (!await CanAdministerUserAsync(target.LabUserID)) return OutOfScope("That user");
+        if (!await CanAssignLabAsync(target.LabId)) return OutOfScope("That lab");
+
         await _repo.RemoveUserLabAsync(ulid);
         return Json(new { success = true });
     }
@@ -294,8 +430,34 @@ public class AdminController : Controller
     public async Task<IActionResult> RemoveUser([FromForm] int userId)
     {
         if (userId <= 0) return BadRequest(new { success = false, errors = new[] { "Invalid user" } });
+        if (!await CanAdministerUserAsync(userId)) return OutOfScope("That user");
+
         await _repo.DeactivateUserAsync(userId, User?.Identity?.Name);
         return Json(new { success = true });
+    }
+
+    /// <summary>The UserRoles row behind an id, so a removal can be scope-checked against its owner.</summary>
+    private async Task<UserRole?> FindUserRoleAsync(int userRoleId)
+    {
+        foreach (var user in await _repo.GetAllUsersAsync())
+        {
+            var match = (await _repo.GetUserRolesAsync(user.LabUserID))
+                .FirstOrDefault(ur => ur.UserRoleId == userRoleId);
+            if (match is not null) return match;
+        }
+
+        return null;
+    }
+
+    private async Task<UserLab?> FindUserLabAsync(int ulid)
+    {
+        foreach (var user in await _repo.GetAllUsersAsync())
+        {
+            var match = (await _repo.GetUserLabsAsync(user.LabUserID)).FirstOrDefault(ul => ul.ULID == ulid);
+            if (match is not null) return match;
+        }
+
+        return null;
     }
 
     [HttpPost]
@@ -336,13 +498,27 @@ public class AdminController : Controller
                 ViewData["OpenCreateUserModal"] = true;
                 return View("ListUsers", vm);
             }
+            // Same scope checks as the AJAX path - this is the non-JavaScript form post, and an
+            // enforcement that lives only in the other handler is not an enforcement.
+            var requestedLabs = GetSelectedLabIds(vm).ToList();
+            var requestedRoles = vm.SelectedRoleIds;
+
+            foreach (var labId in requestedLabs)
+                if (!await CanAssignLabAsync(labId)) return OutOfScope("That lab");
+
+            foreach (var roleId in requestedRoles)
+                if (!await CanAssignRoleAsync(roleId)) return OutOfScope("That role");
+
+            if (!IsSuperAdmin && requestedLabs.Count == 0)
+                return OutOfScope("A user with no lab");
+
             user.PasswordHash = _hasher.Hash(vm.NewUserPassword ?? string.Empty);
             var id = await _repo.CreateUserAsync(user);
 
-            if (vm.NewUserRoleId.HasValue && vm.NewUserRoleId.Value > 0)
-                await _repo.AssignRoleAsync(id, vm.NewUserRoleId.Value);
+            foreach (var roleId in requestedRoles)
+                await _repo.AssignRoleAsync(id, roleId);
 
-            foreach (var labId in GetSelectedLabIds(vm))
+            foreach (var labId in requestedLabs)
                 await _repo.AssignUserLabAsync(new UserLab { LabUserID = id, LabId = labId });
 
             return RedirectToAction("ListUsers");
@@ -358,7 +534,11 @@ public class AdminController : Controller
     {
         var user = await _repo.GetUserByIdAsync(id);
         if (user == null) return NotFound();
-        ViewBag.Labs = (await _repo.GetAllLabsAsync()).Where(lab => lab.IsActive).ToList();
+        if (!await CanAdministerUserAsync(id)) return OutOfScope("That user");
+
+        // Only the labs this administrator may hand out, so the edit screen cannot move a user
+        // into a lab its owner has no authority over.
+        ViewBag.Labs = (await VisibleLabsAsync()).Where(lab => lab.IsActive).ToList();
         ViewBag.SelectedLabIds = (await _repo.GetUserLabsAsync(id)).Select(lab => lab.LabId).Distinct().ToList();
         return View(user);
     }
@@ -372,6 +552,12 @@ public class AdminController : Controller
         // Preserve non-editable fields (e.g. IsExternalUser, MiddleName) by loading the existing record.
         var existing = await _repo.GetUserByIdAsync(user.LabUserID);
         if (existing == null) return NotFound();
+
+        // Checked on the way in AND on the labs being posted: the target must already be inside the
+        // administrator's labs, and it must not be moved outside them.
+        if (!await CanAdministerUserAsync(user.LabUserID)) return OutOfScope("That user");
+        foreach (var labId in LabIds ?? [])
+            if (!await CanAssignLabAsync(labId)) return OutOfScope("That lab");
 
         existing.UserName = user.UserName;
         existing.FirstName = user.FirstName;
@@ -414,6 +600,7 @@ public class AdminController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     public async Task<IActionResult> CreateRole(Role role)
     {
         if (string.IsNullOrWhiteSpace(role.RoleName))
@@ -432,6 +619,9 @@ public class AdminController : Controller
         if (assignUserId <= 0 || assignRoleId <= 0)
             return RedirectToAction("Index");
 
+        if (!await CanAdministerUserAsync(assignUserId)) return OutOfScope("That user");
+        if (!await CanAssignRoleAsync(assignRoleId)) return OutOfScope("That role");
+
         await _repo.AssignRoleAsync(assignUserId, assignRoleId);
         return RedirectToAction("Index");
     }
@@ -443,6 +633,9 @@ public class AdminController : Controller
         if (assignUserId <= 0 || labId <= 0)
             return RedirectToAction("Index");
 
+        if (!await CanAdministerUserAsync(assignUserId)) return OutOfScope("That user");
+        if (!await CanAssignLabAsync(labId)) return OutOfScope("That lab");
+
         var ul = new UserLab { LabId = labId, LabUserID = assignUserId };
         await _repo.AssignUserLabAsync(ul);
         return RedirectToAction("Index");
@@ -450,9 +643,13 @@ public class AdminController : Controller
 
     // ?????????????????????????????????????????????????????????????
     // Lab Master management
+    //
+    // Creating and editing labs is estate-wide, so this whole section is Super Admin only. A Lab
+    // Admin that could add a lab could hand itself a new one.
     // ?????????????????????????????????????????????????????????????
 
     [HttpGet]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     public async Task<IActionResult> ManageLabs()
     {
         var labs = await _repo.GetAllLabsAsync();
@@ -464,6 +661,7 @@ public class AdminController : Controller
     /// Returns { available: true/false }.
     /// </summary>
     [HttpGet]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     public async Task<IActionResult> IsLabNameAvailable(string labName, int? excludeId = null)
     {
         if (string.IsNullOrWhiteSpace(labName))
@@ -476,6 +674,7 @@ public class AdminController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     public async Task<IActionResult> CreateLab(Lab lab)
     {
         if (lab == null || string.IsNullOrWhiteSpace(lab.LabName))
@@ -506,6 +705,7 @@ public class AdminController : Controller
     }
 
     [HttpGet]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     public async Task<IActionResult> EditLab(int id)
     {
         var lab = await _repo.GetLabByIdAsync(id);
@@ -515,6 +715,7 @@ public class AdminController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     public async Task<IActionResult> EditLab(Lab lab)
     {
         if (lab == null || lab.LabId <= 0) return RedirectToAction(nameof(ManageLabs));
@@ -551,15 +752,15 @@ public class AdminController : Controller
     // ─────────────────────────────────────────────────────────────────────
 
     [HttpGet]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     public IActionResult MenuMaster() => View();
 
     [HttpGet]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     public IActionResult RoleMenuMapping() => View();
 
     [HttpGet]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     public async Task<IActionResult> MenuItems(CancellationToken ct)
     {
         try { return Json(await _menuApi.GetMenuItemsAsync(ct)); }
@@ -567,7 +768,7 @@ public class AdminController : Controller
     }
 
     [HttpPost]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> SaveMenuItem(int? id, [FromBody] MenuItemSaveRequest request, CancellationToken ct)
     {
@@ -588,7 +789,7 @@ public class AdminController : Controller
     }
 
     [HttpPost]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> SetMenuDisabled([FromBody] MenuDisabledDto dto, CancellationToken ct)
     {
@@ -602,7 +803,7 @@ public class AdminController : Controller
     }
 
     [HttpPost]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> DeleteMenuItem([FromBody] MenuDeleteDto dto, CancellationToken ct)
     {
@@ -616,7 +817,7 @@ public class AdminController : Controller
     }
 
     [HttpGet]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     public async Task<IActionResult> MenuRoles(CancellationToken ct)
     {
         try { return Json(await _menuApi.GetRolesAsync(ct)); }
@@ -624,7 +825,7 @@ public class AdminController : Controller
     }
 
     [HttpGet]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     public async Task<IActionResult> RoleMenus(int roleId, CancellationToken ct)
     {
         try { return Json(await _menuApi.GetRoleMenuIdsAsync(roleId, ct)); }
@@ -632,7 +833,7 @@ public class AdminController : Controller
     }
 
     [HttpPost]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> SaveRoleMenus([FromBody] RoleMenuSaveDto dto, CancellationToken ct)
     {
@@ -649,7 +850,7 @@ public class AdminController : Controller
 
     /// <summary>The Enable/Disable rows the Role Menu Mapping screen renders under the menu tree.</summary>
     [HttpGet]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     public async Task<IActionResult> MenuFeatures(CancellationToken ct)
     {
         try { return Json(await _menuApi.GetFeatureCatalogAsync(ct)); }
@@ -657,7 +858,7 @@ public class AdminController : Controller
     }
 
     [HttpGet]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = AppRoles.SuperAdminPolicy)]
     public async Task<IActionResult> RoleFeatures(int roleId, CancellationToken ct)
     {
         try { return Json(await _menuApi.GetRoleFeaturesAsync(roleId, ct)); }

@@ -1,5 +1,6 @@
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
+using LabMetricsDashboard.Services.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
@@ -133,7 +134,7 @@ public class AccountController : Controller
                 user.UserName, string.Join(",", mappedButMissingJson.Select(l => $"{l.LabId}:{l.Name}")));
         }
 
-        var isAdmin = roleNames.Any(r => string.Equals(r, "Admin", StringComparison.OrdinalIgnoreCase));
+        var isAdmin = roleNames.Any(AppRoles.IsSuperAdminName);
         var isArManager = roleNames.Any(r => IsRole(r, "AR Manager") || IsRole(r, "ARManager"));
         var isArReviewer = roleNames.Any(r => IsRole(r, "AR Reviewer") || IsRole(r, "ARReviewer") || IsRole(r, "AR Analyser") || IsRole(r, "ARAnalyser") || IsRole(r, "AR Analyzer") || IsRole(r, "ARAnalyzer"));
         var isClientManager = roleNames.Any(r => IsRole(r, "Client Manager") || IsRole(r, "ClientManager"));

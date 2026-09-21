@@ -1,0 +1,609 @@
+@model LabMetricsDashboard.Controllers.LabSchemaPageViewModel
+@{
+    ViewData["Title"] = "Lab Master Configuration";
+}
+
+@* Onboarding a lab is a four-step job, so the page is laid out as those four steps rather than as
+   a form: pick the lab, give it the lab's columns, correct what the matcher was unsure of, take the
+   two artefacts. Claim Level and Line Level are separate tabs because they are separate files with
+   separate schemas - the same lab usually has different headers in each. *@
+
+<div class="container-fluid px-3 py-3 lsc-page">
+
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+        <div>
+            <h4 class="mb-1">Lab Master Configuration</h4>
+            <div class="text-muted" style="font-size:.85rem;">
+                Map a new lab's file columns onto the master schema, then take away that lab's
+                <strong>schema JSON</strong> and its <strong>landing-table script</strong>.
+            </div>
+        </div>
+    </div>
+
+    <div class="lsc-steps">
+        <div class="lsc-step">
+            <span class="lsc-step-no">1</span>
+            <label class="lsc-step-label" for="lscLab">Lab</label>
+            <select id="lscLab" class="form-select form-select-sm">
+                <option value="">Select a lab…</option>
+                @foreach (var lab in Model.Labs)
+                {
+                    <option value="@lab.LabName">@lab.LabName</option>
+                }
+            </select>
+            <div class="lsc-step-hint">Or type a name for a lab that is not registered yet.</div>
+            <input id="lscLabFree" class="form-control form-control-sm mt-1" placeholder="New lab name" />
+        </div>
+
+        <div class="lsc-step">
+            <span class="lsc-step-no">2</span>
+            <label class="lsc-step-label" for="lscFile">The lab's columns</label>
+            <input id="lscFile" type="file" class="form-control form-control-sm" accept=".xlsx,.xlsm,.csv,.txt" />
+            <div class="lsc-step-hint">
+                Header row
+                <input id="lscHeaderRow" type="number" min="1" value="1" class="lsc-mini-input" />
+                &middot; only the header row is read, never the data.
+            </div>
+            <div id="lscSheetWrap" class="mt-1" hidden>
+                <select id="lscSheet" class="form-select form-select-sm"></select>
+                <div class="lsc-step-hint">Sheet to read the headers from.</div>
+            </div>
+        </div>
+
+        <div class="lsc-step">
+            <span class="lsc-step-no">3</span>
+            <span class="lsc-step-label">Review the mapping</span>
+            <div id="lscSummary" class="lsc-summary">
+                <span class="text-muted">Upload a file, or paste headers below, to begin.</span>
+            </div>
+            <button type="button" id="lscPasteToggle" class="btn btn-sm btn-outline-secondary mt-1">
+                <i class="bi bi-clipboard"></i> Paste headers instead
+            </button>
+        </div>
+
+        <div class="lsc-step">
+            <span class="lsc-step-no">4</span>
+            <span class="lsc-step-label">Generate</span>
+            <button type="button" id="lscGenerate" class="btn btn-sm btn-primary w-100" disabled>
+                <i class="bi bi-magic"></i> Generate JSON &amp; SQL
+            </button>
+            <div class="lsc-step-hint">Produces both artefacts for the open tab.</div>
+        </div>
+    </div>
+
+    <div id="lscPasteWrap" class="lsc-paste" hidden>
+        <label class="form-label mb-1">One header per line, or comma separated</label>
+        <textarea id="lscPasteBox" class="form-control" rows="4"
+                  placeholder="VisitNum, Accession, Carrier, Panel…"></textarea>
+        <button type="button" id="lscPasteApply" class="btn btn-sm btn-primary mt-2">
+            <i class="bi bi-check2"></i> Map these headers
+        </button>
+    </div>
+
+    <ul class="nav nav-tabs lsc-tabs mt-3" role="tablist">
+        <li class="nav-item">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#lsc-claim"
+                    type="button" data-level="ClaimLevel">
+                <i class="bi bi-file-earmark-text me-1"></i> Claim Level
+                <span class="badge rounded-pill bg-secondary-subtle text-secondary-emphasis ms-1"
+                      data-count="ClaimLevel">—</span>
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#lsc-line"
+                    type="button" data-level="LineLevel">
+                <i class="bi bi-list-columns me-1"></i> Line Level
+                <span class="badge rounded-pill bg-secondary-subtle text-secondary-emphasis ms-1"
+                      data-count="LineLevel">—</span>
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content">
+        @foreach (var level in new[] { "ClaimLevel", "LineLevel" })
+        {
+            var paneId = level == "ClaimLevel" ? "lsc-claim" : "lsc-line";
+            <div class="tab-pane fade @(level == "ClaimLevel" ? "show active" : "")" id="@paneId" data-level-pane="@level">
+
+                <div class="lsc-panel">
+                    <div class="lsc-panel-head">
+                        <div>
+                            <span class="lsc-panel-title">Column mapping</span>
+                            <span class="lsc-panel-sub" data-master-count>—</span>
+                        </div>
+                        <div class="lsc-filter-chips">
+                            <button type="button" class="lsc-chip is-active" data-filter="all">All</button>
+                            <button type="button" class="lsc-chip" data-filter="review">Needs review</button>
+                            <button type="button" class="lsc-chip" data-filter="unmapped">Unmapped</button>
+                            <button type="button" class="lsc-chip" data-filter="required">Required</button>
+                        </div>
+                    </div>
+
+                    <div class="lsc-table-wrap">
+                        <table class="table table-sm lsc-table mb-0">
+                            <thead>
+                                <tr>
+                                    <th class="lsc-col-master">Master column</th>
+                                    <th class="lsc-col-type">Type</th>
+                                    <th class="lsc-col-lab">Lab column</th>
+                                    <th class="lsc-col-match">Match</th>
+                                </tr>
+                            </thead>
+                            <tbody data-mapping-body>
+                                <tr><td colspan="4" class="lsc-empty">Master schema loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="lsc-leftovers" data-leftovers hidden>
+                        <span class="lsc-leftovers-label">Not claimed by any master column</span>
+                        <div data-leftover-chips></div>
+                    </div>
+                </div>
+
+                <div class="lsc-output">
+                    <div class="lsc-output-card">
+                        <div class="lsc-output-head">
+                            <span><i class="bi bi-filetype-json me-1"></i> <strong data-json-name>schema.json</strong></span>
+                            <span class="ms-auto d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-copy="json" disabled>Copy</button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" data-download="json" disabled>Download</button>
+                            </span>
+                        </div>
+                        <pre class="lsc-code" data-json-out>Generate to see the lab schema.</pre>
+                    </div>
+
+                    <div class="lsc-output-card">
+                        <div class="lsc-output-head">
+                            <span><i class="bi bi-filetype-sql me-1"></i> <strong data-sql-name>CreateTable.sql</strong></span>
+                            <span class="ms-auto d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-copy="sql" disabled>Copy</button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" data-download="sql" disabled>Download</button>
+                            </span>
+                        </div>
+                        <pre class="lsc-code" data-sql-out>Generate to see the table script.</pre>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+
+    <form id="lscDownloadForm" method="post" asp-action="Download" class="d-none">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="fileName" />
+        <input type="hidden" name="content" />
+    </form>
+    @Html.AntiForgeryToken()
+</div>
+
+<style>
+    .lsc-page { --lsc-line: #e4edf6; --lsc-ink: #12314f; --lsc-muted: #6b7a8c; }
+
+    .lsc-steps {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+        gap: .75rem;
+    }
+
+    .lsc-step {
+        position: relative;
+        padding: .7rem .8rem .8rem 2.1rem;
+        border: 1px solid var(--lsc-line);
+        border-radius: .6rem;
+        background: #fff;
+    }
+
+    .lsc-step-no {
+        position: absolute;
+        top: .7rem; left: .7rem;
+        width: 1.15rem; height: 1.15rem;
+        border-radius: 50%;
+        background: var(--lsc-ink);
+        color: #fff;
+        font-size: .68rem;
+        font-weight: 800;
+        display: flex; align-items: center; justify-content: center;
+    }
+
+    .lsc-step-label {
+        display: block;
+        font-size: .68rem; font-weight: 800;
+        text-transform: uppercase; letter-spacing: .06em;
+        color: var(--lsc-muted);
+        margin-bottom: .3rem;
+    }
+
+    .lsc-step-hint { font-size: .7rem; color: var(--lsc-muted); margin-top: .25rem; }
+    .lsc-mini-input { width: 3.2rem; padding: 0 .25rem; font-size: .7rem; border: 1px solid var(--lsc-line); border-radius: .25rem; }
+
+    .lsc-summary { font-size: .78rem; line-height: 1.5; }
+    .lsc-summary strong { color: var(--lsc-ink); }
+
+    .lsc-paste { margin-top: .75rem; padding: .75rem; border: 1px solid var(--lsc-line); border-radius: .6rem; background: #f8fbfe; }
+
+    .lsc-tabs { border-bottom: 2px solid var(--lsc-line); gap: .25rem; }
+    .lsc-tabs .nav-link { border: 0; border-bottom: 3px solid transparent; border-radius: 0; font-weight: 600; font-size: .85rem; color: var(--lsc-muted); }
+    .lsc-tabs .nav-link.active { color: var(--lsc-ink); border-bottom-color: var(--lsc-ink); background: transparent; }
+
+    .lsc-panel { border: 1px solid var(--lsc-line); border-top: 0; border-radius: 0 0 .6rem .6rem; background: #fff; }
+
+    .lsc-panel-head {
+        display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+        padding: .6rem .75rem; border-bottom: 1px solid var(--lsc-line); background: #f7fafd;
+    }
+
+    .lsc-panel-title { font-weight: 800; color: var(--lsc-ink); font-size: .85rem; }
+    .lsc-panel-sub { font-size: .74rem; color: var(--lsc-muted); margin-left: .5rem; }
+
+    .lsc-filter-chips { margin-left: auto; display: flex; gap: .3rem; flex-wrap: wrap; }
+    .lsc-chip {
+        border: 1px solid var(--lsc-line); background: #fff; border-radius: 999px;
+        padding: .12rem .6rem; font-size: .7rem; font-weight: 700; color: var(--lsc-muted); cursor: pointer;
+    }
+    .lsc-chip.is-active { background: var(--lsc-ink); border-color: var(--lsc-ink); color: #fff; }
+
+    .lsc-table-wrap { max-height: 26rem; overflow: auto; }
+    .lsc-table { font-size: .78rem; margin: 0; }
+    .lsc-table thead th {
+        position: sticky; top: 0; z-index: 2;
+        background: #123b63; color: #fff; font-size: .68rem; font-weight: 700;
+        text-transform: uppercase; letter-spacing: .05em; padding: .4rem .55rem; white-space: nowrap;
+    }
+    .lsc-table td { padding: .3rem .55rem; vertical-align: middle; border-bottom: 1px solid #eef3f8; }
+    .lsc-col-master { width: 24%; }
+    .lsc-col-type { width: 9%; }
+    .lsc-col-lab { width: 45%; }
+    .lsc-col-match { width: 22%; }
+
+    .lsc-master-name { font-weight: 700; color: var(--lsc-ink); }
+    .lsc-req { color: #b91c1c; font-weight: 800; margin-left: .15rem; }
+    .lsc-derived { font-size: .68rem; color: #7a5b00; background: #fff7e0; border-radius: .25rem; padding: 0 .3rem; }
+    .lsc-type { font-size: .7rem; color: var(--lsc-muted); font-variant-numeric: tabular-nums; }
+
+    .lsc-table select { font-size: .76rem; padding: .15rem .3rem; width: 100%; border: 1px solid var(--lsc-line); border-radius: .3rem; }
+    .lsc-table tr.is-unmapped select { border-color: #f0c36d; background: #fffdf5; }
+    .lsc-table tr.is-missing select { border-color: #e39a9a; background: #fff6f6; }
+
+    .lsc-badge { font-size: .66rem; font-weight: 800; border-radius: 999px; padding: .08rem .45rem; white-space: nowrap; }
+    .lsc-badge.exact { background: #e8f7ef; color: #0f6b45; }
+    .lsc-badge.alias { background: #e7f0fa; color: #1f4e79; }
+    .lsc-badge.normalized { background: #fff2cc; color: #7f5f00; }
+    .lsc-badge.fuzzy { background: #fde8d7; color: #8a4b12; }
+    .lsc-badge.none { background: #eef1f5; color: #5a6a7a; }
+    .lsc-badge.derived { background: #f3eaff; color: #5b3ba0; }
+
+    .lsc-empty { text-align: center; color: var(--lsc-muted); padding: 1.5rem; }
+
+    .lsc-leftovers { padding: .6rem .75rem; border-top: 1px solid var(--lsc-line); background: #fffdf7; }
+    .lsc-leftovers-label { font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: #7a5b00; display: block; margin-bottom: .3rem; }
+    .lsc-leftover-chip { display: inline-block; font-size: .72rem; background: #fff; border: 1px solid #f0d9a8; border-radius: 999px; padding: .1rem .5rem; margin: 0 .25rem .25rem 0; }
+
+    .lsc-output { display: grid; grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); gap: .75rem; margin-top: .75rem; }
+    .lsc-output-card { border: 1px solid var(--lsc-line); border-radius: .6rem; background: #fff; overflow: hidden; }
+    .lsc-output-head { display: flex; align-items: center; gap: .4rem; padding: .5rem .7rem; border-bottom: 1px solid var(--lsc-line); background: #f7fafd; font-size: .78rem; }
+    .lsc-code { margin: 0; padding: .7rem; font-size: .72rem; line-height: 1.5; max-height: 22rem; overflow: auto; background: #0f2438; color: #dbe7f3; white-space: pre; }
+
+    @@media (max-width: 768px) {
+        .lsc-col-master, .lsc-col-type, .lsc-col-lab, .lsc-col-match { width: auto; }
+    }
+</style>
+
+<script>
+(function () {
+    const urls = {
+        master:   '@Url.Action("Master", "LabSchema")',
+        upload:   '@Url.Action("Upload", "LabSchema")',
+        remap:    '@Url.Action("Remap", "LabSchema")',
+        generate: '@Url.Action("Generate", "LabSchema")'
+    };
+
+    const token = document.querySelector('.lsc-page input[name="__RequestVerificationToken"]').value;
+
+    // One state object per level: the two tabs are independent mappings of the same lab.
+    const state = {
+        ClaimLevel: { headers: [], mappings: [], leftovers: [], filter: 'all', json: '', sql: '', jsonName: '', sqlName: '' },
+        LineLevel:  { headers: [], mappings: [], leftovers: [], filter: 'all', json: '', sql: '', jsonName: '', sqlName: '' }
+    };
+
+    const activeLevel = () => document.querySelector('.lsc-tabs .nav-link.active').dataset.level;
+    const pane = level => document.querySelector(`[data-level-pane="${level}"]`);
+
+    function labName() {
+        const free = document.getElementById('lscLabFree').value.trim();
+        return free || document.getElementById('lscLab').value.trim();
+    }
+
+    function badge(match, confidence) {
+        const kind = (match || 'None').toLowerCase();
+        const label = kind === 'none' ? 'no match' : `${kind} ${confidence}%`;
+        return `<span class="lsc-badge ${kind}">${label}</span>`;
+    }
+
+    function render(level) {
+        const s = state[level];
+        const body = pane(level).querySelector('[data-mapping-body]');
+
+        const rows = s.mappings.filter(m => {
+            if (s.filter === 'unmapped') return !m.isDerived && !m.labColumn;
+            if (s.filter === 'required') return m.required;
+            // "Needs review" is the point of the screen: everything the matcher was not sure of.
+            if (s.filter === 'review') return !m.isDerived && (!m.labColumn || m.match === 'Normalized' || m.match === 'Fuzzy');
+            return true;
+        });
+
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="4" class="lsc-empty">Nothing in this filter.</td></tr>';
+        } else {
+            body.innerHTML = rows.map(m => {
+                const idx = s.mappings.indexOf(m);
+
+                if (m.isDerived) {
+                    return `<tr>
+                        <td><span class="lsc-master-name">${esc(m.masterColumn)}</span></td>
+                        <td class="lsc-type">${esc(m.dataType)}</td>
+                        <td><span class="lsc-derived">computed: ${esc(m.calculation || '')}</span></td>
+                        <td><span class="lsc-badge derived">derived</span></td>
+                    </tr>`;
+                }
+
+                // Selected value first, then everything else - a lab column can be picked for any
+                // master column, so the full header list is always available.
+                const options = ['<option value="">— not mapped —</option>']
+                    .concat(s.headers.map(h =>
+                        `<option value="${esc(h)}" ${h === m.labColumn ? 'selected' : ''}>${esc(h)}</option>`));
+
+                const cls = !m.labColumn ? (m.required ? 'is-missing' : 'is-unmapped') : '';
+
+                return `<tr class="${cls}">
+                    <td><span class="lsc-master-name">${esc(m.masterColumn)}</span>${m.required ? '<span class="lsc-req">*</span>' : ''}</td>
+                    <td class="lsc-type">${esc(m.dataType)}</td>
+                    <td><select data-row="${idx}">${options.join('')}</select></td>
+                    <td>${badge(m.match, m.confidence)}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        const leftWrap = pane(level).querySelector('[data-leftovers]');
+        leftWrap.hidden = s.leftovers.length === 0;
+        leftWrap.querySelector('[data-leftover-chips]').innerHTML =
+            s.leftovers.map(c => `<span class="lsc-leftover-chip">${esc(c)}</span>`).join('');
+
+        const mapped = s.mappings.filter(m => m.labColumn).length;
+        const total = s.mappings.filter(m => !m.isDerived).length;
+        const missing = s.mappings.filter(m => m.required && !m.isDerived && !m.labColumn).length;
+
+        pane(level).querySelector('[data-master-count]').textContent =
+            `${mapped} of ${total} mapped${missing ? ` · ${missing} required still missing` : ''}`;
+
+        document.querySelector(`[data-count="${level}"]`).textContent = total ? `${mapped}/${total}` : '—';
+        updateSummary();
+    }
+
+    function updateSummary() {
+        const box = document.getElementById('lscSummary');
+        const level = activeLevel();
+        const s = state[level];
+
+        if (!s.mappings.length) { return; }
+
+        const mapped = s.mappings.filter(m => m.labColumn).length;
+        const review = s.mappings.filter(m => !m.isDerived && (m.match === 'Normalized' || m.match === 'Fuzzy')).length;
+        const missing = s.mappings.filter(m => m.required && !m.isDerived && !m.labColumn).length;
+
+        box.innerHTML = `<strong>${mapped}</strong> mapped`
+            + (review ? ` · <strong>${review}</strong> to check` : '')
+            + (missing ? ` · <strong style="color:#b91c1c">${missing}</strong> required missing` : '')
+            + (s.leftovers.length ? ` · ${s.leftovers.length} unused header(s)` : '');
+
+        document.getElementById('lscGenerate').disabled = !labName() || !s.mappings.length;
+    }
+
+    function esc(v) {
+        return String(v ?? '').replace(/[&<>"']/g, c =>
+            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    function applyResult(level, result, headers) {
+        const s = state[level];
+        s.mappings = (result.mappings || []).map(m => ({
+            masterColumn: m.masterColumn, dataType: m.dataType, required: m.required,
+            isDerived: m.isDerived, calculation: m.calculation,
+            labColumn: m.labColumn || '', match: m.match, confidence: m.confidence
+        }));
+        s.leftovers = result.unmatchedLabColumns || [];
+        if (headers) s.headers = headers;
+        render(level);
+    }
+
+    async function loadMaster(level) {
+        const res = await fetch(`${urls.master}?level=${level}`, { credentials: 'same-origin' });
+        if (!res.ok) return;
+        applyResult(level, await res.json(), []);
+    }
+
+    // ── Upload ────────────────────────────────────────────────────────────────
+    async function upload(sheet) {
+        const file = document.getElementById('lscFile').files[0];
+        if (!file) return;
+
+        const level = activeLevel();
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('level', level);
+        fd.append('headerRow', document.getElementById('lscHeaderRow').value || '1');
+        if (sheet) fd.append('sheet', sheet);
+        fd.append('__RequestVerificationToken', token);
+
+        const res = await fetch(urls.upload, { method: 'POST', body: fd, credentials: 'same-origin' });
+        const data = await res.json().catch(() => null);
+
+        if (!res.ok || !data || !data.success) {
+            alert((data && data.error) || 'That file could not be read.');
+            return;
+        }
+
+        const wrap = document.getElementById('lscSheetWrap');
+        if (data.sheets && data.sheets.length > 1) {
+            const sel = document.getElementById('lscSheet');
+            sel.innerHTML = data.sheets.map(n =>
+                `<option value="${esc(n)}" ${n === data.sheetUsed ? 'selected' : ''}>${esc(n)}</option>`).join('');
+            wrap.hidden = false;
+        } else {
+            wrap.hidden = true;
+        }
+
+        applyResult(level, data.result, data.headers);
+
+        // The same headers usually serve both tabs, so map the other one too rather than making
+        // the user upload the file twice.
+        const other = level === 'ClaimLevel' ? 'LineLevel' : 'ClaimLevel';
+        const remap = await fetch(urls.remap, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ level: other, headers: data.headers }),
+            credentials: 'same-origin'
+        });
+        if (remap.ok) {
+            const rd = await remap.json();
+            if (rd.success) applyResult(other, rd.result, data.headers);
+        }
+    }
+
+    document.getElementById('lscFile').addEventListener('change', () => upload(null));
+    document.getElementById('lscSheet').addEventListener('change', e => upload(e.target.value));
+    document.getElementById('lscHeaderRow').addEventListener('change', () => upload(document.getElementById('lscSheet').value || null));
+
+    // ── Paste ─────────────────────────────────────────────────────────────────
+    document.getElementById('lscPasteToggle').addEventListener('click', () => {
+        const w = document.getElementById('lscPasteWrap');
+        w.hidden = !w.hidden;
+    });
+
+    document.getElementById('lscPasteApply').addEventListener('click', async () => {
+        const raw = document.getElementById('lscPasteBox').value || '';
+        const headers = raw.split(/[\n,\t]/).map(h => h.trim()).filter(Boolean);
+        if (!headers.length) { alert('Paste at least one header.'); return; }
+
+        for (const level of ['ClaimLevel', 'LineLevel']) {
+            const res = await fetch(urls.remap, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                body: JSON.stringify({ level, headers }),
+                credentials: 'same-origin'
+            });
+            if (res.ok) {
+                const d = await res.json();
+                if (d.success) applyResult(level, d.result, headers);
+            }
+        }
+    });
+
+    // ── Manual correction ─────────────────────────────────────────────────────
+    document.addEventListener('change', e => {
+        const sel = e.target.closest('[data-mapping-body] select');
+        if (!sel) return;
+
+        const level = e.target.closest('[data-level-pane]').dataset.levelPane;
+        const s = state[level];
+        const row = s.mappings[parseInt(sel.dataset.row, 10)];
+        if (!row) return;
+
+        row.labColumn = sel.value;
+        // A hand-picked column is a decision, not a guess - it is recorded as such so the badge
+        // stops claiming a confidence the matcher no longer owns.
+        row.match = sel.value ? 'Exact' : 'None';
+        row.confidence = sel.value ? 100 : 0;
+
+        const used = new Set(s.mappings.filter(m => m.labColumn).map(m => m.labColumn.toLowerCase()));
+        s.leftovers = s.headers.filter(h => !used.has(h.toLowerCase()));
+        render(level);
+    });
+
+    // ── Filters & tabs ────────────────────────────────────────────────────────
+    document.addEventListener('click', e => {
+        const chip = e.target.closest('.lsc-chip');
+        if (chip) {
+            const p = chip.closest('[data-level-pane]');
+            p.querySelectorAll('.lsc-chip').forEach(c => c.classList.toggle('is-active', c === chip));
+            state[p.dataset.levelPane].filter = chip.dataset.filter;
+            render(p.dataset.levelPane);
+        }
+    });
+
+    document.querySelectorAll('.lsc-tabs .nav-link').forEach(btn =>
+        btn.addEventListener('shown.bs.tab', updateSummary));
+
+    ['lscLab', 'lscLabFree'].forEach(id =>
+        document.getElementById(id).addEventListener('input', updateSummary));
+
+    // ── Generate ──────────────────────────────────────────────────────────────
+    document.getElementById('lscGenerate').addEventListener('click', async () => {
+        const level = activeLevel();
+        const s = state[level];
+        const name = labName();
+        if (!name) { alert('Pick or name a lab first.'); return; }
+
+        const missing = s.mappings.filter(m => m.required && !m.isDerived && !m.labColumn);
+        if (missing.length && !confirm(
+            `${missing.length} required column(s) are still unmapped:\n\n`
+            + missing.slice(0, 8).map(m => '  • ' + m.masterColumn).join('\n')
+            + (missing.length > 8 ? `\n  …and ${missing.length - 8} more` : '')
+            + '\n\nGenerate anyway?')) return;
+
+        const res = await fetch(urls.generate, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({
+                labName: name,
+                level,
+                headerRow: parseInt(document.getElementById('lscHeaderRow').value || '1', 10),
+                mappings: s.mappings.filter(m => !m.isDerived).map(m => ({
+                    masterColumn: m.masterColumn,
+                    labColumn: m.labColumn,
+                    dataType: m.dataType,
+                    required: m.required
+                }))
+            }),
+            credentials: 'same-origin'
+        });
+
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.success) { alert((data && data.error) || 'Generate failed.'); return; }
+
+        s.json = data.json; s.sql = data.sql;
+        s.jsonName = data.jsonFileName; s.sqlName = data.sqlFileName;
+
+        const p = pane(level);
+        p.querySelector('[data-json-out]').textContent = data.json;
+        p.querySelector('[data-sql-out]').textContent = data.sql;
+        p.querySelector('[data-json-name]').textContent = data.jsonFileName;
+        p.querySelector('[data-sql-name]').textContent = data.sqlFileName;
+        p.querySelectorAll('[data-copy],[data-download]').forEach(b => b.disabled = false);
+    });
+
+    document.addEventListener('click', async e => {
+        const copy = e.target.closest('[data-copy]');
+        if (copy) {
+            const level = e.target.closest('[data-level-pane]').dataset.levelPane;
+            const text = copy.dataset.copy === 'json' ? state[level].json : state[level].sql;
+            try { await navigator.clipboard.writeText(text); copy.textContent = 'Copied'; }
+            catch { copy.textContent = 'Copy failed'; }
+            setTimeout(() => copy.textContent = 'Copy', 1500);
+        }
+
+        const dl = e.target.closest('[data-download]');
+        if (dl) {
+            const level = e.target.closest('[data-level-pane]').dataset.levelPane;
+            const s = state[level];
+            const isJson = dl.dataset.download === 'json';
+            const form = document.getElementById('lscDownloadForm');
+            form.fileName.value = isJson ? s.jsonName : s.sqlName;
+            form.content.value = isJson ? s.json : s.sql;
+            form.submit();
+        }
+    });
+
+    loadMaster('ClaimLevel');
+    loadMaster('LineLevel');
+})();
+</script>

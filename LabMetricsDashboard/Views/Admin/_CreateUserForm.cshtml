@@ -147,12 +147,21 @@
       </div>
 
       <div class="row g-3 mb-4">
+        @* Roles are a chip picker like Labs: a user can hold several, and both are added and
+           removed the same way so there is one gesture to learn. The list is what the signed-in
+           administrator may grant - a Lab Admin is not offered the administrative roles. *@
         <div class="col-md-6">
-          <label class="form-label">Role <span class="text-danger">*</span></label>
-          <select id="createUserRole" class="form-select select-smooth" name="NewUserRoleId" required>
-            <option value="">-- select role --</option>
-            @foreach(var r in Model.Roles) { <option value="@r.RoleID">@r.RoleName</option> }
-          </select>
+          <label class="form-label">Roles <span class="text-danger">*</span></label>
+          <div class="access-panel lab-chip-picker" data-input-name="NewUserRoleIds">
+            <div class="selected-labs" data-selected-labs>
+              <span class="lab-chip-empty">No roles selected</span>
+            </div>
+            <div data-hidden-labs></div>
+            <select id="createUserRole" class="form-select select-smooth">
+              <option value="">Select role to add</option>
+              @foreach(var r in Model.Roles) { <option value="@r.RoleID">@r.RoleName</option> }
+            </select>
+          </div>
           <div class="invalid-feedback" id="createUserRoleFeedback"></div>
         </div>
         <div class="col-md-6">

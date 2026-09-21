@@ -1,4 +1,5 @@
 using LabMetricsDashboard.Services;
+using LabMetricsDashboard.Services.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -55,8 +56,10 @@ public sealed class MenuAccessFilter : IAsyncAuthorizationFilter
         var user = context.HttpContext.User;
         if (user.Identity?.IsAuthenticated != true) return; // global auth policy handles this
 
-        // Admins always keep full access (the seed script grants them every menu anyway).
-        if (user.IsInRole("Admin") || user.IsInRole("LRN Admin") || user.IsInRole("LRNAdmin")) return;
+        // Super Admins always keep full access (the seed script grants them every menu anyway).
+        // A Lab Admin does NOT bypass here: it is menu-mapped like any other role, so it reaches
+        // only the user screens its grants allow.
+        if (AppRoles.IsSuperAdmin(user)) return;
 
         var routeValues = context.RouteData.Values;
         var controller = routeValues["controller"] as string;

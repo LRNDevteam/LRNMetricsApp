@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
+using LabMetricsDashboard.Services.Security;
 using LRN.ReportQueue.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -139,7 +140,7 @@ public sealed class AnalyticsController : Controller
         }
 
         // Admins are not lab-scoped anywhere else either; everyone else is capped at their labs.
-        var isAdmin = User.IsInRole("Admin") || User.IsInRole("LRN Admin") || User.IsInRole("LRNAdmin");
+        var isAdmin = AppRoles.IsSuperAdmin(User);
         var allowedLabIds = isAdmin ? null : allowedLabs.Select(l => l.LabId).Distinct().ToList();
 
         if (labId is not null && allowedLabIds is not null && !allowedLabIds.Contains(labId.Value))

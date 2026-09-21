@@ -1,6 +1,14 @@
 @model LabMetricsDashboard.Models.PhiExecutiveSummaryViewModel
 @using LabMetricsDashboard.Models
+@inject IConfiguration EsConfiguration
 @{
+    // Drill-through links on the Year Total / Grand Total cells are OFF for now. The markup and the
+    // LisDrill action are untouched - only the link is withheld - so turning them back on is a
+    // settings change, not a code change:
+    //     "ExecutiveSummary": { "EnableTotalDrillLinks": true }
+    // With it off the same cells render as plain values, which is what the else-branches below do.
+    var esTotalDrillEnabled = EsConfiguration.GetValue<bool>("ExecutiveSummary:EnableTotalDrillLinks");
+
     var esTableOnly = ViewData["EsTableOnly"] as bool? == true;
     var esLazy = ViewData["EsLazy"] as bool? == true;
     ViewData["Title"]       = "Executive Summary";
@@ -1042,7 +1050,7 @@
                                             var yrTot = RowYearTotal(row, year);
                                             @* Prefer rowCode (lab-specific LisDrillRowDef) over generic
                                                metric=Billable — Inhealth Billable is RowCode B, not L_A. *@
-                                            @if (!isPanelSpecificRow && (row.Category == "LIS" || row.Category == "PMS" || row.Category == "Cash") && !string.IsNullOrEmpty(row.RowCode) && yrTot != 0)
+                                            @if (esTotalDrillEnabled && !isPanelSpecificRow && (row.Category == "LIS" || row.Category == "PMS" || row.Category == "Cash") && !string.IsNullOrEmpty(row.RowCode) && yrTot != 0)
                                             {
                                                 string yrRowUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
                                                     lab      = Model.SelectedLab,
@@ -1056,7 +1064,7 @@
                                                     <a href="@yrRowUrl" class="es-drill-link">@FmtCount(yrTot, row.Category, row.RowCode)</a>
                                                 </td>
                                             }
-                                            else if (!isPanelSpecificRow && lisDrillMetric != null && yrTot != 0)
+                                            else if (esTotalDrillEnabled && !isPanelSpecificRow && lisDrillMetric != null && yrTot != 0)
                                             {
                                                 string yrDrillUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
                                                     lab    = Model.SelectedLab,
@@ -1073,7 +1081,7 @@
                                                 <td class="es-year-total@(dollarRow ? " es-cell-dollar" : "")">@FmtCount(yrTot, row.Category, row.RowCode)</td>
                                             }
                                         }
-                                        @if (!isPanelSpecificRow && (row.Category == "LIS" || row.Category == "PMS" || row.Category == "Cash") && !string.IsNullOrEmpty(row.RowCode) && gTot != 0)
+                                        @if (esTotalDrillEnabled && !isPanelSpecificRow && (row.Category == "LIS" || row.Category == "PMS" || row.Category == "Cash") && !string.IsNullOrEmpty(row.RowCode) && gTot != 0)
                                         {
                                             string gtRowUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
                                                 lab      = Model.SelectedLab,
@@ -1087,7 +1095,7 @@
                                                 <a href="@gtRowUrl" class="es-drill-link">@FmtCount(gTot, row.Category, row.RowCode)</a>
                                             </td>
                                         }
-                                        else if (!isPanelSpecificRow && lisDrillMetric != null && gTot != 0)
+                                        else if (esTotalDrillEnabled && !isPanelSpecificRow && lisDrillMetric != null && gTot != 0)
                                         {
                                             string gtDrillUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
                                                 lab    = Model.SelectedLab,

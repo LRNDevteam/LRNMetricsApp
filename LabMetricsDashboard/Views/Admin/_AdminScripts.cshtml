@@ -198,7 +198,10 @@
             } else {
                 try { conf.setCustomValidity(''); } catch(e){}
             }
-            if (role && (!role.value || role.value === '')) { role.classList.add('is-invalid'); const fb = document.getElementById('createUserRoleFeedback'); if(fb) fb.textContent = 'Role is required'; ok = false; }
+            // Roles are chips now, so the check is "at least one chip", not "the select has a value" -
+            // the select is only the thing you add chips WITH and is empty once a chip is added.
+            const selectedRoles = frmCreateUser.querySelectorAll('[data-hidden-labs] input[name="NewUserRoleIds"]');
+            if (role && selectedRoles.length === 0) { role.classList.add('is-invalid'); const fb = document.getElementById('createUserRoleFeedback'); if(fb) fb.textContent = 'At least one role is required'; ok = false; }
             const selectedLabs = frmCreateUser.querySelectorAll('[data-hidden-labs] input[name="NewUserLabIds"]');
             if (lab && selectedLabs.length === 0) { lab.classList.add('is-invalid'); const fb = document.getElementById('createUserLabFeedback'); if(fb) fb.textContent = 'Lab is required'; ok = false; }
 
@@ -506,7 +509,7 @@ $(function(){
             if ($pwd.length && (($pwd.val()||'').toString().length < 8)) ok = false;
             if (!validateConfirm()) ok = false;
             if (!validateEmail()) ok = false;
-            if ($role.length && !$role.val()) ok = false;
+            if ($role.length && !$form.find('[data-hidden-labs] input[name="NewUserRoleIds"]').length) ok = false;
             if ($lab.length && !$form.find('[data-hidden-labs] input[name="NewUserLabIds"]').length) ok = false;
             if (!ok) {
                 e.preventDefault();

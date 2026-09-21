@@ -26,6 +26,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Master Claim/Line schemas, read at runtime by the Lab Master Configuration page. These DO
+         ship: unlike the lab configs, they are the product's own canonical column set, and the page
+         has nothing to map onto without them. LabSchema:MasterSchemaFolder overrides the location
+         where a deployment prefers to share the worker's copy. -->
+    <Content Update="Schemas\*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Lab configs are loaded at runtime from LabConfigFolder (appsettings.json).
          Do NOT bake a per-lab config into the build output: it ships a stale copy
          (and a plaintext DB password) into the web root and, when LabConfigFolder

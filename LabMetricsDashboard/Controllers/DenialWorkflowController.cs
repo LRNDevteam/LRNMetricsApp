@@ -82,7 +82,7 @@ public sealed class DenialWorkflowController : Controller
         var userName = User.Identity?.Name?.Trim() ?? string.Empty;
         var isManager = HasAnyRole("AR Manager", "ARManager");
         var isReviewer = HasAnyRole("AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer");
-        var isAdmin = HasAnyRole("Admin");
+        var isAdmin = AppRoles.IsSuperAdmin(User);
         var active = string.IsNullOrWhiteSpace(tab) ? "dashboard" : tab.ToLowerInvariant();
 
         var filter = BuildFilter(selectedLab.LabId, role, userName, status, reviewer, assignedTo, denialCode, payerName, page, PageSize);
@@ -479,13 +479,22 @@ public sealed class DenialWorkflowController : Controller
 
     private string CurrentWorkflowRole()
     {
-        if (HasAnyRole("Admin")) return "Admin";
+        // Still reported to the workflow app as "Admin": that is the role name its own
+        // authorization understands, and the rename was to the dashboard's role, not to the
+        // workflow contract.
+        if (AppRoles.IsSuperAdmin(User)) return "Admin";
         if (HasAnyRole("AR Manager", "ARManager")) return "AR Manager";
         if (HasAnyRole("AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer")) return "AR Reviewer";
         return "User";
     }
 
-    private bool HasAnyRole(params string[] roles) => roles.Any(role => User.IsInRole(role));
+    /// <summary>
+    /// Asking for "Admin" here means "full administrator", so it resolves through AppRoles and
+    /// keeps matching after the role was renamed to Super Admin. Every other name is an ordinary
+    /// role check.
+    /// </summary>
+    private bool HasAnyRole(params string[] roles) => roles.Any(role =>
+        AppRoles.IsSuperAdminName(role) ? AppRoles.IsSuperAdmin(User) : User.IsInRole(role));
 
     /// <summary>
     /// Lab User: view-only access to the Denial Workflow React app. Matched on the normalised
