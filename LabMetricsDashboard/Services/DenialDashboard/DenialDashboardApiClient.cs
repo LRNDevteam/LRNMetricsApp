@@ -247,9 +247,15 @@ public sealed class DenialDashboardApiClient : IDenialDashboardApiClient
         EnsureBaseAddressConfigured();
 
         var user = _httpContextAccessor.HttpContext?.User;
-        if (user?.Identity?.IsAuthenticated != true) return;
-        var tokenResult = await _jwtIssuer.CreateTokenAsync(user, cancellationToken);
-        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenResult.Token);
+
+        // No HttpContext means this is background work - the snapshot scheduler - not a request
+        // borrowing the signed-in user's identity. Returning without a header sent the call out
+        // unauthenticated, and the API answered 401 on every pass.
+        var token = user?.Identity?.IsAuthenticated == true
+            ? (await _jwtIssuer.CreateTokenAsync(user, cancellationToken)).Token
+            : _jwtIssuer.CreateServiceToken("DenialDashboardScheduler").Token;
+
+        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
     }
 
     private void EnsureBaseAddressConfigured()

@@ -8,12 +8,27 @@ namespace LRN.ReportsApi.Security;
 /// </summary>
 public static class PayerMasterRoles
 {
+    /// <summary>
+    /// Every spelling of the full administrator. "Super Admin" is the current name - the dashboard
+    /// renamed the role in place - and "Admin" is what it was called before, still present in
+    /// already-issued tokens. Both are listed because this API is the other half of that rename:
+    /// dropping the old name signs current sessions out, and omitting the new one locked Super
+    /// Admins out of Menu Master and Role Menu Mapping, which is exactly what happened.
+    /// </summary>
+    private static readonly string[] LrnAdminRoles =
+        ["Super Admin", "SuperAdmin", "Super-Admin", "Admin", "LRN Admin", "LRNAdmin"];
+
     public static bool HasAnyRole(ClaimsPrincipal user, params string[] roles)
         => user.Claims
             .Where(c => c.Type == ClaimTypes.Role || c.Type is "role" or "roles")
             .Any(c => roles.Any(r => string.Equals(c.Value, r, StringComparison.OrdinalIgnoreCase)));
 
-    public static bool IsLrnAdmin(ClaimsPrincipal u) => HasAnyRole(u, "Admin", "LRN Admin", "LRNAdmin");
+    public static bool IsLrnAdmin(ClaimsPrincipal u) => HasAnyRole(u, LrnAdminRoles);
+
+    /// <summary>True when a role NAME (not a principal) means full administrator.</summary>
+    public static bool IsLrnAdminName(string? roleName)
+        => !string.IsNullOrWhiteSpace(roleName)
+           && LrnAdminRoles.Any(r => string.Equals(r, roleName.Trim(), StringComparison.OrdinalIgnoreCase));
     public static bool IsPayerPolicyAdmin(ClaimsPrincipal u) => HasAnyRole(u, "Payer Policy Admin", "PayerPolicyAdmin");
     public static bool IsReportsAnalyst(ClaimsPrincipal u) => HasAnyRole(u, "Reports Analyst", "ReportsAnalyst");
     public static bool IsReportsManager(ClaimsPrincipal u) => HasAnyRole(u, "Reports Manager", "ReportsManager");

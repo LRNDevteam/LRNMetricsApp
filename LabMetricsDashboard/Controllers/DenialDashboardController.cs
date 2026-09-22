@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Security.Claims;
 using CsvHelper;
 using CsvHelper.Configuration;
@@ -8,6 +8,7 @@ using LabMetricsDashboard.Services.DenialDashboard;
 using LabMetricsDashboard.ViewModels;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
+using LabMetricsDashboard.Services.Security;
 
 namespace LabMetricsDashboard.Controllers;
 
@@ -878,6 +879,11 @@ public class DenialDashboardController : Controller
 
 	private bool HasAnyRole(params string[] roleNames)
 	{
+		// Asking for "Admin" means "full administrator", so it resolves through AppRoles and keeps
+		// matching after the rename to Super Admin. The exact-token match below would not: it
+		// normalises to letters only, and SUPERADMIN is not ADMIN.
+		if (roleNames.Any(AppRoles.IsSuperAdminName) && AppRoles.IsSuperAdmin(User)) return true;
+
 		var wanted = roleNames
 			.Where(x => !string.IsNullOrWhiteSpace(x))
 			.Select(NormalizeRoleToken)
@@ -946,7 +952,7 @@ public class DenialDashboardController : Controller
 		// 3) The shared cross-report cookie. The standard reports store a LabConfig KEY here (e.g.
 		//    "Inhealth_DTR", "Augustus_Labs"), which is a DIFFERENT namespace from the denial API's
 		//    lab NAMES (e.g. "InHealth", "Augustus"), so match tolerantly. Read-only on purpose: never
-		//    overwrite this cookie with a denial name � the standard reports resolve it as a config key,
+		//    overwrite this cookie with a denial name ï¿½ the standard reports resolve it as a config key,
 		//    so clobbering it made an InHealth selection reopen as the first lab (Augustus) everywhere.
 		if (httpContext.Request.Cookies.TryGetValue(SelectedLabCookieName, out var cookieLab)
 			&& !string.IsNullOrWhiteSpace(cookieLab))
@@ -1065,7 +1071,7 @@ public class DenialDashboardController : Controller
 
 	/// <summary>
 	/// Aggregates one lab's denial data into the six exported tabs exactly the way
-	/// <see cref="Index"/> aggregates them for the page � filters, breakdowns and pivots all
+	/// <see cref="Index"/> aggregates them for the page ï¿½ filters, breakdowns and pivots all
 	/// come from the same helpers. Shared by the synchronous download and by
 	/// LRN.ReportWorker's queued DenialDashboard report, so the two can never drift.
 	/// </summary>
@@ -1102,7 +1108,7 @@ public class DenialDashboardController : Controller
 			ActionCategoryBreakdown: BuildBreakdown(filteredRecords, x => x.EffectiveActionCategory),
 			ClassificationBreakdown: BuildBreakdown(filteredRecords, x => x.DenialClassification),
 			DeadlineBreakdown: BuildDeadlineBreakdown(filteredRecords),
-			// "(Unassigned)" rather than "(Blank)" � an unclaimed denial is the actionable case.
+			// "(Unassigned)" rather than "(Blank)" ï¿½ an unclaimed denial is the actionable case.
 			AssignedToBreakdown: BuildBreakdown(filteredRecords,
 				x => string.IsNullOrWhiteSpace(x.AssignedTo) ? "(Unassigned)" : x.AssignedTo.Trim()),
 			// Notes/assignment come from the UNFILTERED task board: a line item still carries its

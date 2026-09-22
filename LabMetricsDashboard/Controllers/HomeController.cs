@@ -1,9 +1,10 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
+using LabMetricsDashboard.Services.Security;
 
 namespace LabMetricsDashboard.Controllers;
 
@@ -35,7 +36,7 @@ public class HomeController : Controller
     {
         // Non-admin users should never see the Home landing (lab tiles).
         // Send them straight to the Revenue Dashboard.
-        if (User?.Identity?.IsAuthenticated == true && !User.IsInRole("Admin"))
+        if (User?.Identity?.IsAuthenticated == true && !AppRoles.IsSuperAdmin(User))
         {
             return RedirectToAction("Index", "Dashboard");
         }
@@ -43,15 +44,15 @@ public class HomeController : Controller
         // Persist the navbar lab selection. The Home page previously never wrote the
         // lmd_selected_lab cookie, so switching labs here showed the new lab on this page
         // (via ?lab=) but reverted on the next navigation. Resolving here writes the cookie
-        // and sets ViewData["SelectedLab"] so the choice carries to every other page — the
-        // same pattern every content controller (Dashboard, CollectionSummary, …) already uses.
+        // and sets ViewData["SelectedLab"] so the choice carries to every other page â€” the
+        // same pattern every content controller (Dashboard, CollectionSummary, â€¦) already uses.
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
         ViewData["SelectedLab"] = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         var resolvedSort = string.IsNullOrWhiteSpace(sort) ? "latest" : sort;
 
-        // ── Live DB run info for DB-enabled labs (SP: usp_GetPayerValidationRunStats
-        //    via ProbeAsync). Fetched in parallel, cached 5 min, failures → null so a
+        // â”€â”€ Live DB run info for DB-enabled labs (SP: usp_GetPayerValidationRunStats
+        //    via ProbeAsync). Fetched in parallel, cached 5 min, failures â†’ null so a
         //    slow/unreachable lab DB can never break or stall the Home page.
         var runInfoTasks = _labSettings.Labs
             .Where(kv => kv.Value.DBEnabled && !string.IsNullOrWhiteSpace(kv.Value.DbConnectionString))
@@ -124,7 +125,7 @@ public class HomeController : Controller
 
     /// <summary>
     /// Returns the lab's latest prediction run info (RunId + inserted timestamp),
-    /// cached for <see cref="RunInfoCacheDuration"/>. Never throws — any DB error
+    /// cached for <see cref="RunInfoCacheDuration"/>. Never throws â€” any DB error
     /// is logged and cached as null so one bad lab DB cannot slow the Home page
     /// on every request.
     /// </summary>

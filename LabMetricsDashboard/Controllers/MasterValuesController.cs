@@ -2,6 +2,7 @@
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using LabMetricsDashboard.Services.Security;
 
 namespace LabMetricsDashboard.Controllers;
 
@@ -27,7 +28,8 @@ public sealed class MasterValuesController : Controller
 
     // ── Payer Master roles (Requirements Spec §2) ─────────────────────────────
     private bool HasAnyRole(params string[] roles) => roles.Any(r => User.IsInRole(r));
-    private bool IsLrnAdmin => HasAnyRole("Admin", "LRN Admin", "LRNAdmin");
+    // Via AppRoles so "Super Admin" counts: the role was renamed and this list was written before it.
+    private bool IsLrnAdmin => AppRoles.IsSuperAdmin(User) || HasAnyRole("LRN Admin", "LRNAdmin");
     private bool IsPayerPolicyAdmin => HasAnyRole("Payer Policy Admin", "PayerPolicyAdmin");
     private bool IsReportsAnalyst => HasAnyRole("Reports Analyst", "ReportsAnalyst");
     private bool IsReportsManager => HasAnyRole("Reports Manager", "ReportsManager");

@@ -68,8 +68,8 @@ public class AdminController : Controller
 
     /// <summary>
     /// Users the administrator may see. A Lab Admin sees a user only when that user is in at least
-    /// one of its labs; a user with no lab at all is visible to Super Admin only, since there is no
-    /// lab to judge them by.
+    /// one of its labs AND holds no administrative role; a user with no lab at all is visible to
+    /// Super Admin only, since there is no lab to judge them by.
     /// </summary>
     private async Task<List<LabUser>> VisibleUsersAsync()
     {
@@ -77,9 +77,14 @@ public class AdminController : Controller
         var scope = await ScopedLabIdsAsync();
         if (scope is null) return users;
 
+        // Same rule as CanAdministerUserAsync, applied to the list so the screen never shows a row
+        // whose buttons would be refused - an administrator the Lab Admin cannot act on should not
+        // be offered to them at all.
         var visible = new List<LabUser>();
         foreach (var user in users)
         {
+            if (await IsAdministrativeUserAsync(user.LabUserID)) continue;
+
             var labs = await _repo.GetUserLabsAsync(user.LabUserID);
             if (labs.Any(l => scope.Contains(l.LabId))) visible.Add(user);
         }
@@ -90,11 +95,29 @@ public class AdminController : Controller
     private async Task<bool> CanAdministerUserAsync(int labUserId)
     {
         var scope = await ScopedLabIdsAsync();
-        if (scope is null) return true;
+        if (scope is null) return true;              // Super Admin
         if (scope.Count == 0) return false;
+
+        // An administrator is off limits to a Lab Admin however the labs line up. Sharing a lab is
+        // ordinary - a Super Admin is assigned to the labs they support - and scoping on lab overlap
+        // ALONE let the Lab Admin of that lab see, edit and deactivate the Super Admin sitting in it.
+        if (await IsAdministrativeUserAsync(labUserId)) return false;
 
         var labs = await _repo.GetUserLabsAsync(labUserId);
         return labs.Any(l => scope.Contains(l.LabId));
+    }
+
+    /// <summary>
+    /// True when the user holds any administrative role. Used to keep Super Admins - and other Lab
+    /// Admins, who are peers rather than subordinates - out of a Lab Admin's reach entirely.
+    /// </summary>
+    private async Task<bool> IsAdministrativeUserAsync(int labUserId)
+    {
+        var rolesById = (await _repo.GetAllRolesAsync()).ToDictionary(r => r.RoleID);
+
+        return (await _repo.GetUserRolesAsync(labUserId))
+            .Any(ur => rolesById.TryGetValue(ur.RoleID, out var role)
+                       && AppRoles.IsAdministrativeRole(role.RoleName));
     }
 
     private async Task<bool> CanAssignLabAsync(int labId)
@@ -111,9 +134,14 @@ public class AdminController : Controller
         return role is not null && !AppRoles.IsAdministrativeRole(role.RoleName);
     }
 
+    /// <summary>
+    /// Worded without naming labs: a refusal is not always about them. An administrator is refused
+    /// even when the labs do line up, and saying "outside the labs you administer" there would send
+    /// the reader off checking lab assignments for a block that is about the role.
+    /// </summary>
     private IActionResult OutOfScope(string what)
         => StatusCode(StatusCodes.Status403Forbidden,
-            new { success = false, errors = new[] { $"{what} is outside the labs you administer." } });
+            new { success = false, errors = new[] { $"{what} is outside what you may administer." } });
 
     [HttpGet]
     public async Task<IActionResult> Index()
@@ -536,16 +564,18 @@ public class AdminController : Controller
         if (user == null) return NotFound();
         if (!await CanAdministerUserAsync(id)) return OutOfScope("That user");
 
-        // Only the labs this administrator may hand out, so the edit screen cannot move a user
-        // into a lab its owner has no authority over.
+        // Only the labs and roles this administrator may hand out, so the edit screen cannot move a
+        // user into a lab - or onto a role - its owner has no authority over.
         ViewBag.Labs = (await VisibleLabsAsync()).Where(lab => lab.IsActive).ToList();
         ViewBag.SelectedLabIds = (await _repo.GetUserLabsAsync(id)).Select(lab => lab.LabId).Distinct().ToList();
+        ViewBag.Roles = (await AssignableRolesAsync()).ToList();
+        ViewBag.SelectedRoleIds = (await _repo.GetUserRolesAsync(id)).Select(r => r.RoleID).Distinct().ToList();
         return View(user);
     }
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Edit([FromForm] LabUser user, [FromForm] string? Password, [FromForm] string? ConfirmPassword, [FromForm] int[] LabIds)
+    public async Task<IActionResult> Edit([FromForm] LabUser user, [FromForm] string? Password, [FromForm] string? ConfirmPassword, [FromForm] int[] LabIds, [FromForm] int[] RoleIds)
     {
         if (user == null || user.LabUserID <= 0) return RedirectToAction(nameof(ListUsers));
 
@@ -553,11 +583,13 @@ public class AdminController : Controller
         var existing = await _repo.GetUserByIdAsync(user.LabUserID);
         if (existing == null) return NotFound();
 
-        // Checked on the way in AND on the labs being posted: the target must already be inside the
-        // administrator's labs, and it must not be moved outside them.
+        // Checked on the way in AND on what is being posted: the target must already be inside the
+        // administrator's labs, and must not be moved onto a lab or role it has no authority over.
         if (!await CanAdministerUserAsync(user.LabUserID)) return OutOfScope("That user");
         foreach (var labId in LabIds ?? [])
             if (!await CanAssignLabAsync(labId)) return OutOfScope("That lab");
+        foreach (var roleId in RoleIds ?? [])
+            if (!await CanAssignRoleAsync(roleId)) return OutOfScope("That role");
 
         existing.UserName = user.UserName;
         existing.FirstName = user.FirstName;
@@ -587,6 +619,28 @@ public class AdminController : Controller
         {
             await _repo.AssignUserLabAsync(new UserLab { LabUserID = existing.LabUserID, LabId = labId });
         }
+
+        // Roles reconcile the same way the labs above do: remove what is no longer selected, add
+        // what is new. Roles the CURRENT administrator may not grant are left untouched rather than
+        // dropped - a Lab Admin editing a user must not silently strip a Super Admin role it cannot
+        // see, which is what a blanket "remove all then re-add" would do.
+        var postedRoleIds = (RoleIds ?? []).Where(id => id > 0).Distinct().ToHashSet();
+        var existingRoles = (await _repo.GetUserRolesAsync(existing.LabUserID)).ToList();
+
+        foreach (var role in existingRoles)
+        {
+            if (postedRoleIds.Contains(role.RoleID)) continue;
+            if (!await CanAssignRoleAsync(role.RoleID)) continue;
+
+            await _repo.RemoveUserRoleAsync(role.UserRoleId);
+        }
+
+        var heldRoleIds = existingRoles.Select(r => r.RoleID).ToHashSet();
+        foreach (var roleId in postedRoleIds.Where(id => !heldRoleIds.Contains(id)))
+        {
+            await _repo.AssignRoleAsync(existing.LabUserID, roleId);
+        }
+
         return RedirectToAction(nameof(ListUsers));
     }
 

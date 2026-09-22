@@ -29,7 +29,10 @@ public sealed class WorkflowJwtIssuer
         var displayName = user.FindFirstValue("FullName") ?? userName;
         var roles = user.Claims.Where(c => c.Type == ClaimTypes.Role).Select(c => c.Value).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
-        var isAdmin = roles.Any(r => string.Equals(r, "Admin", StringComparison.OrdinalIgnoreCase));
+        // Resolved through AppRoles, not a literal "Admin": after the role was renamed to
+        // Super Admin this comparison silently went false, and an admin's token then carried only
+        // their explicitly-assigned labs instead of the whole estate.
+        var isAdmin = roles.Any(AppRoles.IsSuperAdminName);
 
         var labs = new List<object>();
         if (isAdmin)
@@ -80,6 +83,51 @@ public sealed class WorkflowJwtIssuer
 
         var token = Sign(payload);
         return new WorkflowJwtTokenResult(token, expires.UtcDateTime, userName, displayName, roles.FirstOrDefault() ?? string.Empty, roles, labs);
+    }
+
+    /// <summary>
+    /// A token for background work, which has no signed-in user to borrow an identity from.
+    /// </summary>
+    /// <remarks>
+    /// The Reports API authenticates every non-import endpoint with this JWT and nothing else - the
+    /// X-LRN-Workflow-Key path is scoped to /api/denialworkflow/import. A hosted service calling any
+    /// other endpoint therefore had no way to authenticate at all, and the Denial Dashboard snapshot
+    /// pass failed every cycle with 401 Unauthorized.
+    ///
+    /// <para>It is minted with the administrator role and the full non-demo lab list because that is
+    /// what the work needs: the scheduler enumerates every lab and snapshots each. It is signed with
+    /// the same key as a user token and expires the same way, so it grants nothing a signed-in
+    /// administrator could not already do, and it is only ever issued where there is no user.</para>
+    /// </remarks>
+    public WorkflowJwtTokenResult CreateServiceToken(string serviceName)
+    {
+        var roles = new List<string> { AppRoles.SuperAdmin };
+
+        var labs = (_labConfig.LabsID ?? new List<LabIdInfo>())
+            .Where(l => l.Id > 0 && !string.IsNullOrWhiteSpace(l.Name) && !_labConfig.IsDemoLab(l.Name))
+            .OrderBy(l => l.Name)
+            .DistinctBy(l => l.Id)
+            .Select(l => new { labId = l.Id, labName = l.Name })
+            .Cast<object>()
+            .ToList();
+
+        var now = DateTimeOffset.UtcNow;
+        var expires = now.AddMinutes(Math.Max(10, _configuration.GetValue<int?>("DenialWorkflowAuth:TokenMinutes") ?? 480));
+        var payload = new Dictionary<string, object?>
+        {
+            ["iss"] = _configuration["DenialWorkflowAuth:Issuer"] ?? "LRNMetrics",
+            ["aud"] = _configuration["DenialWorkflowAuth:Audience"] ?? "LRNReportsApi",
+            ["sub"] = "0",
+            ["name"] = serviceName,
+            ["display_name"] = serviceName,
+            ["roles"] = roles,
+            ["labs"] = labs,
+            ["iat"] = now.ToUnixTimeSeconds(),
+            ["exp"] = expires.ToUnixTimeSeconds()
+        };
+
+        return new WorkflowJwtTokenResult(Sign(payload), expires.UtcDateTime, serviceName, serviceName,
+            roles[0], roles, labs);
     }
 
     private string Sign(Dictionary<string, object?> payload)

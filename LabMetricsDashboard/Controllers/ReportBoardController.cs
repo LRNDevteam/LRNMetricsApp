@@ -1,8 +1,9 @@
-using System.Reflection;
+﻿using System.Reflection;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using LabMetricsDashboard.Services.Security;
 
 namespace LabMetricsDashboard.Controllers;
 
@@ -51,13 +52,13 @@ public sealed class ReportBoardController : Controller
             .Where(p => p.PropertyType == typeof(bool))
             .ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
 
-    private bool IsAdmin => User.IsInRole("Admin") || User.IsInRole("LRN Admin") || User.IsInRole("LRNAdmin");
+    private bool IsAdmin => AppRoles.IsSuperAdmin(User);
 
     [HttpGet]
     public async Task<IActionResult> Index(string? view, string? sort, string? filter, string? lab, bool refresh = false, CancellationToken ct = default)
     {
         var resolvedView = string.Equals(view, "cards", StringComparison.OrdinalIgnoreCase) ? "cards" : "matrix";
-        // "order" — the sequence admins set per lab — is the default; the other two stay opt-in.
+        // "order" â€” the sequence admins set per lab â€” is the default; the other two stay opt-in.
         var resolvedSort = sort?.ToLowerInvariant() switch
         {
             "az" => "az",
@@ -85,7 +86,7 @@ public sealed class ReportBoardController : Controller
 
         var visibleLabs = VisibleLabKeys();
 
-        // The board shows every lab at once, so it has no lab of its own — but the navbar lab
+        // The board shows every lab at once, so it has no lab of its own â€” but the navbar lab
         // picker is still on screen here, and picking a lab reloads the CURRENT page with ?lab=.
         // Without this the choice died on arrival: the board ignored the parameter, so the
         // lmd_selected_lab cookie still held the previous lab and the next report opened on it,
@@ -106,7 +107,7 @@ public sealed class ReportBoardController : Controller
         var board = _boardSettings.CurrentValue ?? new ReportBoardSettings();
         var rows = new List<LabReportRow>();
 
-        // A report the tracker has never returned a result for — for ANY lab in this fetch — is
+        // A report the tracker has never returned a result for â€” for ANY lab in this fetch â€” is
         // not part of the pipeline yet. Without this every such column would turn into a row of
         // spinning gears (and, a day later, warnings) for a report nobody is waiting on.
         var apiRows = fetch.Data?.Rows ?? [];
@@ -135,7 +136,7 @@ public sealed class ReportBoardController : Controller
 
             // The tracker returns ONE run per lab, so a report that has not caught up with the
             // latest run shows up as a missing status inside it. Once the three source reports
-            // have succeeded, every other available report is expected — so a missing one is
+            // have succeeded, every other available report is expected â€” so a missing one is
             // "still running" (and, past a day, stalled) rather than "not produced here".
             var sourcesReady = ReportCatalog.SourceReportColumns.All(source =>
                 apiRow.Statuses.TryGetValue(source, out var raw) && ParseStatus(raw) == ReportRunStatus.Success);
@@ -144,7 +145,7 @@ public sealed class ReportBoardController : Controller
 
             // A lab that has stopped billing is still on the board, but its missing reports are
             // expected rather than stalled. Overdue is the only status the banner, the KPI, the row
-            // badge and the filter attribute key off, so withholding it here silences all of them —
+            // badge and the filter attribute key off, so withholding it here silences all of them â€”
             // the cells stay Pending (a gear, not a warning) and nothing else about the lab changes.
             var quiet = board.SuppressesMissingReportWarning(configKey, labDisplayName);
             var overdue = sourcesReady && runAge > ReportBoardViewModel.OverdueAfter && !quiet;
@@ -210,7 +211,7 @@ public sealed class ReportBoardController : Controller
     }
 
     /// <summary>
-    /// Downloads the run's Error log as a CSV — the board's error link points here. Backed by
+    /// Downloads the run's Error log as a CSV â€” the board's error link points here. Backed by
     /// usp_ReportRunIdInfoLog_Get @Runid = &lt;runId&gt;, @logtype = 'Error'. If the file cannot be
     /// produced (API down, no rows), fall back to the on-screen error page so the click is never dead.
     /// </summary>
@@ -224,7 +225,7 @@ public sealed class ReportBoardController : Controller
         if (csv is null || csv.Content.Length == 0)
             return RedirectToAction(nameof(RunErrors), new { runId, lab, labName, report });
 
-        // ErrorLog_<Report>_<Lab>_<RunId> — the API's own name says nothing about which report
+        // ErrorLog_<Report>_<Lab>_<RunId> â€” the API's own name says nothing about which report
         // or lab the log belongs to, so several downloads are indistinguishable in a folder.
         var extension = Path.GetExtension(csv.FileName);
         if (string.IsNullOrWhiteSpace(extension)) extension = ".xlsx";
@@ -246,23 +247,23 @@ public sealed class ReportBoardController : Controller
         bool warningsSuppressed,
         bool producedAnywhere)
     {
-        // A tile may derive its status from another report (StatusFrom) — LIMS Master mirrors
+        // A tile may derive its status from another report (StatusFrom) â€” LIMS Master mirrors
         // "LIS Summary": success when LIS Summary succeeded for this run, otherwise failed.
         var statusKey = column.StatusFrom ?? column.TrackerColumn;
         apiRow.Statuses.TryGetValue(statusKey, out var raw);
         var status = ParseStatus(raw);
 
-        // Reports this lab never produces stay greyed out — they are not late, they are absent
+        // Reports this lab never produces stay greyed out â€” they are not late, they are absent
         // by design. Two distinct absences, and the board must not conflate them:
         //
-        //   LOCKED (padlock) — withheld from THIS lab on purpose: the ReportAvailability section
+        //   LOCKED (padlock) â€” withheld from THIS lab on purpose: the ReportAvailability section
         //     in appsettings, or, for a report with no rule there, the catalog's built-in lab list
         //     (Sales Rep Summary only runs for Cove and Elixir) plus the lab's feature flag. The
         //     flag is only consulted when the lab resolved to a configuration: IsFeatureEnabled
         //     returns false for a null config, so applying it to an unmapped lab would lock every
         //     flagged report even when the run succeeded.
         //
-        //   NOT CONFIGURED (dash) — the pipeline has never produced this report for ANY lab in
+        //   NOT CONFIGURED (dash) â€” the pipeline has never produced this report for ANY lab in
         //     this fetch, so it is not wired up yet rather than withheld here.
         var availability = _availability.Evaluate(
             column, configKey, labDisplayName,
@@ -280,7 +281,7 @@ public sealed class ReportBoardController : Controller
         {
             // No result yet for a report this lab DOES produce: still working through the run,
             // or stalled once the source data has been sitting there for over a day.
-            // `sourcesReady` gates only the stalled verdict — see the caller.
+            // `sourcesReady` gates only the stalled verdict â€” see the caller.
             status = overdue ? ReportRunStatus.Overdue : ReportRunStatus.Pending;
         }
 

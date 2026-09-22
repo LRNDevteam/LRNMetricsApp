@@ -2,6 +2,7 @@ using System.Data;
 using System.Net.Mail;
 using System.Text.Json;
 using LRN.ReportsApi.Models;
+using LRN.ReportsApi.Security;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 
@@ -788,8 +789,9 @@ public sealed class PayerMasterWorkflowService : IPayerMasterWorkflowService
     private static IReadOnlyList<string> ExpandRoles(IReadOnlyCollection<string> roles)
     {
         var set = new HashSet<string>(roles, StringComparer.OrdinalIgnoreCase);
-        // "Admin" is the legacy full-access role and receives LRN Admin notifications.
-        if (set.Contains("Admin") || set.Contains("LRNAdmin")) set.Add("LRN Admin");
+        // "Super Admin" is the current full-access role and "Admin" the legacy one; both receive
+        // LRN Admin notifications. Resolved through PayerMasterRoles so the list lives in one place.
+        if (set.Any(PayerMasterRoles.IsLrnAdminName)) set.Add("LRN Admin");
         if (set.Contains("PayerPolicyAdmin")) set.Add("Payer Policy Admin");
         if (set.Contains("ReportsAnalyst")) set.Add("Reports Analyst");
         if (set.Contains("ReportsManager")) set.Add("Reports Manager");

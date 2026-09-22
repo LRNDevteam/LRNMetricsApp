@@ -5,6 +5,11 @@
     ViewData["Title"] = "Edit User";
     var labs = (ViewBag.Labs as IEnumerable<Lab> ?? Enumerable.Empty<Lab>()).Where(lab => lab.IsActive).ToList();
     var selectedLabIds = new HashSet<int>(ViewBag.SelectedLabIds as IEnumerable<int> ?? Enumerable.Empty<int>());
+
+    // Roles the signed-in administrator may grant. A Lab Admin is not offered the administrative
+    // ones, so the list is not simply every role.
+    var roles = (ViewBag.Roles as IEnumerable<Role> ?? Enumerable.Empty<Role>()).ToList();
+    var selectedRoleIds = new HashSet<int>(ViewBag.SelectedRoleIds as IEnumerable<int> ?? Enumerable.Empty<int>());
 }
 
 <style>
@@ -118,6 +123,24 @@
                 <div class="form-check mb-2">
                     <input class="form-check-input" type="checkbox" name="IsActive" value="true" @(Model.IsActive ? "checked" : "") />
                     <label class="form-check-label">Active</label>
+                </div>
+            </div>
+            @* Roles use the same chip picker as Labs, so adding and removing either is one gesture.
+               Posting the full set (not deltas) lets the controller reconcile in one place. *@
+            <div class="col-12">
+                <label class="form-label">Roles</label>
+                <div class="access-panel lab-chip-picker" data-input-name="RoleIds">
+                    <div class="selected-labs" data-selected-labs>
+                        <span class="lab-chip-empty">No roles selected</span>
+                    </div>
+                    <div data-hidden-labs></div>
+                    <select class="form-select">
+                        <option value="">Select role to add</option>
+                        @foreach (var role in roles)
+                        {
+                            <option value="@role.RoleID" data-selected="@(selectedRoleIds.Contains(role.RoleID).ToString().ToLowerInvariant())">@role.RoleName</option>
+                        }
+                    </select>
                 </div>
             </div>
             <div class="col-12">
