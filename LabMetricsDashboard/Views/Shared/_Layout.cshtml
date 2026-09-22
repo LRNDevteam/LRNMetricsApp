@@ -999,7 +999,10 @@
 
             // Restrict the navbar lab selector to labs the signed-in user is assigned to.
             // Admins see every lab. Anonymous (login screen) sees nothing.
-            var isAdmin = User?.IsInRole("Admin") ?? false;
+            // Through AppRoles: the role is now "Super Admin", and a literal "Admin" here silently made
+    // every administrator look like an ordinary user - which cut their lab picker down to only
+    // the labs explicitly assigned to them.
+    var isAdmin = LabMetricsDashboard.Services.Security.AppRoles.IsSuperAdmin(User);
             var isArManager = (User?.IsInRole("AR Manager") ?? false) || (User?.IsInRole("ARManager") ?? false);
             var isArReviewer = (User?.IsInRole("AR Reviewer") ?? false) || (User?.IsInRole("ARReviewer") ?? false) || (User?.IsInRole("AR Analyser") ?? false) || (User?.IsInRole("ARAnalyser") ?? false) || (User?.IsInRole("AR Analyzer") ?? false) || (User?.IsInRole("ARAnalyzer") ?? false);
             var isArRestricted = isArManager || isArReviewer;
@@ -1212,7 +1215,7 @@
                                 <div class="um-roles">
                                     @foreach (var role in userRoles)
                                     {
-                                        var isAdminRole = string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase);
+                                        var isAdminRole = LabMetricsDashboard.Services.Security.AppRoles.IsSuperAdminName(role);
                                         <span class="um-role-pill @(isAdminRole ? "admin" : "")">@role</span>
                                     }
                                 </div>
