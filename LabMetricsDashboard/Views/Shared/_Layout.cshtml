@@ -1279,6 +1279,27 @@
 
     <div class="container-fluid px-4 pt-3">
         <main role="main" class="pb-4">
+            @{
+                // Set by LabSelectionHelper when the lab picked in the navbar is one this user may
+                // open but this page's lab list excludes (missing Enable* flag or DB connection).
+                var unavailableLab = Context.Items[LabMetricsDashboard.Services.LabSelectionHelper.UnavailableLabItemKey] as string;
+            }
+            @if (!string.IsNullOrWhiteSpace(unavailableLab))
+            {
+                var hasDb = LabSettingsInstance.Labs.TryGetValue(unavailableLab, out var unavailableCfg)
+                    && !string.IsNullOrWhiteSpace(unavailableCfg.DbConnectionString);
+                <div class="alert alert-warning d-flex align-items-start gap-2 py-2 mb-3" role="status">
+                    <i class="bi bi-exclamation-triangle-fill mt-1"></i>
+                    <div>
+                        <strong>@unavailableLab</strong> is not set up for this report, so it is showing
+                        <strong>@(ViewData["SelectedLab"] as string ?? "another lab")</strong> instead.
+                        @(hasDb
+                            ? $"Enable this report in {unavailableLab}.json in the lab config folder."
+                            : $"{unavailableLab}.json has no DbConnectionString in the lab config folder.")
+                        Your lab choice is kept for the other pages.
+                    </div>
+                </div>
+            }
             @RenderBody()
         </main>
     </div>

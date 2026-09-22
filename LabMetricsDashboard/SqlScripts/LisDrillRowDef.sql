@@ -112,7 +112,10 @@ VALUES
  (N'Cove', N'D.5',  N'Coding exception',                  N'DateOfCollection', N'NewStatus',N'=',N'Billable', N'BillCategory',N'=',N'Not Billed', N'SubStatus',N'=',N'Coding exception'),
  (N'Cove', N'D.6',  N'CP Exception',                      N'DateOfCollection', N'NewStatus',N'=',N'Billable', N'BillCategory',N'=',N'Not Billed', N'SubStatus',N'=',N'CP Exception'),
  (N'Cove', N'D.7',  N'In process',                        N'DateOfCollection', N'NewStatus',N'=',N'Billable', N'BillCategory',N'=',N'Not Billed', N'SubStatus',N'=',N'In process'),
- (N'Cove', N'D.8',  N'Ignored - Client Response Non Billiable', N'DateOfCollection', N'NewStatus',N'=',N'Billable', N'BillCategory',N'=',N'Not Billed', N'SubStatus',N'=',N'Ignored - Client Response Non Billiable'),
+ -- D.8: IN, not '=', and both spellings. "Billiable" is a misspelling that runs through Cove's
+-- LIS scripts; whichever spelling the source data carries, the drill must return the samples the
+-- LIS Summary counted for this row, or a count of 10 opens an empty list. Feedback #5.
+(N'Cove', N'D.8',  N'Ignored - Client Response Non Billable', N'DateOfCollection', N'NewStatus',N'=',N'Billable', N'BillCategory',N'=',N'Not Billed', N'SubStatus',N'IN',N'Ignored - Client Response Non Billable,Ignored - Client Response Non Billiable'),
  (N'Cove', N'D.9',  N'Ready To Bill',                     N'DateOfCollection', N'NewStatus',N'=',N'Billable', N'BillCategory',N'=',N'Not Billed', N'SubStatus',N'=',N'Ready To Bill'),
  (N'Cove', N'D.10', N'Ignored - NGS & PGX in Cove',       N'DateOfCollection', N'NewStatus',N'=',N'Billable', N'BillCategory',N'=',N'Not Billed', N'SubStatus',N'=',N'Ignored - NGS & PGX in Cove'),
  (N'Cove', N'D.11', N'CP Exception -In Review',           N'DateOfCollection', N'NewStatus',N'=',N'Billable', N'BillCategory',N'=',N'Not Billed', N'SubStatus',N'=',N'CP Exception -In Review'),

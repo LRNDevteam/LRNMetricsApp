@@ -204,7 +204,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("•", "Referring provider Issues", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Referring provider Issues]"),
 				new TemplateRow("•", "Billed In Variantx Lab", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Billed In Variantx Lab]"),
 				new TemplateRow("•", "Billed Insurance In Covedx", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Billed Insurance In Covedx]"),
-				new TemplateRow("•", "Ignored - Client Response Non Billiable", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - Client Response Non Billiable]"),
+				// Spelled correctly on screen. The match tolerates the "Billiable" misspelling the
+				// source data may still carry - see FixKnownMisspellings.
+				new TemplateRow("•", "Ignored - Client Response Non Billable", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - Client Response Non Billable]"),
 				new TemplateRow("B", "System Test", "Final Status = [System Test]"),
 				new TemplateRow("1", "Billed", "Final Status = [System Test] AND Billed/Not = [Billed]"),
 				new TemplateRow("2", "UnBilled", "Final Status = [System Test] AND Billed/Not = [Unbilled]"),
@@ -2703,10 +2705,26 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			}
 		}
 
+		// "Billiable" is a misspelling of "Billable" that runs through Cove's LIS scripts and
+		// templates ("Ignored - Client Response Non Billiable"). The two spellings compare as
+		// different keys, so a template written one way matched zero samples recorded the
+		// other way - feedback #5, where the row read 0 against 10 in the manual report.
+		// Normalising both sides makes either spelling match either, which is right whichever
+		// spelling the source data actually uses.
+		if (FixKnownMisspellings(actualKey) == FixKnownMisspellings(expectedKey)) return true;
+
 		// Allow small wording differences used by the lab templates, e.g. Insurance Bill(s), Selfpay/Self Pay.
 		return actualKey.TrimEnd('S') == expectedKey.TrimEnd('S')
 			   || actualKey.TrimEnd('D') == expectedKey.TrimEnd('D');
 	}
+
+	/// <summary>
+	/// Folds misspellings known to exist in lab source data or templates onto the correct word,
+	/// on an already-normalised compare key. Only exact, unambiguous typos belong here: nothing
+	/// that is a real word in its own right, or two distinct statuses would be merged.
+	/// </summary>
+	private static string FixKnownMisspellings(string key)
+		=> key.Replace("BILLIABLE", "BILLABLE", StringComparison.Ordinal);
 
 	private static bool IsBillStatusField(string field)
 	{

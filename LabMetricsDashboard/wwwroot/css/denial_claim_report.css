@@ -338,6 +338,52 @@
 }
 
 /* ============================================================================
+   Monthly / Weekly pivot - total columns banded as Production Summary
+   (feedback #65 / #66)
+
+   Production Summary marks its subtotal columns amber and its Grand Total a
+   deeper amber, header and body alike, so the eye finds the totals without
+   reading the labels. The Denial Summary pivot now does the same:
+
+     year subtotal   header #854d0e -> #a16207, metric row #a16207, cells #fefce8
+     Grand Total     header #78350f -> #92400e, metric row #92400e, cells #fef3c7
+
+   The Total footer row keeps its navy band across every column, exactly as the
+   Production Summary total row does.
+
+   Scoped to .dcr-page: the classes come from the shared _BreakdownPivotTable
+   partial, and the original Denial Dashboard page is left as it is.
+   ========================================================================= */
+.dcr-page .breakdown-pivot-table.denial-pivot-freeze thead th.pivot-year-total {
+    background: linear-gradient(135deg, #854d0e 0%, #a16207 100%) !important;
+    color: #fff !important;
+}
+
+.dcr-page .breakdown-pivot-table.denial-pivot-freeze thead th.pivot-metric-title.pivot-year-total {
+    background: #a16207 !important;
+}
+
+.dcr-page .breakdown-pivot-table.denial-pivot-freeze thead th.pivot-total-title {
+    background: linear-gradient(135deg, #78350f 0%, #92400e 100%) !important;
+    color: #fff !important;
+}
+
+.dcr-page .breakdown-pivot-table.denial-pivot-freeze thead th.pivot-metric-title.pivot-grand-total {
+    background: #92400e !important;
+    color: #fff !important;
+}
+
+.dcr-page .breakdown-pivot-table.denial-pivot-freeze tbody td.pivot-year-total {
+    background: #fefce8 !important;
+    font-weight: 700;
+}
+
+.dcr-page .breakdown-pivot-table.denial-pivot-freeze tbody td.pivot-grand-total {
+    background: #fef3c7 !important;
+    font-weight: 800;
+    color: #3b2104;
+}
+
 /* ============================================================================
    Monthly / Weekly pivot - column widths
 

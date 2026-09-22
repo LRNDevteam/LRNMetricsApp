@@ -26,6 +26,13 @@ public static class LabSelectionHelper
     private const string CookieName = "lmd_selected_lab";
 
     /// <summary>
+    /// HttpContext.Items key holding the lab the user picked when the current page cannot show it
+    /// (the page's lab list is narrower than the navbar's, e.g. Production Summary only lists labs
+    /// with EnableProductionSummaryReport). The layout reads it to explain the fallback.
+    /// </summary>
+    public const string UnavailableLabItemKey = "LabUnavailableOnPage";
+
+    /// <summary>
     /// Determines the active lab from (in priority order):
     /// <list type="number">
     ///   <item><c>lab</c> query-string parameter - honoured only if the user is entitled to it</item>
@@ -45,28 +52,53 @@ public static class LabSelectionHelper
         // lands on their own lab rather than on an error, and either way sees nothing of the lab
         // they asked for.
         var selectedLab = Match(permitted, labParam);
+        var fromParam = selectedLab is not null;
 
-        if (string.IsNullOrWhiteSpace(selectedLab)
-            && httpContext.Request.Cookies.TryGetValue(CookieName, out var cookieLab))
-        {
+        // Many pages pass a narrower list than the navbar offers (only labs with a given Enable*
+        // flag or a DB connection). A lab the user may open, picked on a page that cannot show it,
+        // used to fall straight through to the first lab AND overwrite the cookie with it - so
+        // choosing e.g. VariantX on Production Summary looked like the picker "redirecting to the
+        // default lab", and the choice was lost for every other page too. Now the choice is kept
+        // in the cookie and flagged for the layout to explain.
+        string? unavailable = null;
+        if (string.IsNullOrWhiteSpace(selectedLab))
+            unavailable = Match(PermittedLabs(httpContext, AllConfiguredLabs(httpContext)), labParam);
+
+        httpContext.Request.Cookies.TryGetValue(CookieName, out var cookieLab);
+        if (string.IsNullOrWhiteSpace(selectedLab) && unavailable is null)
             selectedLab = Match(permitted, cookieLab);
-        }
 
         selectedLab ??= permitted.FirstOrDefault();
 
-        if (!string.IsNullOrWhiteSpace(selectedLab))
+        if (unavailable is not null)
         {
-            httpContext.Response.Cookies.Append(CookieName, selectedLab, new CookieOptions
-            {
-                HttpOnly = true,
-                SameSite = SameSiteMode.Lax,
-                IsEssential = true,
-                MaxAge = TimeSpan.FromDays(30),
-            });
+            httpContext.Items[UnavailableLabItemKey] = unavailable;
+            WriteCookie(httpContext, unavailable);
+        }
+        else if (!string.IsNullOrWhiteSpace(selectedLab))
+        {
+            // A remembered lab this page merely cannot show stays remembered, so the next page
+            // that can show it still opens it.
+            var keepCookie = !fromParam
+                && !string.Equals(selectedLab, cookieLab, StringComparison.OrdinalIgnoreCase)
+                && Match(PermittedLabs(httpContext, AllConfiguredLabs(httpContext)), cookieLab) is not null;
+            if (!keepCookie) WriteCookie(httpContext, selectedLab);
         }
 
         return selectedLab ?? string.Empty;
     }
+
+    private static void WriteCookie(HttpContext httpContext, string lab)
+        => httpContext.Response.Cookies.Append(CookieName, lab, new CookieOptions
+        {
+            HttpOnly = true,
+            SameSite = SameSiteMode.Lax,
+            IsEssential = true,
+            MaxAge = TimeSpan.FromDays(30),
+        });
+
+    private static IEnumerable<string> AllConfiguredLabs(HttpContext httpContext)
+        => httpContext.RequestServices?.GetService<LabSettings>()?.Labs.Keys ?? Enumerable.Empty<string>();
 
     /// <summary>
     /// The labs this user may open: the ones assigned to them, plus - for a Super Admin - every

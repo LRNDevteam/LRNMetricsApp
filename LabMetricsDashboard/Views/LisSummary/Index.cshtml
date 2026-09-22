@@ -748,8 +748,34 @@
             min-width: 56px;
             max-width: 56px;
             white-space: nowrap;
-            text-align: right;
             font-variant-numeric: tabular-nums;
+        }
+
+        /* Right-alignment is for the NUMBERS only. It used to sit on the combined rule above,
+           where "th:not(.desc-col):not(.lis-code-col)" scores (0,4,1) and so beat the header's
+           own "text-align: center" at (0,2,2) - every Year, Month and Samples header came out
+           right-aligned. Feedback #23. */
+        .lis-summary-table.lis-freeze-table td.count-cell {
+            text-align: right;
+        }
+
+        .lis-summary-table.lis-freeze-table thead th:not(.desc-col) {
+            text-align: center;
+        }
+
+        /* The year-total and grand-total columns read as a band of totals rather than as data,
+           so their figures sit centred - header, body and the Grand Total row alike, so a column
+           does not change alignment half way down. */
+        .lis-summary-table.lis-freeze-table .lis-total-col {
+            text-align: center !important;
+        }
+
+        /* "No. of Samples" is longer than the 56px column it heads. Let it wrap onto two lines
+           rather than clip; it is the last header row, so the taller row pushes nothing below
+           it out of place. */
+        .lis-summary-table.lis-freeze-table thead .sample-header th {
+            white-space: normal;
+            line-height: 1.15;
         }
 
         .lis-summary-table.lis-freeze-table tbody td {
@@ -1514,19 +1540,20 @@ else if (activeTab == "summary")
                                     <th colspan="@yearMonthCount">@year</th>
                                 }
                             }
-                            <th rowspan="3" class="grand-total-cell">TOTAL</th>
+                            <th rowspan="3" class="grand-total-cell lis-total-col">TOTAL</th>
                         </tr>
                         <tr class="month-header">
                             @foreach (var column in monthColumns)
                             {
                                 var label = column.IsYearTotal ? $"{column.Year} TOTAL" : new DateTime(column.Year, int.Parse(column.Key[^2..]), 1).ToString("MMM", CultureInfo.InvariantCulture).ToUpperInvariant();
-                                <th class="@(column.IsYearTotal ? "year-total-head" : "")">@label</th>
+                                <th class="@(column.IsYearTotal ? "year-total-head lis-total-col" : "")">@label</th>
                             }
                         </tr>
                         <tr class="sample-header">
                             @foreach (var column in monthColumns)
                             {
-                                <th class="@(column.IsYearTotal ? "year-total-head" : "")">SAMPLES</th>
+                                @* Feedback #22: "Samples" -> "No. of Samples". Upper-cased by the header CSS. *@
+                                <th class="@(column.IsYearTotal ? "year-total-head lis-total-col" : "")">No. of Samples</th>
                             }
                         </tr>
                     </thead>
@@ -1563,14 +1590,14 @@ else if (activeTab == "summary")
                                 {
                                     if (column.IsYearTotal)
                                     {
-                                        <td class="count-cell year-total-cell">@(row.ByYear.TryGetValue(column.Year, out var yearTotal) ? yearTotal.ToString("N0") : "0")</td>
+                                        <td class="count-cell year-total-cell lis-total-col">@(row.ByYear.TryGetValue(column.Year, out var yearTotal) ? yearTotal.ToString("N0") : "0")</td>
                                     }
                                     else
                                     {
                                         <td class="count-cell">@(row.ByMonth.TryGetValue(column.Key, out var monthTotal) ? monthTotal.ToString("N0") : "0")</td>
                                     }
                                 }
-                                <td class="count-cell grand-total-cell">@row.Total.ToString("N0")</td>
+                                <td class="count-cell grand-total-cell lis-total-col">@row.Total.ToString("N0")</td>
                             </tr>
                         }
                         <tr class="grand-total-row">
@@ -1580,14 +1607,15 @@ else if (activeTab == "summary")
                             {
                                 if (column.IsYearTotal)
                                 {
-                                    <td class="count-cell">@(result.GrandTotalByYear.TryGetValue(column.Year, out var yearTotal) ? yearTotal.ToString("N0") : "0")</td>
+                                    @* lis-total-col for alignment only - the Grand Total row keeps its navy band. *@
+                                    <td class="count-cell lis-total-col">@(result.GrandTotalByYear.TryGetValue(column.Year, out var yearTotal) ? yearTotal.ToString("N0") : "0")</td>
                                 }
                                 else
                                 {
                                     <td class="count-cell">@(result.GrandTotalByMonth.TryGetValue(column.Key, out var monthTotal) ? monthTotal.ToString("N0") : "0")</td>
                                 }
                             }
-                            <td class="count-cell">@result.GrandTotal.ToString("N0")</td>
+                            <td class="count-cell lis-total-col">@result.GrandTotal.ToString("N0")</td>
                         </tr>
                     </tbody>
                 </table>
