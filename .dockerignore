@@ -1,0 +1,54 @@
+﻿# Build context for LabMetricsDashboard/Dockerfile and LRN.ReportsApi/Dockerfile.
+# Both are built from the REPOSITORY ROOT, not from their own folder, because each
+# project references siblings (LRN.ProductionReports, LRN.ReportQueue.Shared,
+# LRN.PayerPolicyMapper.Core) that sit outside its directory.
+#
+#   docker build -f LabMetricsDashboard/Dockerfile -t lrn-dashboard .
+#
+# Everything below either bloats the context or must never reach an image.
+
+# ── Secrets: never copy these into a layer ───────────────────────────────────
+# The csproj files already set CopyToPublishDirectory=Never, but an intermediate
+# layer would still carry them. appsettings.Local.json holds every production
+# connection string and the JWT signing key.
+**/appsettings.Local.json
+**/appsettings.Secrets.json
+**/credentials.local.json
+**/*.pfx
+**/*.p12
+**/.certs/
+**/.env
+**/.env.local
+
+# ── Build output ─────────────────────────────────────────────────────────────
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+
+# publish/ holds tracked staging dumps of previous deployments - several hundred
+# MB of already-built binaries. Sending it to the daemon dominates build time.
+publish/
+_artifacts/
+
+# ── Tooling / IDE ────────────────────────────────────────────────────────────
+.git/
+.github/
+.vs/
+.vscode/
+.idea/
+**/*.user
+**/*.suo
+**/.trae/
+**/.vercel/
+
+# ── Not needed by any image ──────────────────────────────────────────────────
+tests/
+docs/
+SQL_Scripts/
+HelloMauiApp/
+**/*.md
+**/Dockerfile
+**/.dockerignore
+docker-compose*.yml
+**/*.log

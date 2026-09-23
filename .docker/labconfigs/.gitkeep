@@ -1,0 +1,8 @@
+﻿Default mount source for LabConfig:LabConfigFolder in docker-compose.yml.
+
+Drop the per-lab <LabName>.json files here, or point LRN_LAB_CONFIG_DIR at the
+folder that already holds them. The dashboard's lab picker is empty until it
+finds them, and Program.cs logs a startup warning saying so.
+
+These files carry plaintext database passwords, so keep real ones out of git --
+the folder is mounted read-only and is deliberately not baked into the image.

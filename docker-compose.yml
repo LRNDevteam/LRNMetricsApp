@@ -1,0 +1,94 @@
+﻿# Local / single-host composition of the three web-facing pieces.
+#
+#   docker compose build
+#   docker compose up
+#
+#   SPA        http://localhost:5173
+#   Dashboard  http://localhost:8080
+#   ReportsApi http://localhost:8082  (Swagger at /swagger)
+#
+# Copy .env.docker.example to .env and fill it in first - nothing here carries a
+# secret, and both APIs refuse to do useful work without a connection string.
+#
+# No SQL Server container: these apps read real lab databases (LRNMaster and one per
+# lab). Point them at your existing instance. From inside a container "localhost" is
+# the container itself, so a SQL Server on the Docker host is host.docker.internal.
+
+name: lrnmetrics
+
+services:
+  # ── LabMetricsDashboard (net9.0, MVC) ────────────────────────────────────
+  dashboard:
+    build:
+      # Repo root: the project references sibling projects outside its folder.
+      context: .
+      dockerfile: LabMetricsDashboard/Dockerfile
+    image: lrn-dashboard:local
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: ${LRN_DEFAULT_CONNECTION:?set LRN_DEFAULT_CONNECTION in .env}
+      # Both apps normally pull ConnectionStrings:* from Azure Key Vault. A container
+      # has no developer credential to do that with, so the Uri is blanked and the
+      # values above are used instead - which appsettings.json documents as the
+      # supported way to run entirely on local secrets. To use Key Vault, drop this
+      # line and supply AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_CLIENT_SECRET (or
+      # attach a managed identity) so DefaultAzureCredential can authenticate.
+      KeyVault__Uri: ""
+    volumes:
+      # The DataProtection key ring. Without this volume every redeploy mints a new
+      # ring and silently logs out every signed-in user.
+      - dashboard-dpkeys:/var/lrn/dpkeys
+      - dashboard-logs:/var/lrn/logs
+      # Per-lab JSON, read at startup from LabConfig:LabConfigFolder. The lab picker
+      # is empty until this holds <LabName>.json files, so point it at your configs.
+      - ${LRN_LAB_CONFIG_DIR:-./.docker/labconfigs}:/var/lrn/labconfigs:ro
+    restart: unless-stopped
+
+  # ── LRN.ReportsApi (net8.0) ──────────────────────────────────────────────
+  reportsapi:
+    build:
+      context: .
+      dockerfile: LRN.ReportsApi/Dockerfile
+    image: lrn-reportsapi:local
+    ports:
+      - "8082:8080"
+    environment:
+      # Development, deliberately. The CORS origins in Program.cs are hard-coded:
+      # Production allows only the two lrnanalytics.com hosts, so a SPA served from
+      # localhost is blocked outright and no setting changes that. Development adds
+      # localhost:5173, which is the origin the webui service below publishes on.
+      # For a real deployment, serve the SPA from an allowed origin or make the list
+      # configurable in Program.cs.
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: ${LRN_DEFAULT_CONNECTION:?set LRN_DEFAULT_CONNECTION in .env}
+      ConnectionStrings__LabMetrics: ${LRN_LABMETRICS_CONNECTION:-}
+      KeyVault__Uri: ""
+    restart: unless-stopped
+
+  # ── lrn.webui (Vite/React SPA behind nginx) ──────────────────────────────
+  webui:
+    build:
+      # This one builds from its own folder and uses lrn.webui/.dockerignore.
+      context: ./lrn.webui
+      dockerfile: Dockerfile
+      args:
+        # Baked into the JS bundle at build time, so these are the URLs the BROWSER
+        # uses - host ports, not compose service names. Changing them means rebuilding
+        # the image, not restarting the container.
+        VITE_LRN_METRICS_BASE_URL: ${VITE_LRN_METRICS_BASE_URL:-http://localhost:8080}
+        VITE_REPORTS_API_BASE_URL: ${VITE_REPORTS_API_BASE_URL:-http://localhost:8082/api/denialworkflow}
+    image: lrn-webui:local
+    # 5173 on the host because that exact origin is in the API's hard-coded
+    # Development CORS list. Moving it off 5173 breaks the API calls.
+    ports:
+      - "5173:8080"
+    depends_on:
+      - dashboard
+      - reportsapi
+    restart: unless-stopped
+
+volumes:
+  dashboard-dpkeys:
+  dashboard-logs:

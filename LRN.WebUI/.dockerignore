@@ -1,0 +1,22 @@
+﻿# Context for lrn.webui/Dockerfile, which is built from THIS folder.
+# The root .dockerignore does not apply to it.
+
+node_modules/
+dist/
+.vercel/
+.trae/
+.certs/
+
+# Baked in at build time via --build-arg, never copied. Keeping them out also stops
+# a stray .env.local silently overriding the arg during `vite build`.
+.env
+.env.local
+.env.development
+.env.production
+
+*.log
+.vite-dev.*.log
+Dockerfile
+.dockerignore
+README.md
+debug-aging-dashboard-deadlock.md
