@@ -2569,6 +2569,14 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
+        var months = lastMonths is 3 or 6 ? lastMonths : 6;
+        var (windowFrom, windowTo) = await ResolveAvgPaymentsCheckWindowAsync(
+            connectionString, filterCheckDateFrom, filterCheckDateTo, months, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "CollectionSummary AvgPayments: lastMonths={Months}, CheckDate {From:yyyy-MM-dd}..{To:yyyy-MM-dd} (calendar months from week-range end, not 180 days)",
+            months, windowFrom, windowTo);
+
         var prefix = LabCollectionPrefix.GetPrefix(labName);
         if (IsCoveCollectionPrefix(prefix))
             return await GetAvgPaymentsViaSpAsync(
@@ -2577,21 +2585,13 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 filterPayerNames, filterPanelNames,
                 filterFirstBillFrom, filterFirstBillTo,
                 filterDosFrom, filterDosTo,
-                filterCheckDateFrom, filterCheckDateTo,
+                windowFrom, windowTo,
                 ct,
-                lastMonths: lastMonths is 3 or 6 ? lastMonths : 6).ConfigureAwait(false);
+                lastMonths: months).ConfigureAwait(false);
 
-        if (!string.IsNullOrWhiteSpace(prefix) && lastMonths == 6)
-            return await GetAvgPaymentsViaSpAsync(
-                connectionString,
-                $"dbo.usp_Get{prefix}_CS_AvgPayments",
-                filterPayerNames, filterPanelNames,
-                filterFirstBillFrom, filterFirstBillTo,
-                filterDosFrom, filterDosTo,
-                filterCheckDateFrom, filterCheckDateTo,
-                ct).ConfigureAwait(false);
+        // Non-Cove 6-month SPs still clip with GETDATE() or DATEADD(DAY,-180).
+        // Live SQL uses calendar months from billed week-range end.
 
-        var cutoffDate    = DateTime.Today.AddMonths(-Math.Max(1, lastMonths));
         var adjStatusList = string.Join(", ", AdjudicatedStatuses.Select((_, i) => $"@apAdjSt_{i}"));
 
         var whereClauses = new List<string>
@@ -2603,8 +2603,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             "LTRIM(RTRIM(PayerName_Raw)) <> ''",
             "TRY_CAST(CheckDate AS DATE) IS NOT NULL",
             "ClaimStatus IS NOT NULL",
-            "LTRIM(RTRIM(ClaimStatus)) <> ''",
-            $"TRY_CAST(CheckDate AS DATE) >= '{cutoffDate:yyyy-MM-dd}'"
+            "LTRIM(RTRIM(ClaimStatus)) <> ''"
         };
         var parameters = new List<SqlParameter>();
 
@@ -2614,7 +2613,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName_Raw))", "@appn", filterPayerNames);
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PanelName))",     "@appl", filterPanelNames);
         AddDateRangeClause(whereClauses, parameters, "CheckDate", "@apcdFrom", "@apcdTo",
-            filterCheckDateFrom, filterCheckDateTo);
+            windowFrom, windowTo);
 
         var whereStr = string.Join(" AND ", whereClauses);
 
@@ -2683,6 +2682,87 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             "CollectionSummary AvgPayments: rawRows={Count}, elapsed={Ms}ms", rawRows.Count, sw.ElapsedMilliseconds);
 
         return BuildPanelAveragesResult(rawRows, topPayersForDrilldown: 3);
+    }
+
+    /// <summary>
+    /// Avg Payments window: DATEADD(MONTH, -N, billed week-range end), not 180 days.
+    /// Week-range end comes from CheckDateTo, else LineClaimFileLogs.WeekFolder, else MAX(CheckDate).
+    /// </summary>
+    private async Task<(DateOnly From, DateOnly To)> ResolveAvgPaymentsCheckWindowAsync(
+        string connectionString,
+        DateOnly? filterCheckDateFrom,
+        DateOnly? filterCheckDateTo,
+        int lastMonths,
+        CancellationToken ct)
+    {
+        DateOnly to;
+        if (filterCheckDateTo is { } userTo)
+        {
+            to = userTo;
+        }
+        else
+        {
+            var weekFolder = await TryReadLatestWeekFolderAsync(connectionString, ct).ConfigureAwait(false);
+            if (AnalysisRangeInfo.TryParseWeekRangeEnd(weekFolder, out var weekEnd))
+                to = DateOnly.FromDateTime(weekEnd);
+            else
+                to = await TryReadMaxCheckDateAsync(connectionString, ct).ConfigureAwait(false)
+                     ?? DateOnly.FromDateTime(DateTime.Today);
+        }
+
+        var from = to.AddMonths(-Math.Max(1, lastMonths));
+        if (filterCheckDateFrom is { } userFrom && userFrom > from)
+            from = userFrom;
+
+        return (from, to);
+    }
+
+    private static async Task<string?> TryReadLatestWeekFolderAsync(string connectionString, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand("""
+                IF OBJECT_ID(N'dbo.LineClaimFileLogs', N'U') IS NULL
+                    SELECT CAST(NULL AS NVARCHAR(200));
+                ELSE
+                    SELECT TOP 1 CAST(WeekFolder AS NVARCHAR(200))
+                    FROM dbo.LineClaimFileLogs
+                    WHERE NULLIF(LTRIM(RTRIM(CAST(RunId AS NVARCHAR(50)))), '') IS NOT NULL
+                    ORDER BY FileLogId DESC;
+                """, conn) { CommandTimeout = 8 };
+            var val = await cmd.ExecuteScalarAsync(ct);
+            return val is string s && !string.IsNullOrWhiteSpace(s) ? s : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static async Task<DateOnly?> TryReadMaxCheckDateAsync(string connectionString, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand("""
+                SELECT MAX(TRY_CAST(CheckDate AS DATE))
+                FROM dbo.ClaimLevelData
+                WHERE TRY_CAST(CheckDate AS DATE) IS NOT NULL;
+                """, conn) { CommandTimeout = 30 };
+            var val = await cmd.ExecuteScalarAsync(ct);
+            if (val is DateTime dt)
+                return DateOnly.FromDateTime(dt);
+            if (val is DateOnly d)
+                return d;
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     // ?? Excel Export ??????????????????????????????????????????????

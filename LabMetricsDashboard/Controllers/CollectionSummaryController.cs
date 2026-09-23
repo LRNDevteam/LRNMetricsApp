@@ -445,11 +445,16 @@ public class CollectionSummaryController : Controller
                     return Content(string.Empty);
 
                 case "avgpay":
-                    var ap = useAggregates
-                        ? await _repo.GetAvgPaymentsFromAggregatesAsync(connStr, aggregatePrefix!, ct)
-                        : await _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter,
-                            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-                    vm.AvgPayments = ap;
+                    vm.AvgPayments = await _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter,
+                        fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct, lastMonths: 6);
+                    ViewData["AvgPayMonths"] = 6;
+                    return PartialView("_CsTabAvgPayments", vm);
+
+                case "avgpay3":
+                    var ap3 = await _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter,
+                        fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct, lastMonths: 3);
+                    vm.AvgPaymentsLast3Months = ap3;
+                    ViewData["AvgPayMonths"] = 3;
                     return PartialView("_CsTabAvgPayments", vm);
 
                 case "aging":

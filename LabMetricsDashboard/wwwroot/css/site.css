@@ -61,3 +61,19 @@ body {
 }
 .acct-sym, .pr-acct-sym { flex: 0 0 auto; }
 .acct-val, .pr-acct-val { flex: 1 1 auto; text-align: right; }
+
+/* Collection Summary Avg Payments — Monthly Claim Volume navy/teal (beats compiled Index pastels) */
+#avgpay-pane .cs-pr-table thead th,
+#avgpay3-pane .cs-pr-table thead th {
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%) !important;
+    color: rgba(255,255,255,.92) !important;
+}
+#avgpay-pane .cs-pr-table thead tr:nth-child(2) th,
+#avgpay3-pane .cs-pr-table thead tr:nth-child(2) th {
+    background: #1e5a8a !important;
+    color: rgba(255,255,255,.92) !important;
+}
+#avgpay-pane .cs-pr-panel td,
+#avgpay3-pane .cs-pr-panel td { background: #f0fdf4 !important; }
+#avgpay-pane .cs-pr-panel td:first-child,
+#avgpay3-pane .cs-pr-panel td:first-child { background: #f0fdf4 !important; color: #166534 !important; }

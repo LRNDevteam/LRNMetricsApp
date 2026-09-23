@@ -1155,7 +1155,11 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @Cutoff DATE = DATEADD(MONTH, -6, CAST(GETDATE() AS DATE));
+    DECLARE @MaxCheck DATE =
+        (SELECT MAX(TRY_CAST(CheckDate AS DATE))
+         FROM dbo.ClaimLevelData
+         WHERE TRY_CAST(CheckDate AS DATE) IS NOT NULL);
+    DECLARE @Cutoff DATE = DATEADD(MONTH, -6, @MaxCheck);
 
     ;WITH base AS (
         SELECT
@@ -1170,6 +1174,7 @@ BEGIN
         WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
           AND TRY_CAST(CheckDate AS DATE) IS NOT NULL
           AND TRY_CAST(CheckDate AS DATE) >= @Cutoff
+          AND TRY_CAST(CheckDate AS DATE) <= @MaxCheck
           AND Panelname IS NOT NULL AND LTRIM(RTRIM(Panelname)) <> ''
           AND PayerName_Raw IS NOT NULL AND LTRIM(RTRIM(PayerName_Raw)) <> ''
     ),

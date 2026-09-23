@@ -52,9 +52,9 @@
             <table class="cs-rpt-table">
                 <thead>
                     <tr>
-                        <th style="text-align:left;min-width:280px">Row Labels</th>
-                        <th style="min-width:140px">Count of ClaimID</th>
-                        <th style="min-width:180px">Sum of Insurance Payment</th>
+                        <th>Row Labels</th>
+                        <th>Count of ClaimID</th>
+                        <th>Sum of Insurance Payment</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -90,13 +90,13 @@ else if (rowsData.Count > 0)
             <table class="cs-rpt-table">
                 <thead>
                     <tr>
-                        <th rowspan="3" style="text-align:left;min-width:280px">Row Labels</th>
+                        <th rowspan="3">Row Labels</th>
                         @foreach (var year in years)
                         {
                             var yearMonthCount = periods.Count(p => p.Year == year);
                             <th colspan="@(yearMonthCount * 2 + 2)">@year</th>
                         }
-                        <th colspan="2">Grand Total</th>
+                        <th colspan="2" rowspan="2" class="cs-pr-grand">Grand Total</th>
                     </tr>
                     <tr>
                         @foreach (var year in years)
@@ -108,21 +108,20 @@ else if (rowsData.Count > 0)
                             }
                             <th colspan="2">@year Total</th>
                         }
-                        <th colspan="2">Total</th>
                     </tr>
                     <tr>
                         @foreach (var year in years)
                         {
                             foreach (var _ in periods.Where(p => p.Year == year))
                             {
-                                <th style="min-width:105px">Count of Paid Claims</th>
-                                <th style="min-width:150px">Sum of Insurance Payment</th>
+                                <th>Count of Paid Claims</th>
+                                <th>Sum of Insurance Payment</th>
                             }
-                            <th style="min-width:105px">Count of Paid Claims</th>
-                            <th style="min-width:150px">Sum of Insurance Payment</th>
+                            <th>Count of Paid Claims</th>
+                            <th>Sum of Insurance Payment</th>
                         }
-                        <th style="min-width:105px">Count of Paid Claims</th>
-                        <th style="min-width:150px">Sum of Insurance Payment</th>
+                        <th class="cs-pr-grand">Count of Paid Claims</th>
+                        <th class="cs-pr-grand">Sum of Insurance Payment</th>
                     </tr>
                 </thead>
                 <tbody>

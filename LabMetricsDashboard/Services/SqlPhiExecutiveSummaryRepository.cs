@@ -391,6 +391,10 @@ public sealed class SqlPhiExecutiveSummaryRepository
 
             DropEmptyCpExceptionPanelRows(vm.Rows);
 
+            if (spName.Contains("Cove", StringComparison.OrdinalIgnoreCase)
+                || selectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase))
+                FillCoveAvgYearTotals(vm.Rows);
+
             return vm;
         }
         catch (Exception ex)
@@ -398,6 +402,57 @@ public sealed class SqlPhiExecutiveSummaryRepository
             _logger.LogError(ex, "ExecutiveSummary query failed for lab '{Lab}' SP='{Sp}'.", selectedLab, spName);
             vm.ErrorMessage = $"Failed to load Executive Summary data: {ex.Message}";
             return vm;
+        }
+    }
+
+    /// <summary>
+    /// Cove Avg V/W/X are ratios, so a year total must be recomputed from that year's
+    /// numerator / denominator (same formula as the (0,0) Grand Total in
+    /// usp_RefreshCove_ExecutiveSummary), never summed across months.
+    /// Cove_ES_Avg has no (year, 0) rows, so derive them from the PMS/Cash months.
+    ///   V = (P + T) / F
+    ///   W = P / H
+    ///   X = (P + T) / (H + J + L + N.1 + N.2)
+    /// </summary>
+    private static void FillCoveAvgYearTotals(List<ExecSummaryRow> rows)
+    {
+        ExecSummaryRow? Find(string category, string code) =>
+            rows.FirstOrDefault(r => r.Category == category
+                && string.Equals(r.RowCode, code, StringComparison.OrdinalIgnoreCase));
+
+        decimal YearSum(string category, int year, string[] codes) =>
+            codes.Sum(c => Find(category, c)?.ValuesByYearMonth
+                .Where(kv => kv.Key.Year == year && kv.Key.Month is >= 1 and <= 12)
+                .Sum(kv => kv.Value) ?? 0m);
+
+        var years = rows
+            .SelectMany(r => r.ValuesByYearMonth.Keys)
+            .Where(k => k.Year != 0 && k.Month is >= 1 and <= 12)
+            .Select(k => k.Year)
+            .Distinct()
+            .ToList();
+        if (years.Count == 0) return;
+
+        (string Code, string[] Num, string[] Den)[] defs =
+        [
+            ("V", ["P", "T"], ["F"]),
+            ("W", ["P"],      ["H"]),
+            ("X", ["P", "T"], ["H", "J", "L", "N.1", "N.2"]),
+        ];
+
+        foreach (var (code, num, den) in defs)
+        {
+            var avg = Find("Avg", code);
+            if (avg is null) continue;
+
+            foreach (var year in years)
+            {
+                if (avg.ValuesByYearMonth.ContainsKey((year, 0))) continue;
+                var d = YearSum("PMS", year, den);
+                avg.ValuesByYearMonth[(year, 0)] = d == 0m
+                    ? 0m
+                    : Math.Round(YearSum("Cash", year, num) / d, 2);
+            }
         }
     }
 

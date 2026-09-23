@@ -15,6 +15,7 @@ public class LisSummaryController : Controller
 	private readonly IDenialRecordRepository _labRepository;
 	private readonly LabSettings _labSettings;
 	private readonly INotesRepository _notes;
+	private readonly IAnalysisRangeService _analysisRange;
 	private readonly ILogger<LisSummaryController> _logger;
 
 	public LisSummaryController(
@@ -22,12 +23,14 @@ public class LisSummaryController : Controller
 		IDenialRecordRepository labRepository,
 		LabSettings labSettings,
 		INotesRepository notes,
+		IAnalysisRangeService analysisRange,
 		ILogger<LisSummaryController> logger)
 	{
 		_lisSummaryRepository = lisSummaryRepository;
 		_labRepository = labRepository;
 		_labSettings = labSettings;
 		_notes = notes;
+		_analysisRange = analysisRange;
 		_logger = logger;
 	}
 
@@ -38,10 +41,11 @@ public class LisSummaryController : Controller
 			: string.Empty;
 
 	[HttpGet]
-	public IActionResult Index(
+	public async Task<IActionResult> Index(
 		[FromQuery] LisSummaryFilters filters,
 		[FromQuery] string? lab,
-		[FromQuery] string? runId)
+		[FromQuery] string? runId,
+		CancellationToken cancellationToken)
 	{
 		filters ??= new LisSummaryFilters();
 		filters.Normalize();
@@ -97,6 +101,8 @@ public class LisSummaryController : Controller
 		ViewData["PageLabel"] = "LIS Summary";
 		ViewData["LisLazy"] = true;
 
+		var analysisRange = await _analysisRange.GetAsync(config.DbConnectionString, cancellationToken);
+
 		return View(new LisSummaryPageViewModel
 		{
 			Filters = filters,
@@ -105,6 +111,7 @@ public class LisSummaryController : Controller
 			ConfiguredLabKey = selectedLabName,
 			RunId = runId?.Trim() ?? string.Empty,
 			WeekLabel = WeekLabel(filters.EffectiveDateFrom, filters.EffectiveDateTo),
+			AnalysisRange = analysisRange,
 			Result = null,
 			LineData = null,
 			FilterOptions = new([], [], [], [], [])

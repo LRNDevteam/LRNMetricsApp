@@ -131,3 +131,76 @@ window.rptExportIdle = function (btn, originalHtml) {
     if (typeof originalHtml === "string") btn.innerHTML = originalHtml;
     btn.disabled = false;
 };
+
+/* Collection Summary: Avg Payments headers, Panel vs Payment footer, Status Summary widths + expand. */
+(function () {
+    if (!document.getElementById("cs-avgpay-mcv-css")) {
+        var el = document.createElement("style");
+        el.id = "cs-avgpay-mcv-css";
+        el.textContent =
+            "html body div#avgpay-pane table.cs-pr-table[class] thead tr th[class]," +
+            "html body div#avgpay3-pane table.cs-pr-table[class] thead tr th[class]," +
+            "html body div#avgpay-pane table.cs-pr-table[class] thead tr th," +
+            "html body div#avgpay3-pane table.cs-pr-table[class] thead tr th" +
+            "{background:#0e3460 !important;background-color:#0e3460 !important;background-image:none !important;" +
+            "color:#ffffff !important;-webkit-text-fill-color:#ffffff !important;}" +
+            "html body div#avgpay-pane table.cs-pr-table[class] thead tr th.ap-grp[class]," +
+            "html body div#avgpay3-pane table.cs-pr-table[class] thead tr th.ap-grp[class]" +
+            "{background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%) !important;" +
+            "color:rgba(255,255,255,.92) !important;-webkit-text-fill-color:rgba(255,255,255,.92) !important;" +
+            "top:0 !important;z-index:5 !important;}" +
+            "html body #avgpay-pane .cs-pr-panel td,html body #avgpay3-pane .cs-pr-panel td" +
+            "{background:#f0fdf4 !important;}" +
+            "html body #avgpay-pane .cs-pr-panel td:first-child,html body #avgpay3-pane .cs-pr-panel td:first-child" +
+            "{background:#f0fdf4 !important;color:#166534 !important;}" +
+            /* Panel vs Payment: year/Grand Total footer cells = navy (not cream/peach) */
+            "html body #panelpay-pane .cs-rpt-table tbody td.cs-pr-year{background-color:#fefce8 !important;}" +
+            "html body #panelpay-pane .cs-rpt-table tbody td.cs-pr-grand{background-color:#fef3c7 !important;font-weight:800;}" +
+            "html body #panelpay-pane .cs-rpt-table tfoot td," +
+            "html body #panelpay-pane .cs-rpt-table tfoot td.cs-pr-year," +
+            "html body #panelpay-pane .cs-rpt-table tfoot td.cs-pr-grand" +
+            "{background:#0e3460 !important;color:#fff !important;font-weight:800;}" +
+            /* Status Summary: fit columns to content */
+            "html body #statussummary-pane #tblStatusSummary," +
+            "html body #tblStatusSummary" +
+            "{width:max-content !important;min-width:0 !important;table-layout:auto !important;}" +
+            "html body #tblStatusSummary thead th,html body #tblStatusSummary td" +
+            "{white-space:nowrap;width:auto;min-width:0;}";
+        document.body.appendChild(el);
+    }
+
+    function ssSetToggle(tbl, key, open) {
+        var btn = tbl.querySelector('.ss-toggle[data-sskey="' + key + '"]');
+        if (!btn) return;
+        btn.textContent = open ? "\u2212" : "+";
+        if (open) btn.classList.add("open"); else btn.classList.remove("open");
+    }
+    function ssCollapse(tbl, key) {
+        tbl.querySelectorAll('tr[data-parent="' + key + '"]').forEach(function (child) {
+            child.style.display = "none";
+            child.setAttribute("data-open", "0");
+            var ck = child.getAttribute("data-sskey");
+            if (ck) { ssSetToggle(tbl, ck, false); ssCollapse(tbl, ck); }
+        });
+    }
+    document.addEventListener("click", function (e) {
+        var tr = e.target.closest && e.target.closest("#tblStatusSummary tr.ss-lvl1, #tblStatusSummary tr.ss-lvl2, #tblStatusSummary tr.ss-lvl3");
+        if (!tr) return;
+        var tbl = tr.closest("#tblStatusSummary");
+        if (!tbl) return;
+        var key = tr.getAttribute("data-sskey");
+        if (!key) return;
+        var kids = tbl.querySelectorAll('tr[data-parent="' + key + '"]');
+        if (!kids.length) return;
+        var open = tr.getAttribute("data-open") === "1";
+        if (open) {
+            ssCollapse(tbl, key);
+            tr.setAttribute("data-open", "0");
+            ssSetToggle(tbl, key, false);
+        } else {
+            kids.forEach(function (c) { c.style.display = ""; });
+            tr.setAttribute("data-open", "1");
+            ssSetToggle(tbl, key, true);
+        }
+    });
+})();

@@ -21,6 +21,9 @@ public sealed class LisSummaryPageViewModel
 
     /// <summary>The selected range as a week label ("07.23.2026 - 07.29.2026"), for the file name.</summary>
     public string WeekLabel { get; set; } = string.Empty;
+
+    /// <summary>Billed week range / RunId / inserted date banner (LineClaimFileLogs).</summary>
+    public AnalysisRangeInfo AnalysisRange { get; set; } = AnalysisRangeInfo.Empty;
     public LisSummaryResult? Result { get; set; }
     public LisLineDataResult? LineData { get; set; }
     public LisSummaryFilterOptions FilterOptions { get; set; } = new([], [], [], [], []);

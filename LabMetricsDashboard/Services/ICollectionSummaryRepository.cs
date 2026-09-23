@@ -215,7 +215,8 @@ public interface ICollectionSummaryRepository
 
     /// <summary>
     /// Returns Average Payments per Panel data.
-    /// Source: ClaimLevelData WHERE InsurancePayment &gt; 0, last 6 months by CheckDate (Posted Date).
+    /// Source: ClaimLevelData WHERE InsurancePayment &gt; 0, last N calendar months
+    /// by CheckDate through billed week-range end (DATEADD(MONTH,-N,weekEnd), not 180 days).
     /// Rows: PanelName with PayerName_Raw drill-down.
     /// Columns: No. of Claims, Total Charges, Avg Billed, Fully Paid metrics,
     ///          Adjudicated metrics, 30-day metrics, 60-day metrics.

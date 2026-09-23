@@ -862,7 +862,6 @@ public sealed class ClaimLineDbService
             {
                 "dbo.usp_RefreshCove_CS_InsuranceVsAging" => "dbo.usp_RefreshCove_CS_InsuranceVsAging_ClientLogic",
                 "dbo.usp_RefreshCove_CS_PanelAverages" => "dbo.usp_RefreshCove_CS_PanelAverages_ClientLogic",
-                "dbo.usp_RefreshCove_CS_AvgPayments" => "dbo.usp_RefreshCove_CS_AvgPayments_ClientLogic",
                 "dbo.usp_RefreshCove_CS_PanelVsPayment" => "dbo.usp_RefreshCove_CS_PanelVsPayment_ClientLogic",
                 "dbo.usp_RefreshCove_CS_WeeklyClaimVolume" => "dbo.usp_RefreshCove_CS_WeeklyClaimVolume_ClientLogic",
                 _ => sp,

@@ -228,9 +228,7 @@ public sealed class AllLabsCollectionExcelBuilder
             ? _repo.GetCptPaymentPctFromAggregatesAsync(connStr, aggregatePrefix!, ct)
             : _repo.GetCptPaymentPctAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
         // Panel Averages omitted from Excel / UI — do not load.
-        var avgPayTask      = useAggregates
-            ? _repo.GetAvgPaymentsFromAggregatesAsync(connStr, aggregatePrefix!, ct)
-            : _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
+        var avgPayTask      = _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct, lastMonths: 6);
         var avgPay3Task     = _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct, lastMonths: 3);
         var statusTask      = useAggregates
             ? _repo.GetStatusSummaryFromAggregatesAsync(connStr, aggregatePrefix!, ct)

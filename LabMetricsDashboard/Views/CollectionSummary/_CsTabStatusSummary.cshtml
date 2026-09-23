@@ -18,17 +18,40 @@
     .ss-lvl2 td { font-weight: 400; }
     .ss-lvl3 td { font-weight: 400; }
     .ss-lvl4 td { font-weight: 400; font-size: .75rem; color: #64748b; }
+    /* Fit columns to content (do not stretch full pane width) */
+    #tblStatusSummary {
+        width: max-content !important;
+        min-width: 0 !important;
+        table-layout: auto !important;
+    }
+    #tblStatusSummary thead th,
+    #tblStatusSummary td {
+        white-space: nowrap;
+        width: auto;
+        min-width: 0;
+        padding-left: .55rem;
+        padding-right: .55rem;
+    }
+    #tblStatusSummary thead th:first-child,
+    #tblStatusSummary td:first-child {
+        min-width: 180px;
+        max-width: none;
+    }
+    #tblStatusSummary thead th:nth-child(n+2),
+    #tblStatusSummary td:nth-child(n+2) {
+        text-align: right;
+    }
     </style>
     <div class="cs-rpt-wrap">
         <div class="cs-rpt-scroll">
             <table class="cs-rpt-table" id="tblStatusSummary">
                 <thead>
                     <tr>
-                        <th style="text-align:left;min-width:280px">Row Labels</th>
-                        <th style="min-width:130px">Count of Claims</th>
-                        <th style="min-width:160px">Ins. Payments</th>
-                        <th style="min-width:160px">Ins. Balance</th>
-                        <th style="min-width:150px">Pt Balance</th>
+                        <th>Row Labels</th>
+                        <th>Count of Claims</th>
+                        <th>Ins. Payments</th>
+                        <th>Ins. Balance</th>
+                        <th>Pt Balance</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -38,7 +61,7 @@
                     var csHasChildren = csRow.PanelRows.Count > 0;
                     ssIdx++;
                     <tr class="ss-lvl1" data-sskey="@csKey" style="cursor:pointer;background:#dce8ff">
-                        <td style="text-align:left;color:#0d3460;padding-left:.5rem;white-space:nowrap">
+                        <td style="text-align:left;color:#0d3460;padding-left:.5rem">
                             @if (csHasChildren) { <span class="ss-toggle" data-sskey="@csKey">+</span> }
                             else { <span style="display:inline-block;width:20px"></span> }
                             @csRow.ClaimStatus
@@ -55,7 +78,7 @@
                         var panelHasChildren = panelRow.CptRows.Count > 0;
                         panelIdx++;
                         <tr class="ss-lvl2" data-parent="@csKey" data-sskey="@panelKey" style="cursor:pointer;display:none;background:#eef3ff">
-                            <td style="text-align:left;color:#1b3a5c;padding-left:1.6rem;white-space:nowrap">
+                            <td style="text-align:left;color:#1b3a5c;padding-left:1.6rem">
                                 @if (panelHasChildren) { <span class="ss-toggle" data-sskey="@panelKey">+</span> }
                                 else { <span style="display:inline-block;width:20px"></span> }
                                 <i class="bi bi-grid-3x3-gap" style="font-size:.7rem;opacity:.55;margin-right:3px"></i>@panelRow.PanelName
@@ -72,7 +95,7 @@
                             var cptHasChildren = cptRow.Payers.Count > 0;
                             cptIdx++;
                             <tr class="ss-lvl3" data-parent="@panelKey" data-sskey="@cptKey" style="cursor:pointer;display:none;background:#f6f8ff">
-                                <td style="text-align:left;color:#334155;padding-left:3rem;white-space:nowrap">
+                                <td style="text-align:left;color:#334155;padding-left:3rem">
                                     @if (cptHasChildren) { <span class="ss-toggle" data-sskey="@cptKey">+</span> }
                                     else { <span style="display:inline-block;width:20px"></span> }
                                     <i class="bi bi-tag" style="font-size:.65rem;opacity:.45;margin-right:3px"></i>@cptRow.CptCode
@@ -85,7 +108,7 @@
                             foreach (var payerRow in cptRow.Payers)
                             {
                                 <tr class="ss-lvl4" data-parent="@cptKey" style="display:none;background:#fff">
-                                    <td style="text-align:left;padding-left:4.4rem;white-space:nowrap">
+                                    <td style="text-align:left;padding-left:4.4rem">
                                         <i class="bi bi-building" style="font-size:.65rem;opacity:.4;margin-right:3px"></i>@payerRow.PayerName
                                     </td>
                                     <td style="text-align:right">@payerRow.NoClaims.N0OrDash()</td>
@@ -100,8 +123,8 @@
                 </tbody>
                 <tfoot>
                     <tr style="background:#0d3460;color:#fff;font-weight:600;font-size:.79rem">
-                        <td style="text-align:left;padding-left:.5rem">Grand Total</td>
-                        <td style="text-align:right">@Model.StatusSummary.GrandNoClaims.N0OrDash()</td>
+                        <td style="text-align:left;padding-left:.5rem;color:#fff">Grand Total</td>
+                        <td style="text-align:right;color:#fff">@Model.StatusSummary.GrandNoClaims.N0OrDash()</td>
                         <td style="text-align:right">@Acct2(Model.StatusSummary.GrandInsurancePayments)</td>
                         <td style="text-align:right">@Acct2(Model.StatusSummary.GrandInsuranceBalance)</td>
                         <td style="text-align:right">@Acct2(Model.StatusSummary.GrandPatientBalance)</td>
@@ -115,58 +138,6 @@
         <strong>Rows:</strong> ClaimStatus &rarr; PanelName &rarr; CPT Code &times; Units &times; Modifier &rarr; PayerName_Raw &bull;
         <strong>Sorted by:</strong> Count of Claims DESC &bull; Click any row to expand / collapse
     </div>
-    <script nonce='@Context.Items["CspNonce"]'>
-    (function () {
-        var tbl = document.getElementById('tblStatusSummary');
-        if (!tbl) return;
-
-        var childMap = {};
-        tbl.querySelectorAll('tr[data-parent]').forEach(function (tr) {
-            var p = tr.getAttribute('data-parent');
-            if (!childMap[p]) childMap[p] = [];
-            childMap[p].push(tr);
-        });
-
-        function setToggle(key, open) {
-            var btn = tbl.querySelector('.ss-toggle[data-sskey="' + key + '"]');
-            if (!btn) return;
-            btn.textContent = open ? '\u2212' : '+';
-            if (open) btn.classList.add('open'); else btn.classList.remove('open');
-        }
-
-        function collapseAll(key) {
-            var stack = [key];
-            while (stack.length) {
-                var k = stack.pop();
-                var kids = childMap[k];
-                if (!kids) continue;
-                kids.forEach(function (child) {
-                    child.style.display = 'none';
-                    child.setAttribute('data-open', '0');
-                    var ck = child.getAttribute('data-sskey');
-                    if (ck) { setToggle(ck, false); stack.push(ck); }
-                });
-            }
-        }
-
-        tbl.querySelectorAll('tr.ss-lvl1, tr.ss-lvl2, tr.ss-lvl3').forEach(function (tr) {
-            tr.addEventListener('click', function () {
-                var key = tr.getAttribute('data-sskey');
-                if (!childMap[key] || !childMap[key].length) return;
-                var open = tr.getAttribute('data-open') === '1';
-                if (open) {
-                    collapseAll(key);
-                    tr.setAttribute('data-open', '0');
-                    setToggle(key, false);
-                } else {
-                    childMap[key].forEach(function (c) { c.style.display = ''; });
-                    tr.setAttribute('data-open', '1');
-                    setToggle(key, true);
-                }
-            });
-        });
-    })();
-    </script>
 }
 else
 {

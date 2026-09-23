@@ -27,14 +27,13 @@
                     <tr>
                         <th rowspan="3">Panel &amp; Insurance</th>
                         <th colspan="@(wcvWeeks.Count * 2)">Data based on Last 4 Week &mdash; Posting Date</th>
-                        <th colspan="2" class="cs-pr-grand">Grand Total</th>
+                        <th colspan="2" rowspan="2" class="cs-pr-grand">Grand Total</th>
                     </tr>
                     <tr>
                         @foreach (var w in wcvWeeks)
                         {
                             <th colspan="2">@w.Label</th>
                         }
-                        <th colspan="2" class="cs-pr-grand"></th>
                     </tr>
                     <tr>
                         @foreach (var w in wcvWeeks)

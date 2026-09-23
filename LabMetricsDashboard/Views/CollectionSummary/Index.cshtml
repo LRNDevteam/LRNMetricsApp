@@ -73,9 +73,11 @@
     position: sticky; top: 0; z-index: 5;
     border-bottom: 1px solid #0a2a4a;
     border-right: 1px solid rgba(255,255,255,.08);
+    white-space: nowrap;
+    vertical-align: middle;
 }
-.cs-rpt-table thead th:first-child { text-align: center; width: 56px; }
-.cs-rpt-table thead th:nth-child(2) { text-align: left; }
+.cs-rpt-table thead tr:nth-child(2) th { top: 32px; z-index: 4; }
+.cs-rpt-table thead tr:nth-child(3) th { top: 60px; z-index: 3; }
 
 .cs-rpt-table td {
     padding: .55rem .7rem; vertical-align: middle;
@@ -83,14 +85,13 @@
     border-bottom: 1px solid #e2e8f0;
 }
 .cs-rpt-table td:first-child {
-    text-align: center; font-weight: 700; color: #1e293b; width: 56px;
+    text-align: left; font-weight: 700; color: #1e293b;
 }
-.cs-rpt-table td:nth-child(2) {
-    text-align: left; font-weight: 600; color: #1e293b; min-width: 280px;
-}
-.cs-rpt-table td:nth-child(3) {
-    text-align: right; font-weight: 700; font-size: .88rem;
-    font-variant-numeric: tabular-nums;
+.cs-rpt-table tfoot td,
+.cs-rpt-table tfoot td:first-child,
+.cs-rpt-table tfoot td:nth-child(2),
+.cs-rpt-table tfoot td:nth-child(3) {
+    color: #fff !important;
 }
 
 .cs-rpt-table tbody tr:nth-child(odd) td { background: #f8fafc; }
@@ -436,12 +437,12 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
 }
 #mcv-pane .cs-pr-table thead th:first-child,
 #wcv-pane .cs-pr-table thead th:first-child {
-    text-align: left; position: sticky; left: 0; z-index: 7; min-width: 200px;
+    text-align: center;
 }
-#mcv-pane .cs-pr-table thead tr:nth-child(2) th:first-child,
-#wcv-pane .cs-pr-table thead tr:nth-child(2) th:first-child { z-index: 6; }
-#mcv-pane .cs-pr-table thead tr:nth-child(3) th:first-child,
-#wcv-pane .cs-pr-table thead tr:nth-child(3) th:first-child { z-index: 5; }
+#mcv-pane .cs-pr-table thead tr:first-child th:first-child,
+#wcv-pane .cs-pr-table thead tr:first-child th:first-child {
+    text-align: center; position: sticky; left: 0; z-index: 7; min-width: 200px;
+}
 #mcv-pane .cs-pr-table td,
 #wcv-pane .cs-pr-table td {
     padding: .35rem .5rem; vertical-align: middle;
@@ -500,6 +501,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
 #wcv-pane .cs-pr-table thead th.cs-pr-grand {
     background: linear-gradient(135deg, #78350f 0%, #92400e 100%) !important;
     color: #fff !important;
+    vertical-align: middle;
 }
 #mcv-pane .cs-pr-table thead tr:nth-child(3) th.cs-pr-grand,
 #wcv-pane .cs-pr-table thead tr:nth-child(3) th.cs-pr-grand {
@@ -559,31 +561,181 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
 #panelavg-pane .cs-rpt-table thead th:nth-child(n+3) { white-space: nowrap; padding: .4rem .4rem; font-size: .62rem; width: 100px; min-width: 100px; max-width: 100px; }
 #panelavg-pane .cs-rpt-table td:nth-child(n+3) { white-space: nowrap; padding: .4rem .4rem; width: 100px; min-width: 100px; max-width: 100px; }
 
-/* ?? Average Payments sticky columns ??????????????????????????? */
-#avgpay-pane .cs-rpt-table thead tr:first-child th:nth-child(1),
-#avgpay-pane .cs-rpt-table thead tr:first-child th:nth-child(2) {
-    position: sticky; z-index: 10;
-    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+/* Avg Payments (6-month + last 3 months) — Monthly Claim Volume navy/teal + green panels */
+#avgpay-pane .cs-pr-table,
+#avgpay3-pane .cs-pr-table {
+    border-collapse: separate; border-spacing: 0;
+    font-size: .72rem; width: max-content; min-width: 100%;
+    table-layout: auto;
 }
-#avgpay-pane .cs-rpt-table thead tr:first-child th:nth-child(1) { left: 0; min-width: 40px; }
-#avgpay-pane .cs-rpt-table thead tr:first-child th:nth-child(2) { left: 40px; min-width: 260px; border-right: 2px solid #0a2a4a; }
-#avgpay-pane .cs-rpt-table tbody td:nth-child(1),
-#avgpay-pane .cs-rpt-table tbody td:nth-child(2) { position: sticky; z-index: 3; }
-#avgpay-pane .cs-rpt-table tbody td:nth-child(1) { left: 0; }
-#avgpay-pane .cs-rpt-table tbody td:nth-child(2) { left: 40px; border-right: 2px solid #d4dde9; }
-#avgpay-pane .cs-rpt-table tbody tr:nth-child(odd) td:nth-child(1),
-#avgpay-pane .cs-rpt-table tbody tr:nth-child(odd) td:nth-child(2) { background: #f8fafc; }
-#avgpay-pane .cs-rpt-table tbody tr:nth-child(even) td:nth-child(1),
-#avgpay-pane .cs-rpt-table tbody tr:nth-child(even) td:nth-child(2) { background: #fff; }
-#avgpay-pane .cs-rpt-table tbody tr:hover td:nth-child(1),
-#avgpay-pane .cs-rpt-table tbody tr:hover td:nth-child(2) { background: #eef4ff; }
-#avgpay-pane .cs-rpt-table tfoot td:nth-child(1),
-#avgpay-pane .cs-rpt-table tfoot td:nth-child(2) { position: sticky; z-index: 3; background: #0e3460; }
-#avgpay-pane .cs-rpt-table tfoot td:nth-child(1) { left: 0; }
-#avgpay-pane .cs-rpt-table tfoot td:nth-child(2) { left: 40px; border-right: 2px solid #0a2a4a; }
-#avgpay-pane .cs-rpt-table { width: auto; }
-#avgpay-pane .cs-rpt-table thead th:nth-child(n+3) { white-space: nowrap; padding: .4rem .4rem; font-size: .62rem; width: 100px; min-width: 100px; max-width: 100px; }
-#avgpay-pane .cs-rpt-table td:nth-child(n+3) { white-space: nowrap; padding: .4rem .4rem; width: 100px; min-width: 100px; max-width: 100px; }
+#avgpay-pane .cs-pr-table thead th,
+#avgpay3-pane .cs-pr-table thead th {
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%) !important;
+    color: rgba(255,255,255,.92) !important; font-weight: 700; font-size: .58rem;
+    letter-spacing: .03em; text-transform: uppercase;
+    padding: .45rem .45rem; text-align: center;
+    white-space: nowrap; vertical-align: middle;
+    position: sticky; top: 0; z-index: 5;
+    border-right: 1px solid rgba(255,255,255,.08);
+}
+#avgpay-pane .cs-pr-table thead tr:nth-child(2) th,
+#avgpay3-pane .cs-pr-table thead tr:nth-child(2) th {
+    background: #1e5a8a !important;
+    color: rgba(255,255,255,.92) !important;
+    top: 30px; z-index: 4;
+}
+#avgpay-pane .cs-pr-table thead th.ap-grp,
+#avgpay3-pane .cs-pr-table thead th.ap-grp {
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%) !important;
+    color: rgba(255,255,255,.92) !important;
+    top: 0; z-index: 5;
+}
+#avgpay-pane .cs-pr-table thead tr:first-child th:first-child,
+#avgpay3-pane .cs-pr-table thead tr:first-child th:first-child {
+    position: sticky; left: 0; z-index: 7; min-width: 220px;
+}
+#avgpay-pane .cs-pr-table td,
+#avgpay3-pane .cs-pr-table td {
+    padding: .35rem .5rem; text-align: right; white-space: nowrap;
+    border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0;
+    font-variant-numeric: tabular-nums; font-size: .62rem;
+}
+#avgpay-pane .cs-pr-table td:first-child,
+#avgpay3-pane .cs-pr-table td:first-child {
+    text-align: left; position: sticky; left: 0; z-index: 1; background: #fff; min-width: 220px;
+}
+#avgpay-pane .cs-pr-panel td,
+#avgpay3-pane .cs-pr-panel td { background: #f0fdf4 !important; font-weight: 700; }
+#avgpay-pane .cs-pr-panel td:first-child,
+#avgpay3-pane .cs-pr-panel td:first-child { background: #f0fdf4 !important; color: #166534; }
+#avgpay-pane .cs-pr-panel:hover td,
+#avgpay3-pane .cs-pr-panel:hover td,
+#avgpay-pane .cs-pr-panel:hover td:first-child,
+#avgpay3-pane .cs-pr-panel:hover td:first-child { background: #dcfce7 !important; }
+#avgpay-pane .cs-pr-payer td,
+#avgpay3-pane .cs-pr-payer td { background: #fff; color: #475569; font-weight: 400; }
+#avgpay-pane .cs-pr-payer td:first-child,
+#avgpay3-pane .cs-pr-payer td:first-child {
+    padding-left: 1.5rem; font-weight: 500; color: #64748b; background: #fff;
+}
+#avgpay-pane .cs-pr-table tfoot td,
+#avgpay3-pane .cs-pr-table tfoot td {
+    background: #0e3460 !important; color: #fff !important; font-weight: 800;
+}
+#avgpay-pane .cs-pr-table tfoot td:first-child,
+#avgpay3-pane .cs-pr-table tfoot td:first-child {
+    position: sticky; left: 0; z-index: 3; background: #0e3460 !important;
+}
+#avgpay-pane .cs-pr-table th.ap-claims,
+#avgpay-pane .cs-pr-table td.ap-claims,
+#avgpay3-pane .cs-pr-table th.ap-claims,
+#avgpay3-pane .cs-pr-table td.ap-claims { min-width: 118px; }
+
+/* Panel vs Payment year / grand total colors (Production Summary) */
+#panelpay-pane .cs-rpt-table thead th.cs-pr-year {
+    background: linear-gradient(135deg, #854d0e 0%, #a16207 100%) !important;
+    color: #fff !important;
+}
+#panelpay-pane .cs-rpt-table thead th.cs-pr-grand {
+    background: linear-gradient(135deg, #78350f 0%, #92400e 100%) !important;
+    color: #fff !important;
+    vertical-align: middle;
+}
+/* Cream / peach only on body rows — footer stays navy like Monthly Claim Volume */
+#panelpay-pane .cs-rpt-table tbody td.cs-pr-year { background-color: #fefce8 !important; }
+#panelpay-pane .cs-rpt-table tbody td.cs-pr-grand { background-color: #fef3c7 !important; font-weight: 800; }
+#panelpay-pane .cs-rpt-table tfoot td,
+#panelpay-pane .cs-rpt-table tfoot td.cs-pr-year,
+#panelpay-pane .cs-rpt-table tfoot td.cs-pr-grand {
+    background: #0e3460 !important;
+    color: #fff !important;
+    font-weight: 800;
+}
+
+/* Fit-content numeric tables */
+#aging-pane .cs-rpt-table,
+#panelpay-pane .cs-rpt-table {
+    width: max-content; min-width: 100%; table-layout: auto;
+}
+/* Insurance vs Aging, Panel vs Payment, Provider — compact grid matching Avg Payments */
+#aging-pane .cs-rpt-table,
+#panelpay-pane .cs-rpt-table,
+#provider-pane .cs-rpt-table,
+#cptpctpay-pane .cs-rpt-table,
+#insvspay-pane .cs-rpt-table,
+#inspctpay-pane .cs-rpt-table { font-size: .72rem; }
+#aging-pane .cs-rpt-table thead th,
+#panelpay-pane .cs-rpt-table thead th,
+#provider-pane .cs-rpt-table thead th,
+#cptpctpay-pane .cs-rpt-table thead th,
+#insvspay-pane .cs-rpt-table thead th,
+#inspctpay-pane .cs-rpt-table thead th {
+    font-size: .58rem !important; font-weight: 700; letter-spacing: .03em;
+    padding: .45rem .45rem !important; line-height: 1.5;
+}
+#aging-pane .cs-rpt-table thead tr:nth-child(2) th,
+#panelpay-pane .cs-rpt-table thead tr:nth-child(2) th,
+#provider-pane .cs-rpt-table thead tr:nth-child(2) th,
+#insvspay-pane .cs-rpt-table thead tr:nth-child(2) th,
+#inspctpay-pane .cs-rpt-table thead tr:nth-child(2) th { top: 29px; }
+#aging-pane .cs-rpt-table thead tr:nth-child(3) th,
+#panelpay-pane .cs-rpt-table thead tr:nth-child(3) th,
+#provider-pane .cs-rpt-table thead tr:nth-child(3) th,
+#insvspay-pane .cs-rpt-table thead tr:nth-child(3) th,
+#inspctpay-pane .cs-rpt-table thead tr:nth-child(3) th { top: 58px; }
+#cptpctpay-pane .cs-rpt-table .reimb-bar-label,
+#inspctpay-pane .cs-rpt-table .reimb-bar-label { font-size: .62rem; }
+#aging-pane .cs-rpt-table td,
+#panelpay-pane .cs-rpt-table td,
+#provider-pane .cs-rpt-table td,
+#cptpctpay-pane .cs-rpt-table td,
+#insvspay-pane .cs-rpt-table td,
+#inspctpay-pane .cs-rpt-table td {
+    font-size: .62rem !important; padding: .35rem .5rem !important;
+    white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+#aging-pane .cs-rpt-table tbody tr.cs-ag-child td:first-child { padding-left: 1.5rem !important; }
+
+/* Insurance vs Payment (%), CPT vs Payment % — columns sized to content, no full-width stretch */
+#inspctpay-pane .cs-rpt-table,
+#insvspay-pane .cs-rpt-table,
+#cptpctpay-pane .cs-rpt-table {
+    width: max-content !important; min-width: 0 !important; table-layout: auto !important;
+}
+#inspctpay-pane .cs-rpt-table td,
+#insvspay-pane .cs-rpt-table td,
+#cptpctpay-pane .cs-rpt-table td {
+    white-space: nowrap; width: auto; min-width: 0;
+    padding-left: .6rem; padding-right: .6rem;
+}
+#inspctpay-pane .cs-rpt-table .reimb-bar-bg,
+#cptpctpay-pane .cs-rpt-table .reimb-bar-bg { width: 180px; min-width: 180px; }
+#cptpctpay-pane .cs-rpt-table thead th { text-align: center !important; vertical-align: middle; }
+#inspctpay-pane .cs-rpt-table thead th,
+#insvspay-pane .cs-rpt-table thead th,
+#cptpctpay-pane .cs-rpt-table thead th,
+#aging-pane .cs-rpt-table thead th,
+#panelpay-pane .cs-rpt-table thead th {
+    white-space: nowrap; width: auto; min-width: 0;
+}
+/* Status Summary — shrink columns to content (not full-bleed stretch) */
+#statussummary-pane .cs-rpt-table {
+    width: max-content !important;
+    min-width: 0 !important;
+    table-layout: auto !important;
+}
+#statussummary-pane .cs-rpt-table thead th,
+#statussummary-pane .cs-rpt-table td {
+    white-space: nowrap;
+    width: auto;
+    min-width: 0;
+}
+#statussummary-pane .cs-rpt-table td:first-child,
+#statussummary-pane .cs-rpt-table thead th:first-child {
+    white-space: nowrap;
+    min-width: 180px;
+    max-width: none;
+}
 
 /* Scope position:absolute for out-of-flow old pane during tab transition */
 #csRptTabContent { position: relative; }
@@ -1017,6 +1169,13 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             </button>
         </li>
         <li class="nav-item" role="presentation">
+            <button class="nav-link" id="avgpay3-tab" data-bs-toggle="pill"
+                    data-bs-target="#avgpay3-pane" type="button" role="tab"
+                    aria-controls="avgpay3-pane" aria-selected="false">
+                <i class="bi bi-cash-coin"></i> Avg Payments Last 3 Months
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
             <button class="nav-link" id="aging-tab" data-bs-toggle="pill"
                     data-bs-target="#aging-pane" type="button" role="tab"
                     aria-controls="aging-pane" aria-selected="false">
@@ -1135,7 +1294,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                                         var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
                                         <th colspan="@(monthsInYear.Count * 2 + 2)">Data based on Posted Date &mdash; @year</th>
                                     }
-                                    <th colspan="2" class="cs-pr-grand">Grand Total</th>
+                                    <th colspan="2" rowspan="2" class="cs-pr-grand">Grand Total</th>
                                 </tr>
                                 <tr>
                                     @foreach (var year in mcvYears)
@@ -1147,7 +1306,6 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                                         }
                                         <th colspan="2" class="cs-pr-year">@year Total</th>
                                     }
-                                    <th colspan="2" class="cs-pr-grand"></th>
                                 </tr>
                                 <tr>
                                     @foreach (var year in mcvYears)
@@ -1272,6 +1430,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         <div class="tab-pane fade" id="wcv-pane"           role="tabpanel" aria-labelledby="wcv-tab"           data-cs-tab="wcv">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabWcv",          Model) } else { <div class="cs-lazy-pane" data-lazy-tab="wcv"></div> }</div>
         <!-- Average Payments tab (Panel Averages tab hidden from UI) -->
         <div class="tab-pane fade" id="avgpay-pane"        role="tabpanel" aria-labelledby="avgpay-tab"        data-cs-tab="avgpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabAvgPayments",  Model) } else { <div class="cs-lazy-pane" data-lazy-tab="avgpay"></div> }</div>
+        <div class="tab-pane fade" id="avgpay3-pane"       role="tabpanel" aria-labelledby="avgpay3-tab"       data-cs-tab="avgpay3">@if (!Model.LazyLoadTabs) { ViewData["AvgPayMonths"] = 3; @await Html.PartialAsync("_CsTabAvgPayments", Model) } else { <div class="cs-lazy-pane" data-lazy-tab="avgpay3"></div> }</div>
         <!-- Insurance vs Aging tab -->
         <div class="tab-pane fade" id="aging-pane"         role="tabpanel" aria-labelledby="aging-tab"         data-cs-tab="aging">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabAging",        Model) } else { <div class="cs-lazy-pane" data-lazy-tab="aging"></div> }</div>
         <!-- Panel vs Payment tab -->

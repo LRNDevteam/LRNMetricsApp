@@ -44,7 +44,7 @@ public static partial class CollectionSummaryExcelExportBuilder
 
         var insightsWs = BuildMonthlyClaimVolumeSheet(wb, vm, labName);
         BuildWeeklyClaimVolumeSheet(wb, vm, labName, insightsWs);
-        BuildAvgPaymentsSheet(wb, vm.AvgPaymentsLast3Months, labName, lastMonths: 3);
+        BuildAvgPaymentsSheet(wb, vm.AvgPaymentsLast3Months, labName, lastMonths: 3, coveColors: vm.IsCoveLab);
         BuildTop5ReimbursementSheet(wb, vm.Top5Reimbursement, labName);
         if (vm.ShowTop5TotalPayments)
             BuildTop5TotalPaymentsSheet(wb, vm.Top5TotalPayments, labName);
@@ -54,7 +54,7 @@ public static partial class CollectionSummaryExcelExportBuilder
         BuildInsuranceVsPaymentSheet(wb, vm.InsuranceVsPayment, labName);
         BuildCptPaymentPctSheet(wb, vm.CptPaymentPct, labName);
         // Panel Averages sheet intentionally omitted (hidden from UI + Excel).
-        BuildAvgPaymentsSheet(wb, vm.AvgPayments, labName, lastMonths: 6);
+        BuildAvgPaymentsSheet(wb, vm.AvgPayments, labName, lastMonths: 6, coveColors: vm.IsCoveLab);
         BuildStatusSummarySheet(wb, vm.StatusSummary, labName);
         BuildRepVsPaymentSheet(wb, vm.RepPayments, labName);
         BuildProviderSummarySheet(wb, vm.ProviderSummary, labName);
@@ -895,7 +895,7 @@ public static partial class CollectionSummaryExcelExportBuilder
 
     // ?? Average Payments (Per Panel | Last 6 Months | Posted Date) ?????
 
-    private static void BuildAvgPaymentsSheet(XLWorkbook wb, PanelAveragesResult result, string labName, int lastMonths = 6)
+    private static void BuildAvgPaymentsSheet(XLWorkbook wb, PanelAveragesResult result, string labName, int lastMonths = 6, bool coveColors = false)
     {
         if (result.PanelRows.Count == 0) return;
 
@@ -916,27 +916,48 @@ public static partial class CollectionSummaryExcelExportBuilder
 
         int row = 1;
         ExcelTheme.Collection.WriteTitleBar(ws, row, colCount,
-            $"Average Payments \u2014 Per Panel | Last {lastMonths} Months | Posted Date \u2014 {labName}");
+            lastMonths <= 3
+                ? $"Average Payments — Per Panel | Last {lastMonths} calendar months through billed week-range end | Posted Date — {labName}"
+                : $"Average Payments — Per Panel | Last {lastMonths} calendar months through billed week-range end (not 180 days) | Posted Date — {labName}");
         row++;
 
-        // Two-row header: span group columns (Cove Avg payments pastels)
-        WriteMergedHeader(ws, row, row, 1, 4, "Panel / Payer — Summary", ColMonth);
-        WriteMergedHeader(ws, row, row, 5, 7,  "Fully Paid",   ExcelTheme.Collection.GroupFullyPaid);
-        WriteMergedHeader(ws, row, row, 8, 10, "Adjudicated",  ExcelTheme.Collection.GroupAdjudicated);
-        WriteMergedHeader(ws, row, row, 11, 13, "30 Days",     ExcelTheme.Collection.Group30Day);
-        WriteMergedHeader(ws, row, row, 14, 16, "60 Days",     ExcelTheme.Collection.Group60Day);
+        var summaryHdr = coveColors ? ExcelTheme.Collection.AvgPayCoveSummary : ExcelTheme.Collection.AvgPayNavyHeader;
+        var fpHdr  = coveColors ? ExcelTheme.Collection.AvgPayCoveFullyPaid : ExcelTheme.Collection.AvgPayTealHeader;
+        var adjHdr = coveColors ? ExcelTheme.Collection.AvgPayCoveAdjudicated : ExcelTheme.Collection.AvgPayTealHeader;
+        var d30Hdr = coveColors ? ExcelTheme.Collection.AvgPayCove30Day : ExcelTheme.Collection.AvgPayTealHeader;
+        var d60Hdr = coveColors ? ExcelTheme.Collection.AvgPayCove60Day : ExcelTheme.Collection.AvgPayTealHeader;
+        var panelBg = coveColors ? XLColor.White : ExcelTheme.Collection.AvgPayPanelRow;
+        var totalBg = coveColors ? ExcelTheme.Collection.AvgPayCoveTotal : XLColor.FromHtml("#D9D9D9");
+
+        WriteMergedHeader(ws, row, row, 1, 4, "Panel / Payer — Summary", summaryHdr);
+        WriteMergedHeader(ws, row, row, 5, 7,  "Fully Paid",   fpHdr);
+        WriteMergedHeader(ws, row, row, 8, 10, "Adjudicated",  adjHdr);
+        WriteMergedHeader(ws, row, row, 11, 13, "30 Days",     d30Hdr);
+        WriteMergedHeader(ws, row, row, 14, 16, "60 Days",     d60Hdr);
         row++;
 
-        ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ColHeader);
+        if (coveColors)
+        {
+            XLColor[] leafColors =
+            [
+                ExcelTheme.Collection.AvgPayCovePanel, summaryHdr, summaryHdr, summaryHdr,
+                fpHdr, fpHdr, fpHdr, adjHdr, adjHdr, adjHdr, d30Hdr, d30Hdr, d30Hdr, d60Hdr, d60Hdr, d60Hdr
+            ];
+            for (int c = 0; c < headers.Length; c++)
+                WriteHeaderCell(ws, row, c + 1, headers[c], leafColors[c]);
+        }
+        else
+        {
+            ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ExcelTheme.Collection.AvgPayTealHeader);
+        }
         row++;
         int freezeRow = row;
 
-        // Mirror the report tab: each panel is a collapsible outline group over its payers.
         ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
 
         foreach (var panel in result.PanelRows)
         {
-            WriteAvgPayMetricsRow(ws, row, panel.PanelName, panel.Metrics, XLColor.White, bold: true);
+            WriteAvgPayMetricsRow(ws, row, panel.PanelName, panel.Metrics, panelBg, bold: true);
             row++;
 
             int firstChild = row;
@@ -969,7 +990,7 @@ public static partial class CollectionSummaryExcelExportBuilder
                     acc.Days30Amount + p.Metrics.Days30Amount,
                     acc.Days60Count + p.Metrics.Days60Count,
                     acc.Days60Amount + p.Metrics.Days60Amount));
-            WriteAvgPayMetricsRow(ws, row, "Total", total, XLColor.FromHtml("#D9D9D9"), bold: true);
+            WriteAvgPayMetricsRow(ws, row, "Total", total, totalBg, bold: true);
             row++;
         }
 

@@ -272,10 +272,11 @@
 }
 
 .pr-table thead th:first-child {
-    text-align: left; position: sticky; left: 0; z-index: 7;
+    text-align: center;
 }
-.pr-table thead tr:nth-child(2) th:first-child { z-index: 6; }
-.pr-table thead tr:nth-child(3) th:first-child { z-index: 5; }
+.pr-table thead tr:first-child th:first-child {
+    text-align: center; position: sticky; left: 0; z-index: 7;
+}
 
 .pr-table td {
     padding: .35rem .5rem; vertical-align: middle;
@@ -349,6 +350,7 @@ th.pr-month-data, td.pr-month-data {
 .pr-grand-total { background-color: #fef3c7 !important; font-weight: 800; }
 .pr-table thead th.pr-grand-total {
     background: linear-gradient(135deg, #78350f 0%, #92400e 100%) !important;
+    vertical-align: middle;
 }
 .pr-table thead tr:nth-child(3) th.pr-grand-total {
     background: #92400e !important;
@@ -870,7 +872,7 @@ th.pr-month-data, td.pr-month-data {
                                             Data based on @monthlyDateBasis &mdash; @year
                                         </th>
                                     }
-                                    <th colspan="2" class="pr-grand-total">Grand Total</th>
+                                    <th colspan="2" rowspan="2" class="pr-grand-total">Grand Total</th>
                                 </tr>
                                 <tr>
                                     @foreach (var year in validYears)
@@ -882,7 +884,6 @@ th.pr-month-data, td.pr-month-data {
                                         }
                                         <th colspan="2" class="pr-year-total">@year Total</th>
                                     }
-                                    <th colspan="2" class="pr-grand-total"></th>
                                 </tr>
                                 <tr>
                                     @foreach (var year in validYears)
@@ -1113,7 +1114,7 @@ th.pr-month-data, td.pr-month-data {
                                     <th colspan="@(weeks.Count * 2)">
                                         Data based on Last 4 Week [@headerDateLabel]
                                     </th>
-                                    <th colspan="2" class="pr-grand-total">Grand Total</th>
+                                    <th colspan="2" rowspan="2" class="pr-grand-total">Grand Total</th>
                                 </tr>
                                 <tr>
                                     @for (int wi = 0; wi < weeks.Count; wi++)
@@ -1122,7 +1123,6 @@ th.pr-month-data, td.pr-month-data {
                                             @weeks[wi].WeekStart.ToString("M/d/yyyy") &ndash; @weeks[wi].WeekEnd.ToString("M/d/yyyy")
                                         </th>
                                     }
-                                    <th colspan="2" class="pr-grand-total"></th>
                                 </tr>
                                 <tr>
                                     @foreach (var wk in weeks)
@@ -1376,7 +1376,7 @@ th.pr-month-data, td.pr-month-data {
                                         var pbMons = pbMonthsByYear.ContainsKey(year) ? pbMonthsByYear[year] : new List<string>();
                                         <th colspan="@((pbMons.Count + 1) * pbMetricCols)">@year</th>
                                     }
-                                    <th colspan="@pbMetricCols" class="pr-grand-total">Grand Total</th>
+                                    <th colspan="@pbMetricCols" rowspan="2" class="pr-grand-total">Grand Total</th>
                                 </tr>
                                 <tr>
                                     @foreach (var year in pbYears)
@@ -1390,8 +1390,6 @@ th.pr-month-data, td.pr-month-data {
                                         if (pbShowCharges) { <th colspan="2" class="pr-year-total">Year @year Total</th> }
                                         else { <th class="pr-year-total">Year @year Total</th> }
                                     }
-                                    @if (pbShowCharges) { <th colspan="2" class="pr-grand-total"></th> }
-                                    else { <th class="pr-grand-total"></th> }
                                 </tr>
                                 @if (pbShowCharges)
                                 {
@@ -1797,7 +1795,7 @@ th.pr-month-data, td.pr-month-data {
                                                     var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                                     <th colspan="@((mons.Count + 1) * cptMetricCols)">@year</th>
                                                 }
-                                                <th colspan="@cptMetricCols" class="pr-grand-total">Grand Total</th>
+                                                <th colspan="@cptMetricCols" rowspan="2" class="pr-grand-total">Grand Total</th>
                                             </tr>
                                             <tr>
                                                 @foreach (var year in cptYears)
@@ -1809,7 +1807,6 @@ th.pr-month-data, td.pr-month-data {
                                                     }
                                                     <th colspan="@cptMetricCols" class="pr-year-total">Year @year Total</th>
                                                 }
-                                                <th colspan="@cptMetricCols" class="pr-grand-total"></th>
                                             </tr>
                                             <tr>
                                                 @foreach (var year in cptYears)
@@ -1911,7 +1908,7 @@ th.pr-month-data, td.pr-month-data {
                                         var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                         <th colspan="@((mons.Count + 1) * cptMetricCols)">@year</th>
                                     }
-                                    <th colspan="@cptMetricCols" class="pr-grand-total">Grand Total</th>
+                                    <th colspan="@cptMetricCols" rowspan="2" class="pr-grand-total">Grand Total</th>
                                 </tr>
                                 <tr>
                                     @foreach (var year in cptYears)
@@ -1923,7 +1920,6 @@ th.pr-month-data, td.pr-month-data {
                                         }
                                         <th colspan="@cptMetricCols" class="pr-year-total">Year @year Total</th>
                                     }
-                                    <th colspan="@cptMetricCols" class="pr-grand-total"></th>
                                 </tr>
                                 <tr>
                                     @foreach (var year in cptYears)
@@ -2051,7 +2047,7 @@ th.pr-month-data, td.pr-month-data {
                                         var pnlMons = pnlMonthsByYear.ContainsKey(year) ? pnlMonthsByYear[year] : new List<string>();
                                         <th colspan="@((pnlMons.Count + 1) * 2)">@year</th>
                                     }
-                                    <th colspan="2" class="pr-grand-total">Grand Total</th>
+                                    <th colspan="2" rowspan="2" class="pr-grand-total">Grand Total</th>
                                 </tr>
                                 <tr>
                                     @foreach (var year in pnlYears)
@@ -2063,7 +2059,6 @@ th.pr-month-data, td.pr-month-data {
                                         }
                                         <th colspan="2" class="pr-year-total">Year @year Total</th>
                                     }
-                                    <th colspan="2" class="pr-grand-total"></th>
                                 </tr>
                                 <tr>
                                     @foreach (var year in pnlYears)
@@ -2241,7 +2236,7 @@ th.pr-month-data, td.pr-month-data {
                                                 var insMons = tab.MonthsByYear.ContainsKey(year) ? tab.MonthsByYear[year] : new List<string>();
                                                 <th colspan="@((insMons.Count + 1) * 2)">@year</th>
                                             }
-                                            <th colspan="2" class="pr-grand-total">Grand Total</th>
+                                            <th colspan="2" rowspan="2" class="pr-grand-total">Grand Total</th>
                                         </tr>
                                         <tr>
                                             @foreach (var year in tab.Years)
@@ -2253,7 +2248,6 @@ th.pr-month-data, td.pr-month-data {
                                                 }
                                                 <th colspan="2" class="pr-year-total">Year @year Total</th>
                                             }
-                                            <th colspan="2" class="pr-grand-total"></th>
                                         </tr>
                                         <tr>
                                             @foreach (var year in tab.Years)
@@ -2363,7 +2357,7 @@ th.pr-month-data, td.pr-month-data {
                                         var hpMons = hpMonthsByYear.ContainsKey(year) ? hpMonthsByYear[year] : new List<string>();
                                         <th colspan="@((hpMons.Count + 1) * 2)">@year</th>
                                     }
-                                    <th colspan="2" class="pr-grand-total">Grand Total</th>
+                                    <th colspan="2" rowspan="2" class="pr-grand-total">Grand Total</th>
                                 </tr>
                                 <tr>
                                     @foreach (var year in hpYears)
@@ -2375,7 +2369,6 @@ th.pr-month-data, td.pr-month-data {
                                         }
                                         <th colspan="2" class="pr-year-total">Year @year Total</th>
                                     }
-                                    <th colspan="2" class="pr-grand-total"></th>
                                 </tr>
                                 <tr>
                                     @foreach (var year in hpYears)

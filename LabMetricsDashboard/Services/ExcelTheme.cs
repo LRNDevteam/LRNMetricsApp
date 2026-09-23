@@ -143,6 +143,24 @@ public static class ExcelTheme
         /// <summary>Grand-total row — same forest green as headers.</summary>
         public static readonly XLColor TotalRowBg = XLColor.FromHtml("#385624");
 
+        /// <summary>Avg Payments Last 3 Months — Monthly Claim Volume navy header.</summary>
+        public static readonly XLColor AvgPayNavyHeader = XLColor.FromHtml("#0E3460");
+
+        /// <summary>Avg Payments Last 3 Months — Monthly Claim Volume teal leaf header.</summary>
+        public static readonly XLColor AvgPayTealHeader = XLColor.FromHtml("#1E5A8A");
+
+        /// <summary>Avg Payments Last 3 Months — Monthly Claim Volume green panel row.</summary>
+        public static readonly XLColor AvgPayPanelRow = XLColor.FromHtml("#F0FDF4");
+
+        /// <summary>Cove Avg Payments — client workbook pastel palette.</summary>
+        public static readonly XLColor AvgPayCovePanel       = XLColor.FromHtml("#E2EFDA");
+        public static readonly XLColor AvgPayCoveSummary     = XLColor.FromHtml("#E7D9F2");
+        public static readonly XLColor AvgPayCoveFullyPaid   = XLColor.FromHtml("#D9E1F2");
+        public static readonly XLColor AvgPayCoveAdjudicated = XLColor.FromHtml("#FFF2CC");
+        public static readonly XLColor AvgPayCove30Day       = XLColor.FromHtml("#FCE4D6");
+        public static readonly XLColor AvgPayCove60Day       = XLColor.FromHtml("#D6DCE4");
+        public static readonly XLColor AvgPayCoveTotal       = XLColor.FromHtml("#D0CECE");
+
         /// <summary>Avg Payments group: Fully Paid (client purple).</summary>
         public static readonly XLColor GroupFullyPaid = XLColor.FromHtml("#E7D8F4");
 

@@ -4,6 +4,18 @@
     // Pivot mode when any row carries a real BillYear/Month (e.g. Elixir).
     var hasMonthlyGrain = rowsData.Any(r => r.BillYear > 0 && r.BillMonth > 0);
 }
+<style>
+/* Footer year / Grand Total cells stay navy (not cream/peach body fills). */
+#panelpay-pane .cs-rpt-table tbody td.cs-pr-year { background-color: #fefce8 !important; }
+#panelpay-pane .cs-rpt-table tbody td.cs-pr-grand { background-color: #fef3c7 !important; font-weight: 800; }
+#panelpay-pane .cs-rpt-table tfoot td,
+#panelpay-pane .cs-rpt-table tfoot td.cs-pr-year,
+#panelpay-pane .cs-rpt-table tfoot td.cs-pr-grand {
+    background: #0e3460 !important;
+    color: #fff !important;
+    font-weight: 800;
+}
+</style>
 @if (rowsData.Count == 0)
 {
     <div class="text-center py-5 text-muted">
@@ -21,7 +33,7 @@ else if (!hasMonthlyGrain)
             <table class="cs-rpt-table">
                 <thead>
                     <tr>
-                        <th style="text-align:left;min-width:280px">Panel</th>
+                        <th style="min-width:280px">Panel</th>
                         <th style="min-width:140px">No. of Claims</th>
                         <th style="min-width:180px">Insurance Payments</th>
                     </tr>
@@ -89,13 +101,13 @@ else
             <table class="cs-rpt-table">
                 <thead>
                     <tr>
-                        <th rowspan="3" style="text-align:left;min-width:280px">Panel</th>
+                        <th rowspan="3">Panel</th>
                         @foreach (var year in years)
                         {
                             var yearMonthCount = periods.Count(p => p.Year == year);
                             <th colspan="@(yearMonthCount * 2 + 2)">@year</th>
                         }
-                        <th colspan="2">Grand Total</th>
+                        <th colspan="2" rowspan="2" class="cs-pr-grand">Grand Total</th>
                     </tr>
                     <tr>
                         @foreach (var year in years)
@@ -105,23 +117,22 @@ else
                                 var monthLabel = new DateTime(p.Year, p.Month, 1).ToString("MMM");
                                 <th colspan="2">@monthLabel</th>
                             }
-                            <th colspan="2">@year Total</th>
+                            <th colspan="2" class="cs-pr-year">@year Total</th>
                         }
-                        <th colspan="2">Total</th>
                     </tr>
                     <tr>
                         @foreach (var year in years)
                         {
                             foreach (var _ in periods.Where(p => p.Year == year))
                             {
-                                <th style="min-width:105px">Count of Panel Name</th>
-                                <th style="min-width:150px">Sum of CarrierPayment</th>
+                                <th>Count of Panel Name</th>
+                                <th>Sum of CarrierPayment</th>
                             }
-                            <th style="min-width:105px">Count of Panel Name</th>
-                            <th style="min-width:150px">Sum of CarrierPayment</th>
+                            <th class="cs-pr-year">Count of Panel Name</th>
+                            <th class="cs-pr-year">Sum of CarrierPayment</th>
                         }
-                        <th style="min-width:105px">Count of Panel Name</th>
-                        <th style="min-width:150px">Sum of CarrierPayment</th>
+                        <th class="cs-pr-grand">Count of Panel Name</th>
+                        <th class="cs-pr-grand">Sum of CarrierPayment</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -143,11 +154,11 @@ else
                                     <td style="text-align:right">@count.N0OrDash()</td>
                                     <td style="text-align:right">@Acct2(payment)</td>
                                 }
-                                <td style="text-align:right;font-weight:700">@yearCount.N0OrDash()</td>
-                                <td style="text-align:right;font-weight:700">@Acct2(yearPayment)</td>
+                                <td style="text-align:right;font-weight:700" class="cs-pr-year">@yearCount.N0OrDash()</td>
+                                <td style="text-align:right;font-weight:700" class="cs-pr-year">@Acct2(yearPayment)</td>
                             }
-                            <td style="text-align:right;font-weight:700">@row.TotalCount.N0OrDash()</td>
-                            <td style="text-align:right;font-weight:700">@Acct2(row.TotalPayment)</td>
+                            <td style="text-align:right;font-weight:700" class="cs-pr-grand">@row.TotalCount.N0OrDash()</td>
+                            <td style="text-align:right;font-weight:700" class="cs-pr-grand">@Acct2(row.TotalPayment)</td>
                         </tr>
                     }
                 </tbody>
@@ -168,11 +179,11 @@ else
                                 <td style="text-align:right;color:#fff">@count.N0OrDash()</td>
                                 <td style="text-align:right;color:#fff">@Acct2(payment)</td>
                             }
-                            <td style="text-align:right;color:#fff">@yearCount.N0OrDash()</td>
-                            <td style="text-align:right;color:#fff">@Acct2(yearPayment)</td>
+                            <td style="text-align:right;color:#fff" class="cs-pr-year">@yearCount.N0OrDash()</td>
+                            <td style="text-align:right;color:#fff" class="cs-pr-year">@Acct2(yearPayment)</td>
                         }
-                        <td style="text-align:right;color:#fff">@pivotRows.Sum(r => r.TotalCount).N0OrDash()</td>
-                        <td style="text-align:right;color:#fff">@Acct2(pivotRows.Sum(r => r.TotalPayment))</td>
+                        <td style="text-align:right;color:#fff" class="cs-pr-grand">@pivotRows.Sum(r => r.TotalCount).N0OrDash()</td>
+                        <td style="text-align:right;color:#fff" class="cs-pr-grand">@Acct2(pivotRows.Sum(r => r.TotalPayment))</td>
                     </tr>
                 </tfoot>
             </table>

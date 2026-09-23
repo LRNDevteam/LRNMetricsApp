@@ -386,19 +386,11 @@ public sealed partial class SqlCollectionSummaryRepository
         // Try the SP first; fall back to direct snapshot table read if SP is not yet deployed.
         try
         {
-            var spName = string.Equals(prefix, "Cove", StringComparison.OrdinalIgnoreCase)
-                ? "dbo.usp_GetCove_CS_AvgPayments"
-                : $"dbo.usp_Get{prefix}_CS_AvgPayments";
-            return await GetAvgPaymentsViaSpAsync(
+            return await GetAvgPaymentsAsync(
                 connectionString,
-                spName,
-                filterPayerNames: null, filterPanelNames: null,
-                filterFirstBillFrom: null, filterFirstBillTo: null,
-                filterDosFrom: null, filterDosTo: null,
-                filterCheckDateFrom: null, filterCheckDateTo: null,
-                ct,
-                lastMonths: string.Equals(prefix, "Cove", StringComparison.OrdinalIgnoreCase) ? 6 : null)
-                .ConfigureAwait(false);
+                labName: prefix,
+                ct: ct,
+                lastMonths: 6).ConfigureAwait(false);
         }
         catch (SqlException ex) when (ex.Number == 2812) // SP not yet deployed
         {
