@@ -20,6 +20,14 @@
                 <span class="ms-1 fw-semibold" style="color:#0e3460;">@Model.RunId</span>
             </span>
         }
+        @if (!string.IsNullOrWhiteSpace(Model.SourceFileName))
+        {
+            <span class="vr" style="height:1.1em;align-self:center;opacity:.3;"></span>
+            <span>
+                <span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">Source File:</span>
+                <span class="ms-1 fw-semibold" style="color:#0e3460;" title="@Model.SourceFileName">@Model.SourceFileName</span>
+            </span>
+        }
         @if (Model.InsertedDateTime.HasValue)
         {
             <span class="vr" style="height:1.1em;align-self:center;opacity:.3;"></span>

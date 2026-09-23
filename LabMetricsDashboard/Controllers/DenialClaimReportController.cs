@@ -39,30 +39,87 @@ public sealed class DenialClaimReportController : Controller
             ? requested
             : DenialClaimLevelTabViewModel.PageSizes[0];
 
+    /// <summary>
+    /// Roles allowed to import insights, copy Current Week to Previous Week, and edit insight rows.
+    /// </summary>
+    /// <remarks>
+    /// Read from <c>DenialInsight:EditorRoles</c> so a role created through Admin &gt; Roles can be
+    /// granted these actions without a code change - which is what kept new roles (Super Admin, Lab
+    /// Admin, Account Manager, Client Manager) locked out of Import and Copy to Previous Week.
+    /// The defaults below apply only when the setting is absent, so an existing deployment behaves
+    /// as before until it opts in.
+    /// <para>Matching is case- and space-insensitive: "Lab Admin", "LabAdmin" and "labadmin" are one
+    /// role, because the Roles table spells them inconsistently ("Labuser" against "Lab User" in
+    /// code).</para>
+    /// </remarks>
+    private static readonly string[] DefaultEditorRoles =
+    [
+        "Admin", "LRN Admin", "LRNAdmin",
+        "Super Admin", "SuperAdmin",
+        "Lab Admin", "LabAdmin",
+        "AR Manager", "ARManager",
+        "Lab User", "LabUser",
+    ];
+
     private readonly LabSettings _labSettings;
     private readonly LabConfigOptions _labConfig;
     private readonly IDenialClaimReportRepository _repo;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<DenialClaimReportController> _logger;
 
     public DenialClaimReportController(
         LabSettings labSettings,
         LabConfigOptions labConfig,
         IDenialClaimReportRepository repo,
+        IConfiguration configuration,
         ILogger<DenialClaimReportController> logger)
     {
         _labSettings = labSettings;
         _labConfig = labConfig;
         _repo = repo;
+        _configuration = configuration;
         _logger = logger;
     }
 
-    private bool IsAdmin => User.IsInRole("Admin") || User.IsInRole("LRN Admin") || User.IsInRole("LRNAdmin");
+    private bool IsAdmin =>
+        HasRole("Admin") || HasRole("LRN Admin") || HasRole("LRNAdmin") || HasRole("Super Admin");
 
     private string CurrentUser => User.Identity?.Name?.Trim() is { Length: > 0 } u ? u : "system";
 
-    private bool CanEditInsights() =>
-        IsAdmin || User.IsInRole("AR Manager") || User.IsInRole("ARManager")
-               || User.IsInRole("Lab User") || User.IsInRole("LabUser");
+    /// <summary>A role key with spaces and punctuation removed, so spelling variants collapse.</summary>
+    private static string RoleKey(string? value) =>
+        new((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+
+    /// <summary>
+    /// True when the signed-in user holds <paramref name="role"/>, ignoring case and spacing.
+    /// <c>User.IsInRole</c> alone is case-insensitive but NOT space-insensitive, so it matches
+    /// "Labuser" against "LabUser" and misses "Lab Admin" against "LabAdmin".
+    /// </summary>
+    private bool HasRole(string role)
+    {
+        if (string.IsNullOrWhiteSpace(role)) return false;
+
+        // Exact check first: it honours the identity's own RoleClaimType, which a future auth change
+        // could remap away from ClaimTypes.Role and would silently break the claim scan below.
+        if (User.IsInRole(role)) return true;
+
+        var wanted = RoleKey(role);
+        if (wanted.Length == 0) return false;
+
+        var roleClaimType = (User.Identity as System.Security.Claims.ClaimsIdentity)?.RoleClaimType
+            ?? System.Security.Claims.ClaimTypes.Role;
+
+        return User.Claims.Any(c =>
+            (c.Type == roleClaimType || c.Type == System.Security.Claims.ClaimTypes.Role)
+            && RoleKey(c.Value) == wanted);
+    }
+
+    private bool CanEditInsights()
+    {
+        var configured = _configuration.GetSection("DenialInsight:EditorRoles").Get<string[]>();
+        var allowed = configured is { Length: > 0 } ? configured : DefaultEditorRoles;
+        return allowed.Any(HasRole);
+    }
 
     /// <summary>Labs this user may open - the same visibility rule the rest of the app applies.</summary>
     private List<string> VisibleLabs()
@@ -164,8 +221,13 @@ public sealed class DenialClaimReportController : Controller
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count();
             model.UndatedGroups = groups.Count(g => !g.DenialDate.HasValue);
 
-            model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods);
-            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods);
+            // The columns are clamped to how far ClaimLevelData is actually loaded, so the weekly
+            // summary shows the four weeks the data covers rather than opening a column for a week
+            // a stray denial date fell into.
+            var loadedThrough = await _repo.GetClaimDataLoadedThroughAsync(connectionString, ct);
+
+            model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods, loadedThrough: loadedThrough);
+            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: loadedThrough);
         }
         catch (Exception ex)
         {
@@ -218,8 +280,12 @@ public sealed class DenialClaimReportController : Controller
         try
         {
             var groups = await _repo.GetDenialSummaryAsync(connectionString, ct);
-            model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods);
-            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods);
+
+            // Same clamp as the page, so the exported workbook and the screen agree on the columns.
+            var loadedThrough = await _repo.GetClaimDataLoadedThroughAsync(connectionString, ct);
+
+            model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods, loadedThrough: loadedThrough);
+            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: loadedThrough);
 
             model.Insight.Rows = await _repo.GetInsightsAsync(connectionString, model.Insight.Bucket, ct);
         }

@@ -53,7 +53,8 @@ public static class DenialClaimPivotBuilder
         bool weekly,
         int maxPeriods,
         int topPayers = DefaultTopPayers,
-        int topDenialsPerPayer = DefaultTopDenialsPerPayer)
+        int topDenialsPerPayer = DefaultTopDenialsPerPayer,
+        DateTime? loadedThrough = null)
     {
         var model = new BreakdownPivotViewModel
         {
@@ -67,6 +68,16 @@ public static class DenialClaimPivotBuilder
         // page reports how many were dropped.
         var dated = groups.Where(g => g.DenialDate.HasValue && !string.IsNullOrWhiteSpace(g.DenialCodeNormalized)).ToList();
         if (dated.Count == 0) return model;
+
+        // Applied BEFORE the columns are picked, so the newest column is the newest week the claim
+        // data actually covers rather than the newest week a stray denial date happens to fall in.
+        // Without this the weekly summary opened a "16 Sep - 22 Sep" column while ClaimLevelData was
+        // only loaded through "09.09.2026 - 09.15.2026", and the oldest real week fell off the end.
+        if (loadedThrough is { } cutoff)
+        {
+            dated = dated.Where(g => g.DenialDate!.Value.Date <= cutoff.Date).ToList();
+            if (dated.Count == 0) return model;
+        }
 
         var months = BuildBasePeriods(dated, weekly, maxPeriods);
         if (months.Count == 0) return model;
