@@ -29,11 +29,9 @@
 <div class="lis-km card border-0 table-card mb-3">
     <div class="card-body lis-km-body">
         <div class="lis-km-header">
-            <div>
-                <div class="section-title mb-0">Key Metrics</div>
-                <div class="section-subtitle">
-                    Recent 4 Months by @Model.CollectionDateLabel
-                </div>
+            <div class="lis-km-title">
+                <span class="section-title mb-0">Key Metrics</span>
+                <span class="section-subtitle">Recent 4 months by @Model.CollectionDateLabel</span>
             </div>
             <div class="lis-km-filter" title="Filter applied to Key Metrics averages">
                 <span class="lis-km-filter-label">Filter</span>
@@ -65,11 +63,13 @@
                             var prev = i > 0 ? months[i - 1].AvgTimeToResult : null;
                             var isLatest = i == months.Count - 1;
                             <td class="@(isLatest ? "lis-km-latest" : null)">
-                                <span class="lis-km-value">@FormatMetric(month.AvgTimeToResult)</span>
-                                @if (i > 0)
-                                {
-                                    <span class="lis-km-delta @DeltaClass(month.AvgTimeToResult, prev)">@FormatDelta(month.AvgTimeToResult, prev)</span>
-                                }
+                                <span class="lis-km-cell">
+                                    <span class="lis-km-value">@FormatMetric(month.AvgTimeToResult)</span>
+                                    @if (i > 0)
+                                    {
+                                        <span class="lis-km-delta @DeltaClass(month.AvgTimeToResult, prev)">@FormatDelta(month.AvgTimeToResult, prev)</span>
+                                    }
+                                </span>
                             </td>
                         }
                     </tr>
@@ -84,11 +84,13 @@
                             var prev = i > 0 ? months[i - 1].AvgTimeToBill : null;
                             var isLatest = i == months.Count - 1;
                             <td class="@(isLatest ? "lis-km-latest" : null)">
-                                <span class="lis-km-value">@FormatMetric(month.AvgTimeToBill)</span>
-                                @if (i > 0)
-                                {
-                                    <span class="lis-km-delta @DeltaClass(month.AvgTimeToBill, prev)">@FormatDelta(month.AvgTimeToBill, prev)</span>
-                                }
+                                <span class="lis-km-cell">
+                                    <span class="lis-km-value">@FormatMetric(month.AvgTimeToBill)</span>
+                                    @if (i > 0)
+                                    {
+                                        <span class="lis-km-delta @DeltaClass(month.AvgTimeToBill, prev)">@FormatDelta(month.AvgTimeToBill, prev)</span>
+                                    }
+                                </span>
                             </td>
                         }
                     </tr>
