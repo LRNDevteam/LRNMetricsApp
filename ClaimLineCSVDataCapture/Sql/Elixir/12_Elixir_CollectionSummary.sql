@@ -817,12 +817,6 @@ BEGIN
     WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
       AND TRY_CAST(CheckDate AS DATE) IS NOT NULL
       AND YEAR(TRY_CAST(CheckDate AS DATE)) > 1900
-	  AND 
-	   COALESCE(
-                    TRY_CONVERT(DATE, CheckDate, 101),
-                    TRY_CONVERT(DATE, CheckDate, 120),
-                    TRY_CONVERT(DATE, CheckDate)
-                )<>'2026-04-01'
      
     GROUP BY
         LTRIM(RTRIM(Panelname)),
@@ -1193,9 +1187,9 @@ BEGIN
         FROM dbo.ClaimLevelData                                          -- ✅ Elix uses LineLevelData
         WHERE
             ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
-            --AND CheckDate <> ''
-            --AND TRY_CAST(CheckDate AS DATE) IS NOT NULL
-            --AND YEAR(TRY_CAST(CheckDate AS DATE)) > 1900
+            AND NULLIF(LTRIM(RTRIM(CheckDate)), '') IS NOT NULL
+            AND TRY_CAST(CheckDate AS DATE) IS NOT NULL
+            AND YEAR(TRY_CAST(CheckDate AS DATE)) > 1900
 
         GROUP BY
             LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),

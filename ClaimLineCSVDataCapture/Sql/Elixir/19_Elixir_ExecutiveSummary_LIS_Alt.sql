@@ -313,6 +313,10 @@ BEGIN
 	DROP TABLE IF EXISTS #Lis;
 	DROP TABLE IF EXISTS #LisPeriods;
 
+	-- Recalculate mismatch from the completed LIS C (Billed) snapshot.
+	IF OBJECT_ID('dbo.usp_Elix_ES_UpdatePmsBilledMismatch', 'P') IS NOT NULL
+		EXEC dbo.usp_Elix_ES_UpdatePmsBilledMismatch;
+
 	PRINT 'usp_RefreshElix_ExecutiveSummary_LIS_Alt completed.';
 END;
 GO

@@ -1099,7 +1099,10 @@ public static partial class ProductionReportExcelExportBuilder
 
         // ?? Header Row 1 ??
         int hRow1 = row;
-        WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, "Unbilled x Aging", ExcelTheme.InsightsHeaderBg);
+        var rowHeader = vm.SelectedLab.Contains("Elixir", StringComparison.OrdinalIgnoreCase)
+            ? "Payer Name"
+            : "Unbilled x Aging";
+        WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, rowHeader, ExcelTheme.InsightsHeaderBg);
         int hCol = 2;
         foreach (var b in buckets)
         {

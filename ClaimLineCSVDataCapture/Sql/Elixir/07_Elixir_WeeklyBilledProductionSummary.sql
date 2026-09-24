@@ -38,14 +38,27 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- Week boundary: Wed–Tue.
-    -- Reference Wednesday anchor: 1900-01-03 (a known Wednesday).
-    -- DATEDIFF(day, '1900-01-03', @Today) % 7 ? 0=Wed, 1=Thu, …, 6=Tue.
-    DECLARE @Today            DATE = CAST(GETDATE() AS DATE);
-    DECLARE @ThisWeekWedStart DATE = DATEADD(day, -(DATEDIFF(day, '1900-01-03', @Today) % 7), @Today);
+    -- Anchor the window to the latest available FirstBilledDate, not GETDATE().
+    -- This prevents an empty current week from replacing an older week with data.
+    DECLARE @MaxFirstBilledDate DATE =
+    (
+        SELECT MAX(TRY_CAST(FirstBilledDate AS DATE))
+        FROM dbo.ClaimLevelData
+        WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+    );
 
-    -- Build last 4 complete Wed–Tue weeks (index 1 = most recent complete week).
-    DECLARE @i INT = 1;
+    IF @MaxFirstBilledDate IS NULL
+    BEGIN
+        TRUNCATE TABLE dbo.Elix_WeeklyBilledProductionSummary;
+        RETURN;
+    END;
+
+    -- Week boundary: Wed–Tue; 1900-01-03 is a known Wednesday.
+    DECLARE @LatestWeekWedStart DATE =
+        DATEADD(day, -(DATEDIFF(day, '1900-01-03', @MaxFirstBilledDate) % 7), @MaxFirstBilledDate);
+
+    -- Include the week containing the latest data plus its three predecessors.
+    DECLARE @i INT = 0;
     CREATE TABLE #Weeks
     (
         WeekIndex INT PRIMARY KEY,
@@ -54,9 +67,9 @@ BEGIN
         WeekLabel NVARCHAR(32)
     );
 
-    WHILE @i <= 4
+    WHILE @i < 4
     BEGIN
-        DECLARE @ws DATE = DATEADD(week, -@i, @ThisWeekWedStart);
+        DECLARE @ws DATE = DATEADD(week, -@i, @LatestWeekWedStart);
         DECLARE @we DATE = DATEADD(day, 6, @ws);   -- Wed + 6 = Tue
         INSERT INTO #Weeks (WeekIndex, WeekStart, WeekEnd, WeekLabel)
         VALUES (@i, @ws, @we, FORMAT(@ws, 'yyyy-MM-dd') + ' - ' + FORMAT(@we, 'yyyy-MM-dd'));
