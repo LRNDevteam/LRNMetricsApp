@@ -1684,7 +1684,17 @@ else if (activeTab == "summary")
         <div class="card-body">
             <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
                 <div>
-                    <div class="section-title">@result.LogicSheetName Summary</div>
+                    @* Titled by the lab, not by the template it borrows: VariantX reports on Cove's
+                       logic sheet, and "Cove Summary" on the VariantX page reads as the wrong lab's
+                       data. Which template produced the rows is still stated beside it. *@
+                    <div class="section-title">@(string.IsNullOrWhiteSpace(Model.CurrentLabName) ? result.LogicSheetName : Model.CurrentLabName) Summary</div>
+                    @if (!string.IsNullOrWhiteSpace(result.LogicSheetName)
+                         && !string.Equals(result.LogicSheetName, Model.CurrentLabName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        <div class="section-subtitle text-muted" style="font-size:.78rem;">
+                            Built on the <strong>@result.LogicSheetName</strong> logic sheet.
+                        </div>
+                    }
                     @* <div class="section-subtitle">Format follows the attached Excel logic workbook.</div> *@
                 </div>
             </div>
