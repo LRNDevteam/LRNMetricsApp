@@ -2962,6 +2962,10 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				// Sub Status shape, so it also inherits Cove's date columns (DateOfCollection,
 				// ReceivedDate, ValidatedDate) and panel/clinic/provider filters.
 				25 => "Cove",
+				// LRNLabDemo: its LIMSMaster is Cove's (RunIds read R...COV..., and Cove's DateOfCollection /
+				// NewStatus shape - PCRLOA's RequestCollectDate is absent), so it reports on Cove's sheet.
+				// Unmapped, it fell to "Dynamic", whose rows all repeated the Total.
+				99 => "Cove",
 				_ => ResolveLogicSheetByName(labName)
 			};
 		}
@@ -2987,6 +2991,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		if (n.Contains("INHEALTH")) return "InHealth";
 		if (n.Contains("PCRDXAL") || n.Contains("PCRDXA")) return "PCRDx-AL";
 		if (n.Contains("PCRDXCO") || n.Contains("PCRDXC")) return "PCRDx-CO";
+		// Demo lab, by config key or by the de-identified LabName stamped in its data - see LabId 99.
+		if (n.Contains("LRNLABDEMO") || n.Contains("LRNDEMOLAB") || n == "LRNLAB") return "Cove";
 		if (n.Contains("PCR")) return "PCRLOA";
 		return "Dynamic";
 	}
