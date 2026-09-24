@@ -44,7 +44,7 @@ public sealed class ReportQueueWorker : BackgroundService
         if (labs.Count == 0)
         {
             _logger.LogError(
-                "No DB-enabled labs resolved from {Folder} — worker is idle. Check ReportWorker:Labs / LabConfigFolder.",
+                "No queue-enabled labs resolved from {Folder} — worker is idle. Check ReportWorker:Labs / LabConfigFolder.",
                 _options.LabConfigFolder);
             return;
         }
@@ -131,7 +131,12 @@ public sealed class ReportQueueWorker : BackgroundService
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogWarning(ex, "Stuck-report recovery failed for lab {Lab}.", lab.LabName);
+                // Log message + type/message only — formatting full Exception.ToString()
+                // (stack frames) can throw under mismatched framework assemblies and
+                // abort Host.Start before the poll loop begins.
+                _logger.LogWarning(
+                    "Stuck-report recovery failed for lab {Lab}: {ExceptionType}: {ExceptionMessage}",
+                    lab.LabName, ex.GetType().FullName, ex.Message);
             }
         }
     }

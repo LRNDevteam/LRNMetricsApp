@@ -183,6 +183,9 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
     private static bool IsCoveCollectionPrefix(string? prefix) =>
         string.Equals(prefix, "Cove", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsElixirCollectionPrefix(string? prefix) =>
+        string.Equals(prefix, "Elix", StringComparison.OrdinalIgnoreCase);
+
     private static string CollectionGetSp(string prefix, string leaf) =>
         IsAugustusCollectionPrefix(prefix)
             ? $"dbo.usp_Get{prefix}_{leaf}_v2"
@@ -2553,7 +2556,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         return new PanelAveragesResult(panelRows);
     }
 
-    // ?? Average Payments (Per Panel | Last 6 Months | Posted Date) ??????
+    // ?? Average Payments (Per Panel | Last 3/6 Months) ??????
 
     /// <inheritdoc />
     public async Task<PanelAveragesResult> GetAvgPaymentsAsync(
@@ -2570,6 +2573,22 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
         var months = lastMonths is 3 or 6 ? lastMonths : 6;
+        var prefix = LabCollectionPrefix.GetPrefix(labName);
+
+        // Elixir's SP owns its rolling window. It filters DateOfService rows, anchored
+        // to the latest processed week-range end date. Check-date parameters remain
+        // optional user filters.
+        if (IsElixirCollectionPrefix(prefix))
+            return await GetAvgPaymentsViaSpAsync(
+                connectionString,
+                "dbo.usp_GetElix_CS_AvgPayments",
+                filterPayerNames, filterPanelNames,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterDosFrom, filterDosTo,
+                filterCheckDateFrom, filterCheckDateTo,
+                ct,
+                lastMonths: months).ConfigureAwait(false);
+
         var (windowFrom, windowTo) = await ResolveAvgPaymentsCheckWindowAsync(
             connectionString, filterCheckDateFrom, filterCheckDateTo, months, ct).ConfigureAwait(false);
 
@@ -2577,7 +2596,6 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             "CollectionSummary AvgPayments: lastMonths={Months}, CheckDate {From:yyyy-MM-dd}..{To:yyyy-MM-dd} (calendar months from week-range end, not 180 days)",
             months, windowFrom, windowTo);
 
-        var prefix = LabCollectionPrefix.GetPrefix(labName);
         if (IsCoveCollectionPrefix(prefix))
             return await GetAvgPaymentsViaSpAsync(
                 connectionString,

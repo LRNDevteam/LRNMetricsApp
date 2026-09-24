@@ -1,14 +1,20 @@
 ---
-description: Keep deploy zips and packages off the Desktop
+description: Store deployment artifacts outside Git-connected project folders
 alwaysApply: true
 ---
 
 # Deploy package location
 
-Never copy, write, or unzip deployment files to the Desktop (`C:\Users\lrn\Desktop` or `[Environment]::GetFolderPath("Desktop")`).
+Never copy, write, or unzip deployment files to:
 
-Put zips, overlays, SQL packs, and `DEPLOY.txt` under the repo, typically:
+- The Desktop (`C:\Users\lrn\Desktop` or `[Environment]::GetFolderPath("Desktop")`)
+- `E:\LRN-GitHub\2026\LRNDevTeam\LabMetricsDashboard\publish`
+- Any other Git-connected project `publish` folder
 
-`publish/zips/`
+Put staging output, zips, overlays, SQL packs, and `DEPLOY.txt` under:
 
-Do not use `LabMetricsApplication\Zips_*` or other Desktop-style drop folders unless the user names that path in the request.
+`E:\LRN-GitHub\2026\Publish`
+
+Use subfolders such as `staging\`, `zips\`, and `backups\`.
+
+Deploy directly to `E:\LRN-Data\PayerPolicy_v2\2026\DeploymentChanges-2026\LabMetricsApplication\LrnMetric` only when the user requests a localhost application deployment. Preserve its `appsettings*.json` and `web.config`.

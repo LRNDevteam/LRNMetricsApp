@@ -658,13 +658,29 @@ END  ;
 go;
 
 
--- 6. AvgPayments  (CheckDate last 6 months — same shape as legacy dashboard query)
+-- 6. AvgPayments (DateOfService rows; rolling 6 months from latest week-range end)
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshElix_CS_AvgPayments
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @Cutoff DATE = DATEADD(MONTH, -6, CAST(GETDATE() AS DATE));
+    DECLARE @WindowEnd DATE;
+
+    IF OBJECT_ID(N'dbo.LineClaimFileLogs', N'U') IS NOT NULL
+        SELECT @WindowEnd = MAX(TRY_CONVERT(DATE,
+            REPLACE(LTRIM(RTRIM(SUBSTRING(WeekFolder, CHARINDEX(' - ', WeekFolder) + 3, 50))), '.', '/'),
+            101))
+        FROM dbo.LineClaimFileLogs
+        WHERE NULLIF(LTRIM(RTRIM(RunId)), '') IS NOT NULL
+          AND CHARINDEX(' - ', WeekFolder) > 0;
+
+    -- Safety fallback for older databases without usable week-folder history.
+    IF @WindowEnd IS NULL
+        SELECT @WindowEnd = MAX(TRY_CAST(DateOfService AS DATE))
+        FROM dbo.ClaimLevelData;
+
+    DECLARE @Cutoff DATE = DATEADD(MONTH, -6, @WindowEnd);
+    DECLARE @WindowFrom DATE = DATEADD(DAY, 1, @Cutoff);
 
     ;WITH base AS (
         SELECT
@@ -673,36 +689,32 @@ BEGIN
             ClaimID,
             TRY_CAST(ChargeAmount     AS DECIMAL(18,2))               AS Chg,
             TRY_CAST(InsurancePayment AS DECIMAL(18,2))               AS InsPay,
-            LTRIM(RTRIM(ClaimStatus))                                 AS Status,
-            ISNULL(TRY_CAST(DaystoDOS AS INT), 9999)                  AS Days
+            NULLIF(LTRIM(RTRIM(FullyPaidCount)), '')                  AS FullyPaidFlag,
+            NULLIF(LTRIM(RTRIM(AdjucticatedCount)), '')               AS AdjudicatedFlag,
+            TRY_CAST(AdjucticatedAmount AS DECIMAL(18,2))             AS AdjudicatedAmt,
+            NULLIF(LTRIM(RTRIM(Bucket30Count)), '')                   AS Bucket30Flag,
+            TRY_CAST(Bucket30Amount AS DECIMAL(18,2))                 AS Bucket30Amt,
+            NULLIF(LTRIM(RTRIM(Bucket60Count)), '')                   AS Bucket60Flag,
+            TRY_CAST(Bucket60Amount AS DECIMAL(18,2))                 AS Bucket60Amt
         FROM dbo.ClaimLevelData
-        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
-          AND TRY_CAST(CheckDate AS DATE) IS NOT NULL
-          AND TRY_CAST(CheckDate AS DATE) >= @Cutoff
+        WHERE TRY_CAST(DateOfService AS DATE) >= @WindowFrom
+          AND TRY_CAST(DateOfService AS DATE) < @WindowEnd
           AND Panelname IS NOT NULL AND LTRIM(RTRIM(Panelname)) <> ''
           AND PayerName_Raw IS NOT NULL AND LTRIM(RTRIM(PayerName_Raw)) <> ''
     ),
     agg AS (
         SELECT PanelName, PayerName,
-               COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), '')) AS ClaimCount,
+               COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), '')) AS ClaimCount,
                ISNULL(SUM(Chg),    0) AS TotalCharges,
                ISNULL(SUM(InsPay), 0) AS InsurancePayment,
-               COUNT(DISTINCT CASE WHEN Status = 'Fully Paid' THEN ClaimID END) AS FullyPaidCount,
-               ISNULL(SUM(CASE WHEN Status = 'Fully Paid' THEN InsPay ELSE 0 END), 0) AS FullyPaidAmount,
-               COUNT(DISTINCT CASE WHEN Status IN
-                   ('Fully Paid','Partially Paid','Complete W/O','Fully Adjusted',
-                    'Fully Denied','Denied','Partially Denied','Partially Adjusted',
-                    'Patient Responsibility')
-                 THEN ClaimID END) AS AdjudicatedCount,
-               ISNULL(SUM(CASE WHEN Status IN
-                   ('Fully Paid','Partially Paid','Complete W/O','Fully Adjusted',
-                    'Fully Denied','Denied','Partially Denied','Partially Adjusted',
-                    'Patient Responsibility')
-                 THEN InsPay ELSE 0 END), 0) AS AdjudicatedAmount,
-               COUNT(DISTINCT CASE WHEN Days <= 30 THEN ClaimID END) AS Over30Count,
-               ISNULL(SUM(CASE WHEN Days <= 30 THEN InsPay ELSE 0 END), 0) AS Over30Amount,
-               COUNT(DISTINCT CASE WHEN Days <= 60 THEN ClaimID END) AS Over60Count,
-               ISNULL(SUM(CASE WHEN Days <= 60 THEN InsPay ELSE 0 END), 0) AS Over60Amount
+               COUNT(CASE WHEN FullyPaidFlag IS NOT NULL THEN ClaimID END) AS FullyPaidCount,
+               ISNULL(SUM(CASE WHEN FullyPaidFlag IS NOT NULL THEN InsPay ELSE 0 END), 0) AS FullyPaidAmount,
+               COUNT(CASE WHEN AdjudicatedFlag IS NOT NULL THEN ClaimID END) AS AdjudicatedCount,
+               ISNULL(SUM(CASE WHEN AdjudicatedFlag IS NOT NULL THEN AdjudicatedAmt ELSE 0 END), 0) AS AdjudicatedAmount,
+               COUNT(CASE WHEN Bucket30Flag IS NOT NULL THEN ClaimID END) AS Over30Count,
+               ISNULL(SUM(CASE WHEN Bucket30Flag IS NOT NULL THEN Bucket30Amt ELSE 0 END), 0) AS Over30Amount,
+               COUNT(CASE WHEN Bucket60Flag IS NOT NULL THEN ClaimID END) AS Over60Count,
+               ISNULL(SUM(CASE WHEN Bucket60Flag IS NOT NULL THEN Bucket60Amt ELSE 0 END), 0) AS Over60Amount
         FROM base
         GROUP BY PanelName, PayerName
     ),
@@ -746,7 +758,10 @@ BEGIN
     ORDER BY PanelName, PayerRank;
 
     DROP TABLE IF EXISTS #out;
-    PRINT 'usp_RefreshElix_CS_AvgPayments completed.';
+    PRINT 'usp_RefreshElix_CS_AvgPayments completed: DateOfService '
+        + COALESCE(CONVERT(VARCHAR(10), DATEADD(DAY, 1, @Cutoff), 120), 'NULL')
+        + ' .. < ' + COALESCE(CONVERT(VARCHAR(10), @WindowEnd, 120), 'NULL')
+        + ' (week-range end, exclusive)';
 END
 GO
 

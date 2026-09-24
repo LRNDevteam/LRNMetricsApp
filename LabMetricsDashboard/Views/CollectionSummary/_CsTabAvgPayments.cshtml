@@ -2,50 +2,50 @@
 @{
     var months = ViewData["AvgPayMonths"] as int? ?? 6;
     var result = months == 3 ? Model.AvgPaymentsLast3Months : Model.AvgPayments;
+    // One UI palette for every lab (Average Payments + Last 3 Months).
     const string NavyGrad = "background:#0e3460 !important;background-color:#0e3460 !important;background-image:none !important;color:#ffffff !important;-webkit-text-fill-color:#ffffff !important";
-    const string Teal = NavyGrad;
-    const string GroupHead = "background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%) !important;background-color:#0e3460 !important;color:rgba(255,255,255,.92) !important;-webkit-text-fill-color:rgba(255,255,255,.92) !important;position:sticky !important;top:0 !important;z-index:5 !important";
     const string PanelBg = "background:#f0fdf4 !important;color:#166534";
     const string PanelCell = "background:#f0fdf4 !important";
     const string Foot = "background:#0e3460 !important;color:#fff !important";
 
-    // Cove: client Excel pastel palette (black header text, white body, grey Grand Total).
-    var isCove = Model.IsCoveLab;
     string Pastel(string bg, bool group = false) =>
-        $"background:{bg} !important;background-color:{bg} !important;background-image:none !important;color:#000000 !important;-webkit-text-fill-color:#000000 !important;border-color:#bfbfbf !important"
+        $"background:{bg} !important;background-color:{bg} !important;background-image:none !important;color:#1e293b !important;-webkit-text-fill-color:#1e293b !important;border-color:#bfbfbf !important"
         + (group ? ";position:sticky !important;top:0 !important;z-index:5 !important" : "");
-    var hPanel   = isCove ? Pastel("#E2EFDA") : NavyGrad;
-    var hSummary = isCove ? Pastel("#E7D9F2") : NavyGrad;
-    var gFp  = isCove ? Pastel("#D9E1F2", true) : GroupHead;
-    var gAdj = isCove ? Pastel("#FFF2CC", true) : GroupHead;
-    var g30  = isCove ? Pastel("#FCE4D6", true) : GroupHead;
-    var g60  = isCove ? Pastel("#D6DCE4", true) : GroupHead;
-    var sFp  = isCove ? Pastel("#D9E1F2") : Teal;
-    var sAdj = isCove ? Pastel("#FFF2CC") : Teal;
-    var s30  = isCove ? Pastel("#FCE4D6") : Teal;
-    var s60  = isCove ? Pastel("#D6DCE4") : Teal;
-    var rowFirst = isCove ? "background:#ffffff !important;color:#000000 !important" : PanelBg;
-    var rowCell  = isCove ? "background:#ffffff !important;color:#000000 !important" : PanelCell;
-    var foot     = isCove ? "background:#D0CECE !important;color:#000000 !important;-webkit-text-fill-color:#000000 !important;font-weight:800" : Foot;
+
+    // Mild cool palette — group header, sub-header, and body cells share one bg per band.
+    const string ColFp  = "#b6ccf1"; // Fully Paid
+    const string ColAdj = "#a8d5e2"; // Adjudicated
+    const string Col30  = "#95bcc3"; // 30 Days
+    const string Col60  = "#c5ccd4"; // 60 Days
+    var hPanel   = NavyGrad;
+    var hSummary = NavyGrad;
+    var gFp  = Pastel(ColFp, true);
+    var gAdj = Pastel(ColAdj, true);
+    var g30  = Pastel(Col30, true);
+    var g60  = Pastel(Col60, true);
+    // Sub-headers match Panel / Claims / Charges / Avg Billed (navy + white).
+    var sFp  = NavyGrad;
+    var sAdj = NavyGrad;
+    var s30  = NavyGrad;
+    var s60  = NavyGrad;
+    var rowFirst = PanelBg;
+    var rowCell  = PanelCell;
+    var foot     = Foot;
 }
 <style>
 #avgpay-pane .cs-avgpay-mcv thead th,
 #avgpay3-pane .cs-avgpay-mcv thead th,
 .cs-avgpay-mcv thead th {
-    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%) !important;
-    color: rgba(255,255,255,.92) !important;
     font-weight: 700; font-size: .58rem;
     letter-spacing: .03em; text-transform: uppercase;
     padding: .45rem .45rem; text-align: center;
     white-space: nowrap; vertical-align: middle;
     position: sticky; top: 0; z-index: 5;
-    border-right: 1px solid rgba(255,255,255,.08);
+    border-right: 1px solid rgba(15,23,42,.08);
 }
 #avgpay-pane .cs-avgpay-mcv thead tr:nth-child(2) th,
 #avgpay3-pane .cs-avgpay-mcv thead tr:nth-child(2) th,
 .cs-avgpay-mcv thead tr:nth-child(2) th {
-    background: #1e5a8a !important;
-    color: rgba(255,255,255,.92) !important;
     top: 30px; z-index: 4;
 }
 .cs-avgpay-mcv { border-collapse: separate; border-spacing: 0; font-size: .72rem; width: max-content; min-width: 100%; }
@@ -56,18 +56,42 @@
     font-variant-numeric: tabular-nums; font-size: .62rem;
 }
 .cs-avgpay-mcv td:first-child { text-align: left; position: sticky; left: 0; z-index: 1; min-width: 220px; }
+
+/* Body cells match group-header colors exactly */
+.cs-avgpay-mcv td.ap-c-fp,
+.cs-avgpay-mcv tr.cs-pr-panel td.ap-c-fp,
+.cs-avgpay-mcv tr.cs-pr-payer td.ap-c-fp  { background: #b6ccf1 !important; color: #1e293b !important; }
+.cs-avgpay-mcv td.ap-c-adj,
+.cs-avgpay-mcv tr.cs-pr-panel td.ap-c-adj,
+.cs-avgpay-mcv tr.cs-pr-payer td.ap-c-adj { background: #a8d5e2 !important; color: #1e293b !important; }
+.cs-avgpay-mcv td.ap-c-30,
+.cs-avgpay-mcv tr.cs-pr-panel td.ap-c-30,
+.cs-avgpay-mcv tr.cs-pr-payer td.ap-c-30  { background: #95bcc3 !important; color: #1e293b !important; }
+.cs-avgpay-mcv td.ap-c-60,
+.cs-avgpay-mcv tr.cs-pr-panel td.ap-c-60,
+.cs-avgpay-mcv tr.cs-pr-payer td.ap-c-60  { background: #c5ccd4 !important; color: #1e293b !important; }
+
 #avgpay-pane .cs-avgpay-mcv tr.cs-pr-panel td,
 #avgpay3-pane .cs-avgpay-mcv tr.cs-pr-panel td,
-.cs-avgpay-mcv tr.cs-pr-panel td { background: #f0fdf4 !important; font-weight: 700; }
+.cs-avgpay-mcv tr.cs-pr-panel td { font-weight: 700; }
 #avgpay-pane .cs-avgpay-mcv tr.cs-pr-panel td:first-child,
 #avgpay3-pane .cs-avgpay-mcv tr.cs-pr-panel td:first-child,
 .cs-avgpay-mcv tr.cs-pr-panel td:first-child { background: #f0fdf4 !important; color: #166534; }
-.cs-avgpay-mcv tr.cs-pr-panel:hover td,
+
 .cs-avgpay-mcv tr.cs-pr-panel:hover td:first-child { background: #dcfce7 !important; }
-.cs-avgpay-mcv tr.cs-pr-payer td { background: #fff !important; color: #475569; font-weight: 400; }
+.cs-avgpay-mcv tr.cs-pr-panel:hover td.ap-c-fp  { background: #99b6e3 !important; }
+.cs-avgpay-mcv tr.cs-pr-panel:hover td.ap-c-adj { background: #95bcc3 !important; }
+.cs-avgpay-mcv tr.cs-pr-panel:hover td.ap-c-30  { background: #7a9dc1 !important; }
+.cs-avgpay-mcv tr.cs-pr-panel:hover td.ap-c-60  { background: #7e8b98 !important; }
+
+.cs-avgpay-mcv tr.cs-pr-payer td { color: #475569; font-weight: 400; }
 .cs-avgpay-mcv tr.cs-pr-payer td:first-child { padding-left: 1.5rem; font-weight: 500; color: #64748b; background: #fff !important; }
 .cs-avgpay-mcv tfoot td { background: #0e3460 !important; color: #fff !important; font-weight: 800; }
 .cs-avgpay-mcv tfoot td:first-child { position: sticky; left: 0; z-index: 3; background: #0e3460 !important; }
+.cs-avgpay-mcv tfoot td.ap-c-fp  { background: #7a9dc1 !important; }
+.cs-avgpay-mcv tfoot td.ap-c-adj { background: #00607a !important; }
+.cs-avgpay-mcv tfoot td.ap-c-30  { background: #5a7b82 !important; }
+.cs-avgpay-mcv tfoot td.ap-c-60  { background: #4e6074 !important; }
 .cs-avgpay-mcv th.ap-claims, .cs-avgpay-mcv td.ap-claims { min-width: 118px; }
 </style>
 @if (result.PanelRows.Count > 0)
@@ -117,18 +141,18 @@
                             <td class="ap-claims" style="@rowCell">@m.ClaimCount.N0OrDash()</td>
                             <td style="@rowCell">@Acct(m.TotalCharges)</td>
                             <td style="@rowCell">@Acct2(m.AvgBilled)</td>
-                            <td style="@rowCell">@m.FullyPaidCount.N0OrDash()</td>
-                            <td style="@rowCell">@Acct(m.FullyPaidAmount)</td>
-                            <td style="@rowCell">@Acct2(m.AvgFullyPaid)</td>
-                            <td style="@rowCell">@m.AdjudicatedCount.N0OrDash()</td>
-                            <td style="@rowCell">@Acct(m.AdjudicatedAmount)</td>
-                            <td style="@rowCell">@Acct2(m.AvgAdjudicated)</td>
-                            <td style="@rowCell">@m.Days30Count.N0OrDash()</td>
-                            <td style="@rowCell">@Acct(m.Days30Amount)</td>
-                            <td style="@rowCell">@Acct2(m.AvgDays30)</td>
-                            <td style="@rowCell">@m.Days60Count.N0OrDash()</td>
-                            <td style="@rowCell">@Acct(m.Days60Amount)</td>
-                            <td style="@rowCell">@Acct2(m.AvgDays60)</td>
+                            <td class="ap-c-fp">@m.FullyPaidCount.N0OrDash()</td>
+                            <td class="ap-c-fp">@Acct(m.FullyPaidAmount)</td>
+                            <td class="ap-c-fp">@Acct2(m.AvgFullyPaid)</td>
+                            <td class="ap-c-adj">@m.AdjudicatedCount.N0OrDash()</td>
+                            <td class="ap-c-adj">@Acct(m.AdjudicatedAmount)</td>
+                            <td class="ap-c-adj">@Acct2(m.AvgAdjudicated)</td>
+                            <td class="ap-c-30">@m.Days30Count.N0OrDash()</td>
+                            <td class="ap-c-30">@Acct(m.Days30Amount)</td>
+                            <td class="ap-c-30">@Acct2(m.AvgDays30)</td>
+                            <td class="ap-c-60">@m.Days60Count.N0OrDash()</td>
+                            <td class="ap-c-60">@Acct(m.Days60Amount)</td>
+                            <td class="ap-c-60">@Acct2(m.AvgDays60)</td>
                         </tr>
                         @foreach (var payer in panel.Payers)
                         {
@@ -138,18 +162,18 @@
                                 <td class="ap-claims">@pm.ClaimCount.N0OrDash()</td>
                                 <td>@Acct(pm.TotalCharges)</td>
                                 <td>@Acct2(pm.AvgBilled)</td>
-                                <td>@pm.FullyPaidCount.N0OrDash()</td>
-                                <td>@Acct(pm.FullyPaidAmount)</td>
-                                <td>@Acct2(pm.AvgFullyPaid)</td>
-                                <td>@pm.AdjudicatedCount.N0OrDash()</td>
-                                <td>@Acct(pm.AdjudicatedAmount)</td>
-                                <td>@Acct2(pm.AvgAdjudicated)</td>
-                                <td>@pm.Days30Count.N0OrDash()</td>
-                                <td>@Acct(pm.Days30Amount)</td>
-                                <td>@Acct2(pm.AvgDays30)</td>
-                                <td>@pm.Days60Count.N0OrDash()</td>
-                                <td>@Acct(pm.Days60Amount)</td>
-                                <td>@Acct2(pm.AvgDays60)</td>
+                                <td class="ap-c-fp">@pm.FullyPaidCount.N0OrDash()</td>
+                                <td class="ap-c-fp">@Acct(pm.FullyPaidAmount)</td>
+                                <td class="ap-c-fp">@Acct2(pm.AvgFullyPaid)</td>
+                                <td class="ap-c-adj">@pm.AdjudicatedCount.N0OrDash()</td>
+                                <td class="ap-c-adj">@Acct(pm.AdjudicatedAmount)</td>
+                                <td class="ap-c-adj">@Acct2(pm.AvgAdjudicated)</td>
+                                <td class="ap-c-30">@pm.Days30Count.N0OrDash()</td>
+                                <td class="ap-c-30">@Acct(pm.Days30Amount)</td>
+                                <td class="ap-c-30">@Acct2(pm.AvgDays30)</td>
+                                <td class="ap-c-60">@pm.Days60Count.N0OrDash()</td>
+                                <td class="ap-c-60">@Acct(pm.Days60Amount)</td>
+                                <td class="ap-c-60">@Acct2(pm.AvgDays60)</td>
                             </tr>
                         }
                     }
@@ -176,18 +200,18 @@
                         <td class="ap-claims" style="@foot">@tot.ClaimCount.N0OrDash()</td>
                         <td style="@foot">@Acct(tot.TotalCharges)</td>
                         <td style="@foot">@Acct2(tot.AvgBilled)</td>
-                        <td style="@foot">@tot.FullyPaidCount.N0OrDash()</td>
-                        <td style="@foot">@Acct(tot.FullyPaidAmount)</td>
-                        <td style="@foot">@Acct2(tot.AvgFullyPaid)</td>
-                        <td style="@foot">@tot.AdjudicatedCount.N0OrDash()</td>
-                        <td style="@foot">@Acct(tot.AdjudicatedAmount)</td>
-                        <td style="@foot">@Acct2(tot.AvgAdjudicated)</td>
-                        <td style="@foot">@tot.Days30Count.N0OrDash()</td>
-                        <td style="@foot">@Acct(tot.Days30Amount)</td>
-                        <td style="@foot">@Acct2(tot.AvgDays30)</td>
-                        <td style="@foot">@tot.Days60Count.N0OrDash()</td>
-                        <td style="@foot">@Acct(tot.Days60Amount)</td>
-                        <td style="@foot">@Acct2(tot.AvgDays60)</td>
+                        <td class="ap-c-fp">@tot.FullyPaidCount.N0OrDash()</td>
+                        <td class="ap-c-fp">@Acct(tot.FullyPaidAmount)</td>
+                        <td class="ap-c-fp">@Acct2(tot.AvgFullyPaid)</td>
+                        <td class="ap-c-adj">@tot.AdjudicatedCount.N0OrDash()</td>
+                        <td class="ap-c-adj">@Acct(tot.AdjudicatedAmount)</td>
+                        <td class="ap-c-adj">@Acct2(tot.AvgAdjudicated)</td>
+                        <td class="ap-c-30">@tot.Days30Count.N0OrDash()</td>
+                        <td class="ap-c-30">@Acct(tot.Days30Amount)</td>
+                        <td class="ap-c-30">@Acct2(tot.AvgDays30)</td>
+                        <td class="ap-c-60">@tot.Days60Count.N0OrDash()</td>
+                        <td class="ap-c-60">@Acct(tot.Days60Amount)</td>
+                        <td class="ap-c-60">@Acct2(tot.AvgDays60)</td>
                     </tr>
                 </tfoot>
             </table>

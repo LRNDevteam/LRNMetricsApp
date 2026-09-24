@@ -94,6 +94,7 @@ public sealed class LabDbConfig
 {
     public required string LabName { get; init; }
     public bool DbEnabled { get; init; }
+    public bool LineClaimEnabled { get; init; }
     public string? DbConnectionString { get; init; }
 }
 
@@ -113,6 +114,8 @@ public static class LabDbConfigLoader
         {
             LabName = labName,
             DbEnabled = section.TryGetProperty("DBEnabled", out var en) && en.ValueKind == JsonValueKind.True,
+            LineClaimEnabled = section.TryGetProperty("LineClaimEnable", out var lineClaim)
+                && lineClaim.ValueKind == JsonValueKind.True,
             DbConnectionString = section.TryGetProperty("DbConnectionString", out var cs)
                 ? cs.GetString()
                 : null,
@@ -122,7 +125,9 @@ public static class LabDbConfigLoader
     public static List<LabDbConfig> LoadAll(string configFolder, IEnumerable<string> labNames) =>
         labNames
             .Select(l => Load(configFolder, l))
-            .Where(c => c is { DbEnabled: true } && !string.IsNullOrWhiteSpace(c.DbConnectionString))
+            .Where(c => c is not null
+                && (c.DbEnabled || c.LineClaimEnabled)
+                && !string.IsNullOrWhiteSpace(c.DbConnectionString))
             .Cast<LabDbConfig>()
             .ToList();
 }

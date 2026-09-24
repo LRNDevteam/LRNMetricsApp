@@ -551,8 +551,8 @@ END
 GO
 
 -- =====================================================================
--- 6. Average Payments (last 6 months)
--- Source: dbo.ClaimLevelData / dbo.Elix_CS_AvgPayments
+-- 6. Average Payments (DateOfService rows; 3/6 months from latest week-range end)
+-- Source: dbo.ClaimLevelData
 -- Aliases: ClaimCount->NoOfClaims, InsurancePayment->CarrierPayment,
 --          Over30/60->Days30/60 (to match C# reader).
 -- =====================================================================
@@ -564,51 +564,46 @@ CREATE OR ALTER PROCEDURE dbo.usp_GetElix_CS_AvgPayments
     @FirstBillFrom   DATE          = NULL,
     @FirstBillTo     DATE          = NULL,
     @CheckDateFrom   DATE          = NULL,
-    @CheckDateTo     DATE          = NULL
+    @CheckDateTo     DATE          = NULL,
+    @LastMonths      INT           = 6
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @HasFilter BIT =
-        CASE
-            WHEN NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL THEN 1
-            WHEN NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL THEN 1
-            WHEN @DosFrom       IS NOT NULL OR @DosTo       IS NOT NULL THEN 1
-            WHEN @FirstBillFrom IS NOT NULL OR @FirstBillTo IS NOT NULL THEN 1
-            WHEN @CheckDateFrom IS NOT NULL OR @CheckDateTo IS NOT NULL THEN 1
-            ELSE 0
-        END;
+    IF ISNULL(@LastMonths, 0) NOT IN (3, 6)
+        SET @LastMonths = 6;
 
-    IF @HasFilter = 0
-    BEGIN
-        SELECT  PanelName, PayerName,
-                ClaimCount       AS NoOfClaims,
-                TotalCharges,
-                InsurancePayment AS CarrierPayment,
-                FullyPaidCount,   FullyPaidAmount,
-                AdjudicatedCount, AdjudicatedAmount,
-                Over30Count      AS Days30Count, Over30Amount AS Days30Amount,
-                Over60Count      AS Days60Count, Over60Amount AS Days60Amount
-        FROM    dbo.Elix_CS_AvgPayments
-        ORDER BY PanelName, PayerName;
-        RETURN;
-    END;
-
-    DECLARE @PayerList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
-    DECLARE @PanelList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
+    DECLARE @PayerList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
 
     IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
-        INSERT INTO @PayerList SELECT DISTINCT LTRIM(RTRIM(value))
+        INSERT INTO @PayerList SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 450)
         FROM STRING_SPLIT(@PayerNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
 
     IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
-        INSERT INTO @PanelList SELECT DISTINCT LTRIM(RTRIM(value))
+        INSERT INTO @PanelList SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 450)
         FROM STRING_SPLIT(@PanelNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
 
     DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
     DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
 
-    DECLARE @Cutoff DATE = DATEADD(MONTH, -6, CAST(GETDATE() AS DATE));
+    DECLARE @WindowEnd DATE;
+
+    IF OBJECT_ID(N'dbo.LineClaimFileLogs', N'U') IS NOT NULL
+        SELECT @WindowEnd = MAX(TRY_CONVERT(DATE,
+            REPLACE(LTRIM(RTRIM(SUBSTRING(WeekFolder, CHARINDEX(' - ', WeekFolder) + 3, 50))), '.', '/'),
+            101))
+        FROM dbo.LineClaimFileLogs
+        WHERE NULLIF(LTRIM(RTRIM(RunId)), '') IS NOT NULL
+          AND CHARINDEX(' - ', WeekFolder) > 0;
+
+    -- Safety fallback for older databases without usable week-folder history.
+    IF @WindowEnd IS NULL
+        SELECT @WindowEnd = MAX(TRY_CAST(DateOfService AS DATE))
+        FROM dbo.ClaimLevelData;
+
+    DECLARE @Cutoff DATE = DATEADD(MONTH, -@LastMonths, @WindowEnd);
+    DECLARE @WindowFrom DATE = DATEADD(DAY, 1, @Cutoff);
 
     ;WITH base AS (
         SELECT
@@ -617,12 +612,16 @@ BEGIN
             ClaimID,
             TRY_CAST(ChargeAmount     AS DECIMAL(18,2)) AS Chg,
             TRY_CAST(InsurancePayment AS DECIMAL(18,2)) AS InsPay,
-            LTRIM(RTRIM(ClaimStatus))                   AS Status,
-            ISNULL(TRY_CAST(DaystoDOS AS INT), 9999)    AS Days
+            NULLIF(LTRIM(RTRIM(FullyPaidCount)), '')      AS FullyPaidFlag,
+            NULLIF(LTRIM(RTRIM(AdjucticatedCount)), '')   AS AdjudicatedFlag,
+            TRY_CAST(AdjucticatedAmount AS DECIMAL(18,2)) AS AdjudicatedAmt,
+            NULLIF(LTRIM(RTRIM(Bucket30Count)), '')       AS Bucket30Flag,
+            TRY_CAST(Bucket30Amount AS DECIMAL(18,2))     AS Bucket30Amt,
+            NULLIF(LTRIM(RTRIM(Bucket60Count)), '')       AS Bucket60Flag,
+            TRY_CAST(Bucket60Amount AS DECIMAL(18,2))     AS Bucket60Amt
         FROM dbo.ClaimLevelData
-        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
-          AND TRY_CAST(PostingDate AS DATE) IS NOT NULL
-          AND TRY_CAST(PostingDate AS DATE) >= @Cutoff
+        WHERE TRY_CAST(DateOfService AS DATE) >= @WindowFrom
+          AND TRY_CAST(DateOfService AS DATE) < @WindowEnd
           AND Panelname    IS NOT NULL AND LTRIM(RTRIM(Panelname))    <> ''
           AND PayerName_Raw IS NOT NULL AND LTRIM(RTRIM(PayerName_Raw)) <> ''
           AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
@@ -631,28 +630,22 @@ BEGIN
           AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
           AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
           AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
-          AND (@CheckDateFrom IS NULL OR TRY_CAST(PostingDate      AS DATE) >= @CheckDateFrom)
-          AND (@CheckDateTo   IS NULL OR TRY_CAST(PostingDate      AS DATE) <= @CheckDateTo)
+          AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate        AS DATE) >= @CheckDateFrom)
+          AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate        AS DATE) <= @CheckDateTo)
     )
     SELECT
         PanelName, PayerName,
-        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))                           AS NoOfClaims,
+        COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), ''))                                    AS NoOfClaims,
         ISNULL(SUM(Chg),    0)                                                      AS TotalCharges,
         ISNULL(SUM(InsPay), 0)                                                      AS CarrierPayment,
-        COUNT(DISTINCT CASE WHEN Status = 'Fully Paid' THEN ClaimID END)            AS FullyPaidCount,
-        ISNULL(SUM(CASE WHEN Status = 'Fully Paid' THEN InsPay ELSE 0 END), 0)      AS FullyPaidAmount,
-        COUNT(DISTINCT CASE WHEN Status IN (
-            'Fully Paid','Partially Paid','Complete W/O','Fully Adjusted',
-            'Fully Denied','Denied','Partially Denied','Partially Adjusted',
-            'Patient Responsibility') THEN ClaimID END)                             AS AdjudicatedCount,
-        ISNULL(SUM(CASE WHEN Status IN (
-            'Fully Paid','Partially Paid','Complete W/O','Fully Adjusted',
-            'Fully Denied','Denied','Partially Denied','Partially Adjusted',
-            'Patient Responsibility') THEN InsPay ELSE 0 END), 0)                   AS AdjudicatedAmount,
-        COUNT(DISTINCT CASE WHEN Days <= 30 THEN ClaimID END)                       AS Days30Count,
-        ISNULL(SUM(CASE WHEN Days <= 30 THEN InsPay ELSE 0 END), 0)                 AS Days30Amount,
-        COUNT(DISTINCT CASE WHEN Days <= 60 THEN ClaimID END)                       AS Days60Count,
-        ISNULL(SUM(CASE WHEN Days <= 60 THEN InsPay ELSE 0 END), 0)                 AS Days60Amount
+        COUNT(CASE WHEN FullyPaidFlag IS NOT NULL THEN ClaimID END)                         AS FullyPaidCount,
+        ISNULL(SUM(CASE WHEN FullyPaidFlag IS NOT NULL THEN InsPay ELSE 0 END), 0)          AS FullyPaidAmount,
+        COUNT(CASE WHEN AdjudicatedFlag IS NOT NULL THEN ClaimID END)                       AS AdjudicatedCount,
+        ISNULL(SUM(CASE WHEN AdjudicatedFlag IS NOT NULL THEN AdjudicatedAmt ELSE 0 END), 0) AS AdjudicatedAmount,
+        COUNT(CASE WHEN Bucket30Flag IS NOT NULL THEN ClaimID END)                          AS Days30Count,
+        ISNULL(SUM(CASE WHEN Bucket30Flag IS NOT NULL THEN Bucket30Amt ELSE 0 END), 0)      AS Days30Amount,
+        COUNT(CASE WHEN Bucket60Flag IS NOT NULL THEN ClaimID END)                          AS Days60Count,
+        ISNULL(SUM(CASE WHEN Bucket60Flag IS NOT NULL THEN Bucket60Amt ELSE 0 END), 0)      AS Days60Amount
     FROM base
     GROUP BY PanelName, PayerName
     ORDER BY PanelName, PayerName;
