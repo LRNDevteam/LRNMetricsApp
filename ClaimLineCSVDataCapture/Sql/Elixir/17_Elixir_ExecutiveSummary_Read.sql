@@ -700,7 +700,7 @@ BEGIN
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.BilledUnbilled = 'Billed'
-						   AND b.ClaimStatus NOT IN ('Billed Amount 0','Unbilled')
+						   AND b.ClaimStatus NOT IN ('Billed Amount 0','Unbilled','Unbilled - PB')
 		GROUP BY p.ESYear, p.ESMonth
 
 		-- G  Unbilled Claims
@@ -735,7 +735,7 @@ BEGIN
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Fully Paid'
+						   AND b.ClaimStatus = 'Fully Paid'
 		GROUP BY p.ESYear, p.ESMonth
 
 		-- K  No. of Fully Patient Responsibility Claims
@@ -828,7 +828,7 @@ BEGIN
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.BilledUnbilled = 'Billed'
-						   AND b.ClaimStatus NOT IN ('Unbilled','Billed Amount 0')
+						   AND b.ClaimStatus NOT IN ('Unbilled','Unbilled - PB','Billed Amount 0')
 		GROUP BY p.ESYear, p.ESMonth
 
 		-- R  Unbilled Claims ($)
@@ -846,7 +846,7 @@ BEGIN
 			   ISNULL(SUM(b.InsurancePayment), 0)
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Fully Paid'
+						   AND b.ClaimStatus = 'Fully Paid'
 		GROUP BY p.ESYear, p.ESMonth
 
 		-- T  Patient Responsibility ($)
@@ -927,16 +927,16 @@ BEGIN
 	(
 		-- Y  Average Payment ($) - Total Pay/Billed Claims
 		SELECT p.ESYear, p.ESMonth, 'Y' AS RowCode, 'Average Payment ($) - Total Pay/Billed Claims' AS Description,
-			   ISNULL(ROUND(SUM(CASE WHEN b.BilledUnbilled = 'Billed' AND b.ClaimStatus IN ('Fully Paid','Partially Paid') THEN b.InsurancePayment ELSE 0 END)
-					 / NULLIF(COUNT(DISTINCT CASE WHEN b.BilledUnbilled = 'Billed' AND b.ClaimStatus NOT IN ('Billed Amount 0','Unbilled') THEN b.AccessionNumber END), 0), 2), 0) AS MetricValue
+			   ISNULL(ROUND(SUM(CASE WHEN b.ClaimStatus = 'Fully Paid' OR (b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Partially Paid') THEN b.InsurancePayment ELSE 0 END)
+					 / NULLIF(COUNT(DISTINCT CASE WHEN b.BilledUnbilled = 'Billed' AND b.ClaimStatus NOT IN ('Billed Amount 0','Unbilled','Unbilled - PB') THEN b.AccessionNumber END), 0), 2), 0) AS MetricValue
 		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 		GROUP BY p.ESYear, p.ESMonth
 
 		-- Z  Average Payment ($) - Total Pay/Paid Claims
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'Z', 'Average Payment ($) - Total Pay/Paid Claims',
-			   ISNULL(ROUND(SUM(CASE WHEN b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Fully Paid' THEN b.InsurancePayment ELSE 0 END)
-					 / NULLIF(COUNT(DISTINCT CASE WHEN b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Fully Paid' THEN b.AccessionNumber END), 0), 2), 0)
+			   ISNULL(ROUND(SUM(CASE WHEN b.ClaimStatus = 'Fully Paid' THEN b.InsurancePayment ELSE 0 END)
+					 / NULLIF(COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Fully Paid' THEN b.AccessionNumber END), 0), 2), 0)
 		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -944,13 +944,45 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'AA', 'Average Payment ($) - Total Pay/Adjudicated Claims',
 			   ISNULL(ROUND(
-						(SUM(CASE WHEN b.BilledUnbilled = 'Billed' AND b.ClaimStatus IN ('Fully Paid','Partially Paid') THEN b.InsurancePayment ELSE 0 END)
+						(SUM(CASE WHEN b.ClaimStatus = 'Fully Paid' OR (b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Partially Paid') THEN b.InsurancePayment ELSE 0 END)
 						 + SUM(CASE WHEN b.BilledUnbilled = 'Billed' THEN b.PatientPayment ELSE 0 END))
-						/ NULLIF(COUNT(DISTINCT CASE WHEN b.BilledUnbilled = 'Billed'
-													   AND b.ClaimStatus IN ('Fully Paid','Fully Adjusted','Patient Responsibility','Partially Paid','Fully Denied','Partially Denied')
+						/ NULLIF(COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Fully Paid'
+													   OR (b.BilledUnbilled = 'Billed'
+													       AND b.ClaimStatus IN ('Fully Adjusted','Patient Responsibility','Partially Paid','Fully Denied','Partially Denied'))
 												  THEN b.AccessionNumber END), 0), 2), 0)
 		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 		GROUP BY p.ESYear, p.ESMonth
+
+		-- Weighted annual Y/Z/AA rows (ESMonth=0). These prevent the UI
+		-- from adding monthly averages for filtered results.
+		UNION ALL
+		SELECT b.ESYear, 0, 'Y', 'Average Payment ($) - Total Pay/Billed Claims',
+			   ISNULL(ROUND(SUM(CASE WHEN b.ClaimStatus = 'Fully Paid' OR (b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Partially Paid') THEN b.InsurancePayment ELSE 0 END)
+					 / NULLIF(COUNT(DISTINCT CASE WHEN b.BilledUnbilled = 'Billed' AND b.ClaimStatus NOT IN ('Billed Amount 0','Unbilled','Unbilled - PB') THEN b.AccessionNumber END), 0), 2), 0)
+		FROM #Base b
+		WHERE b.ESYear > 0
+		GROUP BY b.ESYear
+
+		UNION ALL
+		SELECT b.ESYear, 0, 'Z', 'Average Payment ($) - Total Pay/Paid Claims',
+			   ISNULL(ROUND(SUM(CASE WHEN b.ClaimStatus = 'Fully Paid' THEN b.InsurancePayment ELSE 0 END)
+					 / NULLIF(COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Fully Paid' THEN b.AccessionNumber END), 0), 2), 0)
+		FROM #Base b
+		WHERE b.ESYear > 0
+		GROUP BY b.ESYear
+
+		UNION ALL
+		SELECT b.ESYear, 0, 'AA', 'Average Payment ($) - Total Pay/Adjudicated Claims',
+			   ISNULL(ROUND(
+						(SUM(CASE WHEN b.ClaimStatus = 'Fully Paid' OR (b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Partially Paid') THEN b.InsurancePayment ELSE 0 END)
+						 + SUM(CASE WHEN b.BilledUnbilled = 'Billed' THEN b.PatientPayment ELSE 0 END))
+						/ NULLIF(COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Fully Paid'
+													   OR (b.BilledUnbilled = 'Billed'
+													       AND b.ClaimStatus IN ('Fully Adjusted','Patient Responsibility','Partially Paid','Fully Denied','Partially Denied'))
+												  THEN b.AccessionNumber END), 0), 2), 0)
+		FROM #Base b
+		WHERE b.ESYear > 0
+		GROUP BY b.ESYear
 	)
 	SELECT RowCode, Category, Description, BillYear, BillMonth, MetricValue
 	FROM

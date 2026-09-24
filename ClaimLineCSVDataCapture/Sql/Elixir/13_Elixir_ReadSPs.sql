@@ -1,4 +1,4 @@
--- Elixir Labs ó Read stored procedures for the Production Summary Report tabs.
+-- Elixir Labs ù Read stored procedures for the Production Summary Report tabs.
 -- Called by LabMetricsDashboard.SqlLabProductionSummaryRepository.
 --
 -- Lab specifics:
@@ -134,10 +134,6 @@ BEGIN
         RETURN;
     END
 
-    -- Reference Wednesday anchor: 1900-01-03.
-    DECLARE @Today            DATE = CAST(GETDATE() AS DATE);
-    DECLARE @ThisWeekWedStart DATE = DATEADD(day, -(DATEDIFF(day, '1900-01-03', @Today) % 7), @Today);
-
     DECLARE @PayerList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
     DECLARE @PanelList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
     IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
@@ -147,11 +143,42 @@ BEGIN
     DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
     DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
 
-    DECLARE @Weeks TABLE (WeekIndex INT NOT NULL PRIMARY KEY, WeekStart DATE NOT NULL, WeekEnd DATE NOT NULL, WeekLabel NVARCHAR(32) NOT NULL);
-    DECLARE @i INT = 1;
-    WHILE @i <= 4
+    -- Anchor to the latest FirstBilledDate in the filtered data, not GETDATE().
+    DECLARE @MaxFirstBilledDate DATE;
+    SELECT @MaxFirstBilledDate = MAX(TRY_CAST(cl.FirstBilledDate AS DATE))
+    FROM dbo.ClaimLevelData cl
+    WHERE TRY_CAST(cl.FirstBilledDate AS DATE) IS NOT NULL
+      AND (@HasPayerFilter   = 0 OR LTRIM(RTRIM(ISNULL(cl.PayerName_Raw,'Unknown'))) IN (SELECT Value FROM @PayerList))
+      AND (@HasPanelFilter   = 0 OR LTRIM(RTRIM(ISNULL(cl.Panelname,'Unknown'))) IN (SELECT Value FROM @PanelList))
+      AND (@DosFrom          IS NULL OR TRY_CAST(cl.DateOfService   AS DATE) >= @DosFrom)
+      AND (@DosTo            IS NULL OR TRY_CAST(cl.DateOfService   AS DATE) <= @DosTo)
+      AND (@FirstBillFrom    IS NULL OR TRY_CAST(cl.FirstBilledDate AS DATE) >= @FirstBillFrom)
+      AND (@FirstBillTo      IS NULL OR TRY_CAST(cl.FirstBilledDate AS DATE) <= @FirstBillTo)
+      AND (@FirstBilledFrom  IS NULL OR TRY_CAST(cl.FirstBilledDate AS DATE) >= @FirstBilledFrom)
+      AND (@FirstBilledTo    IS NULL OR TRY_CAST(cl.FirstBilledDate AS DATE) <= @FirstBilledTo);
+
+    IF @MaxFirstBilledDate IS NULL
     BEGIN
-        DECLARE @ws DATE = DATEADD(week, -@i, @ThisWeekWedStart);
+        SELECT CAST(NULL AS NVARCHAR(500)) AS PanelName,
+               CAST(NULL AS NVARCHAR(500)) AS PayerName,
+               CAST(NULL AS TINYINT) AS PayerRank,
+               CAST(NULL AS DATE) AS WeekStart,
+               CAST(NULL AS DATE) AS WeekEnd,
+               CAST(NULL AS NVARCHAR(32)) AS WeekLabel,
+               CAST(NULL AS INT) AS ClaimCount,
+               CAST(NULL AS DECIMAL(18,2)) AS TotalCharges
+        WHERE 1 = 0;
+        RETURN;
+    END;
+
+    DECLARE @LatestWeekWedStart DATE =
+        DATEADD(day, -(DATEDIFF(day, '1900-01-03', @MaxFirstBilledDate) % 7), @MaxFirstBilledDate);
+
+    DECLARE @Weeks TABLE (WeekIndex INT NOT NULL PRIMARY KEY, WeekStart DATE NOT NULL, WeekEnd DATE NOT NULL, WeekLabel NVARCHAR(32) NOT NULL);
+    DECLARE @i INT = 0;
+    WHILE @i < 4
+    BEGIN
+        DECLARE @ws DATE = DATEADD(week, -@i, @LatestWeekWedStart);
         DECLARE @we DATE = DATEADD(day, 6, @ws);
         INSERT INTO @Weeks (WeekIndex, WeekStart, WeekEnd, WeekLabel)
         VALUES (@i, @ws, @we, FORMAT(@ws, 'yyyy-MM-dd') + ' - ' + FORMAT(@we, 'yyyy-MM-dd'));
@@ -354,6 +381,7 @@ BEGIN
 
     DECLARE @HasFilter BIT =
         CASE
+            WHEN NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL THEN 1
             WHEN NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL THEN 1
             WHEN @DosFrom         IS NOT NULL OR @DosTo         IS NOT NULL THEN 1
             WHEN @FirstBillFrom   IS NOT NULL OR @FirstBillTo   IS NOT NULL THEN 1
@@ -435,18 +463,24 @@ BEGIN
         RETURN;
     END
 
+    DECLARE @PayerList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
     DECLARE @PanelList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList(Value) SELECT DISTINCT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@PayerNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
     IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
         INSERT INTO @PanelList(Value) SELECT DISTINCT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@PanelNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
     DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
 
     SELECT
-        LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), '(No Panelname)'))) AS PanelName,
-        ISNULL(LTRIM(RTRIM(AgingBucket)), 'Unknown')                                 AS AgingBucket,
+        LTRIM(RTRIM(PayerName_Raw))                                                  AS PanelName,
+        ISNULL(LTRIM(RTRIM(AgingDOS)), 'Unknown')                                    AS AgingBucket,
         COUNT(DISTINCT COALESCE(NULLIF(LTRIM(RTRIM(AccessionNumber)), ''), NULLIF(LTRIM(RTRIM(ClaimID)), ''))) AS ClaimCount,
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)                       AS TotalCharges
     FROM   dbo.ClaimLevelData
     WHERE  (FirstBilledDate IS NULL OR LTRIM(RTRIM(FirstBilledDate)) = '')
+      AND  NULLIF(LTRIM(RTRIM(PayerName_Raw)), '') IS NOT NULL
+      AND  (@HasPayerFilter   = 0 OR LTRIM(RTRIM(PayerName_Raw)) IN (SELECT Value FROM @PayerList))
       AND  (@HasPanelFilter   = 0 OR LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), '(No Panelname)'))) IN (SELECT Value FROM @PanelList))
       AND  (@DosFrom          IS NULL OR TRY_CAST(DateOfService    AS DATE) >= @DosFrom)
       AND  (@DosTo            IS NULL OR TRY_CAST(DateOfService    AS DATE) <= @DosTo)
@@ -454,8 +488,8 @@ BEGIN
       AND  (@FirstBillTo      IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) <= @FirstBillTo)
       AND  (@FirstBilledFrom  IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) >= @FirstBilledFrom)
       AND  (@FirstBilledTo    IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) <= @FirstBilledTo)
-    GROUP BY LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), '(No Panelname)'))),
-             ISNULL(LTRIM(RTRIM(AgingBucket)), 'Unknown')
+    GROUP BY LTRIM(RTRIM(PayerName_Raw)),
+             ISNULL(LTRIM(RTRIM(AgingDOS)), 'Unknown')
     ORDER BY PanelName, AgingBucket;
 END
 GO

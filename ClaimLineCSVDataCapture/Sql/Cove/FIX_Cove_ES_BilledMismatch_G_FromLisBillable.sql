@@ -1,11 +1,11 @@
 /* =====================================================================
    Cove — usp_RefreshCove_ExecutiveSummary
-   FIX : Billed Mismatches (RoleID G) = LIS RoleID C − PMS F (No. of Billed Claims)
+   FIX : Billed Mismatches (RoleID G) = PMS F − LIS Billed (RoleID C)
 
    DB  : CoveLRN
 
    After Cove_ES_PMS is loaded:
-     G.ESMonthClaimCount = MAX(0, F.ESMonthClaimCount − Cove_ES_LIS.B.ESMonthClaimCount)
+     G.ESMonthClaimCount = MAX(0, F.ESMonthClaimCount − Cove_ES_LIS.C.ESMonthClaimCount)
 
    Capture order is PMS refresh then LIS_Alt, so G is also recomputed at the
    end of usp_RefreshCove_ExecutiveSummary_LIS_Alt (same formula).
@@ -54,7 +54,7 @@ BEGIN
 
     -- ────────────────────────────────────────────────────────────────────
     --  Cove_ES_PMS  -  F, G(placeholder), H, I, J, K, L, M, N, N.1, N.2, N.3
-    --  G is recomputed after insert: Cove_ES_LIS RoleID C − PMS F
+    --  G is recomputed after insert: PMS F − Cove_ES_LIS RoleID C
     -- ────────────────────────────────────────────────────────────────────
     INSERT INTO dbo.Cove_ES_PMS (RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt)
     SELECT RoleID, Description, ESYear, ESMonth, ClaimCount, 0, GETDATE()
@@ -68,7 +68,7 @@ BEGIN
                           AND b.BillStatus IN ('Billed','Billed-Client','Billed - Client')
         GROUP BY p.ESYear, p.ESMonth
 
-        -- G  placeholder (updated below from LIS C − PMS F)
+        -- G  placeholder (updated below from PMS F − LIS C)
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'G', 'Billed Mismatches - Accessions NA / Other Sample',
                0
@@ -173,7 +173,7 @@ BEGIN
         GROUP BY p.ESYear, p.ESMonth
     ) pms;
 
-    -- G = No. of Billed Claims (F) − Billable Samples (Cove_ES_LIS RoleID B)
+    -- G = No. of Billed Claims (F) − Billed (Cove_ES_LIS RoleID C)
     -- Uses whatever LIS snapshot is already present (prior refresh / same-day LIS).
     -- LIS_Alt re-runs this update after it refreshes Cove_ES_LIS.
     IF OBJECT_ID('dbo.Cove_ES_LIS', 'U') IS NOT NULL
@@ -194,7 +194,7 @@ BEGIN
         LEFT JOIN dbo.Cove_ES_LIS AS lis
             ON  lis.ESYear  = g.ESYear
             AND lis.ESMonth = g.ESMonth
-            AND lis.RoleID  = 'B'   -- Billable Samples (not B.<PanelType>)
+            AND lis.RoleID  = 'C'   -- Billed
         WHERE g.RoleID = 'G';
     END
 
@@ -429,5 +429,5 @@ BEGIN
 END;
 GO
 
-PRINT 'FIX_Cove_ES_BilledMismatch_G_FromLisBillable.sql — usp_RefreshCove_ExecutiveSummary updated.';
+PRINT 'FIX_Cove_ES_BilledMismatch_G_FromLisBillable.sql — billed mismatch now uses LIS Billed (RoleID C).';
 GO

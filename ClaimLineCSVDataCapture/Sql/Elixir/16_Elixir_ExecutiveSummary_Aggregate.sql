@@ -186,7 +186,7 @@ BEGIN
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.BilledUnbilled = 'Billed'
-						   AND b.ClaimStatus NOT IN ('Billed Amount 0','Unbilled')
+						   AND b.ClaimStatus NOT IN ('Billed Amount 0','Unbilled','Unbilled - PB')
 		GROUP BY p.ESYear, p.ESMonth
 
 		-- G  Unbilled Claims
@@ -221,7 +221,7 @@ BEGIN
 			   COUNT(DISTINCT b.AccessionNumber)
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Fully Paid'
+						   AND b.ClaimStatus = 'Fully Paid'
 		GROUP BY p.ESYear, p.ESMonth
 
 		-- K  No. of Fully Patient Responsibility Claims
@@ -320,7 +320,7 @@ BEGIN
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.BilledUnbilled = 'Billed'
-						   AND b.ClaimStatus NOT IN ('Unbilled','Billed Amount 0')
+						   AND b.ClaimStatus NOT IN ('Unbilled','Unbilled - PB','Billed Amount 0')
 		GROUP BY p.ESYear, p.ESMonth
 
 		-- R  Unbilled Claims ($)
@@ -338,7 +338,7 @@ BEGIN
 			   ISNULL(SUM(b.InsurancePayment), 0)
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Fully Paid'
+						   AND b.ClaimStatus = 'Fully Paid'
 		GROUP BY p.ESYear, p.ESMonth
 
 		-- T  Patient Responsibility ($)
@@ -524,13 +524,82 @@ BEGIN
 	LEFT JOIN AvgNumSWV n ON n.ESYear=p.ESYear AND n.ESMonth=p.ESMonth
 	LEFT JOIN DenAA     d ON d.ESYear=p.ESYear AND d.ESMonth=p.ESMonth;
 
+	-- Weighted annual averages. Never sum monthly averages.
+	;WITH CashYear AS
+	(
+		SELECT ESYear,
+			SUM(CASE WHEN RoleID IN ('S','W') THEN ESMonthChargeAmount ELSE 0 END) AS PayPlusPartial,
+			SUM(CASE WHEN RoleID = 'S' THEN ESMonthChargeAmount ELSE 0 END) AS FullyPaidPayment,
+			SUM(CASE WHEN RoleID IN ('S','W','V') THEN ESMonthChargeAmount ELSE 0 END) AS AdjudicatedPayment
+		FROM dbo.Elix_ES_Cash
+		WHERE ESYear > 0 AND ESMonth BETWEEN 1 AND 12
+		GROUP BY ESYear
+	),
+	PmsYear AS
+	(
+		SELECT ESYear,
+			SUM(CASE WHEN RoleID = 'F' THEN CONVERT(DECIMAL(38,6), ESMonthClaimCount) ELSE 0 END) AS BilledClaims,
+			SUM(CASE WHEN RoleID = 'J' THEN CONVERT(DECIMAL(38,6), ESMonthClaimCount) ELSE 0 END) AS PaidClaims,
+			SUM(CASE WHEN RoleID IN ('J','M','K','L','N','O','P.1','P.2')
+					 THEN CONVERT(DECIMAL(38,6), ESMonthClaimCount) ELSE 0 END) AS AdjudicatedClaims
+		FROM dbo.Elix_ES_PMS
+		WHERE ESYear > 0 AND ESMonth BETWEEN 1 AND 12
+		GROUP BY ESYear
+	)
+	INSERT INTO dbo.Elix_ES_Avg
+		(RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt)
+	SELECT v.RoleID, v.Description, p.ESYear, 0,
+		CONVERT(INT, v.Denominator),
+		CONVERT(DECIMAL(18,2), CASE WHEN v.Denominator = 0 THEN 0
+			ELSE ROUND(v.Numerator / v.Denominator, 2) END),
+		GETDATE()
+	FROM PmsYear p
+	LEFT JOIN CashYear c ON c.ESYear = p.ESYear
+	CROSS APPLY
+	(
+		VALUES
+			('Y',  'Average Payment ($) - Total Pay/Billed Claims',
+			 CONVERT(DECIMAL(38,6), ISNULL(c.PayPlusPartial,0)), p.BilledClaims),
+			('Z',  'Average Payment ($) - Total Pay/Paid Claims',
+			 CONVERT(DECIMAL(38,6), ISNULL(c.FullyPaidPayment,0)), p.PaidClaims),
+			('AA', 'Average Payment ($) - Total Pay/Adjudicated Claims',
+			 CONVERT(DECIMAL(38,6), ISNULL(c.AdjudicatedPayment,0)), p.AdjudicatedClaims)
+	) v(RoleID, Description, Numerator, Denominator);
+
 	DROP TABLE IF EXISTS #Base;
 	DROP TABLE IF EXISTS #Periods;
 	DROP TABLE IF EXISTS #BaseBilledCount;
 	DROP TABLE IF EXISTS #LisBilled;
 	DROP TABLE IF EXISTS #LisBilledCount;
 
+	IF OBJECT_ID('dbo.usp_Elix_ES_UpdatePmsBilledMismatch', 'P') IS NOT NULL
+		EXEC dbo.usp_Elix_ES_UpdatePmsBilledMismatch;
+
 	PRINT 'usp_RefreshElix_ExecutiveSummary completed.';
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.usp_Elix_ES_UpdatePmsBilledMismatch
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+	IF OBJECT_ID('dbo.Elix_ES_PMS', 'U') IS NULL
+	   OR OBJECT_ID('dbo.Elix_ES_LIS', 'U') IS NULL
+		RETURN;
+
+	UPDATE i
+	SET i.ESMonthClaimCount =
+		CASE WHEN ISNULL(f.ESMonthClaimCount, 0) - ISNULL(c.ESMonthClaimCount, 0) > 0
+			 THEN ISNULL(f.ESMonthClaimCount, 0) - ISNULL(c.ESMonthClaimCount, 0)
+			 ELSE 0 END,
+		i.RefreshedAt = GETDATE()
+	FROM dbo.Elix_ES_PMS i
+	INNER JOIN dbo.Elix_ES_PMS f
+		ON f.ESYear = i.ESYear AND f.ESMonth = i.ESMonth AND f.RoleID = 'F'
+	LEFT JOIN dbo.Elix_ES_LIS c
+		ON c.ESYear = i.ESYear AND c.ESMonth = i.ESMonth AND c.RoleID = 'C'
+	WHERE i.RoleID = 'I';
 END;
 GO
 

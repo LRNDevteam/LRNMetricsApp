@@ -1211,7 +1211,7 @@ GO
 -- =====================================================================
 -- 14. Insurance vs Payment (Payer x Year/Month)
 -- Source: dbo.ClaimLevelData / dbo.Elix_CS_InsuranceVsPayment (no snapshot)
--- Uses PostingDate (Elixir date field) instead of CheckDate.
+-- Uses all valid CheckDate values; no hard-coded month/date exclusion.
 -- =====================================================================
 CREATE OR ALTER PROCEDURE dbo.usp_GetElix_CS_InsuranceVsPayment
     @PayerNames      NVARCHAR(MAX) = NULL,
@@ -1243,25 +1243,27 @@ BEGIN
     ;WITH agg AS (
         SELECT
             LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))             AS PayerName,
-            CAST(YEAR (TRY_CAST(PostingDate AS DATE)) AS INT)           AS BillYear,
-            CAST(MONTH(TRY_CAST(PostingDate AS DATE)) AS TINYINT)       AS BillMonth,
+            CAST(YEAR (TRY_CAST(CheckDate AS DATE)) AS INT)             AS BillYear,
+            CAST(MONTH(TRY_CAST(CheckDate AS DATE)) AS TINYINT)         AS BillMonth,
             COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))           AS NoOfPaidClaims,
             ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0) AS InsurancePayment
         FROM dbo.ClaimLevelData
         WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
-          AND TRY_CAST(PostingDate AS DATE) IS NOT NULL AND PostingDate <> ''
+          AND NULLIF(LTRIM(RTRIM(CheckDate)), '') IS NOT NULL
+          AND TRY_CAST(CheckDate AS DATE) IS NOT NULL
+          AND YEAR(TRY_CAST(CheckDate AS DATE)) > 1900
           AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
           AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
           AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
           AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
           AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
           AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
-          AND (@CheckDateFrom IS NULL OR TRY_CAST(PostingDate      AS DATE) >= @CheckDateFrom)
-          AND (@CheckDateTo   IS NULL OR TRY_CAST(PostingDate      AS DATE) <= @CheckDateTo)
+          AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate AS DATE) >= @CheckDateFrom)
+          AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate AS DATE) <= @CheckDateTo)
         GROUP BY
             LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
-            CAST(YEAR (TRY_CAST(PostingDate AS DATE)) AS INT),
-            CAST(MONTH(TRY_CAST(PostingDate AS DATE)) AS TINYINT)
+            CAST(YEAR (TRY_CAST(CheckDate AS DATE)) AS INT),
+            CAST(MONTH(TRY_CAST(CheckDate AS DATE)) AS TINYINT)
     ),
     grand AS (
         SELECT BillYear, BillMonth,

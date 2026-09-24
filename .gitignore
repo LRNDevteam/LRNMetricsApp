@@ -26,3 +26,5 @@ appsettings.Local.json
 appsettings.Secrets.json
 /LRN.MasterFileProcessorWorker/Properties/PublishProfiles/FolderProfile.pubxml
 /LRN.ReportsApi/Properties/PublishProfiles/FolderProfile.pubxml
+/LabMetricsDashboard/Schemas/ClaimLevel.schema.json
+/LabMetricsDashboard/Schemas/LineLevel.schema.json

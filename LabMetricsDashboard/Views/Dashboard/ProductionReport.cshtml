@@ -1634,7 +1634,10 @@ th.pr-month-data, td.pr-month-data {
                         }
                         <span class="filter-dot">•</span>
                         <span><span class="filter-label">Filter:</span>
-                           @*  <span class="filter-key">PayerName</span> not blank &nbsp;·&nbsp; *@
+                            @if (Model.SelectedLab.Contains("Elixir", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <span><span class="filter-key">PayerName_Raw</span> not blank &nbsp;·&nbsp; </span>
+                            }
                             <span class="filter-key-2">@uaDateColLocal</span> is a valid date</span>
                     </div>
                     <div class="pr-scroll">
@@ -1651,7 +1654,7 @@ th.pr-month-data, td.pr-month-data {
                             </colgroup>
                             <thead>
                                 <tr>
-                                    <th rowspan="2">Unbilled x Aging</th>
+                                    <th rowspan="2">@(Model.SelectedLab.Contains("Elixir", StringComparison.OrdinalIgnoreCase) ? "Payer Name" : "Unbilled x Aging")</th>
                                     @foreach (var bk in agingBuckets)
                                     {
                                         <th colspan="2">@bk</th>

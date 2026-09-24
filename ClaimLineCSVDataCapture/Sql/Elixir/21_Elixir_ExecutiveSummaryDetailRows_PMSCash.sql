@@ -90,11 +90,11 @@ BEGIN
     FROM #Base b
     WHERE
         -- ── PMS ──────────────────────────────────────────────────────────
-           (@RowCode = 'F'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus NOT IN ('Billed Amount 0','Unbilled'))
+           (@RowCode = 'F'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus NOT IN ('Billed Amount 0','Unbilled','Unbilled - PB'))
         OR (@RowCode = 'G'    AND b.ClaimStatus IN ('Unbilled','Unbilled - PB'))
         OR (@RowCode = 'H'    AND b.ClaimStatus = 'Voided')
         OR (@RowCode = 'I'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus NOT IN ('Billed Amount 0','Unbilled'))  -- degenerate fallback: I = F (cross-table count, not a row list)
-        OR (@RowCode = 'J'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Fully Paid')
+        OR (@RowCode = 'J'    AND b.ClaimStatus = 'Fully Paid')
         OR (@RowCode = 'K'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Patient Responsibility')
         OR (@RowCode = 'L'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Patient Payment')
         OR (@RowCode = 'M'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Fully Adjusted')
@@ -105,9 +105,9 @@ BEGIN
         OR (@RowCode = 'P.2'  AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus IN ('Partially Adjusted','Partially Denied'))
         OR (@RowCode = 'P.3'  AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'No Response')
         -- ── Cash ─────────────────────────────────────────────────────────
-        OR (@RowCode = 'Q'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus NOT IN ('Unbilled','Billed Amount 0'))
+        OR (@RowCode = 'Q'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus NOT IN ('Unbilled','Unbilled - PB','Billed Amount 0'))
         OR (@RowCode = 'R'    AND b.ClaimStatus = 'Unbilled')
-        OR (@RowCode = 'S'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Fully Paid')
+        OR (@RowCode = 'S'    AND b.ClaimStatus = 'Fully Paid')
         OR (@RowCode = 'T'    AND b.BilledUnbilled = 'Billed')
         OR (@RowCode = 'U'    AND b.BilledUnbilled = 'Billed')
         OR (@RowCode = 'V'    AND b.BilledUnbilled = 'Billed')
