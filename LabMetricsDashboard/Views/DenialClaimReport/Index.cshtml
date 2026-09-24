@@ -32,6 +32,14 @@
         </a>
     </div>
 
+    @* Week range and RunId, in the same shape Production Report uses, so the page states the window
+       it reports on and the load that produced it rather than leaving both to be inferred. *@
+    @await Html.PartialAsync("_AnalysisRangeBanner", new LabMetricsDashboard.Models.AnalysisRangeInfo
+    {
+        WeekFolder = Model.WeekRange,
+        RunId = Model.RunId
+    })
+
     @if (TempData["DenialClaimReportSuccess"] is string ok)
     {
         <div class="alert alert-success py-2 d-flex align-items-center gap-2">

@@ -40,9 +40,27 @@ public class AccountController : Controller
     }
 
     [HttpGet]
-    public IActionResult Login(string? returnUrl = null)
+    public IActionResult Login(string? returnUrl = null, int denied = 0)
     {
         ViewData["ReturnUrl"] = returnUrl;
+
+        // Set by OnRedirectToAccessDenied when an already-signed-in user was refused a page. Without
+        // this the refusal looked like the login form simply reloading, over and over.
+        if (denied == 1 && TempData["LoginError"] is null)
+        {
+            _logger.LogWarning(
+                "Access denied for {UserName} with roles [{Roles}] - the page is not mapped to any "
+                + "of their roles in Admin > Role Menu Mapping.",
+                User.Identity?.Name ?? "(anonymous)",
+                string.Join(", ", User.Claims
+                    .Where(c => c.Type == ClaimTypes.Role)
+                    .Select(c => c.Value)));
+
+            TempData["LoginError"] =
+                "Your account does not have access to that page. Its role has no menus assigned - "
+                + "ask an administrator to map menus to it under Admin > Role Menu Mapping.";
+        }
+
         return View(new LoginViewModel());
     }
 
@@ -133,7 +151,17 @@ public class AccountController : Controller
                 user.UserName, string.Join(",", mappedButMissingJson.Select(l => $"{l.LabId}:{l.Name}")));
         }
 
-        var isAdmin = roleNames.Any(r => string.Equals(r, "Admin", StringComparison.OrdinalIgnoreCase));
+        // Every other role test here goes through IsRole, which ignores case AND spacing. This one
+        // used a bare string.Equals against "Admin", so it recognised ONLY a role spelled exactly
+        // "Admin" - "Super Admin", "LRN Admin" and "LRNAdmin" all fell through to the lab-assignment
+        // checks below and were signed straight back out. The rest of the app (MenuAccessFilter,
+        // ReportBoardController, AnalyticsController) has always treated those as admin, so login
+        // was the one place that disagreed.
+        //
+        // "Lab Admin" is deliberately NOT here: a lab admin is scoped to a lab by definition, so it
+        // must keep going through the lab-assignment check rather than bypassing it.
+        var isAdmin = roleNames.Any(r =>
+            IsRole(r, "Admin") || IsRole(r, "Super Admin") || IsRole(r, "LRN Admin"));
         var isArManager = roleNames.Any(r => IsRole(r, "AR Manager") || IsRole(r, "ARManager"));
         var isArReviewer = roleNames.Any(r => IsRole(r, "AR Reviewer") || IsRole(r, "ARReviewer") || IsRole(r, "AR Analyser") || IsRole(r, "ARAnalyser") || IsRole(r, "AR Analyzer") || IsRole(r, "ARAnalyzer"));
         var isClientManager = roleNames.Any(r => IsRole(r, "Client Manager") || IsRole(r, "ClientManager"));
@@ -189,6 +217,13 @@ public class AccountController : Controller
         // 2) Non-admin with no lab assignments at all ? friendly error
         if (userLabs.Count == 0)
         {
+            // Logged with the roles, because from the user's side this is indistinguishable from a
+            // rejected password and the only signal was a generic banner.
+            _logger.LogWarning(
+                "Login blocked for {UserName}: no rows in UserLabs. Roles: [{Roles}]. "
+                + "Assign the user a lab, or the account cannot sign in.",
+                user.UserName, string.Join(", ", roleNames));
+
             TempData["LoginError"] =
                 "Your account has no lab assignments. Please contact your administrator.";
             await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
@@ -199,6 +234,16 @@ public class AccountController : Controller
         //     In this case we cannot resolve which lab name to route to.
         if (mappedLabs.Count == 0)
         {
+            // The LabId exists in UserLabs but LabConfig:LabsID has no name for it, so there is
+            // nowhere to route. Naming the ids makes this a two-minute config fix instead of a
+            // support ticket.
+            _logger.LogWarning(
+                "Login blocked for {UserName}: UserLabs has LabId(s) [{LabIds}] but none resolve "
+                + "through LabConfig:LabsID. Roles: [{Roles}]. Add the mapping to appsettings.",
+                user.UserName,
+                string.Join(", ", userLabs.Select(l => l.LabId).Distinct()),
+                string.Join(", ", roleNames));
+
             TempData["LoginError"] =
                 "Your assigned lab(s) are not mapped in this environment. Please contact your administrator.";
             await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);

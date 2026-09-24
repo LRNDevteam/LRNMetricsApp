@@ -641,13 +641,22 @@ builder.Services.Configure<ReportBoardSettings>(configuration.GetSection(ReportB
 // Dynamic role-based navbar (Menu Master + Role Menu Mapping via LRN.ReportsApi).
 // Short timeout: this client sits on the hot path of EVERY page (navbar + MenuAccessFilter).
 // A slow/unreachable Reports API must fail fast so pages keep rendering (menu falls back
-// to the static navbar and access checks fail open).
+// to the static navbar and access checks fail open - see MenuService.CanAccessAsync).
+//
+// The default was 2s, and production logs showed GetMyMenus completing in 2041ms and 2047ms -
+// i.e. losing the race with its own timeout on a first (uncached) call, most often right after
+// an app-pool recycle when nothing is warm. 5s keeps the "fail fast" intent while leaving room
+// for a cold call; lower it again once the API's cold path is faster.
 builder.Services
     .AddHttpClient<IMenuApiClient, MenuApiClient>()
     .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(
-        builder.Configuration.GetValue<int?>("DenialWorkflowApi:MenuTimeoutSeconds") ?? 2));
+        builder.Configuration.GetValue<int?>("DenialWorkflowApi:MenuTimeoutSeconds") ?? 5));
 builder.Services.AddScoped<IMenuService, MenuService>();
 builder.Services.AddScoped<MenuAccessFilter>();
+
+// Blocks every state-changing request from a view-only role (Lab User). Menu mapping decides which
+// pages a role can open; this decides whether it can change anything once there.
+builder.Services.AddScoped<ViewOnlyRoleFilter>();
 
 // Allow local Vite React dev server to call MVC AuthToken endpoint with cookies.
 // Production stays same-origin, but these origins are useful while debugging React locally.
@@ -724,6 +733,9 @@ builder.Services.AddControllersWithViews(options =>
     // Server-side menu enforcement (FR-9): blocks direct URLs to menu-managed
     // routes the user's role has no mapping for. Non-managed routes pass through.
     options.Filters.AddService<MenuAccessFilter>();
+    // Write enforcement for view-only roles. Runs on every action, so a Lab User cannot POST to a
+    // page their menu grant happens to include. Reads and exports are untouched.
+    options.Filters.AddService<ViewOnlyRoleFilter>();
     // Require authenticated user for every action by default.
     // Use [AllowAnonymous] on Account/Login etc.
     var policy = new AuthorizationPolicyBuilder()
@@ -818,6 +830,21 @@ builder.Services
             OnRedirectToAccessDenied = ctx =>
             {
                 var returnUrl = ctx.Properties.RedirectUri ?? string.Empty;
+                var pathBase = ctx.Request.PathBase.HasValue ? ctx.Request.PathBase.Value : string.Empty;
+                var loginUri = $"{pathBase}{options.LoginPath}";
+
+                // An ALREADY AUTHENTICATED user who is denied has a permissions problem, not a
+                // stale session, and signing in again cannot fix it. Carrying the ReturnUrl here
+                // built an infinite bounce: sign in -> ReturnUrl -> MenuAccessFilter forbids ->
+                // back to login -> sign in... which is what a role with no RoleMenuMapping rows
+                // (e.g. a newly created Lab Admin) hits on every attempt, with nothing on screen to
+                // say why. Drop the ReturnUrl and flag it so the login page can explain instead.
+                if (ctx.HttpContext.User?.Identity?.IsAuthenticated == true)
+                {
+                    ctx.Response.Redirect($"{loginUri}?denied=1");
+                    return Task.CompletedTask;
+                }
+
                 var isSafeReturn =
                     !string.IsNullOrWhiteSpace(returnUrl)
                     && !returnUrl.Contains("/Home/Error", StringComparison.OrdinalIgnoreCase)
@@ -825,8 +852,6 @@ builder.Services
                     && !returnUrl.Contains("/Account/Logout", StringComparison.OrdinalIgnoreCase)
                     && !returnUrl.Contains("/Account/AccessDenied", StringComparison.OrdinalIgnoreCase);
 
-                var pathBase = ctx.Request.PathBase.HasValue ? ctx.Request.PathBase.Value : string.Empty;
-                var loginUri = $"{pathBase}{options.LoginPath}";
                 if (isSafeReturn)
                 {
                     loginUri = $"{loginUri}?ReturnUrl={Uri.EscapeDataString(returnUrl)}";

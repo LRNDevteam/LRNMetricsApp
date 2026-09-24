@@ -39,6 +39,8 @@ public static class SelfTests
         PerLevelCsvToggles();
         DerivedReportRules();
         AugustusPanelNewComesFromSourceColumn();
+        PunctuationOnlyColumnPairsDoNotThrowOrMerge();
+        RelativeCsvLogFolderResolvesAgainstServiceDirectory();
         EmptyRowsAreNotImported();
         RowsWithoutIdentityAreImportedAndCounted();
         LabDatabaseTableNameQuoting();
@@ -1654,6 +1656,149 @@ public static class SelfTests
         Check("Cascade: a blank description is not stored as a match", blank.Resolve("CO10") is null);
     }
 
+    /// <summary>
+    /// Two lab columns whose names differ only by punctuation must not crash the export, and must
+    /// not be treated as the same column.
+    /// </summary>
+    /// <remarks>
+    /// <para>NormKey strips punctuation, so "Fully Paid #" and "Fully Paid $" both key to
+    /// "fullypaid". RegisterAliasGroup therefore tried to merge them, and did so by enumerating a
+    /// lazy LINQ chain over the very list it was adding to - throwing "Collection was modified;
+    /// enumeration operation may not execute" and failing the lab's whole run. VariantX ships four
+    /// such pairs (Fully Paid, Adjucticated, 30 Bucket, 60 Bucket).</para>
+    /// <para>The merge is also wrong on its own terms: one column is a count, the other an amount.
+    /// They are only merged now when the two groups share an actual spelling.</para>
+    /// </remarks>
+    /// <summary>
+    /// A relative ProcessLog:CsvLocalFolder resolves against the SERVICE directory, not the
+    /// process working directory.
+    /// </summary>
+    /// <remarks>
+    /// The config now ships "Logs", which is only the intended
+    /// &lt;install folder&gt;\Logs if resolution is anchored to AppContext.BaseDirectory. A Windows
+    /// Service starts with a working directory of C:\Windows\System32, so anchoring to the
+    /// working directory would silently scatter the logs there instead.
+    /// </remarks>
+    private static void RelativeCsvLogFolderResolvesAgainstServiceDirectory()
+    {
+        var writer = new ProcessLogCsvWriter(
+            Microsoft.Extensions.Options.Options.Create(new ProcessLogOptions
+            {
+                Enabled = true,
+                CsvEnabled = true,
+                CsvLocalFolder = "Logs",
+            }),
+            Microsoft.Extensions.Options.Options.Create(new ImportOptions()));
+
+        var paths = writer.GetPaths(new DateTime(2026, 9, 24));
+
+        // ProcessLogCsv nests a month folder under the configured root ("Logs\September"), so the
+        // assertion is on the ROOT the relative path anchored to, not the leaf directory.
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "Logs"));
+
+        Check("Relative CsvLocalFolder anchors to the service directory",
+            paths.RunCsvPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
+            paths.RunCsvPath);
+
+        Check("Run, Step and Error CSVs share that root",
+            paths.StepCsvPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && paths.ErrorCsvPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+
+        Check("The three logs are separate files",
+            paths.RunCsvPath != paths.StepCsvPath && paths.StepCsvPath != paths.ErrorCsvPath);
+
+        // ResolveFolder creates the directory as a side effect; clean up when it was empty.
+        try
+        {
+            if (Directory.Exists(root) && Directory.GetFileSystemEntries(root).Length == 0)
+                Directory.Delete(root);
+        }
+        catch { /* leaving an empty folder behind is not a test failure */ }
+    }
+
+    private static void PunctuationOnlyColumnPairsDoNotThrowOrMerge()
+    {
+        var folder = TempFolder();
+        try
+        {
+            var source = Path.Combine(folder, "src.csv");
+            File.WriteAllText(source,
+                "Visit No,Fully Paid #,Fully Paid $\r\n" +
+                "V-1,Fully Paid,206.33\r\n");
+
+            var common = new ColumnSchema
+            {
+                SchemaName = "common",
+                HeaderRow = 1,
+                Columns = new List<ColumnSpec>
+                {
+                    new() { Name = "ClaimID", Aliases = new List<string> { "Visit No" } },
+                }
+            };
+
+            // The real VariantX shape: names that collide only after punctuation is stripped.
+            var labSchema = new ColumnSchema
+            {
+                SchemaName = "lab",
+                HeaderRow = 1,
+                Columns = new List<ColumnSpec>
+                {
+                    new() { Name = "Visit No", Aliases = new List<string> { "VisitNum" } },
+                    new() { Name = "Fully Paid #" },
+                    new() { Name = "Fully Paid $" },
+                    new() { Name = "Adjucticated #" },
+                    new() { Name = "Adjucticated $" },
+                    new() { Name = "30 Bucket #" },
+                    new() { Name = "30 Bucket $" },
+                }
+            };
+
+            var outPath = Path.Combine(folder, "out.csv");
+            var threw = "";
+
+            try
+            {
+                StandardCsvExporter.Generate(
+                    sourceCsvPath: source,
+                    headerRow: 1,
+                    outputCsvPath: outPath,
+                    commonSchema: common,
+                    labId: 25,
+                    labName: "VariantX",
+                    sourceFileName: "src.csv",
+                    ingestedOnLocal: DateTime.Now,
+                    labSchema: labSchema,
+                    appendUnmappedSourceColumns: true);
+            }
+            catch (Exception ex)
+            {
+                threw = ex.GetType().Name + ": " + ex.Message;
+            }
+
+            Check("Punctuation-only column pairs export without throwing", threw.Length == 0, threw);
+
+            if (threw.Length == 0 && File.Exists(outPath))
+            {
+                var lines = File.ReadAllLines(outPath);
+                var header = SplitCsv(lines[0]);
+                var row = SplitCsv(lines[1]);
+
+                var countIdx = Array.FindIndex(header, h => h.Equals("Fully Paid #", StringComparison.OrdinalIgnoreCase));
+                var amountIdx = Array.FindIndex(header, h => h.Equals("Fully Paid $", StringComparison.OrdinalIgnoreCase));
+
+                // The count must not pick up the amount, nor the amount the count.
+                Check("A '#' column keeps its own value, not its '$' twin's",
+                    countIdx < 0 || row[countIdx] == "Fully Paid", countIdx < 0 ? "column absent" : row[countIdx]);
+                Check("A '$' column keeps its own value, not its '#' twin's",
+                    amountIdx < 0 || row[amountIdx] == "206.33", amountIdx < 0 ? "column absent" : row[amountIdx]);
+            }
+        }
+        finally
+        {
+            TryDelete(folder);
+        }
+    }
+
     private static void Check(string name, bool condition, string? detail = null)
     {
         if (condition)
@@ -1690,3 +1835,5 @@ public static class SelfTests
             Func<TState, Exception?, string> formatter) { }
     }
 }
+
+

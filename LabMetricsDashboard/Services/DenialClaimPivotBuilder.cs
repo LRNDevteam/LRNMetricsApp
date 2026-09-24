@@ -160,13 +160,14 @@ public static class DenialClaimPivotBuilder
 
         model.Rows = rows;
 
-        // Totals sum the payers SHOWN, so the footer and the rows above it agree. Dropping the
-        // "all other" row means this is the top-N total, which is what the caption says it is.
-        var shownGroups = ranked.SelectMany(p => p.Groups).ToList();
-
-        model.TotalsByPeriod = columns.Select(c => Cell(c.Rows(shownGroups))).ToList();
-        model.GrandTotalClaimCount = shownGroups.Sum(g => g.ClaimCount);
-        model.GrandTotalBalance = shownGroups.Sum(g => g.InsuranceBalance);
+        // Totals cover EVERY payer in the window, not just the top-N rows listed above them. The
+        // footer is read as "what the lab is carrying this period", so a total that silently
+        // excluded payer 11 onwards under-reported the AR - and the rows are a ranked extract of
+        // the data, never a claim to be all of it. The caption already says what share the listed
+        // payers hold ("Covering N% of the AR"), which is where that number belongs.
+        model.TotalsByPeriod = columns.Select(c => Cell(c.Rows(inWindow))).ToList();
+        model.GrandTotalClaimCount = inWindow.Sum(g => g.ClaimCount);
+        model.GrandTotalBalance = inWindow.Sum(g => g.InsuranceBalance);
 
         return model;
     }

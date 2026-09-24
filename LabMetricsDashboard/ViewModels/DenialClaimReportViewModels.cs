@@ -32,6 +32,20 @@ public sealed class DenialClaimReportViewModel
     /// <summary>Aggregated groups with no denial date, which cannot sit in any period.</summary>
     public int UndatedGroups { get; set; }
 
+    /// <summary>
+    /// The newest ClaimLevelData week the figures are reported against, as stored
+    /// ("09.09.2026 - 09.15.2026"). Shown in the header so the page states the range it covers
+    /// rather than leaving the reader to infer it from the newest column.
+    /// </summary>
+    public string? WeekRange { get; set; }
+
+    /// <summary>
+    /// The claim-level run behind <see cref="WeekRange"/> ("R20260922COV2443"), shown beside it so
+    /// a figure on this page can be traced back to the load that produced it - the same
+    /// "ReportId (RunID)" the Production Report header carries.
+    /// </summary>
+    public string? RunId { get; set; }
+
     /// <summary>True when the lab has not yet run the claim-level import that writes the derived columns.</summary>
     public bool MissingNormalizedColumn { get; set; }
 }

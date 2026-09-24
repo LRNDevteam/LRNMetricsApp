@@ -786,17 +786,50 @@ public static class StandardCsvExporter
 			return;
 
 		// Merge with anything already registered under any of these keys.
-		foreach (var key in members.Select(NormKey).Where(k => !string.IsNullOrWhiteSpace(k)).Distinct())
+		//
+		// The key sequence is materialised FIRST. It used to be a lazy LINQ chain over `members`,
+		// and the body below adds to `members` - so the moment a merge actually happened, the
+		// enumerator threw "Collection was modified; enumeration operation may not execute". The
+		// path is only reachable once a lab schema declares an alias that collides with another
+		// column's spelling, which is why it lay dormant until a schema gained Aliases.
+		var keys = members
+			.Select(NormKey)
+			.Where(k => !string.IsNullOrWhiteSpace(k))
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.ToList();
+
+		foreach (var key in keys)
 		{
 			if (!ov.AliasGroupByNorm.TryGetValue(key, out var existing))
 				continue;
 
-			foreach (var e in existing)
+			// Groups are stored by reference, several keys to one list, so `existing` can be the
+			// very list being appended to. Snapshot it rather than enumerate it while it grows.
+			if (ReferenceEquals(existing, members))
+				continue;
+
+			// Merge only groups that genuinely share a spelling. NormKey strips punctuation, so
+			// "Fully Paid #" and "Fully Paid $" both key to "fullypaid" - two DIFFERENT columns (a
+			// count and an amount) that would otherwise be declared interchangeable and could feed
+			// each other's values. VariantX ships four such pairs. The NorthWest case this merge
+			// exists for is unaffected: those groups share the header itself.
+			if (!existing.Any(e => members.Contains(e, StringComparer.OrdinalIgnoreCase)))
+				continue;
+
+			foreach (var e in existing.ToList())
 				if (!members.Contains(e, StringComparer.OrdinalIgnoreCase))
 					members.Add(e);
 		}
 
-		foreach (var key in members.Select(NormKey).Where(k => !string.IsNullOrWhiteSpace(k)).Distinct())
+		// Recomputed rather than reusing `keys`: merging may have brought in spellings whose keys
+		// were not in the original set, and those must resolve to the merged group too.
+		var finalKeys = members
+			.Select(NormKey)
+			.Where(k => !string.IsNullOrWhiteSpace(k))
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.ToList();
+
+		foreach (var key in finalKeys)
 			ov.AliasGroupByNorm[key] = members;
 	}
 

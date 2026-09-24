@@ -52,13 +52,18 @@ public sealed class DenialClaimReportController : Controller
     /// role, because the Roles table spells them inconsistently ("Labuser" against "Lab User" in
     /// code).</para>
     /// </remarks>
+    /// <remarks>
+    /// Lab User is deliberately absent. It was here, which contradicted the role's own definition -
+    /// "no write path at all" - and let a Lab User import workbooks and edit insight rows on this
+    /// page while LRN.ReportsApi refused them every write on the Denial Workflow side. The role is
+    /// view-only in both places now; ViewOnlyRoleFilter enforces it across the whole dashboard.
+    /// </remarks>
     private static readonly string[] DefaultEditorRoles =
     [
         "Admin", "LRN Admin", "LRNAdmin",
         "Super Admin", "SuperAdmin",
         "Lab Admin", "LabAdmin",
         "AR Manager", "ARManager",
-        "Lab User", "LabUser",
     ];
 
     private readonly LabSettings _labSettings;
@@ -224,10 +229,12 @@ public sealed class DenialClaimReportController : Controller
             // The columns are clamped to how far ClaimLevelData is actually loaded, so the weekly
             // summary shows the four weeks the data covers rather than opening a column for a week
             // a stray denial date fell into.
-            var loadedThrough = await _repo.GetClaimDataLoadedThroughAsync(connectionString, ct);
+            var weekRange = await _repo.GetClaimDataWeekRangeAsync(connectionString, ct);
+            model.WeekRange = weekRange.WeekFolder;
+            model.RunId = weekRange.RunId;
 
-            model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods, loadedThrough: loadedThrough);
-            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: loadedThrough);
+            model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods, loadedThrough: weekRange.LoadedThrough);
+            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: weekRange.LoadedThrough);
         }
         catch (Exception ex)
         {
@@ -282,10 +289,12 @@ public sealed class DenialClaimReportController : Controller
             var groups = await _repo.GetDenialSummaryAsync(connectionString, ct);
 
             // Same clamp as the page, so the exported workbook and the screen agree on the columns.
-            var loadedThrough = await _repo.GetClaimDataLoadedThroughAsync(connectionString, ct);
+            var weekRange = await _repo.GetClaimDataWeekRangeAsync(connectionString, ct);
+            model.WeekRange = weekRange.WeekFolder;
+            model.RunId = weekRange.RunId;
 
-            model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods, loadedThrough: loadedThrough);
-            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: loadedThrough);
+            model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods, loadedThrough: weekRange.LoadedThrough);
+            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: weekRange.LoadedThrough);
 
             model.Insight.Rows = await _repo.GetInsightsAsync(connectionString, model.Insight.Bucket, ct);
         }

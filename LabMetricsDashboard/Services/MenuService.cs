@@ -55,9 +55,28 @@ public sealed class MenuService : IMenuService
 
     public void InvalidateCache() => Interlocked.Increment(ref _cacheVersion);
 
-    public async Task<List<MenuItemVm>> GetMenuForUserAsync(ClaimsPrincipal user, CancellationToken ct)
+    /// <summary>
+    /// A fetched menu, plus whether the fetch actually failed.
+    /// </summary>
+    /// <remarks>
+    /// The distinction matters and used to be lost. "This user has no menus" and "we could not
+    /// reach the menu API" both came back as an empty list, so <see cref="GetAllowedRoutesAsync"/>
+    /// could not tell them apart and treated a TIMEOUT as "allowed nothing" - which denied every
+    /// menu-managed page. Because the denial redirects to the login page, a single 2-second timeout
+    /// logged the user out and the 1-minute failure cache kept doing it on every request for the
+    /// next minute. Admins never saw it: MenuAccessFilter short-circuits for them before this runs.
+    /// </remarks>
+    private sealed record MenuFetch(List<MenuItemVm> Items, bool Failed)
     {
-        if (user.Identity?.IsAuthenticated != true) return new List<MenuItemVm>();
+        public static readonly MenuFetch Empty = new(new List<MenuItemVm>(), false);
+    }
+
+    public async Task<List<MenuItemVm>> GetMenuForUserAsync(ClaimsPrincipal user, CancellationToken ct)
+        => (await GetMenuFetchAsync(user, ct)).Items;
+
+    private async Task<MenuFetch> GetMenuFetchAsync(ClaimsPrincipal user, CancellationToken ct)
+    {
+        if (user.Identity?.IsAuthenticated != true) return MenuFetch.Empty;
 
         var key = $"menu:v{Volatile.Read(ref _cacheVersion)}:roles:{RoleKey(user)}";
         var menuSw = Stopwatch.StartNew();
@@ -67,17 +86,20 @@ public sealed class MenuService : IMenuService
             {
                 var flat = await _api.GetMyMenusAsync(ct);
                 entry.AbsoluteExpirationRelativeToNow = CacheDuration;
-                return BuildTree(flat);
+                return new MenuFetch(BuildTree(flat), Failed: false);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Menu API unavailable; using empty menu for {Duration}.", FailureCacheDuration);
+                _logger.LogWarning(ex, "Menu API unavailable; using empty menu for {Duration}. "
+                    + "Access enforcement fails OPEN while this is cached.", FailureCacheDuration);
                 entry.AbsoluteExpirationRelativeToNow = FailureCacheDuration;
-                return new List<MenuItemVm>(); // view falls back to the static navbar
+                // The navbar still falls back to the static markup; the Failed flag is what stops
+                // this being mistaken for a legitimately empty menu.
+                return new MenuFetch(new List<MenuItemVm>(), Failed: true);
             }
         });
         FirstPaintLog.Write(_logger, "Menu", "navbar", "GetMyMenus", menuSw.ElapsedMilliseconds);
-        return cached ?? new List<MenuItemVm>();
+        return cached ?? MenuFetch.Empty;
     }
 
     public async Task<bool> CanAccessAsync(ClaimsPrincipal user, string? area, string? controller, string? action, CancellationToken ct)
@@ -89,6 +111,18 @@ public sealed class MenuService : IMenuService
         {
             var managed = await GetManagedRoutesAsync(ct);
             if (!managed.Contains(routeKey)) return true; // not menu-managed -> not enforced
+
+            // A menu the API could not serve is NOT "a user with no access". GetManagedRoutesAsync
+            // above already fails open on the same outage; this is the other half of that contract,
+            // and its absence is what turned a 2-second timeout into a login loop.
+            var menu = await GetMenuFetchAsync(user, ct);
+            if (menu.Failed)
+            {
+                _logger.LogWarning(
+                    "Menu unavailable while checking {Controller}/{Action}; allowing the request "
+                    + "rather than signing the user out.", controller, action);
+                return true;
+            }
 
             var allowed = await GetAllowedRoutesAsync(user, ct);
             if (allowed.Contains(routeKey)) return true;
@@ -192,8 +226,14 @@ public sealed class MenuService : IMenuService
         var key = $"menu:v{Volatile.Read(ref _cacheVersion)}:access:{RoleKey(user)}";
         var set = await _cache.GetOrCreateAsync(key, async entry =>
         {
-            entry.AbsoluteExpirationRelativeToNow = CacheDuration;
-            var tree = await GetMenuForUserAsync(user, ct);
+            var fetch = await GetMenuFetchAsync(user, ct);
+
+            // Only cache a set derived from a menu that actually arrived. Caching the empty set
+            // built from a failed fetch would outlive the 1-minute failure window and keep denying
+            // pages long after the API recovered.
+            entry.AbsoluteExpirationRelativeToNow = fetch.Failed ? TimeSpan.Zero : CacheDuration;
+
+            var tree = fetch.Items;
             var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var root in tree)
             {

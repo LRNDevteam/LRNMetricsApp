@@ -26,8 +26,8 @@ GO
 USE LRNMaster;
 GO
 
-DECLARE @LabId    INT           = 4,          -- <<< Cove
-        @LabName  VARCHAR(120)  = 'Cove',     -- <<< must match dbo.LRN_Run_Log.LabName
+DECLARE @LabId    INT           = 25,          -- <<< Cove
+        @LabName  VARCHAR(120)  = 'VariantX',     -- <<< must match dbo.LRN_Run_Log.LabName
         @WhatIf   BIT           = 0;          -- <<< 1 = preview only, 0 = actually delete
 
 ------------------------------------------------------------------------------------------------
