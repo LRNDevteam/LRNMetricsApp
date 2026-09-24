@@ -13,6 +13,19 @@ public interface IDenialClaimReportRepository
     Task<IReadOnlyList<DenialSummaryGroup>> GetDenialSummaryAsync(string connectionString, CancellationToken ct);
 
     /// <summary>
+    /// The last date the lab's claim data actually covers, taken from the newest
+    /// <c>ClaimLevelData.WeekFolder</c> range end. Null when the column is absent or unparseable.
+    /// </summary>
+    /// <remarks>
+    /// The weekly summary picks its columns from the newest week-starts present in the DENIAL
+    /// dates, which runs ahead of the load: a single denial stamped inside the current week opens a
+    /// column for a week nothing was loaded for, and pushes the oldest real week off the other end.
+    /// Clamping to the loaded-through date is what keeps the four columns on the four weeks the data
+    /// covers.
+    /// </remarks>
+    Task<DateTime?> GetClaimDataLoadedThroughAsync(string connectionString, CancellationToken ct);
+
+    /// <summary>
     /// A page of denied claims for the Claim Level tab, filtered to a denial code and optionally an
     /// insurance.
     /// </summary>
@@ -168,6 +181,44 @@ GROUP BY LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [{payerCol}]), ''))),
         }
 
         return rows;
+    }
+
+    /// <inheritdoc />
+    public async Task<DateTime?> GetClaimDataLoadedThroughAsync(string connectionString, CancellationToken ct)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+
+        if (!await TableExistsAsync(conn, "ClaimLevelData", ct)) return null;
+
+        var cols = await GetColumnsAsync(conn, "ClaimLevelData", ct);
+        if (!cols.Contains("WeekFolder")) return null;
+
+        // WeekFolder is text in "MM.dd.yyyy - MM.dd.yyyy" form, so MAX() on the column would sort
+        // lexically and put "12.01.2025" after "09.15.2026". The distinct list is one row per loaded
+        // week - a handful - so it is parsed here instead.
+        const string sql = @"
+SELECT DISTINCT LTRIM(RTRIM(CONVERT(nvarchar(100), [WeekFolder])))
+FROM   dbo.ClaimLevelData
+WHERE  [WeekFolder] IS NOT NULL
+  AND  LTRIM(RTRIM(CONVERT(nvarchar(100), [WeekFolder]))) <> '';";
+
+        DateTime? latest = null;
+
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            if (reader.IsDBNull(0)) continue;
+
+            if (AnalysisRangeInfo.TryParseWeekRangeEnd(reader.GetString(0), out var end)
+                && (latest is null || end > latest.Value))
+            {
+                latest = end;
+            }
+        }
+
+        return latest;
     }
 
     // ── Claim Level tab ───────────────────────────────────────────────────────

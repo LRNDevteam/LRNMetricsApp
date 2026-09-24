@@ -31,6 +31,23 @@
     var logicTemplateCss = string.Empty;
     string DateValue(DateOnly? value) => value?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty;
     string RowCss(int level) => level <= 0 ? "lis-summary-section-row" : level == 1 ? "lis-summary-level-one" : level == 2 ? "lis-summary-level-two" : "lis-summary-level-three";
+    string StatusKey(string? value) => new string((value ?? string.Empty).ToUpperInvariant().Where(char.IsLetterOrDigit).ToArray());
+    // The workbook colours only the billed split that sits directly under the billable section.
+    // The same "Billed / Not Billed" wording repeats under Self Pay, Client Bill, System Test and
+    // Deleted/Rejected, so keying the band on the numbering alone bands all of them.
+    bool IsBillableSection(string? description) => StatusKey(description) is "BILLABLE" or "INSURANCEBILL" or "INSURANCEBILLS";
+    bool IsBilledSplitRow(string? description) => StatusKey(description) is "BILLED" or "NOTBILLED" or "UNBILLED";
+    // Source file name sits in the shared banner rather than on a chip, so LIS Summary reads the
+    // same way as Production Summary: analysis range, RunId and source together on one line.
+    var lisBanner = string.IsNullOrWhiteSpace(result?.SourceFileName)
+        ? Model.AnalysisRange
+        : new LabMetricsDashboard.Models.AnalysisRangeInfo
+        {
+            WeekFolder = Model.AnalysisRange.WeekFolder,
+            RunId = Model.AnalysisRange.RunId,
+            InsertedDateTime = Model.AnalysisRange.InsertedDateTime,
+            SourceFileName = result.SourceFileName
+        };
     var filters = Model.Filters;
     var isInHealth = Model.CurrentLabName.Contains("InHealth", StringComparison.OrdinalIgnoreCase);
     var activeTab = filters.EffectiveActiveTab;
@@ -796,6 +813,15 @@
         color: #1e293b;
         font-weight: 800;
     }
+
+    /* The year-total and grand-total columns read as a band of totals rather than as data, so
+       their figures sit centred - header, body and the Grand Total row alike, so a column does
+       not change alignment half way down. The header is already centred by the rule above; this
+       is what the BODY cells need, because .count-cell right-aligns them. */
+    .lis-summary-table.lis-freeze-table .lis-total-col,
+    .lis-summary-table.lis-freeze-table td.count-cell.lis-total-col {
+        text-align: center !important;
+    }
     /* Monthly Summary — Production Summary grid (font, padding, gridlines, panel/payer rows) */
     .lis-freeze-scroll#lisSummaryFreeze {
         border: 1px solid #e0e6ed;
@@ -1397,13 +1423,12 @@
         </div>
         @if (result is not null)
         {
-            <span class="chip">Source File Name: @(string.IsNullOrWhiteSpace(result.SourceFileName) ? "-" : result.SourceFileName)</span>
             <span class="chip">Total: @result.GrandTotal.ToString("N0")</span>
         }
     </div>
 </div>
 
-@await Html.PartialAsync("_AnalysisRangeBanner", Model.AnalysisRange)
+@await Html.PartialAsync("_AnalysisRangeBanner", lisBanner)
 
 <div class="rpt-filter-wrap">
 <div class="lis-filter-shell rpt-filter-panel p-3">
@@ -1678,29 +1703,42 @@ else if (activeTab == "summary")
                                     <th colspan="@yearMonthCount">@year</th>
                                 }
                             }
-                            <th rowspan="3" class="grand-total-cell">TOTAL</th>
+                            <th rowspan="3" class="grand-total-cell lis-total-col">TOTAL</th>
                         </tr>
                         <tr class="month-header">
                             @foreach (var column in monthColumns)
                             {
                                 var label = column.IsYearTotal ? $"{column.Year} TOTAL" : new DateTime(column.Year, int.Parse(column.Key[^2..]), 1).ToString("MMM", CultureInfo.InvariantCulture).ToUpperInvariant();
-                                <th class="@(column.IsYearTotal ? "year-total-head" : "")">@label</th>
+                                <th class="@(column.IsYearTotal ? "year-total-head lis-total-col" : "")">@label</th>
                             }
                         </tr>
                         <tr class="sample-header">
                             @foreach (var column in monthColumns)
                             {
-                                <th class="@(column.IsYearTotal ? "year-total-head" : "")">NO. OF SAMPLES</th>
+                                @* Feedback #22: "Samples" -> "No. of Samples". *@
+                                <th class="@(column.IsYearTotal ? "year-total-head lis-total-col" : "")">NO. OF SAMPLES</th>
                             }
                         </tr>
                     </thead>
                     <tbody>
+                        @{ var inBillableSection = false; }
                         @for (var rowIndex = 0; rowIndex < result.Rows.Count; rowIndex++)
                         {
                             var row = result.Rows[rowIndex];
                             var hasChildren = rowIndex + 1 < result.Rows.Count && result.Rows[rowIndex + 1].Level > row.Level;
                             var startExpanded = !hasChildren;
-                            var isNumberedSubRow = row.Level == 1 && !string.IsNullOrWhiteSpace(row.Code) && row.Code.Trim().All(char.IsDigit);
+                            if (row.Level <= 0)
+                            {
+                                inBillableSection = IsBillableSection(row.Description);
+                            }
+                            // Scoped to the Billable section. Without the section test every section's
+                            // "1. Billed / 2. UnBilled" pair came out banded, which the manual report
+                            // does not do.
+                            var isNumberedSubRow = inBillableSection
+                                && row.Level == 1
+                                && IsBilledSplitRow(row.Description)
+                                && !string.IsNullOrWhiteSpace(row.Code)
+                                && row.Code.Trim().All(char.IsDigit);
                             <tr class="@RowCss(row.Level) @(hasChildren ? "lis-summary-has-children" : "") @(isNumberedSubRow ? "lis-row-dkgreen" : "")" data-lis-row="true" data-level="@row.Level" data-expanded="@(startExpanded ? "true" : "false")">
                                 <td class="lis-code-col sticky-col-1">@row.Code</td>
                                 <td class="desc-col sticky-col-2">
@@ -1720,14 +1758,14 @@ else if (activeTab == "summary")
                                 {
                                     if (column.IsYearTotal)
                                     {
-                                        <td class="count-cell year-total-cell">@(row.ByYear.TryGetValue(column.Year, out var yearTotal) ? yearTotal.ToString("N0") : "0")</td>
+                                        <td class="count-cell year-total-cell lis-total-col">@(row.ByYear.TryGetValue(column.Year, out var yearTotal) ? yearTotal.ToString("N0") : "0")</td>
                                     }
                                     else
                                     {
                                         <td class="count-cell">@(row.ByMonth.TryGetValue(column.Key, out var monthTotal) ? monthTotal.ToString("N0") : "0")</td>
                                     }
                                 }
-                                <td class="count-cell grand-total-cell">@row.Total.ToString("N0")</td>
+                                <td class="count-cell grand-total-cell lis-total-col">@row.Total.ToString("N0")</td>
                             </tr>
                         }
                         <tr class="grand-total-row">
@@ -1737,14 +1775,15 @@ else if (activeTab == "summary")
                             {
                                 if (column.IsYearTotal)
                                 {
-                                    <td class="count-cell">@(result.GrandTotalByYear.TryGetValue(column.Year, out var yearTotal) ? yearTotal.ToString("N0") : "0")</td>
+                                    @* lis-total-col for alignment only - the Grand Total row keeps its own band. *@
+                                    <td class="count-cell lis-total-col">@(result.GrandTotalByYear.TryGetValue(column.Year, out var yearTotal) ? yearTotal.ToString("N0") : "0")</td>
                                 }
                                 else
                                 {
                                     <td class="count-cell">@(result.GrandTotalByMonth.TryGetValue(column.Key, out var monthTotal) ? monthTotal.ToString("N0") : "0")</td>
                                 }
                             }
-                            <td class="count-cell">@result.GrandTotal.ToString("N0")</td>
+                            <td class="count-cell lis-total-col">@result.GrandTotal.ToString("N0")</td>
                         </tr>
                     </tbody>
                 </table>

@@ -13,9 +13,17 @@ public sealed class AnalysisRangeInfo
     public string? RunId { get; init; }
     public DateTime? InsertedDateTime { get; init; }
 
+    /// <summary>
+    /// The source workbook the figures were built from. Optional: only LIS Summary sets it today,
+    /// because it is the one report whose numbers trace back to a single named file. Pages that
+    /// leave it null render exactly as before.
+    /// </summary>
+    public string? SourceFileName { get; init; }
+
     public bool HasAny =>
         !string.IsNullOrWhiteSpace(WeekFolder)
         || !string.IsNullOrWhiteSpace(RunId)
+        || !string.IsNullOrWhiteSpace(SourceFileName)
         || InsertedDateTime.HasValue;
 
     /// <summary>

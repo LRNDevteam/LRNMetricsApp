@@ -6,6 +6,13 @@
     var groupNumber = 0;
     string? currentGroupKey = null;
     var monthly = Model.Periods.Any(x => x.IsYearTotal);
+
+    // Cells line up with Periods by index; this marks the ones under a year-subtotal column.
+    // pivot-year-total / pivot-grand-total mark the total columns so a page can band them the way
+    // Production Summary does. They carry no styling of their own, so the Denial Dashboard page,
+    // which does not opt in, renders exactly as before.
+    string YearTotalClass(int index) =>
+        index < Model.Periods.Count && Model.Periods[index].IsYearTotal ? " pivot-year-total" : string.Empty;
 }
 
 <div class="breakdown-pivot-shell">
@@ -59,17 +66,17 @@
                     <tr>
                         @foreach (var period in Model.Periods)
                         {
-                            <th class="pivot-period-title" colspan="2">@period.Label</th>
+                            <th class="pivot-period-title@(period.IsYearTotal ? " pivot-year-total" : "")" colspan="2">@period.Label</th>
                         }
                     </tr>
                     <tr>
                         @foreach (var period in Model.Periods)
                         {
-                            <th class="pivot-metric-title">No. of Claims</th>
-                            <th class="pivot-metric-title">Insurance Balance</th>
+                            <th class="pivot-metric-title@(period.IsYearTotal ? " pivot-year-total" : "")">No. of Claims</th>
+                            <th class="pivot-metric-title@(period.IsYearTotal ? " pivot-year-total" : "")">Insurance Balance</th>
                         }
-                        <th class="pivot-metric-title">No. of Claims</th>
-                        <th class="pivot-metric-title">Insurance Balance</th>
+                        <th class="pivot-metric-title pivot-grand-total">No. of Claims</th>
+                        <th class="pivot-metric-title pivot-grand-total">Insurance Balance</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -94,13 +101,15 @@
                                     }
                                     </div>
                                 </td>
-                                @foreach (var cell in row.Cells)
+                                @for (var ci = 0; ci < row.Cells.Count; ci++)
                                 {
-                                    <td class="text-end pivot-claims">@(cell.ClaimCount == 0 ? "-" : cell.ClaimCount.ToString("N0"))</td>
-                                    <td class="text-end pivot-balance">@Acct2(cell.DenialBalance)</td>
+                                    var cell = row.Cells[ci];
+                                    var yt = YearTotalClass(ci);
+                                    <td class="text-end pivot-claims@(yt)">@(cell.ClaimCount == 0 ? "-" : cell.ClaimCount.ToString("N0"))</td>
+                                    <td class="text-end pivot-balance@(yt)">@Acct2(cell.DenialBalance)</td>
                                 }
-                                <td class="text-end pivot-claims total-col">@(row.TotalClaimCount == 0 ? "-" : row.TotalClaimCount.ToString("N0"))</td>
-                                <td class="text-end pivot-balance total-col">@Acct2(row.TotalBalance)</td>
+                                <td class="text-end pivot-claims total-col pivot-grand-total">@(row.TotalClaimCount == 0 ? "-" : row.TotalClaimCount.ToString("N0"))</td>
+                                <td class="text-end pivot-balance total-col pivot-grand-total">@Acct2(row.TotalBalance)</td>
                             </tr>
                         }
                         else
@@ -108,13 +117,15 @@
                             <tr class="pivot-denial-row pivot-child-row" data-parent-group="@currentGroupKey">
                                 <td class="pivot-index pivot-freeze-1">@row.IndexLabel</td>
                                 <td class="pivot-label pivot-child-label pivot-freeze-2">@row.Label</td>
-                                @foreach (var cell in row.Cells)
+                                @for (var ci = 0; ci < row.Cells.Count; ci++)
                                 {
-                                    <td class="text-end pivot-claims">@(cell.ClaimCount == 0 ? "-" : cell.ClaimCount.ToString("N0"))</td>
-                                    <td class="text-end pivot-balance">@Acct2(cell.DenialBalance)</td>
+                                    var cell = row.Cells[ci];
+                                    var yt = YearTotalClass(ci);
+                                    <td class="text-end pivot-claims@(yt)">@(cell.ClaimCount == 0 ? "-" : cell.ClaimCount.ToString("N0"))</td>
+                                    <td class="text-end pivot-balance@(yt)">@Acct2(cell.DenialBalance)</td>
                                 }
-                                <td class="text-end pivot-claims total-col">@(row.TotalClaimCount == 0 ? "-" : row.TotalClaimCount.ToString("N0"))</td>
-                                <td class="text-end pivot-balance total-col">@Acct2(row.TotalBalance)</td>
+                                <td class="text-end pivot-claims total-col pivot-grand-total">@(row.TotalClaimCount == 0 ? "-" : row.TotalClaimCount.ToString("N0"))</td>
+                                <td class="text-end pivot-balance total-col pivot-grand-total">@Acct2(row.TotalBalance)</td>
                             </tr>
                         }
                     }
@@ -122,13 +133,15 @@
                 <tfoot>
                     <tr class="pivot-footer-row">
                         <th class="pivot-footer-title pivot-freeze-both" colspan="2">Total</th>
-                        @foreach (var total in Model.TotalsByPeriod)
+                        @for (var ti = 0; ti < Model.TotalsByPeriod.Count; ti++)
                         {
-                            <th class="text-end">@total.ClaimCount.ToString("N0")</th>
-                            <th class="text-end">@Acct2(total.DenialBalance)</th>
+                            var total = Model.TotalsByPeriod[ti];
+                            var yt = YearTotalClass(ti);
+                            <th class="text-end@(yt)">@total.ClaimCount.ToString("N0")</th>
+                            <th class="text-end@(yt)">@Acct2(total.DenialBalance)</th>
                         }
-                        <th class="text-end">@Model.GrandTotalClaimCount.ToString("N0")</th>
-                        <th class="text-end">@Acct2(Model.GrandTotalBalance)</th>
+                        <th class="text-end pivot-grand-total">@Model.GrandTotalClaimCount.ToString("N0")</th>
+                        <th class="text-end pivot-grand-total">@Acct2(Model.GrandTotalBalance)</th>
                     </tr>
                 </tfoot>
             </table>
