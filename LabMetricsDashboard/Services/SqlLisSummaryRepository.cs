@@ -2921,6 +2921,10 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				18 => "Certus",
 				19 => "Augustus",
 				20 => "NWL",
+				// VariantX reports its LIS on Cove's template: the same Final Status / Billed-Not /
+				// Sub Status shape, so it also inherits Cove's date columns (DateOfCollection,
+				// ReceivedDate, ValidatedDate) and panel/clinic/provider filters.
+				25 => "Cove",
 				_ => ResolveLogicSheetByName(labName)
 			};
 		}
@@ -2936,6 +2940,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		if (n.Contains("CERTUS")) return "Certus";
 		if (n.Contains("PHILIFE")) return "PhiLife";
 		if (n.Contains("RISINGTIDES") || n.Contains("RISING")) return "Rising Tides";
+		// Kept beside Cove because it is Cove's template: see the LabId 25 note above.
+		if (n.Contains("VARIANTX") || n.Contains("VARIANT")) return "Cove";
 		if (n.Contains("COVE")) return "Cove";
 		if (n.Contains("ELIXIR")) return "Elixir";
 		if (n.Contains("INHEALTH")) return "InHealth";

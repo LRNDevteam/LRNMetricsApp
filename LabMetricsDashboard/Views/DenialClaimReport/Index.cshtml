@@ -32,6 +32,14 @@
         </a>
     </div>
 
+    @* Week range and RunId, in the same shape Production Report uses, so the page states the window
+       it reports on and the load that produced it rather than leaving both to be inferred. *@
+    @await Html.PartialAsync("_AnalysisRangeBanner", new LabMetricsDashboard.Models.AnalysisRangeInfo
+    {
+        WeekFolder = Model.WeekRange,
+        RunId = Model.RunId
+    })
+
     @if (TempData["DenialClaimReportSuccess"] is string ok)
     {
         <div class="alert alert-success py-2 d-flex align-items-center gap-2">
@@ -80,8 +88,9 @@
     {
         <div class="alert alert-info py-2" style="font-size:.85rem;">
             <i class="bi bi-info-circle"></i>
-            @Model.UndatedGroups.ToString("N0") denial group(s) have no Denial Date, so they cannot appear in any
-            month or week. They are counted in the totals above.
+            @Model.UndatedGroups.ToString("N0") denial group(s) have no Denial Date, so they cannot sit in a
+            month or week column. They are counted in the totals above and shown in the summaries&rsquo;
+            <strong>Other</strong> column.
         </div>
     }
 

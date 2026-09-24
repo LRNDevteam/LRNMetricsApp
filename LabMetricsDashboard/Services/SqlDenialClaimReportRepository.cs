@@ -4,6 +4,17 @@ using Microsoft.Data.SqlClient;
 
 namespace LabMetricsDashboard.Services;
 
+/// <summary>
+/// How far a lab's <c>ClaimLevelData</c> is loaded: the newest WeekFolder as stored
+/// ("09.09.2026 - 09.15.2026"), its parsed end date, and the run that loaded it.
+/// </summary>
+public sealed record ClaimDataWeekRange(string? WeekFolder, DateTime? LoadedThrough, string? RunId = null)
+{
+    public static readonly ClaimDataWeekRange None = new(null, null, null);
+
+    public bool HasRange => !string.IsNullOrWhiteSpace(WeekFolder);
+}
+
 public interface IDenialClaimReportRepository
 {
     /// <summary>
@@ -13,17 +24,17 @@ public interface IDenialClaimReportRepository
     Task<IReadOnlyList<DenialSummaryGroup>> GetDenialSummaryAsync(string connectionString, CancellationToken ct);
 
     /// <summary>
-    /// The last date the lab's claim data actually covers, taken from the newest
-    /// <c>ClaimLevelData.WeekFolder</c> range end. Null when the column is absent or unparseable.
+    /// How far the lab's claim data is loaded: the newest <c>ClaimLevelData.WeekFolder</c> as it is
+    /// stored, and its parsed range end. Both null when the column is absent or unparseable.
     /// </summary>
     /// <remarks>
     /// The weekly summary picks its columns from the newest week-starts present in the DENIAL
     /// dates, which runs ahead of the load: a single denial stamped inside the current week opens a
     /// column for a week nothing was loaded for, and pushes the oldest real week off the other end.
     /// Clamping to the loaded-through date is what keeps the four columns on the four weeks the data
-    /// covers.
+    /// covers. The raw folder text is kept so the page can show the range it is reporting on.
     /// </remarks>
-    Task<DateTime?> GetClaimDataLoadedThroughAsync(string connectionString, CancellationToken ct);
+    Task<ClaimDataWeekRange> GetClaimDataWeekRangeAsync(string connectionString, CancellationToken ct);
 
     /// <summary>
     /// A page of denied claims for the Claim Level tab, filtered to a denial code and optionally an
@@ -184,26 +195,39 @@ GROUP BY LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [{payerCol}]), ''))),
     }
 
     /// <inheritdoc />
-    public async Task<DateTime?> GetClaimDataLoadedThroughAsync(string connectionString, CancellationToken ct)
+    public async Task<ClaimDataWeekRange> GetClaimDataWeekRangeAsync(string connectionString, CancellationToken ct)
     {
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
 
-        if (!await TableExistsAsync(conn, "ClaimLevelData", ct)) return null;
+        if (!await TableExistsAsync(conn, "ClaimLevelData", ct)) return ClaimDataWeekRange.None;
 
         var cols = await GetColumnsAsync(conn, "ClaimLevelData", ct);
-        if (!cols.Contains("WeekFolder")) return null;
+        if (!cols.Contains("WeekFolder")) return ClaimDataWeekRange.None;
 
         // WeekFolder is text in "MM.dd.yyyy - MM.dd.yyyy" form, so MAX() on the column would sort
         // lexically and put "12.01.2025" after "09.15.2026". The distinct list is one row per loaded
         // week - a handful - so it is parsed here instead.
-        const string sql = @"
-SELECT DISTINCT LTRIM(RTRIM(CONVERT(nvarchar(100), [WeekFolder])))
-FROM   dbo.ClaimLevelData
-WHERE  [WeekFolder] IS NOT NULL
-  AND  LTRIM(RTRIM(CONVERT(nvarchar(100), [WeekFolder]))) <> '';";
+        //
+        // RunId comes back with it so the header can name the run behind the figures, the way
+        // Production Report does. A week can carry more than one run when a load is repeated;
+        // MAX picks the newest, because the id is "R<yyyyMMdd><lab><seq>" and so sorts by date.
+        // A lab whose table predates the column simply gets no run id rather than a failed query.
+        var runIdExpr = cols.Contains("RunId")
+            ? "MAX(LTRIM(RTRIM(CONVERT(nvarchar(100), [RunId]))))"
+            : "CAST(NULL AS nvarchar(100))";
+
+        var sql = $@"
+SELECT  LTRIM(RTRIM(CONVERT(nvarchar(100), [WeekFolder]))) AS WeekFolder,
+        {runIdExpr}                                        AS RunId
+FROM    dbo.ClaimLevelData
+WHERE   [WeekFolder] IS NOT NULL
+  AND   LTRIM(RTRIM(CONVERT(nvarchar(100), [WeekFolder]))) <> ''
+GROUP BY LTRIM(RTRIM(CONVERT(nvarchar(100), [WeekFolder])));";
 
         DateTime? latest = null;
+        string? latestFolder = null;
+        string? latestRunId = null;
 
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -211,14 +235,17 @@ WHERE  [WeekFolder] IS NOT NULL
         {
             if (reader.IsDBNull(0)) continue;
 
-            if (AnalysisRangeInfo.TryParseWeekRangeEnd(reader.GetString(0), out var end)
+            var folder = reader.GetString(0);
+            if (AnalysisRangeInfo.TryParseWeekRangeEnd(folder, out var end)
                 && (latest is null || end > latest.Value))
             {
                 latest = end;
+                latestFolder = folder;
+                latestRunId = reader.IsDBNull(1) ? null : reader.GetString(1);
             }
         }
 
-        return latest;
+        return new ClaimDataWeekRange(latestFolder, latest, latestRunId);
     }
 
     // ── Claim Level tab ───────────────────────────────────────────────────────

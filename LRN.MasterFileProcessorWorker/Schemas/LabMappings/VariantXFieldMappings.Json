@@ -1,0 +1,926 @@
+{
+  "LabId": 25,
+  "LabName": "VariantX",
+  "DatabaseName": "VariantX_LRN",
+  "_comment": "BulkCopyToTable starts FALSE for both levels. Run sql/VariantX/01_CreateTables.sql against the lab database, confirm a CSV run produces the expected columns, then flip it. LabId 25 is provisional - confirm against LRNMaster.dbo.Labs before use.",
+  "ClaimLevel": {
+    "Enabled": true,
+    "CreateCsv": true,
+    "BulkCopyToTable": true,
+    "TruncateBeforeLoad": true,
+    "BatchSize": 10000,
+    "BulkCopyTimeoutSeconds": 900,
+    "SqlTableName": "dbo.ClaimLevelData",
+    "TvpTypeName": "dbo.ClaimLevelDataTVP",
+    "SprocName": "dbo.usp_BulkInsertClaimLevelData",
+    "FileTypeKey": "claimlevel",
+    "Fields": [
+      {
+        "CsvHeader": "LabID",
+        "SqlColumn": "LabID",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "LabName",
+        "SqlColumn": "LabName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "SourceFileID",
+        "SqlColumn": "SourceFileID",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "IngestedOn",
+        "SqlColumn": "IngestedOn",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "CsvRowHash",
+        "SqlColumn": "CsvRowHash",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ClaimID",
+        "SqlColumn": "ClaimID",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "AccessionNumber",
+        "SqlColumn": "AccessionNumber",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PanelName",
+        "SqlColumn": "PanelName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PlanType",
+        "SqlColumn": "PlanType",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PatientID",
+        "SqlColumn": "PatientID",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PatientFirstName",
+        "SqlColumn": "PatientFirstName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PatientLastName",
+        "SqlColumn": "PatientLastName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PatientDOB",
+        "SqlColumn": "PatientDOB",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "DateofService",
+        "SqlColumn": "DateofService",
+        "IncludeInHash": true,
+        "DataType": "date"
+      },
+      {
+        "CsvHeader": "AgingDOS",
+        "SqlColumn": "AgingDOS",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "EndDOS",
+        "SqlColumn": "EndDOS",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ChargeEnteredDate",
+        "SqlColumn": "ChargeEnteredDate",
+        "IncludeInHash": true,
+        "DataType": "date"
+      },
+      {
+        "CsvHeader": "AgingDOE",
+        "SqlColumn": "AgingDOE",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Facility",
+        "SqlColumn": "Facility",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ReferringProviderFirstName",
+        "SqlColumn": "ReferringProviderFirstName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ReferringProviderLastName",
+        "SqlColumn": "ReferringProviderLastName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "RendPhyFirstName",
+        "SqlColumn": "RendPhyFirstName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "RendPhyLastName",
+        "SqlColumn": "RendPhyLastName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ServLocCode",
+        "SqlColumn": "ServLocCode",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ServLocation",
+        "SqlColumn": "ServLocation",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PayerName_Raw",
+        "SqlColumn": "PayerName_Raw",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PayerName",
+        "SqlColumn": "PayerName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Payer_Code",
+        "SqlColumn": "Payer_Code",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Payer_Common_Code",
+        "SqlColumn": "Payer_Common_Code",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Payer_Group_Code",
+        "SqlColumn": "Payer_Group_Code",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Global_Payer_ID",
+        "SqlColumn": "Global_Payer_ID",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "SubscriberId",
+        "SqlColumn": "SubscriberId",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "FirstBilledDate",
+        "SqlColumn": "FirstBilledDate",
+        "IncludeInHash": true,
+        "DataType": "date"
+      },
+      {
+        "CsvHeader": "BilledWeek",
+        "SqlColumn": "BilledWeek",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ClaimLevelCPT",
+        "SqlColumn": "ClaimLevelCPT",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Modifier",
+        "SqlColumn": "Modifier",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "CheckDate",
+        "SqlColumn": "CheckDate",
+        "IncludeInHash": true,
+        "DataType": "date"
+      },
+      {
+        "CsvHeader": "DODWeek",
+        "SqlColumn": "DODWeek",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "DenialDate",
+        "SqlColumn": "DenialDate",
+        "IncludeInHash": true,
+        "DataType": "date"
+      },
+      {
+        "CsvHeader": "DeniedWeek",
+        "SqlColumn": "DeniedWeek",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "DenialCode",
+        "SqlColumn": "DenialCode",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "LineLevelDenialCode",
+        "SqlColumn": "LineLevelDenialCode",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ClaimLevelDenialCode",
+        "SqlColumn": "ClaimLevelDenialCode",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "LineLevelICD",
+        "SqlColumn": "LineLevelICD",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ClaimLevelICD",
+        "SqlColumn": "ClaimLevelICD",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "POS",
+        "SqlColumn": "POS",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "TOS",
+        "SqlColumn": "TOS",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "LineLevelCPT",
+        "SqlColumn": "LineLevelCPT",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "CPTCodeXUnitsXModifier",
+        "SqlColumn": "CPTCodeXUnitsXModifier",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ChargeAmount",
+        "SqlColumn": "ChargeAmount",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "AllowedAmount",
+        "SqlColumn": "AllowedAmount",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "InsurancePayment",
+        "SqlColumn": "InsurancePayment",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "PatientPayment",
+        "SqlColumn": "PatientPayment",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "TotalPayments",
+        "SqlColumn": "TotalPayments",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "InsuranceBalance",
+        "SqlColumn": "InsuranceBalance",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "PatientBalance",
+        "SqlColumn": "PatientBalance",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "TotalBalance",
+        "SqlColumn": "TotalBalance",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "InsuranceAdjustments",
+        "SqlColumn": "InsuranceAdjustments",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "PatientAdjustments",
+        "SqlColumn": "PatientAdjustments",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "TotalWO",
+        "SqlColumn": "TotalWO",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "BillingOption",
+        "SqlColumn": "BillingOption",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "CurrentStatus",
+        "SqlColumn": "CurrentStatus",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "BatchNo",
+        "SqlColumn": "BatchNo",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "CreatedBy",
+        "SqlColumn": "CreatedBy",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "UpdatedOn",
+        "SqlColumn": "UpdatedOn",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "UpdatedBy",
+        "SqlColumn": "UpdatedBy",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PaymentPercent",
+        "SqlColumn": "PaymentPercent",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "BillStatus",
+        "SqlColumn": "BillStatus",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "FullyPaidCount",
+        "SqlColumn": "FullyPaidCount",
+        "IncludeInHash": true,
+        "DataType": "int"
+      },
+      {
+        "CsvHeader": "FullyPaidAmount",
+        "SqlColumn": "FullyPaidAmount",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "AdjucticatedCount",
+        "SqlColumn": "AdjucticatedCount",
+        "IncludeInHash": true,
+        "DataType": "int"
+      },
+      {
+        "CsvHeader": "AdjucticatedAmount",
+        "SqlColumn": "AdjucticatedAmount",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "Bucket30Count",
+        "SqlColumn": "Bucket30Count",
+        "IncludeInHash": true,
+        "DataType": "int"
+      },
+      {
+        "CsvHeader": "Bucket30Amount",
+        "SqlColumn": "Bucket30Amount",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "Bucket60Count",
+        "SqlColumn": "Bucket60Count",
+        "IncludeInHash": true,
+        "DataType": "int"
+      },
+      {
+        "CsvHeader": "Bucket60Amount",
+        "SqlColumn": "Bucket60Amount",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "ClaimStatus",
+        "SqlColumn": "ClaimStatus",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "DaystoDOS",
+        "SqlColumn": "DaystoDOS",
+        "IncludeInHash": true,
+        "DataType": "int"
+      },
+      {
+        "CsvHeader": "RollingDays",
+        "SqlColumn": "RollingDays",
+        "IncludeInHash": true,
+        "DataType": "int"
+      },
+      {
+        "CsvHeader": "DaystoBill",
+        "SqlColumn": "DaystoBill",
+        "IncludeInHash": true,
+        "DataType": "int"
+      },
+      {
+        "CsvHeader": "DaystoPost",
+        "SqlColumn": "DaystoPost",
+        "IncludeInHash": true,
+        "DataType": "int"
+      }
+    ]
+  },
+  "LineLevel": {
+    "Enabled": true,
+    "CreateCsv": true,
+    "BulkCopyToTable": true,
+    "TruncateBeforeLoad": true,
+    "BatchSize": 10000,
+    "BulkCopyTimeoutSeconds": 900,
+    "SqlTableName": "dbo.LineLevelData",
+    "TvpTypeName": "dbo.LineLevelDataTVP",
+    "SprocName": "dbo.usp_BulkInsertLineLevelData",
+    "FileTypeKey": "linelevel",
+    "Fields": [
+      {
+        "CsvHeader": "LabID",
+        "SqlColumn": "LabID",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "LabName",
+        "SqlColumn": "LabName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "SourceFileID",
+        "SqlColumn": "SourceFileID",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "IngestedOn",
+        "SqlColumn": "IngestedOn",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "CsvRowHash",
+        "SqlColumn": "CsvRowHash",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ClaimID",
+        "SqlColumn": "ClaimID",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "T/F",
+        "SqlColumn": "T_F",
+        "IncludeInHash": false
+      },
+      {
+        "CsvHeader": "LineLevelUID",
+        "SqlColumn": "LineLevelUID",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "AccessionNumber",
+        "SqlColumn": "AccessionNumber",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Panelname",
+        "SqlColumn": "Panelname",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PlanType",
+        "SqlColumn": "PlanType",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PatientID",
+        "SqlColumn": "PatientID",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PatientFirstName",
+        "SqlColumn": "PatientFirstName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PatientLastName",
+        "SqlColumn": "PatientLastName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PatientDOB",
+        "SqlColumn": "PatientDOB",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "DateofService",
+        "SqlColumn": "DateofService",
+        "IncludeInHash": true,
+        "DataType": "date"
+      },
+      {
+        "CsvHeader": "AgingDOS",
+        "SqlColumn": "AgingDOS",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "EndDOS",
+        "SqlColumn": "EndDOS",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ChargeEnteredDate",
+        "SqlColumn": "ChargeEnteredDate",
+        "IncludeInHash": true,
+        "DataType": "date"
+      },
+      {
+        "CsvHeader": "AgingDOE",
+        "SqlColumn": "AgingDOE",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Facility",
+        "SqlColumn": "Facility",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ReferringProviderLastName",
+        "SqlColumn": "ReferringProviderLastName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ReferringProviderFirstName",
+        "SqlColumn": "ReferringProviderFirstName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "RendPhyFirstName",
+        "SqlColumn": "RendPhyFirstName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "RendPhyLastName",
+        "SqlColumn": "RendPhyLastName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ServLocCode",
+        "SqlColumn": "ServLocCode",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ServLocation",
+        "SqlColumn": "ServLocation",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PayerName_Raw",
+        "SqlColumn": "PayerName_Raw",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PayerName",
+        "SqlColumn": "PayerName",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Payer_Code",
+        "SqlColumn": "Payer_Code",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Payer_Common_Code",
+        "SqlColumn": "Payer_Common_Code",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Payer_Group_Code",
+        "SqlColumn": "Payer_Group_Code",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Global_Payer_ID",
+        "SqlColumn": "Global_Payer_ID",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "SubscriberId",
+        "SqlColumn": "SubscriberId",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "FirstBilledDate",
+        "SqlColumn": "FirstBilledDate",
+        "IncludeInHash": true,
+        "DataType": "date"
+      },
+      {
+        "CsvHeader": "BilledWeek",
+        "SqlColumn": "BilledWeek",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "CPTCode",
+        "SqlColumn": "CPTCode",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Units",
+        "SqlColumn": "Units",
+        "IncludeInHash": true,
+        "DataType": "int"
+      },
+      {
+        "CsvHeader": "Modifier",
+        "SqlColumn": "Modifier",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "CPTXMODXUnits",
+        "SqlColumn": "CPTXMODXUnits",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "LineLevelCPT",
+        "SqlColumn": "LineLevelCPT",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "CheckDate",
+        "SqlColumn": "CheckDate",
+        "IncludeInHash": true,
+        "DataType": "date"
+      },
+      {
+        "CsvHeader": "DODWeek",
+        "SqlColumn": "DODWeek",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "DenialDate",
+        "SqlColumn": "DenialDate",
+        "IncludeInHash": true,
+        "DataType": "date"
+      },
+      {
+        "CsvHeader": "DeniedWeek",
+        "SqlColumn": "DeniedWeek",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "DenialCode",
+        "SqlColumn": "DenialCode",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "LineLevelDenialCode",
+        "SqlColumn": "LineLevelDenialCode",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ICDCode",
+        "SqlColumn": "ICDCode",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ClaimLevelICDCode",
+        "SqlColumn": "ClaimLevelICDCode",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "POS",
+        "SqlColumn": "POS",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "TOS",
+        "SqlColumn": "TOS",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ChargeAmount",
+        "SqlColumn": "ChargeAmount",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "ChargeAmountPerUnit",
+        "SqlColumn": "ChargeAmountPerUnit",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "AllowedAmount",
+        "SqlColumn": "AllowedAmount",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "AllowedAmountPerUnit",
+        "SqlColumn": "AllowedAmountPerUnit",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "InsurancePayment",
+        "SqlColumn": "InsurancePayment",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "InsurancePaymentPerUnit",
+        "SqlColumn": "InsurancePaymentPerUnit",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "PatientPayment",
+        "SqlColumn": "PatientPayment",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "PatientPaymentPerUnit",
+        "SqlColumn": "PatientPaymentPerUnit",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "InsuranceBalance",
+        "SqlColumn": "InsuranceBalance",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "PatientBalance",
+        "SqlColumn": "PatientBalance",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "PatientBalancePerUnit",
+        "SqlColumn": "PatientBalancePerUnit",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "TotalBalance",
+        "SqlColumn": "TotalBalance",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "InsuranceAdjustments",
+        "SqlColumn": "InsuranceAdjustments",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "PatientAdjustments",
+        "SqlColumn": "PatientAdjustments",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "TotalAdjustments",
+        "SqlColumn": "TotalAdjustments",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "BillingOption",
+        "SqlColumn": "BillingOption",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "CPTStatus",
+        "SqlColumn": "CPTStatus",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "CurrentStatus",
+        "SqlColumn": "CurrentStatus",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PaymentPercent",
+        "SqlColumn": "PaymentPercent",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      },
+      {
+        "CsvHeader": "BillStatus",
+        "SqlColumn": "BillStatus",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "CreatedOn",
+        "SqlColumn": "CreatedOn",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "CreatedBy",
+        "SqlColumn": "CreatedBy",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "UpdatedOn",
+        "SqlColumn": "UpdatedOn",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "UpdatedBy",
+        "SqlColumn": "UpdatedBy",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ClaimStatus",
+        "SqlColumn": "ClaimStatus",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PayStatus",
+        "SqlColumn": "PayStatus",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "DaystoDOS",
+        "SqlColumn": "DaystoDOS",
+        "IncludeInHash": true,
+        "DataType": "int"
+      },
+      {
+        "CsvHeader": "RollingDays",
+        "SqlColumn": "RollingDays",
+        "IncludeInHash": true,
+        "DataType": "int"
+      },
+      {
+        "CsvHeader": "DaystoBill",
+        "SqlColumn": "DaystoBill",
+        "IncludeInHash": true,
+        "DataType": "int"
+      },
+      {
+        "CsvHeader": "DaystoPost",
+        "SqlColumn": "DaystoPost",
+        "IncludeInHash": true,
+        "DataType": "int"
+      },
+      {
+        "CsvHeader": "ICDPointer",
+        "SqlColumn": "ICDPointer",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "PaymentPostedDate",
+        "SqlColumn": "PaymentPostedDate",
+        "IncludeInHash": true,
+        "DataType": "date"
+      },
+      {
+        "CsvHeader": "UID",
+        "SqlColumn": "UID",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Source",
+        "SqlColumn": "Source",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "InsuranceBalance_Decimal",
+        "SqlColumn": "InsuranceBalance_Decimal",
+        "IncludeInHash": true,
+        "DataType": "decimal"
+      }
+    ]
+  }
+}

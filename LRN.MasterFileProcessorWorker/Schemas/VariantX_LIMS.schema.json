@@ -1,0 +1,169 @@
+{
+	"SchemaName": "LIMSMaster",
+	"SheetName": "LIMS Data",
+	"HeaderRow": 1,
+	"Columns": [
+		{
+			"ExcelColName": "Accession #",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Accession"
+		},
+		{
+			"ExcelColName": "T/F",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "TrueFalse"
+		},
+		{
+			"ExcelColName": "Receive Date",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "RequestReceivedDate"
+		},
+		{
+			"ExcelColName": "Order Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "OrderStatus"
+		},
+		{
+			"ExcelColName": "Last Name",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PatientLastName"
+		},
+		{
+			"ExcelColName": "First Name",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PatientFirstName"
+		},
+		{
+			"ExcelColName": "Date of Birth",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "DateOfBirth"
+		},
+		{
+			"ExcelColName": "Gender",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Gender"
+		},
+		{
+			"ExcelColName": "Address",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "StreetAddress"
+		},
+		{
+			"ExcelColName": "Date of Collection",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "RequestCollectDate"
+		},
+		{
+			"ExcelColName": "Collection Week",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "CollectionWeek"
+		},
+		{
+			"ExcelColName": "Test Type",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "TestType"
+		},
+		{
+			"ExcelColName": "ICD-10 Code",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ICD10"
+		},
+		{
+			"ExcelColName": "Physician Name",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PhysicianName"
+		},
+		{
+			"ExcelColName": "NPI#",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "NPI"
+		},
+		{
+			"ExcelColName": "Facility",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "FacilityName"
+		},
+		{
+			"ExcelColName": "Sales Rep",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SaleRepName"
+		},
+		{
+			"ExcelColName": "Insurance Name",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PrimaryInsurance"
+		},
+		{
+			"ExcelColName": "Policy Number",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PolicyNumber"
+		},
+		{
+			"ExcelColName": "Comments",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Comments"
+		},
+		{
+			"ExcelColName": "Charges",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Charges"
+		},
+		{
+			"ExcelColName": "Collected",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Collected"
+		},
+		{
+			"ExcelColName": "LRN Result Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ResultStatus"
+		},
+		{
+			"ExcelColName": "LRN Sample Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SampleStatus"
+		},
+		{
+			"ExcelColName": "LRN Bill Category",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BillCategory"
+		},
+		{
+			"ExcelColName": "LRN Sub Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SubStatus"
+		},
+		{
+			"ExcelColName": "Billed Date",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "BilledDate"
+		}
+	]
+}

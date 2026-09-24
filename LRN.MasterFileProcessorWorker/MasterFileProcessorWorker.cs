@@ -1805,7 +1805,8 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			_fileLog.Info($"Lab {lab.LabId}: file status log written: {localLogPath}");
 
 			// FIX: Upload even if selected == null; use site driveId (resolved once)
-			if (IsSharePointFileUploadEnabled() && _opt.SharePoint.Enabled && !string.IsNullOrWhiteSpace(_opt.SharePoint.FileStatusLogUploadFolderPath))
+			if (IsSharePointFileUploadEnabled() && _opt.SharePoint.Enabled && _opt.SharePoint.UploadFileStatusLog
+				&& !string.IsNullOrWhiteSpace(_opt.SharePoint.FileStatusLogUploadFolderPath))
 			{
 				var driveId = siteDriveId;
 				if (string.IsNullOrWhiteSpace(driveId))

@@ -104,6 +104,18 @@ public sealed class SharePointOptions
     // Where to upload filestatus_*.csv (path under drive root). Default: "Data Analysis"
     public string FileStatusLogUploadFolderPath { get; set; } = "Data Analysis";
 
+    /// <summary>
+    /// If true, the per-lab file-status log is uploaded to
+    /// <see cref="FileStatusLogUploadFolderPath"/>. The log is still written locally either way.
+    /// </summary>
+    /// <remarks>
+    /// The upload used to be switched off only by blanking the folder path, which reads as
+    /// "unconfigured" rather than "deliberately off" - and the path defaults to "Data Analysis",
+    /// so a config that simply omitted the key turned the upload back on. This says which was
+    /// meant, matching <see cref="UploadMasterProcessorLog"/> and <see cref="UploadOutputs"/>.
+    /// </remarks>
+    public bool UploadFileStatusLog { get; set; } = true;
+
     // ---------------- Output upload (Payer Policy Validation Report) ----------------
 
     /// <summary>
