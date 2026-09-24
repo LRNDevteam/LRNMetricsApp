@@ -35,6 +35,7 @@ public class PhiExecutiveSummaryController : Controller
             ["PCR_Dx_CO"]         = "PCR",
             ["PCRAL"]             = "PCR",
             ["PCRCO"]             = "PCR",
+            ["LRNLabDemo"]        = "PCR",
             ["Beech_Tree"]        = "BT",
             ["RisingTides"]       = "RT",
         };

@@ -1112,6 +1112,19 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			};
 		}
 
+		if (IsVariantX(labName, labId))
+		{
+			// VariantX reports on Cove's sheet, but its status lives in the "LRN ..." LIMS columns.
+			// Named explicitly: the shared LIMSMaster shape (Create_LIMSMaster.sql) always carries a
+			// FinalStatus column that VariantX leaves empty, and the Cove candidate order would pick
+			// it - every template row then counted 0 while the Grand Total was right.
+			fields["Final Status"] = FirstExisting(columns, "SampleStatus");
+			fields["Billed/Not"] = FirstExisting(columns, "BillCategory");
+			fields["BilledOrNot"] = fields["Billed/Not"];
+			fields["Sub Status"] = FirstExisting(columns, "SubStatus");
+			fields["Claim Status"] = null;
+		}
+
 		var countDistinctColumn = FirstExisting(columns, CountDistinctCandidatesFor(logicSheet));
 
 		return new DimensionProfile(logicSheet, dateColumn, countDistinctColumn, incorrectDosColumn, fields);
@@ -1398,6 +1411,12 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				return configuredDateColumn;
 			}
 
+			var alternateDateColumn = ResolveAlternateDateColumn(logicSheet, normalized);
+			if (alternateDateColumn is not null && columns.Contains(alternateDateColumn))
+			{
+				return alternateDateColumn;
+			}
+
 			throw new InvalidOperationException($"{DateTypeLabel(normalized)} date column '{configuredDateColumn}' was not found in dbo.LIMSMaster for {logicSheet}.");
 		}
 
@@ -1444,6 +1463,19 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			("Augustus", "Resulted") or ("NWL", "Resulted") or ("Certus", "Resulted") => "ResultDate",
 			("Certus", "Collected") => "ReqCollectDate",
 			("Certus", "Received") => "ReqReceivedDate",
+			_ => null
+		};
+
+	/// <summary>
+	/// Second choice when a sheet's configured date column is absent. VariantX reports on Cove's
+	/// sheet but its LIMSMaster names the dates RequestCollectDate / RequestReceivedDate. It has no
+	/// resulted date, so "Resulted" still fails with the configured-column message.
+	/// </summary>
+	private static string? ResolveAlternateDateColumn(string logicSheet, string dateType)
+		=> (logicSheet, dateType) switch
+		{
+			("Cove", "Collected") => "RequestCollectDate",
+			("Cove", "Received") => "RequestReceivedDate",
 			_ => null
 		};
 
@@ -1803,6 +1835,11 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			DateColumn(columns, "DateOfCollection", "DateOfCollection", "DateOfCollection"),
 			DateColumn(columns, "ReceivedDate", "ReceivedDate", "ReceivedDate"),
 			DateColumn(columns, "ValidatedDate", "ValidatedDate", "ValidatedDate"),
+			// VariantX's names for the same data on Cove's sheet; absent columns are dropped.
+			DateColumn(columns, "RequestCollectDate", "RequestCollectDate", "RequestCollectDate"),
+			DateColumn(columns, "RequestReceivedDate", "RequestReceivedDate", "RequestReceivedDate"),
+			TextColumn(columns, "SampleStatus", "SampleStatus", "SampleStatus"),
+			TextColumn(columns, "ResultStatus", "ResultStatus", "ResultStatus"),
 			TextColumn(columns, "ClientStatus", "ClientStatus", "ClientStatus"),
 			TextColumn(columns, "FirstName", "FirstName", "FirstName", "PatientFirstName"),
 			TextColumn(columns, "LastName", "LastName", "LastName", "PatientLastName"),
@@ -2930,6 +2967,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		}
 		return ResolveLogicSheetByName(labName);
 	}
+
+	private static bool IsVariantX(string labName, int? labId)
+		=> labId == 25 || CompareKey(labName).Contains("VARIANT");
 
 	private static string ResolveLogicSheetByName(string labName)
 	{
