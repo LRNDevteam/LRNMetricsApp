@@ -453,11 +453,19 @@ public sealed class DenialClaimReportController : Controller
     ///   <item><b>false</b> - they roll forward into Previous Week and the workbook becomes the new
     ///   Current Week. This is the weekly cycle, and it is the default because it loses nothing.</item>
     /// </list>
+    /// Ignored when <paramref name="bucket"/> is Previous Week.
+    /// </param>
+    /// <param name="bucket">Which tab the workbook is being imported into - Current or Previous.</param>
+    /// <param name="previousMode">
+    /// Previous Week only: <b>append</b> (the default) keeps the rows already there and adds the
+    /// workbook beside them; <b>override</b> empties Previous Week first. A back-dated week is
+    /// normally being topped up rather than rewritten, so append is what an unanswered choice means.
     /// </param>
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> UploadInsights(string? lab, IFormFile? insightFile,
-                                                    bool replaceCurrentWeek, CancellationToken ct)
+                                                    bool replaceCurrentWeek, string? bucket,
+                                                    string? previousMode, CancellationToken ct)
     {
         if (!CanEditInsights())
             return Redirect(InsightError("You do not have permission to import denial insights.", lab));
@@ -490,12 +498,23 @@ public sealed class DenialClaimReportController : Controller
                 labName));
         }
 
+        var targetBucket = DenialInsightBuckets.Normalize(bucket);
+        var intoPrevious = targetBucket == DenialInsightBuckets.Previous;
+
+        // Previous Week rows are dated to the week before the one in progress, not to today, or the
+        // import would file last week's discussion under this week and land in the wrong group.
         var weekStart = SqlDenialClaimReportRepository.WeekStartOf(DateTime.Today);
+        if (intoPrevious) weekStart = weekStart.AddDays(-7);
+
         foreach (var row in validation.Rows)
         {
-            row.Bucket = DenialInsightBuckets.Current;
+            row.Bucket = targetBucket;
             row.WeekStart = weekStart;
         }
+
+        if (intoPrevious)
+            return await ImportIntoPreviousWeekAsync(
+                connectionString, labName, validation, previousMode, weekStart, ct);
 
         try
         {
@@ -537,6 +556,60 @@ public sealed class DenialClaimReportController : Controller
         {
             _logger.LogError(ex, "Denial insight import failed for lab {Lab}.", labName);
             return Redirect(InsightError("The import failed and nothing was saved.", labName));
+        }
+    }
+
+    /// <summary>
+    /// The Previous Week half of <see cref="UploadInsights"/>: the client sends a back-dated week
+    /// late, or sends more of a week already loaded.
+    /// </summary>
+    /// <remarks>
+    /// Unlike Current Week, neither mode rolls anything forward - Previous Week is the end of the
+    /// line, so there is nowhere for its rows to go. Append leaves every other week there untouched
+    /// and upserts on (week, denial code, payer), so re-sending a corrected workbook refreshes those
+    /// rows instead of stacking a second copy of them. Override empties the whole tab first, every
+    /// retained week of it, which is why the panel says so and the button is red.
+    /// </remarks>
+    private async Task<IActionResult> ImportIntoPreviousWeekAsync(
+        string connectionString, string labName, DenialInsightValidationResult validation,
+        string? previousMode, DateTime weekStart, CancellationToken ct)
+    {
+        var overwrite = string.Equals(previousMode, "override", StringComparison.OrdinalIgnoreCase);
+
+        try
+        {
+            var outcome = string.Empty;
+
+            if (overwrite)
+            {
+                var cleared = await _repo.ClearBucketAsync(connectionString, DenialInsightBuckets.Previous, ct);
+                outcome = cleared > 0
+                    ? $" The {cleared:N0} row(s) previously on Previous Week were deleted first."
+                    : string.Empty;
+            }
+
+            var result = await _repo.SaveInsightsAsync(connectionString, validation.Rows, CurrentUser, ct);
+
+            var message =
+                $"Imported {result.Inserted + result.Updated:N0} row(s) into Previous Week "
+                + $"({DenialInsightBuckets.WeekRangeLabel(weekStart)}) for {labName}."
+                + outcome
+                + (!overwrite && result.Updated > 0
+                    ? $" {result.Updated:N0} row(s) already in that week were refreshed."
+                    : string.Empty)
+                + (result.Skipped > 0 ? $" {result.Skipped:N0} row(s) had no denial code and were skipped." : string.Empty)
+                + (result.Errors.Count > 0 ? $" {result.Errors.Count:N0} row(s) failed." : string.Empty)
+                + (validation.Warnings.Count > 0 ? " " + string.Join(" ", validation.Warnings.Take(3)) : string.Empty);
+
+            return Redirect(result.Errors.Count > 0
+                ? InsightError(message, labName, DenialInsightBuckets.Previous)
+                : InsightOk(message, labName, DenialInsightBuckets.Previous));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Denial insight import into Previous Week failed for lab {Lab}.", labName);
+            return Redirect(InsightError("The import failed and nothing was saved.", labName,
+                                         DenialInsightBuckets.Previous));
         }
     }
 

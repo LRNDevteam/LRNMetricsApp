@@ -277,6 +277,38 @@
                 applyImportMode();
             }
 
+            // Previous Week's import is the same idea with a radio pair: Append keeps what is there,
+            // Override empties the tab first. Append is checked by default, so an untouched panel
+            // does the non-destructive thing.
+            var prevAppend = document.getElementById('previousModeAppend');
+            var prevOverride = document.getElementById('previousModeOverride');
+            if (prevAppend && prevOverride) {
+                var noteAppend = document.getElementById('notePreviousAppend');
+                var noteOverride = document.getElementById('notePreviousOverride');
+                var prevSubmit = document.getElementById('insightImportPreviousSubmit');
+                var prevSubmitLabel = document.getElementById('insightImportPreviousSubmitLabel');
+
+                var applyPreviousMode = function () {
+                    var overriding = prevOverride.checked;
+                    noteAppend.hidden = overriding;
+                    noteOverride.hidden = !overriding;
+                    prevSubmitLabel.textContent = overriding
+                        ? 'Delete and import into Previous Week'
+                        : 'Append to Previous Week';
+                    // Override deletes rows, so the button carries the warning colour rather than
+                    // looking identical to the safe path.
+                    prevSubmit.classList.toggle('btn-primary', !overriding);
+                    prevSubmit.classList.toggle('btn-danger', overriding);
+                };
+
+                [prevAppend, prevOverride].forEach(function (radio) {
+                    if (radio.dataset.bound) return;
+                    radio.dataset.bound = '1';
+                    radio.addEventListener('change', applyPreviousMode);
+                });
+                applyPreviousMode();
+            }
+
             // Click-to-sort, used by both the Claim Level grid and the Denial Insight grid. Rows are
             // reordered in place rather than reloaded, so sorting is instant.
             //
