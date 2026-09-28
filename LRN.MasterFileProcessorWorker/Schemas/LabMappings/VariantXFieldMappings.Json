@@ -92,7 +92,7 @@
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "EndDOS",
+        "CsvHeader": "Service To Date",
         "SqlColumn": "EndDOS",
         "IncludeInHash": true
       },
@@ -113,32 +113,42 @@
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "ReferringProviderFirstName",
+        "CsvHeader": "Ordering Physician First Name",
         "SqlColumn": "ReferringProviderFirstName",
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "ReferringProviderLastName",
+        "CsvHeader": "Ordering Physician LastName",
         "SqlColumn": "ReferringProviderLastName",
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "RendPhyFirstName",
+        "CsvHeader": "Rendering Physician FirstName",
         "SqlColumn": "RendPhyFirstName",
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "RendPhyLastName",
+        "CsvHeader": "Rendering Physician LastName",
         "SqlColumn": "RendPhyLastName",
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "ServLocCode",
+        "CsvHeader": "BillingProvider",
+        "SqlColumn": "BillingProvider",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ReferringProvider",
+        "SqlColumn": "ReferringProvider",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Service Location Code",
         "SqlColumn": "ServLocCode",
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "ServLocation",
+        "CsvHeader": "Service Location Name",
         "SqlColumn": "ServLocation",
         "IncludeInHash": true
       },
@@ -173,7 +183,7 @@
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "SubscriberId",
+        "CsvHeader": "Primary Sub ID",
         "SqlColumn": "SubscriberId",
         "IncludeInHash": true
       },
@@ -189,12 +199,12 @@
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "ClaimLevelCPT",
+        "CsvHeader": "CPT Code X Units X Modifier Orginal",
         "SqlColumn": "ClaimLevelCPT",
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "Modifier",
+        "CsvHeader": "Modifiers",
         "SqlColumn": "Modifier",
         "IncludeInHash": true
       },
@@ -205,7 +215,7 @@
         "DataType": "date"
       },
       {
-        "CsvHeader": "DODWeek",
+        "CsvHeader": "Deposit Week",
         "SqlColumn": "DODWeek",
         "IncludeInHash": true
       },
@@ -241,7 +251,7 @@
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "ClaimLevelICD",
+        "CsvHeader": "ICDCode",
         "SqlColumn": "ClaimLevelICD",
         "IncludeInHash": true
       },
@@ -362,7 +372,7 @@
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "PaymentPercent",
+        "CsvHeader": "Payment %",
         "SqlColumn": "PaymentPercent",
         "IncludeInHash": true,
         "DataType": "decimal"
@@ -373,49 +383,49 @@
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "FullyPaidCount",
+        "CsvHeader": "Fully Paid #",
         "SqlColumn": "FullyPaidCount",
         "IncludeInHash": true,
         "DataType": "int"
       },
       {
-        "CsvHeader": "FullyPaidAmount",
+        "CsvHeader": "Fully Paid $",
         "SqlColumn": "FullyPaidAmount",
         "IncludeInHash": true,
         "DataType": "decimal"
       },
       {
-        "CsvHeader": "AdjucticatedCount",
+        "CsvHeader": "Adjucticated #",
         "SqlColumn": "AdjucticatedCount",
         "IncludeInHash": true,
         "DataType": "int"
       },
       {
-        "CsvHeader": "AdjucticatedAmount",
+        "CsvHeader": "Adjucticated $",
         "SqlColumn": "AdjucticatedAmount",
         "IncludeInHash": true,
         "DataType": "decimal"
       },
       {
-        "CsvHeader": "Bucket30Count",
+        "CsvHeader": "30 Bucket #",
         "SqlColumn": "Bucket30Count",
         "IncludeInHash": true,
         "DataType": "int"
       },
       {
-        "CsvHeader": "Bucket30Amount",
+        "CsvHeader": "30 Bucket $",
         "SqlColumn": "Bucket30Amount",
         "IncludeInHash": true,
         "DataType": "decimal"
       },
       {
-        "CsvHeader": "Bucket60Count",
+        "CsvHeader": "60 Bucket #",
         "SqlColumn": "Bucket60Count",
         "IncludeInHash": true,
         "DataType": "int"
       },
       {
-        "CsvHeader": "Bucket60Amount",
+        "CsvHeader": "60 Bucket $",
         "SqlColumn": "Bucket60Amount",
         "IncludeInHash": true,
         "DataType": "decimal"
@@ -550,7 +560,7 @@
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "EndDOS",
+        "CsvHeader": "Service To Date",
         "SqlColumn": "EndDOS",
         "IncludeInHash": true
       },
@@ -571,32 +581,42 @@
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "ReferringProviderLastName",
+        "CsvHeader": "Ordering Physician Last Name",
         "SqlColumn": "ReferringProviderLastName",
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "ReferringProviderFirstName",
+        "CsvHeader": "Ordering Physician First Name",
         "SqlColumn": "ReferringProviderFirstName",
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "RendPhyFirstName",
+        "CsvHeader": "RenderingPhysician First Name",
         "SqlColumn": "RendPhyFirstName",
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "RendPhyLastName",
+        "CsvHeader": "Rendering Physician Last Name",
         "SqlColumn": "RendPhyLastName",
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "ServLocCode",
+        "CsvHeader": "BillingProvider",
+        "SqlColumn": "BillingProvider",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "ReferringProvider",
+        "SqlColumn": "ReferringProvider",
+        "IncludeInHash": true
+      },
+      {
+        "CsvHeader": "Service Location Code",
         "SqlColumn": "ServLocCode",
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "ServLocation",
+        "CsvHeader": "Service Location Name",
         "SqlColumn": "ServLocation",
         "IncludeInHash": true
       },
@@ -631,7 +651,7 @@
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "SubscriberId",
+        "CsvHeader": "Primary Sub ID",
         "SqlColumn": "SubscriberId",
         "IncludeInHash": true
       },
@@ -679,7 +699,7 @@
         "DataType": "date"
       },
       {
-        "CsvHeader": "DODWeek",
+        "CsvHeader": "Deposit Week",
         "SqlColumn": "DODWeek",
         "IncludeInHash": true
       },
@@ -710,7 +730,7 @@
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "ClaimLevelICDCode",
+        "CsvHeader": "Claim Level ICD",
         "SqlColumn": "ClaimLevelICDCode",
         "IncludeInHash": true
       },
@@ -825,12 +845,12 @@
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "CurrentStatus",
+        "CsvHeader": "Current Status",
         "SqlColumn": "CurrentStatus",
         "IncludeInHash": true
       },
       {
-        "CsvHeader": "PaymentPercent",
+        "CsvHeader": "Payment %",
         "SqlColumn": "PaymentPercent",
         "IncludeInHash": true,
         "DataType": "decimal"

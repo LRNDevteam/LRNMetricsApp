@@ -20,7 +20,8 @@
     {
       "Name": "Panel type",
       "Required": false,
-      "DataType": "string"
+      "DataType": "string",
+      "Aliases": [ "Panelname" ]
     },
     {
       "Name": "Plan Type",
@@ -65,7 +66,8 @@
     {
       "Name": "Created On",
       "Required": false,
-      "DataType": "string"
+      "DataType": "string",
+      "Aliases": [ "ChargeEnteredDate" ]
     },
     {
       "Name": "Aging DOE",
@@ -80,20 +82,34 @@
     {
       "Name": "Ordering Physician First Name",
       "Required": false,
-      "DataType": "string"
+      "DataType": "string",
+      "KeepRaw": true
     },
     {
       "Name": "Ordering Physician LastName",
       "Required": false,
-      "DataType": "string"
+      "DataType": "string",
+      "KeepRaw": true
     },
     {
       "Name": "Rendering Physician FirstName",
       "Required": false,
-      "DataType": "string"
+      "DataType": "string",
+      "KeepRaw": true
     },
     {
       "Name": "Rendering Physician LastName",
+      "Required": false,
+      "DataType": "string",
+      "KeepRaw": true
+    },
+    {
+      "Name": "[Ordering Physician LastName], [Ordering Physician First Name] {ReferringProvider}",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "[Rendering Physician LastName], [Rendering Physician FirstName] {BillingProvider}",
       "Required": false,
       "DataType": "string"
     },
@@ -203,12 +219,14 @@
     {
       "Name": "Insurance Paid",
       "Required": false,
-      "DataType": "string"
+      "DataType": "string",
+      "Aliases": [ "InsurancePayment" ]
     },
     {
       "Name": "Patient Paid",
       "Required": false,
-      "DataType": "string"
+      "DataType": "string",
+      "Aliases": [ "PatientPayment" ]
     },
     {
       "Name": "Total WO",

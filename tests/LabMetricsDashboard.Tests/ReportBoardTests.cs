@@ -136,6 +136,39 @@ public class ReportCatalogTests
     }
 
     [Fact]
+    public void Denial_Report_mirrors_Claim_Level_Master_and_opens_the_denial_claim_report()
+    {
+        var denial = ReportCatalog.Find("Denial Report")!;
+
+        Assert.Equal("Claim Level Master", denial.StatusFrom);
+        Assert.Equal("DenialClaimReport", denial.Controller);
+        Assert.Equal("Index", denial.Action);
+    }
+
+    [Fact]
+    public void A_mirrored_tile_stays_when_the_tracker_stops_returning_its_own_column()
+    {
+        // LRN.DenialDatabaseWorker is on hold, so "Denial Report" may vanish from the tracker.
+        var ordered = ReportCatalog.Order(["LIS Summary", "Line Level Master", "Claim Level Master"]);
+
+        Assert.Contains(ordered, c => c.TrackerColumn == "Denial Report");
+    }
+
+    [Fact]
+    public void A_mirrored_tile_is_dropped_when_its_source_is_not_produced()
+        => Assert.DoesNotContain(ReportCatalog.Order(["LIS Summary"]), c => c.TrackerColumn == "Denial Report");
+
+    [Fact]
+    public void Configured_status_source_is_applied_before_the_presence_check()
+    {
+        var ordered = ReportCatalog.Order(
+            ["LIS Summary"],
+            e => e.TrackerColumn == "Denial Report" ? e with { StatusFrom = "LIS Summary" } : e);
+
+        Assert.Equal("LIS Summary", ordered.Single(c => c.TrackerColumn == "Denial Report").StatusFrom);
+    }
+
+    [Fact]
     public void Column_lookup_is_case_insensitive()
         => Assert.NotNull(ReportCatalog.Find("collection summary"));
 

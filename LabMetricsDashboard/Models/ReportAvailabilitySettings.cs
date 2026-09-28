@@ -51,4 +51,11 @@ public sealed class ReportAvailabilityRule
     /// than just "not available". Optional.
     /// </summary>
     public string? Note { get; set; }
+
+    /// <summary>
+    /// Tracker column whose run status this report's cell shows instead of its own, e.g.
+    /// "Claim Level Master" for a report built straight from ClaimLevelData. Overrides the
+    /// catalog's built-in StatusFrom; blank keeps it. Optional.
+    /// </summary>
+    public string? StatusFrom { get; set; }
 }

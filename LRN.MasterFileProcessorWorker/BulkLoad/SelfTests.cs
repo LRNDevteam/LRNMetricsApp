@@ -40,6 +40,9 @@ public static class SelfTests
         DerivedReportRules();
         AugustusPanelNewComesFromSourceColumn();
         PunctuationOnlyColumnPairsDoNotThrowOrMerge();
+        KeepRawAndLabAliasFeedTheirColumns();
+        VariantXLinePhysicianNamesSurviveRepeatedHeader();
+        VariantXClaimProvidersAreDistinct();
         RelativeCsvLogFolderResolvesAgainstServiceDirectory();
         EmptyRowsAreNotImported();
         RowsWithoutIdentityAreImportedAndCounted();
@@ -1786,12 +1789,242 @@ public static class SelfTests
                 var countIdx = Array.FindIndex(header, h => h.Equals("Fully Paid #", StringComparison.OrdinalIgnoreCase));
                 var amountIdx = Array.FindIndex(header, h => h.Equals("Fully Paid $", StringComparison.OrdinalIgnoreCase));
 
+                // Both must reach the CSV: the shared key used to hold only the "$" group, so the
+                // "#" column was silently dropped and never loaded.
+                Check("A '#' column is written alongside its '$' twin", countIdx >= 0 && amountIdx >= 0,
+                    string.Join(",", header));
+
                 // The count must not pick up the amount, nor the amount the count.
                 Check("A '#' column keeps its own value, not its '$' twin's",
-                    countIdx < 0 || row[countIdx] == "Fully Paid", countIdx < 0 ? "column absent" : row[countIdx]);
+                    countIdx >= 0 && row[countIdx] == "Fully Paid", countIdx < 0 ? "column absent" : row[countIdx]);
                 Check("A '$' column keeps its own value, not its '#' twin's",
-                    amountIdx < 0 || row[amountIdx] == "206.33", amountIdx < 0 ? "column absent" : row[amountIdx]);
+                    amountIdx >= 0 && row[amountIdx] == "206.33", amountIdx < 0 ? "column absent" : row[amountIdx]);
             }
+        }
+        finally
+        {
+            TryDelete(folder);
+        }
+    }
+
+    /// <summary>
+    /// A lab column marked KeepRaw is written under its own name even though a COMMON column
+    /// consumed it, and a lab alias naming a common column feeds that column.
+    /// </summary>
+    /// <remarks>
+    /// VariantX sends physician first and last names separately. The common ReferringProvider /
+    /// BillingProvider columns consume them as aliases, so without KeepRaw the names reached SQL
+    /// only as one merged value and ReferringProviderFirstName..RendPhyLastName loaded NULL.
+    /// </remarks>
+    private static void KeepRawAndLabAliasFeedTheirColumns()
+    {
+        var folder = TempFolder();
+        try
+        {
+            var source = Path.Combine(folder, "src.csv");
+            File.WriteAllText(source,
+                "Visit No,Ordering Physician First Name,Ordering Physician Last Name,Insurance Paid\r\n" +
+                "V-1,LISA,CAZES,13.19\r\n");
+
+            var common = new ColumnSchema
+            {
+                SchemaName = "common",
+                HeaderRow = 1,
+                Columns = new List<ColumnSpec>
+                {
+                    new() { Name = "ClaimID", Aliases = new List<string> { "Visit No" } },
+                    new() { Name = "ReferringProvider", Aliases = new List<string> { "Ordering Physician Last Name", "Ordering Physician First Name" } },
+                    new() { Name = "InsurancePayment", Aliases = new List<string> { "InsurancePayment" } },
+                }
+            };
+
+            var labSchema = new ColumnSchema
+            {
+                SchemaName = "lab",
+                HeaderRow = 1,
+                Columns = new List<ColumnSpec>
+                {
+                    new() { Name = "Visit No" },
+                    new() { Name = "Ordering Physician First Name", KeepRaw = true },
+                    new() { Name = "Ordering Physician Last Name", KeepRaw = true },
+                    new() { Name = "Insurance Paid", Aliases = new List<string> { "InsurancePayment" } },
+                }
+            };
+
+            var outPath = Path.Combine(folder, "out.csv");
+            StandardCsvExporter.Generate(
+                sourceCsvPath: source,
+                headerRow: 1,
+                outputCsvPath: outPath,
+                commonSchema: common,
+                labId: 25,
+                labName: "VariantX",
+                sourceFileName: "src.csv",
+                ingestedOnLocal: DateTime.Now,
+                labSchema: labSchema,
+                appendUnmappedSourceColumns: true);
+
+            var lines = File.ReadAllLines(outPath);
+            var header = SplitCsv(lines[0]);
+            var row = SplitCsv(lines[1]);
+            string Val(string name)
+            {
+                var i = Array.FindIndex(header, h => h.Equals(name, StringComparison.OrdinalIgnoreCase));
+                return i < 0 ? "<absent>" : row[i];
+            }
+
+            Check("KeepRaw: a consumed first-name column is still written raw", Val("Ordering Physician First Name") == "LISA", Val("Ordering Physician First Name"));
+            Check("KeepRaw: a consumed last-name column is still written raw", Val("Ordering Physician Last Name") == "CAZES", Val("Ordering Physician Last Name"));
+            Check("KeepRaw: the common column still reads its source", Val("ReferringProvider") is "LISA" or "CAZES", Val("ReferringProvider"));
+            Check("Lab alias: 'Insurance Paid' feeds the common InsurancePayment column", Val("InsurancePayment") == "13.19", Val("InsurancePayment"));
+            Check("Lab alias: a header feeding a common column is not also appended raw",
+                !header.Contains("Insurance Paid", StringComparer.OrdinalIgnoreCase), string.Join(",", header));
+            Check("KeepRaw is opt-in: an unflagged consumed header is not appended",
+                !header.Contains("Visit No", StringComparer.OrdinalIgnoreCase), string.Join(",", header));
+        }
+        finally
+        {
+            TryDelete(folder);
+        }
+    }
+
+    /// <summary>
+    /// VariantX's real Line Level sheet labels BOTH ordering-physician columns
+    /// "Ordering Physician First Name " (the second is really the last name). Run the shipped
+    /// schemas over that header shape and check every name reaches the CSV column its
+    /// VariantXFieldMappings.Json field reads.
+    /// </summary>
+    private static void VariantXLinePhysicianNamesSurviveRepeatedHeader()
+    {
+        var schemas = Path.Combine(AppContext.BaseDirectory, "Schemas");
+        var commonPath = Path.Combine(schemas, "LineLevel.schema.json");
+        var labPath = Path.Combine(schemas, "VariantX_LineLevel.schema.json");
+        var mappingPath = Path.Combine(schemas, "LabMappings", "VariantXFieldMappings.Json");
+
+        if (!File.Exists(commonPath) || !File.Exists(labPath) || !File.Exists(mappingPath))
+        {
+            Check("VariantX line schemas are deployed next to the service", false, schemas);
+            return;
+        }
+
+        var folder = TempFolder();
+        try
+        {
+            var source = Path.Combine(folder, "src.csv");
+            File.WriteAllText(source,
+                "Visit No,Ordering Physician First Name ,Ordering Physician First Name ,RenderingPhysician First Name ,Rendering Physician Last Name ,Primary Payer\r\n" +
+                "V-1,JULIANNE,CARSON HEM,VARIANTX,DIAGNOSTICS LLC,AETNA\r\n");
+
+            var loader = new LRN.MasterFileProcessorWorker.ExcelValidation.JsonColumnSchemaLoader();
+            var outPath = Path.Combine(folder, "out.csv");
+
+            StandardCsvExporter.Generate(
+                sourceCsvPath: source,
+                headerRow: 1,
+                outputCsvPath: outPath,
+                commonSchema: loader.LoadFromFile(commonPath),
+                labId: 25,
+                labName: "VariantX",
+                sourceFileName: "src.csv",
+                ingestedOnLocal: DateTime.Now,
+                labSchema: loader.LoadFromFile(labPath),
+                appendUnmappedSourceColumns: true);
+
+            var lines = File.ReadAllLines(outPath);
+            var header = SplitCsv(lines[0]);
+            var row = SplitCsv(lines[1]);
+
+            // Where each SQL column's value is read from, per the shipped mapping file.
+            using var mapping = System.Text.Json.JsonDocument.Parse(File.ReadAllText(mappingPath));
+            string CsvHeaderFor(string sqlColumn) => mapping.RootElement.GetProperty("LineLevel").GetProperty("Fields")
+                .EnumerateArray()
+                .First(f => f.GetProperty("SqlColumn").GetString()!.Equals(sqlColumn, StringComparison.OrdinalIgnoreCase))
+                .GetProperty("CsvHeader").GetString()!;
+
+            string Loads(string sqlColumn)
+            {
+                var csvHeader = CsvHeaderFor(sqlColumn);
+                var i = Array.FindIndex(header, h => h.Equals(csvHeader, StringComparison.OrdinalIgnoreCase));
+                return i < 0 ? $"<no CSV column '{csvHeader}'>" : row[i];
+            }
+
+            Check("VariantX line: ReferringProviderFirstName loads the first name", Loads("ReferringProviderFirstName") == "JULIANNE", Loads("ReferringProviderFirstName"));
+            Check("VariantX line: ReferringProviderLastName loads the mislabelled last name", Loads("ReferringProviderLastName") == "CARSON HEM", Loads("ReferringProviderLastName"));
+            Check("VariantX line: RendPhyFirstName loads", Loads("RendPhyFirstName") == "VARIANTX", Loads("RendPhyFirstName"));
+            Check("VariantX line: RendPhyLastName loads", Loads("RendPhyLastName") == "DIAGNOSTICS LLC", Loads("RendPhyLastName"));
+            Check("VariantX line: ReferringProvider is the ordering physician, Last, First",
+                Loads("ReferringProvider") == "CARSON HEM, JULIANNE", Loads("ReferringProvider"));
+            Check("VariantX line: BillingProvider is the rendering physician, Last, First",
+                Loads("BillingProvider") == "DIAGNOSTICS LLC, VARIANTX", Loads("BillingProvider"));
+            Check("VariantX line: no CSV column name is written twice",
+                header.Length == header.Distinct(StringComparer.OrdinalIgnoreCase).Count(), string.Join(",", header));
+        }
+        finally
+        {
+            TryDelete(folder);
+        }
+    }
+
+    /// <summary>
+    /// Claim level, shipped schemas and mapping: ReferringProvider and BillingProvider are two
+    /// different people/entities, and the split first/last columns still load alongside them.
+    /// </summary>
+    private static void VariantXClaimProvidersAreDistinct()
+    {
+        var schemas = Path.Combine(AppContext.BaseDirectory, "Schemas");
+        var commonPath = Path.Combine(schemas, "ClaimLevel.schema.json");
+        var labPath = Path.Combine(schemas, "VariantX_ClaimLevel.schema.json");
+        var mappingPath = Path.Combine(schemas, "LabMappings", "VariantXFieldMappings.Json");
+
+        if (!File.Exists(commonPath) || !File.Exists(labPath) || !File.Exists(mappingPath))
+        {
+            Check("VariantX claim schemas are deployed next to the service", false, schemas);
+            return;
+        }
+
+        var folder = TempFolder();
+        try
+        {
+            var source = Path.Combine(folder, "src.csv");
+            File.WriteAllText(source,
+                "Visit No,Ordering Physician First Name,Ordering Physician LastName,Rendering Physician FirstName,Rendering Physician LastName,Primary Payer\r\n" +
+                "V-1,LISA,LEESE,VARIANTX,DIAGNOSTICS LLC,AETNA\r\n");
+
+            var loader = new LRN.MasterFileProcessorWorker.ExcelValidation.JsonColumnSchemaLoader();
+            var outPath = Path.Combine(folder, "out.csv");
+
+            StandardCsvExporter.Generate(
+                sourceCsvPath: source,
+                headerRow: 1,
+                outputCsvPath: outPath,
+                commonSchema: loader.LoadFromFile(commonPath),
+                labId: 25,
+                labName: "VariantX",
+                sourceFileName: "src.csv",
+                ingestedOnLocal: DateTime.Now,
+                labSchema: loader.LoadFromFile(labPath),
+                appendUnmappedSourceColumns: true);
+
+            var lines = File.ReadAllLines(outPath);
+            var header = SplitCsv(lines[0]);
+            var row = SplitCsv(lines[1]);
+
+            using var mapping = System.Text.Json.JsonDocument.Parse(File.ReadAllText(mappingPath));
+            string Loads(string sqlColumn)
+            {
+                var csvHeader = mapping.RootElement.GetProperty("ClaimLevel").GetProperty("Fields")
+                    .EnumerateArray()
+                    .First(f => f.GetProperty("SqlColumn").GetString()!.Equals(sqlColumn, StringComparison.OrdinalIgnoreCase))
+                    .GetProperty("CsvHeader").GetString()!;
+                var i = Array.FindIndex(header, h => h.Equals(csvHeader, StringComparison.OrdinalIgnoreCase));
+                return i < 0 ? $"<no CSV column '{csvHeader}'>" : row[i];
+            }
+
+            Check("VariantX claim: ReferringProvider is the ordering physician, Last, First", Loads("ReferringProvider") == "LEESE, LISA", Loads("ReferringProvider"));
+            Check("VariantX claim: BillingProvider is the rendering physician, Last, First", Loads("BillingProvider") == "DIAGNOSTICS LLC, VARIANTX", Loads("BillingProvider"));
+            Check("VariantX claim: ReferringProviderFirstName still loads", Loads("ReferringProviderFirstName") == "LISA", Loads("ReferringProviderFirstName"));
+            Check("VariantX claim: ReferringProviderLastName still loads", Loads("ReferringProviderLastName") == "LEESE", Loads("ReferringProviderLastName"));
+            Check("VariantX claim: RendPhyLastName still loads", Loads("RendPhyLastName") == "DIAGNOSTICS LLC", Loads("RendPhyLastName"));
         }
         finally
         {

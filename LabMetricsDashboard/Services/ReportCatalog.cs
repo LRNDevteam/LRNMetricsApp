@@ -44,7 +44,10 @@ public static class ReportCatalog
         new("Sales Rep Summary",       "Sales Rep Summary",       "Sales",    "bi-people-fill",          GroupSummary,   "Dashboard",              "SalesRepSummary",         "EnableSalesRepsummary", null, null, SalesRepSummaryLabs),
         // A claim form with a cross, not a warning triangle: on this board a triangle is the
         // glyph for a run that went wrong, so a report whose subject is denials must not wear it.
-        new("Denial Report",           "Denial Report",           "Denial",   "bi-clipboard2-x",         GroupSummary,   "DenialDashboard",        "Index",                   null),
+        // The Denial Summary is aggregated straight from dbo.ClaimLevelData now (LRN.DenialDatabaseWorker
+        // is on hold), so the tile opens the Denial Claim Report page and its status MIRRORS
+        // "Claim Level Master". ReportAvailability:Reports:"Denial Report":StatusFrom can re-point it.
+        new("Denial Report",           "Denial Report",           "Denial",   "bi-clipboard2-x",         GroupSummary,   "DenialClaimReport",      "Index",                   null,               null,   "Claim Level Master"),
 
         new("Coding Validation",       "Coding Validation",       "Coding",   "bi-pencil-square",        GroupAnalytics, "Coding",                 "Summary",                 "EnableCoding"),
         new("Payer Policy Validation", "Payer Policy Validation", "Policy",   "bi-shield-check",         GroupAnalytics, "PayerPolicyValidation",  "Index",                   "EnablePrediction"),
@@ -136,15 +139,26 @@ public static class ReportCatalog
     /// order the SP returned them, so a newly added report type appears at the end rather than
     /// silently disappearing.
     /// </summary>
-    public static List<ReportCatalogEntry> Order(IEnumerable<string> trackerColumns)
+    /// <param name="configure">
+    /// Applies configuration overrides (e.g. a StatusFrom from appsettings) to each catalog entry
+    /// before the presence check, so a re-pointed tile is kept or dropped by its new source.
+    /// </param>
+    public static List<ReportCatalogEntry> Order(
+        IEnumerable<string> trackerColumns,
+        Func<ReportCatalogEntry, ReportCatalogEntry>? configure = null)
     {
         // Drop hidden report types (Error Log, CPT / Panel Averages) entirely — never a tile or a
         // matrix column. They stay in dbo.ReportTypeMaster and still run; the board just ignores them.
         var visibleTracker = trackerColumns.Where(c => !IsHidden(c)).ToList();
         var present = new HashSet<string>(visibleTracker, StringComparer.OrdinalIgnoreCase);
+        var entries = configure is null ? Entries : Entries.Select(configure).ToList();
         // Known catalog entries that the tracker produced, PLUS always-on nav tiles (LIMS Master) that
-        // are shortcuts to a page rather than a tracked report, so they show on every lab.
-        var known = Entries.Where(e => present.Contains(e.TrackerColumn) || AlwaysShow.Contains(e.TrackerColumn)).ToList();
+        // are shortcuts to a page rather than a tracked report, so they show on every lab, PLUS tiles
+        // whose status mirrors a produced column - Denial Report stays on the board off Claim Level
+        // Master even once the tracker stops returning a "Denial Report" column of its own.
+        var known = entries.Where(e => present.Contains(e.TrackerColumn)
+                                       || (e.StatusFrom is not null && present.Contains(e.StatusFrom))
+                                       || AlwaysShow.Contains(e.TrackerColumn)).ToList();
         var knownColumns = new HashSet<string>(known.Select(e => e.TrackerColumn), StringComparer.OrdinalIgnoreCase);
         var unknown = visibleTracker.Where(c => !knownColumns.Contains(c)).Select(Unknown);
         return [.. known, .. unknown];

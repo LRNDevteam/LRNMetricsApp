@@ -20,6 +20,11 @@ public sealed class ColumnSpec
 
     // Optional calculated expression, e.g. "A + B" (A/B are common schema column names)
     public string? Calculation { get; set; }
+
+    // LAB schema only. When a COMMON column consumes this header (e.g. "Ordering Physician Last Name"
+    // feeding ReferringProvider), still write it to the standard CSV under its own name, so the lab's
+    // *FieldMappings.json can load it into a dedicated SQL column.
+    public bool KeepRaw { get; set; } = false;
 }
 
 public sealed class SchemaValidationResult

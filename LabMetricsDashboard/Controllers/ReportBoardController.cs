@@ -72,7 +72,7 @@ public sealed class ReportBoardController : Controller
         };
 
         var fetch = await _api.GetLatestAsync(refresh, ct);
-        var columns = ReportCatalog.Order(fetch.Data?.ReportColumns ?? []);
+        var columns = ReportCatalog.Order(fetch.Data?.ReportColumns ?? [], _availability.Configure);
 
         // One permission check per report page rather than per cell.
         var routeAllowed = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);

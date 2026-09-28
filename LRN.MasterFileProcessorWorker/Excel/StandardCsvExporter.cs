@@ -133,6 +133,12 @@ public static class StandardCsvExporter
 		if (header == null)
 			throw new InvalidOperationException($"Header row {headerRow} not found in CSV: {sourceCsvPath}");
 
+		// A header repeated in the source (VariantX's Line Level sheet labels BOTH physician name
+		// columns "Ordering Physician First Name") used to shadow its twin: every lookup found the
+		// first, so the second column's values were lost. Keep the repeat as "Name (2)", "Name (3)"
+		// so it still reaches the CSV and a lab schema can alias it to the column it really is.
+		DisambiguateRepeatedHeaders(header, log);
+
 		// Build header lookups (exact + normalized)
 		var headerExact = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 		var headerNorm = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -685,6 +691,14 @@ public static class StandardCsvExporter
 		/// flowing without a schema edit. See <see cref="ResolveDynamicColumnBindings"/>.
 		/// </summary>
 		public Dictionary<string, string> DynamicSourceByCommonNorm { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+		/// <summary>
+		/// Lab schema headers marked <c>"KeepRaw": true</c>: appended to the CSV under their own name
+		/// even when a COMMON column consumed them. See <see cref="ColumnSpec.KeepRaw"/>.
+		/// </summary>
+		/// Keyed by the normalized spelling (the column's Name AND its Aliases); the value is the
+		/// Name the column is written under, so every spelling lands in one CSV column.
+		public Dictionary<string, string> KeepRawOutputByNorm { get; } = new(StringComparer.OrdinalIgnoreCase);
 	}
 
 	private readonly record struct CompositeSegment(bool IsColumn, string Text);
@@ -739,6 +753,15 @@ public static class StandardCsvExporter
 
 			// Simple preferred header
 			ov.PreferredExact.Add(rawName);
+			if (c.KeepRaw)
+			{
+				foreach (var spelling in (c.Aliases ?? new List<string>()).Prepend(rawName))
+				{
+					var sn = NormKey((spelling ?? "").Trim());
+					if (!string.IsNullOrWhiteSpace(sn))
+						ov.KeepRawOutputByNorm.TryAdd(sn, rawName);
+				}
+			}
 			var norm = NormKey(rawName);
 			if (!string.IsNullOrWhiteSpace(norm))
 				ov.PreferredNorm.Add(norm);
@@ -1185,6 +1208,37 @@ public static class StandardCsvExporter
 	/// </summary>
 	private sealed record ExtraSourceColumn(string OutputName, List<int> SourceIndexes);
 
+	/// <summary>
+	/// Renames the 2nd, 3rd, ... occurrence of a header (compared trimmed, ignoring case) to
+	/// "Name (2)", "Name (3)" in place, logging each rename. The first occurrence keeps its name.
+	/// </summary>
+	private static void DisambiguateRepeatedHeaders(string[] header, Action<string>? log)
+	{
+		var seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+		for (int i = 0; i < header.Length; i++)
+		{
+			var h = (header[i] ?? "").Trim();
+			if (string.IsNullOrWhiteSpace(h)) continue;
+
+			if (!seen.TryGetValue(h, out var count))
+			{
+				seen[h] = 1;
+				continue;
+			}
+
+			count++;
+			var renamed = $"{h} ({count})";
+			while (seen.ContainsKey(renamed))
+				renamed = $"{h} ({++count})";
+
+			seen[h] = count;
+			seen[renamed] = 1;
+			header[i] = renamed;
+			log?.Invoke($"Repeated source header '{h}' at column {i + 1} kept as '{renamed}'.");
+		}
+	}
+
 	private static List<ExtraSourceColumn> FindExtraSourceColumnIndexes(
 		string[] header,
 		ColumnSchema commonSchema,
@@ -1222,9 +1276,22 @@ public static class StandardCsvExporter
 			if (string.IsNullOrWhiteSpace(sourceHeader))
 				continue;
 
-			// Consumed by a COMMON column already (directly, via alias, or via a composite).
+			// Consumed by a COMMON column already (directly, via alias, or via a composite) - unless the
+			// lab schema asked to keep it raw as well, so its own SQL column can load it.
 			if (usedIndexes.Contains(i))
+			{
+				if (labOv.KeepRawOutputByNorm.TryGetValue(NormKey(sourceHeader), out var keepAs))
+				{
+					// All spellings of one KeepRaw column share a single output column; the row takes
+					// the first non-empty of them.
+					var existing = extras.FirstOrDefault(e => e.OutputName.Equals(keepAs, StringComparison.OrdinalIgnoreCase));
+					if (existing is null)
+						extras.Add(new ExtraSourceColumn(keepAs, new List<int> { i }));
+					else if (!existing.SourceIndexes.Contains(i))
+						existing.SourceIndexes.Add(i);
+				}
 				continue;
+			}
 
 			var normalizedSourceHeader = NormKey(sourceHeader);
 
@@ -1237,9 +1304,14 @@ public static class StandardCsvExporter
 			// once, under its primary spelling, merging the sheet-specific variants into one column.
 			// (Certus "Billed Amounts" does not reach here - it maps to ChargeAmount and is already
 			// in usedIndexes, so it is still not duplicated.)
+			//
+			// The group must actually CONTAIN this header. "30 Bucket #" and "30 Bucket $" share the
+			// key "30bucket", so the key holds whichever group registered last; without this check
+			// the "#" header resolved to the "$" group and the count column never reached the CSV.
 			if (!string.IsNullOrWhiteSpace(normalizedSourceHeader) &&
 				labOv.AliasGroupByNorm.TryGetValue(normalizedSourceHeader, out var group) &&
-				group.Count > 0)
+				group.Count > 0 &&
+				group.Contains(sourceHeader, StringComparer.OrdinalIgnoreCase))
 			{
 				if (!emittedGroups.Add(NormKey(group[0])))
 					continue;
@@ -1251,7 +1323,14 @@ public static class StandardCsvExporter
 					.ToList();
 
 				if (groupIndexes.Count > 0)
-					extras.Add(new ExtraSourceColumn(group[0], groupIndexes));
+				{
+					// A KeepRaw column may already have emitted this name from a consumed spelling.
+					var existing = extras.FirstOrDefault(e => e.OutputName.Equals(group[0], StringComparison.OrdinalIgnoreCase));
+					if (existing is null)
+						extras.Add(new ExtraSourceColumn(group[0], groupIndexes));
+					else
+						existing.SourceIndexes.AddRange(groupIndexes.Where(gi => !existing.SourceIndexes.Contains(gi)));
+				}
 
 				continue;
 			}

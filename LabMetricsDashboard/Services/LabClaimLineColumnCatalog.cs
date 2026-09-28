@@ -34,6 +34,9 @@ public static class LabClaimLineColumnCatalog
         ["RisingTides"] = "RisingTides",
         ["Rising_Tides"] = "RisingTides",
         ["Rishing_Tides"] = "RisingTides",
+        ["VariantX"] = "VariantX",
+        ["Variant_X"] = "VariantX",
+        ["VariantX_LRN"] = "VariantX",
     };
 
     private static readonly string[] DefaultClaim =
@@ -268,6 +271,23 @@ public static class LabClaimLineColumnCatalog
                 "DOE_Year", "DOE_Month", "ClaimUID", "AgingDOE", "AgingDOS", "PanelNameLIS",
                 "PanelNameBasedOnCPT", "InsuranceBalance_Decimal"
             ],
+        ["VariantX"] =
+            [
+                "LabID", "LabName", "SourceFileID", "IngestedOn", "CsvRowHash", "ClaimID",
+                "AccessionNumber", "PanelName", "PlanType", "PatientID", "PatientFirstName", "PatientLastName",
+                "PatientDOB", "DateofService", "AgingDOS", "EndDOS", "ChargeEnteredDate", "AgingDOE",
+                "Facility", "ReferringProviderFirstName", "ReferringProviderLastName", "RendPhyFirstName", "RendPhyLastName", "BillingProvider", "ReferringProvider", "ServLocCode",
+                "ServLocation", "PayerName_Raw", "PayerName", "Payer_Code", "Payer_Common_Code", "Payer_Group_Code",
+                "Global_Payer_ID", "SubscriberId", "FirstBilledDate", "BilledWeek", "ClaimLevelCPT", "Modifier",
+                "CheckDate", "DODWeek", "DenialDate", "DeniedWeek", "DenialCode", "LineLevelDenialCode",
+                "ClaimLevelDenialCode", "LineLevelICD", "ClaimLevelICD", "POS", "TOS", "LineLevelCPT",
+                "CPTCodeXUnitsXModifier", "ChargeAmount", "AllowedAmount", "InsurancePayment", "PatientPayment", "TotalPayments",
+                "InsuranceBalance", "PatientBalance", "TotalBalance", "InsuranceAdjustments", "PatientAdjustments", "TotalWO",
+                "BillingOption", "CurrentStatus", "BatchNo", "CreatedBy", "UpdatedOn", "UpdatedBy",
+                "PaymentPercent", "BillStatus", "FullyPaidCount", "FullyPaidAmount", "AdjucticatedCount", "AdjucticatedAmount",
+                "Bucket30Count", "Bucket30Amount", "Bucket60Count", "Bucket60Amount", "ClaimStatus", "DaystoDOS",
+                "RollingDays", "DaystoBill", "DaystoPost", "InsertedDateTime", "DenialCodeNormalized", "DenialDescription"
+            ],
     };
 
     private static readonly Dictionary<string, string[]> LineByLab = new(StringComparer.OrdinalIgnoreCase)
@@ -469,6 +489,24 @@ public static class LabClaimLineColumnCatalog
                 "CPTUnits", "CPTMOD", "CPTs", "PostedWeek", "Facility", "LineLevelUID",
                 "Source", "InsuranceBalance_Decimal"
             ],
+        ["VariantX"] =
+            [
+                "LabID", "LabName", "SourceFileID", "IngestedOn", "CsvRowHash", "ClaimID",
+                "T_F", "LineLevelUID", "AccessionNumber", "Panelname", "PlanType", "PatientID",
+                "PatientFirstName", "PatientLastName", "PatientDOB", "DateofService", "AgingDOS", "EndDOS",
+                "ChargeEnteredDate", "AgingDOE", "Facility", "ReferringProviderLastName", "ReferringProviderFirstName", "RendPhyFirstName",
+                "RendPhyLastName", "BillingProvider", "ReferringProvider", "ServLocCode", "ServLocation", "PayerName_Raw", "PayerName", "Payer_Code",
+                "Payer_Common_Code", "Payer_Group_Code", "Global_Payer_ID", "SubscriberId", "FirstBilledDate", "BilledWeek",
+                "CPTCode", "Units", "Modifier", "CPTXMODXUnits", "LineLevelCPT", "CheckDate",
+                "DODWeek", "DenialDate", "DeniedWeek", "DenialCode", "LineLevelDenialCode", "ICDCode",
+                "ClaimLevelICDCode", "POS", "TOS", "ChargeAmount", "ChargeAmountPerUnit", "AllowedAmount",
+                "AllowedAmountPerUnit", "InsurancePayment", "InsurancePaymentPerUnit", "PatientPayment", "PatientPaymentPerUnit", "InsuranceBalance",
+                "PatientBalance", "PatientBalancePerUnit", "TotalBalance", "InsuranceAdjustments", "PatientAdjustments", "TotalAdjustments",
+                "BillingOption", "CPTStatus", "CurrentStatus", "PaymentPercent", "BillStatus", "CreatedOn",
+                "CreatedBy", "UpdatedOn", "UpdatedBy", "ClaimStatus", "PayStatus", "DaystoDOS",
+                "RollingDays", "DaystoBill", "DaystoPost", "ICDPointer", "PaymentPostedDate", "UID",
+                "Source", "InsuranceBalance_Decimal", "InsertedDateTime"
+            ],
     };
 
     public static string NormalizeLab(string? labName)
@@ -482,6 +520,15 @@ public static class LabClaimLineColumnCatalog
 
     public static IReadOnlyList<string> GetLineColumns(string? labName)
         => LineByLab.TryGetValue(NormalizeLab(labName), out var cols) ? cols : DefaultLine;
+
+    /// <summary>
+    /// Table columns behind the Payer Type and Clinic filters. VariantX has no PayerType or
+    /// ClinicName, so PlanType and Facility stand in (as in Sql/ClaimLineDetails_SPs/VariantX_Details.sql).
+    /// </summary>
+    public static (string PayerType, string Clinic) GetFilterColumns(string? labName)
+        => string.Equals(NormalizeLab(labName), "VariantX", StringComparison.OrdinalIgnoreCase)
+            ? ("PlanType", "Facility")
+            : ("PayerType", "ClinicName");
 
     /// <summary>
     /// SELECT list for Excel / page exports: Select_Script columns with the same
@@ -528,7 +575,7 @@ public static class LabClaimLineColumnCatalog
 
     private static readonly HashSet<string> TrimColumns = new(StringComparer.OrdinalIgnoreCase)
     {
-        "PayerName", "PayerType", "ClinicName", "Panelname", "PanelName",
+        "PayerName", "PayerType", "PlanType", "ClinicName", "Facility", "Panelname", "PanelName",
         "ClaimStatus", "PayStatus", "SalesRepname", "SalesRepName", "CPTCode",
     };
 
