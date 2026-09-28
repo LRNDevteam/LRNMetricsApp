@@ -1,0 +1,23 @@
+{
+  "name": "lrn-ar-workbench",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5174",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 5174",
+    "publish:prod": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -Command \"$dest=$env:DEPLOY_DIR; if (-not $dest) { $dest='C:\\\\inetpub\\\\wwwroot\\\\ARWorkbench' }; New-Item -ItemType Directory -Force -Path $dest | Out-Null; Copy-Item -Path 'dist\\\\*' -Destination $dest -Recurse -Force\""
+  },
+  "dependencies": {
+    "bootstrap": "^5.3.8",
+    "bootstrap-icons": "^1.13.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router": "^7.9.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.0",
+    "vite": "^8.1.0"
+  }
+}
