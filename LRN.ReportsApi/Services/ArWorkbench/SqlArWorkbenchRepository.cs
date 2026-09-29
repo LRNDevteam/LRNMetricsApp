@@ -6,8 +6,13 @@ namespace LRN.ReportsApi.Services.ArWorkbench;
 
 public interface IArWorkbenchRepository
 {
-    Task<ArWorkbenchUserContext?> GetUserContextAsync(int labId, string userName, CancellationToken ct);
+    /// <param name="siteAdminRole">
+    /// The caller's LRN Metrics admin role (Super Admin / Admin / LRN Admin / Lab Admin) when they
+    /// hold one, else null. Lab access is the controller's job; this only grants every page.
+    /// </param>
+    Task<ArWorkbenchUserContext?> GetUserContextAsync(int labId, string userName, string? siteAdminRole, CancellationToken ct);
     Task<ArWorkbenchQueueSummary> GetQueueSummaryAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<ArWorkbenchDashboard> GetDashboardAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchPagedResult<ArWorkbenchClaimRow>> GetClaimsAsync(ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchClaimDetail?> GetClaimDetailAsync(int labId, long claimKey, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchMasterData> GetMasterDataAsync(int labId, CancellationToken ct);
@@ -91,14 +96,16 @@ public sealed class SqlArWorkbenchRepository : IArWorkbenchRepository
 
     /// <summary>
     /// Builds the user from the existing LRNMaster user tables (dbo.LabUsers, dbo.UserRoles,
-    /// dbo.Roles, dbo.RoleFeatureAccess). ONLY the 8 "AR Workbench - ..." roles count - every other
-    /// LRN Metrics role is ignored, including the site Admin role. Returns null for a user who holds
-    /// none of them.
+    /// dbo.Roles, dbo.RoleFeatureAccess). Apart from the site admin roles (see siteAdminRole), ONLY
+    /// the 8 "AR Workbench - ..." roles count. Returns null for a user who holds none of them.
+    ///
+    /// A site admin (Super Admin / Admin / LRN Admin for every lab, Lab Admin for their assigned
+    /// labs) gets every permission and the whole lab, whatever AR Workbench roles they hold.
     ///
     /// Several AR Workbench roles combine: permissions are the union, and the widest scope wins
     /// (any unscoped role -> whole lab; otherwise clinic, then provider).
     /// </summary>
-    public async Task<ArWorkbenchUserContext?> GetUserContextAsync(int labId, string userName, CancellationToken ct)
+    public async Task<ArWorkbenchUserContext?> GetUserContextAsync(int labId, string userName, string? siteAdminRole, CancellationToken ct)
     {
         // Fail early with the setup message if the lab has not been prepared.
         await using (await OpenLabAsync(labId, ct)) { }
@@ -171,6 +178,24 @@ ELSE
 
         // A role only counts once it has ARWorkbench.Access.
         var workbenchRoles = roles.Where(r => r.Value.Contains(ArWorkbenchFeatures.Access)).ToList();
+
+        if (!string.IsNullOrWhiteSpace(siteAdminRole))
+        {
+            // Checked before the clinic / provider fail-closed below: a site admin who also holds a
+            // viewer role must still see the whole lab.
+            user.Permissions = new ArWorkbenchPermissions
+            {
+                Assign = true, EditClaim = true, QaDecide = true, Approve = true, ManageUsers = true,
+                ViewAudit = true, ManageSettings = true, AllClients = true, ViewClientMgmt = true
+            };
+            user.Access = new ArWorkbenchAccessScope { Level = "client" };
+            user.RoleCode = "admin";
+            user.SiteAdmin = true;
+            user.RoleNames = workbenchRoles.Select(r => DisplayRoleName(r.Key)).Prepend(siteAdminRole).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            user.RoleLabel = string.Join(", ", user.RoleNames);
+            return user;
+        }
+
         if (workbenchRoles.Count == 0) return null;
 
         var features = new HashSet<string>(workbenchRoles.SelectMany(r => r.Value), StringComparer.OrdinalIgnoreCase);
@@ -384,6 +409,285 @@ WHERE 1 = 1 {scope};";
         foreach (var top in summary.Queues) top.Sub = top.Sub.OrderBy(s => s.SortOrder).ToList();
 
         return summary;
+    }
+
+    // ==========================================================================================
+    // Dashboard
+    // ==========================================================================================
+
+    // The mockup's denial category -> Key Observations tag and recommended action (DENIAL_CATEGORY_ACTION).
+    private static readonly Dictionary<string, (string Tag, string Action)> DenialCategoryActions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Additional Documentation Required"] = ("Appeal / MR", "Submit the requested medical records / documentation to the payer via the appropriate channel (portal, fax, etc.)."),
+        ["Medical Necessity"] = ("Appeal / MR", "Review clinical documentation for medical necessity support and file an appeal with supporting notes."),
+        ["Coding-Related Denials"] = ("Review", "Verify the CPT / modifier / diagnosis combination on file and rebill a corrected claim if warranted."),
+        ["Eligibility Issues"] = ("Review", "Re-verify patient eligibility and coordination of benefits; rebill the correct payer if one is identified."),
+        ["Authorization Required"] = ("Review", "Check whether a referral / prior authorization is on file; submit it with medical records if available, or adjust off if not."),
+        ["Timely Filing"] = ("Appeal / MR", "Document proof of timely submission and file a timely-filing exception appeal."),
+        ["Duplicate Claims"] = ("Review", "Confirm whether this is a true duplicate; void the claim or provide the original claim reference if not."),
+        ["Payer Processing Issues"] = ("Review", "LRN currently investigating - contact the payer to confirm claim receipt and expedite processing."),
+        ["Partially Paid Claims"] = ("Review", "Validate the expected allowable against the contract and file an underpayment appeal if warranted."),
+        ["Unresponsive Payers"] = ("Review", "Escalate follow-up with the payer provider line; consider a formal status inquiry."),
+        ["Other"] = ("Review", "Review payer remittance remarks and determine the appropriate corrective action.")
+    };
+
+    private static readonly string[] WorkflowStatusOrder = ["Unassigned", "Assigned", "Submitted for QA", "QA Rejected", "Completed"];
+
+    /// <summary>
+    /// Every tile, chart and table of the mockup's System Administrator dashboard in one round trip.
+    /// All result sets carry the same scope clause, so a scoped user's dashboard only counts their claims.
+    /// </summary>
+    public async Task<ArWorkbenchDashboard> GetDashboardAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct)
+    {
+        await using var connection = await OpenLabAsync(labId, ct);
+        await using var cmd = connection.CreateCommand();
+        var scope = AppendScope(cmd, user);
+        cmd.Parameters.Add("@Today", SqlDbType.Date).Value = DateTime.Today;
+
+        cmd.CommandText = $@"
+-- 0. KPI tiles
+SELECT
+    COUNT(*),
+    SUM(CASE WHEN DATEDIFF(day, w.FirstBilledDate, @Today) BETWEEN 0 AND 7  THEN 1 ELSE 0 END),
+    SUM(CASE WHEN DATEDIFF(day, w.FirstBilledDate, @Today) BETWEEN 8 AND 14 THEN 1 ELSE 0 END),
+    ISNULL(SUM(w.RemainingAR), 0),
+    SUM(CASE WHEN w.WorkflowStatus = 'Unassigned' THEN 1 ELSE 0 END),
+    SUM(CASE WHEN w.WorkflowStatus = 'Assigned' THEN 1 ELSE 0 END),
+    SUM(CASE WHEN w.WorkflowStatus = 'Submitted for QA' THEN 1 ELSE 0 END),
+    SUM(CASE WHEN w.WorkflowStatus = 'QA Rejected' THEN 1 ELSE 0 END),
+    SUM(CASE WHEN w.IsWorkComplete = 1 THEN 1 ELSE 0 END),
+    ISNULL(SUM(w.RecoveredAmount), 0),
+    ISNULL(SUM(CASE WHEN w.IsFinanciallyClosed = 0 THEN w.RemainingAR ELSE 0 END), 0),
+    SUM(CASE WHEN w.NextFollowUpDate < @Today AND w.IsFinanciallyClosed = 0 THEN 1 ELSE 0 END),
+    ISNULL(SUM(w.InitialInsuranceAR), 0),
+    SUM(CASE WHEN w.WorkedStatus = 'Worked' THEN 1 ELSE 0 END)
+FROM arwb.Claim w
+WHERE 1 = 1 {scope};
+
+-- 1. Data refresh (latest successful load)
+SELECT TOP (1) CompletedOn, SourcePeriodStart, SourcePeriodEnd
+FROM arwb.RefreshRun
+WHERE RunStatus = 'Succeeded'
+ORDER BY RefreshRunId DESC;
+
+-- 2. Denial Category Distribution (outstanding balance)
+SELECT ISNULL(NULLIF(w.DenialCategory, N''), N'Other'), COUNT(*), ISNULL(SUM(w.RemainingAR), 0)
+FROM arwb.Claim w
+WHERE 1 = 1 {scope}
+GROUP BY ISNULL(NULLIF(w.DenialCategory, N''), N'Other')
+ORDER BY SUM(w.RemainingAR) DESC;
+
+-- 3. AR Aging Distribution: bucket order from master data, then counts
+SELECT ItemValue FROM arwb.MasterListItem WHERE ListType = 'AGING_BUCKET' AND IsActive = 1 ORDER BY SortOrder;
+SELECT w.AgingBucket, COUNT(*), ISNULL(SUM(w.RemainingAR), 0)
+FROM arwb.Claim w
+WHERE w.AgingBucket IS NOT NULL {scope}
+GROUP BY w.AgingBucket;
+
+-- 4. Claim Workflow Status
+SELECT w.WorkflowStatus, COUNT(*), ISNULL(SUM(w.RemainingAR), 0)
+FROM arwb.Claim w
+WHERE 1 = 1 {scope}
+GROUP BY w.WorkflowStatus;
+
+-- 5. Claim Queue Volumes: workable leaves with an open insurance balance
+SELECT w.ArQueueId, w.ArSubQueueId, t.QueueLabel, s.QueueLabel, COUNT(*), ISNULL(SUM(w.RemainingAR), 0)
+FROM arwb.Claim w
+INNER JOIN arwb.ArQueue t ON t.QueueId = w.ArQueueId
+LEFT  JOIN arwb.ArQueue s ON s.QueueId = w.ArSubQueueId
+WHERE w.IsOpenInsuranceAR = 1 AND w.ArQueueId NOT IN ('closed', 'patientar') {scope}
+GROUP BY w.ArQueueId, w.ArSubQueueId, t.QueueLabel, s.QueueLabel, t.SortOrder, s.SortOrder
+ORDER BY t.SortOrder, s.SortOrder;
+
+-- 6. AR Collections Progress: revenue expectation (initial insurance AR) per top-level queue
+SELECT w.ArQueueId, t.QueueLabel, COUNT(*), ISNULL(SUM(w.InitialInsuranceAR), 0), ISNULL(SUM(w.RecoveredAmount), 0)
+FROM arwb.Claim w
+INNER JOIN arwb.ArQueue t ON t.QueueId = w.ArQueueId
+WHERE 1 = 1 {scope}
+GROUP BY w.ArQueueId, t.QueueLabel, t.SortOrder
+ORDER BY t.SortOrder;
+
+-- 7. Denial code highlights: open claims, pre-grouped; codes are split and rolled up in C#
+SELECT w.DenialCode, w.PayerName, w.DenialCategory, w.DenialReason, w.PanelName, COUNT(*), ISNULL(SUM(w.RemainingAR), 0)
+FROM arwb.Claim w
+WHERE w.IsFinanciallyClosed = 0 AND NULLIF(LTRIM(RTRIM(w.DenialCode)), N'') IS NOT NULL {scope}
+GROUP BY w.DenialCode, w.PayerName, w.DenialCategory, w.DenialReason, w.PanelName;
+
+-- 8. Agent Productivity
+SELECT w.AssignedAgentUser,
+       COUNT(*),
+       SUM(CASE WHEN w.IsWorkComplete = 1 THEN 1 ELSE 0 END),
+       SUM(CASE WHEN w.WorkflowStatus IN ('Submitted for QA', 'QA Rejected') THEN 1 ELSE 0 END),
+       ISNULL(SUM(w.RecoveredAmount), 0)
+FROM arwb.Claim w
+WHERE NULLIF(w.AssignedAgentUser, N'') IS NOT NULL {scope}
+GROUP BY w.AssignedAgentUser
+ORDER BY SUM(w.RecoveredAmount) DESC;";
+
+        var d = new ArWorkbenchDashboard();
+        static int Int(SqlDataReader r, int i) => r.IsDBNull(i) ? 0 : r.GetInt32(i);
+        static decimal Dec(SqlDataReader r, int i) => r.IsDBNull(i) ? 0m : r.GetDecimal(i);
+        static string? Str(SqlDataReader r, int i) => r.IsDBNull(i) ? null : r.GetString(i);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        if (await reader.ReadAsync(ct))
+        {
+            d.TotalClaims = Int(reader, 0);
+            d.IdentifiedThisWeek = Int(reader, 1);
+            d.IdentifiedLastWeek = Int(reader, 2);
+            d.TotalOutstandingAR = Dec(reader, 3);
+            d.Unassigned = Int(reader, 4);
+            d.InProgress = Int(reader, 5);
+            d.AwaitingQa = Int(reader, 6);
+            d.QaRejected = Int(reader, 7);
+            d.Completed = Int(reader, 8);
+            d.TotalRecovered = Dec(reader, 9);
+            d.PotentialRecovery = Dec(reader, 10);
+            d.OverdueFollowUps = Int(reader, 11);
+            d.TotalInitialAR = Dec(reader, 12);
+            d.Worked = Int(reader, 13);
+        }
+
+        await reader.NextResultAsync(ct);
+        if (await reader.ReadAsync(ct))
+        {
+            d.DataRefreshedOn = reader.IsDBNull(0) ? null : reader.GetDateTime(0);
+            d.SourcePeriodStart = reader.IsDBNull(1) ? null : reader.GetDateTime(1);
+            d.SourcePeriodEnd = reader.IsDBNull(2) ? null : reader.GetDateTime(2);
+        }
+
+        await reader.NextResultAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var label = reader.GetString(0);
+            d.DenialCategories.Add(new ArWorkbenchDashboardBar { Label = label, Key = label, Count = Int(reader, 1), Amount = Dec(reader, 2) });
+        }
+
+        await reader.NextResultAsync(ct);
+        var bucketOrder = new List<string>();
+        while (await reader.ReadAsync(ct)) bucketOrder.Add(reader.GetString(0));
+        await reader.NextResultAsync(ct);
+        var buckets = new Dictionary<string, ArWorkbenchDashboardBar>(StringComparer.OrdinalIgnoreCase);
+        while (await reader.ReadAsync(ct))
+        {
+            var label = reader.GetString(0);
+            buckets[label] = new ArWorkbenchDashboardBar { Label = label, Count = Int(reader, 1), Amount = Dec(reader, 2) };
+        }
+        // Every configured bucket shows (zero included) in master-data order; any bucket the
+        // procedure wrote that is not in the list still shows, at the end.
+        d.AgingBuckets = bucketOrder.Select(b => buckets.GetValueOrDefault(b) ?? new ArWorkbenchDashboardBar { Label = b })
+            .Concat(buckets.Values.Where(b => !bucketOrder.Contains(b.Label, StringComparer.OrdinalIgnoreCase)))
+            .ToList();
+
+        await reader.NextResultAsync(ct);
+        var statuses = new Dictionary<string, ArWorkbenchDashboardBar>(StringComparer.OrdinalIgnoreCase);
+        while (await reader.ReadAsync(ct))
+        {
+            var label = reader.GetString(0);
+            statuses[label] = new ArWorkbenchDashboardBar { Label = label, Key = label, Count = Int(reader, 1), Amount = Dec(reader, 2) };
+        }
+        d.WorkflowStatuses = WorkflowStatusOrder.Select(s => statuses.GetValueOrDefault(s) ?? new ArWorkbenchDashboardBar { Label = s, Key = s }).ToList();
+
+        await reader.NextResultAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var top = reader.GetString(0);
+            var sub = Str(reader, 1);
+            var subLabel = Str(reader, 3);
+            d.QueueVolumes.Add(new ArWorkbenchDashboardBar
+            {
+                Label = subLabel is null ? reader.GetString(2) : $"{reader.GetString(2)} — {subLabel}",
+                Key = $"{top}|{sub}",
+                Count = Int(reader, 4),
+                Amount = Dec(reader, 5)
+            });
+        }
+
+        await reader.NextResultAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            d.ArProgress.Add(new ArWorkbenchDashboardBar
+            {
+                Key = reader.GetString(0) + "|",
+                Label = reader.GetString(1),
+                Count = Int(reader, 2),
+                Amount = Dec(reader, 3)
+            });
+        }
+
+        await reader.NextResultAsync(ct);
+        var highlightRows = new List<(string Code, string? Payer, string? Category, string? Reason, string? Panel, int Count, decimal Balance)>();
+        while (await reader.ReadAsync(ct))
+        {
+            var codes = reader.GetString(0).Split([',', ';', '|'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var code in codes.Distinct(StringComparer.OrdinalIgnoreCase))
+                highlightRows.Add((code, Str(reader, 1), Str(reader, 2), Str(reader, 3), Str(reader, 4), Int(reader, 5), Dec(reader, 6)));
+        }
+        d.DenialHighlights = BuildDenialHighlights(highlightRows).Take(5).ToList();
+
+        await reader.NextResultAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            d.Agents.Add(new ArWorkbenchAgentProductivity
+            {
+                UserName = reader.GetString(0),
+                Assigned = Int(reader, 1),
+                Completed = Int(reader, 2),
+                AwaitingReview = Int(reader, 3),
+                Recovery = Dec(reader, 4)
+            });
+        }
+        await reader.DisposeAsync();
+
+        var names = await GetDisplayNamesAsync(d.Agents.Select(a => a.UserName), ct);
+        foreach (var agent in d.Agents) agent.DisplayName = names.GetValueOrDefault(agent.UserName) ?? agent.UserName;
+
+        return d;
+    }
+
+    /// <summary>
+    /// The mockup's Key Observations rollup (App.buildDenialCodeHighlights): per denial code, claim
+    /// count, open balance, the payer carrying the largest share, and the category's recommended
+    /// action. The observation uses the most common panel, the service line on the claim.
+    /// </summary>
+    private static IEnumerable<ArWorkbenchDenialHighlight> BuildDenialHighlights(
+        List<(string Code, string? Payer, string? Category, string? Reason, string? Panel, int Count, decimal Balance)> rows)
+    {
+        static string? MostCommon(IEnumerable<(string? Value, int Weight)> values)
+            => values.Where(v => !string.IsNullOrWhiteSpace(v.Value))
+                .GroupBy(v => v.Value!, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(g => g.Sum(v => v.Weight))
+                .Select(g => g.Key)
+                .FirstOrDefault();
+
+        return rows
+            .GroupBy(r => r.Code, StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var balance = g.Sum(r => r.Balance);
+                var topPayer = g.GroupBy(r => r.Payer ?? "Unknown payer", StringComparer.OrdinalIgnoreCase)
+                    .Select(p => (Payer: p.Key, Balance: p.Sum(r => r.Balance)))
+                    .OrderByDescending(p => p.Balance)
+                    .First();
+                var category = MostCommon(g.Select(r => (r.Category, r.Count))) ?? "Other";
+                var action = DenialCategoryActions.GetValueOrDefault(category, DenialCategoryActions["Other"]);
+                var panel = MostCommon(g.Select(r => (r.Panel, r.Count)));
+                return new ArWorkbenchDenialHighlight
+                {
+                    Code = g.Key,
+                    Description = MostCommon(g.Select(r => (r.Reason, r.Count))),
+                    Count = g.Sum(r => r.Count),
+                    Balance = balance,
+                    TopPayer = topPayer.Payer,
+                    TopPayerBalance = topPayer.Balance,
+                    ImpactPct = balance > 0 ? topPayer.Balance / balance : 0,
+                    Observation = $"Per review, the majority of denied claims are for {panel ?? "this service line"}.",
+                    Category = action.Tag,
+                    Action = action.Action
+                };
+            })
+            .OrderByDescending(h => h.Balance);
     }
 
     // ==========================================================================================

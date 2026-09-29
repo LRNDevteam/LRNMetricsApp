@@ -968,8 +968,8 @@
     </style>
 </head>
 @{
-    var denialReactUrl = Configuration["DenialWorkflowReactUrl"] ?? "https://localhost:5173";
-    var denialReactAgingUrl = denialReactUrl.Contains('#') ? denialReactUrl : $"{denialReactUrl}#aging";
+    // Denial Workflow = LRN.ARWorkbench (replaced LRN.WebUI); it has no #aging route.
+    var denialReactUrl = Configuration["DenialWorkflowReactUrl"] ?? "https://localhost:5174/";
     var routeController = bootController;
     var routeAction = bootAction;
 }
@@ -1244,7 +1244,7 @@
                         @if (isArRestricted)
                         {
                             <li class="nav-item">
-                                <a class="nav-link" href="@denialReactAgingUrl" target="_blank" rel="noopener">
+                                <a class="nav-link" href="@denialReactUrl" target="_blank" rel="noopener">
                                     <i class="bi bi-kanban-fill"></i> Denial Workflow <span class="badge text-bg-info ms-1">React</span>
                                 </a>
                             </li>

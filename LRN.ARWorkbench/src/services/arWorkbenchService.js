@@ -5,6 +5,7 @@ export const arWorkbenchService = {
   labs: () => api('labs'),
   me: (labId) => api(`me${qs({ labId })}`),
   queues: (labId, signal) => api(`queues${qs({ labId })}`, { signal }),
+  dashboard: (labId, signal) => api(`dashboard${qs({ labId })}`, { signal }),
   claims: (filter, signal) => api(`claims${qs(filter)}`, { signal }),
   claim: (labId, claimKey, signal) => api(`claims/${encodeURIComponent(claimKey)}${qs({ labId })}`, { signal }),
   masterData: (labId) => api(`master-data${qs({ labId })}`),

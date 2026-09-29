@@ -7,8 +7,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- KeyVaultSecretNamingTests runs the real KeyVaultSecretManager. The API references this package
-         with PrivateAssets="all", so it does not flow through the ProjectReference below. -->
+    <!-- KeyVaultSecretNamingTests runs the real KeyVaultSecretManager; referenced directly so the tests
+         do not depend on it flowing through the ProjectReference below. -->
     <PackageReference Include="Azure.Extensions.AspNetCore.Configuration.Secrets" Version="1.4.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.0" />
     <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="161.8910.0" />

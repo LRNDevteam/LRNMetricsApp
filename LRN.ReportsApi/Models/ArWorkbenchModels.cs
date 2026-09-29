@@ -43,6 +43,8 @@ public sealed class ArWorkbenchUserContext
     /// <summary>The user's AR Workbench role name(s) without the "AR Workbench - " prefix, for display.</summary>
     public string RoleLabel { get; set; } = string.Empty;
     public List<string> RoleNames { get; set; } = new();
+    /// <summary>True for Super Admin / Admin / LRN Admin / Lab Admin: every page opens, whatever the RoleCode's menu.</summary>
+    public bool SiteAdmin { get; set; }
     public ArWorkbenchPermissions Permissions { get; set; } = new();
     public ArWorkbenchAccessScope Access { get; set; } = new();
 }
@@ -70,6 +72,81 @@ public sealed class ArWorkbenchQueueSummary
     public int AwaitingQa { get; set; }
     public int RefollowupDue { get; set; }
     public List<ArWorkbenchQueueNode> Queues { get; set; } = new();
+}
+
+// ============================================================================================
+// Dashboard - the mockup's System Administrator dashboard (docs/Denial_WorkFlow/
+// LRN_Denial_AR_Workbench_Demo_Account.html, App.views.dashboard), every figure computed in SQL
+// over the caller's scoped claims.
+// ============================================================================================
+
+public sealed class ArWorkbenchDashboard
+{
+    // KPI tiles
+    public int TotalClaims { get; set; }
+    /// <summary>Claims first billed in the last 7 days / the 7 days before - the "identified this wk" delta.</summary>
+    public int IdentifiedThisWeek { get; set; }
+    public int IdentifiedLastWeek { get; set; }
+    public decimal TotalOutstandingAR { get; set; }
+    public DateTime? DataRefreshedOn { get; set; }
+    public DateTime? SourcePeriodStart { get; set; }
+    public DateTime? SourcePeriodEnd { get; set; }
+    public int Unassigned { get; set; }
+    public int InProgress { get; set; }
+    public int AwaitingQa { get; set; }
+    public int QaRejected { get; set; }
+    public int Completed { get; set; }
+    public decimal TotalRecovered { get; set; }
+    public decimal PotentialRecovery { get; set; }
+    public int OverdueFollowUps { get; set; }
+    public decimal TotalInitialAR { get; set; }
+    public int Worked { get; set; }
+
+    // Charts
+    public List<ArWorkbenchDashboardBar> DenialCategories { get; set; } = new();
+    public List<ArWorkbenchDashboardBar> AgingBuckets { get; set; } = new();
+    public List<ArWorkbenchDashboardBar> WorkflowStatuses { get; set; } = new();
+    /// <summary>Workable AR Queue leaves (not Closed / Patient AR) with an open insurance balance.</summary>
+    public List<ArWorkbenchDashboardBar> QueueVolumes { get; set; } = new();
+    /// <summary>AR Collections Progress: per top-level AR queue, revenue expectation (initial insurance AR) and count.</summary>
+    public List<ArWorkbenchDashboardBar> ArProgress { get; set; } = new();
+
+    // Tables
+    public List<ArWorkbenchDenialHighlight> DenialHighlights { get; set; } = new();
+    public List<ArWorkbenchAgentProductivity> Agents { get; set; } = new();
+}
+
+/// <summary>One bar. Key is what the Work Queue filters on (queue|sub, status, category); null when it cannot drill.</summary>
+public sealed class ArWorkbenchDashboardBar
+{
+    public string Label { get; set; } = string.Empty;
+    public string? Key { get; set; }
+    public int Count { get; set; }
+    public decimal Amount { get; set; }
+}
+
+public sealed class ArWorkbenchDenialHighlight
+{
+    public string Code { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public int Count { get; set; }
+    public decimal Balance { get; set; }
+    public string? TopPayer { get; set; }
+    public decimal TopPayerBalance { get; set; }
+    public decimal ImpactPct { get; set; }
+    public string Observation { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string Action { get; set; } = string.Empty;
+}
+
+public sealed class ArWorkbenchAgentProductivity
+{
+    public string UserName { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public int Assigned { get; set; }
+    public int Completed { get; set; }
+    public int AwaitingReview { get; set; }
+    public decimal Recovery { get; set; }
 }
 
 public sealed class ArWorkbenchClaimFilter

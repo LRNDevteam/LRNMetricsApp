@@ -266,9 +266,9 @@ public class AccountController : Controller
             var workflowUrl = _configuration["DenialWorkflowReactUrl"];
             if (!string.IsNullOrWhiteSpace(workflowUrl))
             {
-                var url = workflowUrl.Trim();
-                if (!url.Contains('#')) url += "#dashboard";
-                return Redirect(url);
+                // LRN.ARWorkbench (replaced LRN.WebUI) opens on its dashboard at the root; it has
+                // no #dashboard route.
+                return Redirect(workflowUrl.Trim());
             }
 
             return RedirectToAction("Index", "DenialWorkflow", new { tab = "dashboard" });

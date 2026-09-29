@@ -19,7 +19,9 @@ namespace LRN.ReportsApi.Controllers;
 ///   1. lab access   - the JWT lab_id claims (or the user's dbo.UserLabs list)
 ///   2. AR Workbench role - one of the 8 'AR Workbench - ...' roles in LRNMaster dbo.Roles (via
 ///      dbo.UserRoles), with permissions in dbo.RoleFeatureAccess and the clinic / provider in
-///      dbo.ARWorkbenchUserScope. No other LRN Metrics role is read. Scope is applied inside the SQL.
+///      dbo.ARWorkbenchUserScope. Scope is applied inside the SQL. The one exception is the site
+///      admin roles: Super Admin (and Admin / LRN Admin) and Lab Admin get every page, with no
+///      AR Workbench role needed.
 /// </summary>
 [ApiController]
 [Route("api/ar-workbench")]
@@ -60,6 +62,15 @@ public sealed class ArWorkbenchController : ControllerBase
         var (user, denied) = await ResolveUserAsync(labId, ct);
         if (denied is not null) return denied;
         return Ok(await _repository.GetQueueSummaryAsync(labId, user!, ct));
+    }
+
+    /// <summary>The Dashboard screen: KPI tiles, charts and tables, all within the caller's scope.</summary>
+    [HttpGet("dashboard")]
+    public async Task<ActionResult<ArWorkbenchDashboard>> Dashboard([FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        return Ok(await _repository.GetDashboardAsync(labId, user!, ct));
     }
 
     [HttpGet("claims")]
@@ -126,7 +137,7 @@ public sealed class ArWorkbenchController : ControllerBase
         if (!await CanAccessLabAsync(labId, ct))
             return (null, Forbidden("Access denied. You can open the AR Workbench only for your authorized labs."));
 
-        var user = await _repository.GetUserContextAsync(labId, CurrentUserName(), ct);
+        var user = await _repository.GetUserContextAsync(labId, CurrentUserName(), SiteAdminRole(), ct);
         if (user is null)
             return (null, Forbidden("You do not have an AR Workbench role. Ask an administrator to give you one of the 'AR Workbench - ...' roles."));
         return (user, null);
@@ -138,9 +149,32 @@ public sealed class ArWorkbenchController : ControllerBase
     private ObjectResult Forbidden(string message)
         => StatusCode(StatusCodes.Status403Forbidden, new { message });
 
+    // Compared with case and spaces removed, as elsewhere: "Super Admin", "SuperAdmin", "superadmin".
+    private static readonly string[] AllLabAdminRoles = ["SUPERADMIN", "ADMIN", "LRNADMIN"];
+    private const string LabAdminRole = "LABADMIN";
+
+    /// <summary>
+    /// The caller's LRN Metrics admin role, or null. Super Admin (and the equivalent Admin / LRN
+    /// Admin) and Lab Admin open every AR Workbench page. Which labs they can open is NOT decided
+    /// here: that stays with <see cref="CanAccessLabAsync"/>, and the token lists every lab for a
+    /// Super Admin but only the assigned labs for a Lab Admin.
+    /// </summary>
+    private string? SiteAdminRole()
+    {
+        var roles = User.Claims
+            .Where(c => c.Type == ClaimTypes.Role || string.Equals(c.Type, "role", StringComparison.OrdinalIgnoreCase))
+            .Select(c => c.Value)
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .ToList();
+        static string Norm(string r) => r.Replace(" ", string.Empty).ToUpperInvariant();
+        return roles.FirstOrDefault(r => AllLabAdminRoles.Contains(Norm(r)))
+            ?? roles.FirstOrDefault(r => Norm(r) == LabAdminRole);
+    }
+
     private async Task<bool> CanAccessLabAsync(int labId, CancellationToken ct)
     {
-        // No site-Admin bypass: the AR Workbench does not use the existing LRN Metrics roles.
+        // No lab bypass for admins: the token already lists every lab for a Super Admin and only
+        // the assigned labs for a Lab Admin.
         var tokenLabs = LabsFromToken();
         if (tokenLabs.Count > 0) return tokenLabs.Any(l => l.LabId == labId);
         var labs = await _workflowService.GetLabsForUserAsync(CurrentUserName(), ct);

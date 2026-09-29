@@ -503,7 +503,8 @@ public sealed class DenialWorkflowController : Controller
         // Nothing configured to redirect to: refuse rather than fall through to a screen this
         // role must not edit from.
         if (string.IsNullOrWhiteSpace(url)) return Forbid();
-        return Redirect(url.Contains('#') ? url : $"{url}#aging");
+        // LRN.ARWorkbench (replaced LRN.WebUI) has no #aging route; it opens on its dashboard.
+        return Redirect(url);
     }
 }
 

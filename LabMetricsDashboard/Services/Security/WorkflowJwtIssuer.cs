@@ -29,7 +29,10 @@ public sealed class WorkflowJwtIssuer
         var displayName = user.FindFirstValue("FullName") ?? userName;
         var roles = user.Claims.Where(c => c.Type == ClaimTypes.Role).Select(c => c.Value).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
-        var isAdmin = roles.Any(r => string.Equals(r, "Admin", StringComparison.OrdinalIgnoreCase));
+        // Same admin set as login (AccountController): Super Admin / LRN Admin get every lab like
+        // Admin. Lab Admin is deliberately not here - it keeps its assigned labs (dbo.UserLabs).
+        static string Norm(string r) => r.Replace(" ", string.Empty).ToUpperInvariant();
+        var isAdmin = roles.Any(r => Norm(r) is "ADMIN" or "SUPERADMIN" or "LRNADMIN");
 
         var labs = new List<object>();
         if (isAdmin)

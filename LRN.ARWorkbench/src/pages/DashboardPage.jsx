@@ -1,109 +1,256 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { BarList, Donut, sequentialRamp } from '../components/Charts';
 import { canOpen } from '../config/navigation';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
-import { ErrorBox, Loading, PageHeader, QueueBadge } from '../components/Status';
+import { ErrorBox, Loading, PageHeader } from '../components/Status';
 import { fmt } from '../utils/format';
 
-function Kpi({ label, value, hint, tone }) {
+const GOOD = '#198754';
+const WARNING = '#fd7e14';
+const pct0 = (v) => `${Math.round(Number(v || 0) * 100)}%`;
+
+function Delta({ tone = 'flat', children }) {
+  return <span className={`arwb-kpi-delta ${tone}`}>{children}</span>;
+}
+
+function Kpi({ label, value, delta }) {
   return (
-    <div className="col-6 col-md-4 col-xl">
-      <div className={`arwb-kpi ${tone ? `arwb-kpi-${tone}` : ''}`}>
-        <div className="arwb-kpi-label">{label}</div>
-        <div className="arwb-kpi-value">{value}</div>
-        {hint && <div className="arwb-kpi-hint">{hint}</div>}
-      </div>
+    <div className="arwb-kpi arwb-kpi-tile">
+      <span className="arwb-kpi-accent" />
+      <span className="arwb-kpi-label">{label}</span>
+      <span className="arwb-kpi-value">{value}</span>
+      {delta}
     </div>
   );
 }
 
+function Card({ icon, title, sub, action, children, flush }) {
+  return (
+    <div className="arwb-table-card mb-3">
+      <div className="arwb-card-head">
+        {icon && <i className={`bi bi-${icon} text-secondary`} />}
+        <h2 className="h6 mb-0">{title}</h2>
+        {sub && <span className="text-secondary small">{sub}</span>}
+        {action && <div className="ms-auto">{action}</div>}
+      </div>
+      <div className={flush ? '' : 'p-3'}>{children}</div>
+    </div>
+  );
+}
+
+function GoTo({ onClick, children }) {
+  return <button type="button" className="btn btn-sm btn-link text-decoration-none p-0" onClick={onClick}>{children} &rarr;</button>;
+}
+
+/**
+ * The mockup's System Administrator dashboard (docs/Denial_WorkFlow/LRN_Denial_AR_Workbench_Demo_Account.html):
+ * 10 KPI tiles, Latest Denial Analysis Report insights, AR Collections Progress, Claim Queue
+ * Volumes, the four distribution charts and Agent Productivity. Every figure comes from
+ * /dashboard, already limited to the caller's scope; the role only decides which cards show,
+ * exactly as in the mockup.
+ */
 export default function DashboardPage() {
   const { labId, lab, user } = useWorkbench();
   const navigate = useNavigate();
-  const [summary, setSummary] = useState(null);
+  const [d, setD] = useState(null);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
     setError('');
-    arWorkbenchService.queues(labId, controller.signal)
-      .then(setSummary)
+    setD(null);
+    arWorkbenchService.dashboard(labId, controller.signal)
+      .then(setD)
       .catch((e) => { if (e.name !== 'AbortError') setError(e.message); });
     return () => controller.abort();
   }, [labId, reload]);
 
-  const canDrill = canOpen(user?.roleCode, 'workqueue');
-  const openQueue = useCallback((queueId, subQueueId) => {
-    if (!canDrill) return;
-    const params = new URLSearchParams({ queue: queueId });
-    if (subQueueId) params.set('sub', subQueueId);
-    navigate(`/work-queue?${params}`);
-  }, [canDrill, navigate]);
-
   if (error) return <ErrorBox message={error} onRetry={() => setReload((n) => n + 1)} />;
-  if (!summary) return <Loading />;
+  if (!d) return <Loading />;
 
-  const recoveryRate = summary.totalInitialAR > 0 ? summary.totalRecovered / summary.totalInitialAR : null;
+  const isViewer = user?.roleCode === 'viewer' && !user?.siteAdmin;
+  const canSeeAllQueues = user?.siteAdmin || ['admin', 'manager', 'lead'].includes(user?.roleCode);
+  const canDrill = canOpen(user, 'workqueue');
+  const openQueue = (params) => navigate(`/work-queue?${new URLSearchParams(params)}`);
+  const drill = (params) => (canDrill ? () => openQueue(params) : undefined);
+  const queueParams = (key, extra = {}) => {
+    const [queue, sub] = String(key || '').split('|');
+    return { queue, ...(sub ? { sub } : {}), ...extra };
+  };
+
+  const identDiff = d.identifiedThisWeek - d.identifiedLastWeek;
+  const kpis = [
+    { label: 'Total Eligible Claims', value: fmt.count(d.totalClaims),
+      delta: <Delta tone={identDiff === 0 ? 'flat' : identDiff > 0 ? 'up' : 'down'}>{`${identDiff >= 0 ? '+' : ''}${identDiff} identified this wk`}</Delta> },
+    { label: 'Total Outstanding Insurance AR', value: fmt.money(d.totalOutstandingAR),
+      delta: d.dataRefreshedOn ? <Delta>as of {fmt.date(d.dataRefreshedOn)}</Delta> : null },
+    { label: 'Claims Awaiting Assignment', value: fmt.count(d.unassigned),
+      delta: d.unassigned > 0 ? <Delta tone="down">needs manager action</Delta> : <Delta tone="up">queue clear</Delta> },
+    { label: 'Claims In Progress', value: fmt.count(d.inProgress) },
+    { label: 'Claims Awaiting QA', value: fmt.count(d.awaitingQa) },
+    { label: 'QA Rejected', value: fmt.count(d.qaRejected) },
+    { label: 'Completed / Closed Claims', value: fmt.count(d.completed) },
+    { label: 'Total Recovered Amount', value: fmt.money(d.totalRecovered) },
+    { label: 'Potential Recovery Amount', value: fmt.money(d.potentialRecovery) },
+    { label: 'Overdue Follow-Ups', value: fmt.count(d.overdueFollowUps),
+      delta: d.overdueFollowUps > 0 ? <Delta tone="down">{d.overdueFollowUps} past due</Delta> : <Delta tone="up">on schedule</Delta> }
+  ];
+
+  const ramp = sequentialRamp(d.agingBuckets.length);
+  const recoveryPct = d.totalInitialAR > 0 ? d.totalRecovered / d.totalInitialAR : 0;
+  const arExpectation = d.arProgress.reduce((s, r) => s + r.amount, 0);
 
   return (
     <>
-      <PageHeader title="Dashboard" subtitle={`${lab?.labName || ''} · denied claims identified from claim-level data`} />
+      <PageHeader title="Dashboard" subtitle={`${lab?.labName || ''} · Denial & AR portfolio at a glance`}>
+        <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setReload((n) => n + 1)}>
+          <i className="bi bi-arrow-clockwise me-1" />Refresh
+        </button>
+      </PageHeader>
 
-      <div className="row g-3 mb-4">
-        <Kpi label="Denied claims" value={fmt.count(summary.totalClaims)} />
-        <Kpi label="Initial insurance AR" value={fmt.moneyCompact(summary.totalInitialAR)} hint="At identification" />
-        <Kpi label="Recovered" value={fmt.moneyCompact(summary.totalRecovered)} hint={recoveryRate === null ? null : `${fmt.pct(recoveryRate)} of initial AR`} tone="good" />
-        <Kpi label="Remaining AR" value={fmt.moneyCompact(summary.totalRemainingAR)} tone="warn" />
-        <Kpi label="Unassigned, open balance" value={fmt.count(summary.unassignedOpen)} />
-        <Kpi label="Awaiting QA" value={fmt.count(summary.awaitingQa)} />
+      <div className="arwb-grid-kpi mb-3">
+        {kpis.map((k) => <Kpi key={k.label} {...k} />)}
       </div>
 
-      <div className="arwb-table-card">
-        <div className="arwb-table-toolbar">
-          <h2 className="h6 mb-0">AR queues</h2>
-          <span className="text-secondary small ms-2">Every claim sits in exactly one queue</span>
+      {!isViewer && (
+        <Card icon="layers" title="Latest Denial Analysis Report insights" sub="from the latest data load" flush
+          action={canOpen(user, 'data-processing') && <GoTo onClick={() => navigate('/data-processing')}>Open Data Processing</GoTo>}>
+          <DenialHighlights rows={d.denialHighlights} onRoute={canDrill ? (code) => openQueue({ q: code }) : null} />
+        </Card>
+      )}
+
+      <Card icon="graph-up-arrow" title="AR Collections Progress" sub="revenue expectation by AR queue"
+        action={canOpen(user, 'reports') && <GoTo onClick={() => navigate('/reports')}>View Full Report</GoTo>}>
+        <BarList items={d.arProgress.map((r) => ({
+          label: r.label, value: r.amount,
+          display: `${fmt.moneyCompact(r.amount)} · ${fmt.count(r.count)}`,
+          onClick: drill(queueParams(r.key))
+        }))} />
+        <div className="text-secondary small mt-2">
+          {`Across all ${fmt.count(d.totalClaims)} claims, total revenue expectation stands at ${fmt.money(arExpectation)}, with ${fmt.money(d.totalRecovered)} collected so far — an overall ${pct0(arExpectation > 0 ? d.totalRecovered / arExpectation : 0)} realization rate.`}
         </div>
-        <div className="table-responsive">
-          <table className="table table-sm align-middle mb-0 arwb-table">
-            <thead>
-              <tr>
-                <th scope="col">Queue</th>
-                <th scope="col" className="text-end">Claims</th>
-                <th scope="col" className="text-end">Remaining AR</th>
-                <th scope="col" className="text-center">Priority</th>
-              </tr>
-            </thead>
-            <tbody>
-              {summary.queues.map((q) => (
-                <QueueRows key={q.queueId} queue={q} onOpen={openQueue} canDrill={canDrill} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+      </Card>
+
+      {canSeeAllQueues && (
+        <Card icon="inbox" title="Claim Queue Volumes" sub="workable AR Queue leaves with an open insurance balance — assign volumes to agents from here"
+          action={canDrill && <GoTo onClick={() => navigate('/work-queue')}>Open Work Queue</GoTo>}>
+          <BarList items={d.queueVolumes.map((q) => ({
+            label: q.label, value: q.count, display: fmt.count(q.count),
+            onClick: drill(queueParams(q.key, { open: '1' }))
+          }))} empty="No open insurance AR in any workable queue." />
+        </Card>
+      )}
+
+      <div className="arwb-grid-charts mb-3">
+        <Card title="Denial Category Distribution" sub="outstanding balance">
+          <BarList items={d.denialCategories.map((c) => ({
+            label: c.label, value: c.amount, display: fmt.moneyCompact(c.amount), onClick: drill({ category: c.key })
+          }))} />
+        </Card>
+        <Card title="AR Aging Distribution" sub="claim count by age of service">
+          <BarList items={d.agingBuckets.map((b, i) => ({ label: b.label, value: b.count, display: fmt.count(b.count), color: ramp[i] }))} />
+        </Card>
+        <Card title="Claim Workflow Status" sub="where work currently sits">
+          <BarList items={d.workflowStatuses.map((s) => ({
+            label: s.label, value: s.count, display: fmt.count(s.count), onClick: s.count ? drill({ status: s.key }) : undefined
+          }))} />
+        </Card>
+        <Card title="Recovery Performance" sub="identified vs. recovered">
+          <Donut
+            segments={[
+              { label: 'Recovered', value: d.totalRecovered, color: GOOD, display: fmt.moneyCompact(d.totalRecovered) },
+              { label: 'Outstanding', value: d.totalOutstandingAR, color: WARNING, display: fmt.moneyCompact(d.totalOutstandingAR) }
+            ]}
+            centerLabel={fmt.pct(recoveryPct)}
+            centerSub="recovered" />
+        </Card>
       </div>
+
+      {!isViewer && (
+        <Card title="Agent Productivity" sub="current portfolio, all statuses" flush>
+          <div className="table-responsive">
+            <table className="table table-sm align-middle mb-0 arwb-table">
+              <thead>
+                <tr>
+                  <th scope="col">Agent</th>
+                  <th scope="col" className="text-end">Assigned</th>
+                  <th scope="col" className="text-end">Completed</th>
+                  <th scope="col" className="text-end">Awaiting Review</th>
+                  <th scope="col" className="text-end">Recovery $</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.agents.length ? d.agents.map((a) => (
+                  <tr key={a.userName}>
+                    <td><span className="arwb-avatar">{initials(a.displayName)}</span>{a.displayName} <span className="text-secondary small">({a.userName})</span></td>
+                    <td className="text-end">{fmt.count(a.assigned)}</td>
+                    <td className="text-end">{fmt.count(a.completed)}</td>
+                    <td className="text-end">{fmt.count(a.awaitingReview)}</td>
+                    <td className="text-end">{fmt.money(a.recovery)}</td>
+                  </tr>
+                )) : (
+                  <tr><td colSpan={5} className="text-center text-secondary py-3">No claims assigned yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
     </>
   );
 }
 
-function QueueRows({ queue, onOpen, canDrill }) {
+function initials(name) {
+  return String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join('');
+}
+
+function DenialHighlights({ rows, onRoute }) {
+  if (!rows.length) return <div className="text-center text-secondary py-3">No denial code groups with an open balance in the current scope.</div>;
   return (
-    <>
-      <tr className={canDrill && queue.claimCount ? 'arwb-clickable' : ''} onClick={() => queue.claimCount && onOpen(queue.queueId)}>
-        <td><QueueBadge label={queue.label} badge={queue.badgeClass} /></td>
-        <td className="text-end fw-semibold">{fmt.count(queue.claimCount)}</td>
-        <td className="text-end">{fmt.money(queue.remainingAR)}</td>
-        <td className="text-center">{queue.isPriority ? <i className="bi bi-flag-fill text-danger" title="Priority queue" /> : ''}</td>
-      </tr>
-      {queue.sub.map((s) => (
-        <tr key={s.queueId} className={canDrill && s.claimCount ? 'arwb-clickable' : ''} onClick={() => s.claimCount && onOpen(queue.queueId, s.queueId)}>
-          <td className="ps-4 text-secondary small"><i className="bi bi-arrow-return-right me-2" />{s.label}</td>
-          <td className="text-end">{fmt.count(s.claimCount)}</td>
-          <td className="text-end">{fmt.money(s.remainingAR)}</td>
-          <td className="text-center">{s.isPriority ? <i className="bi bi-flag text-danger" title="Priority sub-queue" /> : ''}</td>
-        </tr>
-      ))}
-    </>
+    <div className="table-responsive">
+      <table className="table table-sm align-middle mb-0 arwb-table">
+        <thead>
+          <tr>
+            <th scope="col">#</th>
+            <th scope="col">Denial Codes</th>
+            <th scope="col">Description</th>
+            <th scope="col" className="text-end"># of Denial</th>
+            <th scope="col" className="text-end">Total Balance ($)</th>
+            <th scope="col">Highest $ Impact — Insurance</th>
+            <th scope="col" className="text-end">Ins. Balance ($)</th>
+            <th scope="col" className="text-end">$ Impact (%)</th>
+            <th scope="col">Observation</th>
+            <th scope="col">Category</th>
+            <th scope="col">Recommended Action</th>
+            {onRoute && <th scope="col" className="text-end">Action</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((h, i) => (
+            <tr key={h.code}>
+              <td>{i + 1}</td>
+              <td className="font-monospace">{h.code}</td>
+              <td className="arwb-wrap">{h.description || '—'}</td>
+              <td className="text-end">{fmt.count(h.count)}</td>
+              <td className="text-end">{fmt.money(h.balance)}</td>
+              <td>{h.topPayer || '—'}</td>
+              <td className="text-end">{fmt.money(h.topPayerBalance)}</td>
+              <td className="text-end">{pct0(h.impactPct)}</td>
+              <td className="arwb-wrap">{h.observation}</td>
+              <td><span className={`badge ${h.category === 'Review' ? 'text-bg-warning' : 'text-bg-info'}`}>{h.category}</span></td>
+              <td className="arwb-wrap">{h.action}</td>
+              {onRoute && (
+                <td className="text-end">
+                  <button type="button" className="btn btn-sm btn-primary text-nowrap" onClick={() => onRoute(h.code)}>Route to Work Queue</button>
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

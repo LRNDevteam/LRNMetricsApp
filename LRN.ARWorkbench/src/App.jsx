@@ -1,7 +1,7 @@
 import { HashRouter, Route, Routes } from 'react-router';
 import AppShell from './components/AppShell';
 import { ErrorBox, Loading } from './components/Status';
-import { NAV } from './config/navigation';
+import { allows, NAV } from './config/navigation';
 import { useWorkbench, WorkbenchProvider } from './context/WorkbenchContext';
 import ClaimDetailPage from './pages/ClaimDetailPage';
 import DashboardPage from './pages/DashboardPage';
@@ -21,7 +21,7 @@ const SCREENS = {
 // the same rules server-side; this guard only keeps the UI honest.
 function Guard({ item }) {
   const { user } = useWorkbench();
-  if (!item.roles.includes(user?.roleCode)) {
+  if (!allows(user, item)) {
     return <ErrorBox message={`Your role (${user?.roleLabel || 'unknown'}) cannot open ${item.label}.`} />;
   }
   const Screen = item.built ? SCREENS[item.id] : null;

@@ -79,6 +79,42 @@ body {
 .arwb-kpi-good { border-left: 4px solid #198754; }
 .arwb-kpi-warn { border-left: 4px solid #fd7e14; }
 
+/* ---------- Dashboard (mockup: grid-kpi, kpi-tile, bar-list, donut) ---------- */
+.arwb-grid-kpi { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.arwb-grid-charts { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); }
+.arwb-grid-charts > .arwb-table-card { margin-bottom: 0 !important; }
+
+.arwb-kpi-tile { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 0.35rem; padding-left: 1.1rem; }
+.arwb-kpi-accent { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--arwb-accent); }
+.arwb-kpi-tile .arwb-kpi-label { font-weight: 700; font-size: 0.72rem; }
+.arwb-kpi-delta { font-size: 0.72rem; font-weight: 700; width: fit-content; padding: 1px 7px; border-radius: 999px; }
+.arwb-kpi-delta.up { color: #146c43; background: #d1e7dd; }
+.arwb-kpi-delta.down { color: #b02a37; background: #f8d7da; }
+.arwb-kpi-delta.flat { color: #6c757d; background: #eef1f4; }
+
+.arwb-card-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.65rem 1rem; border-bottom: 1px solid var(--arwb-border); }
+
+.arwb-bar-list { display: flex; flex-direction: column; gap: 0.45rem; }
+.arwb-bar-row { display: grid; grid-template-columns: minmax(7rem, 34%) 1fr auto; align-items: center; gap: 0.6rem; font-size: 0.82rem; width: 100%; }
+.arwb-bar-row-btn { border: 0; background: none; padding: 2px 4px; margin: -2px -4px; text-align: left; border-radius: 4px; color: inherit; font: inherit; width: calc(100% + 8px); }
+.arwb-bar-row-btn:hover { background: #eef4fb; }
+.arwb-br-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #495057; }
+.arwb-br-track { height: 10px; background: #eef1f4; border-radius: 5px; overflow: hidden; }
+.arwb-br-fill { display: block; height: 100%; border-radius: 5px; }
+.arwb-br-val { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; text-align: right; min-width: 3.5rem; }
+
+.arwb-donut-wrap { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; }
+.arwb-donut { position: relative; width: 132px; height: 132px; flex: 0 0 auto; }
+.arwb-donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.arwb-donut-label { font-size: 1.25rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.arwb-legend-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 0.4rem; vertical-align: middle; }
+
+.arwb-avatar {
+  display: inline-flex; align-items: center; justify-content: center; width: 1.6rem; height: 1.6rem; margin-right: 0.45rem;
+  border-radius: 50%; background: #dbe8f5; color: var(--arwb-accent); font-size: 0.68rem; font-weight: 700;
+}
+.arwb-wrap { white-space: normal; min-width: 12rem; }
+
 .arwb-filters { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; margin-bottom: 1rem; }
 .arwb-filters > div { min-width: 11rem; }
 .arwb-filters > .arwb-filter-grow { flex: 1 1 16rem; }

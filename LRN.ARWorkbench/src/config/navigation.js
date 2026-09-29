@@ -24,10 +24,16 @@ export const NAV = [
   { id: 'settings',        label: 'Master File Maintenance',   icon: 'sliders',             path: '/settings',        roles: ['admin'],                              built: true,  phase: 3 }
 ];
 
-export function navForRole(role) {
-  return NAV.filter((item) => item.roles.includes(role));
+// user is /me. A site admin (Super Admin for every lab, Lab Admin for their assigned labs) opens
+// every page; everyone else gets their role's list.
+export function allows(user, item) {
+  return Boolean(user?.siteAdmin) || item.roles.includes(user?.roleCode);
 }
 
-export function canOpen(role, id) {
-  return NAV.some((item) => item.id === id && item.roles.includes(role));
+export function navForUser(user) {
+  return NAV.filter((item) => allows(user, item));
+}
+
+export function canOpen(user, id) {
+  return NAV.some((item) => item.id === id && allows(user, item));
 }

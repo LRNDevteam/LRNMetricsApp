@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
 import { LOGOUT_URL } from '../config/apiConfig';
-import { navForRole } from '../config/navigation';
+import { navForUser } from '../config/navigation';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
 import { clearJwt } from '../services/auth';
@@ -37,7 +37,7 @@ export default function AppShell() {
 
   useEffect(() => { setNavOpen(false); }, [location.pathname]);
 
-  const items = navForRole(user?.roleCode);
+  const items = navForUser(user);
 
   function logout() {
     clearJwt();
