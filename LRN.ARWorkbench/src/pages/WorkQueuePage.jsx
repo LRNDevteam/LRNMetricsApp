@@ -97,7 +97,7 @@ export default function WorkQueuePage() {
 
   return (
     <>
-      <PageHeader title="Work Queue" subtitle="Every denied claim in your scope" />
+      <PageHeader note="Every denied claim in your scope" />
 
       <div className="arwb-filters">
         <div>

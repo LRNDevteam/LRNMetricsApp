@@ -43,7 +43,7 @@ export default function DataProcessingPage() {
 
   return (
     <>
-      <PageHeader title="Data Processing" subtitle={`Load denied claims for ${lab?.labName || 'this lab'} from claim-level and line-level data`}>
+      <PageHeader note={`Load denied claims for ${lab?.labName || 'this lab'} from claim-level and line-level data`}>
         <button type="button" className="btn btn-primary btn-sm" disabled={running} onClick={() => setConfirming(true)}>
           {running ? <><span className="spinner-border spinner-border-sm me-2" />Processing…</> : <><i className="bi bi-arrow-repeat me-1" />Run data processing</>}
         </button>

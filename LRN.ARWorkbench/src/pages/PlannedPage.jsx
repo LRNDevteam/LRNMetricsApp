@@ -18,7 +18,7 @@ const PLANS = {
 export default function PlannedPage({ item }) {
   return (
     <>
-      <PageHeader title={item.label} subtitle={`Planned for build phase ${item.phase}`} />
+      <PageHeader note={`Planned for build phase ${item.phase}`} />
       <div className="arwb-card arwb-planned">
         <i className="bi bi-cone-striped" />
         <div>

@@ -22,7 +22,7 @@ export default function MasterDataPage() {
 
   return (
     <>
-      <PageHeader title="Master File Maintenance" subtitle="Reference lists that drive queues and follow-up capture (arwb.MasterListItem)">
+      <PageHeader note="Reference lists that drive queues and follow-up capture (arwb.MasterListItem)">
         <span className="badge text-bg-light border align-self-center">Editing arrives in phase 3</span>
       </PageHeader>
 

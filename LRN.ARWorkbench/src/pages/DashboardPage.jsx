@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { BarList, Donut, sequentialRamp } from '../components/Charts';
+import Icon from '../components/Icon';
 import { canOpen } from '../config/navigation';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
 import { ErrorBox, Loading, PageHeader } from '../components/Status';
 import { fmt } from '../utils/format';
 
-const GOOD = '#198754';
-const WARNING = '#fd7e14';
+// Theme tokens (styles.css), so the donut follows light / dark like the rest of the page.
+const GOOD = 'var(--good)';
+const WARNING = 'var(--warning)';
 const pct0 = (v) => `${Math.round(Number(v || 0) * 100)}%`;
 
 function Delta({ tone = 'flat', children }) {
@@ -17,8 +19,8 @@ function Delta({ tone = 'flat', children }) {
 
 function Kpi({ label, value, delta }) {
   return (
-    <div className="arwb-kpi arwb-kpi-tile">
-      <span className="arwb-kpi-accent" />
+    <div className="arwb-panel arwb-kpi-tile">
+      <span className="arwb-kpi-accent-bar" />
       <span className="arwb-kpi-label">{label}</span>
       <span className="arwb-kpi-value">{value}</span>
       {delta}
@@ -26,22 +28,23 @@ function Kpi({ label, value, delta }) {
   );
 }
 
+// The mockup's .card with a .card-head (icon, h3, .card-sub, .card-head-actions).
 function Card({ icon, title, sub, action, children, flush }) {
   return (
-    <div className="arwb-table-card mb-3">
-      <div className="arwb-card-head">
-        {icon && <i className={`bi bi-${icon} text-secondary`} />}
-        <h2 className="h6 mb-0">{title}</h2>
-        {sub && <span className="text-secondary small">{sub}</span>}
-        {action && <div className="ms-auto">{action}</div>}
+    <div className="arwb-panel arwb-section">
+      <div className="arwb-panel-head">
+        {icon && <Icon name={icon} />}
+        <h3>{title}</h3>
+        {sub && <span className="arwb-card-sub">{sub}</span>}
+        {action && <div className="arwb-panel-head-actions">{action}</div>}
       </div>
-      <div className={flush ? '' : 'p-3'}>{children}</div>
+      <div className={flush ? '' : 'arwb-panel-pad'}>{children}</div>
     </div>
   );
 }
 
 function GoTo({ onClick, children }) {
-  return <button type="button" className="btn btn-sm btn-link text-decoration-none p-0" onClick={onClick}>{children} &rarr;</button>;
+  return <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-ghost" onClick={onClick}>{children} &rarr;</button>;
 }
 
 /**
@@ -105,13 +108,13 @@ export default function DashboardPage() {
 
   return (
     <>
-      <PageHeader title="Dashboard" subtitle={`${lab?.labName || ''} · Denial & AR portfolio at a glance`}>
-        <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setReload((n) => n + 1)}>
-          <i className="bi bi-arrow-clockwise me-1" />Refresh
+      <PageHeader note={d.dataRefreshedOn ? `${lab?.labName || ''} · data refreshed ${fmt.date(d.dataRefreshedOn)}` : lab?.labName}>
+        <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => setReload((n) => n + 1)}>
+          <Icon name="refresh" size={14} />Refresh
         </button>
       </PageHeader>
 
-      <div className="arwb-grid-kpi mb-3">
+      <div className="arwb-grid arwb-grid-kpi arwb-section">
         {kpis.map((k) => <Kpi key={k.label} {...k} />)}
       </div>
 
@@ -124,12 +127,12 @@ export default function DashboardPage() {
 
       <Card icon="graph-up-arrow" title="AR Collections Progress" sub="revenue expectation by AR queue"
         action={canOpen(user, 'reports') && <GoTo onClick={() => navigate('/reports')}>View Full Report</GoTo>}>
-        <BarList items={d.arProgress.map((r) => ({
+        <BarList wide items={d.arProgress.map((r) => ({
           label: r.label, value: r.amount,
           display: `${fmt.moneyCompact(r.amount)} · ${fmt.count(r.count)}`,
           onClick: drill(queueParams(r.key))
         }))} />
-        <div className="text-secondary small mt-2">
+        <div className="arwb-hint mt-2">
           {`Across all ${fmt.count(d.totalClaims)} claims, total revenue expectation stands at ${fmt.money(arExpectation)}, with ${fmt.money(d.totalRecovered)} collected so far — an overall ${pct0(arExpectation > 0 ? d.totalRecovered / arExpectation : 0)} realization rate.`}
         </div>
       </Card>
@@ -137,14 +140,14 @@ export default function DashboardPage() {
       {canSeeAllQueues && (
         <Card icon="inbox" title="Claim Queue Volumes" sub="workable AR Queue leaves with an open insurance balance — assign volumes to agents from here"
           action={canDrill && <GoTo onClick={() => navigate('/work-queue')}>Open Work Queue</GoTo>}>
-          <BarList items={d.queueVolumes.map((q) => ({
+          <BarList wide items={d.queueVolumes.map((q) => ({
             label: q.label, value: q.count, display: fmt.count(q.count),
             onClick: drill(queueParams(q.key, { open: '1' }))
           }))} empty="No open insurance AR in any workable queue." />
         </Card>
       )}
 
-      <div className="arwb-grid-charts mb-3">
+      <div className="arwb-grid arwb-grid-charts arwb-section">
         <Card title="Denial Category Distribution" sub="outstanding balance">
           <BarList items={d.denialCategories.map((c) => ({
             label: c.label, value: c.amount, display: fmt.moneyCompact(c.amount), onClick: drill({ category: c.key })
@@ -171,28 +174,28 @@ export default function DashboardPage() {
 
       {!isViewer && (
         <Card title="Agent Productivity" sub="current portfolio, all statuses" flush>
-          <div className="table-responsive">
-            <table className="table table-sm align-middle mb-0 arwb-table">
+          <div className="arwb-table-wrap">
+            <table className="arwb-data-table">
               <thead>
                 <tr>
                   <th scope="col">Agent</th>
-                  <th scope="col" className="text-end">Assigned</th>
-                  <th scope="col" className="text-end">Completed</th>
-                  <th scope="col" className="text-end">Awaiting Review</th>
-                  <th scope="col" className="text-end">Recovery $</th>
+                  <th scope="col" className="num">Assigned</th>
+                  <th scope="col" className="num">Completed</th>
+                  <th scope="col" className="num">Awaiting Review</th>
+                  <th scope="col" className="num">Recovery $</th>
                 </tr>
               </thead>
               <tbody>
                 {d.agents.length ? d.agents.map((a) => (
                   <tr key={a.userName}>
-                    <td><span className="arwb-avatar">{initials(a.displayName)}</span>{a.displayName} <span className="text-secondary small">({a.userName})</span></td>
-                    <td className="text-end">{fmt.count(a.assigned)}</td>
-                    <td className="text-end">{fmt.count(a.completed)}</td>
-                    <td className="text-end">{fmt.count(a.awaitingReview)}</td>
-                    <td className="text-end">{fmt.money(a.recovery)}</td>
+                    <td><span className="arwb-avatar-sm">{initials(a.displayName)}</span>{a.displayName} <span className="arwb-hint">({a.userName})</span></td>
+                    <td className="num mono">{fmt.count(a.assigned)}</td>
+                    <td className="num mono">{fmt.count(a.completed)}</td>
+                    <td className="num mono">{fmt.count(a.awaitingReview)}</td>
+                    <td className="num mono">{fmt.money(a.recovery)}</td>
                   </tr>
                 )) : (
-                  <tr><td colSpan={5} className="text-center text-secondary py-3">No claims assigned yet.</td></tr>
+                  <tr><td colSpan={5}><div className="arwb-empty-state">No claims assigned yet.</div></td></tr>
                 )}
               </tbody>
             </table>
@@ -208,43 +211,43 @@ function initials(name) {
 }
 
 function DenialHighlights({ rows, onRoute }) {
-  if (!rows.length) return <div className="text-center text-secondary py-3">No denial code groups with an open balance in the current scope.</div>;
+  if (!rows.length) return <div className="arwb-empty-state">No denial code groups with an open balance in the current scope.</div>;
   return (
-    <div className="table-responsive">
-      <table className="table table-sm align-middle mb-0 arwb-table">
+    <div className="arwb-table-wrap">
+      <table className="arwb-data-table">
         <thead>
           <tr>
             <th scope="col">#</th>
             <th scope="col">Denial Codes</th>
             <th scope="col">Description</th>
-            <th scope="col" className="text-end"># of Denial</th>
-            <th scope="col" className="text-end">Total Balance ($)</th>
+            <th scope="col" className="num"># of Denial</th>
+            <th scope="col" className="num">Total Balance ($)</th>
             <th scope="col">Highest $ Impact — Insurance</th>
-            <th scope="col" className="text-end">Ins. Balance ($)</th>
-            <th scope="col" className="text-end">$ Impact (%)</th>
+            <th scope="col" className="num">Ins. Balance ($)</th>
+            <th scope="col" className="num">$ Impact (%)</th>
             <th scope="col">Observation</th>
             <th scope="col">Category</th>
             <th scope="col">Recommended Action</th>
-            {onRoute && <th scope="col" className="text-end">Action</th>}
+            {onRoute && <th scope="col" className="num">Action</th>}
           </tr>
         </thead>
         <tbody>
           {rows.map((h, i) => (
             <tr key={h.code}>
-              <td>{i + 1}</td>
-              <td className="font-monospace">{h.code}</td>
-              <td className="arwb-wrap">{h.description || '—'}</td>
-              <td className="text-end">{fmt.count(h.count)}</td>
-              <td className="text-end">{fmt.money(h.balance)}</td>
+              <td className="mono">{i + 1}</td>
+              <td className="mono">{h.code}</td>
+              <td className="wrap">{h.description || '—'}</td>
+              <td className="num">{fmt.count(h.count)}</td>
+              <td className="num mono">{fmt.money(h.balance)}</td>
               <td>{h.topPayer || '—'}</td>
-              <td className="text-end">{fmt.money(h.topPayerBalance)}</td>
-              <td className="text-end">{pct0(h.impactPct)}</td>
-              <td className="arwb-wrap">{h.observation}</td>
-              <td><span className={`badge ${h.category === 'Review' ? 'text-bg-warning' : 'text-bg-info'}`}>{h.category}</span></td>
-              <td className="arwb-wrap">{h.action}</td>
+              <td className="num mono">{fmt.money(h.topPayerBalance)}</td>
+              <td className="num mono">{pct0(h.impactPct)}</td>
+              <td className="wrap">{h.observation}</td>
+              <td><span className={`arwb-badge ${h.category === 'Review' ? 'arwb-badge-warning' : 'arwb-badge-info'}`}>{h.category}</span></td>
+              <td className="wrap">{h.action}</td>
               {onRoute && (
-                <td className="text-end">
-                  <button type="button" className="btn btn-sm btn-primary text-nowrap" onClick={() => onRoute(h.code)}>Route to Work Queue</button>
+                <td className="num">
+                  <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" onClick={() => onRoute(h.code)}>Route to Work Queue</button>
                 </td>
               )}
             </tr>

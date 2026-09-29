@@ -20,13 +20,13 @@ export function ErrorBox({ message, onRetry }) {
   );
 }
 
-export function PageHeader({ title, subtitle, children }) {
+// The page title and subtitle live in the topbar (AppShell, from NAV). This is the row under it:
+// an optional page-specific note on the left and the page's actions on the right.
+export function PageHeader({ note, children }) {
+  if (!note && !children) return null;
   return (
     <div className="arwb-page-header">
-      <div>
-        <h1 className="h4 mb-1">{title}</h1>
-        {subtitle && <div className="text-secondary small">{subtitle}</div>}
-      </div>
+      <div className="arwb-hint">{note}</div>
       {children && <div className="d-flex gap-2 flex-wrap">{children}</div>}
     </div>
   );
