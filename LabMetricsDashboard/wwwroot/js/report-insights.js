@@ -900,6 +900,8 @@
     }
 
     let loadPromise = null;
+    let featureAvailable = false;
+    const notEnabledMsg = "Insights are not enabled for this lab yet. Run the NotesInsights SQL scripts (SQL_Scripts\\NotesInsights 01-10) on this lab's database.";
     function showPanelLoading() {
         if (el.body) el.body.innerHTML = `<div class="ri-empty"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Loading insights…</div>`;
     }
@@ -908,12 +910,15 @@
         try {
             const avail = await getJson(`${apiBase}/Notes/Available?${q({ lab: ctx.lab })}`);
             if (!avail || !avail.available) {
-                showAlert("Insights are not enabled for this lab yet. Run the NotesInsights SQL scripts on the lab database (CoveLRN), including 07 and 08.", "info");
+                showAlert(notEnabledMsg, "info");
                 el.body.innerHTML = emptyHtml();
                 el.add.disabled = true;
                 if (el.archiveBtn) el.archiveBtn.disabled = true;
+                const toolbarAdd = document.getElementById("riAddInsightBtn");
+                if (toolbarAdd) toolbarAdd.disabled = true;
                 return;
             }
+            featureAvailable = true;
             try { lookups = await getJson(`${apiBase}/Notes/Lookups?${q({ lab: ctx.lab })}`); }
             catch { /* defaults in form */ }
             await refreshTemplates();
@@ -934,6 +939,7 @@
     });
     el.add.addEventListener("click", async () => {
         await ensureLoaded();
+        if (!featureAvailable) return;
         await refreshTemplates();
         openDetail(null, false);
     });
@@ -980,6 +986,7 @@
         setOpen(true);
         root.scrollIntoView({ behavior: "smooth", block: "start" });
         await ensureLoaded();
+        if (!featureAvailable) { showAlert(notEnabledMsg, "info"); return; }
         await refreshTemplates();
         openDetail(null, false);
     });
