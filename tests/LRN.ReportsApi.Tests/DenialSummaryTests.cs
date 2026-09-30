@@ -78,6 +78,33 @@ public class DenialSummaryScheduleTests
     }
 
     [Theory]
+    [InlineData("2026-09-25", "2026-09-18", "2026-09-24")] // Friday: matches WeekFolder "09.18.2026 - 09.24.2026"
+    [InlineData("2026-09-30", "2026-09-18", "2026-09-24")] // Wednesday: still that week
+    [InlineData("2026-09-24", "2026-09-11", "2026-09-17")] // Thursday: current week not finished
+    public void Rising_Tides_week_is_friday_to_thursday(string today, string start, string end)
+    {
+        var options = new DenialSummarySnapshotOptions { WeekStartDayByLab = { ["Rising_Tides"] = "Friday" } };
+        var weekStart = DenialSummarySchedule.WeekStartFor(9, "Rising_Tides", options);
+
+        var (s, e) = DenialSummarySchedule.LastCompletedWeek(DateTime.Parse(today), weekStart);
+
+        Assert.Equal(DayOfWeek.Friday, weekStart);
+        Assert.Equal(DateTime.Parse(start), s);
+        Assert.Equal(DateTime.Parse(end), e);
+        Assert.Equal(DayOfWeek.Thursday, e.DayOfWeek);
+    }
+
+    [Theory]
+    [InlineData(9, "Rising Tides", DayOfWeek.Friday)]      // name match ignores space / underscore / case
+    [InlineData(9, "Unknown name", DayOfWeek.Monday)]      // keyed by name only, so the id alone does not match
+    [InlineData(13, "PCRLabsofAmerica", DayOfWeek.Monday)] // other labs unchanged
+    public void Week_start_is_per_lab_and_defaults_to_monday(int labId, string labName, DayOfWeek expected)
+    {
+        var options = new DenialSummarySnapshotOptions { WeekStartDayByLab = { ["Rising_Tides"] = "Friday" } };
+        Assert.Equal(expected, DenialSummarySchedule.WeekStartFor(labId, labName, options));
+    }
+
+    [Theory]
     [InlineData("2026-09-01", "2026-08-01", "2026-08-31")]
     [InlineData("2026-09-30", "2026-08-01", "2026-08-31")]
     [InlineData("2026-03-10", "2026-02-01", "2026-02-28")]

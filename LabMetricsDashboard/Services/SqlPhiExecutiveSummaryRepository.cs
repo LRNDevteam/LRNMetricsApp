@@ -40,7 +40,7 @@ public sealed class SqlPhiExecutiveSummaryRepository
         "L_A1","L_A1a",
         "L_A2","L_A2a","L_A2b","L_A2c","L_A2d",
         "L_A3",
-        "L_A4","L_A4a","L_A4b",
+        "L_A4","L_A4a","L_A4b","L_A4c",
         "L_A5","L_A5a","L_A5b","L_A5c",
         "L_A6","L_A6a",
         "L_A7","L_A7a","L_A7b","L_A7c",

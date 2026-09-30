@@ -90,7 +90,6 @@ public sealed class DenialSummarySnapshotService : IDenialSummarySnapshotService
     public async Task<int> RunScheduledAsync(DateTime now, CancellationToken ct)
     {
         var today = LocalNow(now).Date;
-        var week = DenialSummarySchedule.LastCompletedWeek(today);
         var month = DenialSummarySchedule.LastCompletedMonth(today);
         var taken = 0;
 
@@ -99,6 +98,8 @@ public sealed class DenialSummarySnapshotService : IDenialSummarySnapshotService
             ct.ThrowIfCancellationRequested();
             try
             {
+                // Week boundaries are per lab (Rising Tides: Friday-Thursday; others Monday-Sunday).
+                var week = DenialSummarySchedule.LastCompletedWeek(today, DenialSummarySchedule.WeekStartFor(labId, labName, _options));
                 if (await CreateSnapshotAsync(labId, DenialSummarySnapshotPeriodTypes.Weekly, week.Start, week.End, "Scheduler", ct) is not null) taken++;
                 if (await CreateSnapshotAsync(labId, DenialSummarySnapshotPeriodTypes.Monthly, month.Start, month.End, "Scheduler", ct) is not null) taken++;
             }
