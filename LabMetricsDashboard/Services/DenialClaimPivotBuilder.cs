@@ -54,7 +54,8 @@ public static class DenialClaimPivotBuilder
         int maxPeriods,
         int topPayers = DefaultTopPayers,
         int topDenialsPerPayer = DefaultTopDenialsPerPayer,
-        DateTime? loadedThrough = null)
+        DateTime? loadedThrough = null,
+        DayOfWeek weekStartsOn = SqlDenialClaimReportRepository.DefaultWeekStartsOn)
     {
         var model = new BreakdownPivotViewModel
         {
@@ -79,7 +80,7 @@ public static class DenialClaimPivotBuilder
             if (loaded.Count > 0) dated = loaded;
         }
 
-        var months = BuildBasePeriods(dated, weekly, maxPeriods);
+        var months = BuildBasePeriods(dated, weekly, maxPeriods, weekStartsOn);
 
         // Monthly gains a subtotal column per year; weekly stays as its four weeks.
         var columns = new List<PivotColumn>(weekly ? months : WithYearTotals(months));
@@ -231,11 +232,11 @@ public static class DenialClaimPivotBuilder
     /// with a gap in its history does not get empty columns taking up the width.
     /// </remarks>
     private static List<PivotColumn> BuildBasePeriods(
-        IReadOnlyList<DenialSummaryGroup> groups, bool weekly, int maxPeriods)
+        IReadOnlyList<DenialSummaryGroup> groups, bool weekly, int maxPeriods, DayOfWeek weekStartsOn)
     {
         return groups
             .Select(g => weekly
-                ? SqlDenialClaimReportRepository.WeekStartOf(g.DenialDate!.Value)
+                ? SqlDenialClaimReportRepository.WeekStartOf(g.DenialDate!.Value, weekStartsOn)
                 : new DateTime(g.DenialDate!.Value.Year, g.DenialDate.Value.Month, 1))
             .Distinct()
             .OrderByDescending(d => d)
