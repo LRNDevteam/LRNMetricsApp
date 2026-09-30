@@ -30,7 +30,8 @@
     {
       "Name": "Panel type",
       "Required": false,
-      "DataType": "string"
+      "DataType": "string",
+      "Aliases": [ "Panelname" ]
     },
     {
       "Name": "Plan Type",
@@ -75,7 +76,9 @@
     {
       "Name": "Created On",
       "Required": false,
-      "DataType": "string"
+      "DataType": "string",
+      "Aliases": [ "ChargeEnteredDate" ],
+      "KeepRaw": true
     },
     {
       "Name": "Aging DOE",
@@ -90,20 +93,35 @@
     {
       "Name": "Ordering Physician First Name",
       "Required": false,
-      "DataType": "string"
+      "DataType": "string",
+      "KeepRaw": true
     },
     {
       "Name": "Ordering Physician Last Name",
       "Required": false,
-      "DataType": "string"
+      "DataType": "string",
+      "KeepRaw": true,
+      "Aliases": [ "Ordering Physician First Name (2)" ]
     },
     {
       "Name": "RenderingPhysician First Name",
       "Required": false,
-      "DataType": "string"
+      "DataType": "string",
+      "KeepRaw": true
     },
     {
       "Name": "Rendering Physician Last Name",
+      "Required": false,
+      "DataType": "string",
+      "KeepRaw": true
+    },
+    {
+      "Name": "[Ordering Physician Last Name][Ordering Physician First Name (2)], [Ordering Physician First Name] {ReferringProvider}",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "[Rendering Physician Last Name], [RenderingPhysician First Name] {BillingProvider}",
       "Required": false,
       "DataType": "string"
     },
@@ -228,12 +246,14 @@
     {
       "Name": "Insurance Paid",
       "Required": false,
-      "DataType": "string"
+      "DataType": "string",
+      "Aliases": [ "InsurancePayment" ]
     },
     {
       "Name": "Patient Paid",
       "Required": false,
-      "DataType": "string"
+      "DataType": "string",
+      "Aliases": [ "PatientPayment" ]
     },
     {
       "Name": "Carrier WO",
@@ -290,7 +310,8 @@
     {
       "Name": "Current Status",
       "Required": false,
-      "DataType": "string"
+      "DataType": "string",
+      "KeepRaw": true
     },
     {
       "Name": "Batch No",

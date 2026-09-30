@@ -151,28 +151,37 @@ public sealed class SqlDenialClaimReportRepository : IDenialClaimReportRepositor
 
         // COUNT(DISTINCT ClaimId) needs a claim identifier. Without one, every row is its own claim -
         // which is what COUNT(*) says, and is the honest answer for a table with no claim key.
-        var claimCountExpr = claimIdCol is null
-            ? "COUNT_BIG(1)"
-            : $"COUNT(DISTINCT CONVERT(nvarchar(255), [{claimIdCol}]))";
+        var claimKeyExpr = claimIdCol is null
+            ? "CAST(NULL AS nvarchar(255))"
+            : $"LTRIM(RTRIM(CONVERT(nvarchar(255), [{claimIdCol}])))";
+        var claimCountExpr = claimIdCol is null ? "COUNT_BIG(1)" : "COUNT(DISTINCT ClaimKey)";
+
+        var (denialDateExpr, lineDateJoin) = await BuildDenialDateSourceAsync(conn, cols, claimIdCol, ct);
 
         // TRY_CONVERT rather than CAST: a lab whose InsuranceBalance is stored as text with a
         // currency symbol would fail the whole query on CAST. TRY_CONVERT yields NULL, and NULL is
         // excluded by "> 0" - the same rows are kept, without the query ever erroring.
+        //
+        // The row expressions are worked out once in the inner SELECT and grouped on by name, so the
+        // denial date - which may come from a join - is not repeated in the GROUP BY.
         var sql = $@"
-SELECT  LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [{payerCol}]), ''))) AS PayerName,
-        {normalizedExpr}                                              AS DenialCodeNormalized,
-        {descriptionExpr}                                             AS DenialDescription,
-        TRY_CONVERT(date, [DenialDate])                               AS DenialDate,
-        {claimCountExpr}                                              AS ClaimCount,
-        SUM(TRY_CONVERT(decimal(18,2), [InsuranceBalance]))           AS InsuranceBalance
-FROM    dbo.ClaimLevelData
-WHERE   [DenialCode] IS NOT NULL
-  AND   LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> ''
-  AND   TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0
-GROUP BY LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [{payerCol}]), ''))),
-        {normalizedExpr},
-        {descriptionExpr},
-        TRY_CONVERT(date, [DenialDate]);";
+SELECT  PayerName, DenialCodeNormalized, DenialDescription, DenialDate,
+        {claimCountExpr}      AS ClaimCount,
+        SUM(InsuranceBalance) AS InsuranceBalance
+FROM (
+    SELECT  LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [{payerCol}]), ''))) AS PayerName,
+            {normalizedExpr}                                              AS DenialCodeNormalized,
+            {descriptionExpr}                                             AS DenialDescription,
+            {denialDateExpr}                                              AS DenialDate,
+            {claimKeyExpr}                                                AS ClaimKey,
+            TRY_CONVERT(decimal(18,2), [InsuranceBalance])                AS InsuranceBalance
+    FROM    dbo.ClaimLevelData AS cld
+    {lineDateJoin}
+    WHERE   [DenialCode] IS NOT NULL
+      AND   LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> ''
+      AND   TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0
+) AS d
+GROUP BY PayerName, DenialCodeNormalized, DenialDescription, DenialDate;";
 
         var rows = new List<DenialSummaryGroup>();
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 };
@@ -192,6 +201,77 @@ GROUP BY LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [{payerCol}]), ''))),
         }
 
         return rows;
+    }
+
+    /// <summary>
+    /// Where each denied claim's denial date comes from, which is what places it in a Monthly or
+    /// Weekly column: the expression to select, and the join (if any) it needs.
+    /// </summary>
+    /// <remarks>
+    /// <para>Cove's ClaimLevelData carries DenialDate itself, and that stays the first choice. Most
+    /// labs' claim tables do not - Augustus, Beech Tree, Certus, NorthWest, PCR Labs of America,
+    /// Phi Life and Rising Tides only have it on LineLevelData - and reading the claim column
+    /// unconditionally failed the whole summary for them with "Invalid column name 'DenialDate'",
+    /// so their Monthly and Weekly tabs never loaded.</para>
+    /// <para>So the claim takes the latest DenialDate of its denied lines, joined on the claim id.
+    /// It is also the fallback where the claim column exists but a row's value is blank, so a lab
+    /// that half-populates the claim column still dates those claims.</para>
+    /// </remarks>
+    private async Task<(string DateExpr, string Join)> BuildDenialDateSourceAsync(
+        SqlConnection conn, HashSet<string> claimCols, string? claimIdCol, CancellationToken ct)
+    {
+        var claimDate = claimCols.Contains("DenialDate") ? "TRY_CONVERT(date, [DenialDate])" : null;
+
+        string? lineDate = null;
+        var join = string.Empty;
+
+        if (claimIdCol is not null && await TableExistsAsync(conn, "LineLevelData", ct))
+        {
+            var lineCols = await GetColumnsAsync(conn, "LineLevelData", ct);
+            var lineIdCol = lineCols.Contains(claimIdCol)
+                ? claimIdCol
+                : FirstPresent(lineCols, "ClaimID", "ClaimId", "VisitNumber", "AccessionNo");
+
+            if (lineIdCol is not null && lineCols.Contains("DenialDate"))
+            {
+                // Only lines that were actually denied, where the line table says so.
+                var deniedLine = lineCols.Contains("DenialCode")
+                    ? "AND LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [DenialCode]), ''))) <> ''"
+                    : string.Empty;
+
+                // Aliases named so they cannot collide with a ClaimLevelData column, which the
+                // outer query still references unqualified.
+                join = $@"LEFT JOIN (
+        SELECT  LTRIM(RTRIM(CONVERT(nvarchar(255), [{lineIdCol}]))) AS LineClaimKey,
+                MAX(TRY_CONVERT(date, [DenialDate]))                AS LineDenialDate
+        FROM    dbo.LineLevelData
+        WHERE   TRY_CONVERT(date, [DenialDate]) IS NOT NULL
+                {deniedLine}
+        GROUP BY LTRIM(RTRIM(CONVERT(nvarchar(255), [{lineIdCol}])))
+    ) AS ldd ON ldd.LineClaimKey = LTRIM(RTRIM(CONVERT(nvarchar(255), cld.[{claimIdCol}])))";
+
+                lineDate = "ldd.LineDenialDate";
+            }
+        }
+
+        var expr = (claimDate, lineDate) switch
+        {
+            ({ } c, { } l) => $"COALESCE({c}, {l})",
+            ({ } c, null) => c,
+            (null, { } l) => l,
+            _ => "CAST(NULL AS date)"
+        };
+
+        if (claimDate is null && lineDate is null)
+        {
+            // Not an error: every claim lands in Monthly's "Other Periods" and Weekly is empty,
+            // which is the truth for a lab with no denial dates anywhere.
+            _logger.LogWarning(
+                "Denial summary: neither ClaimLevelData nor LineLevelData has a usable DenialDate; "
+                + "claims cannot be placed in a month or week.");
+        }
+
+        return (expr, join);
     }
 
     /// <inheritdoc />

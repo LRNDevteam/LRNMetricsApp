@@ -61,6 +61,9 @@ public sealed class ExecutiveSummaryController : Controller
             ["PCR_Dx_CO"]        = "PCR",
             ["PCRAL"]            = "PCR",
             ["PCRCO"]            = "PCR",
+            // Demo lab: its database is a clone of PCRLabsofAmerica and carries PCR's SPs
+            // (docs/demo-lab/DemoLab_Setup.md). Same mapping as LabCollectionPrefix.
+            ["LRNLabDemo"]       = "PCR",
             ["Beech_Tree"]       = "BT",
         };
 

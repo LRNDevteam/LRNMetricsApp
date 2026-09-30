@@ -107,10 +107,48 @@ public static class MenuFeatureCatalog
             FeatureKey  = ReimbursementChatHelpBubble,
             DisplayName = "Reimbursement option in the help chat bubble",
             Description = "The \"Ask about reimbursement rates\" shortcut inside the floating help bot."
-        }
+        },
+
+        // AR Workbench permission matrix (read by ArWorkbenchController). Listed here so the role
+        // feature admin screen shows them and ReplaceRoleFeaturesAsync keeps them on save.
+        new() { FeatureKey = ArWorkbenchFeatures.Access,         DisplayName = "AR Workbench: open the workbench",       Description = "Required for any access to the AR Workbench. Alone, it gives read-only (viewer) access." },
+        new() { FeatureKey = ArWorkbenchFeatures.Assign,         DisplayName = "AR Workbench: assign and reassign",      Description = "Assignment Management, assignment batches and bulk reassign." },
+        new() { FeatureKey = ArWorkbenchFeatures.EditClaim,      DisplayName = "AR Workbench: work claims",              Description = "Log follow-ups and act on claims. Without Assign, the user sees only their own caseload." },
+        new() { FeatureKey = ArWorkbenchFeatures.QaDecide,       DisplayName = "AR Workbench: QA decisions",             Description = "Approve or reject in QA Verification (never their own work)." },
+        new() { FeatureKey = ArWorkbenchFeatures.Approve,        DisplayName = "AR Workbench: approvals",                Description = "CIP approvals, escalations and data processing (RCM Manager level)." },
+        new() { FeatureKey = ArWorkbenchFeatures.ManageUsers,    DisplayName = "AR Workbench: user access",              Description = "Set clinic / provider access scope for workbench users (Administrator level)." },
+        new() { FeatureKey = ArWorkbenchFeatures.ViewAudit,      DisplayName = "AR Workbench: audit logs",               Description = "Cross-claim activity trail." },
+        new() { FeatureKey = ArWorkbenchFeatures.ManageSettings, DisplayName = "AR Workbench: master file maintenance",   Description = "Edit master lists, denial code map and settings." },
+        new() { FeatureKey = ArWorkbenchFeatures.AllClients,     DisplayName = "AR Workbench: all clients",              Description = "See every client, not only an assigned one." },
+        new() { FeatureKey = ArWorkbenchFeatures.ViewClientMgmt, DisplayName = "AR Workbench: client management",        Description = "Client roster and activation." },
+        new() { FeatureKey = ArWorkbenchFeatures.ScopeClinic,    DisplayName = "AR Workbench: limit to one clinic",      Description = "Clinic Viewer. The clinic is set per user and lab in dbo.ARWorkbenchUserScope." },
+        new() { FeatureKey = ArWorkbenchFeatures.ScopeProvider,  DisplayName = "AR Workbench: limit to one provider",    Description = "Provider Viewer. The provider is set per user and lab in dbo.ARWorkbenchUserScope." }
     };
 
     public static bool IsKnown(string? featureKey)
         => !string.IsNullOrWhiteSpace(featureKey)
         && All.Any(f => string.Equals(f.FeatureKey, featureKey, StringComparison.OrdinalIgnoreCase));
+}
+
+/// <summary>
+/// dbo.RoleFeatureAccess keys for the AR Workbench, granted only to the 8 "AR Workbench - ..." roles
+/// (LRNMaster_01_ArWorkbench_Roles_Access.sql).
+/// </summary>
+public static class ArWorkbenchFeatures
+{
+    /// <summary>dbo.Roles.RoleName prefix of the AR Workbench roles. No other role is read.</summary>
+    public const string RolePrefix = "AR Workbench - ";
+    public const string Prefix = "ARWorkbench.";
+    public const string ScopeClinic = "ARWorkbench.Scope.Clinic";
+    public const string ScopeProvider = "ARWorkbench.Scope.Provider";
+    public const string Access = "ARWorkbench.Access";
+    public const string Assign = "ARWorkbench.Assign";
+    public const string EditClaim = "ARWorkbench.EditClaim";
+    public const string QaDecide = "ARWorkbench.QaDecide";
+    public const string Approve = "ARWorkbench.Approve";
+    public const string ManageUsers = "ARWorkbench.ManageUsers";
+    public const string ViewAudit = "ARWorkbench.ViewAudit";
+    public const string ManageSettings = "ARWorkbench.ManageSettings";
+    public const string AllClients = "ARWorkbench.AllClients";
+    public const string ViewClientMgmt = "ARWorkbench.ViewClientMgmt";
 }

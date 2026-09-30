@@ -658,7 +658,8 @@ builder.Services.AddScoped<MenuAccessFilter>();
 // pages a role can open; this decides whether it can change anything once there.
 builder.Services.AddScoped<ViewOnlyRoleFilter>();
 
-// Allow local Vite React dev server to call MVC AuthToken endpoint with cookies.
+// Allow the local Vite dev server of the denial app (LRN.ARWorkbench, port 5174 - it replaced
+// LRN.WebUI on 5173) to call the MVC AuthToken endpoint with cookies.
 // Production stays same-origin, but these origins are useful while debugging React locally.
 var denialWorkflowCorsOrigins = builder.Configuration
     .GetSection("DenialWorkflowCors:AllowedOrigins")
@@ -669,10 +670,10 @@ var denialWorkflowCorsOrigins = builder.Configuration
     .ToArray()
     ?? new[]
     {
-        "http://localhost:5173",
-        "https://localhost:5173",
-        "http://127.0.0.1:5173",
-        "https://127.0.0.1:5173"
+        "http://localhost:5174",
+        "https://localhost:5174",
+        "http://127.0.0.1:5174",
+        "https://127.0.0.1:5174"
     };
 
 builder.Services.AddCors(options =>

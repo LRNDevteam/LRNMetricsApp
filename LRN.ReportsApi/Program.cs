@@ -94,6 +94,9 @@ builder.Services.AddScoped<IDenialDashboardSnapshotService, DenialDashboardSnaps
 // AR follow-up reporting suite (RPT-01 AR Follow-up Activity Detail and the shared report catalog).
 builder.Services.AddScoped<LRN.ReportsApi.Services.ArReports.IArActivityReportRepository,
                            LRN.ReportsApi.Services.ArReports.SqlArActivityReportRepository>();
+// AR Workbench (new denial application; [arwb] schema per lab, React app LRN.ARWorkbench).
+builder.Services.AddScoped<LRN.ReportsApi.Services.ArWorkbench.IArWorkbenchRepository,
+                           LRN.ReportsApi.Services.ArWorkbench.SqlArWorkbenchRepository>();
 builder.Services.AddScoped<IPayerMasterWorkflowService, PayerMasterWorkflowService>();
 builder.Services.AddHostedService<PayerMasterSlaEscalationService>();
 // Denial Summary observations and weekly/monthly Excel snapshots (Denial Workflow v1.1, 4a-4i).
@@ -226,7 +229,9 @@ app.Use(async (context, next) =>
         || path.StartsWithSegments("/api/analytics")
         // Report Control Board landing page. Must be listed here: anything not matched below runs
         // with no authentication at all, and this endpoint exposes every lab's run status.
-        || path.StartsWithSegments("/api/report-board");
+        || path.StartsWithSegments("/api/report-board")
+        // AR Workbench. Returns claim and patient data, so it must stay behind the JWT gate.
+        || path.StartsWithSegments("/api/ar-workbench");
 
     // client-logs exists to capture client-side errors, including ones caused by auth being
     // broken or expired. Requiring a valid JWT here creates a chicken-and-egg failure: exactly
@@ -236,6 +241,7 @@ app.Use(async (context, next) =>
         || path.StartsWithSegments("/api/denialworkflow/health")
         || path.StartsWithSegments("/api/denial-workflow/health")
         || path.StartsWithSegments("/api/denial-dashboard/health")
+        || path.StartsWithSegments("/api/ar-workbench/health")
         || path.StartsWithSegments("/api/denialworkflow/client-logs")
         || path.StartsWithSegments("/api/denial-workflow/client-logs"))
     {

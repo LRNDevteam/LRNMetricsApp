@@ -64,6 +64,26 @@ public sealed record LisKeyMetricsBlock(
     string CollectionDateLabel,
     IReadOnlyList<LisKeyMetricsMonth> Months);
 
+/// <summary>
+/// One row of the Key Metrics table: # | Description | Responsible Party | Benchmark | months.
+/// Shared by the page and the Excel export so the two cannot drift apart.
+/// </summary>
+public sealed record LisKeyMetricRow(
+    string Description,
+    string ResponsibleParty,
+    double Benchmark,
+    Func<LisKeyMetricsMonth, double?> Value)
+{
+    /// <summary>
+    /// The client template's rows. Benchmarks are the default target days (2 to result, 4 to bill).
+    /// </summary>
+    public static readonly IReadOnlyList<LisKeyMetricRow> All =
+    [
+        new("Time to Result", "Client", 2, m => m.AvgTimeToResult),
+        new("Time to Bill", "Billing Company", 2, m => m.AvgTimeToBill)
+    ];
+}
+
 public sealed record LisSummaryFilterOptions(
     List<string> Panels,
     List<string> Clinics,

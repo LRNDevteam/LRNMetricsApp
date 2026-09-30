@@ -2,10 +2,10 @@
 @model List<MenuItemVm>
 @inject IConfiguration Configuration
 @{
-    // Denial Workflow lives in a separate React app, so its menu row (DenialWorkflow/Index)
-    // drives visibility, order and placement while the link itself points at that app.
-    var denialReactUrl = Configuration["DenialWorkflowReactUrl"] ?? "https://localhost:5173";
-    var denialReactAgingUrl = denialReactUrl.Contains('#') ? denialReactUrl : $"{denialReactUrl}#aging";
+    // Denial Workflow lives in a separate React app (LRN.ARWorkbench, which replaced LRN.WebUI), so
+    // its menu row (DenialWorkflow/Index) drives visibility, order and placement while the link
+    // itself points at that app. ARWorkbench has no #aging route, so it opens on its dashboard.
+    var denialReactUrl = Configuration["DenialWorkflowReactUrl"] ?? "https://localhost:5174/";
 
     bool IsDenialWorkflow(MenuItemVm item) =>
         string.Equals(item.ControllerName, "DenialWorkflow", StringComparison.OrdinalIgnoreCase)
@@ -26,7 +26,7 @@
 
     // Href for a linkable item: the React app for Denial Workflow, the MVC route otherwise.
     string LinkFor(MenuItemVm item) => IsDenialWorkflow(item)
-        ? denialReactAgingUrl
+        ? denialReactUrl
         : Url.Action(item.ActionName, item.ControllerName, new { area = item.AreaName ?? string.Empty })!;
 }
 @if (Model == null || Model.Count == 0)

@@ -43,7 +43,13 @@
             <table class="lis-km-table">
                 <thead>
                     <tr>
-                        <th scope="col" class="lis-km-metric-head">Metrics</th>
+                        <th scope="col" rowspan="2" class="lis-km-index-head">#</th>
+                        <th scope="col" rowspan="2" class="lis-km-metric-head">Description</th>
+                        <th scope="col" rowspan="2" class="lis-km-party-head">Responsible Party</th>
+                        <th scope="colgroup" colspan="@(months.Count + 1)">Average Days Taken</th>
+                    </tr>
+                    <tr>
+                        <th scope="col" class="lis-km-benchmark">Benchmark</th>
                         @for (var i = 0; i < months.Count; i++)
                         {
                             var isLatest = i == months.Count - 1;
@@ -52,48 +58,33 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <tr>
-                        <th scope="row" class="lis-km-metric-name">
-                            <span class="lis-km-metric-title">Time to Result</span>
-                            <span class="lis-km-metric-unit">days avg</span>
-                        </th>
-                        @for (var i = 0; i < months.Count; i++)
-                        {
-                            var month = months[i];
-                            var prev = i > 0 ? months[i - 1].AvgTimeToResult : null;
-                            var isLatest = i == months.Count - 1;
-                            <td class="@(isLatest ? "lis-km-latest" : null)">
-                                <span class="lis-km-cell">
-                                    <span class="lis-km-value">@FormatMetric(month.AvgTimeToResult)</span>
-                                    @if (i > 0)
-                                    {
-                                        <span class="lis-km-delta @DeltaClass(month.AvgTimeToResult, prev)">@FormatDelta(month.AvgTimeToResult, prev)</span>
-                                    }
-                                </span>
-                            </td>
-                        }
-                    </tr>
-                    <tr>
-                        <th scope="row" class="lis-km-metric-name">
-                            <span class="lis-km-metric-title">Time to Bill</span>
-                            <span class="lis-km-metric-unit">days avg</span>
-                        </th>
-                        @for (var i = 0; i < months.Count; i++)
-                        {
-                            var month = months[i];
-                            var prev = i > 0 ? months[i - 1].AvgTimeToBill : null;
-                            var isLatest = i == months.Count - 1;
-                            <td class="@(isLatest ? "lis-km-latest" : null)">
-                                <span class="lis-km-cell">
-                                    <span class="lis-km-value">@FormatMetric(month.AvgTimeToBill)</span>
-                                    @if (i > 0)
-                                    {
-                                        <span class="lis-km-delta @DeltaClass(month.AvgTimeToBill, prev)">@FormatDelta(month.AvgTimeToBill, prev)</span>
-                                    }
-                                </span>
-                            </td>
-                        }
-                    </tr>
+                    @for (var r = 0; r < LabMetricsDashboard.Models.LisKeyMetricRow.All.Count; r++)
+                    {
+                        var metric = LabMetricsDashboard.Models.LisKeyMetricRow.All[r];
+                        <tr>
+                            <td class="lis-km-index">@(r + 1)</td>
+                            <th scope="row" class="lis-km-metric-name">
+                                <span class="lis-km-metric-title">@metric.Description</span>
+                            </th>
+                            <td class="lis-km-party">@metric.ResponsibleParty</td>
+                            <td class="lis-km-benchmark">@FormatMetric(metric.Benchmark)</td>
+                            @for (var i = 0; i < months.Count; i++)
+                            {
+                                var value = metric.Value(months[i]);
+                                var prev = i > 0 ? metric.Value(months[i - 1]) : null;
+                                var isLatest = i == months.Count - 1;
+                                <td class="@(isLatest ? "lis-km-latest" : null)">
+                                    <span class="lis-km-cell">
+                                        <span class="lis-km-value">@FormatMetric(value)</span>
+                                        @if (i > 0)
+                                        {
+                                            <span class="lis-km-delta @DeltaClass(value, prev)">@FormatDelta(value, prev)</span>
+                                        }
+                                    </span>
+                                </td>
+                            }
+                        </tr>
+                    }
                 </tbody>
             </table>
         </div>

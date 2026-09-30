@@ -137,8 +137,8 @@ public static class LisSummaryExcelExportBuilder
 
         if (result.KeyMetrics is { Months.Count: > 0 } keyMetrics)
         {
-            // Key Metrics is Metrics | Month1 | Month2 | … — not the summary pivot's
-            // S.No | Description layout, so months start in column 2 (no blank gap).
+            // Key Metrics is # | Description | Responsible Party | Benchmark | Month1 … —
+            // its own layout, not the summary pivot's S.No | Description columns.
             rowAfterTitle = BuildKeyMetricsSection(sheet, keyMetrics, rowAfterTitle);
             rowAfterTitle++;
         }
@@ -300,21 +300,25 @@ public static class LisSummaryExcelExportBuilder
 
     /// <summary>
     /// Recent 4 Months by Date of Collection — average Time to Result / Time to Bill.
-    /// Layout matches the client template: Metrics | Month 1 | Month 2 | Month 3 | Month 4
-    /// (real month names in the headers). Filter note above the table, then metrics, then values.
+    /// Layout matches the client template: # | Description | Responsible Party, then an
+    /// "Average Days Taken" band over Benchmark | Month 1 … Month 4 (real month names).
+    /// Filter note above the table. Rows come from <see cref="LisKeyMetricRow.All"/>.
     /// </summary>
     private static int BuildKeyMetricsSection(
         IXLWorksheet sheet,
         LisKeyMetricsBlock metrics,
         int startRow)
     {
-        const int metricsCol = 1;
-        const int firstMonthCol = 2;
-        var lastColumn = Math.Max(firstMonthCol, firstMonthCol + metrics.Months.Count - 1);
+        const int indexCol = 1;
+        const int metricsCol = 2;
+        const int partyCol = 3;
+        const int benchmarkCol = 4;
+        const int firstMonthCol = 5;
+        var lastColumn = firstMonthCol + metrics.Months.Count - 1;
 
-        var titleRange = sheet.Range(startRow, metricsCol, startRow, lastColumn);
+        var titleRange = sheet.Range(startRow, indexCol, startRow, lastColumn);
         titleRange.Merge();
-        var titleCell = sheet.Cell(startRow, metricsCol);
+        var titleCell = sheet.Cell(startRow, indexCol);
         titleCell.Value = $"Key Metrics — Recent 4 Months by {metrics.CollectionDateLabel}";
         titleCell.Style.Font.Bold = true;
         titleCell.Style.Font.FontColor = XLColor.White;
@@ -322,14 +326,26 @@ public static class LisSummaryExcelExportBuilder
         titleCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 
         var filterRow = startRow + 1;
-        sheet.Cell(filterRow, metricsCol).Value =
+        sheet.Cell(filterRow, indexCol).Value =
             $"Filter: {metrics.CollectionDateLabel}. Exclude blank Time to Result / Time to Bill. Average per month.";
-        sheet.Range(filterRow, metricsCol, filterRow, lastColumn).Merge();
-        sheet.Cell(filterRow, metricsCol).Style.Font.Italic = true;
-        sheet.Cell(filterRow, metricsCol).Style.Font.FontColor = XLColor.FromHtml("#5C738A");
+        sheet.Range(filterRow, indexCol, filterRow, lastColumn).Merge();
+        sheet.Cell(filterRow, indexCol).Style.Font.Italic = true;
+        sheet.Cell(filterRow, indexCol).Style.Font.FontColor = XLColor.FromHtml("#5C738A");
 
-        var headerRow = filterRow + 1;
-        sheet.Cell(headerRow, metricsCol).Value = "Metrics";
+        // Two header rows: #, Description and Responsible Party span both; "Average Days Taken"
+        // bands Benchmark and the months, as in the client template.
+        var bandRow = filterRow + 1;
+        var headerRow = bandRow + 1;
+        foreach (var (column, label) in new[] { (indexCol, "#"), (metricsCol, "Description"), (partyCol, "Responsible Party") })
+        {
+            sheet.Cell(bandRow, column).Value = label;
+            sheet.Range(bandRow, column, headerRow, column).Merge();
+        }
+
+        sheet.Cell(bandRow, benchmarkCol).Value = "Average Days Taken";
+        sheet.Range(bandRow, benchmarkCol, bandRow, lastColumn).Merge();
+
+        sheet.Cell(headerRow, benchmarkCol).Value = "Benchmark";
         var col = firstMonthCol;
         foreach (var month in metrics.Months)
         {
@@ -337,44 +353,50 @@ public static class LisSummaryExcelExportBuilder
             col++;
         }
 
-        var resultRow = headerRow + 1;
-        sheet.Cell(resultRow, metricsCol).Value = "Time to Result";
-        col = firstMonthCol;
-        foreach (var month in metrics.Months)
+        var row = headerRow;
+        for (var i = 0; i < LisKeyMetricRow.All.Count; i++)
         {
-            WriteMetricCell(sheet.Cell(resultRow, col), month.AvgTimeToResult);
-            col++;
+            var metric = LisKeyMetricRow.All[i];
+            row++;
+            sheet.Cell(row, indexCol).Value = i + 1;
+            sheet.Cell(row, metricsCol).Value = metric.Description;
+            sheet.Cell(row, partyCol).Value = metric.ResponsibleParty;
+            WriteMetricCell(sheet.Cell(row, benchmarkCol), metric.Benchmark);
+
+            col = firstMonthCol;
+            foreach (var month in metrics.Months)
+            {
+                WriteMetricCell(sheet.Cell(row, col), metric.Value(month));
+                col++;
+            }
         }
 
-        var billRow = resultRow + 1;
-        sheet.Cell(billRow, metricsCol).Value = "Time to Bill";
-        col = firstMonthCol;
-        foreach (var month in metrics.Months)
-        {
-            WriteMetricCell(sheet.Cell(billRow, col), month.AvgTimeToBill);
-            col++;
-        }
-
-        var table = sheet.Range(headerRow, metricsCol, billRow, lastColumn);
+        var lastRow = row;
+        var table = sheet.Range(bandRow, indexCol, lastRow, lastColumn);
         table.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
         table.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
         table.Style.Border.OutsideBorderColor = BorderColor;
         table.Style.Border.InsideBorderColor = BorderColor;
 
-        var headerRange = sheet.Range(headerRow, metricsCol, headerRow, lastColumn);
+        var headerRange = sheet.Range(bandRow, indexCol, headerRow, lastColumn);
         headerRange.Style.Font.Bold = true;
         headerRange.Style.Font.FontColor = XLColor.White;
         headerRange.Style.Fill.BackgroundColor = HeaderGreen;
         headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        headerRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
 
-        sheet.Range(resultRow, firstMonthCol, billRow, lastColumn)
+        sheet.Range(headerRow + 1, indexCol, lastRow, indexCol)
+            .Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        sheet.Range(headerRow + 1, benchmarkCol, lastRow, lastColumn)
             .Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
 
+        sheet.Column(indexCol).Width = Math.Max(sheet.Column(indexCol).Width, 5);
         sheet.Column(metricsCol).Width = Math.Max(sheet.Column(metricsCol).Width, 18);
-        for (var c = firstMonthCol; c <= lastColumn; c++)
+        sheet.Column(partyCol).Width = Math.Max(sheet.Column(partyCol).Width, 18);
+        for (var c = benchmarkCol; c <= lastColumn; c++)
             sheet.Column(c).Width = Math.Max(sheet.Column(c).Width, 12);
 
-        return billRow;
+        return lastRow;
     }
 
     private static void WriteMetricCell(IXLCell cell, double? value)

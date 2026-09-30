@@ -46,6 +46,17 @@
                     <i class="bi bi-download"></i> Export
                 </a>
 
+                @if (Model.CanEdit && !isCurrent)
+                {
+                    @* Previous Week takes an import too - a client who sends last week's workbook
+                       late has nowhere else to put it. Same deliberate two-step as Current Week,
+                       because Override empties the tab. *@
+                    <button type="button" class="btn btn-sm btn-outline-primary"
+                            data-bs-toggle="offcanvas" data-bs-target="#insightImportPreviousPanel">
+                        <i class="bi bi-upload"></i> Import
+                    </button>
+                }
+
                 @if (Model.CanEdit && isCurrent)
                 {
                     @* The import opens a panel rather than firing on file-pick: it rewrites the whole
@@ -457,6 +468,100 @@
                 <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="offcanvas">Cancel</button>
                 <button type="submit" class="btn btn-sm btn-primary flex-grow-1" id="insightImportSubmit">
                     <i class="bi bi-upload"></i> <span id="insightImportSubmitLabel">Import as new Current Week</span>
+                </button>
+            </div>
+        </form>
+    </div>
+}
+
+@if (Model.CanEdit && !isCurrent)
+{
+    @* ── Previous Week import panel ────────────────────────────────────────
+       Same shape as the Current Week panel, but the choice is Append or Override
+       rather than roll-forward or replace: Previous Week is the end of the line,
+       so there is nowhere for its existing rows to roll to. *@
+    var previousWeekStart = Model.CurrentWeekStart.AddDays(-7);
+
+    <div class="offcanvas offcanvas-end insight-import-panel" tabindex="-1" id="insightImportPreviousPanel"
+         aria-labelledby="insightImportPreviousLabel">
+        <div class="offcanvas-header">
+            <h5 class="offcanvas-title" id="insightImportPreviousLabel">
+                <i class="bi bi-upload me-2"></i>Import into Previous Week
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+        </div>
+
+        <form method="post" asp-action="UploadInsights" asp-route-lab="@Model.CurrentLab"
+              enctype="multipart/form-data" id="insightUploadPreviousForm" class="offcanvas-body d-flex flex-column">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="bucket" value="@DenialInsightBuckets.Previous" />
+
+            <div class="import-lab">
+                <span class="import-lab-label">Lab</span>
+                <span class="import-lab-name">@Model.CurrentLab</span>
+            </div>
+
+            <div class="import-field">
+                <label class="import-label" for="insightFilePrevious">Denial Insight workbook</label>
+                <input type="file" name="insightFile" accept=".xlsx,.xlsm" id="insightFilePrevious"
+                       class="form-control form-control-sm" required />
+                <div class="import-hint">
+                    Same template as Current Week &mdash; use <strong>Export</strong> on this tab to get it.
+                    The file is checked in full before anything is saved. Rows land in the week of
+                    <strong>@DenialInsightBuckets.WeekRangeLabel(previousWeekStart)</strong>.
+                </div>
+            </div>
+
+            <div class="import-choice">
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="previousMode" value="append"
+                           id="previousModeAppend" checked />
+                    <label class="form-check-label" for="previousModeAppend">Append <span class="text-muted">(default)</span></label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="previousMode" value="override"
+                           id="previousModeOverride" />
+                    <label class="form-check-label" for="previousModeOverride">Override</label>
+                </div>
+
+                @* Both notes are in the DOM; the radio shows one and hides the other, so the
+                   consequence is on screen before the user commits either way. *@
+                <div class="import-note import-note-roll" id="notePreviousAppend">
+                    <div class="import-note-head">
+                        <i class="bi bi-plus-circle"></i> Added to what Previous Week already holds
+                    </div>
+                    <ul>
+                        <li>
+                            The <strong>@previousCount.ToString("N0")</strong> row(s) already on Previous Week
+                            stay where they are &mdash; nothing is deleted.
+                        </li>
+                        <li>
+                            A denial code and payer already recorded for that week is refreshed from the
+                            workbook rather than duplicated.
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="import-note import-note-replace" id="notePreviousOverride" hidden>
+                    <div class="import-note-head">
+                        <i class="bi bi-exclamation-triangle-fill"></i> Previous Week will be deleted first
+                    </div>
+                    <ul>
+                        <li>
+                            All <strong>@previousCount.ToString("N0")</strong> row(s) on Previous Week are
+                            <strong>deleted</strong>, every retained week of them, and this workbook takes their place.
+                        </li>
+                        <li>Current Week is not touched.</li>
+                        <li>Anything typed into Previous Week and not exported is lost.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="mt-auto d-flex gap-2 pt-3">
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="offcanvas">Cancel</button>
+                <button type="submit" class="btn btn-sm btn-primary flex-grow-1" id="insightImportPreviousSubmit">
+                    <i class="bi bi-upload"></i>
+                    <span id="insightImportPreviousSubmitLabel">Append to Previous Week</span>
                 </button>
             </div>
         </form>

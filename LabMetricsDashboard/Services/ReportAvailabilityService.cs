@@ -22,6 +22,12 @@ public interface IReportAvailabilityService
         string? labKey,
         string? labDisplayName,
         bool featureEnabled);
+
+    /// <summary>
+    /// The catalog entry with its configured overrides applied — today the rule's StatusFrom.
+    /// Returns the entry unchanged when configuration has nothing for it.
+    /// </summary>
+    ReportCatalogEntry Configure(ReportCatalogEntry entry);
 }
 
 /// <summary>
@@ -72,6 +78,12 @@ public sealed class ReportAvailabilityService : IReportAvailabilityService
             return new ReportAvailabilityResult(false, "This report is not enabled for this lab.");
 
         return new ReportAvailabilityResult(true, null);
+    }
+
+    public ReportCatalogEntry Configure(ReportCatalogEntry entry)
+    {
+        var statusFrom = FindRule(entry)?.StatusFrom?.Trim();
+        return string.IsNullOrEmpty(statusFrom) ? entry : entry with { StatusFrom = statusFrom };
     }
 
     /// <summary>A rule's own Note wins over the generated sentence, so an admin can explain the lock.</summary>

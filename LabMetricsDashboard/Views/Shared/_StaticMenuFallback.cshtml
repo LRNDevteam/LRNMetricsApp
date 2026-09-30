@@ -6,8 +6,8 @@
     // Legacy hard-coded navbar. Rendered only when the dynamic (database-driven)
     // menu is unavailable (Reports API down / menu tables not deployed) or the
     // user's roles have no menu mappings yet.
-    var denialReactUrl = Configuration["DenialWorkflowReactUrl"] ?? "https://localhost:5173";
-    var denialReactAgingUrl = denialReactUrl.Contains('#') ? denialReactUrl : $"{denialReactUrl}#aging";
+    // Denial Workflow = LRN.ARWorkbench (replaced LRN.WebUI); it has no #aging route.
+    var denialReactUrl = Configuration["DenialWorkflowReactUrl"] ?? "https://localhost:5174/";
 
     var isAdmin = (User?.IsInRole("Admin") ?? false)
         || (User?.IsInRole("Super Admin") ?? false)
@@ -136,7 +136,7 @@
 </li>
 
 <li class="nav-item">
-    <a class="nav-link" href="@denialReactAgingUrl" target="_blank" rel="noopener">
+    <a class="nav-link" href="@denialReactUrl" target="_blank" rel="noopener">
         <i class="bi bi-kanban-fill"></i> Denial Workflow
     </a>
 </li>

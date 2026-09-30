@@ -438,8 +438,12 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("•", "Billed In AMD", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Billed] AND Billed/Not = [Billed]"),
 				new TemplateRow("2", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Payment Method = [Insurance] AND Billing Status != [No Bill]"),
 				new TemplateRow("•", "Received", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Payment Method = [Insurance] AND Billing Status != [No Bill] AND Sample Status = [Received]"),
-				new TemplateRow("•", "Billing Review Required", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Payment Method = [Insurance] AND Billing Status != [No Bill]"),
-				new TemplateRow("3", "Unbilled", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Entered] AND Billed/Not = [UnBilled]"),
+				// Rising Tide Lis Summary 29092026.xlsx: Billing Review Required is that client status only
+				// (it previously repeated the parent's Blank too); Transferred / Collected are the Blank rows.
+				new TemplateRow("•", "Billing Review Required", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required] AND Payment Method = [Insurance] AND Billing Status != [No Bill]"),
+				new TemplateRow("•", "Transferred", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Payment Method = [Insurance] AND Billing Status != [No Bill] AND Sample Status = [Transferred]"),
+				new TemplateRow("•", "Collected", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Payment Method = [Insurance] AND Billing Status != [No Bill] AND Sample Status = [Collected]"),
+				new TemplateRow("3", "Unbilled", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Entered] AND Billed/Not = [UnBilled] AND Client Status != [Test Entries]"),
 				new TemplateRow("4", "Client Bill", "Resulted / Not = [Resulted] AND Payment Method = [Client Bill] AND Claim Status = [Billed, Not Entered in AMD] AND Billed/Not = [Billed, UnBilled] AND Client Status = [Client Bill] AND Billing Status != [No Bill]"),
 				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Payment Method = [Client Bill] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Client Bill] AND Billing Status != [No Bill]"),
 				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Payment Method = [Client Bill] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Client Bill] AND Billing Status != [No Bill]"),
@@ -447,8 +451,11 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Payment Method = [Self Pay] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Self Pay] AND Billing Status != [No Bill]"),
 				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Payment Method = [Self Pay] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Self Pay] AND Billing Status != [No Bill]"),
 				new TemplateRow("•", "Entered", "Resulted / Not = [Resulted] AND Payment Method = [Self Pay] AND Claim Status = [Entered] AND Billed/Not = [UnBilled] AND Client Status = [Self Pay] AND Billing Status != [No Bill]"),
-				new TemplateRow("6", "Test Entries", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Test Entries] AND Billing Status != [No Bill]"),
-				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Test Entries] AND Billing Status != [No Bill]"),
+				// Test Entries counts every claim status (it was Not Entered in AMD only), split by claim status.
+				new TemplateRow("6", "Test Entries", "Resulted / Not = [Resulted] AND Client Status = [Test Entries] AND Billing Status != [No Bill]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Client Status = [Test Entries] AND Billing Status != [No Bill] AND Claim Status = [Billed]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Client Status = [Test Entries] AND Billing Status != [No Bill] AND Claim Status = [Not Entered in AMD]"),
+				new TemplateRow("•", "Entered", "Resulted / Not = [Resulted] AND Client Status = [Test Entries] AND Billing Status != [No Bill] AND Claim Status = [Entered]"),
 				new TemplateRow("7", "Billing Status - No Bill", "Resulted / Not = [Resulted] AND Billing Status = [No Bill]"),
 				new TemplateRow("•", "Rejected", "Resulted / Not = [Resulted] AND Billing Status = [No Bill] AND Order Status = [Rejected]"),
 				new TemplateRow("•", "Completed", "Resulted / Not = [Resulted] AND Billing Status = [No Bill] AND Order Status = [Completed]"),
@@ -458,7 +465,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("•", "Collected", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Sample Status = [Collected]"),
 				new TemplateRow("•", "Received", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Sample Status = [Received]"),
 				new TemplateRow("2", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Rejected Sample]"),
-				new TemplateRow("3", "Client Bill", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Client Bill]"),
+				new TemplateRow("3", "Self Pay", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Self Pay]"),
+				new TemplateRow("4", "Test Entries", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Test Entries]"),
+				new TemplateRow("5", "Client Bill", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Client Bill]"),
 			},
 	};
 
@@ -1112,6 +1121,19 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			};
 		}
 
+		if (IsVariantX(labName, labId))
+		{
+			// VariantX reports on Cove's sheet, but its status lives in the "LRN ..." LIMS columns.
+			// Named explicitly: the shared LIMSMaster shape (Create_LIMSMaster.sql) always carries a
+			// FinalStatus column that VariantX leaves empty, and the Cove candidate order would pick
+			// it - every template row then counted 0 while the Grand Total was right.
+			fields["Final Status"] = FirstExisting(columns, "SampleStatus");
+			fields["Billed/Not"] = FirstExisting(columns, "BillCategory");
+			fields["BilledOrNot"] = fields["Billed/Not"];
+			fields["Sub Status"] = FirstExisting(columns, "SubStatus");
+			fields["Claim Status"] = null;
+		}
+
 		var countDistinctColumn = FirstExisting(columns, CountDistinctCandidatesFor(logicSheet));
 
 		return new DimensionProfile(logicSheet, dateColumn, countDistinctColumn, incorrectDosColumn, fields);
@@ -1398,6 +1420,12 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				return configuredDateColumn;
 			}
 
+			var alternateDateColumn = ResolveAlternateDateColumn(logicSheet, normalized);
+			if (alternateDateColumn is not null && columns.Contains(alternateDateColumn))
+			{
+				return alternateDateColumn;
+			}
+
 			throw new InvalidOperationException($"{DateTypeLabel(normalized)} date column '{configuredDateColumn}' was not found in dbo.LIMSMaster for {logicSheet}.");
 		}
 
@@ -1444,6 +1472,19 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			("Augustus", "Resulted") or ("NWL", "Resulted") or ("Certus", "Resulted") => "ResultDate",
 			("Certus", "Collected") => "ReqCollectDate",
 			("Certus", "Received") => "ReqReceivedDate",
+			_ => null
+		};
+
+	/// <summary>
+	/// Second choice when a sheet's configured date column is absent. VariantX reports on Cove's
+	/// sheet but its LIMSMaster names the dates RequestCollectDate / RequestReceivedDate. It has no
+	/// resulted date, so "Resulted" still fails with the configured-column message.
+	/// </summary>
+	private static string? ResolveAlternateDateColumn(string logicSheet, string dateType)
+		=> (logicSheet, dateType) switch
+		{
+			("Cove", "Collected") => "RequestCollectDate",
+			("Cove", "Received") => "RequestReceivedDate",
 			_ => null
 		};
 
@@ -1803,6 +1844,11 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			DateColumn(columns, "DateOfCollection", "DateOfCollection", "DateOfCollection"),
 			DateColumn(columns, "ReceivedDate", "ReceivedDate", "ReceivedDate"),
 			DateColumn(columns, "ValidatedDate", "ValidatedDate", "ValidatedDate"),
+			// VariantX's names for the same data on Cove's sheet; absent columns are dropped.
+			DateColumn(columns, "RequestCollectDate", "RequestCollectDate", "RequestCollectDate"),
+			DateColumn(columns, "RequestReceivedDate", "RequestReceivedDate", "RequestReceivedDate"),
+			TextColumn(columns, "SampleStatus", "SampleStatus", "SampleStatus"),
+			TextColumn(columns, "ResultStatus", "ResultStatus", "ResultStatus"),
 			TextColumn(columns, "ClientStatus", "ClientStatus", "ClientStatus"),
 			TextColumn(columns, "FirstName", "FirstName", "FirstName", "PatientFirstName"),
 			TextColumn(columns, "LastName", "LastName", "LastName", "PatientLastName"),
@@ -2925,11 +2971,18 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				// Sub Status shape, so it also inherits Cove's date columns (DateOfCollection,
 				// ReceivedDate, ValidatedDate) and panel/clinic/provider filters.
 				25 => "Cove",
+				// LRNLabDemo: its LIMSMaster is Cove's (RunIds read R...COV..., and Cove's DateOfCollection /
+				// NewStatus shape - PCRLOA's RequestCollectDate is absent), so it reports on Cove's sheet.
+				// Unmapped, it fell to "Dynamic", whose rows all repeated the Total.
+				99 => "Cove",
 				_ => ResolveLogicSheetByName(labName)
 			};
 		}
 		return ResolveLogicSheetByName(labName);
 	}
+
+	private static bool IsVariantX(string labName, int? labId)
+		=> labId == 25 || CompareKey(labName).Contains("VARIANT");
 
 	private static string ResolveLogicSheetByName(string labName)
 	{
@@ -2947,6 +3000,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		if (n.Contains("INHEALTH")) return "InHealth";
 		if (n.Contains("PCRDXAL") || n.Contains("PCRDXA")) return "PCRDx-AL";
 		if (n.Contains("PCRDXCO") || n.Contains("PCRDXC")) return "PCRDx-CO";
+		// Demo lab, by config key or by the de-identified LabName stamped in its data - see LabId 99.
+		if (n.Contains("LRNLABDEMO") || n.Contains("LRNDEMOLAB") || n == "LRNLAB") return "Cove";
 		if (n.Contains("PCR")) return "PCRLOA";
 		return "Dynamic";
 	}

@@ -87,17 +87,28 @@ public static class DenialClaimPivotBuilder
         // WHICH ROWS ARE COUNTED is every group the page's tiles count. Rows the columns above
         // cannot hold - no denial date, older than the window, or denied after the load reached -
         // used to be dropped, which is why the footer read 3,730 claims under a "Denied Claims"
-        // tile of 3,744. They now land in one "Other" column instead, so the footer matches the
-        // tile, the columns still add up to the footer, and nothing leaves the report unseen.
+        // tile of 3,744. Monthly shows them in one "Other Periods" column, so nothing leaves the
+        // report unseen and its footer matches the tile.
+        //
+        // Weekly is a report on the weeks it shows: an "Other Weeks" column was most of the claims
+        // under a heading that names no week, and folding them silently into the Total made the
+        // Total disagree with the columns beside it. So weekly works on the displayed weeks only -
+        // row totals, footer, payer ranking and the AR coverage all describe those weeks, and its
+        // footer is deliberately smaller than the page's all-time Denied Claims tile.
         bool InAnyPeriod(DenialSummaryGroup g) =>
             g.DenialDate.HasValue
             && months.Any(m => g.DenialDate.Value.Date >= m.Start && g.DenialDate.Value.Date <= m.End);
 
-        if (groups.Any(g => !InAnyPeriod(g)))
+        if (weekly)
+        {
+            groups = groups.Where(InAnyPeriod).ToList();
+            if (groups.Count == 0) return model;
+        }
+        else if (groups.Any(g => !InAnyPeriod(g)))
         {
             columns.Add(new PivotColumn(
                 "other",
-                weekly ? "Other Weeks" : "Other Periods",
+                "Other Periods",
                 DateTime.MinValue, DateTime.MaxValue, Year: 0, IsYearTotal: false,
                 IsOther: true,
                 Matcher: g => !InAnyPeriod(g)));

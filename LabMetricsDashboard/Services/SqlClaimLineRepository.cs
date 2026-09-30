@@ -159,7 +159,7 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         var dataSql = $"""
             SELECT {selectList}
             FROM dbo.ClaimLevelData
-            {ClaimLevelWhereSql}
+            {ClaimLevelWhereSql(labName)}
             ORDER BY ClaimID
             OFFSET ISNULL(@Offset, 0) ROWS
             FETCH NEXT ISNULL(@PageSize, 2147483647) ROWS ONLY
@@ -191,7 +191,7 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         var dataSql = $"""
             SELECT {selectList}
             FROM dbo.LineLevelData
-            {LineLevelWhereSql}
+            {LineLevelWhereSql(labName)}
             ORDER BY ClaimID, CPTCode
             OFFSET ISNULL(@Offset, 0) ROWS
             FETCH NEXT ISNULL(@PageSize, 2147483647) ROWS ONLY
@@ -512,17 +512,20 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         => new(name, SqlDbType.Int) { Value = value.HasValue ? value.Value : DBNull.Value };
 
     /// <summary>Same predicates as dbo.usp_GetClaimLevelDetails, using the export @params directly.</summary>
-    private const string ClaimLevelWhereSql = """
+    private static string ClaimLevelWhereSql(string labName)
+    {
+        var (payerTypeCol, clinicCol) = LabClaimLineColumnCatalog.GetFilterColumns(labName);
+        return $"""
         WHERE (@PayerName IS NULL OR LTRIM(RTRIM(@PayerName)) = N''
                OR EXISTS (SELECT 1 FROM STRING_SPLIT(@PayerName, ',') p
                           WHERE NULLIF(LTRIM(RTRIM(p.value)), '') IS NOT NULL
                             AND LTRIM(RTRIM(ClaimLevelData.PayerName)) LIKE N'%' + LTRIM(RTRIM(p.value)) + N'%'))
           AND (@PayerTypes IS NULL OR LTRIM(RTRIM(@PayerTypes)) = N''
-               OR LTRIM(RTRIM(PayerType)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@PayerTypes, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
+               OR LTRIM(RTRIM({payerTypeCol})) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@PayerTypes, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
           AND (@ClaimStatuses IS NULL OR LTRIM(RTRIM(@ClaimStatuses)) = N''
                OR LTRIM(RTRIM(ClaimStatus)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@ClaimStatuses, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
           AND (@ClinicNames IS NULL OR LTRIM(RTRIM(@ClinicNames)) = N''
-               OR LTRIM(RTRIM(ClinicName)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@ClinicNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
+               OR LTRIM(RTRIM({clinicCol})) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@ClinicNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
           AND (@DenialCode IS NULL OR LTRIM(RTRIM(@DenialCode)) = N''
                OR EXISTS (SELECT 1 FROM STRING_SPLIT(@DenialCode, ',') d
                           WHERE NULLIF(LTRIM(RTRIM(d.value)), '') IS NOT NULL
@@ -582,15 +585,19 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
                 AND (@DosTo   IS NULL OR TRY_CAST(DateOfService AS DATE) <= @DosTo)))
               )
         """;
+    }
 
     /// <summary>Same predicates as dbo.usp_GetLineLevelDetails, using the export @params directly.</summary>
-    private const string LineLevelWhereSql = """
+    private static string LineLevelWhereSql(string labName)
+    {
+        var (payerTypeCol, clinicCol) = LabClaimLineColumnCatalog.GetFilterColumns(labName);
+        return $"""
         WHERE (@PayerName IS NULL OR LTRIM(RTRIM(@PayerName)) = N''
                OR EXISTS (SELECT 1 FROM STRING_SPLIT(@PayerName, ',') p
                           WHERE NULLIF(LTRIM(RTRIM(p.value)), '') IS NOT NULL
                             AND LTRIM(RTRIM(LineLevelData.PayerName)) LIKE N'%' + LTRIM(RTRIM(p.value)) + N'%'))
           AND (@PayerTypes IS NULL OR LTRIM(RTRIM(@PayerTypes)) = N''
-               OR LTRIM(RTRIM(PayerType)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@PayerTypes, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
+               OR LTRIM(RTRIM({payerTypeCol})) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@PayerTypes, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
           AND (@ClaimStatuses IS NULL OR LTRIM(RTRIM(@ClaimStatuses)) = N''
                OR LTRIM(RTRIM(ClaimStatus)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@ClaimStatuses, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
           AND (@PayStatuses IS NULL OR LTRIM(RTRIM(@PayStatuses)) = N''
@@ -598,12 +605,13 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
           AND (@CPTCodes IS NULL OR LTRIM(RTRIM(@CPTCodes)) = N''
                OR LTRIM(RTRIM(CPTCode)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 100) FROM STRING_SPLIT(@CPTCodes, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
           AND (@ClinicNames IS NULL OR LTRIM(RTRIM(@ClinicNames)) = N''
-               OR LTRIM(RTRIM(ClinicName)) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@ClinicNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
+               OR LTRIM(RTRIM({clinicCol})) IN (SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500) FROM STRING_SPLIT(@ClinicNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL))
           AND (@DenialCode IS NULL OR LTRIM(RTRIM(@DenialCode)) = N''
                OR EXISTS (SELECT 1 FROM STRING_SPLIT(@DenialCode, ',') d
                           WHERE NULLIF(LTRIM(RTRIM(d.value)), '') IS NOT NULL
                             AND LTRIM(RTRIM(LineLevelData.DenialCode)) LIKE N'%' + LTRIM(RTRIM(d.value)) + N'%'))
         """;
+    }
 
     private static List<SqlParameter> BuildClaimLevelSpParameters(
         string? filterPayerName, List<string>? filterPayerTypes, List<string>? filterClaimStatuses,
