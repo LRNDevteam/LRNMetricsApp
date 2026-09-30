@@ -143,4 +143,112 @@ public sealed class CollectionSummaryPivotTests
         }
         Assert.True(sawMedium21);
     }
+
+    [Fact]
+    public void Aging_sheet_has_grand_total_and_wide_balance_columns()
+    {
+        var vm = new CollectionSummaryViewModel
+        {
+            InsuranceAging =
+            [
+                new InsuranceAgingRow("MEDICARE FLORIDA - MCR", 220, 194_887m, 66, 66_418m, 25, 24_304m, 8, 7_299m, 34, 30_057m, 353, 322_966m),
+                new InsuranceAgingRow("UHC - UHC", 112, 32_864m, 86, 35_725m, 51, 13_291m, 47, 11_537m, 313, 89_043m, 609, 182_460m),
+            ],
+        };
+
+        using var wb = CollectionSummaryExcelExportBuilder.CreateWorkbook(vm, [], [], "Rising_Tides");
+
+        var ws = wb.Worksheets.Worksheet("No Response Vs Aging");
+        Assert.Equal("Grand Total", ws.Cell(5, 1).GetString());
+        Assert.Equal(332, ws.Cell(5, 2).GetValue<int>());
+        Assert.Equal(505_426m, ws.Cell(5, 13).GetValue<decimal>());
+        for (int c = 3; c <= 13; c += 2)
+            Assert.True(ws.Column(c).Width >= 17, $"balance column {c} too narrow: {ws.Column(c).Width}");
+    }
+
+    [Fact]
+    public void Rising_Tides_workbook_includes_genetics_vs_id_avg_side_by_side()
+    {
+        var vm = new CollectionSummaryViewModel
+        {
+            SelectedLab = "RisingTides",
+            ShowGeneticsVsIdAvg = true,
+            GeneticsVsIdAvg = new GeneticsVsIdAvgResult
+            {
+                FullyPaid = new GeneticsVsIdAvgBlock
+                {
+                    Rows =
+                    [
+                        new GeneticsVsIdAvgRow("UTI ABR Panel", 643, 298_700m),
+                        new GeneticsVsIdAvgRow("Wound Panel", 291, 157_967m),
+                    ],
+                },
+                ExcludingNoResponse = new GeneticsVsIdAvgBlock
+                {
+                    Rows =
+                    [
+                        new GeneticsVsIdAvgRow("UTI ABR Panel", 1704, 311_847m),
+                        new GeneticsVsIdAvgRow("Genesis 2", 34, 17m),
+                    ],
+                },
+            },
+        };
+
+        using var wb = CollectionSummaryExcelExportBuilder.CreateWorkbook(vm, [], [], "RisingTides");
+
+        var ws = wb.Worksheets.Worksheet("Genetics vs ID Avg");
+        Assert.Equal("Fully Paid", ws.Cell(3, 2).GetString());
+        Assert.Equal("Panel Group (IDs)", ws.Cell(5, 1).GetString());
+        Assert.Equal("Panel Group (IDs)", ws.Cell(5, 6).GetString());
+        Assert.Equal("Grand Total", ws.Cell(8, 1).GetString());
+        Assert.Equal(934, ws.Cell(8, 2).GetValue<int>());
+        Assert.Equal(456_667m, ws.Cell(8, 3).GetValue<decimal>());
+        Assert.Equal(Math.Round(456_667m / 934, 2), Math.Round(ws.Cell(8, 4).GetValue<decimal>(), 2));
+        Assert.Equal("Genesis 2", ws.Cell(7, 6).GetString());
+        Assert.Equal(0.5m, ws.Cell(7, 9).GetValue<decimal>());
+
+        vm.ShowGeneticsVsIdAvg = false;
+        using var otherLab = CollectionSummaryExcelExportBuilder.CreateWorkbook(vm, [], [], "Cove");
+        Assert.DoesNotContain("Genetics vs ID Avg", otherLab.Worksheets.Select(s => s.Name));
+    }
+
+    [Fact]
+    public void Rising_Tides_workbook_splits_avg_payments_by_dos_and_check_date()
+    {
+        static PanelAveragesResult Result(int claims, decimal charges, int from, int to) =>
+            new([new PanelAveragesRow
+            {
+                PanelName = "UTI ABR Panel",
+                Metrics = new PanelAveragesMetrics(claims, charges, 100m, 1, 50m, 2, 100m, 2, 90m, 1, 40m),
+            }])
+            {
+                WindowFrom = new DateOnly(2026, 3, from),
+                WindowTo   = new DateOnly(2026, 9, to),
+            };
+
+        var vm = new CollectionSummaryViewModel
+        {
+            SelectedLab = "RisingTides",
+            ShowAvgPaymentsByDateBasis = true,
+            AvgPaymentsDos = Result(10, 1_000m, 23, 22),
+            AvgPayments    = Result(12, 1_200m, 25, 24),
+            AvgPaymentsLast3Months = Result(5, 500m, 1, 1),
+        };
+
+        using var wb = CollectionSummaryExcelExportBuilder.CreateWorkbook(vm, [], [], "RisingTides");
+        var names = wb.Worksheets.Select(s => s.Name).ToList();
+
+        Assert.Contains("Avg Payments - DOS", names);
+        Assert.Contains("Avg Payments - Check Date", names);
+        Assert.DoesNotContain("Avg payments_Last 3 Months", names);
+        Assert.DoesNotContain("Avg Payments", names);
+
+        var dos = wb.Worksheets.Worksheet("Avg Payments - DOS");
+        Assert.Contains("Based on Date of Service (03/23/2026 - 09/22/2026)", dos.Cell(1, 1).GetString());
+        Assert.Equal(10, dos.Cell(4, 2).GetValue<int>());
+
+        var chk = wb.Worksheets.Worksheet("Avg Payments - Check Date");
+        Assert.Contains("Based on Check Date (03/25/2026 - 09/24/2026)", chk.Cell(1, 1).GetString());
+        Assert.Equal(12, chk.Cell(4, 2).GetValue<int>());
+    }
 }

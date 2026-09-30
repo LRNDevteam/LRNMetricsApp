@@ -1,4 +1,4 @@
--- Elixir Labs ù Read stored procedures for the Production Summary Report tabs.
+-- Elixir Labs ÔøΩ Read stored procedures for the Production Summary Report tabs.
 -- Called by LabMetricsDashboard.SqlLabProductionSummaryRepository.
 --
 -- Lab specifics:

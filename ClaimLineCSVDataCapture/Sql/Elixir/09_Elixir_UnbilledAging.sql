@@ -1,4 +1,4 @@
--- Elixir Labs — Unbilled × Aging (by AgingDOS)
+-- Elixir Labs ï¿½ Unbilled ï¿½ Aging (by AgingDOS)
 -- Rule:
 --   Filter  : FirstBilledDate IS NULL or blank  (truly unbilled claims)
 --             and PayerName_Raw is not blank
@@ -58,7 +58,7 @@ BEGIN
 
     DROP TABLE IF EXISTS #Raw;
 
-    PRINT 'usp_RefreshElix_UnbilledAging completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
+    PRINT 'usp_RefreshElix_UnbilledAging completed ï¿½ ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END
 GO
 

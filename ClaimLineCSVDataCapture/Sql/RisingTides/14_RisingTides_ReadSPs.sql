@@ -1,4 +1,4 @@
--- RisingTides — Read stored procedures for the Production Summary Report tabs.
+-- RisingTides â€” Read stored procedures for the Production Summary Report tabs.
 -- Called by LabMetricsDashboard.SqlLabProductionSummaryRepository.
 --
 -- Each SP supports two execution paths:
@@ -553,8 +553,8 @@ BEGIN
         LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), '(No Panelname)'))) AS PanelName,
         ISNULL(LTRIM(RTRIM(AgingBucket)), 'Unknown')                                 AS AgingBucket,
         COUNT(DISTINCT COALESCE(
-            NULLIF(LTRIM(RTRIM(AccessionNumber)), ''),
-            NULLIF(LTRIM(RTRIM(ClaimID)), '')
+            NULLIF(LTRIM(RTRIM(ClaimID)), ''),
+            NULLIF(LTRIM(RTRIM(AccessionNumber)), '')
         ))                                                                           AS ClaimCount,
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)                       AS TotalCharges
     FROM   dbo.ClaimLevelData

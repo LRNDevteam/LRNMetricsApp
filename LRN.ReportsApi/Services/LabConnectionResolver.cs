@@ -25,6 +25,7 @@ internal static class LabConnectionResolver
             "COVE" => "CoveConnection",
             "INHEALTHDTR" or "INHEALTH" => "InHealthConn",
             "ELIXIR" => "ElixirConnection",
+            "VARIANTX" => "VariantXConnection",
             "CERTUS" or "CERTUSLABORATORIES" => "CertusConnection",
             "BEECHTREE" => "BeechTreeConnStr",
             "AUGUSTUSLABS" or "AUGUSTUS" => "AugustusConnStr",

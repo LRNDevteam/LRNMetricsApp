@@ -159,6 +159,8 @@ public class CollectionSummaryController : Controller
             UsesLineEncounters   = useLineEncounters,
             ShowTop5TotalPayments = showTotalPayments,
             ShowInsuranceVsPayment = true,
+            ShowGeneticsVsIdAvg  = LabCollectionPrefix.ShowsGeneticsVsIdAvg(selectedLab),
+            ShowAvgPaymentsByDateBasis = LabCollectionPrefix.UsesAvgPaymentsByDateBasis(selectedLab),
             IsAggregateMode      = useAggregates,
             SupportsAggregateMode = aggregatePrefix is not null,
             LazyLoadTabs         = true,
@@ -445,9 +447,27 @@ public class CollectionSummaryController : Controller
                     return Content(string.Empty);
 
                 case "avgpay":
-                    vm.AvgPayments = await _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter,
-                        fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct, lastMonths: 6);
+                    if (LabCollectionPrefix.UsesAvgPaymentsByDateBasis(selectedLab))
+                    {
+                        vm.AvgPayments = await _repo.GetAvgPaymentsByDateBasisAsync(connStr, AvgPaymentsDateBasis.CheckDate,
+                            payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+                        vm.ShowAvgPaymentsByDateBasis = true;
+                        ViewData["AvgPayBasis"] = AvgPaymentsDateBasis.CheckDate;
+                    }
+                    else
+                    {
+                        vm.AvgPayments = await _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter,
+                            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct, lastMonths: 6);
+                    }
                     ViewData["AvgPayMonths"] = 6;
+                    return PartialView("_CsTabAvgPayments", vm);
+
+                case "avgpaydos":
+                    vm.AvgPaymentsDos = await _repo.GetAvgPaymentsByDateBasisAsync(connStr, AvgPaymentsDateBasis.DateOfService,
+                        payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+                    vm.ShowAvgPaymentsByDateBasis = true;
+                    ViewData["AvgPayMonths"] = 6;
+                    ViewData["AvgPayBasis"] = AvgPaymentsDateBasis.DateOfService;
                     return PartialView("_CsTabAvgPayments", vm);
 
                 case "avgpay3":
@@ -516,6 +536,12 @@ public class CollectionSummaryController : Controller
                     vm.StatusSummary = ss;
                     return PartialView("_CsTabStatusSummary", vm);
 
+                case "genidavg":
+                    vm.GeneticsVsIdAvg = await _repo.GetGeneticsVsIdAvgAsync(connStr, payerFilter, panelFilter,
+                        fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+                    vm.ShowGeneticsVsIdAvg = true;
+                    return PartialView("_CsTabGeneticsVsIdAvg", vm);
+
                 case "provider":
                     var prov = useAggregates
                         ? await _repo.GetProviderSummaryFromAggregatesAsync(connStr, aggregatePrefix!, ct)
@@ -578,12 +604,22 @@ public class CollectionSummaryController : Controller
             connStr, payerFilter, panelFilter,
             fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
         // Panel Averages omitted from Excel / UI — do not load.
-        var avgPaymentsTask = _repo.GetAvgPaymentsAsync(
-            connStr, payerFilter, panelFilter,
-            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-        var avgPayments3Task = _repo.GetAvgPaymentsAsync(
-            connStr, payerFilter, panelFilter,
-            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct, lastMonths: 3);
+        var avgPayByDateBasis = LabCollectionPrefix.UsesAvgPaymentsByDateBasis(selectedLab);
+        var avgPaymentsTask = avgPayByDateBasis
+            ? _repo.GetAvgPaymentsByDateBasisAsync(connStr, AvgPaymentsDateBasis.CheckDate,
+                payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
+            : _repo.GetAvgPaymentsAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var avgPayments3Task = avgPayByDateBasis
+            ? Task.FromResult(new PanelAveragesResult([]))
+            : _repo.GetAvgPaymentsAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct, lastMonths: 3);
+        var avgPaymentsDosTask = avgPayByDateBasis
+            ? _repo.GetAvgPaymentsByDateBasisAsync(connStr, AvgPaymentsDateBasis.DateOfService,
+                payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
+            : Task.FromResult(new PanelAveragesResult([]));
         var statusSummaryTask = _repo.GetStatusSummaryAsync(
             connStr, payerFilter, panelFilter,
             fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
@@ -596,6 +632,12 @@ public class CollectionSummaryController : Controller
         var insuranceVsPaymentTask = _repo.GetInsuranceVsPaymentAsync(
             connStr, payerFilter, panelFilter,
             fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var showGeneticsVsIdAvg = LabCollectionPrefix.ShowsGeneticsVsIdAvg(selectedLab);
+        var geneticsVsIdAvgTask = showGeneticsVsIdAvg
+            ? _repo.GetGeneticsVsIdAvgAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
+            : Task.FromResult(GeneticsVsIdAvgResult.Empty);
         var analysisRangeTask = _analysisRange.GetAsync(connStr, ct);
 
         // Soft-fail per sheet when a Collection Summary SP is not deployed on a lab DB
@@ -655,6 +697,9 @@ public class CollectionSummaryController : Controller
                 avgPaymentsTask, new PanelAveragesResult([]), "Avg Payments", selectedLab, _logger),
             AvgPaymentsLast3Months = await AwaitOrDefaultAsync(
                 avgPayments3Task, new PanelAveragesResult([]), "Avg payments_Last 3 Months", selectedLab, _logger),
+            AvgPaymentsDos = await AwaitOrDefaultAsync(
+                avgPaymentsDosTask, new PanelAveragesResult([]), "Avg Payments - DOS", selectedLab, _logger),
+            ShowAvgPaymentsByDateBasis = avgPayByDateBasis,
             StatusSummary = await AwaitOrDefaultAsync(
                 statusSummaryTask, StatusSummaryResult.Empty, "Status Summary", selectedLab, _logger),
             ProviderSummary = await AwaitOrDefaultAsync(
@@ -663,6 +708,9 @@ public class CollectionSummaryController : Controller
                 repPaymentTask, new RepPaymentResult([]), "Rep Vs Payment", selectedLab, _logger),
             InsuranceVsPayment = await AwaitOrDefaultAsync(
                 insuranceVsPaymentTask, new List<InsuranceVsPaymentRow>(), "Insurance Vs Payments", selectedLab, _logger),
+            GeneticsVsIdAvg = await AwaitOrDefaultAsync(
+                geneticsVsIdAvgTask, GeneticsVsIdAvgResult.Empty, "Genetics vs ID Avg", selectedLab, _logger),
+            ShowGeneticsVsIdAvg = showGeneticsVsIdAvg,
             AnalysisRange = await AwaitOrDefaultAsync(
                 analysisRangeTask, AnalysisRangeInfo.Empty, "Analysis Range", selectedLab, _logger),
         };

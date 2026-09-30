@@ -320,6 +320,7 @@ public static class ClinicSummaryExcelExportBuilder
 
         ExcelTheme.WriteHeaderRow(ws, 1, 1,
             ["Clinic Name", "Claim Status", "No. of Claims", "Total Charge", "Insurance Payments"]);
+        ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
 
         int rowNum = 2;
         int idx = 0;
@@ -343,6 +344,7 @@ public static class ClinicSummaryExcelExportBuilder
             rowNum++;
 
             // Status drill-down rows
+            int firstStatusRow = rowNum;
             foreach (var status in clinic.Statuses)
             {
                 var statusBg = ExcelTheme.GetRowBg(idx++);
@@ -357,6 +359,12 @@ public static class ClinicSummaryExcelExportBuilder
                 ws.Cell(rowNum, 4).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
                 ws.Cell(rowNum, 5).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
                 rowNum++;
+            }
+
+            if (rowNum > firstStatusRow)
+            {
+                ws.Rows(firstStatusRow, rowNum - 1).Group();
+                ws.Rows(firstStatusRow, rowNum - 1).Collapse();
             }
         }
 
@@ -488,77 +496,85 @@ public static class ClinicSummaryExcelExportBuilder
         ws.TabColor = ExcelTheme.TabGreen;
         ExcelTheme.ApplyDefaults(ws);
 
+        // Client pivot layout: panels nested under the clinic in one "Clinic Name" column,
+        // white rows, bold clinic rows, centred counts, blank for zero, panels grouped + collapsed.
         var statuses = vm.Statuses;
-        int colCount = 2 + statuses.Count + 1; // Clinic, Panel, statuses..., Grand Total
+        int colCount = 1 + statuses.Count + 1; // Clinic/Panel, statuses..., Grand Total
 
-        // Header row
-        var headers = new List<string> { "Clinic Name", "Panel Name" };
+        var headers = new List<string> { "Clinic Name" };
         headers.AddRange(statuses);
         headers.Add("Grand Total");
         ExcelTheme.WriteHeaderRow(ws, 1, 1, headers.ToArray());
+        ws.Cell(1, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+        ws.Row(1).Height = 30;
+
+        ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
 
         int rowNum = 2;
-        int idx = 0;
         foreach (var clinic in vm.Clinics)
         {
-            // Clinic-level row (bold)
-            var clinicBg = ExcelTheme.GetRowBg(idx++);
-            ws.Cell(rowNum, 1).Value = clinic.ClinicName;
-            ws.Cell(rowNum, 2).Value = "";
-            for (int s = 0; s < statuses.Count; s++)
-            {
-                var val = clinic.StatusCounts.GetValueOrDefault(statuses[s]);
-                ws.Cell(rowNum, 3 + s).Value = val;
-                ws.Cell(rowNum, 3 + s).Style.NumberFormat.Format = "#,##0";
-            }
-            ws.Cell(rowNum, colCount).Value = clinic.GrandTotal;
-            ws.Cell(rowNum, colCount).Style.NumberFormat.Format = "#,##0";
-            for (int c = 1; c <= colCount; c++)
-            {
-                ExcelTheme.StyleDataCell(ws.Cell(rowNum, c), clinicBg);
-                ws.Cell(rowNum, c).Style.Font.SetBold(true);
-            }
+            WritePanelStatusRow(ws, rowNum, clinic.ClinicName, statuses, clinic.StatusCounts,
+                clinic.GrandTotal, colCount, bold: true, indent: 0);
             rowNum++;
 
-            // Panel drill-down rows
+            int firstPanelRow = rowNum;
             foreach (var panel in clinic.Panels)
             {
-                var panelBg = ExcelTheme.GetRowBg(idx++);
-                ws.Cell(rowNum, 1).Value = "";
-                ws.Cell(rowNum, 2).Value = panel.PanelName;
-                for (int s = 0; s < statuses.Count; s++)
-                {
-                    var val = panel.StatusCounts.GetValueOrDefault(statuses[s]);
-                    ws.Cell(rowNum, 3 + s).Value = val;
-                    ws.Cell(rowNum, 3 + s).Style.NumberFormat.Format = "#,##0";
-                }
-                ws.Cell(rowNum, colCount).Value = panel.GrandTotal;
-                ws.Cell(rowNum, colCount).Style.NumberFormat.Format = "#,##0";
-                for (int c = 1; c <= colCount; c++)
-                    ExcelTheme.StyleDataCell(ws.Cell(rowNum, c), panelBg);
+                WritePanelStatusRow(ws, rowNum, panel.PanelName, statuses, panel.StatusCounts,
+                    panel.GrandTotal, colCount, bold: false, indent: 2);
                 rowNum++;
+            }
+
+            if (rowNum > firstPanelRow)
+            {
+                ws.Rows(firstPanelRow, rowNum - 1).Group();
+                ws.Rows(firstPanelRow, rowNum - 1).Collapse();
             }
         }
 
-        // Grand Total footer
-        ws.Cell(rowNum, 1).Value = "Grand Total";
-        ws.Cell(rowNum, 2).Value = "";
-        for (int s = 0; s < statuses.Count; s++)
-        {
-            var val = vm.GrandTotals.GetValueOrDefault(statuses[s]);
-            ws.Cell(rowNum, 3 + s).Value = val;
-            ws.Cell(rowNum, 3 + s).Style.NumberFormat.Format = "#,##0";
-        }
-        ws.Cell(rowNum, colCount).Value = vm.GrandTotalAll;
-        ws.Cell(rowNum, colCount).Style.NumberFormat.Format = "#,##0";
-        for (int c = 1; c <= colCount; c++)
-        {
-            ExcelTheme.StyleDataCell(ws.Cell(rowNum, c), ExcelTheme.TotalRowBg);
-            ws.Cell(rowNum, c).Style.Font.SetBold(true);
-        }
+        WritePanelStatusRow(ws, rowNum, "Grand Total", statuses, vm.GrandTotals,
+            vm.GrandTotalAll, colCount, bold: true, indent: 0);
+        var totalRange = ws.Range(rowNum, 1, rowNum, colCount);
+        totalRange.Style.Fill.BackgroundColor = ExcelTheme.Collection.MonthHeaderBg;
+        totalRange.Style.Border.TopBorder = XLBorderStyleValues.Medium;
+        totalRange.Style.Border.TopBorderColor = ExcelTheme.HeaderBg;
 
         ws.SheetView.FreezeRows(1);
-        ws.SheetView.FreezeColumns(2);
-        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 12, firstColMinWidth: 30);
+        ws.SheetView.FreezeColumns(1);
+        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 12, firstColMinWidth: 40);
+    }
+
+    private static void WritePanelStatusRow(
+        IXLWorksheet ws, int row, string label, IReadOnlyList<string> statuses,
+        IReadOnlyDictionary<string, int> counts, int grandTotal, int colCount, bool bold, int indent)
+    {
+        var labelCell = ws.Cell(row, 1);
+        labelCell.Value = label;
+        labelCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+        labelCell.Style.Alignment.Indent = indent;
+
+        for (int s = 0; s < statuses.Count; s++)
+        {
+            var val = counts.GetValueOrDefault(statuses[s]);
+            var cell = ws.Cell(row, 2 + s);
+            if (val != 0)
+                cell.Value = val;
+            cell.Style.NumberFormat.Format = "#,##0";
+            cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        }
+
+        var gtCell = ws.Cell(row, colCount);
+        gtCell.Value = grandTotal;
+        gtCell.Style.NumberFormat.Format = "#,##0";
+        gtCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        gtCell.Style.Font.Bold = true;
+
+        var range = ws.Range(row, 1, row, colCount);
+        range.Style.Fill.BackgroundColor = XLColor.White;
+        range.Style.Font.FontColor = XLColor.Black;
+        if (bold)
+            range.Style.Font.Bold = true;
+        range.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
+        range.Style.Border.BottomBorderColor = XLColor.FromHtml("#D9D9D9");
     }
 }

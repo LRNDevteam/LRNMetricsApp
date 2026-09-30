@@ -1,8 +1,9 @@
--- RisingTides — Unbilled × Aging (by AgingBucket column)
+-- RisingTides â€” Unbilled Ã— Aging (by AgingBucket column)
 -- Rule:
 --   Filter  : FirstBilledDate IS NULL or blank
 --   Row     : Panelname  (Panel Group)
---   Columns : AgingBucket | COUNT(DISTINCT visit no) | SUM(ChargeAmount)
+--   Columns : AgingBucket | COUNT(DISTINCT ClaimID, else AccessionNumber) | SUM(ChargeAmount)
+--             (one accession can carry several claims; the client counts claims)
 -- ============================================================
 
 SET NOCOUNT ON;
@@ -29,8 +30,8 @@ BEGIN
         LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), '(No Panelname)')))     AS Panelname,
         ISNULL(LTRIM(RTRIM(AgingBucket)), 'Unknown')                                     AS AgingBucket,
         COUNT(DISTINCT COALESCE(
-            NULLIF(LTRIM(RTRIM(AccessionNumber)), ''),
-            NULLIF(LTRIM(RTRIM(ClaimID)), '')
+            NULLIF(LTRIM(RTRIM(ClaimID)), ''),
+            NULLIF(LTRIM(RTRIM(AccessionNumber)), '')
         ))                                                                                AS ClaimCount,
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)                          AS TotalCharges
     INTO #Raw
@@ -48,7 +49,7 @@ BEGIN
 
     DROP TABLE IF EXISTS #Raw;
 
-    PRINT 'usp_RefreshRT_UnbilledAging completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
+    PRINT 'usp_RefreshRT_UnbilledAging completed â€” ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END
 GO
 

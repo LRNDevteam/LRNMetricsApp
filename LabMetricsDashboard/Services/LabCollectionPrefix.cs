@@ -33,6 +33,9 @@ public static class LabCollectionPrefix
         ["Cert"]               = "Cert",
         ["Cove"]               = "Cove",
         ["Elixir"]             = "Elix",
+        // VariantX is an Elixir clone (Rule5 / Wed–Tue); aggregate prefix VarX_*.
+        ["VariantX"]           = "VarX",
+        ["VariantX_LRN"]       = "VarX",
         ["PhiLife"]            = "Phi",
         ["Phi_Life"]           = "Phi",
         ["PCRLabsofAmerica"]   = "PCR",
@@ -80,6 +83,42 @@ public static class LabCollectionPrefix
 
         return [primary];
     }
+
+    /// <summary>
+    /// Labs whose Average Payments SPs own a rolling DateOfService window anchored to the
+    /// latest billed week-range end. Every other lab gets a CheckDate window computed by
+    /// the caller, so a lab listed here must have the DateOfService version of its SPs deployed.
+    /// </summary>
+    public static bool UsesDateOfServiceAvgPayments(string? labName) =>
+        GetPrefix(labName) is "Elix" or "VarX" or "Cove";
+
+    /// <summary>
+    /// Labs with the client "Genetics vs ID Avg" summary. Requires
+    /// <c>usp_Get{prefix}_CS_GeneticsVsIdAvg</c> on the lab database.
+    /// </summary>
+    public static bool ShowsGeneticsVsIdAvg(string? labName) =>
+        GetPrefix(labName) is "RT";
+
+    /// <summary>
+    /// Labs whose Average Payments show two 6-month tabs (DateOfService and CheckDate) from
+    /// <c>usp_Get{prefix}_CS_AvgPayments_ClientLogic</c>, with "Last 3 Months" hidden.
+    /// </summary>
+    public static bool UsesAvgPaymentsByDateBasis(string? labName) =>
+        GetPrefix(labName) is "RT";
+
+    /// <summary>
+    /// Labs whose Clinic Panel Status, Clinic $ Analysis and Count by DOS Month pivots only
+    /// include claims with <c>BilledUnbilled = 'Billed'</c>.
+    /// </summary>
+    public static bool ClinicPivotsBilledOnly(string? labName) =>
+        GetPrefix(labName) is "RT";
+
+    /// <summary>
+    /// Labs whose Clinic Panel Status columns are ordered by total claim count (largest first),
+    /// as in the client pivot, instead of alphabetically.
+    /// </summary>
+    public static bool ClinicPanelStatusOrderByCount(string? labName) =>
+        GetPrefix(labName) is "RT";
 
     /// <summary>
     /// Returns the correct <c>ClaimLevelData</c> column to use for the Panel filter dropdown.

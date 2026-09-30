@@ -260,8 +260,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             while (await rdr.ReadAsync(ct))
             {
                 rawRows.Add(new RawPivotRow(
-                    rdr.GetString(0),
-                    rdr.GetString(1),
+                    rdr.IsDBNull(0) ? "(Blank)" : rdr.GetString(0),
+                    rdr.IsDBNull(1) ? "Unknown" : rdr.GetString(1),
                     rdr.GetInt32(2),
                     rdr.GetInt32(3),
                     rdr.GetInt32(4),
@@ -627,8 +627,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             {
                 var billDate = DateOnly.FromDateTime(rdr.GetDateTime(2));
                 rawRows.Add(new RawWeeklyRow(
-                    rdr.GetString(0),
-                    rdr.GetString(1),
+                    rdr.IsDBNull(0) ? "(Blank)" : rdr.GetString(0),
+                    rdr.IsDBNull(1) ? "Unknown" : rdr.GetString(1),
                     billDate,
                     rdr.GetInt32(3),
                     rdr.GetDecimal(4)));

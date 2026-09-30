@@ -334,13 +334,16 @@ VALUES
  (N'RT', N'L_A',  N'Billable Samples - Resulted', N'RequestCollectDate', N'LIS', N'RessultedStatus',N'=',N'Resulted', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
  (N'RT', N'L_A1', N'Billed to Insurance',         N'RequestCollectDate', N'LIS', N'RessultedStatus',N'=',N'Resulted', N'PaymentMethod',N'=',N'Insurance', N'ClaimStatus',N'=',N'Billed', NULL,NULL,NULL),
  (N'RT', N'L_A1a',N'Billed In AMD',               N'RequestCollectDate', N'LIS', N'RessultedStatus',N'=',N'Resulted', N'PaymentMethod',N'=',N'Insurance', N'ClaimStatus',N'=',N'Billed', N'BillingStatus',N'=',N'Billed'),
- (N'RT', N'L_A3', N'Unbilled',                    N'RequestCollectDate', N'LIS', N'RessultedStatus',N'=',N'Resulted', N'PaymentMethod',N'=',N'Insurance', N'ClaimStatus',N'=',N'Entered', N'BillingStatus',N'<>',N'Billed'),
+ (N'RT', N'L_A2', N'Not Entered in AMD',          N'RequestCollectDate', N'LIS', N'RessultedStatus',N'=',N'Resulted', N'ClaimStatus',N'=',N'Not Entered in AMD', N'ClientStatus',N'IN',N'__BLANK__,Billing Review Required', N'BillingStatus',N'IN',N'Billed,Not Ready To Bill,Ready To Bill'),
+ (N'RT', N'L_A3', N'Unbilled',                    N'RequestCollectDate', N'LIS', N'RessultedStatus',N'=',N'Resulted', N'ClaimStatus',N'=',N'Entered', N'BilledorNot',N'=',N'UnBilled', N'ClientStatus',N'=',N''),
  (N'RT', N'L_A4', N'Client Bill',                 N'RequestCollectDate', N'LIS', N'RessultedStatus',N'=',N'Resulted', N'PaymentMethod',N'=',N'Client Bill', N'ClientStatus',N'=',N'Client Bill', N'BillingStatus',N'=',N'Billed'),
  (N'RT', N'L_A5', N'Self Pay',                    N'RequestCollectDate', N'LIS', N'RessultedStatus',N'=',N'Resulted', N'PaymentMethod',N'=',N'Self Pay', N'ClientStatus',N'=',N'Self Pay', N'BillingStatus',N'IN',N'Billed,Not Ready To Bill'),
  (N'RT', N'L_A6', N'Test Entries',                N'RequestCollectDate', N'LIS', N'RessultedStatus',N'=',N'Resulted', N'ClaimStatus',N'=',N'Not Entered in AMD', N'BillingStatus',N'<>',N'Billed', N'ClientStatus',N'=',N'Test Entries'),
  (N'RT', N'L_A7', N'Billing Status - No Bill',    N'RequestCollectDate', N'LIS', N'RessultedStatus',N'=',N'Resulted', N'BillingStatus',N'=',N'No Bill', NULL,NULL,NULL, NULL,NULL,NULL),
  (N'RT', N'L_B',  N'Not Resulted',                N'RequestCollectDate', N'LIS', N'RessultedStatus',N'=',N'Not Resulted', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
- (N'RT', N'L_B1', N'Not Entered in AMD',          N'RequestCollectDate', N'LIS', N'RessultedStatus',N'=',N'Not Resulted', N'ClaimStatus',N'=',N'Not Entered in AMD', NULL,NULL,NULL, NULL,NULL,NULL);
+ (N'RT', N'L_B1', N'Not Entered in AMD',          N'RequestCollectDate', N'LIS', N'RessultedStatus',N'=',N'Not Resulted', N'ClaimStatus',N'=',N'Not Entered in AMD', NULL,NULL,NULL, NULL,NULL,NULL),
+ (N'RT', N'L_B1b',N'Received',                    N'RequestCollectDate', N'LIS', N'RessultedStatus',N'=',N'Not Resulted', N'ClaimStatus',N'=',N'Not Entered in AMD', N'SampleStatus',N'=',N'Received', N'ClientStatus',N'=',N''),
+ (N'RT', N'L_B3', N'Test Entries',                N'RequestCollectDate', N'LIS', N'RessultedStatus',N'=',N'Not Resulted', N'ClientStatus',N'=',N'Test Entries', NULL,NULL,NULL, NULL,NULL,NULL);
 GO
 
 DELETE FROM dbo.LisDrillRowDef WHERE LabPrefix = N'RT' AND ISNULL(Source, N'LIS') = N'PMS';
@@ -369,22 +372,22 @@ VALUES
  (N'RT', N'V', N'Partially Paid', N'DateofService', N'PMS',
      N'BilledUnbilled', N'=', N'Billed', N'ClaimStatus', N'=', N'Partially Paid',
      NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
- (N'RT', N'X', N'Patient Payment', N'DateofService', N'PMS',
+ (N'RT', N'W', N'Patient Payment', N'DateofService', N'PMS',
      N'BilledUnbilled', N'=', N'Billed', N'ClaimStatus', N'=', N'Patient Payment',
      NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
- (N'RT', N'W', N'Insurance Balance', N'DateofService', N'PMS',
-     N'BilledUnbilled', N'=', N'Billed', N'ClaimStatus', N'IN', N'Fully Denied,No Response,Partially Denied',
+ (N'RT', N'X', N'Insurance Balance', N'DateofService', N'PMS',
+     N'BilledUnbilled', N'=', N'Billed', N'ClaimStatus', N'IN', N'Fully Denied,No Response,Partially Denied,Partially Adjusted',
      N'Fully Denied', N'ClaimStatus', N'Fully Denied',
      N'No Response', N'ClaimStatus', N'No Response',
-     N'Partially Denied', N'ClaimStatus', N'Partially Denied'),
- (N'RT', N'W1', N'Fully Denied', N'DateofService', N'PMS',
+     N'Partially Denied', N'ClaimStatus', N'Partially Denied,Partially Adjusted'),
+ (N'RT', N'X1', N'Fully Denied', N'DateofService', N'PMS',
      N'BilledUnbilled', N'=', N'Billed', N'ClaimStatus', N'=', N'Fully Denied',
      NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
- (N'RT', N'W2', N'No Response', N'DateofService', N'PMS',
+ (N'RT', N'X2', N'No Response', N'DateofService', N'PMS',
      N'BilledUnbilled', N'=', N'Billed', N'ClaimStatus', N'=', N'No Response',
      NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
- (N'RT', N'W3', N'Partially Denied', N'DateofService', N'PMS',
-     N'BilledUnbilled', N'=', N'Billed', N'ClaimStatus', N'=', N'Partially Denied',
+ (N'RT', N'X3', N'Partially Denied', N'DateofService', N'PMS',
+     N'BilledUnbilled', N'=', N'Billed', N'ClaimStatus', N'IN', N'Partially Denied,Partially Adjusted',
      NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL);
 GO
 

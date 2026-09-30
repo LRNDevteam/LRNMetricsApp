@@ -389,6 +389,37 @@ public interface ICollectionSummaryRepository
         string? labName = null,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Client-logic Average Payments (last 6 months) via
+    /// <c>usp_Get{prefix}_CS_AvgPayments_ClientLogic</c>, windowed on DateOfService or CheckDate.
+    /// Only for labs where <see cref="LabCollectionPrefix.UsesAvgPaymentsByDateBasis"/> is true.
+    /// </summary>
+    Task<PanelAveragesResult> GetAvgPaymentsByDateBasisAsync(
+        string connectionString,
+        AvgPaymentsDateBasis basis,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// "Genetics vs ID Avg" (Rising Tides): Panelname pivots for ClaimStatus = Fully Paid
+    /// and ClaimStatus &lt;&gt; No Response via <c>usp_Get{prefix}_CS_GeneticsVsIdAvg</c>.
+    /// Returns <see cref="GeneticsVsIdAvgResult.Empty"/> for labs without the summary.
+    /// </summary>
+    Task<GeneticsVsIdAvgResult> GetGeneticsVsIdAvgAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
+        CancellationToken ct = default);
+
     Task<CptPaymentPctResult>          GetCptPaymentPctFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
     Task<StatusSummaryResult>          GetStatusSummaryFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
     Task<ProviderSummaryResult>        GetProviderSummaryFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
@@ -500,7 +531,19 @@ public sealed record CptPaymentPctResult(
 
 /// <summary>Result container for the Panel Averages tab.</summary>
 public sealed record PanelAveragesResult(
-List<PanelAveragesRow> PanelRows);
+List<PanelAveragesRow> PanelRows)
+{
+    /// <summary>Date window the SP applied, when it reports one.</summary>
+    public DateOnly? WindowFrom { get; init; }
+    public DateOnly? WindowTo { get; init; }
+}
+
+/// <summary>Date column that anchors the client-logic Average Payments window.</summary>
+public enum AvgPaymentsDateBasis
+{
+    DateOfService,
+    CheckDate,
+}
 
 /// <summary>Metrics cell shared by panel rows and payer drill-down rows in the Panel Averages tab.</summary>
 public sealed record PanelAveragesMetrics(

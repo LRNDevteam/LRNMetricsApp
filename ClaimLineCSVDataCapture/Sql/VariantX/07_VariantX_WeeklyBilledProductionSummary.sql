@@ -1,0 +1,155 @@
+﻿/* =============================================================================
+   VariantX Labs — cloned from Elixir (07_Elixir_WeeklyBilledProductionSummary.sql)
+   Prefix: VarX_ / VarX_CS_ / VarX_ES_
+   Refresh: usp_RefreshVarX_*
+   Read:    usp_GetVarX_*
+   Source tables: dbo.ClaimLevelData, dbo.LineLevelData, dbo.LIMSMaster
+   No inline UI queries — dashboard/ReportWorker must call these SPs only.
+   ============================================================================= */
+-- VariantX Labs � Weekly Claim Production Billed Summary
+-- Rule:
+--   Filter  : TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+--   Rows    : Panelname  x  Top 3 Payer (by COUNT(DISTINCT ClaimID), per Panelname)
+--   Columns : FirstBilledDate week range Wed�Tue, last 4 complete weeks
+--             | COUNT(DISTINCT ClaimID) | SUM(ChargeAmount)
+--   Note    : VariantX week runs Wednesday through Tuesday.
+--             Reference Wednesday anchor: 1900-01-03.
+-- ============================================================
+
+SET NOCOUNT ON;
+GO
+
+-- ============================================================
+-- Step 1: Aggregate table
+-- ============================================================
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'VarX_WeeklyBilledProductionSummary')
+CREATE TABLE dbo.VarX_WeeklyBilledProductionSummary
+(
+    SummaryId    INT             NOT NULL IDENTITY(1,1) PRIMARY KEY,
+    PanelType    NVARCHAR(MAX)   NOT NULL,   -- stores Panelname value
+    PayerName    NVARCHAR(500)   NOT NULL,
+    PayerRank    TINYINT         NOT NULL,   -- 1 / 2 / 3 within the Panelname
+    WeekStart    DATE            NOT NULL,   -- Wednesday
+    WeekEnd      DATE            NOT NULL,   -- Tuesday
+    WeekLabel    NVARCHAR(32)    NOT NULL,   -- 'yyyy-MM-dd - yyyy-MM-dd'
+    ClaimCount   INT             NOT NULL DEFAULT 0,
+    TotalCharges DECIMAL(18,2)   NOT NULL DEFAULT 0,
+    RefreshedAt  DATETIME        NOT NULL DEFAULT GETDATE()
+);
+GO
+
+-- ============================================================
+-- Step 2: Stored procedure
+-- ============================================================
+CREATE OR ALTER PROCEDURE dbo.usp_RefreshVarX_WeeklyBilledProductionSummary
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Anchor the window to the latest available FirstBilledDate, not GETDATE().
+    -- This prevents an empty current week from replacing an older week with data.
+    DECLARE @MaxFirstBilledDate DATE =
+    (
+        SELECT MAX(TRY_CAST(FirstBilledDate AS DATE))
+        FROM dbo.ClaimLevelData
+        WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+    );
+
+    IF @MaxFirstBilledDate IS NULL
+    BEGIN
+        TRUNCATE TABLE dbo.VarX_WeeklyBilledProductionSummary;
+        RETURN;
+    END;
+
+    -- Week boundary: Wed�Tue; 1900-01-03 is a known Wednesday.
+    DECLARE @LatestWeekWedStart DATE =
+        DATEADD(day, -(DATEDIFF(day, '1900-01-03', @MaxFirstBilledDate) % 7), @MaxFirstBilledDate);
+
+    -- Include the week containing the latest data plus its three predecessors.
+    DECLARE @i INT = 0;
+    CREATE TABLE #Weeks
+    (
+        WeekIndex INT PRIMARY KEY,
+        WeekStart DATE,
+        WeekEnd   DATE,
+        WeekLabel NVARCHAR(32)
+    );
+
+    WHILE @i < 4
+    BEGIN
+        DECLARE @ws DATE = DATEADD(week, -@i, @LatestWeekWedStart);
+        DECLARE @we DATE = DATEADD(day, 6, @ws);   -- Wed + 6 = Tue
+        INSERT INTO #Weeks (WeekIndex, WeekStart, WeekEnd, WeekLabel)
+        VALUES (@i, @ws, @we, FORMAT(@ws, 'yyyy-MM-dd') + ' - ' + FORMAT(@we, 'yyyy-MM-dd'));
+        SET @i = @i + 1;
+    END
+
+    -- Bug-fix: drive the join from #Weeks (LEFT JOIN) so every one of the 4 weeks
+    -- always produces at least one row in the snapshot, even when zero billed claims
+    -- existed that week.
+    SELECT
+        LTRIM(RTRIM(ISNULL(cl.Panelname,     'Unknown')))              AS Panelname,
+        LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, 'Unknown')))              AS PayerName_Raw,
+        w.WeekStart,
+        w.WeekEnd,
+        w.WeekLabel,
+        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(cl.ClaimID)), ''))           AS ClaimCount,
+        ISNULL(SUM(TRY_CAST(cl.ChargeAmount AS DECIMAL(18,2))), 0)     AS TotalCharges
+    INTO #BilledRaw
+    FROM #Weeks w
+    LEFT JOIN dbo.ClaimLevelData cl
+           ON TRY_CAST(cl.FirstBilledDate AS DATE) BETWEEN w.WeekStart AND w.WeekEnd
+          AND LTRIM(RTRIM(cl.FirstBilledDate)) <> ''
+    GROUP BY
+        LTRIM(RTRIM(ISNULL(cl.Panelname,     'Unknown'))),
+        LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, 'Unknown'))),
+        w.WeekStart, w.WeekEnd, w.WeekLabel;
+
+    -- Rank payers within each Panelname across the 4-week window.
+    SELECT
+        Panelname,
+        PayerName_Raw,
+        DENSE_RANK() OVER (PARTITION BY Panelname ORDER BY SUM(ClaimCount) DESC) AS PayerRank
+    INTO #PayerRanks
+    FROM #BilledRaw
+    GROUP BY Panelname, PayerName_Raw;
+
+    -- Keep all payers (rank filter removed) so the read SP can derive panel totals.
+    SELECT
+        b.Panelname,
+        b.PayerName_Raw,
+        CAST(r.PayerRank AS TINYINT) AS PayerRank,
+        b.WeekStart, b.WeekEnd, b.WeekLabel,
+        b.ClaimCount, b.TotalCharges
+    INTO #Top3
+    FROM #BilledRaw b
+    JOIN #PayerRanks r ON r.Panelname = b.Panelname AND r.PayerName_Raw = b.PayerName_Raw;
+
+    TRUNCATE TABLE dbo.VarX_WeeklyBilledProductionSummary;
+
+    INSERT INTO dbo.VarX_WeeklyBilledProductionSummary
+        (PanelType, PayerName, PayerRank, WeekStart, WeekEnd, WeekLabel,
+         ClaimCount, TotalCharges, RefreshedAt)
+    SELECT Panelname, PayerName_Raw, PayerRank,
+           WeekStart, WeekEnd, WeekLabel,
+           ClaimCount, TotalCharges, GETDATE()
+    FROM #Top3
+    ORDER BY Panelname, PayerRank, WeekStart DESC;
+
+    DROP TABLE IF EXISTS #BilledRaw;
+    DROP TABLE IF EXISTS #PayerRanks;
+    DROP TABLE IF EXISTS #Top3;
+    DROP TABLE IF EXISTS #Weeks;
+
+    PRINT 'usp_RefreshVarX_WeeklyBilledProductionSummary completed � ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
+END
+GO
+
+/*
+SELECT PanelType, PayerName, PayerRank, WeekStart, WeekEnd, WeekLabel, ClaimCount, TotalCharges
+FROM dbo.VarX_WeeklyBilledProductionSummary
+ORDER BY PanelType, PayerRank, WeekStart DESC;
+*/
+
+PRINT '07_VariantX_WeeklyBilledProductionSummary.sql completed.';
+

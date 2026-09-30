@@ -140,18 +140,21 @@ window.rptExportIdle = function (btn, originalHtml) {
         el.textContent =
             "html body div#avgpay-pane table.cs-pr-table[class] thead tr th[class]," +
             "html body div#avgpay3-pane table.cs-pr-table[class] thead tr th[class]," +
+            "html body div#avgpaydos-pane table.cs-pr-table[class] thead tr th[class]," +
             "html body div#avgpay-pane table.cs-pr-table[class] thead tr th," +
-            "html body div#avgpay3-pane table.cs-pr-table[class] thead tr th" +
+            "html body div#avgpay3-pane table.cs-pr-table[class] thead tr th," +
+            "html body div#avgpaydos-pane table.cs-pr-table[class] thead tr th" +
             "{background:#0e3460 !important;background-color:#0e3460 !important;background-image:none !important;" +
             "color:#ffffff !important;-webkit-text-fill-color:#ffffff !important;}" +
             "html body div#avgpay-pane table.cs-pr-table[class] thead tr th.ap-grp[class]," +
-            "html body div#avgpay3-pane table.cs-pr-table[class] thead tr th.ap-grp[class]" +
+            "html body div#avgpay3-pane table.cs-pr-table[class] thead tr th.ap-grp[class]," +
+            "html body div#avgpaydos-pane table.cs-pr-table[class] thead tr th.ap-grp[class]" +
             "{background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%) !important;" +
             "color:rgba(255,255,255,.92) !important;-webkit-text-fill-color:rgba(255,255,255,.92) !important;" +
             "top:0 !important;z-index:5 !important;}" +
-            "html body #avgpay-pane .cs-pr-panel td,html body #avgpay3-pane .cs-pr-panel td" +
+            "html body #avgpay-pane .cs-pr-panel td,html body #avgpay3-pane .cs-pr-panel td,html body #avgpaydos-pane .cs-pr-panel td" +
             "{background:#f0fdf4 !important;}" +
-            "html body #avgpay-pane .cs-pr-panel td:first-child,html body #avgpay3-pane .cs-pr-panel td:first-child" +
+            "html body #avgpay-pane .cs-pr-panel td:first-child,html body #avgpay3-pane .cs-pr-panel td:first-child,html body #avgpaydos-pane .cs-pr-panel td:first-child" +
             "{background:#f0fdf4 !important;color:#166534 !important;}" +
             /* Panel vs Payment: year/Grand Total footer cells = navy (not cream/peach) */
             "html body #panelpay-pane .cs-rpt-table tbody td.cs-pr-year{background-color:#fefce8 !important;}" +

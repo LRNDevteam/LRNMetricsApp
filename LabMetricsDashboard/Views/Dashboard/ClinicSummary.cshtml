@@ -287,7 +287,22 @@
 </style>
 
 <!-- Page heading -->
-<h2 class="mb-3 fw-bold">Clinic Summary <span class="badge bg-primary bg-gradient fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@Model.SelectedLab</span></h2>
+<div class="rpt-page-head">
+    <div class="rpt-page-head-main">
+        <h2 class="mb-0 fw-bold">Clinic Summary <span class="badge bg-primary bg-gradient fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@Model.SelectedLab</span></h2>
+    </div>
+    @if (Model.Totals is not null)
+    {
+        <div class="rpt-page-head-right">
+            <div class="rpt-toolbar">
+                <button type="button" id="exportExcelBtn" class="btn btn-sm btn-outline-success rpt-toolbar-btn"
+                        title="Download Excel" aria-label="Download Excel">
+                    <i class="bi bi-file-earmark-excel"></i>
+                </button>
+            </div>
+        </div>
+    }
+</div>
 
 @await Html.PartialAsync("_AnalysisRangeBanner", Model.AnalysisRange)
 
@@ -418,9 +433,6 @@
                     <a asp-controller="Dashboard" asp-action="ClinicSummary"
                        asp-route-lab="@Model.SelectedLab"
                        class="btn btn-sm btn-outline-secondary">Clear</a>
-                    <button type="button" id="exportExcelBtn" class="btn btn-sm btn-outline-success ms-auto">
-                        <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
-                    </button>
                 </div>
             </form>
         </div>
@@ -988,21 +1000,21 @@ else
 
                 var original = exportBtn.innerHTML;
                 exportBtn.disabled = true;
-                exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing…';
+                window.rptExportBusy(exportBtn, '<span class="spinner-border spinner-border-sm me-1"></span>Queuing…');
 
                 fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
                     .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
                     .then(function (res) {
                         if (res.ok) {
-                            exportBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating — watch Reports 📄';
+                            window.rptExportBusy(exportBtn, '<i class="bi bi-check-circle me-1"></i>Generating — watch Reports 📄');
                             if (window.lrnShowReportAlert) window.lrnShowReportAlert('success');
                             if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
-                            setTimeout(function () { exportBtn.disabled = false; exportBtn.innerHTML = original; }, 8000);
+                            setTimeout(function () { window.rptExportIdle(exportBtn, original); }, 8000);
                         } else if (res.status === 400) {
-                            exportBtn.disabled = false; exportBtn.innerHTML = original;
+                            window.rptExportIdle(exportBtn, original);
                             csLegacyDownload();
                         } else {
-                            exportBtn.disabled = false; exportBtn.innerHTML = original;
+                            window.rptExportIdle(exportBtn, original);
                             var qMsg = res.j && res.j.message ? res.j.message : '';
                             if (window.lrnShowReportAlert) {
                                 if (res.status === 409 || /already/i.test(qMsg)) {
@@ -1014,7 +1026,7 @@ else
                         }
                     })
                     .catch(function () {
-                        exportBtn.disabled = false; exportBtn.innerHTML = original;
+                        window.rptExportIdle(exportBtn, original);
                         csLegacyDownload();
                     });
             });

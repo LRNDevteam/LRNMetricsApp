@@ -47,8 +47,12 @@ public sealed class ExecutiveSummaryController : Controller
             ["Inhealth_DTR"]     = "Inh",
             ["Cove"]             = "Cove",
             ["CoveLRN"]          = "Cove",
+            // Demo lab DB is a Cove restore — use Cove ES SPs (usp_GetCove_ExecutiveSummary).
+            ["LRNLabDemo"]       = "Cove",
             ["Elixir"]           = "Elix",
             ["Elixir_LRN"]       = "Elix",
+            ["VariantX"]         = "VarX",
+            ["VariantX_LRN"]     = "VarX",
             ["NorthWest"]        = "NW",
             ["NWL"]              = "NW",
             ["PCRLabsofAmerica"] = "PCR",
@@ -81,8 +85,9 @@ public sealed class ExecutiveSummaryController : Controller
     // All labs in LabPrefixMap now support extended filter parameters.
     // IsCoveLab kept as alias for backward compatibility with Detail action.
     private static bool IsCoveLab(string labName) =>
-        labName.Equals("Cove",    StringComparison.OrdinalIgnoreCase) ||
-        labName.Equals("CoveLRN", StringComparison.OrdinalIgnoreCase);
+        labName.Equals("Cove",       StringComparison.OrdinalIgnoreCase) ||
+        labName.Equals("CoveLRN",    StringComparison.OrdinalIgnoreCase) ||
+        labName.Equals("LRNLabDemo", StringComparison.OrdinalIgnoreCase);
 
     public async Task<IActionResult> Index(
         string? lab,

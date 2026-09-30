@@ -134,6 +134,7 @@
         border-bottom: 1px solid #e0e6ed;
     }
     .page-actions { display: flex; align-items: center; gap: .5rem; flex-shrink: 0; }
+    .page-actions .rpt-toolbar { margin-bottom: 0; }
 
     /* ── Executive Summary table — styled to match Production Report ── */
     .es-wrap {
@@ -394,6 +395,27 @@
         <i class="bi bi-grid-3x3-gap-fill me-1"></i>Executive Summary
     </h2>
     <div class="page-actions">
+        <div class="rpt-toolbar">
+            <button type="button" id="esExportExcelBtn" class="btn btn-sm btn-outline-success rpt-toolbar-btn"
+                    title="Download Excel" aria-label="Download Excel">
+                <i class="bi bi-file-earmark-excel"></i>
+            </button>
+            @if (Model.SelectedLab.Equals("Beech_Tree", StringComparison.OrdinalIgnoreCase))
+            {
+                <a asp-controller="ExecutiveSummary" asp-action="ThreePillarDiagnostic"
+                   asp-route-lab="@Model.SelectedLab" asp-route-months="12"
+                   class="btn btn-sm btn-outline-primary rpt-toolbar-btn"
+                   title="Three-Pillar Diagnostic" aria-label="Three-Pillar Diagnostic">
+                    <i class="bi bi-clipboard2-pulse"></i>
+                </a>
+                <a asp-controller="ExecutiveSummary" asp-action="RevenuePipelineLis"
+                   asp-route-lab="@Model.SelectedLab"
+                   class="btn btn-sm btn-primary rpt-toolbar-btn"
+                   title="Three-Pillar LIS" aria-label="Three-Pillar LIS">
+                    <i class="bi bi-bar-chart-line"></i>
+                </a>
+            }
+        </div>
         <button type="button" data-ni-open
                 class="btn btn-sm btn-outline-primary ni-btn-open"
                 title="Open Notes &amp; Insights for this report">
@@ -418,27 +440,6 @@
 
 <!-- ── Filter panel ─────────────────────────────────────────── -->
 <div class="rpt-filter-wrap">
-<div class="rpt-toolbar">
-    <button type="button" id="esExportExcelBtn" class="btn btn-sm btn-outline-success rpt-toolbar-btn"
-            title="Download Excel" aria-label="Download Excel">
-        <i class="bi bi-file-earmark-excel"></i>
-    </button>
-    @if (Model.SelectedLab.Equals("Beech_Tree", StringComparison.OrdinalIgnoreCase))
-    {
-        <a asp-controller="ExecutiveSummary" asp-action="ThreePillarDiagnostic"
-           asp-route-lab="@Model.SelectedLab" asp-route-months="12"
-           class="btn btn-sm btn-outline-primary rpt-toolbar-btn"
-           title="Three-Pillar Diagnostic" aria-label="Three-Pillar Diagnostic">
-            <i class="bi bi-clipboard2-pulse"></i>
-        </a>
-        <a asp-controller="ExecutiveSummary" asp-action="RevenuePipelineLis"
-           asp-route-lab="@Model.SelectedLab"
-           class="btn btn-sm btn-primary rpt-toolbar-btn"
-           title="Three-Pillar LIS" aria-label="Three-Pillar LIS">
-            <i class="bi bi-bar-chart-line"></i>
-        </a>
-    }
-</div>
 <div class="es-filter-panel rpt-filter-panel p-3" id="esFilterCard">
 
     <div class="rpt-filter-head">
@@ -822,21 +823,21 @@
 
         var original = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing…';
+        window.rptExportBusy(btn, '<span class="spinner-border spinner-border-sm me-1"></span>Queuing…');
 
         fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
             .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
             .then(function (res) {
                 if (res.ok) {
-                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating - watch Reports';
+                    window.rptExportBusy(btn, '<i class="bi bi-check-circle me-1"></i>Generating - watch Reports');
                     if (window.lrnShowReportAlert) window.lrnShowReportAlert('success');
                     if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
-                    setTimeout(function () { btn.disabled = false; btn.innerHTML = original; }, 8000);
+                    setTimeout(function () { window.rptExportIdle(btn, original); }, 8000);
                 } else if (res.status === 400) {
-                    btn.disabled = false; btn.innerHTML = original;
+                    window.rptExportIdle(btn, original);
                     legacyDownload();
                 } else {
-                    btn.disabled = false; btn.innerHTML = original;
+                    window.rptExportIdle(btn, original);
                     var qMsg = res.j && res.j.message ? res.j.message : '';
                     if (window.lrnShowReportAlert) {
                         if (res.status === 409 || /already/i.test(qMsg)) {
@@ -848,7 +849,7 @@
                 }
             })
             .catch(function () {
-                btn.disabled = false; btn.innerHTML = original;
+                window.rptExportIdle(btn, original);
                 legacyDownload();
             });
     });

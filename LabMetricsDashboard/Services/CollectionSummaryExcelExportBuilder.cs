@@ -44,7 +44,8 @@ public static partial class CollectionSummaryExcelExportBuilder
 
         var insightsWs = BuildMonthlyClaimVolumeSheet(wb, vm, labName);
         BuildWeeklyClaimVolumeSheet(wb, vm, labName, insightsWs);
-        BuildAvgPaymentsSheet(wb, vm.AvgPaymentsLast3Months, lastMonths: 3);
+        if (!vm.ShowAvgPaymentsByDateBasis)
+            BuildAvgPaymentsSheet(wb, vm.AvgPaymentsLast3Months, lastMonths: 3);
         BuildTop5ReimbursementSheet(wb, vm.Top5Reimbursement, labName);
         if (vm.ShowTop5TotalPayments)
             BuildTop5TotalPaymentsSheet(wb, vm.Top5TotalPayments, labName);
@@ -54,8 +55,20 @@ public static partial class CollectionSummaryExcelExportBuilder
         BuildInsuranceVsPaymentSheet(wb, vm.InsuranceVsPayment, labName);
         BuildCptPaymentPctSheet(wb, vm.CptPaymentPct, labName);
         // Panel Averages sheet intentionally omitted (hidden from UI + Excel).
-        BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6);
+        if (vm.ShowAvgPaymentsByDateBasis)
+        {
+            BuildAvgPaymentsSheet(wb, vm.AvgPaymentsDos, lastMonths: 6,
+                sheetName: AvgPaymentsDosSheetName, basisLabel: "Date of Service");
+            BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6,
+                sheetName: AvgPaymentsCheckDateSheetName, basisLabel: "Check Date");
+        }
+        else
+        {
+            BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6);
+        }
         BuildStatusSummarySheet(wb, vm.StatusSummary, labName);
+        if (vm.ShowGeneticsVsIdAvg)
+            BuildGeneticsVsIdAvgSheet(wb, vm.GeneticsVsIdAvg, labName);
         BuildRepVsPaymentSheet(wb, vm.RepPayments, labName);
         BuildProviderSummarySheet(wb, vm.ProviderSummary, labName);
 
@@ -549,7 +562,24 @@ public static partial class CollectionSummaryExcelExportBuilder
             }
         }
 
+        WriteAgingRow(ws, row, string.Empty, "Grand Total",
+            rows.Sum(r => r.ClaimsCurrent), rows.Sum(r => r.BalanceCurrent),
+            rows.Sum(r => r.Claims30), rows.Sum(r => r.Balance30),
+            rows.Sum(r => r.Claims60), rows.Sum(r => r.Balance60),
+            rows.Sum(r => r.Claims90), rows.Sum(r => r.Balance90),
+            rows.Sum(r => r.Claims120), rows.Sum(r => r.Balance120),
+            rows.Sum(r => r.ClaimsTotal), rows.Sum(r => r.BalanceTotal),
+            ColTotal, bold: true, showSource: showSource);
+
         AutoFitColumns(ws);
+        // AdjustToContents under-measures accounting-format values ("$ 194,887.00"),
+        // which Excel then renders as "#######".
+        int firstValueCol = showSource ? 3 : 2;
+        for (int c = firstValueCol; c <= colCount; c++)
+        {
+            bool isBalance = (c - firstValueCol) % 2 == 1;
+            ws.Column(c).Width = Math.Max(ws.Column(c).Width, isBalance ? 17 : 10);
+        }
         ws.SheetView.FreezeRows(3);
     }
 
@@ -895,11 +925,19 @@ public static partial class CollectionSummaryExcelExportBuilder
 
     // ?? Average Payments (Per Panel | Last 3/6 Months | Date of Service) ?????
 
-    private static void BuildAvgPaymentsSheet(XLWorkbook wb, PanelAveragesResult result, int lastMonths = 6)
+    internal const string AvgPaymentsDosSheetName       = "Avg Payments - DOS";
+    internal const string AvgPaymentsCheckDateSheetName = "Avg Payments - Check Date";
+
+    private static void BuildAvgPaymentsSheet(
+        XLWorkbook wb, PanelAveragesResult result, int lastMonths = 6,
+        string? sheetName = null, string basisLabel = "Date of Service")
     {
         if (result.PanelRows.Count == 0) return;
 
-        var sheetName = lastMonths <= 3 ? "Avg payments_Last 3 Months" : "Avg Payments";
+        sheetName ??= lastMonths <= 3 ? "Avg payments_Last 3 Months" : "Avg Payments";
+        var windowText = result.WindowFrom.HasValue && result.WindowTo.HasValue
+            ? $" ({result.WindowFrom.Value:MM/dd/yyyy} - {result.WindowTo.Value:MM/dd/yyyy})"
+            : string.Empty;
         var ws = wb.AddWorksheet(sheetName);
         ws.TabColor = ExcelTheme.Collection.TabPeach;
         ExcelTheme.ApplyDefaults(ws);
@@ -917,7 +955,7 @@ public static partial class CollectionSummaryExcelExportBuilder
         int row = 1;
         ExcelTheme.Collection.WriteTitleBar(
             ws, row, colCount,
-            $"Average Payments - Per Panel | Last {lastMonths} Months | Based on Date of Service");
+            $"Average Payments - Per Panel | Last {lastMonths} Months | Based on {basisLabel}{windowText}");
         row++;
 
         var panelHdr   = ExcelTheme.Collection.AvgPayCovePanel;
@@ -1164,6 +1202,61 @@ public static partial class CollectionSummaryExcelExportBuilder
         cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
     }
 
+
+    /// <summary>
+    /// "Genetics vs ID Avg" (Rising Tides): two Panelname pivots side by side,
+    /// Payment Status = Fully Paid and Payment Status &lt;&gt; No Response.
+    /// </summary>
+    private static void BuildGeneticsVsIdAvgSheet(XLWorkbook wb, GeneticsVsIdAvgResult result, string labName)
+    {
+        if (!result.HasData) return;
+
+        var ws = wb.AddWorksheet("Genetics vs ID Avg");
+        ws.TabColor = ExcelTheme.Collection.TabYellow;
+        ExcelTheme.ApplyDefaults(ws);
+
+        string[] headers = ["Panel Group (IDs)", "# VisitNum", "Carrier Payment", "Average of CarrierPayment"];
+        const int blockGap = 1;
+        int rightStart = headers.Length + blockGap + 1;
+        int colCount = rightStart + headers.Length - 1;
+
+        ExcelTheme.Collection.WriteTitleBar(ws, 1, colCount, $"Genetics vs ID Avg \u2014 {labName}");
+
+        const int filterRow = 3;
+        const int headerRow = 5;
+        WriteBlock(1, "Fully Paid", result.FullyPaid);
+        WriteBlock(rightStart, "(Multiple Items) \u2014 excl. No Response", result.ExcludingNoResponse);
+
+        AutoFitColumns(ws);
+        ws.Column(headers.Length + 1).Width = 3;
+        ws.SheetView.FreezeRows(headerRow);
+
+        void WriteBlock(int startCol, string filterValue, GeneticsVsIdAvgBlock block)
+        {
+            var label = ws.Cell(filterRow, startCol);
+            label.Value = "Payment Status";
+            label.Style.Font.Bold = true;
+            ws.Cell(filterRow, startCol + 1).Value = filterValue;
+
+            ExcelTheme.WriteHeaderRow(ws, headerRow, startCol, headers, ColHeader);
+
+            int row = headerRow + 1;
+            foreach (var r in block.Rows)
+            {
+                var bg = XLColor.White;
+                WriteCell(ws, row, startCol,     r.PanelName, bg, isText: true);
+                WriteCell(ws, row, startCol + 1, r.ClaimCount, bg);
+                WriteCell(ws, row, startCol + 2, r.CarrierPayment, bg, isCurrency: true, wholeDollars: true);
+                WriteCell(ws, row, startCol + 3, r.AveragePayment, bg, isCurrency: true, wholeDollars: true);
+                row++;
+            }
+
+            WriteCell(ws, row, startCol,     "Grand Total", ColTotal, isText: true, bold: true);
+            WriteCell(ws, row, startCol + 1, block.TotalClaims, ColTotal, bold: true);
+            WriteCell(ws, row, startCol + 2, block.TotalPayment, ColTotal, isCurrency: true, bold: true, wholeDollars: true);
+            WriteCell(ws, row, startCol + 3, block.TotalAverage, ColTotal, isCurrency: true, bold: true, wholeDollars: true);
+        }
+    }
 
     private static void BuildRepVsPaymentSheet(XLWorkbook wb, RepPaymentResult result, string labName)
     {

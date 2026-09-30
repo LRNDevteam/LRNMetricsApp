@@ -23,6 +23,7 @@ public static class LabProductionSummaryRepositoryMap
             ["Certus"]           = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Certus),
             ["Cove"]             = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Cove),
             ["Elixir"]           = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Elixir),
+            ["VariantX"]         = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.VariantX),
             ["PCRLabsofAmerica"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PCRLabsofAmerica),
             ["Beech_Tree"]       = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.BeechTree),
             ["Rising_Tides"]     = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.RisingTides),

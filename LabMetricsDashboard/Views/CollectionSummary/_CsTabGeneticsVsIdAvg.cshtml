@@ -1,0 +1,83 @@
+@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+@{
+    var gvi = Model.GeneticsVsIdAvg;
+    var blocks = new (string Filter, string Note, LabMetricsDashboard.Models.GeneticsVsIdAvgBlock Block)[]
+    {
+        ("Fully Paid", "ClaimStatus = Fully Paid", gvi.FullyPaid),
+        ("(Multiple Items)", "ClaimStatus <> No Response", gvi.ExcludingNoResponse),
+    };
+}
+@if (gvi.HasData)
+{
+    <style>
+    .gvi-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; align-items: stretch; }
+    .gvi-col { display: flex; flex-direction: column; min-height: 0; max-height: 70vh; }
+    .gvi-col .cs-rpt-wrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+    .gvi-col .cs-rpt-scroll { flex: 1 1 auto; min-height: 0; max-height: none; overflow: auto; }
+    .gvi-filter { font-size: .68rem; margin-bottom: .35rem; color: #64748b; }
+    .gvi-filter strong { color: #0f172a; }
+    .gvi-filter .gvi-note { color: #94a3b8; margin-left: .25rem; }
+    #genidavg-pane .gvi-grid .cs-rpt-table { width: 100% !important; min-width: 0 !important; }
+    </style>
+    <div class="gvi-grid">
+        @foreach (var b in blocks)
+        {
+            <div class="gvi-col">
+                <div class="gvi-filter">
+                    Payment Status: <strong>@b.Filter</strong><span class="gvi-note">(@b.Note)</span>
+                </div>
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                <tr>
+                                    <th>Panel Group (IDs)</th>
+                                    <th># VisitNum</th>
+                                    <th>Carrier Payment</th>
+                                    <th>Average of CarrierPayment</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            @if (b.Block.Rows.Count == 0)
+                            {
+                                <tr><td colspan="4" class="text-muted text-center">No claims for this filter</td></tr>
+                            }
+                            @foreach (var row in b.Block.Rows)
+                            {
+                                <tr>
+                                    <td style="text-align:left;font-weight:600">@row.PanelName</td>
+                                    <td style="text-align:right">@row.ClaimCount.N0OrDash()</td>
+                                    <td style="text-align:right">@Acct(row.CarrierPayment)</td>
+                                    <td style="text-align:right">@Acct(row.AveragePayment)</td>
+                                </tr>
+                            }
+                            </tbody>
+                            <tfoot>
+                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                    <td style="text-align:right;color:#fff">@b.Block.TotalClaims.N0OrDash()</td>
+                                    <td style="text-align:right;color:#fff">@Acct(b.Block.TotalPayment)</td>
+                                    <td style="text-align:right;color:#fff">@Acct(b.Block.TotalAverage)</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+    <div class="mt-2" style="font-size:.68rem;color:#94a3b8">
+        <strong>Source:</strong> ClaimLevelData &bull;
+        <strong>Rows:</strong> Panelname &bull;
+        <strong># VisitNum:</strong> Count of ClaimID &bull;
+        <strong>Average:</strong> Sum of InsurancePayment / Count of ClaimID &bull;
+        <strong>Sorted by:</strong> Carrier Payment DESC
+    </div>
+}
+else
+{
+    <div class="text-center py-5 text-muted">
+        <div style="font-size:2rem;opacity:.4">&#128202;</div>
+        <div class="fw-semibold mt-2">No Genetics vs ID Avg data available</div>
+    </div>
+}

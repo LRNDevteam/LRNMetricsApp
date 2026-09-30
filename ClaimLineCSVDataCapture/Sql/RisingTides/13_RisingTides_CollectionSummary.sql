@@ -1,4 +1,4 @@
-﻿-- =====================================================================
+-- =====================================================================
 -- RisingTides — Collection Summary Aggregates
 -- Pre-computes the data behind the 13 Collection Summary tabs in the
 -- LabMetricsDashboard web app:
@@ -933,11 +933,12 @@ END
 GO
 
 
--- 7. Insurance vs Aging
---    Exclude : ClaimStatus = 'No Response' AND BilledUnbilled = 'Unbilled'
+-- 7. Insurance vs Aging (client pivot)
 --    Filter  : InsuranceBalance <> 0, PayerName_Raw not blank
 --    Row     : PayerName_Raw
---    Column  : AgingBucket, COUNT(DISTINCT AccessionNumber), SUM(InsuranceBalance)
+--    Column  : AgingBucket, Count of ClaimID, Sum of InsuranceBalance
+--    Count is per claim row, not DISTINCT AccessionNumber: claims sharing an
+--    accession are separate rows in the client pivot.
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshRT_CS_InsuranceVsAging
 AS
 BEGIN
@@ -949,17 +950,15 @@ BEGIN
         (PayerName, AgingBucket, VisitCount, InsuranceBalance, RefreshedAt)
     SELECT
         LTRIM(RTRIM(PayerName_Raw))                                  AS PayerName,
-        LTRIM(RTRIM(ISNULL(AgingBucket, '(blank)')))                 AS AgingBucket,
-        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(AccessionNumber)), ''))    AS VisitCount,
+        ISNULL(NULLIF(LTRIM(RTRIM(AgingBucket)), ''), '(blank)')     AS AgingBucket,
+        COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), ''))                     AS VisitCount,
         ISNULL(SUM(TRY_CAST(InsuranceBalance AS DECIMAL(18,2))), 0)  AS InsuranceBalance,
         GETDATE()
     FROM dbo.ClaimLevelData
     WHERE PayerName_Raw IS NOT NULL
       AND LTRIM(RTRIM(PayerName_Raw)) <> ''
       AND ISNULL(TRY_CAST(InsuranceBalance AS DECIMAL(18,2)), 0) <> 0
-      AND NOT (LTRIM(RTRIM(ClaimStatus)) = 'No Response'
-               AND LTRIM(RTRIM(BilledUnbilled)) = 'Unbilled')
-    GROUP BY LTRIM(RTRIM(PayerName_Raw)), LTRIM(RTRIM(ISNULL(AgingBucket, '(blank)')));
+    GROUP BY LTRIM(RTRIM(PayerName_Raw)), ISNULL(NULLIF(LTRIM(RTRIM(AgingBucket)), ''), '(blank)');
 
     PRINT 'usp_RefreshRT_CS_InsuranceVsAging completed.';
 END

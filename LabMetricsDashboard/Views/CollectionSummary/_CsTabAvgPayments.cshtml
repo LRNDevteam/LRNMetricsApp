@@ -1,7 +1,19 @@
 @model LabMetricsDashboard.Models.CollectionSummaryViewModel
 @{
     var months = ViewData["AvgPayMonths"] as int? ?? 6;
-    var result = months == 3 ? Model.AvgPaymentsLast3Months : Model.AvgPayments;
+    var dateBasis = ViewData["AvgPayBasis"] as AvgPaymentsDateBasis?;
+    var result = dateBasis == AvgPaymentsDateBasis.DateOfService ? Model.AvgPaymentsDos
+        : months == 3 ? Model.AvgPaymentsLast3Months
+        : Model.AvgPayments;
+    var windowBasis = dateBasis switch
+    {
+        AvgPaymentsDateBasis.DateOfService => "DateOfService",
+        AvgPaymentsDateBasis.CheckDate => "CheckDate",
+        _ => LabMetricsDashboard.Services.LabCollectionPrefix.UsesDateOfServiceAvgPayments(Model.SelectedLab)
+            ? "DateOfService"
+            : "CheckDate (Deposit / Posted Date)",
+    };
+    var groupKey = dateBasis == AvgPaymentsDateBasis.DateOfService ? "dos" : months.ToString();
     // One UI palette for every lab (Average Payments + Last 3 Months).
     const string NavyGrad = "background:#0e3460 !important;background-color:#0e3460 !important;background-image:none !important;color:#ffffff !important;-webkit-text-fill-color:#ffffff !important";
     const string PanelBg = "background:#f0fdf4 !important;color:#166534";
@@ -35,6 +47,7 @@
 <style>
 #avgpay-pane .cs-avgpay-mcv thead th,
 #avgpay3-pane .cs-avgpay-mcv thead th,
+#avgpaydos-pane .cs-avgpay-mcv thead th,
 .cs-avgpay-mcv thead th {
     font-weight: 700; font-size: .58rem;
     letter-spacing: .03em; text-transform: uppercase;
@@ -45,6 +58,7 @@
 }
 #avgpay-pane .cs-avgpay-mcv thead tr:nth-child(2) th,
 #avgpay3-pane .cs-avgpay-mcv thead tr:nth-child(2) th,
+#avgpaydos-pane .cs-avgpay-mcv thead tr:nth-child(2) th,
 .cs-avgpay-mcv thead tr:nth-child(2) th {
     top: 30px; z-index: 4;
 }
@@ -73,9 +87,11 @@
 
 #avgpay-pane .cs-avgpay-mcv tr.cs-pr-panel td,
 #avgpay3-pane .cs-avgpay-mcv tr.cs-pr-panel td,
+#avgpaydos-pane .cs-avgpay-mcv tr.cs-pr-panel td,
 .cs-avgpay-mcv tr.cs-pr-panel td { font-weight: 700; }
 #avgpay-pane .cs-avgpay-mcv tr.cs-pr-panel td:first-child,
 #avgpay3-pane .cs-avgpay-mcv tr.cs-pr-panel td:first-child,
+#avgpaydos-pane .cs-avgpay-mcv tr.cs-pr-panel td:first-child,
 .cs-avgpay-mcv tr.cs-pr-panel td:first-child { background: #f0fdf4 !important; color: #166534; }
 
 .cs-avgpay-mcv tr.cs-pr-panel:hover td:first-child { background: #dcfce7 !important; }
@@ -132,7 +148,7 @@
                         apIdx++;
                         var letter = apIdx <= 26 ? ((char)('A' + apIdx - 1)).ToString() : apIdx.ToString();
                         var m = panel.Metrics;
-                        var apGroupId = $"ap{months}-{apIdx}";
+                        var apGroupId = $"ap{groupKey}-{apIdx}";
                         <tr class="cs-pr-panel cs-ag-group" data-ag-group="@apGroupId" role="button"
                             aria-expanded="false" title="Open / close payers">
                             <td style="@rowFirst">
@@ -220,7 +236,15 @@
 
     <div class="mt-2" style="font-size:.68rem;color:#94a3b8">
         <strong>Source:</strong> ClaimLevelData &bull;
-        <strong>Date Range:</strong> Last @months calendar months by CheckDate (Deposit / Posted Date) through billed week-range end (DATEADD(MONTH, -@months, week end) — not 180 days) &bull;
+        @if (dateBasis is not null)
+        {
+            <span><strong>Date Range:</strong> @windowBasis @(result.WindowFrom?.ToString("MM/dd/yyyy")) &ndash; @(result.WindowTo?.ToString("MM/dd/yyyy")) (last @months calendar months up to the latest @windowBasis on or before the billed week-range end) &bull;</span>
+            <span><strong>Fully Paid / Adjudicated / 30 / 60 Days:</strong> FullyPaidCount / AdjucticatedCount / Bucket30Count / Bucket60Count not blank &bull;</span>
+        }
+        else
+        {
+            <span><strong>Date Range:</strong> Last @months calendar months by @windowBasis through billed week-range end (DATEADD(MONTH, -@months, week end) — not 180 days) &bull;</span>
+        }
         <strong>Panel totals:</strong> ALL payers &bull;
         <strong>Drill-down:</strong> Top 3 PayerName_Raw by claim count &bull;
         <strong>Counts:</strong> Count(ClaimID) — not DISTINCT
@@ -231,6 +255,6 @@ else
     <div class="text-center py-5 text-muted">
         <div style="font-size:2rem;opacity:.4">&#128184;</div>
         <div class="fw-semibold mt-2">No Average Payments data available</div>
-        <div class="small mt-1">No claims found for the last @months calendar months by CheckDate (Deposit / Posted Date) through the billed week-range end. Try adjusting your filters.</div>
+        <div class="small mt-1">No claims found for the last @months calendar months by @windowBasis through the billed week-range end. Try adjusting your filters.</div>
     </div>
 }

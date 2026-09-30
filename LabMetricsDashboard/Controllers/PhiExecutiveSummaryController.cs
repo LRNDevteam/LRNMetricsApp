@@ -25,8 +25,12 @@ public class PhiExecutiveSummaryController : Controller
             ["Cert"]              = "Cert",
             ["Cove"]              = "Cove",
             ["CoveLRN"]           = "Cove",
+            // Demo lab DB is a Cove restore — use Cove ES SPs.
+            ["LRNLabDemo"]        = "Cove",
             ["Elixir"]            = "Elix",
             ["Elixir_LRN"]        = "Elix",
+            ["VariantX"]          = "VarX",
+            ["VariantX_LRN"]      = "VarX",
             ["NorthWest"]         = "NW",
             ["NWL"]               = "NW",
             ["PCRLabsofAmerica"]  = "PCR",

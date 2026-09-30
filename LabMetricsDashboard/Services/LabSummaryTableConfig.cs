@@ -68,6 +68,11 @@ public record LabSummaryTableConfig(
         new("Elix_", "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
         { SupportsFilteredMonthlyWeeklySp = true };
 
+    /// <summary>VariantX Labs — prefix <c>VarX_</c> (Elixir clone: Rule5, Wed–Tue).</summary>
+    public static readonly LabSummaryTableConfig VariantX =
+        new("VarX_", "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
+        { SupportsFilteredMonthlyWeeklySp = true };
+
     /// <summary>PCR Labs of America � prefix <c>PCR_</c>. Monthly/Weekly read SPs accept filter parameters.</summary>
     public static readonly LabSummaryTableConfig PCRLabsofAmerica =
         new("PCR_",  "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)

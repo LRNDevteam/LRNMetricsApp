@@ -9,8 +9,12 @@
     var denialReactUrl = Configuration["DenialWorkflowReactUrl"] ?? "https://localhost:5173";
     var denialReactAgingUrl = denialReactUrl.Contains('#') ? denialReactUrl : $"{denialReactUrl}#aging";
 
-    var isAdmin = User?.IsInRole("Admin") ?? false;
-    var isLrnAdmin = isAdmin || (User?.IsInRole("LRN Admin") ?? false) || (User?.IsInRole("LRNAdmin") ?? false);
+    var isAdmin = (User?.IsInRole("Admin") ?? false)
+        || (User?.IsInRole("Super Admin") ?? false)
+        || (User?.IsInRole("SuperAdmin") ?? false)
+        || (User?.IsInRole("LRN Admin") ?? false)
+        || (User?.IsInRole("LRNAdmin") ?? false);
+    var isLrnAdmin = isAdmin;
     var isPayerPolicyAdmin = (User?.IsInRole("Payer Policy Admin") ?? false) || (User?.IsInRole("PayerPolicyAdmin") ?? false);
     var isReportsAnalyst = (User?.IsInRole("Reports Analyst") ?? false) || (User?.IsInRole("ReportsAnalyst") ?? false);
     var isReportsManager = (User?.IsInRole("Reports Manager") ?? false) || (User?.IsInRole("ReportsManager") ?? false);

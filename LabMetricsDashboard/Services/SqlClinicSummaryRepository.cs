@@ -633,6 +633,12 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
         whereClauses.Add($"{columnName} IN ({string.Join(", ", paramNames)})");
     }
 
+    private static void AddBilledOnlyClause(List<string> whereClauses, string labName)
+    {
+        if (LabCollectionPrefix.ClinicPivotsBilledOnly(labName))
+            whereClauses.Add("LTRIM(RTRIM(BilledUnbilled)) = 'Billed'");
+    }
+
     /// <summary>
     /// Adds parameterized date range clauses (>= from, <= to) using TRY_CAST to DATE.
     /// </summary>
@@ -682,6 +688,7 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
         AddInClause(whereClauses, parameters, "PanelName", "@pl", filterPanelNames);
         AddDateRangeClause(whereClauses, parameters, "DateOfService", "@dosFrom", "@dosTo", filterDosFrom, filterDosTo);
         AddDateRangeClause(whereClauses, parameters, "FirstBilledDate", "@fbFrom", "@fbTo", filterFirstBillFrom, filterFirstBillTo);
+        AddBilledOnlyClause(whereClauses, labName);
         var whereClause = string.Join(" AND ", whereClauses);
 
         var sql = $"""
@@ -725,7 +732,13 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
             throw;
         }
 
-        var statuses = allStatuses.ToList();
+        var statuses = LabCollectionPrefix.ClinicPanelStatusOrderByCount(labName)
+            ? rawRows.GroupBy(r => r.Status, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(g => g.Sum(r => r.Count))
+                .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.Key)
+                .ToList()
+            : allStatuses.ToList();
 
         // Build pivot structure
         var clinicMap = new Dictionary<string, ClinicPanelStatusClinicRow>(StringComparer.OrdinalIgnoreCase);
@@ -841,6 +854,7 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
         AddInClause(whereClauses, parameters, "PanelName", "@pl", filterPanelNames);
         AddDateRangeClause(whereClauses, parameters, "DateOfService", "@dosFrom", "@dosTo", filterDosFrom, filterDosTo);
         AddDateRangeClause(whereClauses, parameters, "FirstBilledDate", "@fbFrom", "@fbTo", filterFirstBillFrom, filterFirstBillTo);
+        AddBilledOnlyClause(whereClauses, labName);
         var whereClause = string.Join(" AND ", whereClauses);
 
         var sql = $"""
@@ -958,6 +972,7 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
         AddInClause(whereClauses, parameters, "PanelName", "@pl", filterPanelNames);
         AddDateRangeClause(whereClauses, parameters, "DateOfService", "@dosFrom", "@dosTo", filterDosFrom, filterDosTo);
         AddDateRangeClause(whereClauses, parameters, "FirstBilledDate", "@fbFrom", "@fbTo", filterFirstBillFrom, filterFirstBillTo);
+        AddBilledOnlyClause(whereClauses, labName);
         var whereClause = string.Join(" AND ", whereClauses);
 
         var sql = $"""

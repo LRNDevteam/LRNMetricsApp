@@ -398,6 +398,27 @@ public sealed class ClaimLineDbService
     }
 
     /// <summary>
+    /// Runs all VariantX Labs-specific production report stored procedures after ingestion.
+    /// VariantX is an Elixir clone (Rule5 / Wed–Tue); SP prefix is VarX_.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshVariantXProductionReports()
+    {
+        string[] procedures =
+        [
+            "dbo.usp_RefreshVarX_MonthlyBilledProductionSummary",
+            "dbo.usp_RefreshVarX_WeeklyBilledProductionSummary",
+            "dbo.usp_RefreshVarX_PayerBreakdown",
+            "dbo.usp_RefreshVarX_PayerByPanel",
+            "dbo.usp_RefreshVarX_PanelBreakdownWithPayers",
+            "dbo.usp_RefreshVarX_UnbilledAging",
+            "dbo.usp_RefreshVarX_CPTBreakdown",
+            "dbo.usp_RefreshVarX_CodingBreakdown_Unbilled",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>
     /// Runs all PCRLabsofAmerica-specific production report stored procedures after ingestion.
     /// Each SP is executed independently so a failure in one does not block the others.
     /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging.
@@ -615,6 +636,8 @@ public sealed class ClaimLineDbService
             ["CoveLRN"]          = "Cove",
             ["Elixir"]           = "Elix",
             ["Elixir_LRN"]       = "Elix",
+            ["VariantX"]         = "VarX",
+            ["VariantX_LRN"]     = "VarX",
             ["NorthWest"]        = "NW",
             ["NWL"]              = "NW",
             ["PCRLabsofAmerica"] = "PCR",
@@ -875,6 +898,10 @@ public sealed class ClaimLineDbService
     /// <summary>Refreshes the Elixir Collection Summary aggregates.</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshElixirCollectionReports()
         => RunProductionReportSPs(BuildCollectionSummarySpList("Elix"));
+
+    /// <summary>Refreshes the VariantX Collection Summary aggregates (Elixir clone).</summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshVariantXCollectionReports()
+        => RunProductionReportSPs(BuildCollectionSummarySpList("VarX"));
 
     /// <summary>Refreshes the NorthWest Collection Summary aggregates.</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshNorthWestCollectionReports()

@@ -22,6 +22,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
     private const string CertusPrefix = "Cert_";
     private const string CovePrefix = "Cove_";
     private const string ElixirPrefix = "Elix_";
+    private const string VariantXPrefix = "VarX_";
     private const string AugustusPrefix = "Aug_";
     private const string NorthWestPrefix = "NW_";
     private const string PcrPrefix = "PCR_";
@@ -277,8 +278,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             while (await rdr.ReadAsync(ct))
             {
                 rawRows.Add(new RawPivotRow(
-                    rdr.GetString(0),
-                    rdr.GetString(1),
+                    rdr.IsDBNull(0) ? "(Blank)" : rdr.GetString(0),
+                    rdr.IsDBNull(1) ? "Unknown" : rdr.GetString(1),
                     rdr.GetInt32(2),
                     rdr.GetInt32(3),
                     rdr.GetInt32(4),
@@ -646,8 +647,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             {
                 var billDate = DateOnly.FromDateTime(rdr.GetDateTime(2));
                 rawRows.Add(new RawWeeklyRow(
-                    rdr.GetString(0),
-                    rdr.GetString(1),
+                    rdr.IsDBNull(0) ? "(Blank)" : rdr.GetString(0),
+                    rdr.IsDBNull(1) ? "Unknown" : rdr.GetString(1),
                     billDate,
                     rdr.GetInt32(3),
                     rdr.GetDecimal(4)));
@@ -4367,6 +4368,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             "LRNLabDemo" => CovePrefix,
             "CoveLRN" => CovePrefix,
             "Elixir_LRN" => ElixirPrefix,
+            "VariantX_LRN" => VariantXPrefix,
             "Certus_LRN" => CertusPrefix,
             "Augustus_LRN" => AugustusPrefix,
             "NWL" => NorthWestPrefix,
@@ -4379,6 +4381,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             prefix = CovePrefix;
         if (string.IsNullOrEmpty(prefix) && string.Equals(initialCatalog, "Elixir", StringComparison.OrdinalIgnoreCase))
             prefix = ElixirPrefix;
+        if (string.IsNullOrEmpty(prefix) && string.Equals(initialCatalog, "VariantX", StringComparison.OrdinalIgnoreCase))
+            prefix = VariantXPrefix;
         if (string.IsNullOrEmpty(prefix) && string.Equals(initialCatalog, "Certus", StringComparison.OrdinalIgnoreCase))
             prefix = CertusPrefix;
         if (string.IsNullOrEmpty(prefix) && string.Equals(initialCatalog, "Augustus", StringComparison.OrdinalIgnoreCase))
@@ -4409,6 +4413,10 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             else if (initialCatalog.Contains("Elixir", StringComparison.OrdinalIgnoreCase))
             {
                 prefix = ElixirPrefix;
+            }
+            else if (initialCatalog.Contains("VariantX", StringComparison.OrdinalIgnoreCase))
+            {
+                prefix = VariantXPrefix;
             }
             else if (initialCatalog.Contains("Augustus", StringComparison.OrdinalIgnoreCase))
             {

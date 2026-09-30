@@ -644,7 +644,7 @@ GO
 -- =====================================================================
 -- 7. Insurance vs Aging
 -- Source: dbo.ClaimLevelData / dbo.RT_CS_InsuranceVsAging
--- AgingBucket values: Current / 30 Days / 60 Days / 90 Days / 120+ Days
+-- AgingBucket: ClaimLevelData.AgingBucket (C# normalizes 30+/60+/90+/120+)
 -- =====================================================================
 CREATE OR ALTER PROCEDURE dbo.usp_GetRT_CS_InsuranceVsAging
     @PayerNames      NVARCHAR(MAX) = NULL,
@@ -691,22 +691,16 @@ BEGIN
     DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
     DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
 
+    -- Same logic as usp_RefreshRT_CS_InsuranceVsAging (client pivot):
+    -- InsuranceBalance <> 0, AgingBucket column, Count of ClaimID.
     SELECT
-        LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))                         AS PayerName,
-        CASE
-            WHEN ISNULL(TRY_CAST(DaystoDOS AS INT), -1) < 0  THEN '(blank)'
-            WHEN TRY_CAST(DaystoDOS AS INT) < 30              THEN 'Current'
-            WHEN TRY_CAST(DaystoDOS AS INT) < 60              THEN '30 Days'
-            WHEN TRY_CAST(DaystoDOS AS INT) < 90              THEN '60 Days'
-            WHEN TRY_CAST(DaystoDOS AS INT) < 120             THEN '90 Days'
-            ELSE '120+ Days'
-        END                                                                     AS AgingBucket,
-        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(AccessionNumber)), ''))               AS VisitCount,
+        LTRIM(RTRIM(PayerName_Raw))                                             AS PayerName,
+        ISNULL(NULLIF(LTRIM(RTRIM(AgingBucket)), ''), '(blank)')                AS AgingBucket,
+        COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), ''))                                AS VisitCount,
         ISNULL(SUM(TRY_CAST(InsuranceBalance AS DECIMAL(18,2))), 0)            AS InsuranceBalance
     FROM dbo.ClaimLevelData
     WHERE PayerName_Raw IS NOT NULL AND LTRIM(RTRIM(PayerName_Raw)) <> ''
       AND ISNULL(TRY_CAST(InsuranceBalance AS DECIMAL(18,2)), 0) <> 0
-      AND LTRIM(RTRIM(ClaimStatus)) <> 'No Response'
       AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
       AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
       AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
@@ -716,15 +710,8 @@ BEGIN
       AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate      AS DATE) >= @CheckDateFrom)
       AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate      AS DATE) <= @CheckDateTo)
     GROUP BY
-        LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
-        CASE
-            WHEN ISNULL(TRY_CAST(DaystoDOS AS INT), -1) < 0  THEN '(blank)'
-            WHEN TRY_CAST(DaystoDOS AS INT) < 30              THEN 'Current'
-            WHEN TRY_CAST(DaystoDOS AS INT) < 60              THEN '30 Days'
-            WHEN TRY_CAST(DaystoDOS AS INT) < 90              THEN '60 Days'
-            WHEN TRY_CAST(DaystoDOS AS INT) < 120             THEN '90 Days'
-            ELSE '120+ Days'
-        END
+        LTRIM(RTRIM(PayerName_Raw)),
+        ISNULL(NULLIF(LTRIM(RTRIM(AgingBucket)), ''), '(blank)')
     ORDER BY PayerName, AgingBucket;
 END
 GO

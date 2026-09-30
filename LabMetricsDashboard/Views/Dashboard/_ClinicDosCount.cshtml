@@ -48,12 +48,15 @@
 .cdc-table thead tr:nth-child(2) th { top: 28px; z-index: 3; }
 .cdc-table thead th:last-child { border-right: none; }
 
-/* Sticky first column */
-.cdc-table thead th:first-child {
+/* Sticky first column (Clinic Name spans both header rows, so only row 1's first th) */
+.cdc-table thead tr:first-child th:first-child {
     text-align: left; min-width: 220px;
     position: sticky; left: 0; z-index: 5;
     background: linear-gradient(135deg, #0a1628 0%, #0e3460 100%);
 }
+
+/* Month columns: equal width */
+.cdc-table thead tr:nth-child(2) th { width: 3.4rem; min-width: 3.4rem; }
 
 /* Year group separator */
 .cdc-table thead th.cdc-year-hdr {

@@ -107,12 +107,29 @@ public sealed class CollectionSummaryViewModel
     /// <summary>Same Avg Payments metrics restricted to the latest 3 posted months.</summary>
     public PanelAveragesResult AvgPaymentsLast3Months { get; set; } = new PanelAveragesResult([]);
 
+    /// <summary>
+    /// Client-logic 6-month Avg Payments windowed on DateOfService. Used with
+    /// <see cref="ShowAvgPaymentsByDateBasis"/>, where <see cref="AvgPayments"/> holds the CheckDate version.
+    /// </summary>
+    public PanelAveragesResult AvgPaymentsDos { get; set; } = new PanelAveragesResult([]);
+
+    /// <summary>
+    /// Avg Payments split into DOS and CheckDate tabs / sheets, with "Last 3 Months" hidden (Rising Tides).
+    /// </summary>
+    public bool ShowAvgPaymentsByDateBasis { get; set; }
+
     public RepPaymentResult RepPayments { get; set; } = new([]);
 
     // ?? Status Summary ????????????????????????????????????????????
     public StatusSummaryResult StatusSummary { get; set; } = StatusSummaryResult.Empty;
 
     public ProviderSummaryResult ProviderSummary { get; set; } = ProviderSummaryResult.Empty;
+
+    // Genetics vs ID Avg (Rising Tides)
+    public GeneticsVsIdAvgResult GeneticsVsIdAvg { get; set; } = GeneticsVsIdAvgResult.Empty;
+
+    /// <summary>Whether the "Genetics vs ID Avg" tab / sheet is available for the selected lab.</summary>
+    public bool ShowGeneticsVsIdAvg { get; set; }
 
     /// <summary>
     /// True when the page was rendered from the pre-aggregated <c>{prefix}_CS_*</c> snapshot
@@ -200,6 +217,35 @@ public sealed class StatusSummaryResult
     public decimal GrandInsuranceBalance     { get; set; }
     public decimal GrandPatientBalance       { get; set; }
     public bool    HasData                   => Rows.Count > 0;
+}
+
+// Genetics vs ID Avg types
+
+/// <summary>One Panelname row: Count of ClaimID, Sum of InsurancePayment, Sum / Count.</summary>
+public sealed record GeneticsVsIdAvgRow(string PanelName, int ClaimCount, decimal CarrierPayment)
+{
+    public decimal AveragePayment => ClaimCount == 0 ? 0m : CarrierPayment / ClaimCount;
+}
+
+/// <summary>One ClaimStatus-filtered pivot, rows sorted by CarrierPayment descending.</summary>
+public sealed class GeneticsVsIdAvgBlock
+{
+    public List<GeneticsVsIdAvgRow> Rows { get; set; } = [];
+    public int     TotalClaims  => Rows.Sum(r => r.ClaimCount);
+    public decimal TotalPayment => Rows.Sum(r => r.CarrierPayment);
+    public decimal TotalAverage => TotalClaims == 0 ? 0m : TotalPayment / TotalClaims;
+}
+
+/// <summary>
+/// "Genetics vs ID Avg": the same Panelname pivot filtered to ClaimStatus = Fully Paid,
+/// and to ClaimStatus &lt;&gt; No Response.
+/// </summary>
+public sealed class GeneticsVsIdAvgResult
+{
+    public static readonly GeneticsVsIdAvgResult Empty = new();
+    public GeneticsVsIdAvgBlock FullyPaid           { get; set; } = new();
+    public GeneticsVsIdAvgBlock ExcludingNoResponse { get; set; } = new();
+    public bool HasData => FullyPaid.Rows.Count > 0 || ExcludingNoResponse.Rows.Count > 0;
 }
 
 /// <summary>

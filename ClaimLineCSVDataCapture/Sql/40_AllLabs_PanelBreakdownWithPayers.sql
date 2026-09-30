@@ -61,6 +61,7 @@ IF @Prefix IS NULL
             WHEN OBJECT_ID('dbo.Cert_MonthlyBilledProductionSummary', 'U') IS NOT NULL THEN N'Cert_'
             WHEN OBJECT_ID('dbo.Cove_MonthlyBilledProductionSummary', 'U') IS NOT NULL THEN N'Cove_'
             WHEN OBJECT_ID('dbo.Elix_MonthlyBilledProductionSummary', 'U') IS NOT NULL THEN N'Elix_'
+            WHEN OBJECT_ID('dbo.VarX_MonthlyBilledProductionSummary', 'U') IS NOT NULL THEN N'VarX_'
             WHEN OBJECT_ID('dbo.PCR_MonthlyBilledProductionSummary',  'U') IS NOT NULL THEN N'PCR_'
             WHEN OBJECT_ID('dbo.BT_MonthlyBilledProductionSummary',   'U') IS NOT NULL THEN N'BT_'
             WHEN OBJECT_ID('dbo.RT_MonthlyBilledProductionSummary',   'U') IS NOT NULL THEN N'RT_'

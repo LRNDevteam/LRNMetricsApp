@@ -38,7 +38,7 @@ public sealed class SqlPhiExecutiveSummaryRepository
         "L_0",
         "L_A",
         "L_A1","L_A1a",
-        "L_A2","L_A2a","L_A2b",
+        "L_A2","L_A2a","L_A2b","L_A2c","L_A2d",
         "L_A3",
         "L_A4","L_A4a","L_A4b",
         "L_A5","L_A5a","L_A5b","L_A5c",
@@ -46,7 +46,7 @@ public sealed class SqlPhiExecutiveSummaryRepository
         "L_A7","L_A7a","L_A7b","L_A7c",
         "L_B",
         "L_B1","L_B1a","L_B1b",
-        "L_B2",
+        "L_B2","L_B3","L_B4",
     ];
 
     public SqlPhiExecutiveSummaryRepository(ILogger<SqlPhiExecutiveSummaryRepository> logger)

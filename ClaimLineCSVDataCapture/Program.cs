@@ -1026,6 +1026,37 @@ foreach (var lab in labConfigs)
             collSummaryResults = RunCollectionSummary(log, db, "Elix CS", db.RefreshElixirCollectionReports);
         }
 
+        // ── VariantX Labs production report aggregates ────────────────────────
+        // Elixir clone: Rule5 / Wed–Tue, prefix VarX_.
+        if (lab.LabName.Equals("VariantX", StringComparison.OrdinalIgnoreCase))
+        {
+            log.Info($"  [VarX Reports] Running VariantX production report SPs…");
+            try
+            {
+                var varxResults = db.RefreshVariantXProductionReports();
+                prodSummaryResults = varxResults;
+                foreach (var (spName, elapsedMs, error) in varxResults)
+                {
+                    if (error is null)
+                        log.Info($"  [VarX Reports] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [VarX Reports] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+
+                var failed = varxResults.Count(r => r.Error is not null);
+                var passed = varxResults.Count(r => r.Error is null);
+                log.Info($"  [VarX Reports] {passed}/{varxResults.Count} SP(s) succeeded.");
+                if (failed > 0)
+                    log.Warn($"  [VarX Reports] {failed} SP(s) failed — see errors above.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [VarX Reports] Unexpected error running VariantX production report SPs: {ex.Message}");
+            }
+
+            collSummaryResults = RunCollectionSummary(log, db, "VarX CS", db.RefreshVariantXCollectionReports);
+        }
+
         // ── PCRLabsofAmerica production report aggregates ─────────────────────
         // Matches "PCRLAPSOfAmerica" or "PCRLabsofAmerica" lab name.
         // Rule1 variant: ChargeEnteredDate columns, Thu–Wed week, coding = billed.
@@ -2006,6 +2037,9 @@ static (string? Rule, string? WeekRule, string? WeekRange) ResolveProductionSumm
         var name when name.Equals("Elixir", StringComparison.OrdinalIgnoreCase)
                 => ("Rule5", "Rule5", "Wed to Tue"),
 
+        var name when name.Equals("VariantX", StringComparison.OrdinalIgnoreCase)
+                => ("Rule5", "Rule5", "Wed to Tue"),
+
         var name when name.Equals("PCRLabsofAmerica", StringComparison.OrdinalIgnoreCase)
             || name.Equals("PCRLAPSOfAmerica", StringComparison.OrdinalIgnoreCase)
             || name.Equals("Beech_Tree", StringComparison.OrdinalIgnoreCase)
@@ -2079,6 +2113,7 @@ static string? GetCollectionSummarySpPrefix(ClaimLineCSVDataCapture.Models.LabCo
     if (name.Equals("Certus",           StringComparison.OrdinalIgnoreCase)) return "Cert";
     if (name.Equals("Cove",             StringComparison.OrdinalIgnoreCase)) return "Cove";
     if (name.Equals("Elixir",           StringComparison.OrdinalIgnoreCase)) return "Elix";
+    if (name.Equals("VariantX",         StringComparison.OrdinalIgnoreCase)) return "VarX";
     if (name.Equals("PCRLabsofAmerica", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("PCR_Labs_of_America", StringComparison.OrdinalIgnoreCase)) return "PCR";
     if (name.Equals("PhiLife",          StringComparison.OrdinalIgnoreCase) ||

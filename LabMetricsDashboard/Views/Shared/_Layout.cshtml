@@ -999,7 +999,13 @@
 
             // Restrict the navbar lab selector to labs the signed-in user is assigned to.
             // Admins see every lab. Anonymous (login screen) sees nothing.
-            var isAdmin = User?.IsInRole("Admin") ?? false;
+            // Match AccountController / ReportBoard: Super Admin and LRN Admin are full admin
+            // for the picker. "Lab Admin" stays scoped to assigned labs only.
+            var isAdmin = (User?.IsInRole("Admin") ?? false)
+                || (User?.IsInRole("Super Admin") ?? false)
+                || (User?.IsInRole("SuperAdmin") ?? false)
+                || (User?.IsInRole("LRN Admin") ?? false)
+                || (User?.IsInRole("LRNAdmin") ?? false);
             var isArManager = (User?.IsInRole("AR Manager") ?? false) || (User?.IsInRole("ARManager") ?? false);
             var isArReviewer = (User?.IsInRole("AR Reviewer") ?? false) || (User?.IsInRole("ARReviewer") ?? false) || (User?.IsInRole("AR Analyser") ?? false) || (User?.IsInRole("ARAnalyser") ?? false) || (User?.IsInRole("AR Analyzer") ?? false) || (User?.IsInRole("ARAnalyzer") ?? false);
             var isArRestricted = isArManager || isArReviewer;

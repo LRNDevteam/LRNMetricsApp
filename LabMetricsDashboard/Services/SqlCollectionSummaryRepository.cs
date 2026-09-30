@@ -452,9 +452,11 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         DateOnly? filterDosFrom, DateOnly? filterDosTo,
         DateOnly? filterCheckDateFrom, DateOnly? filterCheckDateTo,
         CancellationToken ct,
-        int? lastMonths = null)
+        int? lastMonths = null,
+        IEnumerable<SqlParameter>? extraParams = null)
     {
         var rawRows = new List<PanelAveragesRawRow>();
+        DateOnly? windowFrom = null, windowTo = null;
         var sw = Stopwatch.StartNew();
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
@@ -470,10 +472,19 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             filterCheckDateFrom, filterCheckDateTo).ToList();
         if (lastMonths is 3 or 6)
             spParams.Add(new SqlParameter("@LastMonths", lastMonths.Value));
+        if (extraParams is not null)
+            spParams.AddRange(extraParams);
         cmd.Parameters.AddRange(spParams.ToArray());
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
         {
+            if (rawRows.Count == 0 && HasColumn(r, "WindowFrom"))
+            {
+                var fromOrd = r.GetOrdinal("WindowFrom");
+                var toOrd = r.GetOrdinal("WindowTo");
+                if (!r.IsDBNull(fromOrd)) windowFrom = DateOnly.FromDateTime(r.GetDateTime(fromOrd));
+                if (!r.IsDBNull(toOrd)) windowTo = DateOnly.FromDateTime(r.GetDateTime(toOrd));
+            }
             rawRows.Add(new PanelAveragesRawRow(
                 PanelName:         GetStringOrEmpty(r, "PanelName"),
                 PayerName:         GetStringOrEmpty(r, "PayerName"),
@@ -491,7 +502,42 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rawRows.Count, sw.ElapsedMilliseconds);
         // Panel totals = ALL payers returned by SP; drill-down shows Top 3 only.
-        return BuildPanelAveragesResult(rawRows, topPayersForDrilldown: 3);
+        return BuildPanelAveragesResult(rawRows, topPayersForDrilldown: 3) with
+        {
+            WindowFrom = windowFrom,
+            WindowTo = windowTo,
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<PanelAveragesResult> GetAvgPaymentsByDateBasisAsync(
+        string connectionString,
+        AvgPaymentsDateBasis basis,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        if (!LabCollectionPrefix.UsesAvgPaymentsByDateBasis(labName))
+            return new PanelAveragesResult([]);
+
+        var prefix = LabCollectionPrefix.GetPrefix(labName)!;
+        var dateBasis = basis == AvgPaymentsDateBasis.CheckDate ? "CheckDate" : "DOS";
+        return await GetAvgPaymentsViaSpAsync(
+            connectionString,
+            $"dbo.usp_Get{prefix}_CS_AvgPayments_ClientLogic",
+            filterPayerNames, filterPanelNames,
+            filterFirstBillFrom, filterFirstBillTo,
+            filterDosFrom, filterDosTo,
+            filterCheckDateFrom, filterCheckDateTo,
+            ct,
+            lastMonths: 6,
+            extraParams: [new SqlParameter("@DateBasis", dateBasis)]).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -2168,6 +2214,70 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             ct).ConfigureAwait(false);
     }
 
+    public async Task<GeneticsVsIdAvgResult> GetGeneticsVsIdAvgAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        if (!LabCollectionPrefix.ShowsGeneticsVsIdAvg(labName))
+            return GeneticsVsIdAvgResult.Empty;
+
+        var prefix = LabCollectionPrefix.GetPrefix(labName)!;
+        var fullyPaid = new List<GeneticsVsIdAvgRow>();
+        var exclNoResponse = new List<GeneticsVsIdAvgRow>();
+        var sw = Stopwatch.StartNew();
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand($"dbo.usp_Get{prefix}_CS_GeneticsVsIdAvg", conn)
+        {
+            CommandType = System.Data.CommandType.StoredProcedure,
+            CommandTimeout = 120
+        };
+        cmd.Parameters.AddRange(BuildCollectionReadSpParameters(
+            filterPayerNames, filterPanelNames,
+            filterFirstBillFrom, filterFirstBillTo,
+            filterDosFrom, filterDosTo,
+            filterCheckDateFrom, filterCheckDateTo));
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            var row = new GeneticsVsIdAvgRow(
+                GetStringOrEmpty(r, "PanelName"),
+                GetInt32OrDefault(r, "ClaimCount"),
+                GetDecimalOrDefault(r, "CarrierPayment"));
+
+            var summaryType = GetStringOrEmpty(r, "SummaryType");
+            if (summaryType.Equals("FullyPaid", StringComparison.OrdinalIgnoreCase))
+                fullyPaid.Add(row);
+            else if (summaryType.Equals("ExclNoResponse", StringComparison.OrdinalIgnoreCase))
+                exclNoResponse.Add(row);
+        }
+
+        _logger.LogInformation(
+            "CollectionSummary GeneticsVsIdAvg: fullyPaid={FullyPaid}, exclNoResponse={Excl}, elapsed={Ms}ms",
+            fullyPaid.Count, exclNoResponse.Count, sw.ElapsedMilliseconds);
+
+        return new GeneticsVsIdAvgResult
+        {
+            FullyPaid = new GeneticsVsIdAvgBlock
+            {
+                Rows = fullyPaid.OrderByDescending(x => x.CarrierPayment).ThenBy(x => x.PanelName).ToList()
+            },
+            ExcludingNoResponse = new GeneticsVsIdAvgBlock
+            {
+                Rows = exclNoResponse.OrderByDescending(x => x.CarrierPayment).ThenBy(x => x.PanelName).ToList()
+            },
+        };
+    }
+
     public async Task<InsurancePaymentPctResult> GetInsurancePaymentPctAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
@@ -2575,13 +2685,13 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         var months = lastMonths is 3 or 6 ? lastMonths : 6;
         var prefix = LabCollectionPrefix.GetPrefix(labName);
 
-        // Elixir's SP owns its rolling window. It filters DateOfService rows, anchored
+        // Elixir / VariantX / Cove SPs own their rolling DateOfService window, anchored
         // to the latest processed week-range end date. Check-date parameters remain
         // optional user filters.
-        if (IsElixirCollectionPrefix(prefix))
+        if (LabCollectionPrefix.UsesDateOfServiceAvgPayments(labName))
             return await GetAvgPaymentsViaSpAsync(
                 connectionString,
-                "dbo.usp_GetElix_CS_AvgPayments",
+                $"dbo.usp_Get{prefix}_CS_AvgPayments",
                 filterPayerNames, filterPanelNames,
                 filterFirstBillFrom, filterFirstBillTo,
                 filterDosFrom, filterDosTo,
@@ -2595,17 +2705,6 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         _logger.LogInformation(
             "CollectionSummary AvgPayments: lastMonths={Months}, CheckDate {From:yyyy-MM-dd}..{To:yyyy-MM-dd} (calendar months from week-range end, not 180 days)",
             months, windowFrom, windowTo);
-
-        if (IsCoveCollectionPrefix(prefix))
-            return await GetAvgPaymentsViaSpAsync(
-                connectionString,
-                "dbo.usp_GetCove_CS_AvgPayments",
-                filterPayerNames, filterPanelNames,
-                filterFirstBillFrom, filterFirstBillTo,
-                filterDosFrom, filterDosTo,
-                windowFrom, windowTo,
-                ct,
-                lastMonths: months).ConfigureAwait(false);
 
         // Non-Cove 6-month SPs still clip with GETDATE() or DATEADD(DAY,-180).
         // Live SQL uses calendar months from billed week-range end.

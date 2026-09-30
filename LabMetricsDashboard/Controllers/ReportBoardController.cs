@@ -51,7 +51,12 @@ public sealed class ReportBoardController : Controller
             .Where(p => p.PropertyType == typeof(bool))
             .ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
 
-    private bool IsAdmin => User.IsInRole("Admin") || User.IsInRole("LRN Admin") || User.IsInRole("LRNAdmin");
+    private bool IsAdmin =>
+        User.IsInRole("Admin")
+        || User.IsInRole("Super Admin")
+        || User.IsInRole("SuperAdmin")
+        || User.IsInRole("LRN Admin")
+        || User.IsInRole("LRNAdmin");
 
     [HttpGet]
     public async Task<IActionResult> Index(string? view, string? sort, string? filter, string? lab, bool refresh = false, CancellationToken ct = default)

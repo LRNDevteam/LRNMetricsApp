@@ -1,8 +1,8 @@
--- Elixir Labs — Weekly Claim Production Billed Summary
+-- Elixir Labs ï¿½ Weekly Claim Production Billed Summary
 -- Rule:
 --   Filter  : TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
 --   Rows    : Panelname  x  Top 3 Payer (by COUNT(DISTINCT ClaimID), per Panelname)
---   Columns : FirstBilledDate week range Wed–Tue, last 4 complete weeks
+--   Columns : FirstBilledDate week range Wedï¿½Tue, last 4 complete weeks
 --             | COUNT(DISTINCT ClaimID) | SUM(ChargeAmount)
 --   Note    : Elixir week runs Wednesday through Tuesday.
 --             Reference Wednesday anchor: 1900-01-03.
@@ -53,7 +53,7 @@ BEGIN
         RETURN;
     END;
 
-    -- Week boundary: Wed–Tue; 1900-01-03 is a known Wednesday.
+    -- Week boundary: Wedï¿½Tue; 1900-01-03 is a known Wednesday.
     DECLARE @LatestWeekWedStart DATE =
         DATEADD(day, -(DATEDIFF(day, '1900-01-03', @MaxFirstBilledDate) % 7), @MaxFirstBilledDate);
 
@@ -133,7 +133,7 @@ BEGIN
     DROP TABLE IF EXISTS #Top3;
     DROP TABLE IF EXISTS #Weeks;
 
-    PRINT 'usp_RefreshElix_WeeklyBilledProductionSummary completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
+    PRINT 'usp_RefreshElix_WeeklyBilledProductionSummary completed ï¿½ ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END
 GO
 

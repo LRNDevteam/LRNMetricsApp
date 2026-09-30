@@ -228,8 +228,16 @@ public sealed class AllLabsCollectionExcelBuilder
             ? _repo.GetCptPaymentPctFromAggregatesAsync(connStr, aggregatePrefix!, ct)
             : _repo.GetCptPaymentPctAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
         // Panel Averages omitted from Excel / UI — do not load.
-        var avgPayTask      = _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct, lastMonths: 6);
-        var avgPay3Task     = _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct, lastMonths: 3);
+        var avgPayByDateBasis = LabCollectionPrefix.UsesAvgPaymentsByDateBasis(labName);
+        var avgPayTask      = avgPayByDateBasis
+            ? _repo.GetAvgPaymentsByDateBasisAsync(connStr, AvgPaymentsDateBasis.CheckDate, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct)
+            : _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct, lastMonths: 6);
+        var avgPay3Task     = avgPayByDateBasis
+            ? Task.FromResult(new PanelAveragesResult([]))
+            : _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct, lastMonths: 3);
+        var avgPayDosTask   = avgPayByDateBasis
+            ? _repo.GetAvgPaymentsByDateBasisAsync(connStr, AvgPaymentsDateBasis.DateOfService, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct)
+            : Task.FromResult(new PanelAveragesResult([]));
         var statusTask      = useAggregates
             ? _repo.GetStatusSummaryFromAggregatesAsync(connStr, aggregatePrefix!, ct)
             : _repo.GetStatusSummaryAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
@@ -250,7 +258,7 @@ public sealed class AllLabsCollectionExcelBuilder
         await Task.WhenAll(
             monthlyTask, weeklyTask, reimbTask, totPayTask,
             agingTask, panelPayTask, insPctTask,
-            cptPctTask, avgPayTask, avgPay3Task, statusTask, providerTask,
+            cptPctTask, avgPayTask, avgPay3Task, avgPayDosTask, statusTask, providerTask,
             repPayTask, insVsPayTask,
             claimCountTask, lineCountTask);
 
@@ -285,6 +293,8 @@ public sealed class AllLabsCollectionExcelBuilder
             PanelAverages         = [],
             AvgPayments           = await avgPayTask,
             AvgPaymentsLast3Months = await avgPay3Task,
+            AvgPaymentsDos        = await avgPayDosTask,
+            ShowAvgPaymentsByDateBasis = avgPayByDateBasis,
             StatusSummary         = await statusTask,
             ProviderSummary       = await providerTask,
             RepPayments           = await repPayTask,
