@@ -983,7 +983,7 @@ BEGIN
     BEGIN
         SELECT CPTCode, SumUnits, PaidInsurancePayment, PaidChargeAmount, PaymentPct
         FROM   dbo.RT_CS_CptVsPaymentPct
-        ORDER  BY SumUnits DESC;
+        ORDER  BY SumUnits DESC, CPTCode;
         RETURN;
     END;
 
@@ -1001,25 +1001,32 @@ BEGIN
     DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
     DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
 
+    ;WITH src AS (
+        SELECT
+            LTRIM(RTRIM(CPTCode)) AS CPTCode,
+            TRY_CAST(InsurancePayment AS DECIMAL(18,2))
+              / NULLIF(TRY_CAST(ChargeAmount AS DECIMAL(18,2)), 0) * 100.0 AS LinePct
+        FROM dbo.LineLevelData
+        WHERE NULLIF(LTRIM(RTRIM(CPTCode)), '') IS NOT NULL
+          AND ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+          AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
+          AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
+          AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
+          AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
+          AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+          AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
+          AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate       AS DATE) >= @CheckDateFrom)
+          AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate       AS DATE) <= @CheckDateTo)
+    )
     SELECT
-        LTRIM(RTRIM(CPTCode))                                                      AS CPTCode,
-        ISNULL(SUM(TRY_CAST(Units AS DECIMAL(18,2))), 0)                          AS SumUnits,
-        ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
-                        THEN TRY_CAST(InsurancePayment AS DECIMAL(18,2)) ELSE 0 END), 0) AS PaidInsurancePayment,
-        ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
-                        THEN TRY_CAST(ChargeAmount     AS DECIMAL(18,2)) ELSE 0 END), 0) AS PaidChargeAmount
-    FROM dbo.LineLevelData
-    WHERE CPTCode IS NOT NULL AND LTRIM(RTRIM(CPTCode)) <> ''
-      AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
-      AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
-      AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
-      AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
-      AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
-      AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
-      AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate      AS DATE) >= @CheckDateFrom)
-      AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate      AS DATE) <= @CheckDateTo)
-    GROUP BY LTRIM(RTRIM(CPTCode))
-    ORDER BY SumUnits DESC;
+        CPTCode,
+        CAST(COUNT(*) AS DECIMAL(18,2))                          AS SumUnits,
+        CAST(ISNULL(SUM(LinePct), 0) AS DECIMAL(18,2))           AS PaidInsurancePayment,
+        CAST(COUNT(LinePct) * 100 AS DECIMAL(18,2))              AS PaidChargeAmount,
+        CAST(ISNULL(AVG(LinePct), 0) AS DECIMAL(9,4))            AS PaymentPct
+    FROM src
+    GROUP BY CPTCode
+    ORDER BY SumUnits DESC, CPTCode;
 END
 GO
 

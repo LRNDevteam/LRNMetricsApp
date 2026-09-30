@@ -151,32 +151,49 @@ public sealed class ProductionReportGenerator : IReportGenerator
 
         var isCove = job.LabName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
                   || job.LabName.Contains("Cove", StringComparison.OrdinalIgnoreCase);
+        var isBeechTree = job.LabName.Equals("Beech_Tree", StringComparison.OrdinalIgnoreCase)
+                       || job.LabName.Equals("BeechTree", StringComparison.OrdinalIgnoreCase);
         _labSummaryRepos.TryGetValue(job.LabName, out var labSummaryRepo);
         // Cove keys may be exactly "Cove"
         if (labSummaryRepo is null)
             _labSummaryRepos.TryGetValue("Cove", out labSummaryRepo);
 
+        // Beech Tree must match the Production Summary page, so every tab reads usp_GetBT_*.
+        var useLabSps = isBeechTree && labSummaryRepo is not null;
+
         // Phase 1 — 7 summary queries concurrently.
         // Cove Production Summary breakdowns use SqlLabProductionSummaryRepository
         // (usp_GetCove_*_CountCpt / FullCharges / FullClaims / FirstBilled).
-        var monthlyTask = _repo.GetMonthlyClaimVolumeAsync(
-            connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, productionRule, ct);
-        var weeklyTask = _repo.GetWeeklyClaimVolumeAsync(
-            connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, weekRule, weekRange, ct);
-        var codingTask = _repo.GetCodingAsync(connStr, panelArg, ct);
-        var payerBreakdownTask = isCove && labSummaryRepo is not null
+        var monthlyTask = useLabSps
+            ? labSummaryRepo!.GetMonthlyAsync(
+                connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct)
+            : _repo.GetMonthlyClaimVolumeAsync(
+                connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, productionRule, ct);
+        var weeklyTask = useLabSps
+            ? labSummaryRepo!.GetWeeklyAsync(
+                connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct)
+            : _repo.GetWeeklyClaimVolumeAsync(
+                connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, weekRule, weekRange, ct);
+        var codingTask = useLabSps
+            ? labSummaryRepo!.GetCodingAsync(
+                connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct)
+            : _repo.GetCodingAsync(connStr, panelArg, ct);
+        var payerBreakdownTask = (isCove || useLabSps) && labSummaryRepo is not null
             ? labSummaryRepo.GetPayerBreakdownAsync(
                 connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct)
             : _repo.GetPayerBreakdownAsync(
                 connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, productionRule, ct);
-        var payerPanelTask = isCove && labSummaryRepo is not null
+        var payerPanelTask = (isCove || useLabSps) && labSummaryRepo is not null
             ? labSummaryRepo.GetPayerByPanelAsync(
                 connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct)
             : _repo.GetPayerPanelAsync(
                 connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, productionRule, ct);
-        var unbilledAgingTask = _repo.GetUnbilledAgingAsync(
-            connStr, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, productionRule, ct);
-        var cptBreakdownTask = isCove && labSummaryRepo is not null
+        var unbilledAgingTask = useLabSps
+            ? labSummaryRepo!.GetUnbilledAgingAsync(
+                connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct)
+            : _repo.GetUnbilledAgingAsync(
+                connStr, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, productionRule, ct);
+        var cptBreakdownTask = (isCove || useLabSps) && labSummaryRepo is not null
             ? labSummaryRepo.GetCptBreakdownAsync(
                 connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct)
             : _repo.GetCptBreakdownAsync(
@@ -255,7 +272,9 @@ public sealed class ProductionReportGenerator : IReportGenerator
             CptBreakdownGrandByMonth        = cptResult.GrandTotalByMonth,
             CptBreakdownGrandTotalUnits     = cptResult.GrandTotalUnits,
             CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
-            CptUnitsLabel                   = isCove ? "Count of CPT" : "No. of Claims",
+            CptUnitsLabel                   = isCove || useLabSps ? "Count of CPT" : "No. of Claims",
+            // The Excel builder only writes Payer Breakdown charge columns for Rule3/Rule4.
+            ProductionSummaryRule           = useLabSps ? "Rule3" : null,
             PanelBreakdownMonths              = pnlResult.Months,
             PanelBreakdownYears               = pnlResult.Years,
             PanelBreakdownRows                = pnlResult.PayerRows,

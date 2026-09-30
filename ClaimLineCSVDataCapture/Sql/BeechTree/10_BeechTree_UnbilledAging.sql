@@ -28,10 +28,7 @@ BEGIN
     SELECT
         LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), '(No Panelname)')))     AS Panelname,
         ISNULL(LTRIM(RTRIM(AgingBucket)), 'Unknown')                                     AS AgingBucket,
-        COUNT(DISTINCT COALESCE(
-            NULLIF(LTRIM(RTRIM(AccessionNumber)), ''),
-            NULLIF(LTRIM(RTRIM(ClaimID)), '')
-        ))                                                                                AS ClaimCount,
+        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))                                 AS ClaimCount,
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)                          AS TotalCharges
     INTO #Raw
     FROM dbo.ClaimLevelData

@@ -97,28 +97,28 @@ public static class LabCollectionPrefix
     /// <c>usp_Get{prefix}_CS_GeneticsVsIdAvg</c> on the lab database.
     /// </summary>
     public static bool ShowsGeneticsVsIdAvg(string? labName) =>
-        GetPrefix(labName) is "RT";
+        GetPrefix(labName) is "RT" or "BT";
 
     /// <summary>
     /// Labs whose Average Payments show two 6-month tabs (DateOfService and CheckDate) from
     /// <c>usp_Get{prefix}_CS_AvgPayments_ClientLogic</c>, with "Last 3 Months" hidden.
     /// </summary>
     public static bool UsesAvgPaymentsByDateBasis(string? labName) =>
-        GetPrefix(labName) is "RT";
+        GetPrefix(labName) is "RT" or "BT";
 
     /// <summary>
     /// Labs whose Clinic Panel Status, Clinic $ Analysis and Count by DOS Month pivots only
     /// include claims with <c>BilledUnbilled = 'Billed'</c>.
     /// </summary>
     public static bool ClinicPivotsBilledOnly(string? labName) =>
-        GetPrefix(labName) is "RT";
+        GetPrefix(labName) is "RT" or "BT";
 
     /// <summary>
     /// Labs whose Clinic Panel Status columns are ordered by total claim count (largest first),
     /// as in the client pivot, instead of alphabetically.
     /// </summary>
     public static bool ClinicPanelStatusOrderByCount(string? labName) =>
-        GetPrefix(labName) is "RT";
+        GetPrefix(labName) is "RT" or "BT";
 
     /// <summary>
     /// Returns the correct <c>ClaimLevelData</c> column to use for the Panel filter dropdown.

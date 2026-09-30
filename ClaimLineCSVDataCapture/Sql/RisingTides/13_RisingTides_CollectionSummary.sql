@@ -1084,24 +1084,24 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    ;WITH agg AS (
+    ;WITH src AS (
         SELECT
-            LTRIM(RTRIM(CPTCode))                                      AS CPTCode,
-            ISNULL(SUM(TRY_CAST(Units AS DECIMAL(18,2))), 0)           AS SumUnits,
-            ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
-                            THEN TRY_CAST(InsurancePayment AS DECIMAL(18,2)) ELSE 0 END), 0) AS PaidIns,
-            ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
-                            THEN TRY_CAST(ChargeAmount     AS DECIMAL(18,2)) ELSE 0 END), 0) AS PaidChg
+            LTRIM(RTRIM(CPTCode)) AS CPTCode,
+            TRY_CAST(InsurancePayment AS DECIMAL(18,2))
+              / NULLIF(TRY_CAST(ChargeAmount AS DECIMAL(18,2)), 0) * 100.0 AS LinePct
         FROM dbo.LineLevelData
-        WHERE CPTCode IS NOT NULL AND LTRIM(RTRIM(CPTCode)) <> ''
-        GROUP BY LTRIM(RTRIM(CPTCode))
+        WHERE NULLIF(LTRIM(RTRIM(CPTCode)), '') IS NOT NULL
+          AND ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
     )
-    SELECT CPTCode, SumUnits, PaidIns, PaidChg,
-           CASE WHEN PaidChg > 0
-                THEN CAST(PaidIns * 100.0 / PaidChg AS DECIMAL(9,4))
-                ELSE 0 END AS PaymentPct
+    SELECT
+        CPTCode,
+        CAST(COUNT(*) AS DECIMAL(18,2))                          AS SumUnits,
+        CAST(ISNULL(SUM(LinePct), 0) AS DECIMAL(18,2))           AS PaidIns,
+        CAST(COUNT(LinePct) * 100 AS DECIMAL(18,2))              AS PaidChg,
+        CAST(ISNULL(AVG(LinePct), 0) AS DECIMAL(9,4))            AS PaymentPct
     INTO #out
-    FROM agg;
+    FROM src
+    GROUP BY CPTCode;
 
     TRUNCATE TABLE dbo.RT_CS_CptVsPaymentPct;
     INSERT INTO dbo.RT_CS_CptVsPaymentPct
