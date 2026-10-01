@@ -6,19 +6,39 @@ namespace LRN.ReportsApi.Services;
 /// Period and retention rules for Denial Summary snapshots (spec 4g-4i). Pure, so they are tested
 /// without a database.
 ///
-/// A weekly snapshot is "the week that just ended" (Monday-Sunday), taken on the first scheduler
-/// pass on or after the following Monday; a monthly one is the month that just ended. A missed
-/// period is not back-filled: a snapshot is the state at capture time, and a week captured late
-/// would present today's numbers under last month's label.
+/// A weekly snapshot is "the week that just ended", taken on the first scheduler pass on or after
+/// the next week's first day. Weeks run Monday-Sunday unless the lab is configured otherwise in
+/// DenialSummarySnapshots:WeekStartDayByLab (Rising Tides: Friday-Thursday, matching its
+/// ClaimLevelData WeekFolder, e.g. "09.18.2026 - 09.24.2026"). A monthly one is the month that
+/// just ended. A missed period is not back-filled: a snapshot is the state at capture time, and a
+/// week captured late would present today's numbers under last month's label.
 /// </summary>
 internal static class DenialSummarySchedule
 {
-    public static (DateTime Start, DateTime End) LastCompletedWeek(DateTime today)
+    public static (DateTime Start, DateTime End) LastCompletedWeek(DateTime today, DayOfWeek weekStart = DayOfWeek.Monday)
     {
         var date = today.Date;
-        var daysSinceMonday = ((int)date.DayOfWeek + 6) % 7;
-        var thisMonday = date.AddDays(-daysSinceMonday);
-        return (thisMonday.AddDays(-7), thisMonday.AddDays(-1));
+        var daysSinceStart = ((int)date.DayOfWeek - (int)weekStart + 7) % 7;
+        var thisWeekStart = date.AddDays(-daysSinceStart);
+        return (thisWeekStart.AddDays(-7), thisWeekStart.AddDays(-1));
+    }
+
+    /// <summary>
+    /// The lab's configured first day of the week, matched on lab name (ignoring case, spaces,
+    /// '_' and '-') or lab id. Monday when the lab is not configured or the value is not a day name.
+    /// </summary>
+    public static DayOfWeek WeekStartFor(int labId, string labName, DenialSummarySnapshotOptions options)
+    {
+        static string Key(string? value) => new((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+
+        var wanted = new[] { Key(labName), labId.ToString(System.Globalization.CultureInfo.InvariantCulture) };
+        foreach (var (key, day) in options.WeekStartDayByLab ?? new Dictionary<string, string>())
+        {
+            if (wanted.Contains(Key(key)) && Enum.TryParse<DayOfWeek>(day?.Trim(), ignoreCase: true, out var parsed)
+                && Enum.IsDefined(parsed))
+                return parsed;
+        }
+        return DayOfWeek.Monday;
     }
 
     public static (DateTime Start, DateTime End) LastCompletedMonth(DateTime today)

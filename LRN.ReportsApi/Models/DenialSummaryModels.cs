@@ -126,4 +126,11 @@ public sealed class DenialSummarySnapshotOptions
 
     /// <summary>Windows or IANA id deciding when a week/month has ended. Blank = server local time.</summary>
     public string TimeZoneId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// First day of the weekly snapshot week, per lab, keyed by LabConfig:LabsID Name or Id
+    /// (e.g. "Rising_Tides": "Friday" -> Friday-Thursday weeks). Labs not listed use Monday
+    /// (Monday-Sunday).
+    /// </summary>
+    public Dictionary<string, string> WeekStartDayByLab { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }

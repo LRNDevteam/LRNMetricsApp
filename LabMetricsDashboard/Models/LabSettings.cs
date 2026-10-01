@@ -29,6 +29,38 @@ public sealed class LabConfigOptions
     public int? GetLabIdByName(string name) =>
         LabsID.FirstOrDefault(l => string.Equals(l.Name, name, StringComparison.OrdinalIgnoreCase))?.Id;
 
+    /// <summary>
+    /// Denial Summary (Denial Claim Report) week per lab: lab name -> "Mon to Sun" / "Tue to Mon" /
+    /// "Wed to Tue" / "Thu to Wed" / "Fri to Thu". Sourced from <c>LabConfig:DenialSummaryWeekRange</c>.
+    /// Labs not listed keep the report's default Wednesday-to-Tuesday week.
+    /// </summary>
+    public Dictionary<string, string> DenialSummaryWeekRange { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The configured first day of the Denial Summary week for a lab, or null when not configured.</summary>
+    public DayOfWeek? GetDenialSummaryWeekStart(string? labName)
+    {
+        if (string.IsNullOrWhiteSpace(labName) || DenialSummaryWeekRange is null) return null;
+        static string Key(string v) => new(v.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+        var wanted = Key(labName);
+        foreach (var (lab, range) in DenialSummaryWeekRange)
+        {
+            if (Key(lab) != wanted || string.IsNullOrWhiteSpace(range)) continue;
+            // Only a recognised range counts; a typo keeps the default rather than silently becoming Monday.
+            return range.Trim().ToLowerInvariant() switch
+            {
+                "mon to sun" => DayOfWeek.Monday,
+                "tue to mon" => DayOfWeek.Tuesday,
+                "wed to tue" => DayOfWeek.Wednesday,
+                "thu to wed" => DayOfWeek.Thursday,
+                "fri to thu" => DayOfWeek.Friday,
+                "sat to fri" => DayOfWeek.Saturday,
+                "sun to sat" => DayOfWeek.Sunday,
+                _ => null
+            };
+        }
+        return null;
+    }
+
     public bool IsDemoLab(string? labName) =>
         !string.IsNullOrWhiteSpace(labName)
         && DemoLabs.Any(d => string.Equals(d, labName, StringComparison.OrdinalIgnoreCase));

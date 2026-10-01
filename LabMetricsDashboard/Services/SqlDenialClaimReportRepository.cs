@@ -944,19 +944,21 @@ SELECT @@ROWCOUNT;";
         await reader.ReadAsync(ct) && !reader.IsDBNull(0) ? reader.GetInt32(0) : 0;
 
     /// <summary>
-    /// The day the reporting week begins. Denial weeks run <b>Wednesday to Tuesday</b>, which is the
-    /// lab's own reporting cycle rather than the calendar's - so a week reads "12 Aug - 18 Aug".
+    /// The default day the reporting week begins. Denial weeks run <b>Wednesday to Tuesday</b>, which
+    /// is the labs' reporting cycle rather than the calendar's - so a week reads "12 Aug - 18 Aug".
+    /// A lab can override it with LabConfig:DenialSummaryWeekRange (Rising Tides: Fri to Thu).
     /// </summary>
-    private const DayOfWeek WeekStartsOn = DayOfWeek.Wednesday;
+    public const DayOfWeek DefaultWeekStartsOn = DayOfWeek.Wednesday;
 
     /// <summary>
-    /// The Wednesday that opens the week this date falls in. This is the week identity insights are
-    /// stamped with and the weekly summary groups on, so both agree on where a week begins.
+    /// The day that opens the week this date falls in (Wednesday unless the lab is configured
+    /// otherwise). This is the week identity insights are stamped with and the weekly summary groups
+    /// on, so both agree on where a week begins.
     /// </summary>
-    public static DateTime WeekStartOf(DateTime date)
+    public static DateTime WeekStartOf(DateTime date, DayOfWeek weekStartsOn = DefaultWeekStartsOn)
     {
         var d = date.Date;
-        return d.AddDays(-(((int)d.DayOfWeek - (int)WeekStartsOn + 7) % 7));
+        return d.AddDays(-(((int)d.DayOfWeek - (int)weekStartsOn + 7) % 7));
     }
 
     private static async Task EnsureInsightTableAsync(SqlConnection conn, CancellationToken ct)

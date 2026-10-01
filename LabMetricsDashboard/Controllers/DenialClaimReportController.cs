@@ -171,6 +171,13 @@ public sealed class DenialClaimReportController : Controller
         return true;
     }
 
+    /// <summary>
+    /// The lab's Denial Summary week start: LabConfig:DenialSummaryWeekRange when the lab is listed
+    /// (Rising_Tides: Fri to Thu, matching its ClaimLevelData WeekFolder), else Wednesday.
+    /// </summary>
+    private DayOfWeek WeekStartsOnFor(string? labName)
+        => _labConfig.GetDenialSummaryWeekStart(labName) ?? SqlDenialClaimReportRepository.DefaultWeekStartsOn;
+
     // ── The page ──────────────────────────────────────────────────────────────
 
     [HttpGet]
@@ -211,6 +218,8 @@ public sealed class DenialClaimReportController : Controller
         model.CurrentLab = labName;
         model.Insight.CurrentLab = labName;
         model.Claims.CurrentLab = labName;
+        var weekStartsOn = WeekStartsOnFor(labName);
+        model.Insight.CurrentWeekStart = SqlDenialClaimReportRepository.WeekStartOf(DateTime.Today, weekStartsOn);
 
         try
         {
@@ -234,7 +243,7 @@ public sealed class DenialClaimReportController : Controller
             model.RunId = weekRange.RunId;
 
             model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods, loadedThrough: weekRange.LoadedThrough);
-            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: weekRange.LoadedThrough);
+            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: weekRange.LoadedThrough, weekStartsOn: WeekStartsOnFor(labName));
         }
         catch (Exception ex)
         {
@@ -294,7 +303,7 @@ public sealed class DenialClaimReportController : Controller
             model.RunId = weekRange.RunId;
 
             model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods, loadedThrough: weekRange.LoadedThrough);
-            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: weekRange.LoadedThrough);
+            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: weekRange.LoadedThrough, weekStartsOn: WeekStartsOnFor(labName));
 
             model.Insight.Rows = await _repo.GetInsightsAsync(connectionString, model.Insight.Bucket, ct);
         }
@@ -389,6 +398,7 @@ public sealed class DenialClaimReportController : Controller
         }
 
         panel.CurrentLab = labName;
+        panel.CurrentWeekStart = SqlDenialClaimReportRepository.WeekStartOf(DateTime.Today, WeekStartsOnFor(labName));
 
         try
         {
@@ -503,7 +513,7 @@ public sealed class DenialClaimReportController : Controller
 
         // Previous Week rows are dated to the week before the one in progress, not to today, or the
         // import would file last week's discussion under this week and land in the wrong group.
-        var weekStart = SqlDenialClaimReportRepository.WeekStartOf(DateTime.Today);
+        var weekStart = SqlDenialClaimReportRepository.WeekStartOf(DateTime.Today, WeekStartsOnFor(labName));
         if (intoPrevious) weekStart = weekStart.AddDays(-7);
 
         foreach (var row in validation.Rows)
