@@ -79,9 +79,10 @@ export default function DashboardPage() {
   const canDrill = canOpen(user, 'workqueue');
   const openQueue = (params) => navigate(`/work-queue?${new URLSearchParams(params)}`);
   const drill = (params) => (canDrill ? () => openQueue(params) : undefined);
+  // The Work Queue's AR Queue filter takes "queue" or "queue|sub" (one leaf).
   const queueParams = (key, extra = {}) => {
     const [queue, sub] = String(key || '').split('|');
-    return { queue, ...(sub ? { sub } : {}), ...extra };
+    return { queue: sub ? `${queue}|${sub}` : queue, ...extra };
   };
 
   const identDiff = d.identifiedThisWeek - d.identifiedLastWeek;

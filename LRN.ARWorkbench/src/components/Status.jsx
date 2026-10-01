@@ -1,9 +1,10 @@
-import { badgeClass, statusBadgeClass } from '../utils/format';
+import Icon from './Icon';
+import { arQueueBadgeClass, fmt, statusBadgeClass } from '../utils/format';
 
 export function Loading({ text = 'Loading…' }) {
   return (
-    <div className="d-flex align-items-center gap-2 text-secondary py-4">
-      <div className="spinner-border spinner-border-sm" role="status" />
+    <div className="arwb-loading" role="status">
+      <span className="arwb-spinner" />
       <span>{text}</span>
     </div>
   );
@@ -12,10 +13,10 @@ export function Loading({ text = 'Loading…' }) {
 export function ErrorBox({ message, onRetry }) {
   if (!message) return null;
   return (
-    <div className="alert alert-danger d-flex align-items-start gap-2" role="alert">
-      <i className="bi bi-exclamation-triangle-fill mt-1" />
-      <div className="flex-grow-1">{message}</div>
-      {onRetry && <button type="button" className="btn btn-sm btn-outline-danger" onClick={onRetry}>Retry</button>}
+    <div className="arwb-alert" role="alert">
+      <Icon name="warn" size={16} />
+      <div className="grow">{message}</div>
+      {onRetry && <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-danger" onClick={onRetry}>Retry</button>}
     </div>
   );
 }
@@ -27,20 +28,35 @@ export function PageHeader({ note, children }) {
   return (
     <div className="arwb-page-header">
       <div className="arwb-hint">{note}</div>
-      {children && <div className="d-flex gap-2 flex-wrap">{children}</div>}
+      {children && <div className="arwb-panel-head-actions" style={{ marginLeft: 0 }}>{children}</div>}
     </div>
   );
 }
 
-export function QueueBadge({ label, subLabel, badge }) {
-  if (!label) return <span className="text-secondary">—</span>;
-  return (
-    <span className={`badge ${badgeClass(badge)} arwb-queue-badge`} title={subLabel ? `${label} · ${subLabel}` : label}>
-      {label.replace(/ Queue$/, '')}{subLabel ? ` · ${subLabel}` : ''}
-    </span>
-  );
+export function Badge({ className = 'arwb-badge-neutral', dot, title, children }) {
+  return <span className={`arwb-badge ${className}${dot ? ' arwb-badge-dot' : ''}`} title={title}>{children}</span>;
+}
+
+// "Top queue · Sub-queue" (handoff FR-ARQ-02), coloured by the top-level queue as in the mockup.
+export function QueueBadge({ queueId, label, subLabel }) {
+  if (!label) return <span className="text-muted-ink">—</span>;
+  const text = `${label.replace(/ Queue$/, '')}${subLabel ? ` · ${subLabel}` : ''}`;
+  return <Badge className={`${arQueueBadgeClass(queueId)} arwb-queue-badge`} title={text}>{text}</Badge>;
 }
 
 export function StatusBadge({ status }) {
-  return <span className={`badge ${statusBadgeClass(status)}`}>{status}</span>;
+  return <Badge className={statusBadgeClass(status)}>{status}</Badge>;
+}
+
+export function PriorityText({ priority }) {
+  return priority ? <span className={`priority-${priority}`}>{priority}</span> : <span className="text-muted-ink">—</span>;
+}
+
+export function TflBadge({ atRisk }) {
+  return atRisk ? <Badge className="arwb-badge-critical" dot>At Risk</Badge> : <Badge className="arwb-badge-good">OK</Badge>;
+}
+
+export function AgentName({ name, fallback = 'Unassigned' }) {
+  if (!name) return <span className="text-muted-ink">{fallback}</span>;
+  return <><span className="arwb-avatar-sm">{fmt.initials(name)}</span>{name}</>;
 }

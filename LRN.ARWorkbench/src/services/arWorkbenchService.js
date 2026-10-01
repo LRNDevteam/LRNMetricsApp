@@ -7,6 +7,7 @@ export const arWorkbenchService = {
   queues: (labId, signal) => api(`queues${qs({ labId })}`, { signal }),
   dashboard: (labId, signal) => api(`dashboard${qs({ labId })}`, { signal }),
   claims: (filter, signal) => api(`claims${qs(filter)}`, { signal }),
+  claimFilterOptions: (labId, signal) => api(`claims/filter-options${qs({ labId })}`, { signal }),
   claim: (labId, claimKey, signal) => api(`claims/${encodeURIComponent(claimKey)}${qs({ labId })}`, { signal }),
   masterData: (labId) => api(`master-data${qs({ labId })}`),
   refreshRuns: (labId, top = 10) => api(`data-processing/runs${qs({ labId, top })}`),

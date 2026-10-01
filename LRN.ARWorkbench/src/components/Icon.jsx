@@ -19,7 +19,13 @@ const PATHS = {
   warn: <><path d="M10 3 17.5 16.5h-15Z" /><line x1="10" y1="8" x2="10" y2="11.6" /><line x1="10" y1="14" x2="10" y2="14" /></>,
   flag: <><line x1="5" y1="17.5" x2="5" y2="3" /><path d="M5 4c1.9-1.2 3.9-1.2 5.8 0 1.9 1.2 3.9 1.2 5.8 0v8c-1.9 1.2-3.9 1.2-5.8 0-1.9-1.2-3.9-1.2-5.8 0Z" /></>,
   calendar: <><rect x="3" y="4" width="14" height="13" rx="1.3" /><line x1="3" y1="8" x2="17" y2="8" /><line x1="7" y1="2.3" x2="7" y2="5.3" /><line x1="13" y1="2.3" x2="13" y2="5.3" /></>,
-  refresh: <><path d="M16.5 10a6.5 6.5 0 1 1-1.9-4.6" /><polyline points="16.5,3.5 16.5,7 13,7" /></>
+  refresh: <><path d="M16.5 10a6.5 6.5 0 1 1-1.9-4.6" /><polyline points="16.5,3.5 16.5,7 13,7" /></>,
+  chevronDown: <polyline points="5,7.5 10,12.5 15,7.5" />,
+  search: <><circle cx="8.7" cy="8.7" r="5.4" /><line x1="12.8" y1="12.8" x2="17" y2="17" /></>,
+  filter: <polygon points="3,4 17,4 12,10.5 12,16 8,14 8,10.5" />,
+  doc: <><path d="M6 2.5h6l4 4V17a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z" /><polyline points="12,2.5 12,6.5 16,6.5" /></>,
+  plus: <><line x1="10" y1="3.5" x2="10" y2="16.5" /><line x1="3.5" y1="10" x2="16.5" y2="10" /></>,
+  arrowLeft: <><line x1="16" y1="10" x2="4" y2="10" /><polyline points="9,5 4,10 9,15" /></>
 };
 
 export default function Icon({ name, size = 17 }) {

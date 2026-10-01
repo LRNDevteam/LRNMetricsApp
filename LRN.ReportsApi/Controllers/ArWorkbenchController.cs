@@ -7,9 +7,9 @@ using Microsoft.AspNetCore.Mvc;
 namespace LRN.ReportsApi.Controllers;
 
 /// <summary>
-/// AR Workbench (new denial application, React app LRN.ARWorkbench). Reads the [arwb] schema in
+/// AR Workbench (new denial application, React app LRN.ARWorkbench). Reads the dbo.ARWB_* tables in
 /// each lab database, populated from dbo.ClaimLevelData / dbo.LineLevelData by
-/// arwb.usp_LoadClaimsFromSource. Separate from the Denial Workflow (/api/denialworkflow) and its
+/// dbo.ARWB_usp_LoadClaimsFromSource. Separate from the Denial Workflow (/api/denialworkflow) and its
 /// dbo.Denial* tables, which are left unchanged.
 ///
 /// /api/ar-workbench is listed in the workflow JWT gate in Program.cs. Anything outside that list
@@ -82,6 +82,15 @@ public sealed class ArWorkbenchController : ControllerBase
         return Ok(await _repository.GetClaimsAsync(filter, user!, ct));
     }
 
+    /// <summary>Option lists (with counts) for the Work Queue's multi-select filters, over the caller's scope.</summary>
+    [HttpGet("claims/filter-options")]
+    public async Task<ActionResult<ArWorkbenchFilterOptions>> ClaimFilterOptions([FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        return Ok(await _repository.GetFilterOptionsAsync(labId, user!, ct));
+    }
+
     [HttpGet("claims/{claimKey:long}")]
     public async Task<ActionResult<ArWorkbenchClaimDetail>> ClaimDetail([FromRoute] long claimKey, [FromQuery] int labId, CancellationToken ct)
     {
@@ -109,7 +118,7 @@ public sealed class ArWorkbenchController : ControllerBase
         return Ok(await _repository.GetRefreshRunsAsync(labId, top, ct));
     }
 
-    /// <summary>Runs arwb.usp_LoadClaimsFromSource: claim-level rows with a denial code -> arwb.Claim, lines -> arwb.ClaimLine.</summary>
+    /// <summary>Runs dbo.ARWB_usp_LoadClaimsFromSource: every claim-level row -> dbo.ARWB_Claim, every line -> dbo.ARWB_ClaimLine.</summary>
     [HttpPost("data-processing/run")]
     public async Task<ActionResult<ArWorkbenchRefreshRun>> RunRefresh([FromQuery] int labId, [FromBody] ArWorkbenchRunRequest? request, CancellationToken ct)
     {

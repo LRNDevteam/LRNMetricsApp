@@ -2,9 +2,10 @@
     Derived denial columns on the claim-level table.
     Run against EACH LAB database (not LRNMaster).
 
-    DenialCodeNormalized  Denial code(s) with the claim adjustment group prefix stripped, so
-                          CO10 / PR10 / PI10 all read as 10, and a multi-code cell such as
-                          "CO10, CO189" reads as "10, 189".
+    DenialCodeNormalized  Denial code(s) with the CO / PR / PI prefix stripped, so
+                          CO10 / PR10 / PI10 all read as 10, COA97 reads as OA97, and a
+                          multi-code cell such as "CO10, CO189" reads as "10; 189".
+                          CO/PR/PI 1, 2, 3, 253 and 45 are left out of the column entirely.
 
     DenialDescription     Each normalized code paired with its description, e.g.
                           "10 - <description>; 189 - <description>".
@@ -126,6 +127,30 @@ BEGIN
         WHERE [DenialCodeNormalized] IS NOT NULL;
 
     PRINT 'Created IX_ClaimLevelData_DenialCodeNormalized.';
+END
+GO
+
+/*
+    The same two columns on the line-level table, filled by the line-level import with the same
+    rules. No index here - add one only if line-level reporting starts filtering on the column.
+*/
+IF OBJECT_ID('dbo.LineLevelData', 'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.columns
+                   WHERE object_id = OBJECT_ID('dbo.LineLevelData')
+                     AND name = 'DenialCodeNormalized')
+BEGIN
+    ALTER TABLE dbo.LineLevelData ADD [DenialCodeNormalized] nvarchar(400) NULL;
+    PRINT 'Added dbo.LineLevelData.DenialCodeNormalized.';
+END
+GO
+
+IF OBJECT_ID('dbo.LineLevelData', 'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.columns
+                   WHERE object_id = OBJECT_ID('dbo.LineLevelData')
+                     AND name = 'DenialDescription')
+BEGIN
+    ALTER TABLE dbo.LineLevelData ADD [DenialDescription] nvarchar(max) NULL;
+    PRINT 'Added dbo.LineLevelData.DenialDescription.';
 END
 GO
 

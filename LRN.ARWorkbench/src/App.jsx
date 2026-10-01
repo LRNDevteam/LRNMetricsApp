@@ -31,14 +31,17 @@ function Guard({ item }) {
 function Gate() {
   const { status, error, labs, setLabId, labId } = useWorkbench();
 
-  if (status === 'loading') return <div className="p-4"><Loading text="Opening AR Workbench…" /></div>;
+  if (status === 'loading') return <div style={{ padding: 24 }}><Loading text="Opening AR Workbench…" /></div>;
   if (status === 'error') {
     return (
-      <div className="container py-5" style={{ maxWidth: 640 }}>
-        <h1 className="h4 mb-3">AR Workbench</h1>
+      <div style={{ maxWidth: 640, margin: '0 auto', padding: '48px 16px' }}>
+        <div className="arwb-sidebar-top" style={{ border: 0, padding: '0 0 16px' }}>
+          <span className="arwb-brand-mark">LRN</span>
+          <span className="arwb-brand-title-main">AR Workbench</span>
+        </div>
         <ErrorBox message={error} />
         {labs.length > 1 && (
-          <select className="form-select form-select-sm w-auto" value={labId || ''} onChange={(e) => setLabId(Number(e.target.value))}>
+          <select className="arwb-select" style={{ width: 'auto' }} value={labId || ''} onChange={(e) => setLabId(Number(e.target.value))}>
             {labs.map((l) => <option key={l.labId} value={l.labId}>{l.labName}</option>)}
           </select>
         )}

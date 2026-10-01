@@ -149,17 +149,30 @@ public sealed class ArWorkbenchAgentProductivity
     public decimal Recovery { get; set; }
 }
 
+/// <summary>
+/// Work Queue filters. Every list is a multi-select (the mockup's filter popovers): repeat the query
+/// key per value (?payer=A&amp;payer=B). An empty list means "All".
+/// </summary>
 public sealed class ArWorkbenchClaimFilter
 {
+    public const int MaxValuesPerFilter = 100;
+    /// <summary>The value for "no agent" in <see cref="Agent"/>.</summary>
+    public const string UnassignedAgent = "__unassigned";
+
     public int LabId { get; set; }
-    public string? QueueId { get; set; }
-    public string? SubQueueId { get; set; }
-    public string? WorkflowStatus { get; set; }
-    public string? Payer { get; set; }
-    public string? DenialCategory { get; set; }
-    public string? AssignedAgent { get; set; }
+    /// <summary>"queueId" for a whole top-level queue, or "queueId|subQueueId" for one sub-queue.</summary>
+    public List<string> Queue { get; set; } = new();
+    public List<string> Status { get; set; } = new();
+    public List<string> Payer { get; set; } = new();
+    public List<string> Category { get; set; } = new();
+    public List<string> Agent { get; set; } = new();
+    public List<string> Priority { get; set; } = new();
+    public List<string> Aging { get; set; } = new();
+    public List<string> Panel { get; set; } = new();
+    public List<string> Clinic { get; set; } = new();
     public string? Search { get; set; }
     public bool OpenInsuranceArOnly { get; set; }
+    public bool TflRiskOnly { get; set; }
     public string? SortBy { get; set; }
     public bool SortDesc { get; set; } = true;
     public int Page { get; set; } = 1;
@@ -170,7 +183,15 @@ public sealed class ArWorkbenchClaimRow
 {
     public long ClaimKey { get; set; }
     public string ClaimID { get; set; } = string.Empty;
+    public string? LabName { get; set; }
+    public string? PatientID { get; set; }
     public string? PatientName { get; set; }
+    public string? FirstCptCode { get; set; }
+    public int LineCount { get; set; }
+    public string? DenialReason { get; set; }
+    public string? SourceClaimStatus { get; set; }
+    public string? FixResolution { get; set; }
+    public DateTime? LastFollowUpDate { get; set; }
     public string? PayerName { get; set; }
     public string? PayerType { get; set; }
     public string? ClinicName { get; set; }
@@ -203,6 +224,33 @@ public sealed class ArWorkbenchClaimRow
     public string? QaStatus { get; set; }
     public int OpenCipCases { get; set; }
     public int PendingAgentRequests { get; set; }
+}
+
+public static class ArWorkbenchFilterValues
+{
+    /// <summary>The value for a blank payer / panel / clinic / denial category in a list filter.</summary>
+    public const string None = "__none";
+}
+
+/// <summary>Option lists for the Work Queue filter popovers, from the caller's scoped claims.</summary>
+public sealed class ArWorkbenchFilterOptions
+{
+    public List<ArWorkbenchFilterOption> Queues { get; set; } = new();
+    public List<ArWorkbenchFilterOption> Payers { get; set; } = new();
+    public List<ArWorkbenchFilterOption> Panels { get; set; } = new();
+    public List<ArWorkbenchFilterOption> Clinics { get; set; } = new();
+    public List<ArWorkbenchFilterOption> Categories { get; set; } = new();
+    public List<ArWorkbenchFilterOption> Statuses { get; set; } = new();
+    public List<ArWorkbenchFilterOption> Agents { get; set; } = new();
+    public List<ArWorkbenchFilterOption> Priorities { get; set; } = new();
+    public List<ArWorkbenchFilterOption> AgingBuckets { get; set; } = new();
+}
+
+public sealed class ArWorkbenchFilterOption
+{
+    public string Value { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public int Count { get; set; }
 }
 
 public sealed class ArWorkbenchPagedResult<T>
@@ -265,7 +313,7 @@ public sealed class ArWorkbenchTemplateStage
 
 public sealed class ArWorkbenchClaimDetail
 {
-    /// <summary>Every column of arwb.vw_ClaimWorklist, keyed by column name.</summary>
+    /// <summary>Every column of dbo.ARWB_vw_ClaimWorklist, keyed by column name.</summary>
     public Dictionary<string, object?> Claim { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string? WorkflowTemplateLabel { get; set; }
     public List<ArWorkbenchTemplateStage> WorkflowStages { get; set; } = new();

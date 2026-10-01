@@ -80,7 +80,7 @@ var host = Host.CreateDefaultBuilder(args)
 		services.AddSingleton<LineClaimFileLogRepository>();
 		services.AddSingleton<ReportRunIdInfoLogger>();
 		services.AddSingleton<ReportsWorkflowTrackerRepository>();
-		// Derives NormalizedDenialCode / DenialDescription on the claim-level table after it loads.
+		// Derives DenialCodeNormalized / DenialDescription on the claim- and line-level tables after they load.
 		services.AddSingleton<DenialDescriptionEnricher>();
 		services.AddSingleton<LineClaimImportService>();
 

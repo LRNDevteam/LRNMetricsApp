@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import Icon from './Icon';
 import { downloadText, fmt, toCsv } from '../utils/format';
 
 function readHidden(storageKey) {
@@ -9,16 +10,19 @@ function writeHidden(storageKey, hidden) {
   try { localStorage.setItem(storageKey, JSON.stringify([...hidden])); } catch { /* per-session only */ }
 }
 
+const PAGE_SIZES = [10, 25, 50, 100];
+
 /**
- * The one table component every queue uses (server-side paging and sorting).
- * Gives each screen, for free: sortable headers, pager, column show/hide (remembered per table),
- * and CSV export of exactly the rows and columns on screen.
+ * The one table component every queue uses (server-side paging and sorting), in the mockup's
+ * App.createTable markup: toolbar (record count, Columns, Export), a bounded scroll box with a
+ * sticky header, and the Prev / Next + Rows per page footer.
  *
- * columns: [{ key, label, sortKey?, render?(row), csv?(row), align?, defaultHidden? }]
+ * columns: [{ key, label, sortKey?, render?(row), csv?(row), align?: 'end', wrap?, defaultHidden? }]
  */
 export default function DataTable({
   tableId, columns, rows, totalCount, page, pageSize, sortBy, sortDesc,
-  onSort, onPage, onRowClick, loading, emptyText = 'No claims match these filters.', exportName = 'export', toolbar
+  onSort, onPage, onPageSize, onRowClick, loading, emptyText = 'No records match the current filters.',
+  exportName = 'export', toolbar, rowKey = (r, i) => r.claimKey ?? i
 }) {
   const storageKey = `lrn.arwb.cols.${tableId}`;
   const [hidden, setHidden] = useState(() => {
@@ -36,9 +40,10 @@ export default function DataTable({
   }, [menuOpen]);
 
   const visible = columns.filter((c) => !hidden.has(c.key));
-  const pageCount = Math.max(1, Math.ceil((totalCount || 0) / pageSize));
-  const firstRow = totalCount ? (page - 1) * pageSize + 1 : 0;
-  const lastRow = Math.min(page * pageSize, totalCount || 0);
+  const total = totalCount || 0;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const firstRow = total ? (page - 1) * pageSize + 1 : 0;
+  const lastRow = Math.min(page * pageSize, total);
 
   function toggle(key) {
     const next = new Set(hidden);
@@ -55,46 +60,45 @@ export default function DataTable({
   return (
     <div className="arwb-table-card">
       <div className="arwb-table-toolbar">
-        <div className="text-secondary small">
-          {loading ? 'Loading…' : `${fmt.count(firstRow)}–${fmt.count(lastRow)} of ${fmt.count(totalCount || 0)}`}
-        </div>
-        <div className="ms-auto d-flex gap-2 align-items-center">
-          {toolbar}
-          <div className="position-relative" ref={menuRef}>
-            <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setMenuOpen((v) => !v)}>
-              <i className="bi bi-layout-three-columns me-1" />Columns
-            </button>
-            {menuOpen && (
-              <div className="arwb-col-menu shadow-sm">
+        <span className="arwb-hint">
+          {loading ? 'Loading…' : `${fmt.count(total)} record${total === 1 ? '' : 's'}${total > pageSize ? ` · showing ${fmt.count(firstRow)}–${fmt.count(lastRow)}` : ''}`}
+        </span>
+        <div className="grow" />
+        {toolbar}
+        <div style={{ position: 'relative' }} ref={menuRef}>
+          <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-ghost" onClick={() => setMenuOpen((v) => !v)} aria-expanded={menuOpen}>
+            <Icon name="filter" size={15} /> Columns
+          </button>
+          {menuOpen && (
+            <div className="arwb-popover right">
+              <div className="arwb-col-toggle-menu">
                 {columns.map((c) => (
-                  <label key={c.key} className="form-check small mb-1">
-                    <input type="checkbox" className="form-check-input" checked={!hidden.has(c.key)} onChange={() => toggle(c.key)} />
-                    <span className="form-check-label">{c.label}</span>
+                  <label key={c.key}>
+                    <input type="checkbox" checked={!hidden.has(c.key)} onChange={() => toggle(c.key)} /> {c.label}
                   </label>
                 ))}
               </div>
-            )}
-          </div>
-          <button type="button" className="btn btn-sm btn-outline-secondary" onClick={exportCsv} disabled={!rows.length} title="Export the rows on screen">
-            <i className="bi bi-download me-1" />CSV
-          </button>
+            </div>
+          )}
         </div>
+        <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-ghost" onClick={exportCsv} disabled={!rows.length} title="Export the rows on this page">
+          <Icon name="doc" size={15} /> Export
+        </button>
       </div>
 
-      <div className="table-responsive">
-        <table className="table table-hover table-sm align-middle mb-0 arwb-table">
+      <div className="arwb-table-wrap">
+        <table className="arwb-data-table">
           <thead>
             <tr>
               {visible.map((c) => {
                 const active = c.sortKey && c.sortKey === sortBy;
+                const cls = [c.align === 'end' ? 'num' : '', c.sortKey ? 'sortable' : '', active ? 'sorted' : ''].join(' ').trim();
                 return (
-                  <th key={c.key} className={c.align === 'end' ? 'text-end' : ''} scope="col">
-                    {c.sortKey ? (
-                      <button type="button" className="arwb-sort" onClick={() => onSort(c.sortKey, active ? !sortDesc : true)}>
-                        {c.label}
-                        <i className={`bi ms-1 ${active ? (sortDesc ? 'bi-caret-down-fill' : 'bi-caret-up-fill') : 'bi-chevron-expand text-body-tertiary'}`} />
-                      </button>
-                    ) : c.label}
+                  <th key={c.key} className={cls} scope="col"
+                    aria-sort={active ? (sortDesc ? 'descending' : 'ascending') : undefined}
+                    onClick={c.sortKey ? () => onSort(c.sortKey, active ? !sortDesc : true) : undefined}>
+                    {c.label}
+                    {c.sortKey && <span className="arwb-sort-arrow">{active ? (sortDesc ? '▼' : '▲') : '↕'}</span>}
                   </th>
                 );
               })}
@@ -102,12 +106,12 @@ export default function DataTable({
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={visible.length} className="text-center text-secondary py-5">{emptyText}</td></tr>
+              <tr><td colSpan={visible.length}><div className="arwb-empty-state"><Icon name="search" /><div>{emptyText}</div></div></td></tr>
             )}
             {rows.map((row, i) => (
-              <tr key={row.claimKey ?? i} onClick={onRowClick ? () => onRowClick(row) : undefined} className={onRowClick ? 'arwb-clickable' : ''}>
+              <tr key={rowKey(row, i)} onClick={onRowClick ? () => onRowClick(row) : undefined} className={onRowClick ? 'clickable' : ''}>
                 {visible.map((c) => (
-                  <td key={c.key} className={c.align === 'end' ? 'text-end text-nowrap' : ''}>
+                  <td key={c.key} className={[c.align === 'end' ? 'num' : '', c.wrap ? 'wrap' : ''].join(' ').trim() || undefined}>
                     {c.render ? c.render(row) : (row[c.key] ?? '—')}
                   </td>
                 ))}
@@ -117,14 +121,19 @@ export default function DataTable({
         </table>
       </div>
 
-      <div className="arwb-table-footer">
-        <button type="button" className="btn btn-sm btn-outline-secondary" disabled={page <= 1 || loading} onClick={() => onPage(page - 1)}>
-          <i className="bi bi-chevron-left" />
-        </button>
-        <span className="small text-secondary">Page {fmt.count(page)} of {fmt.count(pageCount)}</span>
-        <button type="button" className="btn btn-sm btn-outline-secondary" disabled={page >= pageCount || loading} onClick={() => onPage(page + 1)}>
-          <i className="bi bi-chevron-right" />
-        </button>
+      <div className="arwb-pagination">
+        <span>Page {fmt.count(page)} of {fmt.count(pageCount)}</span>
+        <button type="button" className="arwb-btn arwb-btn-sm" disabled={page <= 1 || loading} onClick={() => onPage(page - 1)}>‹ Prev</button>
+        <button type="button" className="arwb-btn arwb-btn-sm" disabled={page >= pageCount || loading} onClick={() => onPage(page + 1)}>Next ›</button>
+        <span className="grow" />
+        {onPageSize && (
+          <span className="arwb-hint">
+            <label htmlFor={`ps-${tableId}`}>Rows per page</label>
+            <select id={`ps-${tableId}`} className="arwb-select arwb-select-inline" value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))}>
+              {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </span>
+        )}
       </div>
     </div>
   );

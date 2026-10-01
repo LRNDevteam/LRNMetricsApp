@@ -1,12 +1,12 @@
 /* ============================================================================================
-   AR Workbench - 07 OPTIONAL: index on the source line table
-   The only statement in the AR Workbench scripts that touches a dbo table. It adds an index; it
-   does not change any column or data. dbo.LineLevelData has no ClaimID index today, and the loader
-   joins on ClaimID - without this the line step scans the whole table on every refresh.
+   AR Workbench - 08 OPTIONAL: index on the source line table
+   The only statement in the AR Workbench scripts that touches a dbo source table. It adds an
+   index; it does not change any column or data. The sync ranks line files per ClaimID and joins
+   on ClaimID; this index lets it do that without sorting the whole table on every run.
    dbo.ClaimLevelData already has IX_ClaimLevelData_ClaimID_Latest (DenialDashboard_Filter_Indexes.sql).
    Run it in a quiet window; skip it if the DBA prefers to own dbo indexes.
+   Script 00 does not drop this index (it is on a source table), so the name is kept as it was.
    ============================================================================================ */
--- Required for filtered indexes, persisted computed columns, and captured by every procedure/view at create time.
 SET ANSI_NULLS ON;
 SET QUOTED_IDENTIFIER ON;
 SET NOCOUNT ON;

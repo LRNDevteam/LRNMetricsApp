@@ -18,8 +18,8 @@ public sealed record DenialEnrichmentResult(
     IReadOnlyList<string> UnresolvedCodes);
 
 /// <summary>
-/// Fills <c>NormalizedDenialCode</c> and <c>DenialDescription</c> on a lab's claim-level table,
-/// immediately after the claim-level bulk copy commits.
+/// Fills <c>DenialCodeNormalized</c> and <c>DenialDescription</c> on a lab's claim-level and
+/// line-level tables, immediately after each level's bulk copy commits.
 ///
 /// <para><b>Why after the load rather than in the CSV.</b> The description comes from
 /// LRNMaster.DenialMapperSuperMaster, which the CSV exporter has no connection to, and the rule has
@@ -45,7 +45,7 @@ public sealed class DenialDescriptionEnricher
     /// <summary>The raw code the lab's ETL loaded, which everything here is derived from.</summary>
     private const string SourceColumn = "DenialCode";
 
-    /// <summary>Group-prefix-stripped code(s), e.g. "CO10, CO189" -> "10, 189".</summary>
+    /// <summary>Group-prefix-stripped code(s), e.g. "CO10, CO189" -> "10; 189".</summary>
     public const string NormalizedColumn = "DenialCodeNormalized";
 
     /// <summary>Code/description pairs from the masters, e.g. "10 - ...; 189 - ...".</summary>

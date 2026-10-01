@@ -324,8 +324,8 @@ public sealed class LineClaimImportService
                 $"{fileType} bulk copy completed. Rows={result.RowsInTable}, Table={level!.SqlTableName}, Duration={stopwatch.ElapsedMilliseconds} ms.", ct, logSourceName)
                 .ConfigureAwait(false);
 
-            // Derived denial columns, claim level only. The rows are committed by this point, so a
-            // failure here is reported and dropped rather than turning a good load into a failed one.
+            // Derived denial columns, claim and line level. The rows are committed by this point, so
+            // a failure here is reported and dropped rather than turning a good load into a failed one.
             await EnrichDenialCodesAsync(lab, request, fileType, level, sourceSystem, logSourceName, ct)
                 .ConfigureAwait(false);
 
@@ -370,12 +370,10 @@ public sealed class LineClaimImportService
     }
 
     /// <summary>
-    /// Populates NormalizedDenialCode and DenialDescription on the claim-level table just loaded.
+    /// Populates DenialCodeNormalized and DenialDescription on the claim-level or line-level table
+    /// just loaded, from that table's own DenialCode column.
     /// </summary>
     /// <remarks>
-    /// <para>Claim level only. The line-level table carries its own denial code, but the denial
-    /// reporting built on this reads claim level - that is the level the requirement names, and
-    /// running it on both would double the cost for a column nothing reads yet.</para>
     /// <para>Never throws. The bulk copy has already committed when this runs, so a master-table
     /// outage or a missing permission must cost the descriptions and nothing else: the failure is
     /// written to the run log as a warning and the import still reports Success.</para>
@@ -389,7 +387,8 @@ public sealed class LineClaimImportService
         string logSourceName,
         CancellationToken ct)
     {
-        if (!string.Equals(fileType, FileTypes.ClaimLevel, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(fileType, FileTypes.ClaimLevel, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(fileType, FileTypes.LineLevel, StringComparison.OrdinalIgnoreCase))
             return;
 
         try
@@ -427,7 +426,7 @@ public sealed class LineClaimImportService
 
             await _runInfo.WarningAsync(request.RunId, fileType, sourceSystem,
                 $"Denial normalization failed for lab {lab.LabName} ({lab.LabId}): {ex.Message}. " +
-                "The claim-level rows loaded successfully and are unaffected.", ct, logSourceName)
+                $"The {fileType} rows loaded successfully and are unaffected.", ct, logSourceName)
                 .ConfigureAwait(false);
         }
     }

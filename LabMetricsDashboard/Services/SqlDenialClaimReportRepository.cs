@@ -141,9 +141,19 @@ public sealed class SqlDenialClaimReportRepository : IDenialClaimReportRepositor
         // A lab that has not yet run the new claim-level import has neither derived column. The
         // summary still works - it falls back to the raw code and an empty description - rather than
         // showing the lab an error it cannot act on.
-        var normalizedExpr = cols.Contains("DenialCodeNormalized")
+        var useNormalized = cols.Contains("DenialCodeNormalized")
+            && await HasNormalizedValuesAsync(conn, ct);
+
+        var normalizedExpr = useNormalized
             ? "LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(400), [DenialCodeNormalized]), '')))"
             : "LTRIM(RTRIM(CONVERT(nvarchar(400), [DenialCode])))";
+
+        // Once the Master File Processor has filled DenialCodeNormalized, a denied claim with a
+        // blank normalized code is one whose every code was deliberately left out (CO/PR/PI 1, 2,
+        // 3, 253, 45), so it is not counted. Before the first fill the raw code stands in instead.
+        var normalizedFilter = useNormalized
+            ? "AND   LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(400), [DenialCodeNormalized]), ''))) <> ''"
+            : string.Empty;
 
         var descriptionExpr = cols.Contains("DenialDescription")
             ? "ISNULL(CONVERT(nvarchar(4000), [DenialDescription]), '')"
@@ -180,6 +190,7 @@ FROM (
     WHERE   [DenialCode] IS NOT NULL
       AND   LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> ''
       AND   TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0
+      {normalizedFilter}
 ) AS d
 GROUP BY PayerName, DenialCodeNormalized, DenialDescription, DenialDate;";
 
@@ -524,6 +535,22 @@ WHERE  {codeMatch}
         }
 
         return new DenialClaimDiagnosis(code, payer, normalized, samples);
+    }
+
+    /// <summary>
+    /// True once any claim row carries a DenialCodeNormalized value - i.e. the claim-level import
+    /// has populated the column at least once, rather than the deployment script merely adding it.
+    /// </summary>
+    private static async Task<bool> HasNormalizedValuesAsync(SqlConnection conn, CancellationToken ct)
+    {
+        const string sql = @"
+SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM dbo.ClaimLevelData
+    WHERE  LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(400), [DenialCodeNormalized]), ''))) <> ''
+) THEN 1 ELSE 0 END;";
+
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)) == 1;
     }
 
     private static async Task<bool> ColumnExistsAsync(

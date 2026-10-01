@@ -19,6 +19,8 @@ export function qs(params = {}) {
   Object.entries(params).forEach(([key, value]) => {
     // false is sent: sortDesc=false must reach the API, whose default is true.
     if (value === undefined || value === null || value === '') return;
+    // Lists repeat the key (?payer=A&payer=B), which ASP.NET binds to List<string>.
+    if (Array.isArray(value)) { value.forEach((v) => { if (v !== '' && v != null) search.append(key, v); }); return; }
     search.append(key, value);
   });
   const text = search.toString();

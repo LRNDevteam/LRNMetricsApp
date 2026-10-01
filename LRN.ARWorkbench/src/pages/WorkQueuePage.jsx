@@ -1,76 +1,123 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import DataTable from '../components/DataTable';
-import { ErrorBox, PageHeader, QueueBadge, StatusBadge } from '../components/Status';
+import MultiSelect from '../components/MultiSelect';
+import { AgentName, ErrorBox, PriorityText, QueueBadge, StatusBadge, TflBadge } from '../components/Status';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
-import { fmt, priorityBadgeClass } from '../utils/format';
+import { fmt } from '../utils/format';
 
-const PAGE_SIZE = 50;
+const DEFAULT_PAGE_SIZE = 25;
 
-const COLUMNS = [
-  { key: 'claimID', label: 'Claim ID', sortKey: 'claimId', render: (r) => <span className="fw-semibold">{r.claimID}</span> },
-  { key: 'patientName', label: 'Patient', defaultHidden: true },
-  { key: 'payerName', label: 'Payer', sortKey: 'payerName' },
-  { key: 'clinicName', label: 'Clinic', defaultHidden: true },
-  { key: 'panelName', label: 'Panel', defaultHidden: true },
-  { key: 'dateOfService', label: 'DOS', sortKey: 'dateOfService', render: (r) => fmt.date(r.dateOfService), csv: (r) => fmt.date(r.dateOfService) },
-  { key: 'denialCode', label: 'Denial code' },
-  { key: 'denialCategory', label: 'Category', sortKey: 'denialCategory' },
-  { key: 'queue', label: 'AR queue', render: (r) => <QueueBadge label={r.arQueueLabel} subLabel={r.arSubQueueLabel} badge={r.arQueueBadgeClass} />, csv: (r) => [r.arQueueLabel, r.arSubQueueLabel].filter(Boolean).join(' / ') },
-  { key: 'workflowStatus', label: 'Status', sortKey: 'workflowStatus', render: (r) => <StatusBadge status={r.workflowStatus} /> },
-  { key: 'priority', label: 'Priority', sortKey: 'priority', render: (r) => r.priority ? <span className={`badge ${priorityBadgeClass(r.priority)}`}>{r.priority}</span> : '—' },
-  { key: 'assignedAgentName', label: 'Agent', render: (r) => r.assignedAgentName || r.assignedAgentUser || <span className="text-secondary">Unassigned</span>, csv: (r) => r.assignedAgentName || r.assignedAgentUser || '' },
-  { key: 'initialInsuranceAR', label: 'Initial AR', align: 'end', render: (r) => fmt.money(r.initialInsuranceAR), defaultHidden: true },
-  { key: 'recoveredAmount', label: 'Recovered', align: 'end', sortKey: 'recoveredAmount', render: (r) => fmt.money(r.recoveredAmount) },
-  { key: 'remainingAR', label: 'Remaining AR', align: 'end', sortKey: 'remainingAR', render: (r) => <span className="fw-semibold">{fmt.money(r.remainingAR)}</span> },
-  { key: 'agingDays', label: 'Aging', align: 'end', sortKey: 'agingDays', render: (r) => (r.agingDays ?? '—') },
-  { key: 'daysSinceLastTouch', label: 'Days untouched', align: 'end', sortKey: 'daysSinceLastTouch', render: (r) => (r.daysSinceLastTouch ?? '—'), defaultHidden: true },
-  { key: 'nextFollowUpDate', label: 'Next follow-up', sortKey: 'nextFollowUpDate', render: (r) => fmt.date(r.nextFollowUpDate), csv: (r) => fmt.date(r.nextFollowUpDate), defaultHidden: true },
-  { key: 'flags', label: 'Flags', render: (r) => (
-    <span className="d-inline-flex gap-1">
-      {r.isTflRisk && <span className="badge text-bg-danger" title="Timely filing at risk">TFL</span>}
-      {r.isNonCollectible && <span className="badge text-bg-secondary" title="Non-collectible denial code">NC</span>}
-      {r.openCipCases > 0 && <span className="badge text-bg-warning" title="Open CIP case">CIP</span>}
-      {r.pendingAgentRequests > 0 && <span className="badge text-bg-info" title="Pending agent request">REQ</span>}
-    </span>
-  ), csv: (r) => [r.isTflRisk && 'TFL', r.isNonCollectible && 'NC', r.openCipCases > 0 && 'CIP', r.pendingAgentRequests > 0 && 'REQ'].filter(Boolean).join(' ') }
+// Multi-select filters: URL key -> API filter key, label, filter-options list. Each value is its
+// own URL entry (?payer=A&payer=B), so a filtered view can be bookmarked or shared.
+const LIST_FILTERS = [
+  { param: 'clinic', api: 'clinic', label: 'Clinic', options: 'clinics' },
+  { param: 'payer', api: 'payer', label: 'Payer', options: 'payers' },
+  { param: 'panel', api: 'panel', label: 'Panel Type', options: 'panels' },
+  { param: 'category', api: 'category', label: 'Denial Category', options: 'categories' },
+  { param: 'status', api: 'status', label: 'Workflow Status', options: 'statuses' },
+  { param: 'agent', api: 'agent', label: 'Assigned Agent', options: 'agents' },
+  { param: 'priority', api: 'priority', label: 'Priority', options: 'priorities' },
+  { param: 'aging', api: 'aging', label: 'AR Aging', options: 'agingBuckets' },
+  { param: 'queue', api: 'queue', label: 'AR Queue', options: 'queues' }
 ];
 
+function NextFollowUp({ date }) {
+  if (!date) return '—';
+  const days = fmt.daysUntil(date);
+  const cls = days < 0 ? 'text-critical' : days <= 2 ? 'text-warning-ink' : '';
+  return <span className={cls}>{fmt.date(date)}</span>;
+}
+
+// The mockup's Work Queue columns (handoff FR-WQ-05); * = hidden by default.
+function buildColumns(openClaim) {
+  return [
+    { key: 'claimID', label: 'Claim ID', sortKey: 'claimId',
+      render: (r) => <button type="button" className="arwb-claim-link" onClick={(e) => { e.stopPropagation(); openClaim(r); }}>{r.claimID}</button> },
+    { key: 'labName', label: 'Client', render: (r) => r.labName || '—' },
+    { key: 'patientID', label: 'Patient Acct', sortKey: 'patientId', render: (r) => <span className="mono">{r.patientID || '—'}</span> },
+    { key: 'dateOfService', label: 'DOS', sortKey: 'dateOfService', render: (r) => fmt.date(r.dateOfService), csv: (r) => fmt.date(r.dateOfService) },
+    { key: 'payerName', label: 'Payer', sortKey: 'payerName', wrap: true },
+    { key: 'panelName', label: 'Panel Type', sortKey: 'panelName' },
+    { key: 'cpt', label: 'CPT', render: (r) => (r.firstCptCode ? `${r.firstCptCode}${r.lineCount > 1 ? ` +${r.lineCount - 1}` : ''}` : '—'),
+      csv: (r) => (r.firstCptCode ? `${r.firstCptCode}${r.lineCount > 1 ? ` +${r.lineCount - 1}` : ''}` : '') },
+    { key: 'denialCode', label: 'Denial Code', render: (r) => (r.denialCode ? <span className="mono">{r.denialCode}</span> : '—'), csv: (r) => r.denialCode || '' },
+    { key: 'denialCategory', label: 'Denial Category', sortKey: 'denialCategory', wrap: true },
+    { key: 'denialReason', label: 'Denial Reason', wrap: true, defaultHidden: true },
+    { key: 'sourceClaimStatus', label: 'Claim Status', defaultHidden: true },
+    { key: 'insuranceBalance', label: 'Ins. Balance', align: 'end', sortKey: 'insuranceBalance',
+      render: (r) => <span className="mono">{fmt.money(r.insuranceBalance)}</span>, csv: (r) => r.insuranceBalance },
+    { key: 'agingBucket', label: 'Aging', sortKey: 'agingDays', render: (r) => r.agingBucket || '—' },
+    { key: 'isTflRisk', label: 'TFL', render: (r) => <TflBadge atRisk={r.isTflRisk} />, csv: (r) => (r.isTflRisk ? 'At Risk' : 'OK') },
+    { key: 'priority', label: 'Priority', sortKey: 'priority', render: (r) => <PriorityText priority={r.priority} /> },
+    { key: 'assignedAgentName', label: 'Assigned Agent', render: (r) => <AgentName name={r.assignedAgentName || r.assignedAgentUser} />,
+      csv: (r) => r.assignedAgentName || r.assignedAgentUser || '' },
+    { key: 'workflowStatus', label: 'Workflow Status', sortKey: 'workflowStatus', render: (r) => <StatusBadge status={r.workflowStatus} /> },
+    { key: 'queue', label: 'AR Queue', render: (r) => <QueueBadge queueId={r.arQueueId} label={r.arQueueLabel} subLabel={r.arSubQueueLabel} />,
+      csv: (r) => [r.arQueueLabel, r.arSubQueueLabel].filter(Boolean).join(' · ') },
+    { key: 'fixResolution', label: 'Fix / Resolution', wrap: true, defaultHidden: true },
+    { key: 'recoveredAmount', label: 'Recovered', align: 'end', sortKey: 'recoveredAmount', defaultHidden: true,
+      render: (r) => <span className="mono">{fmt.money(r.recoveredAmount)}</span>, csv: (r) => r.recoveredAmount },
+    { key: 'remainingAR', label: 'Remaining AR', align: 'end', sortKey: 'remainingAR', defaultHidden: true,
+      render: (r) => <span className="mono">{fmt.money(r.remainingAR)}</span>, csv: (r) => r.remainingAR },
+    { key: 'lastFollowUpDate', label: 'Last Follow-Up', sortKey: 'lastFollowUpDate', render: (r) => fmt.date(r.lastFollowUpDate), csv: (r) => fmt.date(r.lastFollowUpDate) },
+    { key: 'nextFollowUpDate', label: 'Next Follow-Up', sortKey: 'nextFollowUpDate', render: (r) => <NextFollowUp date={r.nextFollowUpDate} />,
+      csv: (r) => fmt.date(r.nextFollowUpDate) },
+    { key: 'action', label: 'Action', align: 'end', csv: () => '',
+      render: (r) => <button type="button" className="arwb-btn arwb-btn-sm" onClick={(e) => { e.stopPropagation(); openClaim(r); }}>Open</button> }
+  ];
+}
+
 export default function WorkQueuePage() {
-  const { labId, masterData } = useWorkbench();
+  const { labId } = useWorkbench();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const [queues, setQueues] = useState([]);
+  const [options, setOptions] = useState(null);
   const [data, setData] = useState({ items: [], totalCount: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchText, setSearchText] = useState(params.get('q') || '');
 
-  const filter = useMemo(() => ({
-    labId,
-    queueId: params.get('queue') || '',
-    subQueueId: params.get('sub') || '',
-    workflowStatus: params.get('status') || '',
-    denialCategory: params.get('category') || '',
-    search: params.get('q') || '',
-    openInsuranceArOnly: params.get('open') === '1',
-    sortBy: params.get('sort') || 'remainingAR',
-    sortDesc: params.get('dir') !== 'asc',
-    page: Number(params.get('page')) || 1,
-    pageSize: PAGE_SIZE
-  }), [labId, params]);
+  const pageSize = Number(params.get('size')) || DEFAULT_PAGE_SIZE;
+  const filter = useMemo(() => {
+    const f = {
+      labId,
+      search: params.get('q') || '',
+      openInsuranceArOnly: params.get('open') === '1',
+      tflRiskOnly: params.get('tfl') === '1',
+      sortBy: params.get('sort') || 'remainingAR',
+      sortDesc: params.get('dir') !== 'asc',
+      page: Number(params.get('page')) || 1,
+      pageSize
+    };
+    LIST_FILTERS.forEach((lf) => { f[lf.api] = params.getAll(lf.param); });
+    return f;
+  }, [labId, params, pageSize]);
 
   function update(changes, resetPage = true) {
     const next = new URLSearchParams(params);
-    Object.entries(changes).forEach(([k, v]) => { if (v === '' || v === null || v === undefined) next.delete(k); else next.set(k, v); });
+    Object.entries(changes).forEach(([k, v]) => {
+      next.delete(k);
+      if (Array.isArray(v)) v.forEach((x) => next.append(k, x));
+      else if (v !== '' && v !== null && v !== undefined) next.set(k, v);
+    });
     if (resetPage) next.delete('page');
+    setParams(next, { replace: true });
+  }
+
+  function clearFilters() {
+    const next = new URLSearchParams();
+    ['sort', 'dir', 'size'].forEach((k) => { if (params.get(k)) next.set(k, params.get(k)); });
+    setSearchText('');
     setParams(next, { replace: true });
   }
 
   useEffect(() => {
     const controller = new AbortController();
-    arWorkbenchService.queues(labId, controller.signal).then((s) => setQueues(s.queues)).catch(() => {});
+    arWorkbenchService.claimFilterOptions(labId, controller.signal)
+      .then(setOptions)
+      .catch((e) => { if (e.name !== 'AbortError') setError(e.message); });
     return () => controller.abort();
   }, [labId]);
 
@@ -86,76 +133,70 @@ export default function WorkQueuePage() {
 
   // Debounced search, so typing does not fire a query per keystroke.
   useEffect(() => {
-    const t = setTimeout(() => { if (searchText !== (params.get('q') || '')) update({ q: searchText.trim() }); }, 400);
+    const t = setTimeout(() => { if (searchText.trim() !== (params.get('q') || '')) update({ q: searchText.trim() }); }, 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchText]);
 
-  const selectedQueue = queues.find((q) => q.queueId === filter.queueId);
-  const statuses = masterData?.lists?.WORKFLOW_STATUS || [];
-  const categories = masterData?.lists?.DENIAL_CATEGORY || [];
+  const openClaim = (row) => navigate(`/claims/${row.claimKey}`, { state: { from: `/work-queue?${params}` } });
+  const columns = useMemo(() => buildColumns(openClaim), [params]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const activeChips = LIST_FILTERS.flatMap((lf) => params.getAll(lf.param).map((v) => {
+    const label = options?.[lf.options]?.find((o) => o.value === v)?.label ?? v;
+    return { key: `${lf.param}:${v}`, text: `${lf.label}: ${label}`, remove: () => update({ [lf.param]: params.getAll(lf.param).filter((x) => x !== v) }) };
+  }));
 
   return (
     <>
-      <PageHeader note="Every denied claim in your scope" />
-
-      <div className="arwb-filters">
-        <div>
-          <label className="form-label small text-secondary mb-1" htmlFor="f-queue">AR queue</label>
-          <select id="f-queue" className="form-select form-select-sm" value={filter.queueId} onChange={(e) => update({ queue: e.target.value, sub: '' })}>
-            <option value="">All queues</option>
-            {queues.map((q) => <option key={q.queueId} value={q.queueId}>{q.label} ({fmt.count(q.claimCount)})</option>)}
-          </select>
+      <div className="arwb-panel arwb-filter-card">
+        <div className="arwb-filter-bar">
+          <div className="arwb-field grow">
+            <label htmlFor="wq-search">Search</label>
+            <input id="wq-search" type="search" className="arwb-input" placeholder="Claim ID, patient acct, provider, denial code…"
+              value={searchText} maxLength={200} onChange={(e) => setSearchText(e.target.value)} />
+          </div>
+          {LIST_FILTERS.map((lf) => (
+            <MultiSelect key={lf.param} id={lf.param} label={lf.label}
+              options={options?.[lf.options] || []}
+              selected={filter[lf.api]}
+              onChange={(values) => update({ [lf.param]: values })} />
+          ))}
+          <div className="arwb-checkbox-row">
+            <input id="wq-tfl" type="checkbox" checked={filter.tflRiskOnly} onChange={(e) => update({ tfl: e.target.checked ? '1' : '' })} />
+            <label htmlFor="wq-tfl">TFL risk only</label>
+          </div>
+          <div className="arwb-checkbox-row">
+            <input id="wq-open" type="checkbox" checked={filter.openInsuranceArOnly} onChange={(e) => update({ open: e.target.checked ? '1' : '' })} />
+            <label htmlFor="wq-open">Open insurance AR only</label>
+          </div>
+          <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-ghost" onClick={clearFilters}>Clear Filters</button>
         </div>
-        {selectedQueue?.sub?.length > 0 && (
-          <div>
-            <label className="form-label small text-secondary mb-1" htmlFor="f-sub">Sub-queue</label>
-            <select id="f-sub" className="form-select form-select-sm" value={filter.subQueueId} onChange={(e) => update({ sub: e.target.value })}>
-              <option value="">All</option>
-              {selectedQueue.sub.map((s) => <option key={s.queueId} value={s.queueId}>{s.label} ({fmt.count(s.claimCount)})</option>)}
-            </select>
+        {activeChips.length > 0 && (
+          <div className="arwb-filter-chip-row">
+            {activeChips.map((c) => (
+              <span key={c.key} className="arwb-filter-chip">{c.text}<button type="button" aria-label={`Remove ${c.text}`} onClick={c.remove}>×</button></span>
+            ))}
           </div>
         )}
-        <div>
-          <label className="form-label small text-secondary mb-1" htmlFor="f-status">Status</label>
-          <select id="f-status" className="form-select form-select-sm" value={filter.workflowStatus} onChange={(e) => update({ status: e.target.value })}>
-            <option value="">All statuses</option>
-            {statuses.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="form-label small text-secondary mb-1" htmlFor="f-cat">Denial category</label>
-          <select id="f-cat" className="form-select form-select-sm" value={filter.denialCategory} onChange={(e) => update({ category: e.target.value })}>
-            <option value="">All categories</option>
-            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </div>
-        <div className="arwb-filter-grow">
-          <label className="form-label small text-secondary mb-1" htmlFor="f-q">Search</label>
-          <input id="f-q" className="form-control form-control-sm" placeholder="Claim ID, patient, accession, denial code" value={searchText} onChange={(e) => setSearchText(e.target.value)} maxLength={200} />
-        </div>
-        <div className="form-check align-self-end mb-1">
-          <input id="f-open" type="checkbox" className="form-check-input" checked={filter.openInsuranceArOnly} onChange={(e) => update({ open: e.target.checked ? '1' : '' })} />
-          <label className="form-check-label small" htmlFor="f-open">Open insurance AR only</label>
-        </div>
       </div>
 
       <ErrorBox message={error} />
 
       <DataTable
-        tableId="workqueue"
-        exportName="ar_workbench_work_queue"
-        columns={COLUMNS}
+        tableId="workqueue-v2"
+        exportName="denial-ar-work-queue"
+        columns={columns}
         rows={data.items}
         totalCount={data.totalCount}
         page={filter.page}
-        pageSize={PAGE_SIZE}
+        pageSize={pageSize}
         sortBy={filter.sortBy}
         sortDesc={filter.sortDesc}
         loading={loading}
         onSort={(sort, desc) => update({ sort, dir: desc ? '' : 'asc' })}
         onPage={(page) => update({ page: page > 1 ? String(page) : '' }, false)}
-        onRowClick={(row) => navigate(`/claims/${row.claimKey}`, { state: { from: `/work-queue?${params}` } })}
+        onPageSize={(size) => update({ size: size === DEFAULT_PAGE_SIZE ? '' : String(size) })}
+        onRowClick={openClaim}
       />
     </>
   );

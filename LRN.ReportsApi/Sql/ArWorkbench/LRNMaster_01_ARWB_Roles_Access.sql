@@ -3,8 +3,7 @@
    Target database: LRNMaster (DefaultConnection). Run ONCE per environment, not per lab.
 
    Fresh start: the AR Workbench does NOT use any existing LRN Metrics role (Admin, AR Manager,
-   AR Reviewer, Client Manager, ...). It has its own 8 roles, taken from the AR Workbench mockup
-   (docs/Denial_WorkFlow/LRN_Denial_AR_Workbench_Demo_Account.html, App.ROLE_META / App.PERSONAS):
+   AR Reviewer, Client Manager, ...). It has its own 8 roles, taken from the AR Workbench mockup:
 
      Role (dbo.Roles.RoleName)                          Mockup role   Sees
      AR Workbench - System Administrator                admin         whole lab
@@ -13,18 +12,19 @@
      AR Workbench - AR Agent                            agent         own assigned caseload
      AR Workbench - QA Reviewer                         qa            whole lab
      AR Workbench - Client Viewer                       viewer        whole lab (client level)
-     AR Workbench - Clinic Viewer                       viewer        one clinic      (dbo.ARWorkbenchUserScope.ClinicName)
-     AR Workbench - Provider Viewer                     viewer        one provider    (dbo.ARWorkbenchUserScope.ProviderName)
+     AR Workbench - Clinic Viewer                       viewer        one clinic      (dbo.ARWB_UserScope.ClinicName)
+     AR Workbench - Provider Viewer                     viewer        one provider    (dbo.ARWB_UserScope.ProviderName)
+
+   Permission matrix: Developer Handoff v1.1 section 15.2. Session decision: the Team Lead CAN
+   approve CIPs to the client, so 'lead' has ARWorkbench.Approve (the mockup did not).
 
    The roles live in the EXISTING user tables, so users are managed in the existing screens:
      dbo.LabUsers (user)  dbo.UserLabs (labs)  dbo.UserRoles -> dbo.Roles (role)
      dbo.RoleFeatureAccess (what each role may do; FeatureKey 'ARWorkbench.*')
-   Only these 8 roles are granted 'ARWorkbench.*' features. A user needs one of them to open the
-   workbench. The "AR Workbench - " prefix keeps them apart from other applications' roles in the
-   shared dbo.Roles table; the workbench screens show the name without it.
 
-   The one new table, dbo.ARWorkbenchUserScope, holds WHICH clinic / provider a Clinic Viewer or
-   Provider Viewer is limited to, per lab.
+   The one AR Workbench table here, dbo.ARWB_UserScope, holds WHICH clinic / provider a Clinic
+   Viewer or Provider Viewer is limited to, per lab. It replaces dbo.ARWorkbenchUserScope: rows in
+   the old table are copied across and the old table is dropped.
 
    Requires dbo.RoleFeatureAccess (LRN.ReportsApi/Sql/DynamicMenu_Setup.sql).
    Idempotent - safe to run again; it only adds what is missing, so admin edits are kept.
@@ -60,7 +60,7 @@ FROM @Roles r
 WHERE NOT EXISTS (SELECT 1 FROM dbo.Roles x WHERE x.RoleName = r.RoleName);
 PRINT CONCAT('AR Workbench roles added: ', @@ROWCOUNT);
 
-/* ---------- 2. Permission matrix (mockup App.PERMS) --------------------------------------- */
+/* ---------- 2. Permission matrix (handoff 15.2) ------------------------------------------- */
 DECLARE @Perms TABLE (Persona varchar(20) NOT NULL, FeatureKey nvarchar(100) NOT NULL);
 INSERT INTO @Perms (Persona, FeatureKey) VALUES
     ('admin', N'ARWorkbench.Access'), ('admin', N'ARWorkbench.Assign'), ('admin', N'ARWorkbench.EditClaim'),
@@ -73,7 +73,7 @@ INSERT INTO @Perms (Persona, FeatureKey) VALUES
     ('manager', N'ARWorkbench.AllClients'),
 
     ('lead', N'ARWorkbench.Access'), ('lead', N'ARWorkbench.Assign'), ('lead', N'ARWorkbench.EditClaim'),
-    ('lead', N'ARWorkbench.QaDecide'), ('lead', N'ARWorkbench.AllClients'),
+    ('lead', N'ARWorkbench.QaDecide'), ('lead', N'ARWorkbench.Approve'), ('lead', N'ARWorkbench.AllClients'),
 
     ('agent', N'ARWorkbench.Access'), ('agent', N'ARWorkbench.EditClaim'),
 
@@ -97,22 +97,41 @@ GO
 /* ---------- 3. Which clinic / provider a Clinic Viewer or Provider Viewer sees -------------
    One row per user per lab. Values must match the lab's ClaimLevelData.ClinicName /
    ReferringProvider exactly. A Clinic or Provider Viewer with no row for a lab sees nothing
-   there (fails closed). */
-IF OBJECT_ID(N'dbo.ARWorkbenchUserScope', N'U') IS NULL
-CREATE TABLE dbo.ARWorkbenchUserScope
+   there (fails closed). CIP escalations for a clinic are routed to that clinic's users. */
+IF OBJECT_ID(N'dbo.ARWB_UserScope', N'U') IS NULL
+CREATE TABLE dbo.ARWB_UserScope
 (
-    ARWorkbenchUserScopeId  int            IDENTITY(1,1) NOT NULL CONSTRAINT PK_ARWorkbenchUserScope PRIMARY KEY,
-    LabUserID               int            NOT NULL CONSTRAINT FK_ARWorkbenchUserScope_LabUsers REFERENCES dbo.LabUsers (LabUserID),
+    UserScopeId             int            IDENTITY(1,1) NOT NULL CONSTRAINT PK_ARWB_UserScope PRIMARY KEY,
+    LabUserID               int            NOT NULL CONSTRAINT FK_ARWB_UserScope_LabUsers REFERENCES dbo.LabUsers (LabUserID),
     LabId                   int            NOT NULL,
     ClinicName              nvarchar(500)  NULL,
     ProviderName            nvarchar(500)  NULL,
     CreatedBy               nvarchar(100)  NULL,
-    CreatedDate             datetime2(0)   NOT NULL CONSTRAINT DF_ARWorkbenchUserScope_CreatedDate DEFAULT (SYSUTCDATETIME()),
+    CreatedDate             datetime2(0)   NOT NULL CONSTRAINT DF_ARWB_UserScope_CreatedDate DEFAULT (SYSUTCDATETIME()),
     ModifiedBy              nvarchar(100)  NULL,
     ModifiedDate            datetime2(0)   NULL,
-    CONSTRAINT UQ_ARWorkbenchUserScope_User_Lab UNIQUE (LabUserID, LabId),
-    CONSTRAINT CK_ARWorkbenchUserScope_Value CHECK (ClinicName IS NOT NULL OR ProviderName IS NOT NULL)
+    CONSTRAINT UQ_ARWB_UserScope_User_Lab UNIQUE (LabUserID, LabId),
+    CONSTRAINT CK_ARWB_UserScope_Value CHECK (ClinicName IS NOT NULL OR ProviderName IS NOT NULL)
 );
+GO
+
+-- Move rows from the old table, then drop it.
+IF OBJECT_ID(N'dbo.ARWorkbenchUserScope', N'U') IS NOT NULL
+BEGIN
+    BEGIN TRANSACTION;
+
+    EXEC sys.sp_executesql N'
+INSERT INTO dbo.ARWB_UserScope (LabUserID, LabId, ClinicName, ProviderName, CreatedBy, CreatedDate, ModifiedBy, ModifiedDate)
+SELECT o.LabUserID, o.LabId, o.ClinicName, o.ProviderName, o.CreatedBy, o.CreatedDate, o.ModifiedBy, o.ModifiedDate
+FROM dbo.ARWorkbenchUserScope o
+WHERE NOT EXISTS (SELECT 1 FROM dbo.ARWB_UserScope n WHERE n.LabUserID = o.LabUserID AND n.LabId = o.LabId);
+PRINT CONCAT(''Scope rows copied from dbo.ARWorkbenchUserScope: '', @@ROWCOUNT);';
+
+    DROP TABLE dbo.ARWorkbenchUserScope;
+
+    COMMIT TRANSACTION;
+    PRINT 'Dropped dbo.ARWorkbenchUserScope.';
+END;
 GO
 
 PRINT 'AR Workbench LRNMaster setup ready.';

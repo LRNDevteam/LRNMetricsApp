@@ -13,6 +13,19 @@ SET ANSI_NULLS ON;
 SET QUOTED_IDENTIFIER ON;
 GO
 
+-- DenialCodeNormalized / DenialDescription are filled by LRN.MasterFileProcessorWorker after each
+-- claim- and line-level import. Created here as well, so the procedures below (which select them)
+-- can be created on a lab database the worker has not populated yet. Re-runnable.
+IF OBJECT_ID('dbo.ClaimLevelData', 'U') IS NOT NULL AND COL_LENGTH('dbo.ClaimLevelData', 'DenialCodeNormalized') IS NULL
+    ALTER TABLE dbo.ClaimLevelData ADD [DenialCodeNormalized] nvarchar(400) NULL;
+IF OBJECT_ID('dbo.ClaimLevelData', 'U') IS NOT NULL AND COL_LENGTH('dbo.ClaimLevelData', 'DenialDescription') IS NULL
+    ALTER TABLE dbo.ClaimLevelData ADD [DenialDescription] nvarchar(max) NULL;
+IF OBJECT_ID('dbo.LineLevelData', 'U') IS NOT NULL AND COL_LENGTH('dbo.LineLevelData', 'DenialCodeNormalized') IS NULL
+    ALTER TABLE dbo.LineLevelData ADD [DenialCodeNormalized] nvarchar(400) NULL;
+IF OBJECT_ID('dbo.LineLevelData', 'U') IS NOT NULL AND COL_LENGTH('dbo.LineLevelData', 'DenialDescription') IS NULL
+    ALTER TABLE dbo.LineLevelData ADD [DenialDescription] nvarchar(max) NULL;
+GO
+
 CREATE OR ALTER PROCEDURE dbo.usp_GetClaimLevelDetails
     @PayerName                   NVARCHAR(500) = NULL,
     @PayerTypes                  NVARCHAR(MAX) = NULL,
@@ -128,6 +141,8 @@ BEGIN
             [CheckDate],
             ISNULL(LTRIM(RTRIM([ClaimStatus])),'') AS [ClaimStatus],
             [DenialCode],
+            [DenialCodeNormalized],
+            [DenialDescription],
             [ICDCode],
             [DaystoDOS],
             [RollingDays],
@@ -331,6 +346,8 @@ BEGIN
             ISNULL(LTRIM(RTRIM([ClaimStatus])),'') AS [ClaimStatus],
             ISNULL(LTRIM(RTRIM([PayStatus])),'') AS [PayStatus],
             [DenialCode],
+            [DenialCodeNormalized],
+            [DenialDescription],
             [DenialDate],
             [ICDCode],
             [DaystoDOS],

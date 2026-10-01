@@ -173,7 +173,7 @@ public sealed class DenialClaimReportController : Controller
 
     /// <summary>
     /// The lab's Denial Summary week start: LabConfig:DenialSummaryWeekRange when the lab is listed
-    /// (Rising_Tides: Fri to Thu, matching its ClaimLevelData WeekFolder), else Wednesday.
+    /// (Rising_Tides and Beech_Tree: Fri to Thu, matching their ClaimLevelData WeekFolder), else Wednesday.
     /// </summary>
     private DayOfWeek WeekStartsOnFor(string? labName)
         => _labConfig.GetDenialSummaryWeekStart(labName) ?? SqlDenialClaimReportRepository.DefaultWeekStartsOn;
@@ -186,7 +186,7 @@ public sealed class DenialClaimReportController : Controller
                                            int claimPage, int claimPageSize,
                                            CancellationToken ct)
     {
-        ViewData["PageLabel"] = "Denial Claim Report";
+        ViewData["PageLabel"] = "Denial Summary";
 
         var model = new DenialClaimReportViewModel
         {

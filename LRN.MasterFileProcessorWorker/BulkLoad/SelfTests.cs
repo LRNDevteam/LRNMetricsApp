@@ -1507,9 +1507,31 @@ public static class SelfTests
             DenialCodeNormalizer.Normalize("CO 45") == "45" &&
             DenialCodeNormalizer.Normalize(" co45 ") == "45");
 
-        Check("Denial: OA and CR are group prefixes too",
-            DenialCodeNormalizer.Normalize("OA23") == "23" &&
-            DenialCodeNormalizer.Normalize("CR1") == "1");
+        Check("Denial: only CO/PR/PI are stripped - OA and CR are kept",
+            DenialCodeNormalizer.Normalize("OA23") == "OA23" &&
+            DenialCodeNormalizer.Normalize("CR1") == "CR1");
+
+        Check("Denial: COA drops only the C",
+            DenialCodeNormalizer.Normalize("COA97") == "OA97" &&
+            DenialCodeNormalizer.Normalize("coa-23") == "OA23");
+
+        Check("Denial: CO/PR/PI 1, 2, 3, 253, 45 are excluded",
+            DenialCodeNormalizer.IsExcluded("CO1") && DenialCodeNormalizer.IsExcluded("CO2") &&
+            DenialCodeNormalizer.IsExcluded("CO3") && DenialCodeNormalizer.IsExcluded("CO253") &&
+            DenialCodeNormalizer.IsExcluded("CO45") && DenialCodeNormalizer.IsExcluded("PR45") &&
+            DenialCodeNormalizer.IsExcluded("PI253") && DenialCodeNormalizer.IsExcluded("CO-45"));
+
+        Check("Denial: only those exact codes are excluded",
+            !DenialCodeNormalizer.IsExcluded("45") && !DenialCodeNormalizer.IsExcluded("OA45") &&
+            !DenialCodeNormalizer.IsExcluded("CO45A") && !DenialCodeNormalizer.IsExcluded("CO4") &&
+            !DenialCodeNormalizer.IsExcluded("CO11") && !DenialCodeNormalizer.IsExcluded("COA1"));
+
+        Check("Denial: excluded codes drop out of a multi-code cell",
+            DenialCodeNormalizer.NormalizeAll("CO1;COB9") == "B9" &&
+            DenialCodeNormalizer.NormalizeAll("CO97; COA97; PR243;PR45") == "97; OA97; 243");
+
+        Check("Denial: a cell of only excluded codes normalizes to null",
+            DenialCodeNormalizer.NormalizeAll("CO45, PR1") is null);
 
         // A remark code is not a group-prefixed code and must survive intact - stripping "MA" would
         // merge MA130 into a "130" that means something else entirely.
@@ -1542,19 +1564,19 @@ public static class SelfTests
             DenialCodeNormalizer.Normalize(null) == "" && DenialCodeNormalizer.Normalize("   ") == "");
 
         Check("Denial: a multi-code cell normalizes every code",
-            DenialCodeNormalizer.NormalizeAll("CO10, CO189") == "10, 189");
+            DenialCodeNormalizer.NormalizeAll("CO10, CO189") == "10; 189");
 
         Check("Denial: separators other than comma split too",
-            DenialCodeNormalizer.NormalizeAll("CO10; CO189") == "10, 189" &&
-            DenialCodeNormalizer.NormalizeAll("CO10|CO189") == "10, 189" &&
-            DenialCodeNormalizer.NormalizeAll("CO10/CO189") == "10, 189");
+            DenialCodeNormalizer.NormalizeAll("CO10; CO189") == "10; 189" &&
+            DenialCodeNormalizer.NormalizeAll("CO10|CO189") == "10; 189" &&
+            DenialCodeNormalizer.NormalizeAll("CO10/CO189") == "10; 189");
 
-        // "CO 45" is one code written loosely. Splitting on the space would make it "CO" and "45".
+        // "CO 97" is one code written loosely. Splitting on the space would make it "CO" and "97".
         Check("Denial: a bare space does not split a code",
-            DenialCodeNormalizer.NormalizeAll("CO 45") == "45");
+            DenialCodeNormalizer.NormalizeAll("CO 97") == "97");
 
         Check("Denial: the same denial under two groups collapses to one code",
-            DenialCodeNormalizer.NormalizeAll("CO45, PR45") == "45");
+            DenialCodeNormalizer.NormalizeAll("CO97, PR97") == "97");
 
         Check("Denial: a cell with no code normalizes to null",
             DenialCodeNormalizer.NormalizeAll("") is null && DenialCodeNormalizer.NormalizeAll(null) is null);
@@ -1567,7 +1589,9 @@ public static class SelfTests
         var lookup = new DenialDescriptionLookup();
         lookup.AddSuper("CO10", "The diagnosis is inconsistent with the patient's gender.");
         lookup.AddSuper("CO189", "This non-covered service was not deemed medically necessary.");
-        lookup.AddSuper("PR45", "Charge exceeds fee schedule/maximum allowable.");
+        lookup.AddSuper("PR97", "Payment is included in the allowance for another service.");
+        lookup.AddSuper("OA97", "OA wording for 97.");
+        lookup.AddSuper("CO45", "Charge exceeds fee schedule/maximum allowable.");
 
         Check("Denial: one code is described with its code in front",
             DenialCodeNormalizer.DescribeAll("CO10", lookup)
@@ -1586,12 +1610,22 @@ public static class SelfTests
             DenialCodeNormalizer.DescribeAll("COM127", remark)
                 == "M127 - Missing patient medical record for this service.");
 
-        // The master has only PR45. CO45 and PI45 have to reach it through the normalized step.
-        Check("Denial: CO45, PI45 and PR45 all resolve to the same description",
-            DenialCodeNormalizer.DescribeAll("CO45", lookup)
-                == "45 - Charge exceeds fee schedule/maximum allowable." &&
-            DenialCodeNormalizer.DescribeAll("PI45", lookup)
-                == DenialCodeNormalizer.DescribeAll("CO45", lookup));
+        // The master has only PR97. CO97 and PI97 have to reach it through the normalized step.
+        Check("Denial: CO97, PI97 and PR97 all resolve to the same description",
+            DenialCodeNormalizer.DescribeAll("CO97", lookup)
+                == "97 - Payment is included in the allowance for another service." &&
+            DenialCodeNormalizer.DescribeAll("PI97", lookup)
+                == DenialCodeNormalizer.DescribeAll("CO97", lookup));
+
+        Check("Denial: COA97 is described as OA97",
+            DenialCodeNormalizer.DescribeAll("COA97", lookup) == "OA97 - OA wording for 97.");
+
+        var excludedUnresolved = new List<string>();
+
+        Check("Denial: excluded codes are neither described nor reported",
+            DenialCodeNormalizer.DescribeAll("CO45; PR1; CO97", lookup, excludedUnresolved)
+                == "97 - Payment is included in the allowance for another service."
+            && excludedUnresolved.Count == 0);
 
         var unresolved = new List<string>();
 

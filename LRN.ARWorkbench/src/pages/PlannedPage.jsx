@@ -1,3 +1,4 @@
+import Icon from '../components/Icon';
 import { PageHeader } from '../components/Status';
 
 // What each not-yet-built route will deliver, from AR_Workbench_Open_Items_And_Phases.md.
@@ -20,10 +21,10 @@ export default function PlannedPage({ item }) {
     <>
       <PageHeader note={`Planned for build phase ${item.phase}`} />
       <div className="arwb-card arwb-planned">
-        <i className="bi bi-cone-striped" />
+        <span style={{ color: 'var(--warning)' }}><Icon name="flag" size={26} /></span>
         <div>
-          <p className="mb-2">{PLANS[item.id] || 'This screen is planned.'}</p>
-          <p className="text-secondary small mb-0">The tables it needs are already in the AR Workbench schema; the screen and its API endpoints come in phase {item.phase}.</p>
+          <p style={{ margin: '0 0 6px' }}>{PLANS[item.id] || 'This screen is planned.'}</p>
+          <p className="arwb-hint" style={{ margin: 0 }}>The tables it needs are already in the AR Workbench database; the screen and its API endpoints come in phase {item.phase}.</p>
         </div>
       </div>
     </>

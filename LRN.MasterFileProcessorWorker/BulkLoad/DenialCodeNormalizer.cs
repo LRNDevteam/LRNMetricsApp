@@ -16,7 +16,7 @@ namespace LRN.MasterFileProcessorWorker.BulkLoad;
 /// one denial instead of three.</para>
 ///
 /// <para><b>Multi-code claims.</b> A claim-level denial cell routinely holds several codes
-/// ("CO10, CO189"). Both halves are kept: the normalized column lists every code ("10, 189") and
+/// ("CO10, CO189"). Both halves are kept: the normalized column lists every code ("10; 189") and
 /// the description column pairs each code with its own description ("10 - ...; 189 - ...") so the
 /// codes and the descriptions stay readable against each other.</para>
 ///
@@ -36,10 +36,29 @@ public static class DenialCodeNormalizer
     ///
     /// <para>At least one digit is required, which is what keeps the rule safe: a word beginning
     /// with a prefix ("CORE") has no digits and is left alone.</para>
+    ///
+    /// <para>Only CO, PR and PI are stripped. OA (and anything else) is kept as part of the code,
+    /// so OA97 stays OA97.</para>
     /// </summary>
     private static readonly Regex PrefixedNumeric = new(
-        @"^(CO|PI|PR|OA|CR)[\s\-]?([A-Z]{0,2}\d+[A-Za-z]?)$",
+        @"^(CO|PI|PR)[\s\-]?([A-Z]{0,2}\d+[A-Za-z]?)$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// "COA97" is an OA code with a stray C in front: only the C is dropped, giving "OA97".
+    /// Checked before <see cref="PrefixedNumeric"/>, which would otherwise read it as CO + A97.
+    /// </summary>
+    private static readonly Regex CPrefixedOtherAdjustment = new(
+        @"^C(OA)[\s\-]?(\d+[A-Za-z]?)$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// CO/PR/PI codes left out of the normalized and description columns entirely:
+    /// CO1, CO2, CO3, CO253, CO45 and the same numbers under PR and PI. Only these exact codes -
+    /// a bare "45", OA45 or CO45A is kept.
+    /// </summary>
+    private static readonly HashSet<string> ExcludedPrefixedCodes =
+        new(StringComparer.OrdinalIgnoreCase) { "1", "2", "3", "253", "45" };
 
     /// <summary>
     /// What separates one code from the next inside a single cell.
@@ -49,8 +68,8 @@ public static class DenialCodeNormalizer
     /// </summary>
     private static readonly char[] Separators = [',', ';', '|', '/', '\n', '\r', '\t'];
 
-    /// <summary>Joins the normalized codes in the NormalizedDenialCode column.</summary>
-    private const string CodeSeparator = ", ";
+    /// <summary>Joins the normalized codes in the DenialCodeNormalized column.</summary>
+    private const string CodeSeparator = "; ";
 
     /// <summary>
     /// Joins the code/description pairs in the DenialDescription column. Semicolon rather than comma
@@ -81,24 +100,39 @@ public static class DenialCodeNormalizer
     }
 
     /// <summary>
-    /// The common code one raw code rolls up to: "CO45", "CO-45", "PI 45", "PR45" -> "45".
-    /// A code that carries no group prefix ("MA130", "N130") is trimmed and upper-cased only -
-    /// guessing at it would invent a grouping the master table does not have.
+    /// The common code one raw code rolls up to: "CO97", "CO-97", "PI 97", "PR97" -> "97";
+    /// "COA97" -> "OA97". A code that carries no CO/PR/PI prefix ("OA23", "MA130", "N130") is
+    /// trimmed and upper-cased only - guessing at it would invent a grouping the master table does
+    /// not have.
     /// </summary>
-    public static string Normalize(string? denialCode)
+    public static string Normalize(string? denialCode) => Strip(denialCode).Code;
+
+    /// <summary>
+    /// True for the CO/PR/PI codes that are dropped from the derived columns
+    /// (see <see cref="ExcludedPrefixedCodes"/>).
+    /// </summary>
+    public static bool IsExcluded(string? denialCode) => Strip(denialCode).Excluded;
+
+    private static (string Code, bool Excluded) Strip(string? denialCode)
     {
         var raw = (denialCode ?? string.Empty).Trim();
-        if (raw.Length == 0) return string.Empty;
+        if (raw.Length == 0) return (string.Empty, false);
+
+        var otherAdjustment = CPrefixedOtherAdjustment.Match(raw);
+        if (otherAdjustment.Success)
+            return ("OA" + otherAdjustment.Groups[2].Value.ToUpperInvariant(), false);
 
         var match = PrefixedNumeric.Match(raw);
-        return match.Success
-            ? match.Groups[2].Value.ToUpperInvariant()
-            : raw.ToUpperInvariant();
+        if (!match.Success) return (raw.ToUpperInvariant(), false);
+
+        var code = match.Groups[2].Value.ToUpperInvariant();
+        return (code, ExcludedPrefixedCodes.Contains(code));
     }
 
     /// <summary>
-    /// Every code in the cell, normalized and de-duplicated: "CO10, CO189" -> "10, 189",
-    /// "CO45, PR45" -> "45". Null when the cell holds no code.
+    /// Every code in the cell, normalized and de-duplicated, excluded codes dropped:
+    /// "CO10, CO189" -> "10; 189", "CO97; COA97; PR243; PR45" -> "97; OA97; 243".
+    /// Null when the cell holds no code that survives.
     /// </summary>
     public static string? NormalizeAll(string? rawDenialCode)
     {
@@ -107,8 +141,8 @@ public static class DenialCodeNormalizer
 
         foreach (var code in Split(rawDenialCode))
         {
-            var key = Normalize(code);
-            if (key.Length > 0 && seen.Add(key))
+            var (key, excluded) = Strip(code);
+            if (!excluded && key.Length > 0 && seen.Add(key))
                 normalized.Add(key);
         }
 
@@ -137,8 +171,10 @@ public static class DenialCodeNormalizer
 
         foreach (var code in Split(rawDenialCode))
         {
-            var key = Normalize(code);
-            if (key.Length == 0 || !seen.Add(key)) continue;
+            // Same codes as the normalized column: an excluded code is neither described nor
+            // reported as unresolved.
+            var (key, excluded) = Strip(code);
+            if (excluded || key.Length == 0 || !seen.Add(key)) continue;
 
             // Resolved from the RAW code first, so a master row that exists only under the
             // prefixed spelling still wins before the normalized fallback is tried.

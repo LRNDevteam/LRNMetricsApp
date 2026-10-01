@@ -80,40 +80,29 @@ public static class DenialClaimPivotBuilder
             if (loaded.Count > 0) dated = loaded;
         }
 
-        var months = BuildBasePeriods(dated, weekly, maxPeriods, weekStartsOn);
+        // Weekly is anchored on the ClaimLevelData week range itself: the newest column IS the
+        // table's week ("09.11.2026 - 09.17.2026") and the others are the weeks immediately before
+        // it, whether or not each one carries a denial. Only a lab with no WeekFolder falls back to
+        // the weeks its denial dates happen to fall in.
+        var months = weekly && loadedThrough is { } through
+            ? BuildTrailingWeeks(through, maxPeriods)
+            : BuildBasePeriods(dated, weekly, maxPeriods, weekStartsOn);
 
         // Monthly gains a subtotal column per year; weekly stays as its four weeks.
         var columns = new List<PivotColumn>(weekly ? months : WithYearTotals(months));
 
-        // WHICH ROWS ARE COUNTED is every group the page's tiles count. Rows the columns above
+        // WHICH ROWS ARE COUNTED: both summaries report on the periods they show. Claims the columns
         // cannot hold - no denial date, older than the window, or denied after the load reached -
-        // used to be dropped, which is why the footer read 3,730 claims under a "Denied Claims"
-        // tile of 3,744. Monthly shows them in one "Other Periods" column, so nothing leaves the
-        // report unseen and its footer matches the tile.
-        //
-        // Weekly is a report on the weeks it shows: an "Other Weeks" column was most of the claims
-        // under a heading that names no week, and folding them silently into the Total made the
-        // Total disagree with the columns beside it. So weekly works on the displayed weeks only -
-        // row totals, footer, payer ranking and the AR coverage all describe those weeks, and its
-        // footer is deliberately smaller than the page's all-time Denied Claims tile.
+        // are left out (Monthly used to show them in an "Other Periods" column, which was removed
+        // from the page). Folding them silently into the Total would make it disagree with the
+        // columns beside it, so row totals, footer, payer ranking and the AR coverage all describe
+        // the displayed periods, and the footer can be smaller than the all-time Denied Claims tile.
         bool InAnyPeriod(DenialSummaryGroup g) =>
             g.DenialDate.HasValue
             && months.Any(m => g.DenialDate.Value.Date >= m.Start && g.DenialDate.Value.Date <= m.End);
 
-        if (weekly)
-        {
-            groups = groups.Where(InAnyPeriod).ToList();
-            if (groups.Count == 0) return model;
-        }
-        else if (groups.Any(g => !InAnyPeriod(g)))
-        {
-            columns.Add(new PivotColumn(
-                "other",
-                "Other Periods",
-                DateTime.MinValue, DateTime.MaxValue, Year: 0, IsYearTotal: false,
-                IsOther: true,
-                Matcher: g => !InAnyPeriod(g)));
-        }
+        groups = groups.Where(InAnyPeriod).ToList();
+        if (groups.Count == 0) return model;
 
         model.Periods = columns.Select(c => c.ToPeriod()).ToList();
         model.ColumnGroups = BuildColumnGroups(columns, weekly, model.GrandTotalTitle);
@@ -254,6 +243,29 @@ public static class DenialClaimPivotBuilder
     }
 
     /// <summary>
+    /// <paramref name="weeks"/> consecutive seven-day weeks, oldest first, the last one ending on
+    /// <paramref name="loadedThrough"/> - the end date of the claim table's WeekFolder. So
+    /// "09.11.2026 - 09.17.2026" gives 21 Aug - 27 Aug, 28 Aug - 03 Sep, 04 Sep - 10 Sep and
+    /// 11 Sep - 17 Sep.
+    /// </summary>
+    private static List<PivotColumn> BuildTrailingWeeks(DateTime loadedThrough, int weeks)
+    {
+        var lastEnd = loadedThrough.Date;
+
+        return Enumerable.Range(0, weeks)
+            .Select(i =>
+            {
+                var end = lastEnd.AddDays(-7 * (weeks - 1 - i));
+                var start = end.AddDays(-6);
+                return new PivotColumn(
+                    start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    $"{start:dd MMM} - {end:dd MMM}",
+                    start, end, start.Year, IsYearTotal: false);
+            })
+            .ToList();
+    }
+
+    /// <summary>
     /// Inserts a "2025 | Total" column after the last month of each year.
     /// <para>The subtotal covers only the months on screen, not the whole calendar year - so a view
     /// showing Nov and Dec reports a 2025 total of Nov + Dec, which is what the two columns beside
@@ -363,9 +375,22 @@ public static class DenialClaimPivotBuilder
 
         var text = description.Trim();
 
-        return text.StartsWith(code, StringComparison.OrdinalIgnoreCase)
-            ? text
-            : $"{code} - {text}";
+        // A multi-code cell ("97; OA97; 243") has a description that opens with its FIRST code
+        // ("97 - ...; OA97 - ..."), so that is what is compared.
+        var firstCode = code.Split([';', ','], 2)[0].Trim();
+
+        if (text.StartsWith(code, StringComparison.OrdinalIgnoreCase)) return text;
+
+        if (code.Contains(';') || code.Contains(','))
+        {
+            // Every code is listed with its own description, unless some code had no description
+            // at all - then the codes go in front so none of them silently vanishes from the label.
+            var codes = code.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var allDescribed = codes.All(c => text.Contains(c + " - ", StringComparison.OrdinalIgnoreCase));
+            if (allDescribed && text.StartsWith(firstCode + " - ", StringComparison.OrdinalIgnoreCase)) return text;
+        }
+
+        return $"{code} - {text}";
     }
 
     private static string Key(string? value) =>

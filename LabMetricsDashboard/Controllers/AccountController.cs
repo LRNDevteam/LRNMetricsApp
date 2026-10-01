@@ -166,6 +166,9 @@ public class AccountController : Controller
         var isArReviewer = roleNames.Any(r => IsRole(r, "AR Reviewer") || IsRole(r, "ARReviewer") || IsRole(r, "AR Analyser") || IsRole(r, "ARAnalyser") || IsRole(r, "AR Analyzer") || IsRole(r, "ARAnalyzer"));
         var isClientManager = roleNames.Any(r => IsRole(r, "Client Manager") || IsRole(r, "ClientManager"));
         var isAccountManager = roleNames.Any(r => IsRole(r, "Account Manager") || IsRole(r, "AccountManager"));
+        // The 8 AR Workbench roles in dbo.Roles all start with "AR Workbench - " (the same prefix
+        // LRN.ReportsApi uses to find them - see LRNMaster_01_ARWB_Roles_Access.sql).
+        var isArWorkbenchUser = roleNames.Any(r => (r ?? string.Empty).TrimStart().StartsWith("AR Workbench - ", StringComparison.OrdinalIgnoreCase));
 
         // Build claims
         var claims = new List<Claim>
@@ -204,11 +207,12 @@ public class AccountController : Controller
             return Redirect(returnUrl);
         }
 
-        // Routing rules
-        var isDenialWorkflowUser = isArManager || isArReviewer || isClientManager || isAccountManager;
+        // Routing rules. AR Workbench users land on the AR Workbench dashboard, like the Denial
+        // Workflow roles it replaced.
+        var isDenialWorkflowUser = isArManager || isArReviewer || isClientManager || isAccountManager || isArWorkbenchUser;
 
-        // 1) Admin without a Denial Workflow role => Report Control Board (the landing/home page).
-        //    Users with Denial Workflow roles are routed to the workflow dashboard below.
+        // 1) Admin without a Denial Workflow / AR Workbench role => Report Control Board (the landing/home page).
+        //    Users with those roles are routed to the AR Workbench dashboard below.
         if (isAdmin && !isDenialWorkflowUser)
         {
             return RedirectToAction("Index", "ReportBoard");
@@ -250,7 +254,7 @@ public class AccountController : Controller
             return RedirectToAction(nameof(Login));
         }
 
-        // 3) Non-admin (1 or many labs). AR users go directly to Denial Database.
+        // 3) Non-admin (1 or many labs). AR and AR Workbench users go directly to the AR Workbench.
         var defaultLabName = mappedLabs[0].Name!;
         Response.Cookies.Append("lmd_selected_lab", defaultLabName, new CookieOptions
         {

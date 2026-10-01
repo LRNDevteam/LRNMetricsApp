@@ -23,26 +23,33 @@
        document (and its spinner) is gone for seconds while this page parses. This paints
        a dark overlay as soon as HEAD is ready — it does not wait for the tables. *@
     <style>
-        html.lmd-boot { background: #0d1b2a; }
+        html.lmd-boot { background: #f0f4f8; }
+        /* Light, blurred veil rather than a solid screen: whatever has painted underneath stays
+           visible, just out of focus. */
         html.lmd-boot::before {
             content: "";
             position: fixed; inset: 0; z-index: 2147483646;
-            background: #0d1b2a;
+            background: rgba(240, 244, 248, .45);
+            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px);
         }
+        /* The pipette loader (same artwork as #lmd-loader), as an image because a pseudo-element
+           cannot hold markup. Its animation runs inside the SVG. */
         html.lmd-boot::after {
             content: "";
             position: fixed; top: 50%; left: 50%;
-            width: 56px; height: 56px; margin: -28px 0 0 -28px;
+            width: 56px; height: 80px; margin: -40px 0 0 -28px;
             z-index: 2147483647;
-            border: 5px solid rgba(255,255,255,.2);
-            border-top-color: #64b5f6;
-            border-radius: 50%;
-            animation: lmd-boot-spin .75s linear infinite;
+            background: no-repeat center / contain url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA5MiIgZmlsbD0iIzBkNWM3NCI+PHN0eWxlPi5kcm9we2FuaW1hdGlvbjpmIDEuN3MgY3ViaWMtYmV6aWVyKC41LDAsLjg1LC40KSBpbmZpbml0ZX0ucG9vbHt0cmFuc2Zvcm0tYm94OmZpbGwtYm94O3RyYW5zZm9ybS1vcmlnaW46NTAlIDEwMCU7YW5pbWF0aW9uOnAgMS43cyBsaW5lYXIgaW5maW5pdGV9QGtleWZyYW1lcyBmezAlLDgle3RyYW5zZm9ybTp0cmFuc2xhdGVZKDApO29wYWNpdHk6MH0xNCV7b3BhY2l0eToxfTYyJXt0cmFuc2Zvcm06dHJhbnNsYXRlWSgzNHB4KTtvcGFjaXR5OjF9NzAlLDEwMCV7dHJhbnNmb3JtOnRyYW5zbGF0ZVkoMzRweCk7b3BhY2l0eTowfX1Aa2V5ZnJhbWVzIHB7MCV7dHJhbnNmb3JtOnNjYWxlWSguMjgpfTYyJXt0cmFuc2Zvcm06c2NhbGVZKC4yOCl9NzQle3RyYW5zZm9ybTpzY2FsZVkoMSl9OTIle3RyYW5zZm9ybTpzY2FsZVkoMSk7b3BhY2l0eToxfTEwMCV7dHJhbnNmb3JtOnNjYWxlWSgxKTtvcGFjaXR5OjB9fTwvc3R5bGU+PHBvbHlnb24gcG9pbnRzPSIxNyw4IDQ3LDggMzIsMjkiLz48cmVjdCB4PSIzMC41IiB5PSIyOSIgd2lkdGg9IjMiIGhlaWdodD0iMjciLz48cGF0aCBjbGFzcz0iZHJvcCIgZD0iTTMyIDMzIGE0IDQgMCAxIDEgLS4wMSAwWiIvPjxwYXRoIGNsYXNzPSJwb29sIiBkPSJNNiA4NCBMMTkgNjggQzI1IDYzIDMzIDcxIDQwIDY2IEw1OCA4NCBaIi8+PC9zdmc+");
         }
+        /* The boot veil above already blurs and carries the pipette, so the body overlay stays
+           invisible underneath it rather than drawing a second pipette through the veil. */
         html.lmd-boot #lmd-loader {
             background: transparent;
+            -webkit-backdrop-filter: none;
             backdrop-filter: none;
         }
+        html.lmd-boot #lmd-loader > * { visibility: hidden; }
     </style>
     <script nonce='@Context.Items["CspNonce"]'>
         (function () {
@@ -342,17 +349,51 @@
         display: none;
         position: fixed;
         inset: 0;
-        background: rgba(13, 27, 42, .72);
-        backdrop-filter: blur(3px);
+        /* A light veil that blurs the page instead of blanking or greying it out. */
+        background: rgba(240, 244, 248, .45);
+        -webkit-backdrop-filter: blur(6px);
+        backdrop-filter: blur(6px);
         z-index: 9999;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 1.2rem;
+        gap: .9rem;
         }
 
         #lmd-loader.active {
         display: flex;
+        }
+
+        /* ── Pipette loader: a drop falls from the pipette tip into the pool ── */
+        .lrn-pipette {
+        width: 56px;
+        height: 80px;
+        color: #0d5c74;
+        }
+
+        .lrn-pipette .drop {
+        animation: lrn-pip-fall 1.7s cubic-bezier(.5, 0, .85, .4) infinite;
+        }
+
+        .lrn-pipette .pool {
+        transform-box: fill-box;
+        transform-origin: 50% 100%;
+        animation: lrn-pip-pool 1.7s linear infinite;
+        }
+
+        @@keyframes lrn-pip-fall {
+        0%, 8% { transform: translateY(0); opacity: 0; }
+        14% { opacity: 1; }
+        62% { transform: translateY(34px); opacity: 1; }
+        70%, 100% { transform: translateY(34px); opacity: 0; }
+        }
+
+        @@keyframes lrn-pip-pool {
+        0% { transform: scaleY(.28); }
+        62% { transform: scaleY(.28); }
+        74% { transform: scaleY(1); }
+        92% { transform: scaleY(1); opacity: 1; }
+        100% { transform: scaleY(1); opacity: 0; }
         }
 
         .lmd-spinner {
@@ -371,7 +412,8 @@
         }
 
         .lmd-loader-text {
-        color: #fff;
+        color: #0d1b2a;
+        text-shadow: 0 1px 2px rgba(255, 255, 255, .8);
         font-size: 1rem;
         font-weight: 600;
         letter-spacing: .04em;
@@ -981,7 +1023,12 @@
     <div id="lmd-loader" class="@(showReportPageLoader ? "active" : null)"
          data-page-load="@(showReportPageLoader ? "1" : null)"
          role="status" aria-live="polite" aria-label="Loading">
-        <div class="lmd-spinner"></div>
+        <svg class="lrn-pipette" viewBox="0 0 64 92" fill="currentColor" aria-hidden="true">
+            <polygon points="17,8 47,8 32,29"></polygon>
+            <rect x="30.5" y="29" width="3" height="27"></rect>
+            <path class="drop" d="M32 33 a4 4 0 1 1 -.01 0Z"></path>
+            <path class="pool" d="M6 84 L19 68 C25 63 33 71 40 66 L58 84 Z"></path>
+        </svg>
         <div class="lmd-loader-text" id="lmd-loader-text">@(showReportPageLoader ? "Loading report…" : "Loading lab data…")</div>
     </div>
     @if (showReportPageLoader)

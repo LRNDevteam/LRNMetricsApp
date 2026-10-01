@@ -1,7 +1,7 @@
 @using LabMetricsDashboard.Models
 @model LabMetricsDashboard.ViewModels.DenialClaimReportViewModel
 @{
-    ViewData["Title"] = "Denial Claim Report";
+    ViewData["Title"] = "Denial Summary";
     ViewData["SelectedLab"] = Model.CurrentLab;
 
     var tab = Model.ActiveTab;
@@ -15,21 +15,27 @@
 
 <div class="container-fluid px-3 py-3 dcr-page">
 
-    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-        <div>
-            <h4 class="mb-1">Denial Claim Report</h4>
-            <div class="text-muted" style="font-size:.85rem;">
-                Calculated from <strong>@Model.CurrentLab</strong>&rsquo;s claim-level data &mdash; denied claims with an
-                insurance balance still outstanding, grouped on Denial Date. Denial codes roll up to their
-                common code, so CO45, PI45 and PR45 all count as 45.
+    @* Same header as the other report pages: title on the left, toolbar pinned right. The
+       description sits below the row so its length can never push the button onto a new line. *@
+    <div class="rpt-page-head mb-1">
+        <div class="rpt-page-head-main">
+            <h4 class="mb-0">Denial Summary</h4>
+        </div>
+        <div class="rpt-page-head-right">
+            <div class="rpt-toolbar">
+                <a class="btn btn-sm btn-outline-success rpt-toolbar-btn"
+                   asp-action="ExportWorkbook" asp-route-lab="@Model.CurrentLab" asp-route-bucket="@Model.Insight.Bucket"
+                   title="Download Excel - Monthly Summary, Weekly Summary and Denial Insight in one workbook"
+                   aria-label="Download Excel">
+                    <i class="bi bi-file-earmark-excel"></i>
+                </a>
             </div>
         </div>
-
-        <a class="btn btn-sm btn-success"
-           asp-action="ExportWorkbook" asp-route-lab="@Model.CurrentLab" asp-route-bucket="@Model.Insight.Bucket"
-           title="Download Monthly Summary, Weekly Summary and Denial Insight as one Excel workbook">
-            <i class="bi bi-file-earmark-excel"></i> Download Excel
-        </a>
+    </div>
+    <div class="text-muted mb-3" style="font-size:.85rem;">
+        Calculated from <strong>@Model.CurrentLab</strong>&rsquo;s claim-level data &mdash; denied claims with an
+        insurance balance still outstanding, grouped on Denial Date. Denial codes roll up to their
+        common code, so CO45, PI45 and PR45 all count as 45.
     </div>
 
     @* Week range and RunId, in the same shape Production Report uses, so the page states the window
@@ -89,8 +95,8 @@
         <div class="alert alert-info py-2" style="font-size:.85rem;">
             <i class="bi bi-info-circle"></i>
             @Model.UndatedGroups.ToString("N0") denial group(s) have no Denial Date, so they cannot sit in a
-            month or week column. They are counted in the totals above and shown in the summaries&rsquo;
-            <strong>Other</strong> column.
+            month or week column. They are counted in the totals above but not in the Monthly or Weekly
+            Summary.
         </div>
     }
 

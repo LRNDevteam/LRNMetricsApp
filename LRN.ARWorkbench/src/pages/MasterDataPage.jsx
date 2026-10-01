@@ -1,8 +1,9 @@
-import { PageHeader } from '../components/Status';
+import { Badge, PageHeader } from '../components/Status';
 import { useWorkbench } from '../context/WorkbenchContext';
 
 const LIST_LABELS = [
   ['NON_COLLECTIBLE_CODE', 'Non-Collectible Denial Codes'],
+  ['AUTO_ADJUST_CODE', 'Auto-Adjust Denial Codes'],
   ['DENIAL_CATEGORY', 'Denial Categories'],
   ['PANEL_TYPE', 'Panel Types'],
   ['DENIAL_ROOT_CAUSE', 'Denial Root Cause Options'],
@@ -11,7 +12,10 @@ const LIST_LABELS = [
   ['FOLLOW_UP_TYPE', 'Follow-Up Types'],
   ['CLAIM_TYPE', 'Claim Types'],
   ['CIP_CATEGORY', 'CIP Categories'],
-  ['CIP_REQUIRED_INFO', 'CIP Required Information']
+  ['CIP_REQUIRED_INFO', 'CIP Required Information'],
+  ['ESCALATION_REASON', 'Escalation Reasons'],
+  ['REASSIGNMENT_REASON', 'Reassignment Reasons'],
+  ['DOCUMENT_CATEGORY', 'Document Categories']
 ];
 
 // Read-only in the base build. Add / remove, CSV download and upload arrive with phase 3.
@@ -22,38 +26,39 @@ export default function MasterDataPage() {
 
   return (
     <>
-      <PageHeader note="Reference lists that drive queues and follow-up capture (arwb.MasterListItem)">
-        <span className="badge text-bg-light border align-self-center">Editing arrives in phase 3</span>
+      <PageHeader note="Reference lists that drive queues and follow-up capture (dbo.ARWB_MasterListItem)">
+        <Badge>Editing arrives in phase 3</Badge>
       </PageHeader>
 
-      <div className="row g-3">
+      <div className="arwb-grid arwb-grid-charts arwb-section">
         {LIST_LABELS.map(([key, label]) => (
-          <div key={key} className="col-12 col-lg-6">
-            <div className="arwb-card h-100">
-              <h2 className="h6 d-flex justify-content-between">{label}<span className="text-secondary small fw-normal">{(lists[key] || []).length}</span></h2>
-              <div className="d-flex flex-wrap gap-1">
-                {(lists[key] || []).map((v) => <span key={v} className="badge text-bg-light border fw-normal arwb-chip">{v}</span>)}
-                {!(lists[key] || []).length && <span className="text-secondary small">No values</span>}
-              </div>
+          <div key={key} className="arwb-panel">
+            <div className="arwb-panel-head">
+              <h3>{label}</h3>
+              <span className="arwb-card-sub">{(lists[key] || []).length} values</span>
+            </div>
+            <div className="arwb-panel-pad" style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {(lists[key] || []).map((v) => <Badge key={v} className="arwb-badge-accent">{v}</Badge>)}
+              {!(lists[key] || []).length && <span className="arwb-hint">No values</span>}
             </div>
           </div>
         ))}
-        <div className="col-12">
-          <div className="arwb-card">
-            <h2 className="h6">Fix / Resolution by Claim Status</h2>
-            <div className="table-responsive">
-              <table className="table table-sm mb-0">
-                <tbody>
-                  {Object.entries(byStatus).map(([status, fixes]) => (
-                    <tr key={status}>
-                      <th className="text-nowrap" style={{ width: '14rem' }}>{status}</th>
-                      <td>{fixes.join(' · ')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+      </div>
+
+      <div className="arwb-table-card">
+        <div className="arwb-panel-head"><h3>Fix / Resolution by Claim Status</h3></div>
+        <div className="arwb-table-wrap">
+          <table className="arwb-data-table">
+            <thead><tr><th>Claim status</th><th>Allowed Fix / Resolution options</th></tr></thead>
+            <tbody>
+              {Object.entries(byStatus).map(([status, fixes]) => (
+                <tr key={status}>
+                  <td><strong>{status}</strong></td>
+                  <td className="wrap">{fixes.join(' · ')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </>
