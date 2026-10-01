@@ -161,7 +161,9 @@
         => d is not null && d.TryGetValue(pk, out var c) ? c.BilledCharges : 0m;
 
     // Unbilled X Aging helpers
-    var agingBuckets = AgingBuckets.All;
+    var agingBuckets = Model.SelectedLab.Contains("InHealth", StringComparison.OrdinalIgnoreCase)
+        ? AgingBuckets.OldestFirst
+        : AgingBuckets.All;
     int UaClaims(Dictionary<string, ProductionMonthCell>? d, string bk)
         => d is not null && d.TryGetValue(bk, out var c) ? c.ClaimCount : 0;
     decimal UaCharges(Dictionary<string, ProductionMonthCell>? d, string bk)
@@ -1519,6 +1521,13 @@ th.pr-month-data, td.pr-month-data {
                             &nbsp;·&nbsp; Columns: <span class="filter-key">Panelname</span>
                             &nbsp;·&nbsp; Rank: <span class="filter-key">COUNT(DISTINCT ClaimID)</span></span>
                         }
+                        else if (Model.SelectedLab.Contains("InHealth", StringComparison.OrdinalIgnoreCase))
+                        {
+                        <span><span class="filter-label">Filter:</span>
+                            <span class="filter-key">PayerName_Raw</span> not blank
+                            &nbsp;·&nbsp; Rows: <span class="filter-key">PayerName_Raw</span>
+                            &nbsp;·&nbsp; Columns: <span class="filter-key">PanelNameBasedOnCPT</span></span>
+                        }
                         else
                         {
                         <span><span class="filter-label">Filter:</span>
@@ -1633,12 +1642,22 @@ th.pr-month-data, td.pr-month-data {
                             var uaDateColLocal = uaUsesChargeLocal ? "ChargeEnteredDate" : "FirstBilledDate";
                         }
                         <span class="filter-dot">•</span>
+                        @if (Model.SelectedLab.Contains("InHealth", StringComparison.OrdinalIgnoreCase))
+                        {
+                        <span><span class="filter-label">Filter:</span>
+                            <span class="filter-key-2">FirstBilledDate</span> blank or <span class="filter-key">BillStatus</span> = Unbilled
+                            &nbsp;·&nbsp; Rows: <span class="filter-key">PayerName_Raw</span>
+                            &nbsp;·&nbsp; Columns: <span class="filter-key">AgingDOS</span></span>
+                        }
+                        else
+                        {
                         <span><span class="filter-label">Filter:</span>
                             @if (Model.SelectedLab.Contains("Elixir", StringComparison.OrdinalIgnoreCase))
                             {
                                 <span><span class="filter-key">PayerName_Raw</span> not blank &nbsp;·&nbsp; </span>
                             }
                             <span class="filter-key-2">@uaDateColLocal</span> is a valid date</span>
+                        }
                     </div>
                     <div class="pr-scroll">
                         <table class="pr-table">
@@ -1654,7 +1673,7 @@ th.pr-month-data, td.pr-month-data {
                             </colgroup>
                             <thead>
                                 <tr>
-                                    <th rowspan="2">@(Model.SelectedLab.Contains("Elixir", StringComparison.OrdinalIgnoreCase) ? "Payer Name" : "Unbilled x Aging")</th>
+                                    <th rowspan="2">@(Model.SelectedLab.Contains("Elixir", StringComparison.OrdinalIgnoreCase) || Model.SelectedLab.Contains("InHealth", StringComparison.OrdinalIgnoreCase) ? "Payer Name" : "Unbilled x Aging")</th>
                                     @foreach (var bk in agingBuckets)
                                     {
                                         <th colspan="2">@bk</th>
@@ -1880,6 +1899,44 @@ th.pr-month-data, td.pr-month-data {
                         }
                     </div>
                 }
+                </div>
+            }
+            else if (Model.CptBreakdownRows.Count > 0 && Model.SelectedLab.Contains("InHealth", StringComparison.OrdinalIgnoreCase))
+            {
+                <div class="pr-wrap">
+                    <div class="pr-scroll">
+                        <table class="pr-table">
+                            <colgroup>
+                                <col style="width:160px" />
+                                <col style="width:110px" />
+                                <col style="width:140px" />
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th>CPT Codes</th>
+                                    <th class="pr-grand-total">@(cptUnitsHeader)</th>
+                                    <th class="pr-grand-total">Total Charge</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in Model.CptBreakdownRows)
+                                {
+                                    <tr class="pr-panel-row">
+                                        <td>@row.CptCode</td>
+                                        <td class="pr-grand-total">@row.GrandTotalClaims.N0OrDash()</td>
+                                        <td class="pr-grand-total">@Acct(row.GrandTotalCharges)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr class="pr-total-row">
+                                    <td>Grand Total</td>
+                                    <td class="pr-grand-total">@Model.CptBreakdownRows.Sum(r => r.GrandTotalClaims).N0OrDash()</td>
+                                    <td class="pr-grand-total">@Acct(Model.CptBreakdownRows.Sum(r => r.GrandTotalCharges))</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
                 </div>
             }
             else if (Model.CptBreakdownRows.Count > 0 && cptYears.Count > 0)

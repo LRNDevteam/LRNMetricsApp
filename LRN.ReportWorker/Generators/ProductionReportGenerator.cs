@@ -158,8 +158,11 @@ public sealed class ProductionReportGenerator : IReportGenerator
         if (labSummaryRepo is null)
             _labSummaryRepos.TryGetValue("Cove", out labSummaryRepo);
 
-        // Beech Tree must match the Production Summary page, so every tab reads usp_GetBT_*.
-        var useLabSps = isBeechTree && labSummaryRepo is not null;
+        var isInHealthDtr = job.LabName.Equals("Inhealth_DTR", StringComparison.OrdinalIgnoreCase);
+
+        // Beech Tree and InHealth DTR must match the Production Summary page, so every tab
+        // reads the lab's usp_Get{Prefix}* SPs (usp_GetBT_* / usp_GetInH_*).
+        var useLabSps = (isBeechTree || isInHealthDtr) && labSummaryRepo is not null;
 
         // Phase 1 — 7 summary queries concurrently.
         // Cove Production Summary breakdowns use SqlLabProductionSummaryRepository

@@ -416,6 +416,9 @@ public static class AgingBuckets
 
     /// <summary>Ordered list of all bucket keys.</summary>
     public static readonly IReadOnlyList<string> All = [Current, Over30, Over60, Over90, Over120];
+
+    /// <summary>Oldest bucket first (InHealth DTR client layout).</summary>
+    public static readonly IReadOnlyList<string> OldestFirst = [Over120, Over90, Over60, Over30, Current];
 }
 
 public sealed class UnbilledAgingRow

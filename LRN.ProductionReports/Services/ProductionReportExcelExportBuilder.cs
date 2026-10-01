@@ -1090,7 +1090,7 @@ public static partial class ProductionReportExcelExportBuilder
         ws.TabColor = ExcelTheme.TabGold;
         ExcelTheme.ApplyDefaults(ws);
 
-        var buckets = AgingBuckets.All;
+        var buckets = IsInHealthLab(vm) ? AgingBuckets.OldestFirst : AgingBuckets.All;
         int colCount = 1 + buckets.Count * 2 + 2;
 
         int row = 1;
@@ -1099,7 +1099,7 @@ public static partial class ProductionReportExcelExportBuilder
 
         // ?? Header Row 1 ??
         int hRow1 = row;
-        var rowHeader = vm.SelectedLab.Contains("Elixir", StringComparison.OrdinalIgnoreCase)
+        var rowHeader = vm.SelectedLab.Contains("Elixir", StringComparison.OrdinalIgnoreCase) || IsInHealthLab(vm)
             ? "Payer Name"
             : "Unbilled x Aging";
         WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, rowHeader, ExcelTheme.InsightsHeaderBg);
@@ -1164,10 +1164,54 @@ public static partial class ProductionReportExcelExportBuilder
 
     // ?? CPT Breakdown ????????????????????????????????????????????????????
 
+    private static bool IsInHealthLab(ProductionReportViewModel vm) =>
+        vm.SelectedLab.Contains("InHealth", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>InHealth CPT Breakdown: one row per CPT code, no month/year columns.</summary>
+    private static void BuildCptFlatSheet(XLWorkbook wb, ProductionReportViewModel vm)
+    {
+        var ws = wb.AddWorksheet("CPT Breakdown");
+        ws.TabColor = ExcelTheme.TabYellow;
+        ExcelTheme.ApplyDefaults(ws);
+
+        const int colCount = 3;
+        int row = 1;
+        ExcelTheme.WriteTitleBar(ws, row, colCount, "CPT Breakdown", ExcelTheme.InsightsHeaderBg);
+        row++;
+
+        var countHeader = string.IsNullOrWhiteSpace(vm.CptUnitsLabel) ? "Count of CPT" : vm.CptUnitsLabel;
+        WriteHeaderCell(ws, row, 1, "CPT Codes", ExcelTheme.InsightsHeaderBg);
+        WriteHeaderCell(ws, row, 2, countHeader, ExcelTheme.InsightsHeaderBg);
+        WriteHeaderCell(ws, row, 3, "Total Charge", ExcelTheme.InsightsHeaderBg);
+        row++;
+
+        foreach (var cptRow in vm.CptBreakdownRows)
+        {
+            WriteCell(ws, row, 1, cptRow.CptCode, XLColor.White, isText: true);
+            WriteCell(ws, row, 2, cptRow.GrandTotalClaims, XLColor.White);
+            WriteCurrencyCell(ws, row, 3, cptRow.GrandTotalCharges, XLColor.White);
+            row++;
+        }
+
+        ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
+        ws.Cell(row, 1).Value = "Grand Total";
+        ws.Cell(row, 2).Value = vm.CptBreakdownRows.Sum(r => r.GrandTotalClaims);
+        ws.Cell(row, 2).Style.NumberFormat.Format = ExcelTheme.CountNumberFormat;
+        ws.Cell(row, 3).Value = vm.CptBreakdownRows.Sum(r => r.GrandTotalCharges);
+        ws.Cell(row, 3).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+
+        ExcelTheme.AutoFitColumns(ws, colCount);
+    }
+
     private static void BuildCptBreakdownSheet(XLWorkbook wb, ProductionReportViewModel vm)
     {
         if (TryBuildCptBreakdownPivot(wb, vm)) return;
         if (vm.CptBreakdownRows.Count == 0) return;
+        if (IsInHealthLab(vm))
+        {
+            BuildCptFlatSheet(wb, vm);
+            return;
+        }
 
         var ws = wb.AddWorksheet("CPT Breakdown");
         ws.TabColor = ExcelTheme.TabYellow;
