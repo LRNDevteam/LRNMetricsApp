@@ -95,6 +95,12 @@ public sealed class CollectionSummaryViewModel
         SelectedLab.Equals("Cove", StringComparison.OrdinalIgnoreCase)
         || SelectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// InHealth DTR: Insurance Vs Payments is payer totals only; Insurance vs Payment %,
+    /// CPT vs Payment % and Genetics vs ID Avg show Average of PaymentPercent.
+    /// </summary>
+    public bool IsInHealthDtrLab => LabCollectionPrefix.IsInHealthDtr(SelectedLab);
+
     // ?? CPT vs Payment % ???????????????????????????????????????
     public List<CptPaymentPctRow> CptPaymentPct { get; set; } = [];
 
@@ -221,8 +227,12 @@ public sealed class StatusSummaryResult
 
 // Genetics vs ID Avg types
 
-/// <summary>One Panelname row: Count of ClaimID, Sum of InsurancePayment, Sum / Count.</summary>
-public sealed record GeneticsVsIdAvgRow(string PanelName, int ClaimCount, decimal CarrierPayment)
+/// <summary>
+/// One Panelname row: Count of ClaimID, Sum of InsurancePayment, Sum / Count.
+/// <see cref="AvgPaymentPct"/> (Average of PaymentPercent, in points) is set only for labs
+/// whose SP returns it (InHealth DTR).
+/// </summary>
+public sealed record GeneticsVsIdAvgRow(string PanelName, int ClaimCount, decimal CarrierPayment, decimal? AvgPaymentPct = null)
 {
     public decimal AveragePayment => ClaimCount == 0 ? 0m : CarrierPayment / ClaimCount;
 }
@@ -234,6 +244,10 @@ public sealed class GeneticsVsIdAvgBlock
     public int     TotalClaims  => Rows.Sum(r => r.ClaimCount);
     public decimal TotalPayment => Rows.Sum(r => r.CarrierPayment);
     public decimal TotalAverage => TotalClaims == 0 ? 0m : TotalPayment / TotalClaims;
+    public bool    HasPaymentPct => Rows.Any(r => r.AvgPaymentPct.HasValue);
+    /// <summary>Claim-weighted Average of PaymentPercent (every claim carries a PaymentPercent).</summary>
+    public decimal TotalAvgPaymentPct => TotalClaims == 0 ? 0m
+        : Rows.Sum(r => (r.AvgPaymentPct ?? 0m) * r.ClaimCount) / TotalClaims;
 }
 
 /// <summary>

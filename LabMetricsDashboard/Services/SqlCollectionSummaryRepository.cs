@@ -2247,12 +2247,14 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             filterDosFrom, filterDosTo,
             filterCheckDateFrom, filterCheckDateTo));
         await using var r = await cmd.ExecuteReaderAsync(ct);
+        var hasPaymentPct = HasColumn(r, "AvgPaymentPct");
         while (await r.ReadAsync(ct))
         {
             var row = new GeneticsVsIdAvgRow(
                 GetStringOrEmpty(r, "PanelName"),
                 GetInt32OrDefault(r, "ClaimCount"),
-                GetDecimalOrDefault(r, "CarrierPayment"));
+                GetDecimalOrDefault(r, "CarrierPayment"),
+                hasPaymentPct ? GetDecimalOrDefault(r, "AvgPaymentPct") : (decimal?)null);
 
             var summaryType = GetStringOrEmpty(r, "SummaryType");
             if (summaryType.Equals("FullyPaid", StringComparison.OrdinalIgnoreCase))

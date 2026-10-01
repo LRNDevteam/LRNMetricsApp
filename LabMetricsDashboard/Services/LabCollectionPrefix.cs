@@ -97,14 +97,21 @@ public static class LabCollectionPrefix
     /// <c>usp_Get{prefix}_CS_GeneticsVsIdAvg</c> on the lab database.
     /// </summary>
     public static bool ShowsGeneticsVsIdAvg(string? labName) =>
-        GetPrefix(labName) is "RT" or "BT";
+        GetPrefix(labName) is "RT" or "BT" or "IHD";
 
     /// <summary>
     /// Labs whose Average Payments show two 6-month tabs (DateOfService and CheckDate) from
     /// <c>usp_Get{prefix}_CS_AvgPayments_ClientLogic</c>, with "Last 3 Months" hidden.
     /// </summary>
     public static bool UsesAvgPaymentsByDateBasis(string? labName) =>
-        GetPrefix(labName) is "RT" or "BT";
+        GetPrefix(labName) is "RT" or "BT" or "IHD";
+
+    /// <summary>
+    /// InHealth DTR: Collection Summary payment-percent tabs show Average of PaymentPercent
+    /// and Insurance Vs Payments shows payer totals (no CheckDate month columns).
+    /// </summary>
+    public static bool IsInHealthDtr(string? labName) =>
+        GetPrefix(labName) is "IHD";
 
     /// <summary>
     /// Labs whose Clinic Panel Status, Clinic $ Analysis and Count by DOS Month pivots only

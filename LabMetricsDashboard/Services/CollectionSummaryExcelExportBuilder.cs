@@ -791,7 +791,10 @@ public static partial class CollectionSummaryExcelExportBuilder
         ws.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
 
-        string[] headers = ["Payer Name", "Total Claims", "Insurance Payments", "Payment %"];
+        var isInHealth = LabCollectionPrefix.IsInHealthDtr(labName);
+        string[] headers = isInHealth
+            ? ["Row Labels", "Count of ClaimID", "Sum of InsurancePayment", "Average of PaymentPercent"]
+            : ["Payer Name", "Total Claims", "Insurance Payments", "Payment %"];
         int colCount = headers.Length;
 
         int row = 1;
@@ -811,6 +814,17 @@ public static partial class CollectionSummaryExcelExportBuilder
             row++;
         }
 
+        if (isInHealth && rows.Count > 0)
+        {
+            var totalClaims = rows.Sum(r => r.TotalClaims);
+            var avgPct = totalClaims == 0 ? 0m
+                : Math.Round(rows.Sum(r => r.PaymentPct * r.TotalClaims) / totalClaims, 2);
+            WriteCell(ws, row, 1, "Grand Total", ColTotal, isText: true, bold: true);
+            WriteCell(ws, row, 2, totalClaims, ColTotal, bold: true);
+            WriteCell(ws, row, 3, rows.Sum(r => r.InsurancePayments), ColTotal, isCurrency: true, bold: true);
+            WriteCell(ws, row, 4, avgPct, ColTotal, isPct: true, bold: true);
+        }
+
         AutoFitColumns(ws);
         ws.SheetView.FreezeRows(3);
     }
@@ -825,7 +839,9 @@ public static partial class CollectionSummaryExcelExportBuilder
         ws.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
 
-        string[] headers = ["CPT Code", "Service Units", "Payment %"];
+        string[] headers = LabCollectionPrefix.IsInHealthDtr(labName)
+            ? ["CPT Code", "Count of ClaimID", "Average of PaymentPercent"]
+            : ["CPT Code", "Service Units", "Payment %"];
         int colCount = headers.Length;
 
         int row = 1;
@@ -842,6 +858,15 @@ public static partial class CollectionSummaryExcelExportBuilder
             WriteCell(ws, row, 2, r.SumServiceUnits, bg);
             WriteCell(ws, row, 3, r.PaymentPct, bg, isPct: true);
             row++;
+        }
+
+        if (LabCollectionPrefix.IsInHealthDtr(labName) && rows.Count > 0)
+        {
+            var paidChg = rows.Sum(r => r.PaidChargeAmount);
+            var avgPct = paidChg == 0 ? 0m : Math.Round(rows.Sum(r => r.PaidInsurancePayment) / paidChg * 100m, 2);
+            WriteCell(ws, row, 1, "Grand Total", ColTotal, isText: true, bold: true);
+            WriteCell(ws, row, 2, rows.Sum(r => r.SumServiceUnits), ColTotal, bold: true);
+            WriteCell(ws, row, 3, avgPct, ColTotal, isPct: true, bold: true);
         }
 
         AutoFitColumns(ws);
@@ -1215,7 +1240,9 @@ public static partial class CollectionSummaryExcelExportBuilder
         ws.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
 
-        string[] headers = ["Panel Group (IDs)", "# VisitNum", "Carrier Payment", "Average of CarrierPayment"];
+        var showPct = result.FullyPaid.HasPaymentPct || result.ExcludingNoResponse.HasPaymentPct;
+        string[] headers = ["Panel Group (IDs)", "# VisitNum", "Carrier Payment",
+            showPct ? "Average of PaymentPercent" : "Average of CarrierPayment"];
         const int blockGap = 1;
         int rightStart = headers.Length + blockGap + 1;
         int colCount = rightStart + headers.Length - 1;
@@ -1247,14 +1274,20 @@ public static partial class CollectionSummaryExcelExportBuilder
                 WriteCell(ws, row, startCol,     r.PanelName, bg, isText: true);
                 WriteCell(ws, row, startCol + 1, r.ClaimCount, bg);
                 WriteCell(ws, row, startCol + 2, r.CarrierPayment, bg, isCurrency: true, wholeDollars: true);
-                WriteCell(ws, row, startCol + 3, r.AveragePayment, bg, isCurrency: true, wholeDollars: true);
+                if (showPct)
+                    WriteCell(ws, row, startCol + 3, Math.Round(r.AvgPaymentPct ?? 0m, 2), bg, isPct: true);
+                else
+                    WriteCell(ws, row, startCol + 3, r.AveragePayment, bg, isCurrency: true, wholeDollars: true);
                 row++;
             }
 
             WriteCell(ws, row, startCol,     "Grand Total", ColTotal, isText: true, bold: true);
             WriteCell(ws, row, startCol + 1, block.TotalClaims, ColTotal, bold: true);
             WriteCell(ws, row, startCol + 2, block.TotalPayment, ColTotal, isCurrency: true, bold: true, wholeDollars: true);
-            WriteCell(ws, row, startCol + 3, block.TotalAverage, ColTotal, isCurrency: true, bold: true, wholeDollars: true);
+            if (showPct)
+                WriteCell(ws, row, startCol + 3, Math.Round(block.TotalAvgPaymentPct, 2), ColTotal, isPct: true, bold: true);
+            else
+                WriteCell(ws, row, startCol + 3, block.TotalAverage, ColTotal, isCurrency: true, bold: true, wholeDollars: true);
         }
     }
 

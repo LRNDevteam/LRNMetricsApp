@@ -6,6 +6,7 @@
         ("Fully Paid", "ClaimStatus = Fully Paid", gvi.FullyPaid),
         ("(Multiple Items)", "ClaimStatus <> No Response", gvi.ExcludingNoResponse),
     };
+    var showPct = gvi.FullyPaid.HasPaymentPct || gvi.ExcludingNoResponse.HasPaymentPct;
 }
 @if (gvi.HasData)
 {
@@ -34,7 +35,7 @@
                                     <th>Panel Group (IDs)</th>
                                     <th># VisitNum</th>
                                     <th>Carrier Payment</th>
-                                    <th>Average of CarrierPayment</th>
+                                    <th>@(showPct ? "Average of PaymentPercent" : "Average of CarrierPayment")</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -48,7 +49,14 @@
                                     <td style="text-align:left;font-weight:600">@row.PanelName</td>
                                     <td style="text-align:right">@row.ClaimCount.N0OrDash()</td>
                                     <td style="text-align:right">@Acct(row.CarrierPayment)</td>
-                                    <td style="text-align:right">@Acct(row.AveragePayment)</td>
+                                    @if (showPct)
+                                    {
+                                        <td style="text-align:right">@((row.AvgPaymentPct ?? 0m).ToString("F2")) %</td>
+                                    }
+                                    else
+                                    {
+                                        <td style="text-align:right">@Acct(row.AveragePayment)</td>
+                                    }
                                 </tr>
                             }
                             </tbody>
@@ -57,7 +65,14 @@
                                     <td style="text-align:left;color:#fff">Grand Total</td>
                                     <td style="text-align:right;color:#fff">@b.Block.TotalClaims.N0OrDash()</td>
                                     <td style="text-align:right;color:#fff">@Acct(b.Block.TotalPayment)</td>
-                                    <td style="text-align:right;color:#fff">@Acct(b.Block.TotalAverage)</td>
+                                    @if (showPct)
+                                    {
+                                        <td style="text-align:right;color:#fff">@b.Block.TotalAvgPaymentPct.ToString("F2") %</td>
+                                    }
+                                    else
+                                    {
+                                        <td style="text-align:right;color:#fff">@Acct(b.Block.TotalAverage)</td>
+                                    }
                                 </tr>
                             </tfoot>
                         </table>
@@ -68,9 +83,9 @@
     </div>
     <div class="mt-2" style="font-size:.68rem;color:#94a3b8">
         <strong>Source:</strong> ClaimLevelData &bull;
-        <strong>Rows:</strong> Panelname &bull;
+        <strong>Rows:</strong> @(Model.IsInHealthDtrLab ? "PanelNameBasedOnCPT" : "Panelname") &bull;
         <strong># VisitNum:</strong> Count of ClaimID &bull;
-        <strong>Average:</strong> Sum of InsurancePayment / Count of ClaimID &bull;
+        <strong>Average:</strong> @(showPct ? "Average of PaymentPercent" : "Sum of InsurancePayment / Count of ClaimID") &bull;
         <strong>Sorted by:</strong> Carrier Payment DESC
     </div>
 }

@@ -18,14 +18,15 @@
                     cptGrandPct = cptGrandUnits == 0 ? 0m : Math.Round(weightedSum / cptGrandUnits, 2);
                 }
                 var cptMaxPct = Model.CptPaymentPct.Max(r => r.PaymentPct);
+                var isInHealthCpt = Model.IsInHealthDtrLab;
                 <div class="cs-rpt-wrap">
                     <div class="cs-rpt-scroll">
                         <table class="cs-rpt-table">
                             <thead>
                                 <tr>
                                     <th>CPT Code</th>
-                                    <th>Sum of Service Units</th>
-                                    <th>Payment %</th>
+                                    <th>@(isInHealthCpt ? "Count of ClaimID" : "Sum of Service Units")</th>
+                                    <th>@(isInHealthCpt ? "Average of PaymentPercent" : "Payment %")</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -59,8 +60,15 @@
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> Line Level Data &bull;
                     <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) — @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &bull;
-                    <strong>Sorted by:</strong> SUM(Units) DESC &bull;
-                    <strong>Payment %:</strong> SUM(InsurancePayment) / SUM(ChargeAmount) × 100 where ClaimStatus IN (Fully Paid, Partially Paid)
+                    @if (isInHealthCpt)
+                    {
+                        <span><strong>Rows:</strong> CPTCode &bull; <strong>Sorted by:</strong> Count of ClaimID DESC &bull; <strong>Payment %:</strong> Average of PaymentPercent</span>
+                    }
+                    else
+                    {
+                        <span><strong>Sorted by:</strong> SUM(Units) DESC &bull;
+                        <strong>Payment %:</strong> SUM(InsurancePayment) / SUM(ChargeAmount) × 100 where ClaimStatus IN (Fully Paid, Partially Paid)</span>
+                    }
                 </div>
             }
             else

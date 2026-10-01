@@ -3,8 +3,10 @@
     var rowsData = Model.InsuranceVsPayment;
 
     // Cove client report: Row Labels | Count of ClaimID | Sum of Insurance Payment (no month columns).
+    // InHealth DTR client report: Row Labels | Sum of Insurance Payment.
     // Other labs keep CheckDate year/month pivot.
-    var usePayerFlat = Model.IsCoveLab;
+    var isInHealth = Model.IsInHealthDtrLab;
+    var usePayerFlat = Model.IsCoveLab || isInHealth;
 
     var flatRows = rowsData
         .GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
@@ -53,7 +55,10 @@
                 <thead>
                     <tr>
                         <th>Row Labels</th>
-                        <th>Count of ClaimID</th>
+                        @if (!isInHealth)
+                        {
+                            <th>Count of ClaimID</th>
+                        }
                         <th>Sum of Insurance Payment</th>
                     </tr>
                 </thead>
@@ -62,7 +67,10 @@
                     {
                         <tr>
                             <td style="text-align:left;font-weight:600">@row.PayerName</td>
-                            <td style="text-align:right">@row.TotalCount.N0OrDash()</td>
+                            @if (!isInHealth)
+                            {
+                                <td style="text-align:right">@row.TotalCount.N0OrDash()</td>
+                            }
                             <td style="text-align:right">@Acct2(row.TotalPayment)</td>
                         </tr>
                     }
@@ -70,7 +78,10 @@
                 <tfoot>
                     <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
                         <td style="text-align:left;color:#fff">Grand Total</td>
-                        <td style="text-align:right;color:#fff">@flatRows.Sum(r => r.TotalCount).N0OrDash()</td>
+                        @if (!isInHealth)
+                        {
+                            <td style="text-align:right;color:#fff">@flatRows.Sum(r => r.TotalCount).N0OrDash()</td>
+                        }
                         <td style="text-align:right;color:#fff">@Acct2(flatRows.Sum(r => r.TotalPayment))</td>
                     </tr>
                 </tfoot>
@@ -79,8 +90,16 @@
     </div>
 
     <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
-        <strong>Source:</strong> Aggregate snapshot <code>Cove_CS_InsuranceVsPayment</code>
-        — filter InsurancePayment &gt; 0; payer totals (no month columns).
+        @if (isInHealth)
+        {
+            <span><strong>Source:</strong> <code>usp_GetIHD_CS_InsuranceVsPayment</code>
+            — filter InsurancePayment &gt; 0, PayerName_Raw not blank &bull; Rows PayerName_Raw &bull; Sum of InsurancePayment (payer totals, no month columns).</span>
+        }
+        else
+        {
+            <span><strong>Source:</strong> Aggregate snapshot <code>Cove_CS_InsuranceVsPayment</code>
+            — filter InsurancePayment &gt; 0; payer totals (no month columns).</span>
+        }
     </div>
 }
 else if (rowsData.Count > 0)

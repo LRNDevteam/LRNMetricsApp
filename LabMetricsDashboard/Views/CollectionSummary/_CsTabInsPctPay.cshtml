@@ -5,7 +5,13 @@
                 var grandInsPayments = Model.InsurancePaymentPct.Sum(r => r.InsurancePayments);
                 var grandPaidIns = Model.InsurancePaymentPct.Sum(r => r.PaidInsurancePayment);
                 var grandPaidChg = Model.InsurancePaymentPct.Sum(r => r.PaidChargeAmount);
+                var isInHealthPct = Model.IsInHealthDtrLab;
                 var grandPaymentPct = grandPaidChg == 0 ? 0m : Math.Round(grandPaidIns / grandPaidChg * 100m, 2);
+                if (isInHealthPct && grandPaidChg == 0 && grandTotalClaims > 0)
+                {
+                    // Average of PaymentPercent over every claim = claim-weighted payer averages.
+                    grandPaymentPct = Math.Round(Model.InsurancePaymentPct.Sum(r => r.PaymentPct * r.TotalClaims) / grandTotalClaims, 2);
+                }
                 var maxPct = Model.InsurancePaymentPct.Max(r => r.PaymentPct);
                 var showNorthWestSnapshotPivot = !Model.IsAugustusLab
                     && Model.InsurancePaymentPct.Any(r => r.BillYear.HasValue && r.BillMonth.HasValue);
@@ -86,9 +92,9 @@
                                 {
                                 <tr>
                                     <th>Payer</th>
-                                    <th>Total No. of Claims</th>
-                                    <th>Insurance Payments</th>
-                                    <th>Payment %</th>
+                                    <th>@(isInHealthPct ? "Count of ClaimID" : "Total No. of Claims")</th>
+                                    <th>@(isInHealthPct ? "Sum of InsurancePayment" : "Insurance Payments")</th>
+                                    <th>@(isInHealthPct ? "Average of PaymentPercent" : "Payment %")</th>
                                 </tr>
                                 }
                             </thead>
@@ -188,7 +194,14 @@
                     <strong>Source:</strong> Claim Level Data &bull;
                     <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) — @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &bull;
                     <strong>Sorted by:</strong> @(Model.IsAugustusLab ? "Count of ClaimID DESC" : "SUM(InsurancePayment) DESC") &bull;
-                    <strong>Payment %:</strong> SUM(InsurancePayment) / SUM(ChargeAmount) × 100 (same as Reimbursement Rate; not the file PaymentPercent)
+                    @if (isInHealthPct)
+                    {
+                        <span><strong>Filter:</strong> InsurancePayment &gt; 0, PayerName_Raw not blank &bull; <strong>Payment %:</strong> Average of PaymentPercent</span>
+                    }
+                    else
+                    {
+                        <span><strong>Payment %:</strong> SUM(InsurancePayment) / SUM(ChargeAmount) × 100 (same as Reimbursement Rate; not the file PaymentPercent)</span>
+                    }
                 </div>
             }
             else

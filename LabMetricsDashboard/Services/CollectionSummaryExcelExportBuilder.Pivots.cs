@@ -106,6 +106,35 @@ public static partial class CollectionSummaryExcelExportBuilder
     {
         var isCove = labName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
             || labName.Contains("Cove", StringComparison.OrdinalIgnoreCase);
+        var isInHealth = LabCollectionPrefix.IsInHealthDtr(labName);
+
+        if (isInHealth)
+        {
+            // InHealth DTR client report: Row Labels | Sum of Insurance Payment (payer totals).
+            var wsIhd = wb.AddWorksheet("Insurance Vs Payments");
+            wsIhd.TabColor = ExcelTheme.Collection.TabYellow;
+            ExcelTheme.ApplyDefaults(wsIhd);
+            string[] ihdHeaders = ["Row Labels", "Sum of Insurance Payment"];
+            int ihdRow = 1;
+            ExcelTheme.Collection.WriteTitleBar(wsIhd, ihdRow, ihdHeaders.Length, $"Insurance Vs Payments — {labName}");
+            ihdRow++;
+            ExcelTheme.WriteHeaderRow(wsIhd, ihdRow, 1, ihdHeaders, ExcelTheme.Collection.HeaderBg);
+            ihdRow++;
+            var payers = rows.GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
+                .Select(g => (Payer: g.Key, Pay: g.Sum(x => x.InsurancePayment)))
+                .OrderByDescending(g => g.Pay)
+                .ToList();
+            foreach (var (payer, pay) in payers)
+            {
+                WriteCell(wsIhd, ihdRow, 1, payer, XLColor.White, isText: true);
+                WriteCell(wsIhd, ihdRow, 2, pay, XLColor.White, isCurrency: true);
+                ihdRow++;
+            }
+            WriteCell(wsIhd, ihdRow, 1, "Grand Total", ExcelTheme.Collection.TotalRowBg, isText: true);
+            WriteCell(wsIhd, ihdRow, 2, payers.Sum(p => p.Pay), ExcelTheme.Collection.TotalRowBg, isCurrency: true);
+            AutoFitColumns(wsIhd);
+            return;
+        }
 
         var periods = isCove
             ? []

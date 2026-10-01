@@ -9,7 +9,7 @@
 
    Tab                  Filter                                         Rows / Columns
    -------------------  ---------------------------------------------  ---------------------------------------
-   Monthly Summary      Billed, FirstBilledDate + PayerName_Raw set    Panel > top payers  x  CED month
+   Monthly Summary      Billed, FirstBilledDate set (blank payer kept) Panel > top payers  x  CED month
    Weekly               Billed, BilledWeek set                         Panel > top payers  x  BilledWeek
    CPT Breakdown        All lines (LineLevelData)                      CPT code  x  Count of CPT, Charge
    Payer Breakdown      Billed, PayerName_Raw set                      Payer  x  CED month
@@ -96,12 +96,12 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    SELECT PanelName, PayerName, EnteredMonth, ClaimID, ChargeAmount
+    -- Blank PayerName_Raw stays in (as "(blank)"), matching the client's Monthly pivot.
+    SELECT PanelName, ISNULL(PayerName, N'(blank)') AS PayerName, EnteredMonth, ClaimID, ChargeAmount
     INTO   #Base
     FROM   dbo.fn_InH_ProductionClaims(@PayerNames, @PanelNames, @DosFrom, @DosTo, @FirstBillFrom, @FirstBillTo, @FirstBilledFrom, @FirstBilledTo)
     WHERE  IsBilled = 1
       AND  FirstBilledDate IS NOT NULL
-      AND  PayerName IS NOT NULL
       AND  EnteredMonth IS NOT NULL;
 
     ;WITH PayerRanks AS
