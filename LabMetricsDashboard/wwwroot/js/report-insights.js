@@ -54,6 +54,19 @@
     const q = obj => Object.entries(obj).filter(([, v]) => v != null && v !== "").map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v)).join("&");
     const esc = s => (s == null ? "" : String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])));
     const isoDate = s => { if (!s) return ""; const d = new Date(s); return isNaN(d) ? "" : d.toISOString().slice(0, 10); };
+    const ymd = s => {
+        if (!s) return "";
+        const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+        const d = new Date(s);
+        return isNaN(d) ? "" : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    };
+    const weekTextFrom = (start, end) => {
+        const fmt = v => { const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[2]}.${m[3]}.${m[1]}` : ""; };
+        const s = fmt(start), e = fmt(end || start);
+        if (!s) return "";
+        return !e || s === e ? s : `${s} - ${e}`;
+    };
     const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
     const fmtShort = s => {
         if (!s) return "";
@@ -560,6 +573,27 @@
         }
     }
 
+    function weekFields() {
+        const start = el.form.querySelector("[data-week=start]");
+        const end = el.form.querySelector("[data-week=end]");
+        const text = el.form.querySelector("#ri_WeekRangeText");
+        return start && end ? { start, end, text } : null;
+    }
+
+    function bindWeekFields() {
+        const f = weekFields();
+        if (!f) return;
+        const sync = () => {
+            if (f.start.value && f.end.value && f.end.value < f.start.value) f.end.value = f.start.value;
+            const t = weekTextFrom(f.start.value, f.end.value);
+            if (f.text) f.text.value = t;
+            const card = document.getElementById("riCtxWeek");
+            if (card) card.textContent = t || "—";
+        };
+        f.start.addEventListener("change", sync);
+        f.end.addEventListener("change", sync);
+    }
+
     function openDetail(row, archived) {
         editing = row || null;
         detailReadOnly = !!archived || (row && row.archiveStatus === "Archived");
@@ -576,24 +610,37 @@
             el.activeBadge.className = "ri-badge" + (detailReadOnly ? " archived" : "");
         }
         if (el.save) el.save.hidden = detailReadOnly;
-        if (el.historyBtn) el.historyBtn.hidden = isNew;
+        if (el.historyBtn) el.historyBtn.hidden = isNew || detailReadOnly;
 
         const ro = detailReadOnly ? "disabled" : "";
         const roAttr = detailReadOnly ? "readonly" : "";
         const editable = detailReadOnly ? "false" : "true";
         const banner = detailReadOnly
-            ? `<div class="ri-lock-note"><span>Archived notes are read-only. This entry cannot be edited, deleted, saved, or reopened. Revision history remains available for audit.</span></div>`
+            ? `<div class="ri-lock-note"><span>Archived notes are read-only. This entry cannot be edited, deleted, saved, or reopened.</span></div>`
             : `<div class="ri-edit-banner"><span>Active notes can be edited by authorized users with access to this report. Saving changes updates the active row, increments the version number, and records a revision event.</span></div>`;
 
         const week = (row && row.weekRangeText) || ctx.weekText || "—";
         const runId = (row && row.reportRunId) || ctx.runId || "—";
         const archiveLabel = detailReadOnly ? "Archived" : ((row && row.archiveStatus) || "Active");
+        const wkStart = row ? ymd(row.weekRangeStart) : (ctx.weekStart || "");
+        const wkEnd = row ? ymd(row.weekRangeEnd) : (ctx.weekEnd || ctx.weekStart || "");
+        const weekSection = !weekLifecycle ? "" : `
+                    <section class="ri-info-card">
+                        <div class="ri-info-head"><div class="ri-info-title">Report Week Range</div><div class="ri-info-sub">Defaults to the current report week · editable</div></div>
+                        <div class="ri-info-body">
+                            <div class="ri-field-grid">
+                                <div class="ri-field"><label for="ri_WeekRangeStart">Week Range Start</label><input id="ri_WeekRangeStart" data-week="start" type="date" value="${esc(wkStart)}" ${roAttr} /></div>
+                                <div class="ri-field"><label for="ri_WeekRangeEnd">Week Range End</label><input id="ri_WeekRangeEnd" data-week="end" type="date" value="${esc(wkEnd)}" ${roAttr} /></div>
+                                <div class="ri-field" style="grid-column:1 / -1;"><label for="ri_WeekRangeText">Week Range Text</label><input id="ri_WeekRangeText" readonly value="${esc(row ? (row.weekRangeText || weekTextFrom(wkStart, wkEnd)) : weekTextFrom(wkStart, wkEnd))}" /></div>
+                            </div>
+                        </div>
+                    </section>`;
 
         el.form.innerHTML = `
             ${banner}
             <div class="ri-ctx-row">
                 <div class="ri-ctx-card"><div class="ri-ctx-label">Report Name</div><div class="ri-ctx-value">${esc(ctx.reportName)}</div></div>
-                <div class="ri-ctx-card"><div class="ri-ctx-label">Week Range</div><div class="ri-ctx-value">${esc(week)}</div></div>
+                <div class="ri-ctx-card"><div class="ri-ctx-label">Week Range</div><div class="ri-ctx-value" id="riCtxWeek">${esc(week)}</div></div>
                 <div class="ri-ctx-card"><div class="ri-ctx-label">Report ID / RUNID</div><div class="ri-ctx-value">${esc(runId)}</div></div>
                 <div class="ri-ctx-card"><div class="ri-ctx-label">Archive Status</div><div class="ri-ctx-value">${esc(archiveLabel)}</div></div>
             </div>
@@ -659,7 +706,7 @@
                         </div>
                     </section>
                 </div>
-                <div class="ri-detail-col">
+                <div class="ri-detail-col">${weekSection}
                     <section class="ri-info-card">
                         <div class="ri-info-head"><div class="ri-info-title">Timeline</div><div class="ri-info-sub">Discussion through close</div></div>
                         <div class="ri-info-body">
@@ -690,6 +737,7 @@
         syncBadges();
         bindRichToolbar(detailReadOnly);
         bindClaimsInput(el.form.querySelector("[data-key=NoOfClaims]"));
+        bindWeekFields();
         el.form.querySelectorAll("input, select, textarea, [contenteditable]").forEach(node => {
             node.addEventListener("input", () => { setDirty(true); if (node.dataset && node.dataset.key === "Status") syncBadges(); });
             node.addEventListener("change", () => { setDirty(true); syncBadges(); });
@@ -720,7 +768,7 @@
         const nClaims = parseClaims(get("NoOfClaims"));
         const charge = get("TotalCharge");
         const nCharge = charge === "" ? null : Number(charge);
-        return {
+        const payload = {
             noteId: editing ? editing.noteId : null,
             reportName: ctx.reportName,
             reportRunId: (editing && editing.reportRunId) || ctx.runId || null,
@@ -741,27 +789,134 @@
             closedDate: dateOrNull(get("ClosedDate")),
             statusCode: statusCode(get("Status") || "Discuss")
         };
+        const wf = weekLifecycle ? weekFields() : null;
+        if (wf) {
+            const ws = wf.start.value, we = wf.end.value || wf.start.value;
+            payload.weekRangeStart = ws || null;
+            payload.weekRangeEnd = we || null;
+            payload.weekRangeText = weekTextFrom(ws, we) || null;
+        }
+        return payload;
     }
+
+    let dialogEl = null;
+    let dialogModal = null;
+    const DIALOG_ICONS = { warn: "bi-archive", error: "bi-exclamation-octagon", info: "bi-info-circle" };
+
+    function ensureDialog() {
+        if (dialogEl) return dialogEl;
+        dialogEl = document.createElement("div");
+        dialogEl.className = "modal fade ri-dialog-stack";
+        dialogEl.tabIndex = -1;
+        dialogEl.setAttribute("aria-hidden", "true");
+        dialogEl.innerHTML = `
+            <div class="modal-dialog modal-dialog-centered ri-confirm-dialog ri-dialog">
+                <div class="modal-content ri-detail-modal ri-confirm-modal">
+                    <div class="modal-header ri-detail-head ri-dialog-head">
+                        <div class="ri-confirm-icon" aria-hidden="true"><i class="bi"></i></div>
+                        <div class="ri-detail-title-block">
+                            <div class="ri-detail-title" data-dlg="title"></div>
+                            <div class="ri-detail-sub" data-dlg="sub"></div>
+                        </div>
+                    </div>
+                    <div class="modal-body ri-confirm-body" data-dlg="body"></div>
+                    <div class="modal-footer ri-detail-footer ri-confirm-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-dlg="cancel"></button>
+                        <button type="button" class="btn ri-dialog-ok" data-dlg="ok"></button>
+                    </div>
+                </div>
+            </div>`;
+        document.body.appendChild(dialogEl);
+        dialogEl.addEventListener("shown.bs.modal", () => {
+            const backdrops = document.querySelectorAll(".modal-backdrop");
+            const last = backdrops[backdrops.length - 1];
+            if (last) last.classList.add("ri-dialog-backdrop");
+            const ok = dialogEl.querySelector("[data-dlg=ok]");
+            ok && ok.focus();
+        });
+        dialogEl.addEventListener("hidden.bs.modal", () => {
+            if (document.querySelector(".modal.show")) document.body.classList.add("modal-open");
+        });
+        return dialogEl;
+    }
+
+    /* Rich replacement for alert/confirm. Resolves true on OK, false on Cancel/close. */
+    function riDialog(opts) {
+        const o = Object.assign({ tone: "info", title: "", sub: "", bodyHtml: "", okText: "OK", cancelText: null }, opts || {});
+        if (!window.bootstrap) {
+            const text = stripHtml(o.bodyHtml) || o.title;
+            return Promise.resolve(o.cancelText ? confirm(text) : (alert(text), true));
+        }
+        const node = ensureDialog();
+        node.querySelector(".ri-dialog-head").className = "modal-header ri-detail-head ri-dialog-head tone-" + o.tone;
+        node.querySelector(".ri-confirm-icon i").className = "bi " + (DIALOG_ICONS[o.tone] || DIALOG_ICONS.info);
+        node.querySelector("[data-dlg=title]").textContent = o.title;
+        node.querySelector("[data-dlg=sub]").textContent = o.sub;
+        node.querySelector("[data-dlg=body]").innerHTML = o.bodyHtml;
+        const ok = node.querySelector("[data-dlg=ok]");
+        const cancel = node.querySelector("[data-dlg=cancel]");
+        ok.textContent = o.okText;
+        ok.className = "btn ri-dialog-ok tone-" + o.tone;
+        cancel.textContent = o.cancelText || "";
+        cancel.hidden = !o.cancelText;
+        if (!dialogModal) dialogModal = new bootstrap.Modal(node, { backdrop: "static" });
+        return new Promise(resolve => {
+            let result = false;
+            ok.onclick = () => { result = true; dialogModal.hide(); };
+            cancel.onclick = () => dialogModal.hide();
+            node.addEventListener("hidden.bs.modal", () => resolve(result), { once: true });
+            dialogModal.show();
+        });
+    }
+
+    const riNotice = (title, message) => riDialog({
+        tone: "error", title, sub: "Please correct and try again",
+        bodyHtml: `<div class="ri-dialog-msg">${esc(message)}</div>`
+    });
 
     async function save() {
         if (detailReadOnly) return;
         const payload = readForm();
-        if (!stripHtml(payload.insights)) { alert("Insights is required."); return; }
+        if (!stripHtml(payload.insights)) { await riNotice("Insights is required", "Enter the insight text before saving."); return; }
         if (payload.statusCode === "Closed" && !payload.closedDate) {
-            alert("Closed Date is required when Status is Closed.");
+            await riNotice("Closed Date is required", "Closed Date is required when Status is Closed.");
             return;
+        }
+        if (weekLifecycle && weekFields()) {
+            if (!payload.weekRangeStart || !payload.weekRangeEnd) { await riNotice("Week range is required", "Week Range Start and End are required."); return; }
+            if (payload.weekRangeEnd < payload.weekRangeStart) { await riNotice("Invalid week range", "Week Range End cannot be before Week Range Start."); return; }
+            if (ctx.weekStart && payload.weekRangeEnd < ctx.weekStart) {
+                const go = await riDialog({
+                    tone: "warn",
+                    title: "Save to a previous week range?",
+                    sub: "This insight will go straight to Archived Notes",
+                    bodyHtml: `
+                        <div class="ri-dialog-weeks">
+                            <div class="ri-dialog-week old"><span>Insight week range</span><strong>${esc(payload.weekRangeText || "")}</strong></div>
+                            <i class="bi bi-arrow-right" aria-hidden="true"></i>
+                            <div class="ri-dialog-week cur"><span>Current report week</span><strong>${esc(ctx.weekText || "")}</strong></div>
+                        </div>
+                        <div class="ri-dialog-msg">The selected week range ends before the current report week, so the insight is saved as <b>Archived</b> (read-only). You can find it under <b>Archived Notes</b>.</div>`,
+                    okText: "Save & Archive",
+                    cancelText: "Change week range"
+                });
+                if (!go) return;
+            }
         }
         el.save.disabled = true;
         try {
             await postJson(`${apiBase}/Notes/Save?${q({ lab: ctx.lab, report: ctx.reportName })}`, payload);
             modal && modal.hide();
             await loadRows();
-            showAlert("Insight saved. Version was incremented and a revision event was recorded.", "ok");
-        } catch (e) { alert(e.message); }
+            const toArchive = weekLifecycle && ctx.weekStart && payload.weekRangeEnd && payload.weekRangeEnd < ctx.weekStart;
+            showAlert(toArchive
+                ? `Insight saved for week range ${payload.weekRangeText} and moved to Archived Notes.`
+                : "Insight saved. Version was incremented and a revision event was recorded.", "ok");
+        } catch (e) { await riNotice("Save failed", e.message); }
         finally { el.save.disabled = false; }
     }
 
-    async function openHistory(noteId, fromArchive) {
+    async function openHistory(noteId) {
         if (!noteId) return;
         const note = rows.find(r => r.noteId === noteId);
         if (el.historyNoteBadge) el.historyNoteBadge.textContent = note ? ("#" + (note.displayNo || note.entryNo || noteId)) : ("Note " + noteId);
@@ -802,10 +957,6 @@
         if (back) {
             back.onclick = () => {
                 historyModal && historyModal.hide();
-                if (fromArchive) {
-                    archiveModal && archiveModal.show();
-                    return;
-                }
                 if (editing && editing.noteId === noteId) modal && modal.show();
                 else {
                     const row = rows.find(r => r.noteId === noteId);
@@ -816,13 +967,22 @@
     }
 
     async function openArchive() {
-        if (!archiveModal && window.bootstrap) archiveModal = new bootstrap.Modal(document.getElementById("riArchiveModal"));
+        const archiveNode = document.getElementById("riArchiveModal");
+        if (!archiveModal && window.bootstrap) archiveModal = new bootstrap.Modal(archiveNode);
+        const archiveDialog = archiveNode && archiveNode.querySelector(".modal-dialog");
+        if (archiveDialog) archiveDialog.classList.toggle("ri-archive-wide", weekLifecycle);
         el.archiveBody.innerHTML = `<div class="itm-empty">Loading archive…</div>`;
         archiveModal && archiveModal.show();
         try {
             const data = await getJson(`${apiBase}/Notes/Archived?${q({ lab: ctx.lab, report: ctx.reportName })}`);
             const s = data.summary || {};
             const archived = data.rows || [];
+            const sub = document.getElementById("riArchiveSub");
+            if (sub && weekLifecycle) sub.textContent = "Insights from previous week ranges · read-only historical reference";
+            if (weekLifecycle) {
+                renderArchiveGrid(s, archived);
+                return;
+            }
             const cards = `<div class="ri-ctx-row">
                 <div class="ri-ctx-card"><div class="ri-ctx-label">Total Archived</div><div class="ri-ctx-value">${esc(s.totalArchived || 0)}</div></div>
                 <div class="ri-ctx-card"><div class="ri-ctx-label">Red Risk Archived</div><div class="ri-ctx-value">${esc(s.redRiskArchived || 0)}</div></div>
@@ -841,26 +1001,106 @@
                 <td>${esc(fmtShort(n.closedDate))}</td>
                 <td class="ri-row-acts">
                     <button type="button" class="btn btn-sm btn-outline-secondary" data-aview="${n.noteId}">View</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" data-ahist="${n.noteId}">History</button>
                 </td>
             </tr>`).join("")}</tbody></table>` : `<div class="itm-empty">No archived notes for this report.</div>`;
             el.archiveBody.innerHTML = cards + table;
-            el.archiveBody.querySelectorAll("[data-aview]").forEach(btn => {
-                btn.onclick = async () => {
-                    const id = +btn.getAttribute("data-aview");
-                    try {
-                        const note = await getJson(`${apiBase}/Notes/Detail?${q({ lab: ctx.lab, id })}`);
-                        archiveModal && archiveModal.hide();
-                        openDetail(note, true);
-                    } catch (e) { alert(e.message); }
-                };
-            });
-            el.archiveBody.querySelectorAll("[data-ahist]").forEach(btn => {
-                btn.onclick = () => openHistory(+btn.getAttribute("data-ahist"), true);
-            });
+            bindArchiveActs();
         } catch (e) {
             el.archiveBody.innerHTML = `<div class="itm-alert error">${esc(e.message)}</div>`;
         }
+    }
+
+    function bindArchiveActs() {
+        el.archiveBody.querySelectorAll("[data-aview]").forEach(btn => {
+            btn.onclick = async () => {
+                const id = +btn.getAttribute("data-aview");
+                try {
+                    const note = await getJson(`${apiBase}/Notes/Detail?${q({ lab: ctx.lab, id })}`);
+                    archiveModal && archiveModal.hide();
+                    openDetail(note, true);
+                } catch (e) { await riNotice("Could not open insight", e.message); }
+            };
+        });
+    }
+
+    const archWeekKey = n => ymd(n.weekRangeStart) + "|" + ymd(n.weekRangeEnd);
+    const archWeekText = n => n.weekRangeText || weekTextFrom(ymd(n.weekRangeStart), ymd(n.weekRangeEnd)) || "—";
+
+    function renderArchiveGrid(s, archived) {
+        const rowsSorted = archived.slice().sort((a, b) =>
+            (ymd(b.weekRangeStart) || "").localeCompare(ymd(a.weekRangeStart) || "")
+            || (+a.entryNo || 0) - (+b.entryNo || 0)
+            || (+a.noteId || 0) - (+b.noteId || 0));
+        const weeks = [];
+        const seen = new Map();
+        rowsSorted.forEach(n => {
+            const key = archWeekKey(n);
+            if (!seen.has(key)) { const w = { key, text: archWeekText(n), count: 0 }; seen.set(key, w); weeks.push(w); }
+            seen.get(key).count++;
+        });
+        const cards = `<div class="ri-ctx-row">
+            <div class="ri-ctx-card"><div class="ri-ctx-label">Total Archived</div><div class="ri-ctx-value">${esc(s.totalArchived || archived.length)}</div></div>
+            <div class="ri-ctx-card"><div class="ri-ctx-label">Week Ranges</div><div class="ri-ctx-value">${esc(weeks.length)}</div></div>
+            <div class="ri-ctx-card"><div class="ri-ctx-label">Red Risk Archived</div><div class="ri-ctx-value">${esc(s.redRiskArchived || 0)}</div></div>
+            <div class="ri-ctx-card"><div class="ri-ctx-label">Last Archived</div><div class="ri-ctx-value">${esc(fmtShort(s.lastArchivedDate) || "—")}</div></div>
+        </div>
+        <div class="ri-lock-note">Archived Notes are read-only. When a new week range is loaded, insights from previous week ranges move here automatically.</div>`;
+        if (!rowsSorted.length) {
+            el.archiveBody.innerHTML = cards + `<div class="itm-empty">No archived notes for this report.</div>`;
+            return;
+        }
+        const toolbar = `<div class="ri-arch-toolbar">
+            <label for="riArchWeek"><i class="bi bi-calendar-range" aria-hidden="true"></i> Week Range</label>
+            <select id="riArchWeek" class="form-select form-select-sm">
+                <option value="">All week ranges (${rowsSorted.length})</option>
+                ${weeks.map(w => `<option value="${esc(w.key)}">${esc(w.text)} (${w.count})</option>`).join("")}
+            </select>
+            <span class="ri-arch-count" id="riArchCount"></span>
+        </div>`;
+        el.archiveBody.innerHTML = cards + toolbar + `<div class="ri-arch-scroll ri-arch-grid" id="riArchGrid"></div>`;
+        const select = document.getElementById("riArchWeek");
+        const draw = () => {
+            const key = select.value;
+            const list = key ? rowsSorted.filter(n => archWeekKey(n) === key) : rowsSorted;
+            document.getElementById("riArchGrid").innerHTML = archiveTableHtml(list);
+            document.getElementById("riArchCount").textContent = `Showing ${list.length} of ${rowsSorted.length} insight(s)`;
+            bindArchiveActs();
+        };
+        select.onchange = draw;
+        draw();
+    }
+
+    function archiveTableHtml(list) {
+        const L = reportLayout();
+        const head = `<thead><tr>
+            <th>#</th><th class="ri-arch-weekcol">Week Range</th><th>${esc(L.risk)}</th><th>${esc(L.party)}</th>
+            <th class="ri-arch-long">${esc(L.insights)}</th>
+            <th>${esc(L.claims)}</th><th>${esc(L.charge)}</th>
+            <th class="ri-arch-long">${esc(L.action)}</th><th class="ri-arch-long">${esc(L.feedback)}</th>
+            <th>${esc(L.owner)}</th><th>${esc(L.discuss)}</th><th>${esc(L.eta)}</th><th>${esc(L.closed)}</th>
+            <th>${esc(L.status)}</th><th>Archived On</th><th></th>
+        </tr></thead>`;
+        const body = list.map((n, i) => `<tr>
+                <td>${i + 1}</td>
+                <td class="ri-arch-weekcol"><span class="ri-arch-weekpill">${esc(archWeekText(n))}</span></td>
+                <td class="ri-risk-${esc(riskDisplay(n))}">${esc(riskDisplay(n))}</td>
+                <td>${esc(n.responsibleParty || "")}</td>
+                <td class="ri-arch-long"><div class="ri-insights-html">${sanitizeRichHtml(n.insights || "")}</div></td>
+                <td class="ri-count">${esc(formatClaims(n.noOfSamples))}</td>
+                <td class="ri-charge">${n.totalCharge == null || n.totalCharge === "" ? "" : money(n.totalCharge)}</td>
+                <td class="ri-arch-long">${esc(stripHtml(n.actionSolution || ""))}</td>
+                <td class="ri-arch-long">${esc(stripHtml(n.feedbackResponse || ""))}</td>
+                <td>${esc(n.responsibility || "")}</td>
+                <td class="ri-arch-date">${esc(fmtShort(n.discussionDate))}</td>
+                <td class="ri-arch-date">${esc(fmtShort(n.eta))}</td>
+                <td class="ri-arch-date">${esc(fmtShort(n.closedDate))}</td>
+                <td>${esc(n.statusLabel || n.statusCode || "")}</td>
+                <td class="ri-arch-date">${esc(fmtShort(n.archivedDate))}</td>
+                <td class="ri-row-acts">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-aview="${n.noteId}">View</button>
+                </td>
+            </tr>`).join("");
+        return `<table class="ri-archive-table ri-arch-flat">${head}<tbody>${body}</tbody></table>`;
     }
 
     function fillTemplates() {
@@ -885,10 +1125,13 @@
 
     async function loadRows() {
         const params = { lab: ctx.lab, report: ctx.reportName };
-        if (ctx.weekStart) params.weekStart = ctx.weekStart;
+        if (ctx.weekStart && !weekLifecycle) params.weekStart = ctx.weekStart;
         const data = await getJson(`${apiBase}/Notes/Active?${q(params)}`);
         const all = data.rows || [];
-        const filtered = (ctx.weekStart || ctx.weekText) ? all.filter(inCurrentWeek) : all;
+        const filtered = !weekLifecycle && (ctx.weekStart || ctx.weekText) ? all.filter(inCurrentWeek) : all;
+        if (data.archivedNow > 0) {
+            showAlert(`New week range ${data.currentWeekText || ""} loaded: ${data.archivedNow} insight(s) from previous week ranges moved to Archived Notes.`, "info");
+        }
         rows = filtered.slice().sort((a, b) => {
             const ea = a.entryNo ?? a.noteId ?? 0;
             const eb = b.entryNo ?? b.noteId ?? 0;
@@ -901,6 +1144,7 @@
 
     let loadPromise = null;
     let featureAvailable = false;
+    let weekLifecycle = false;
     const notEnabledMsg = "Insights are not enabled for this lab yet. Run the NotesInsights SQL scripts (SQL_Scripts\\NotesInsights 01-10) on this lab's database.";
     function showPanelLoading() {
         if (el.body) el.body.innerHTML = `<div class="ri-empty"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Loading insights…</div>`;
@@ -919,6 +1163,14 @@
                 return;
             }
             featureAvailable = true;
+            weekLifecycle = !!avail.weekLifecycle;
+            const cw = avail.currentWeek;
+            if (weekLifecycle && cw && cw.start) {
+                ctx.weekStart = cw.start;
+                ctx.weekEnd = cw.end || cw.start;
+                ctx.weekText = cw.text || weekTextFrom(cw.start, cw.end);
+                if (!ctx.runId && cw.runId) ctx.runId = cw.runId;
+            }
             try { lookups = await getJson(`${apiBase}/Notes/Lookups?${q({ lab: ctx.lab })}`); }
             catch { /* defaults in form */ }
             await refreshTemplates();

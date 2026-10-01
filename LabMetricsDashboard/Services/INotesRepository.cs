@@ -17,6 +17,19 @@ public interface INotesRepository
     /// </summary>
     Task<bool> IsFeatureAvailableAsync(string connectionString, CancellationToken ct = default);
 
+    /// <summary>
+    /// True when the week-range lifecycle script (11_NotesInsight_WeekRangeLifecycle)
+    /// is deployed: editable week range + auto-archive of previous weeks.
+    /// </summary>
+    Task<bool> IsWeekLifecycleEnabledAsync(string connectionString, CancellationToken ct = default);
+
+    /// <summary>Archives every non-archived insight of the report whose week ended before <paramref name="currentWeekStart"/>.</summary>
+    Task<int> ArchivePreviousWeeksAsync(
+        string connectionString, int reportKeyId, DateTime currentWeekStart, string? currentWeekText, CancellationToken ct = default);
+
+    Task SetWeekRangeAsync(
+        string connectionString, int noteId, DateTime weekRangeStart, DateTime weekRangeEnd, string? weekRangeText, string editedBy, CancellationToken ct = default);
+
     Task<int> EnsureReportAsync(string connectionString, string reportName, CancellationToken ct = default);
 
     Task<NotesLookups> GetLookupsAsync(string connectionString, CancellationToken ct = default);

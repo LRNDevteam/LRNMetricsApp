@@ -42,6 +42,53 @@ public sealed class SqlNotesRepository : INotesRepository
         }
     }
 
+    public async Task<bool> IsWeekLifecycleEnabledAsync(string connectionString, CancellationToken ct = default)
+    {
+        const string sql =
+            "SELECT CASE WHEN OBJECT_ID('dbo.usp_NotesInsight_ArchivePreviousWeeks','P') IS NOT NULL " +
+            "AND OBJECT_ID('dbo.usp_NotesInsight_SetWeekRange','P') IS NOT NULL THEN 1 ELSE 0 END;";
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 15 };
+            var result = await cmd.ExecuteScalarAsync(ct);
+            return result != null && result != DBNull.Value && Convert.ToInt32(result) == 1;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Notes: week-lifecycle check failed; treating as disabled.");
+            return false;
+        }
+    }
+
+    public async Task<int> ArchivePreviousWeeksAsync(
+        string connectionString, int reportKeyId, DateTime currentWeekStart, string? currentWeekText, CancellationToken ct = default)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand("dbo.usp_NotesInsight_ArchivePreviousWeeks", conn) { CommandType = CommandType.StoredProcedure, CommandTimeout = CommandTimeoutSeconds };
+        cmd.Parameters.AddWithValue("@ReportKeyId", reportKeyId);
+        cmd.Parameters.Add("@CurrentWeekStart", SqlDbType.Date).Value = currentWeekStart.Date;
+        cmd.Parameters.AddWithValue("@CurrentWeekText", (object?)NullIfEmpty(currentWeekText) ?? DBNull.Value);
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result == null || result == DBNull.Value ? 0 : Convert.ToInt32(result);
+    }
+
+    public async Task SetWeekRangeAsync(
+        string connectionString, int noteId, DateTime weekRangeStart, DateTime weekRangeEnd, string? weekRangeText, string editedBy, CancellationToken ct = default)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand("dbo.usp_NotesInsight_SetWeekRange", conn) { CommandType = CommandType.StoredProcedure, CommandTimeout = CommandTimeoutSeconds };
+        cmd.Parameters.AddWithValue("@NoteId", noteId);
+        cmd.Parameters.Add("@WeekRangeStart", SqlDbType.Date).Value = weekRangeStart.Date;
+        cmd.Parameters.Add("@WeekRangeEnd", SqlDbType.Date).Value = weekRangeEnd.Date;
+        cmd.Parameters.AddWithValue("@WeekRangeText", (object?)NullIfEmpty(weekRangeText) ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@EditedBy", editedBy);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     // ── Report registry ──────────────────────────────────────────────────
     public async Task<int> EnsureReportAsync(string connectionString, string reportName, CancellationToken ct = default)
     {
