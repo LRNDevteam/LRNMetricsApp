@@ -24,14 +24,34 @@ public sealed class NotesController : Controller
 
     private readonly LabSettings _labSettings;
     private readonly INotesRepository _repo;
+    private readonly IAnalysisRangeService _analysisRange;
     private readonly ILogger<NotesController> _logger;
 
-    public NotesController(LabSettings labSettings, INotesRepository repo, ILogger<NotesController> logger)
+    public NotesController(LabSettings labSettings, INotesRepository repo, IAnalysisRangeService analysisRange, ILogger<NotesController> logger)
     {
         _labSettings = labSettings;
         _repo = repo;
+        _analysisRange = analysisRange;
         _logger = logger;
     }
+
+    private sealed record CurrentWeek(DateTime Start, DateTime End, string Text, string? RunId);
+
+    /// <summary>Latest loaded week range of the lab (LineClaimFileLogs); null when unknown.</summary>
+    private async Task<CurrentWeek?> GetCurrentWeekAsync(string cs, CancellationToken ct)
+    {
+        var range = await _analysisRange.GetAsync(cs, ct);
+        TryParseWeekRangeText(range.WeekFolder, out var start, out var end);
+        if (start is null) return null;
+        var s = start.Value.Date;
+        var e = (end ?? s).Date;
+        if (e < s) e = s;
+        var text = string.IsNullOrWhiteSpace(range.WeekFolder) ? FormatWeekText(s, e) : range.WeekFolder.Trim();
+        return new CurrentWeek(s, e, text, range.RunId);
+    }
+
+    private static string FormatWeekText(DateTime s, DateTime e) =>
+        s.Date == e.Date ? s.ToString("MM.dd.yyyy") : $"{s:MM.dd.yyyy} - {e:MM.dd.yyyy}";
 
     private string CurrentUser => User.Identity?.Name?.Trim() is { Length: > 0 } u ? u : "system";
 
@@ -66,7 +86,24 @@ public sealed class NotesController : Controller
     public async Task<IActionResult> Available(string? lab, CancellationToken ct)
     {
         if (!TryResolveConnection(lab, out var cs, out _)) return Json(new { available = false });
-        try { return Json(new { available = await _repo.IsFeatureAvailableAsync(cs, ct) }); }
+        try
+        {
+            if (!await _repo.IsFeatureAvailableAsync(cs, ct)) return Json(new { available = false });
+            if (!await _repo.IsWeekLifecycleEnabledAsync(cs, ct)) return Json(new { available = true, weekLifecycle = false });
+            var week = await GetCurrentWeekAsync(cs, ct);
+            return Json(new
+            {
+                available = true,
+                weekLifecycle = true,
+                currentWeek = week is null ? null : new
+                {
+                    start = week.Start.ToString("yyyy-MM-dd"),
+                    end = week.End.ToString("yyyy-MM-dd"),
+                    text = week.Text,
+                    runId = week.RunId
+                }
+            });
+        }
         catch { return Json(new { available = false }); }
     }
 
@@ -90,8 +127,19 @@ public sealed class NotesController : Controller
         try
         {
             var reportKeyId = await _repo.EnsureReportAsync(cs, reportName, ct);
+            var archivedNow = 0;
+            string? currentWeekText = null;
+            if (await _repo.IsWeekLifecycleEnabledAsync(cs, ct))
+            {
+                var week = await GetCurrentWeekAsync(cs, ct);
+                if (week is not null)
+                {
+                    archivedNow = await _repo.ArchivePreviousWeeksAsync(cs, reportKeyId, week.Start, week.Text, ct);
+                    currentWeekText = week.Text;
+                }
+            }
             var rows = await _repo.GetActiveAsync(cs, reportKeyId, weekStart, status, risk, responsibility, search, ct);
-            return Json(new { reportKeyId, reportName, rows });
+            return Json(new { reportKeyId, reportName, rows, archivedNow, currentWeekText });
         }
         catch (Exception ex) { return Fail(ex, "load active notes"); }
     }
@@ -168,6 +216,8 @@ public sealed class NotesController : Controller
             else
             {
                 result = await _repo.UpdateAsync(cs, req, CurrentUser, ct);
+                if (await _repo.IsWeekLifecycleEnabledAsync(cs, ct))
+                    await _repo.SetWeekRangeAsync(cs, req.NoteId!.Value, req.WeekRangeStart!.Value, req.WeekRangeEnd!.Value, req.WeekRangeText, CurrentUser, ct);
             }
             return Json(result);
         }

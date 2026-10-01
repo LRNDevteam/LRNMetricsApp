@@ -328,6 +328,72 @@
 .ri-archive-table { width: 100%; font-size: .78rem; border-collapse: collapse; }
 .ri-archive-table th { background: #10243d; color: #fff; padding: .4rem .5rem; }
 .ri-archive-table td { padding: .4rem .5rem; border-bottom: 1px solid #e8eef5; vertical-align: top; }
+.ri-arch-scroll { overflow-x: auto; }
+.ri-arch-scroll .ri-archive-table th { white-space: nowrap; }
+.ri-archive-table tr.ri-arch-week td {
+    background: #e8f0fa; color: #10243d; font-weight: 700; font-size: .8rem;
+    border-top: 2px solid #10243d; padding: .45rem .6rem;
+}
+.ri-archive-table tr.ri-arch-week td span { color: #5a6b80; font-weight: 600; }
+
+/* Archived Notes — week-range lifecycle: wide modal, flat grid, week filter */
+.modal-dialog.ri-archive-wide { --bs-modal-width: min(1860px, 97vw); max-width: min(1860px, 97vw); }
+.ri-arch-toolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin: 0 0 10px; padding: 8px 12px;
+    border: 1px solid #d9e3ef; border-radius: 10px; background: #f6f9fc;
+}
+.ri-arch-toolbar label { font-size: .78rem; font-weight: 800; color: #10243d; margin: 0; white-space: nowrap; }
+.ri-arch-toolbar select { width: auto; min-width: 280px; font-size: .8rem; }
+.ri-arch-count { margin-left: auto; font-size: .75rem; font-weight: 700; color: #5a6b80; }
+.ri-arch-scroll.ri-arch-grid {
+    max-height: 62vh; overflow: auto;
+    border: 1px solid #e2e8f0; border-radius: 8px;
+}
+.ri-arch-flat thead th { position: sticky; top: 0; z-index: 2; }
+.ri-arch-flat tbody tr:nth-child(even) td { background: #fafcfe; }
+.ri-arch-flat tbody tr:hover td { background: #eef5fd; }
+.ri-arch-flat td.ri-arch-long, .ri-arch-flat th.ri-arch-long {
+    min-width: 26rem; max-width: 34rem;
+    white-space: normal; overflow-wrap: anywhere; line-height: 1.45;
+}
+.ri-arch-flat .ri-insights-html { max-width: none; }
+.ri-arch-flat .ri-arch-weekcol, .ri-arch-flat .ri-arch-date { white-space: nowrap; }
+.ri-arch-weekpill {
+    display: inline-block; padding: 3px 8px; border-radius: 999px;
+    background: #e8f0fa; border: 1px solid #c8d9ee; color: #10243d;
+    font-weight: 700; font-size: .72rem;
+}
+
+/* Rich alert / confirm dialog — stacks above the insight editor */
+.ri-dialog-stack { z-index: 1080; }
+.modal-backdrop.ri-dialog-backdrop { z-index: 1075; }
+.ri-dialog { max-width: 520px; }
+.ri-dialog-head { align-items: center; gap: 12px; }
+.ri-dialog-head.tone-warn { background: linear-gradient(135deg, #78350f 0%, #b45309 55%, #d97706 100%); }
+.ri-dialog-head.tone-error { background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 45%, #b91c1c 100%); }
+.ri-dialog-head.tone-info { background: linear-gradient(135deg, #10243d 0%, #1d3f66 60%, #285a8f 100%); }
+.ri-dialog-msg { font-size: .86rem; color: #1e293b; line-height: 1.5; }
+.ri-dialog-weeks {
+    display: flex; align-items: stretch; gap: 10px; margin-bottom: 12px;
+}
+.ri-dialog-weeks > i { align-self: center; color: #94a3b8; }
+.ri-dialog-week {
+    flex: 1; border-radius: 10px; padding: 9px 12px; border: 1px solid #e2e8f0; background: #f8fafc;
+}
+.ri-dialog-week span { display: block; font-size: .68rem; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #64748b; }
+.ri-dialog-week strong { display: block; font-size: .86rem; color: #0f172a; margin-top: 2px; white-space: nowrap; }
+.ri-dialog-week.old { border-color: #fcd34d; background: #fffbeb; }
+.ri-dialog-week.old strong { color: #92400e; }
+.ri-dialog-week.cur { border-color: #bfdbfe; background: #eff6ff; }
+.ri-dialog-week.cur strong { color: #1e3a8a; }
+.ri-dialog-ok { font-weight: 700; color: #fff; min-width: 96px; }
+.ri-dialog-ok.tone-warn { background: #b45309; border-color: #92400e; }
+.ri-dialog-ok.tone-warn:hover, .ri-dialog-ok.tone-warn:focus { background: #92400e; color: #fff; }
+.ri-dialog-ok.tone-error { background: #b91c1c; border-color: #991b1b; }
+.ri-dialog-ok.tone-error:hover, .ri-dialog-ok.tone-error:focus { background: #991b1b; color: #fff; }
+.ri-dialog-ok.tone-info { background: #10243d; border-color: #10243d; }
+.ri-dialog-ok.tone-info:hover, .ri-dialog-ok.tone-info:focus { background: #1d3f66; color: #fff; }
 @media (max-width: 1100px) {
     .ri-detail-layout, .ri-ctx-row, .ri-field-grid, .ri-history-summary { grid-template-columns: 1fr; }
     .ri-rev { grid-template-columns: 34px 1fr; }
