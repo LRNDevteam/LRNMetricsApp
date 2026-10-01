@@ -103,6 +103,8 @@ var host = Host.CreateDefaultBuilder(args)
         // lab's database via LabConnectionResolver, so instances must not be shared between
         // concurrently generating reports.
         services.AddTransient<LabMetricsDashboard.Services.SqlDenialRecordRepository>();
+        // Denial Summary (DenialClaimReport page) — stateless, takes the lab connection per call.
+        services.AddSingleton<LabMetricsDashboard.Services.SqlDenialClaimReportRepository>();
 
         // One IReportGenerator per report type — add future reports here.
         services.AddSingleton<IReportGenerator, PayerPolicyValidationReportGenerator>();
@@ -119,6 +121,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IReportGenerator, CodingSummaryReportGenerator>();
         services.AddSingleton<IReportGenerator, LisSummaryReportGenerator>();
         services.AddSingleton<IReportGenerator, DenialDashboardReportGenerator>();
+        services.AddSingleton<IReportGenerator, DenialSummaryReportGenerator>();
         // Two report types, one class: registered per tab so the factory can key on ReportType.
         services.AddSingleton<IReportGenerator>(sp => CptLookupReportGenerator.ForCpt(
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ReportStorageOptions>>(),

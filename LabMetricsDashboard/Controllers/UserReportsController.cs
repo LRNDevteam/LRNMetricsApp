@@ -177,6 +177,8 @@ public class UserReportsController : Controller
                     LisSummaryReportFilters.FromJson(filterDetails).ToJson()),
                 "denialdashboard" or "denialreport" => (ReportTypes.DenialDashboard,
                     DenialDashboardReportFilters.FromJson(filterDetails).ToJson()),
+                "denialsummary" or "denialclaimreport" => (ReportTypes.DenialSummary,
+                    DenialSummaryReportFilters.FromJson(filterDetails).ToJson()),
                 // Cross-lab: these two are queued against ReportQueueLabs.Master, not a real lab.
                 "cptlookup" => (ReportTypes.CptLookup,
                     CptLookupReportFilters.FromJson(filterDetails).ToJson()),

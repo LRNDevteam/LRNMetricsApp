@@ -23,9 +23,15 @@
         </div>
         <div class="rpt-page-head-right">
             <div class="rpt-toolbar">
-                <a class="btn btn-sm btn-outline-success rpt-toolbar-btn"
+                @* Queued through LRN.ReportWorker (the Reports badge says when it is ready). The href
+                   is the direct download, used when the lab has no report queue or JS is off. *@
+                <a id="dcrExportExcelBtn" class="btn btn-sm btn-outline-success rpt-toolbar-btn"
                    asp-action="ExportWorkbook" asp-route-lab="@Model.CurrentLab" asp-route-bucket="@Model.Insight.Bucket"
-                   title="Download Excel - Monthly Summary, Weekly Summary and Denial Insight in one workbook"
+                   data-lab="@Model.CurrentLab" data-bucket="@Model.Insight.Bucket"
+                   data-week-starts-on="@(ViewData["DenialWeekStartsOn"] as string)"
+                   data-date-column="@(ViewData["DenialDateColumn"] as string)"
+                   data-run-id="@Model.RunId" data-week-folder="@Model.WeekRange"
+                   title="Download Excel - Monthly Summary, Weekly Summary, Denial Insight and Denial Claim Level in one workbook"
                    aria-label="Download Excel">
                     <i class="bi bi-file-earmark-excel"></i>
                 </a>
@@ -34,7 +40,7 @@
     </div>
     <div class="text-muted mb-3" style="font-size:.85rem;">
         Calculated from <strong>@Model.CurrentLab</strong>&rsquo;s claim-level data &mdash; denied claims with an
-        insurance balance still outstanding, grouped on Denial Date. Denial codes roll up to their
+        insurance balance still outstanding, grouped on @(ViewData["DenialDateColumn"] as string is { Length: > 0 } dc ? dc : "Denial Date"). Denial codes roll up to their
         common code, so CO45, PI45 and PR45 all count as 45.
     </div>
 
@@ -184,6 +190,77 @@
 
 @section Scripts {
     <script nonce="@Context.Items["CspNonce"]">
+        // ── Excel download ───────────────────────────────────────────────────
+        // Queues a DenialSummary report; LRN.ReportWorker builds the four-sheet workbook (Monthly,
+        // Weekly, Denial Insight and the Denial Claim Level rows) and the Reports badge says when
+        // it is ready. Falls back to the button's own href - the direct download - when the lab
+        // has no report queue.
+        (function () {
+            var btn = document.getElementById('dcrExportExcelBtn');
+            if (!btn) return;
+
+            btn.addEventListener('click', function (e) {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                e.preventDefault();
+
+                var direct = function () { window.location.href = btn.getAttribute('href'); };
+                var lab = btn.dataset.lab;
+                if (!lab) { direct(); return; }
+
+                // The Insight week tab swaps without a reload but the address bar follows it, so
+                // the URL is the current choice; the attribute is only the first render's.
+                var bucket = new URLSearchParams(window.location.search).get('bucket') || btn.dataset.bucket || null;
+
+                var filters = {
+                    Bucket:       bucket,
+                    WeekStartsOn: btn.dataset.weekStartsOn || null,
+                    DateColumn:   btn.dataset.dateColumn || null,
+                    // Not filters - these name the downloaded file after the run it came from.
+                    RunId:        btn.dataset.runId || null,
+                    WeekFolder:   btn.dataset.weekFolder || null
+                };
+
+                var body = new FormData();
+                body.append('lab', lab);
+                body.append('reportType', 'DenialSummary');
+                body.append('filterDetails', JSON.stringify(filters));
+                var af = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
+                if (af) body.append('__RequestVerificationToken', af.value);
+
+                var original = btn.innerHTML;
+                btn.classList.add('disabled');
+                window.rptExportBusy(btn, '<span class="spinner-border spinner-border-sm"></span> Queuing…');
+
+                fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
+                    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+                    .then(function (res) {
+                        if (res.ok) {
+                            window.rptExportBusy(btn, '<i class="bi bi-check-circle"></i> Generating — watch Reports');
+                            if (window.lrnShowReportAlert) window.lrnShowReportAlert('success');
+                            if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
+                            setTimeout(function () { btn.classList.remove('disabled'); window.rptExportIdle(btn, original); }, 8000);
+                            return;
+                        }
+
+                        btn.classList.remove('disabled');
+                        window.rptExportIdle(btn, original);
+
+                        if (res.status === 400) { direct(); return; }
+
+                        var qMsg = res.j && res.j.message ? res.j.message : '';
+                        if (window.lrnShowReportAlert) {
+                            if (res.status === 409 || /already/i.test(qMsg)) window.lrnShowReportAlert('info');
+                            else window.lrnShowReportAlert('error', { message: qMsg || 'Could not queue the report.' });
+                        }
+                    })
+                    .catch(function () {
+                        btn.classList.remove('disabled');
+                        window.rptExportIdle(btn, original);
+                        direct();
+                    });
+            });
+        })();
+
         (function () {
             // Keep the open tab in the URL. A save, an import or a delete redirects back here, and
             // without this the lab picker in the header would drop the user on Monthly Summary

@@ -665,6 +665,52 @@ public sealed record LisSummaryReportFilters(
 }
 
 /// <summary>
+/// Filter snapshot for a Denial Summary (DenialClaimReport page) export.
+/// </summary>
+/// <remarks>
+/// The page has no filters of its own; what travels here is what the worker cannot work out
+/// alone. <see cref="WeekStartsOn"/> comes from the dashboard's LabConfig:DenialSummaryWeekRange,
+/// which the worker does not read, so it is resolved when the job is queued and the Weekly sheet
+/// matches the screen.
+/// </remarks>
+public sealed record DenialSummaryReportFilters(
+    // Denial Insight tab exported: "Current" or "Previous".
+    string? Bucket       = null,
+    // First day of the lab's denial week, as a DayOfWeek name ("Friday").
+    string? WeekStartsOn = null,
+    // ClaimLevelData column that dates the denials (LabConfig:DenialSummaryDateColumn); null = Denial Date.
+    string? DateColumn   = null,
+    // Identify the run in the downloaded file name; not filters.
+    string? RunId        = null,
+    string? WeekFolder   = null)
+{
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    public string ToJson() => JsonSerializer.Serialize(this, JsonOpts);
+
+    public static DenialSummaryReportFilters FromJson(string? json) =>
+        string.IsNullOrWhiteSpace(json)
+            ? new DenialSummaryReportFilters()
+            : JsonSerializer.Deserialize<DenialSummaryReportFilters>(json, JsonOpts)
+              ?? new DenialSummaryReportFilters();
+
+    /// <summary>The configured week start, or null when absent or not a day name.</summary>
+    public DayOfWeek? ParsedWeekStartsOn =>
+        Enum.TryParse<DayOfWeek>(WeekStartsOn, ignoreCase: true, out var day) ? day : null;
+
+    public List<(string Label, string? Value)> ToActiveFilterList()
+    {
+        var list = new List<(string, string?)>();
+        if (!string.IsNullOrWhiteSpace(Bucket)) list.Add(("Denial Insight", Bucket));
+        if (!string.IsNullOrWhiteSpace(WeekStartsOn)) list.Add(("Week Starts On", WeekStartsOn));
+        return list;
+    }
+}
+
+/// <summary>
 /// Filter snapshot for a Coding Summary Excel export. The page currently exports
 /// the full lab dataset (no server-side year/week/panel filter); this contract
 /// exists so queue validation stays consistent with other report types.

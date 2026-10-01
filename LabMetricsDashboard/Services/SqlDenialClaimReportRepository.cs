@@ -21,7 +21,11 @@ public interface IDenialClaimReportRepository
     /// The aggregated denial groups the Monthly and Weekly summaries are built from, straight out
     /// of the lab's own dbo.ClaimLevelData.
     /// </summary>
-    Task<IReadOnlyList<DenialSummaryGroup>> GetDenialSummaryAsync(string connectionString, CancellationToken ct);
+    /// <param name="dateColumn">
+    /// The ClaimLevelData column that dates each claim (LabConfig:DenialSummaryDateColumn, e.g.
+    /// CheckDate for Beech Tree). Null, or a column the table does not have, uses the Denial Date.
+    /// </param>
+    Task<IReadOnlyList<DenialSummaryGroup>> GetDenialSummaryAsync(string connectionString, string? dateColumn, CancellationToken ct);
 
     /// <summary>
     /// How far the lab's claim data is loaded: the newest <c>ClaimLevelData.WeekFolder</c> as it is
@@ -42,6 +46,17 @@ public interface IDenialClaimReportRepository
     /// </summary>
     Task<DenialClaimPage> GetClaimRowsAsync(string connectionString, IReadOnlyList<string> columns,
         string? denialCode, string? payerName, int page, int pageSize, CancellationToken ct);
+
+    /// <summary>
+    /// The SELECT behind the download's Denial Claim Level sheet: every denied claim with an
+    /// insurance balance outstanding, carrying the lab's claim-level columns. Null when the lab
+    /// has no claim-level table or no DenialCode column.
+    /// </summary>
+    Task<DeniedClaimExportQuery?> BuildDeniedClaimExportQueryAsync(
+        string connectionString, IReadOnlyList<string> columns, CancellationToken ct);
+
+    /// <summary>Runs <paramref name="query"/> into memory - for the page's direct download only.</summary>
+    Task<DataTable> ReadDeniedClaimsAsync(string connectionString, DeniedClaimExportQuery query, CancellationToken ct);
 
     /// <summary>The insight rows on one tab - Current or Previous.</summary>
     Task<IReadOnlyList<DenialInsightRow>> GetInsightsAsync(string connectionString, string bucket, CancellationToken ct);
@@ -67,6 +82,9 @@ public interface IDenialClaimReportRepository
     /// </summary>
     Task<DenialInsightRollResult> RollCurrentToPreviousAsync(string connectionString, string userName, CancellationToken ct);
 }
+
+/// <summary>A ready-to-run SELECT and the columns it returns, in order.</summary>
+public sealed record DeniedClaimExportQuery(string Sql, IReadOnlyList<string> Columns);
 
 /// <summary>What an import's roll-forward moved, reported back on the page.</summary>
 public sealed record DenialInsightRollResult(int RolledToPrevious, int Archived);
@@ -122,7 +140,7 @@ public sealed class SqlDenialClaimReportRepository : IDenialClaimReportRepositor
 
     // ── Denial summary ────────────────────────────────────────────────────────
 
-    public async Task<IReadOnlyList<DenialSummaryGroup>> GetDenialSummaryAsync(string connectionString, CancellationToken ct)
+    public async Task<IReadOnlyList<DenialSummaryGroup>> GetDenialSummaryAsync(string connectionString, string? dateColumn, CancellationToken ct)
     {
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
@@ -166,7 +184,23 @@ public sealed class SqlDenialClaimReportRepository : IDenialClaimReportRepositor
             : $"LTRIM(RTRIM(CONVERT(nvarchar(255), [{claimIdCol}])))";
         var claimCountExpr = claimIdCol is null ? "COUNT_BIG(1)" : "COUNT(DISTINCT ClaimKey)";
 
-        var (denialDateExpr, lineDateJoin) = await BuildDenialDateSourceAsync(conn, cols, claimIdCol, ct);
+        // A lab configured to report on its own claim column (Beech Tree: CheckDate) is dated by that
+        // column alone. The name is matched against the table's real columns first, so only a column
+        // that exists - spelled as the table spells it - ever reaches the SQL.
+        var configuredDate = string.IsNullOrWhiteSpace(dateColumn)
+            ? null
+            : cols.FirstOrDefault(c => string.Equals(c, dateColumn.Trim(), StringComparison.OrdinalIgnoreCase));
+
+        if (!string.IsNullOrWhiteSpace(dateColumn) && configuredDate is null)
+        {
+            _logger.LogWarning(
+                "Denial summary: configured date column '{Column}' is not on ClaimLevelData; using the Denial Date.",
+                dateColumn);
+        }
+
+        var (denialDateExpr, lineDateJoin) = configuredDate is not null
+            ? ($"TRY_CONVERT(date, cld.[{configuredDate.Replace("]", "]]")}])", string.Empty)
+            : await BuildDenialDateSourceAsync(conn, cols, claimIdCol, ct);
 
         // TRY_CONVERT rather than CAST: a lab whose InsuranceBalance is stored as text with a
         // currency symbol would fail the whole query on CAST. TRY_CONVERT yields NULL, and NULL is
@@ -463,6 +497,62 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         }
 
         return result;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>The same denied population as the Claim Level tab and the summaries, so the sheet
+    /// ties back to the figures beside it. The columns are the lab's claim-level catalog - the
+    /// same set the Claim Level report downloads - cut down to what this lab's table actually has,
+    /// because a catalog column the table lacks would fail the whole query.</para>
+    /// <para>DenialCodeNormalized and DenialDescription are added whenever the table has them,
+    /// even for a lab whose catalog does not list them: they are the point of this sheet.</para>
+    /// </remarks>
+    public async Task<DeniedClaimExportQuery?> BuildDeniedClaimExportQueryAsync(
+        string connectionString, IReadOnlyList<string> columns, CancellationToken ct)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+
+        if (!await TableExistsAsync(conn, "ClaimLevelData", ct)) return null;
+
+        var present = await GetColumnsAsync(conn, "ClaimLevelData", ct);
+        if (!present.Contains("DenialCode") || !present.Contains("InsuranceBalance")) return null;
+
+        var selected = columns.Where(present.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        foreach (var derived in new[] { "DenialCodeNormalized", "DenialDescription" })
+        {
+            if (present.Contains(derived) && !selected.Contains(derived, StringComparer.OrdinalIgnoreCase))
+                selected.Add(derived);
+        }
+
+        if (selected.Count == 0) selected.Add("DenialCode");
+
+        var sql = $@"
+SELECT {LabClaimLineColumnCatalog.ToSqlSelectList(selected, isLineLevel: false)}
+FROM   dbo.ClaimLevelData
+WHERE  [DenialCode] IS NOT NULL
+  AND  LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> ''
+  AND  TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0
+ORDER BY ISNULL(TRY_CONVERT(decimal(18,2), [InsuranceBalance]), 0) DESC;";
+
+        return new DeniedClaimExportQuery(sql, selected);
+    }
+
+    /// <inheritdoc />
+    public async Task<DataTable> ReadDeniedClaimsAsync(
+        string connectionString, DeniedClaimExportQuery query, CancellationToken ct)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+
+        await using var cmd = new SqlCommand(query.Sql, conn) { CommandTimeout = 600 };
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        var table = new DataTable("DenialClaimLevel");
+        table.Load(reader);
+        return table;
     }
 
     /// <summary>

@@ -25,8 +25,8 @@ namespace LabMetricsDashboard.Controllers;
 public sealed class DenialClaimReportController : Controller
 {
     /// <summary>Periods across a pivot. Weekly is the last four weeks, per the reporting spec.</summary>
-    private const int MonthlyPeriods = 12;
-    private const int WeeklyPeriods = 4;
+    private const int MonthlyPeriods = DenialClaimReportExcelBuilder.MonthlyPeriods;
+    private const int WeeklyPeriods = DenialClaimReportExcelBuilder.WeeklyPeriods;
 
     /// <summary>Claim rows per page on the Claim Level tab.</summary>
     /// <summary>
@@ -178,6 +178,12 @@ public sealed class DenialClaimReportController : Controller
     private DayOfWeek WeekStartsOnFor(string? labName)
         => _labConfig.GetDenialSummaryWeekStart(labName) ?? SqlDenialClaimReportRepository.DefaultWeekStartsOn;
 
+    /// <summary>
+    /// The ClaimLevelData column that dates the lab's denials: LabConfig:DenialSummaryDateColumn
+    /// when the lab is listed (Beech_Tree: CheckDate), else null - the Denial Date.
+    /// </summary>
+    private string? DateColumnFor(string? labName) => _labConfig.GetDenialSummaryDateColumn(labName);
+
     // ── The page ──────────────────────────────────────────────────────────────
 
     [HttpGet]
@@ -221,9 +227,15 @@ public sealed class DenialClaimReportController : Controller
         var weekStartsOn = WeekStartsOnFor(labName);
         model.Insight.CurrentWeekStart = SqlDenialClaimReportRepository.WeekStartOf(DateTime.Today, weekStartsOn);
 
+        // Travels with the queued download: LRN.ReportWorker does not read LabConfig, so it is
+        // told the lab's week here and the Weekly sheet matches the screen.
+        ViewData["DenialWeekStartsOn"] = weekStartsOn.ToString();
+        var dateColumn = DateColumnFor(labName);
+        ViewData["DenialDateColumn"] = dateColumn;
+
         try
         {
-            var groups = await _repo.GetDenialSummaryAsync(connectionString, ct);
+            var groups = await _repo.GetDenialSummaryAsync(connectionString, dateColumn, ct);
 
             model.TotalClaims = groups.Sum(g => g.ClaimCount);
             model.TotalInsuranceBalance = groups.Sum(g => g.InsuranceBalance);
@@ -269,13 +281,16 @@ public sealed class DenialClaimReportController : Controller
     }
 
     /// <summary>
-    /// Downloads the whole report as one workbook: Monthly Summary, Weekly Summary and Denial
-    /// Insight, a sheet each, carrying the page's own colours.
+    /// Downloads the whole report as one workbook: Monthly Summary, Weekly Summary, Denial Insight
+    /// and the Denial Claim Level rows, a sheet each.
     /// </summary>
     /// <remarks>
-    /// Rebuilds the summaries rather than reusing whatever the last page render held, so the file
-    /// is the lab's position now. The Denial Insight sheet exports the tab the user is looking at -
-    /// Current or Previous Week - because that is the one they asked to download.
+    /// <para>The page's Download button queues this through LRN.ReportWorker (report type
+    /// DenialSummary), which streams the claim sheet. This action is the fallback the button uses
+    /// when the lab has no report queue, and it builds the same four sheets.</para>
+    /// <para>Rebuilds the summaries rather than reusing whatever the last page render held, so the
+    /// file is the lab's position now. The Denial Insight sheet exports the tab the user is looking
+    /// at - Current or Previous Week - because that is the one they asked to download.</para>
     /// </remarks>
     [HttpGet]
     public async Task<IActionResult> ExportWorkbook(string? lab, string? bucket, CancellationToken ct)
@@ -283,44 +298,34 @@ public sealed class DenialClaimReportController : Controller
         if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
             return Redirect(InsightError(error, lab));
 
-        var model = new DenialClaimReportViewModel
-        {
-            CurrentLab = labName,
-            Insight = new DenialInsightPanelViewModel
-            {
-                CurrentLab = labName,
-                Bucket = DenialInsightBuckets.Normalize(bucket)
-            }
-        };
+        DenialClaimReportViewModel model;
+        System.Data.DataTable? claims = null;
 
         try
         {
-            var groups = await _repo.GetDenialSummaryAsync(connectionString, ct);
+            model = await DenialClaimReportExcelBuilder.LoadAsync(
+                _repo, connectionString, labName, bucket, WeekStartsOnFor(labName), DateColumnFor(labName), ct);
 
-            // Same clamp as the page, so the exported workbook and the screen agree on the columns.
-            var weekRange = await _repo.GetClaimDataWeekRangeAsync(connectionString, ct);
-            model.WeekRange = weekRange.WeekFolder;
-            model.RunId = weekRange.RunId;
-
-            model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods, loadedThrough: weekRange.LoadedThrough);
-            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: weekRange.LoadedThrough, weekStartsOn: WeekStartsOnFor(labName));
-
-            model.Insight.Rows = await _repo.GetInsightsAsync(connectionString, model.Insight.Bucket, ct);
+            var claimQuery = await _repo.BuildDeniedClaimExportQueryAsync(
+                connectionString, LabClaimLineColumnCatalog.GetClaimColumns(labName), ct);
+            if (claimQuery is not null)
+                claims = await _repo.ReadDeniedClaimsAsync(connectionString, claimQuery, ct);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Denial Claim Report export failed for lab {Lab}.", labName);
+            _logger.LogError(ex, "Denial Summary export failed for lab {Lab}.", labName);
             return Redirect(InsightError("The workbook could not be built for this lab.", labName));
         }
 
         using var workbook = DenialClaimReportExcelBuilder.Build(model);
+        DenialClaimReportExcelBuilder.AddClaimLevelSheet(workbook, claims);
 
         await using var stream = new MemoryStream();
         workbook.SaveAs(stream);
 
         var safeLab = string.Join("_", labName.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
         return File(stream.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            $"{safeLab}_DenialClaimReport_{DateTime.Now:yyyyMMdd}.xlsx");
+            $"{safeLab}_DenialSummary_{DateTime.Now:yyyyMMdd}.xlsx");
     }
 
     /// <summary>

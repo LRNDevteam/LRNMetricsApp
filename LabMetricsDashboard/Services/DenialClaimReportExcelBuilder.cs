@@ -38,6 +38,59 @@ public static class DenialClaimReportExcelBuilder
     private const string Money = "$#,##0.00";
     private const string Whole = "#,##0";
 
+    /// <summary>
+    /// Periods across each pivot. Monthly shows every month the lab has denials in - with the
+    /// Other Periods column gone, capping it at twelve left older claims out of the Grand Total,
+    /// which then disagreed with the Denied Claims tile. Weekly is the last four weeks, per the
+    /// reporting spec.
+    /// </summary>
+    public const int MonthlyPeriods = int.MaxValue;
+    public const int WeeklyPeriods = 4;
+
+    /// <summary>The sheet holding the denied claims themselves, after the three summary sheets.</summary>
+    public const string ClaimLevelSheetName = "Denial Claim Level";
+
+    /// <summary>
+    /// Everything the workbook's summary sheets show, read the same way the page reads it. Shared
+    /// by the page's direct download and LRN.ReportWorker, so the two files cannot drift apart.
+    /// </summary>
+    public static async Task<DenialClaimReportViewModel> LoadAsync(
+        IDenialClaimReportRepository repo,
+        string connectionString,
+        string labName,
+        string? bucket,
+        DayOfWeek weekStartsOn,
+        string? dateColumn,
+        CancellationToken ct)
+    {
+        var model = new DenialClaimReportViewModel
+        {
+            CurrentLab = labName,
+            Insight = new DenialInsightPanelViewModel
+            {
+                CurrentLab = labName,
+                Bucket = DenialInsightBuckets.Normalize(bucket)
+            }
+        };
+
+        var groups = await repo.GetDenialSummaryAsync(connectionString, dateColumn, ct);
+
+        // Same clamp as the page, so the file and the screen agree on the columns.
+        var weekRange = await repo.GetClaimDataWeekRangeAsync(connectionString, ct);
+        model.WeekRange = weekRange.WeekFolder;
+        model.RunId = weekRange.RunId;
+
+        model.TotalClaims = groups.Sum(g => g.ClaimCount);
+        model.TotalInsuranceBalance = groups.Sum(g => g.InsuranceBalance);
+
+        model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods, loadedThrough: weekRange.LoadedThrough);
+        model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: weekRange.LoadedThrough, weekStartsOn: weekStartsOn);
+
+        model.Insight.Rows = await repo.GetInsightsAsync(connectionString, model.Insight.Bucket, ct);
+
+        return model;
+    }
+
     public static XLWorkbook Build(DenialClaimReportViewModel model)
     {
         var workbook = new XLWorkbook();
@@ -47,6 +100,39 @@ public static class DenialClaimReportExcelBuilder
         WriteInsight(workbook.Worksheets.Add("Denial Insight"), model.Insight, model.CurrentLab);
 
         return workbook;
+    }
+
+    /// <summary>
+    /// Adds the Denial Claim Level sheet from rows already read. Used by the page's direct
+    /// download only; LRN.ReportWorker streams this sheet instead, because ClosedXML holds a whole
+    /// sheet in memory and a large lab's denied claims would not fit comfortably.
+    /// </summary>
+    public static void AddClaimLevelSheet(XLWorkbook workbook, System.Data.DataTable? claims)
+    {
+        var ws = workbook.Worksheets.Add(ClaimLevelSheetName);
+
+        if (claims is null || claims.Columns.Count == 0)
+        {
+            ws.Cell(1, 1).Value = "This lab has no claim-level denial data.";
+            ws.Cell(1, 1).Style.Font.SetItalic().Font.SetFontColor(XLColor.FromHtml("#6B7A8C"));
+            ws.Column(1).Width = 60;
+            return;
+        }
+
+        var table = ws.Cell(1, 1).InsertTable(claims, ClaimLevelSheetName.Replace(" ", string.Empty), createTable: true);
+        table.Theme = XLTableTheme.TableStyleLight9;
+
+        for (var c = 1; c <= claims.Columns.Count; c++)
+        {
+            if (LabClaimLineColumnCatalog.IsMoneyColumn(claims.Columns[c - 1].ColumnName))
+                ws.Column(c).Style.NumberFormat.SetFormat(Money);
+        }
+
+        ws.Columns(1, claims.Columns.Count).AdjustToContents(1, Math.Min(claims.Rows.Count + 1, 500));
+        foreach (var column in ws.Columns(1, claims.Columns.Count))
+            column.Width = Math.Clamp(column.Width, 10, 45);
+
+        ws.SheetView.FreezeRows(1);
     }
 
     // ── Monthly / Weekly ──────────────────────────────────────────────────────

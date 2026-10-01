@@ -61,6 +61,26 @@ public sealed class LabConfigOptions
         return null;
     }
 
+    /// <summary>
+    /// Denial Summary date column per lab: lab name -> a ClaimLevelData column ("CheckDate") whose
+    /// date places each denied claim in a Monthly / Weekly column. Sourced from
+    /// <c>LabConfig:DenialSummaryDateColumn</c>. Labs not listed keep the Denial Date.
+    /// </summary>
+    public Dictionary<string, string> DenialSummaryDateColumn { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The configured Denial Summary date column for a lab, or null when not configured.</summary>
+    public string? GetDenialSummaryDateColumn(string? labName)
+    {
+        if (string.IsNullOrWhiteSpace(labName) || DenialSummaryDateColumn is null) return null;
+        static string Key(string v) => new(v.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+        var wanted = Key(labName);
+        foreach (var (lab, column) in DenialSummaryDateColumn)
+        {
+            if (Key(lab) == wanted && !string.IsNullOrWhiteSpace(column)) return column.Trim();
+        }
+        return null;
+    }
+
     public bool IsDemoLab(string? labName) =>
         !string.IsNullOrWhiteSpace(labName)
         && DemoLabs.Any(d => string.Equals(d, labName, StringComparison.OrdinalIgnoreCase));

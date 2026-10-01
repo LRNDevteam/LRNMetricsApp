@@ -66,6 +66,8 @@ public static class ReportTypes
     public const string CodingSummary      = "CodingSummary";
     public const string LisSummary         = "LisSummary";
     public const string DenialDashboard    = "DenialDashboard";
+    /// <summary>Denial Summary page (DenialClaimReport): summaries, insights and the denied claims.</summary>
+    public const string DenialSummary      = "DenialSummary";
     public const string CptLookup          = "CptLookup";
     public const string PanelLookup        = "PanelLookup";
 }

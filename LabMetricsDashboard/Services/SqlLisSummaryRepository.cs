@@ -304,9 +304,15 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("•", "Failed Discovery", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed AND Entry_Status = Failed Discovery"),
 				new TemplateRow("•", "Waiting for Information", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed AND Entry_Status = Waiting for Information"),
 				new TemplateRow("•", "Results Posted", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed AND Entry_Status = Results Posted"),
+				// LIS_Inhealth_DTR Summary Validation 10012026: Not Billed above counts every Entry
+				// Status, and Incomplete was the one its bullets left out (5,676 vs 5,671).
+				new TemplateRow("•", "Incomplete", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed AND Entry_Status = Incomplete"),
 				new TemplateRow("D", "System Test", "NA = Blank AND LRN Sample Status = System Test"),
 				new TemplateRow("E", "Duplicate", "NA = Blank AND LRN Sample Status = Duplicate"),
 				new TemplateRow("F", "Deleted/Rejected", "NA = Blank AND LRN Sample Status = Deleted/Rejected"),
+				// Same validation workbook: Deleted/Rejected split by bill category, as Self Pay is.
+				new TemplateRow("1", "Billed", "NA = Blank AND LRN Sample Status = Deleted/Rejected AND LRN Bill Category = Billed"),
+				new TemplateRow("2", "Not Billed", "NA = Blank AND LRN Sample Status = Deleted/Rejected AND LRN Bill Category = Not Billed"),
 				new TemplateRow("", "Total Samples", "NA = Blank"),
 		},
 		["PCRLOA"] = new[] {

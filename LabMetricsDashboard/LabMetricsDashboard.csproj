@@ -77,15 +77,13 @@
   <ProjectExtensions><VisualStudio><UserProperties /></VisualStudio></ProjectExtensions>
 
     <ItemGroup>
-      <None Include="Templates\CodingSummary_CalculationLogic.xlsx" Condition="Exists('Templates\CodingSummary_CalculationLogic.xlsx')">
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </None>
-    </ItemGroup>
-
-    <ItemGroup>
       <Content Remove="publish\**" />
       <None Remove="publish\**" />
       <EmbeddedResource Remove="publish\**" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="Templates\" />
     </ItemGroup>
 
 </Project>
