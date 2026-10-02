@@ -1,11 +1,13 @@
-import { HashRouter, Route, Routes } from 'react-router';
+import { HashRouter, Navigate, Route, Routes } from 'react-router';
 import AppShell from './components/AppShell';
 import { ErrorBox, Loading } from './components/Status';
-import { allows, NAV } from './config/navigation';
+import { allows, REDIRECTS, ROUTES } from './config/navigation';
 import { useWorkbench, WorkbenchProvider } from './context/WorkbenchContext';
+import AssignmentPage from './pages/AssignmentPage';
 import ClaimDetailPage from './pages/ClaimDetailPage';
 import DashboardPage from './pages/DashboardPage';
 import DataProcessingPage from './pages/DataProcessingPage';
+import DenialCodeMasterPage from './pages/DenialCodeMasterPage';
 import MasterDataPage from './pages/MasterDataPage';
 import PlannedPage from './pages/PlannedPage';
 import WorkQueuePage from './pages/WorkQueuePage';
@@ -13,8 +15,11 @@ import WorkQueuePage from './pages/WorkQueuePage';
 const SCREENS = {
   dashboard: DashboardPage,
   workqueue: WorkQueuePage,
+  assignment: AssignmentPage,
   'data-processing': DataProcessingPage,
-  settings: MasterDataPage
+  // Master Values submenu: one page component serves several menu items, each a different view.
+  'master-values': MasterDataPage,
+  'denial-codes': DenialCodeMasterPage
 };
 
 // Route access is checked against the same NAV list that builds the sidebar. The API enforces
@@ -24,8 +29,9 @@ function Guard({ item }) {
   if (!allows(user, item)) {
     return <ErrorBox message={`Your role (${user?.roleLabel || 'unknown'}) cannot open ${item.label}.`} />;
   }
-  const Screen = item.built ? SCREENS[item.id] : null;
-  return Screen ? <Screen /> : <PlannedPage item={item} />;
+  const Screen = item.built ? SCREENS[item.screen || item.id] : null;
+  // key: moving between two views of the same page starts that page fresh.
+  return Screen ? <Screen key={item.id} view={item.view} /> : <PlannedPage item={item} />;
 }
 
 function Gate() {
@@ -52,9 +58,11 @@ function Gate() {
   return (
     <Routes>
       <Route element={<AppShell />}>
-        {NAV.map((item) => (
+        {ROUTES.map((item) => (
           <Route key={item.id} path={item.path === '/' ? undefined : item.path} index={item.path === '/'} element={<Guard item={item} />} />
         ))}
+        <Route path="/masters" element={<Navigate to={ROUTES.find((r) => r.group === 'masters')?.path || '/'} replace />} />
+        {Object.entries(REDIRECTS).map(([from, to]) => <Route key={from} path={from} element={<Navigate to={to} replace />} />)}
         <Route path="/claims/:claimKey" element={<ClaimDetailPage />} />
         <Route path="*" element={<ErrorBox message="Page not found." />} />
       </Route>

@@ -78,10 +78,16 @@ export function WorkbenchProvider({ children }) {
 
   const can = useCallback((perm) => Boolean(user?.permissions?.[perm]), [user]);
 
+  // After a Master File Maintenance change, so every screen's dropdowns offer the new lists.
+  const reloadMasterData = useCallback(async () => {
+    if (!labId) return;
+    try { setMasterData(await arWorkbenchService.masterData(labId)); } catch { /* keep the lists already loaded */ }
+  }, [labId]);
+
   const value = useMemo(() => ({
-    labs, labId, setLabId, user, masterData, status, error, can,
+    labs, labId, setLabId, user, masterData, reloadMasterData, status, error, can,
     lab: labs.find((l) => l.labId === labId) || null
-  }), [labs, labId, setLabId, user, masterData, status, error, can]);
+  }), [labs, labId, setLabId, user, masterData, reloadMasterData, status, error, can]);
 
   return <WorkbenchContext.Provider value={value}>{children}</WorkbenchContext.Provider>;
 }

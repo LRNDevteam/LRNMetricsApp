@@ -52,7 +52,7 @@ async function toError(response) {
   return new ApiError(message, response.status, correlationId);
 }
 
-export async function api(path, options = {}) {
+async function request(path, options) {
   let token = await ensureJwt();
   let response = await send(path, options, token);
 
@@ -65,6 +65,28 @@ export async function api(path, options = {}) {
   }
 
   if (!response.ok) throw await toError(response);
+  return response;
+}
+
+export async function api(path, options = {}) {
+  const response = await request(path, options);
   if (response.status === 204) return null;
   return (response.headers.get('content-type') || '').includes('application/json') ? response.json() : response.text();
+}
+
+// A file download (Excel export / template): the bearer token rules out a plain link, so fetch it
+// and save the blob under the server's file name.
+export async function downloadFile(path, fallbackName) {
+  const response = await request(path, {});
+  const disposition = response.headers.get('content-disposition') || '';
+  const match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition);
+  const fileName = match ? decodeURIComponent(match[1] || match[2]) : fallbackName;
+  const url = URL.createObjectURL(await response.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

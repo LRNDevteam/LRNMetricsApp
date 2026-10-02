@@ -173,6 +173,10 @@ public sealed class ArWorkbenchClaimFilter
     public string? Search { get; set; }
     public bool OpenInsuranceArOnly { get; set; }
     public bool TflRiskOnly { get; set; }
+    /// <summary>Only claims that have an agent (Assignment Management's reassign table).</summary>
+    public bool AssignedOnly { get; set; }
+    /// <summary>Only claims with no activity for at least this many days (never-touched claims count).</summary>
+    public int? MinDaysUntouched { get; set; }
     public string? SortBy { get; set; }
     public bool SortDesc { get; set; } = true;
     public int Page { get; set; } = 1;

@@ -21,6 +21,22 @@ export function ErrorBox({ message, onRetry }) {
   );
 }
 
+// A dismissible outcome message: { kind: 'good' | 'info' | 'warning', text, details?: string[] }.
+// Errors use ErrorBox.
+export function Notice({ notice, onClose }) {
+  if (!notice?.text) return null;
+  return (
+    <div className={`arwb-notice arwb-notice-${notice.kind || 'info'}`} role="status">
+      <Icon name={notice.kind === 'warning' ? 'warn' : 'check'} size={16} />
+      <div className="grow">
+        {notice.text}
+        {notice.details?.length > 0 && <ul className="arwb-error-list">{notice.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
+      </div>
+      {onClose && <button type="button" className="arwb-icon-btn" onClick={onClose} aria-label="Dismiss"><Icon name="close" size={14} /></button>}
+    </div>
+  );
+}
+
 // The page title and subtitle live in the topbar (AppShell, from NAV). This is the row under it:
 // an optional page-specific note on the left and the page's actions on the right.
 export function PageHeader({ note, children }) {
