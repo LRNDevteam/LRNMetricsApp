@@ -1,4 +1,4 @@
--- BeechTree — Read stored procedures for the Production Summary Report tabs.
+-- BeechTree ï¿½ Read stored procedures for the Production Summary Report tabs.
 -- Called by LabMetricsDashboard.SqlLabProductionSummaryRepository.
 --
 -- Each SP supports two execution paths:

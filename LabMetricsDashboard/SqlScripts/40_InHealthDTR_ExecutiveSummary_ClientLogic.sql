@@ -1,0 +1,1776 @@
+/*
+    InHealth DTR - Executive Summary client logic (SP-only change)
+    Database : InHealthDTRLRN
+
+    1. PMS claim counts (F, G, H..O.3) count every ClaimLevelData row
+       (was COUNT(AccessionNumber), which skipped rows with a NULL accession).
+    2. New dbo.usp_Inh_ES_ApplyClientCorrections, run at the end of
+       dbo.usp_RefreshInh_ExecutiveSummary:
+         G  Billed Mismatches = F - (LIS C Billed + LIS E.1 Other Samples Billed), floored at 0
+            (LIS counts read from LIMSMaster by LastTest, so the refresh order does not matter)
+         X  (R + T) / F
+         Y  R / I
+         Z  (R + S + T) / (I + J + K + L + M + O.1 + O.2)
+       Averages are rebuilt for every month, every year (ESMonth = 0) and the
+       grand total (0,0), each weighted from its own components.
+    3. dbo.usp_GetInh_ExecutiveSummary (filtered view): G uses the same rule as item 2.
+    4. LIS month = LIMSMaster.LastTest (was Entry_DateCreated) in
+       usp_RefreshInh_ExecutiveSummary_LIS_Alt, the filtered view and the
+       Billed Mismatches LIS counts - matches the client LIS figures.
+    5. Rebuilds the LIS, PMS, Cash and Avg snapshot tables.
+
+    Rollback: 40_InHealthDTR_ExecutiveSummary_ClientLogic_ROLLBACK.sql
+*/
+USE InHealthDTRLRN;
+GO
+SET NOCOUNT ON;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.usp_Inh_ES_ApplyClientCorrections
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF OBJECT_ID(N'dbo.Inhealth_ES_PMS', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.Inhealth_ES_Cash', N'U') IS NULL
+       OR OBJECT_ID(N'dbo.Inhealth_ES_Avg', N'U') IS NULL
+        RETURN;
+
+    DROP TABLE IF EXISTS #Comp;
+    WITH pms AS
+    (
+        SELECT ESYear, ESMonth,
+            SUM(CASE WHEN RoleID = N'F' THEN ESMonthClaimCount ELSE 0 END) AS F,
+            SUM(CASE WHEN RoleID = N'I' THEN ESMonthClaimCount ELSE 0 END) AS I,
+            SUM(CASE WHEN RoleID IN (N'I', N'J', N'K', N'L', N'M', N'O.1', N'O.2')
+                     THEN ESMonthClaimCount ELSE 0 END) AS Adjudicated
+        FROM dbo.Inhealth_ES_PMS
+        GROUP BY ESYear, ESMonth
+    ),
+    cash AS
+    (
+        SELECT ESYear, ESMonth,
+            SUM(CASE WHEN RoleID = N'R'              THEN ESMonthChargeAmount ELSE 0 END) AS R,
+            SUM(CASE WHEN RoleID IN (N'R', N'T')     THEN ESMonthChargeAmount ELSE 0 END) AS RT,
+            SUM(CASE WHEN RoleID IN (N'R', N'S', N'T') THEN ESMonthChargeAmount ELSE 0 END) AS RST
+        FROM dbo.Inhealth_ES_Cash
+        GROUP BY ESYear, ESMonth
+    )
+    SELECT p.ESYear, p.ESMonth,
+           CAST(p.F AS DECIMAL(18,2))           AS F,
+           CAST(p.I AS DECIMAL(18,2))           AS I,
+           CAST(p.Adjudicated AS DECIMAL(18,2)) AS Adjudicated,
+           ISNULL(c.R, 0)   AS R,
+           ISNULL(c.RT, 0)  AS RT,
+           ISNULL(c.RST, 0) AS RST
+    INTO #Comp
+    FROM pms p
+    LEFT JOIN cash c ON c.ESYear = p.ESYear AND c.ESMonth = p.ESMonth;
+
+    DROP TABLE IF EXISTS #AvgPeriods;
+    SELECT ESYear, ESMonth, F, I, Adjudicated, R, RT, RST
+    INTO #AvgPeriods
+    FROM #Comp
+    WHERE (ESYear > 0 AND ESMonth BETWEEN 1 AND 12)
+       OR (ESYear = 0 AND ESMonth = 0)
+    UNION ALL
+    SELECT ESYear, 0, SUM(F), SUM(I), SUM(Adjudicated), SUM(R), SUM(RT), SUM(RST)
+    FROM #Comp
+    WHERE ESYear > 0 AND ESMonth BETWEEN 1 AND 12
+    GROUP BY ESYear;
+
+    -- LIS C (Billable, Billed) + E.1 (Other Samples, Billed), same rules as
+    -- usp_RefreshInh_ExecutiveSummary_LIS_Alt; read from LIMSMaster so the result
+    -- does not depend on which refresh procedure runs first.
+    DROP TABLE IF EXISTS #LisBilledCE;
+    CREATE TABLE #LisBilledCE (ESYear INT NOT NULL, ESMonth INT NOT NULL, BilledCount INT NOT NULL);
+
+    IF OBJECT_ID(N'dbo.LIMSMaster', N'U') IS NOT NULL
+    BEGIN
+        WITH lis AS
+        (
+            SELECT LTRIM(RTRIM(CONVERT(NVARCHAR(100), OrderID)))      AS OrderID,
+                   YEAR (LastTest)                                    AS ESYear,
+                   MONTH(LastTest)                                    AS ESMonth,
+                   LTRIM(RTRIM(ISNULL(SampleStatus, N'')))            AS SampleStatus
+            FROM dbo.LIMSMaster
+            WHERE ISNULL(CONVERT(NVARCHAR(50), NA), N'') = N''
+              AND LTRIM(RTRIM(ISNULL(BillCategory, N''))) = N'Billed'
+              AND LTRIM(RTRIM(ISNULL(SampleStatus, N''))) IN (N'Billable', N'Other Samples')
+              AND LastTest IS NOT NULL
+        )
+        INSERT INTO #LisBilledCE (ESYear, ESMonth, BilledCount)
+        SELECT ESYear, ESMonth,
+               COUNT(DISTINCT CASE WHEN SampleStatus = N'Billable'      THEN OrderID END)
+             + COUNT(DISTINCT CASE WHEN SampleStatus = N'Other Samples' THEN OrderID END)
+        FROM lis
+        GROUP BY ESYear, ESMonth;
+    END
+
+    BEGIN TRAN;
+
+        UPDATE g
+        SET g.ESMonthClaimCount =
+                CASE WHEN f.ESMonthClaimCount - ISNULL(lis.BilledCount, 0) > 0
+                     THEN f.ESMonthClaimCount - ISNULL(lis.BilledCount, 0)
+                     ELSE 0 END,
+            g.RefreshedAt = GETDATE()
+        FROM dbo.Inhealth_ES_PMS AS g
+        INNER JOIN dbo.Inhealth_ES_PMS AS f
+            ON f.RoleID = N'F' AND f.ESYear = g.ESYear AND f.ESMonth = g.ESMonth
+        LEFT JOIN #LisBilledCE AS lis
+            ON lis.ESYear = g.ESYear AND lis.ESMonth = g.ESMonth
+        WHERE g.RoleID = N'G';
+
+        DELETE FROM dbo.Inhealth_ES_Avg WHERE RoleID IN (N'X', N'Y', N'Z');
+
+        INSERT INTO dbo.Inhealth_ES_Avg
+            (RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt)
+        SELECT v.RoleID, v.Description, a.ESYear, a.ESMonth,
+               CONVERT(INT, v.Denominator),
+               CONVERT(DECIMAL(18,2), ISNULL(ROUND(v.Numerator / NULLIF(v.Denominator, 0), 2), 0)),
+               GETDATE()
+        FROM #AvgPeriods a
+        CROSS APPLY (VALUES
+            (N'X', N'Average Payment ($) - Total Pay/Billed Claims',            a.F,           a.RT),
+            (N'Y', N'Average Payment ($) - Fully Paid Claim Value/Paid Claims', a.I,           a.R),
+            (N'Z', N'Average Payment ($) - Total Pay/Adjudicated Claims',       a.Adjudicated, a.RST)
+        ) v (RoleID, Description, Denominator, Numerator)
+        ORDER BY a.ESYear, a.ESMonth, v.RoleID;
+
+    COMMIT;
+
+    DROP TABLE IF EXISTS #LisBilledCE;
+    DROP TABLE IF EXISTS #AvgPeriods;
+    DROP TABLE IF EXISTS #Comp;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [dbo].[usp_RefreshInh_ExecutiveSummary]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    TRUNCATE TABLE dbo.Inhealth_ES_PMS;
+    TRUNCATE TABLE dbo.Inhealth_ES_Cash;
+    TRUNCATE TABLE dbo.Inhealth_ES_Avg;
+
+    -- ── #Base : one row per ClaimLevelData record with period bucket ───────
+    DROP TABLE IF EXISTS #Base;
+
+    SELECT
+        AccessionNumber,
+        CAST(1 AS TINYINT) AS RowCnt,
+        YEAR (TRY_CAST(DateofService AS DATE))  AS ESYear,
+        MONTH(TRY_CAST(DateofService AS DATE))  AS ESMonth,
+        ISNULL(LTRIM(RTRIM(BillStatus)),  '')   AS BillStatus,
+        ISNULL(LTRIM(RTRIM(ClaimStatus)), '')   AS ClaimStatus,
+        ISNULL(TRY_CAST(ChargeAmount          AS DECIMAL(18,2)), 0) AS ChargeAmount,
+        ISNULL(TRY_CAST(InsurancePayment      AS DECIMAL(18,2)), 0) AS InsurancePayment,
+        ISNULL(TRY_CAST(PatientPayment        AS DECIMAL(18,2)), 0) AS PatientPayment,
+        ISNULL(TRY_CAST(InsuranceAdjustments  AS DECIMAL(18,2)), 0) AS InsuranceAdjustments,
+        ISNULL(TRY_CAST(PatientAdjustments    AS DECIMAL(18,2)), 0) AS PatientAdjustments,
+        ISNULL(TRY_CAST(InsuranceBalance      AS DECIMAL(18,2)), 0) AS InsuranceBalance,
+        ISNULL(TRY_CAST(PatientBalance        AS DECIMAL(18,2)), 0) AS PatientBalance
+    INTO #Base
+    FROM dbo.ClaimLevelData;
+    --WHERE TRY_CAST(DateofService AS DATE) IS NOT NULL
+    --  AND NULLIF(LTRIM(RTRIM(AccessionNumber)), '') IS NOT NULL;
+
+    -- ── #Periods : distinct (ESYear, ESMonth) + (0,0) grand-total sentinel ──
+    DROP TABLE IF EXISTS #Periods;
+    SELECT DISTINCT ESYear, ESMonth INTO #Periods FROM #Base
+    UNION ALL SELECT 0, 0;
+
+    -- ── #LisBilled : LIMSMaster BillCategory='Billed' counts per
+    --    Entry_DateCreated period, used for PMS row G (Billed Mismatches).
+    --    Inhealth uses Entry_DateCreated as the date column in LIMSMaster.
+    DROP TABLE IF EXISTS #LisBilled;
+    CREATE TABLE #LisBilled (ESYear INT NOT NULL, ESMonth INT NOT NULL, BilledCount INT NOT NULL);
+
+    IF OBJECT_ID('dbo.LIMSMaster', 'U') IS NOT NULL
+    BEGIN
+        -- Per-period rows (Entry_DateCreated → ESYear / ESMonth)
+        INSERT INTO #LisBilled (ESYear, ESMonth, BilledCount)
+        SELECT
+            YEAR (TRY_CAST(Entry_DateCreated AS DATE)),
+            MONTH(TRY_CAST(Entry_DateCreated AS DATE)),
+            COUNT( OrderID)
+        FROM dbo.LIMSMaster
+        WHERE BillCategory = 'Billed'
+          --AND TRY_CAST(Entry_DateCreated AS DATE) IS NOT NULL
+          --AND NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), OrderID))), '') IS NOT NULL
+        GROUP BY
+            YEAR (TRY_CAST(Entry_DateCreated AS DATE)),
+            MONTH(TRY_CAST(Entry_DateCreated AS DATE));
+
+        -- Grand-total sentinel (ESYear=0, ESMonth=0)
+        INSERT INTO #LisBilled (ESYear, ESMonth, BilledCount)
+        SELECT 0, 0, COUNT( OrderID)
+        FROM dbo.LIMSMaster
+        WHERE BillCategory = 'Billed'
+          AND TRY_CAST(Entry_DateCreated AS DATE) IS NOT NULL
+          AND NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), OrderID))), '') IS NOT NULL;
+    END
+
+    -- ────────────────────────────────────────────────────────────────────
+    --  Inhealth_ES_PMS  -  F, G, H, H.1, H.2, I, J, K, L, M, N, O, O.1, O.2, O.3
+    -- ────────────────────────────────────────────────────────────────────
+    INSERT INTO dbo.Inhealth_ES_PMS (RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt)
+    SELECT RoleID, Description, ESYear, ESMonth, ClaimCount, 0, GETDATE()
+    FROM
+    (
+        -- F  No. of Billed Claims
+        SELECT p.ESYear, p.ESMonth, 'F' AS RoleID, 'No. of Billed Claims' AS Description,
+               COUNT(b.RowCnt) AS ClaimCount
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+                          AND b.BillStatus = 'Billed'
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- G  Billed Mismatches (PMS Billed Count - LIS BillCategory='Billed' Count)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'G', 'Billed Mismatches',
+               (COUNT(CASE WHEN b.BillStatus='Billed' THEN b.RowCnt END)
+                - ISNULL(lb.BilledCount, 0)) AS ClaimCount
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        LEFT JOIN #LisBilled lb ON lb.ESYear=p.ESYear AND lb.ESMonth=p.ESMonth
+        GROUP BY p.ESYear, p.ESMonth, lb.BilledCount
+
+        -- H  No. of UnBilled Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'H', 'No. of UnBilled Claims',
+               COUNT(b.RowCnt)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+                          AND b.BillStatus = 'Unbilled'
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- H.1  Unbilled
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'H.1', '  Unbilled',
+               COUNT(b.RowCnt)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+                          AND b.BillStatus = 'Unbilled'
+                          AND b.ClaimStatus = 'Unbilled'
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- H.2  Unbilled - Patient Balance
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'H.2', '  Unbilled - Patient Balance',
+               COUNT(b.RowCnt)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+                          AND b.BillStatus = 'Unbilled'
+                          AND b.ClaimStatus = 'Unbilled - Patient Balance'
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- I  No. of Fully Paid Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'I', 'No. of Fully Paid Claims',
+               COUNT(b.RowCnt)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+                          AND b.BillStatus = 'Billed'
+                          AND b.ClaimStatus = 'Fully Paid'
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- J  No. of Patient Responsibility Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'J', 'No. of Patient Responsibility Claims',
+               COUNT(b.RowCnt)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+                          AND b.BillStatus = 'Billed'
+                          AND b.ClaimStatus = 'Patient Responsibility'
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- K  No. of Fully Adjusted Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'K', 'No. of Fully Adjusted Claims',
+               COUNT(b.RowCnt)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+                          AND b.BillStatus = 'Billed'
+                          AND b.ClaimStatus in ('Complete W/O','Fully Adjusted')
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- L  No. of Partially Adjusted Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'L', 'No. of Partially Adjusted Claims',
+               COUNT(b.RowCnt)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+                          AND b.BillStatus = 'Billed'
+                          AND b.ClaimStatus = 'Partially Adjusted'
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- M  No. of Patient Payments Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'M', 'No. of Patient Payments Claims',
+               COUNT(b.RowCnt)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+                          AND b.BillStatus = 'Billed'
+                          AND b.ClaimStatus = 'Patient Payment'
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- N  No. of Partially Paid Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'N', 'No. of Partially Paid Claims',
+               COUNT(b.RowCnt)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+                          AND b.BillStatus = 'Billed'
+                          AND b.ClaimStatus = 'Partially Paid'
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- O  No. of Insurance Balance Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'O', 'No. of Insurance Balance Claims',
+               COUNT(b.RowCnt)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+                          AND b.BillStatus = 'Billed'
+                          AND b.ClaimStatus IN ('Fully Denied','Partially Denied','No Response')
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- O.1  No. of Denied Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'O.1', '  No. of Denied Claims',
+               COUNT(b.RowCnt)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+                          AND b.BillStatus = 'Billed'
+                          AND b.ClaimStatus in ( 'Fully Denied')
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- O.2  No. of Partially Denied Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'O.2', '  No. of Partially Denied Claims',
+               COUNT(b.RowCnt)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+                          AND b.BillStatus = 'Billed'
+                          AND b.ClaimStatus = 'Partially Denied'
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- O.3  No. of No Response from Payor Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'O.3', '  No. of No Response from Payor Claims',
+               COUNT(b.RowCnt)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+                          AND b.BillStatus = 'Billed'
+                          AND b.ClaimStatus = 'No Response'
+        GROUP BY p.ESYear, p.ESMonth
+    ) pms;
+
+    -- ────────────────────────────────────────────────────────────────────
+    --  Inhealth_ES_Cash  -  P, Q, Q.1, Q.2, R, S, T, U, V, W, W.1, W.2, W.3
+    -- ────────────────────────────────────────────────────────────────────
+    INSERT INTO dbo.Inhealth_ES_Cash (RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt)
+    SELECT RoleID, Description, ESYear, ESMonth, 0, ChargeAmount, GETDATE()
+    FROM
+    (
+        -- P  Total Billed ($)
+        SELECT p.ESYear, p.ESMonth, 'P' AS RoleID, 'Total Billed ($)' AS Description,
+               SUM(CASE WHEN b.BillStatus='Billed' THEN b.ChargeAmount ELSE 0 END) AS ChargeAmount
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- Q  Total Unbilled ($)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'Q', 'Total Unbilled ($)',
+               SUM(CASE WHEN b.BillStatus='Unbilled' THEN b.ChargeAmount ELSE 0 END)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- Q.1  Unbilled
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'Q.1', '  Unbilled',
+               SUM(CASE WHEN b.BillStatus='Unbilled' AND b.ClaimStatus='Unbilled' THEN b.ChargeAmount ELSE 0 END)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- Q.2  Unbilled - Patient Balance
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'Q.2', '  Unbilled - Patient Balance',
+               SUM(CASE WHEN b.BillStatus='Unbilled' AND b.ClaimStatus='Unbilled - Patient Balance' THEN b.ChargeAmount ELSE 0 END)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- R  Insurance Payment ($)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'R', 'Insurance Payment ($)',
+               SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Fully Paid' THEN b.InsurancePayment ELSE 0 END)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- S  Patient Payments ($)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'S', 'Patient Payments ($)',
+               SUM(CASE WHEN b.BillStatus='Billed' THEN b.PatientPayment ELSE 0 END)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- T  Partially Paid ($)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'T', 'Partially Paid ($)',
+               SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Partially Paid' THEN b.InsurancePayment ELSE 0 END)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- U  Patient Responsibility ($)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'U', 'Patient Responsibility ($)',
+               SUM(CASE WHEN b.BillStatus='Billed' THEN b.PatientBalance ELSE 0 END)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- V  Total Adjustments ($)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'V', 'Total Adjustments ($)',
+               SUM(CASE WHEN b.BillStatus='Billed' THEN ISNULL(b.InsuranceAdjustments,0) + ISNULL(b.PatientAdjustments,0) ELSE 0 END)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- W  Insurance Balance ($)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'W', 'Insurance Balance ($)',
+               SUM(CASE WHEN b.BillStatus='Billed' THEN b.InsuranceBalance ELSE 0 END)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- W.1  Denials
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'W.1', '  Denials',
+               SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Fully Denied' THEN b.InsuranceBalance ELSE 0 END)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- W.2  Partially Denied
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'W.2', '  Partially Denied',
+               SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus not in ('No Response','Fully Denied') THEN b.InsuranceBalance ELSE 0 END)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- W.3  No Response from Payor
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'W.3', '  No Response from Payor',
+               SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='No Response' THEN b.InsuranceBalance ELSE 0 END)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+    ) cash;
+
+
+			-- ────────────────────────────────────────────────────────────────────
+		--  Inhealth_ES_Avg  -  X, Y, Z  (TABLE-DRIVEN)
+		-- ────────────────────────────────────────────────────────────────────
+		INSERT INTO dbo.Inhealth_ES_Avg
+		(
+			RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt
+		)
+		SELECT
+			'X',
+			'Average Payment ($) - Total Pay/Billed Claims',
+			p.ESYear,
+			p.ESMonth,
+			ISNULL(dx.DenomCnt,0),
+			ISNULL(ROUND(ISNULL(nx.NumAmt,0) / NULLIF(dx.DenomCnt,0), 2),0),
+			GETDATE()
+		FROM #Periods p
+		LEFT JOIN
+		(
+			-- X numerator = R + T
+			SELECT ESYear, ESMonth, SUM(ESMonthChargeAmount) AS NumAmt
+			FROM dbo.Inhealth_ES_Cash
+			WHERE RoleID IN ('R','T')
+			GROUP BY ESYear, ESMonth
+		) nx ON nx.ESYear = p.ESYear AND nx.ESMonth = p.ESMonth
+		LEFT JOIN
+		(
+			-- X denominator = F
+			SELECT ESYear, ESMonth, SUM(ESMonthClaimCount) AS DenomCnt
+			FROM dbo.Inhealth_ES_PMS
+			WHERE RoleID = 'F'
+			GROUP BY ESYear, ESMonth
+		) dx ON dx.ESYear = p.ESYear AND dx.ESMonth = p.ESMonth
+
+		UNION ALL
+
+		SELECT
+			'Y',
+			'Average Payment ($) - Fully Paid Claim Value/Paid Claims',
+			p.ESYear,
+			p.ESMonth,
+			ISNULL(dy.DenomCnt,0),
+			ISNULL(ROUND(ISNULL(ny.NumAmt,0) / NULLIF(dy.DenomCnt,0), 2),0),
+			GETDATE()
+		FROM #Periods p
+		LEFT JOIN
+		(
+			-- Y numerator = R
+			SELECT ESYear, ESMonth, SUM(ESMonthChargeAmount) AS NumAmt
+			FROM dbo.Inhealth_ES_Cash
+			WHERE RoleID = 'R'
+			GROUP BY ESYear, ESMonth
+		) ny ON ny.ESYear = p.ESYear AND ny.ESMonth = p.ESMonth
+		LEFT JOIN
+		(
+			-- Y denominator = I
+			SELECT ESYear, ESMonth, SUM(ESMonthClaimCount) AS DenomCnt
+			FROM dbo.Inhealth_ES_PMS
+			WHERE RoleID = 'I'
+			GROUP BY ESYear, ESMonth
+		) dy ON dy.ESYear = p.ESYear AND dy.ESMonth = p.ESMonth
+
+		UNION ALL
+
+		SELECT
+			'Z',
+			'Average Payment ($) - Total Pay/Adjudicated Claims',
+			p.ESYear,
+			p.ESMonth,
+			ISNULL(dz.DenomCnt,0),
+			ISNULL(ROUND(ISNULL(nz.NumAmt,0) / NULLIF(dz.DenomCnt,0), 2),0),
+			GETDATE()
+		FROM #Periods p
+		LEFT JOIN
+		(
+			-- Z numerator = R + S + T
+			SELECT ESYear, ESMonth, SUM(ESMonthChargeAmount) AS NumAmt
+			FROM dbo.Inhealth_ES_Cash
+			WHERE RoleID IN ('R','S','T')
+			GROUP BY ESYear, ESMonth
+		) nz ON nz.ESYear = p.ESYear AND nz.ESMonth = p.ESMonth
+		LEFT JOIN
+		(
+			-- Z denominator = I + J + K + M + N + O.1 + O.2
+			SELECT ESYear, ESMonth, SUM(ESMonthClaimCount) AS DenomCnt
+			FROM dbo.Inhealth_ES_PMS
+			WHERE RoleID IN ('I','J','K','M','N','O.1','O.2')
+			GROUP BY ESYear, ESMonth
+		) dz ON dz.ESYear = p.ESYear AND dz.ESMonth = p.ESMonth;
+    -- ────────────────────────────────────────────────────────────────────
+    --  Inhealth_ES_Avg  -  X, Y, Z
+    -- ────────────────────────────────────────────────────────────────────
+    --INSERT INTO dbo.Inhealth_ES_Avg (RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt)
+    --SELECT RoleID, Description, ESYear, ESMonth, ClaimCount,
+    --       CASE WHEN ClaimCount > 0 THEN PayTotal / ClaimCount ELSE 0 END, GETDATE()
+    --FROM
+    --(
+    --    -- X  Average Payment ($) - Total Pay/Billed Claims
+    --    --    Sum(InsurancePayment Fully Paid + Partially Paid) / Count(Billed Claims)
+    --    SELECT p.ESYear, p.ESMonth, 'X' AS RoleID,
+    --           'Average Payment ($) - Total Pay/Billed Claims' AS Description,
+    --           COUNT(DISTINCT CASE WHEN b.BillStatus='Billed' THEN b.AccessionNumber END) AS ClaimCount,
+    --           SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus IN ('Fully Paid','Partially Paid')
+    --                    THEN b.InsurancePayment ELSE 0 END) AS PayTotal
+    --    FROM #Periods p
+    --    LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+    --    GROUP BY p.ESYear, p.ESMonth
+
+    --    -- Y  Average Payment ($) - Fully Paid Claim Value/Paid Claims
+    --    --    Sum(InsurancePayment Fully Paid) / Count(Fully Paid Claims)
+    --    UNION ALL
+    --    SELECT p.ESYear, p.ESMonth, 'Y',
+    --           'Average Payment ($) - Fully Paid Claim Value/Paid Claims',
+    --           COUNT(DISTINCT CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Fully Paid' THEN b.AccessionNumber END),
+    --           SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Fully Paid' THEN b.InsurancePayment ELSE 0 END)
+    --    FROM #Periods p
+    --    LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+    --    GROUP BY p.ESYear, p.ESMonth
+
+    --    -- Z  Average Payment ($) - Total Pay/Adjudicated Claims
+    --    --    Sum(InsurancePayment + PatientPayment) / Count(Adjudicated Claims)
+    --    UNION ALL
+    --    SELECT p.ESYear, p.ESMonth, 'Z',
+    --           'Average Payment ($) - Total Pay/Adjudicated Claims',
+    --           COUNT(DISTINCT CASE WHEN b.BillStatus='Billed'
+    --                               AND b.ClaimStatus IN ('Fully Paid','Complete W/O','Patient Responsibility',
+    --                                                     'Partially Paid','Patient Payment','Fully Denied','Partially Denied')
+    --                               THEN b.AccessionNumber END),
+    --           SUM(CASE WHEN b.BillStatus='Billed'
+    --                    AND b.ClaimStatus IN ('Fully Paid','Complete W/O','Patient Responsibility',
+    --                                          'Partially Paid','Patient Payment','Fully Denied','Partially Denied')
+    --                    THEN b.InsurancePayment + b.PatientPayment ELSE 0 END)
+    --    FROM #Periods p
+    --    LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+    --    GROUP BY p.ESYear, p.ESMonth
+    --) avgrows;
+
+    DROP TABLE IF EXISTS #Base;
+    DROP TABLE IF EXISTS #Periods;
+    DROP TABLE IF EXISTS #LisBilled;
+
+    EXEC dbo.usp_Inh_ES_ApplyClientCorrections;
+
+    PRINT 'usp_RefreshInh_ExecutiveSummary completed.';
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [dbo].[usp_GetInh_ExecutiveSummary]
+(
+    @YearFrom     INT           = 0,
+    @YearTo       INT           = 0,
+    @MonthFrom    INT           = 0,
+    @MonthTo      INT           = 0,
+    @DosFrom      DATE          = NULL,
+    @DosTo        DATE          = NULL,
+    @BilledFrom   DATE          = NULL,
+    @BilledTo     DATE          = NULL,
+    @Panels       NVARCHAR(MAX) = NULL,
+    @Clinics      NVARCHAR(MAX) = NULL,
+    @Providers    NVARCHAR(MAX) = NULL,
+    @Reps         NVARCHAR(MAX) = NULL
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @HasFilter BIT = CASE
+        WHEN ISNULL(@YearFrom,  0) <> 0 THEN 1
+        WHEN ISNULL(@YearTo,    0) <> 0 THEN 1
+        WHEN ISNULL(@MonthFrom, 0) <> 0 THEN 1
+        WHEN ISNULL(@MonthTo,   0) <> 0 THEN 1
+        WHEN @DosFrom      IS NOT NULL THEN 1
+        WHEN @DosTo        IS NOT NULL THEN 1
+        WHEN @BilledFrom   IS NOT NULL THEN 1
+        WHEN @BilledTo     IS NOT NULL THEN 1
+        WHEN NULLIF(LTRIM(RTRIM(@Panels)),   '') IS NOT NULL THEN 1
+        WHEN NULLIF(LTRIM(RTRIM(@Clinics)),  '') IS NOT NULL THEN 1
+        WHEN NULLIF(LTRIM(RTRIM(@Providers)),'') IS NOT NULL THEN 1
+        WHEN NULLIF(LTRIM(RTRIM(@Reps)),     '') IS NOT NULL THEN 1
+        ELSE 0
+    END;
+    -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    --  NO FILTER  -  fast read from the 4 aggregate tables
+    -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    IF @HasFilter = 0
+    BEGIN
+        SELECT RowCode, Category, Description, BillYear, BillMonth, MetricValue
+        FROM
+        (
+            SELECT RoleID AS RowCode, 'LIS' AS Category, Description, ESYear AS BillYear, ESMonth AS BillMonth,
+                   CAST(ESMonthClaimCount AS DECIMAL(18,2)) AS MetricValue,
+                   1 AS CatOrder, Id AS SortId
+            FROM dbo.Inhealth_ES_LIS
+            UNION ALL
+            SELECT RoleID, 'PMS', Description, ESYear, ESMonth,
+                   CAST(ESMonthClaimCount AS DECIMAL(18,2)),
+                   2, Id
+            FROM dbo.Inhealth_ES_PMS
+            UNION ALL
+            SELECT RoleID, 'Cash', Description, ESYear, ESMonth,
+                   ESMonthChargeAmount,
+                   3, Id
+            FROM dbo.Inhealth_ES_Cash
+            UNION ALL
+            SELECT RoleID, 'Avg', Description, ESYear, ESMonth,
+                   ESMonthChargeAmount,
+                   4, Id
+            FROM dbo.Inhealth_ES_Avg
+        ) x
+        ORDER BY BillYear, BillMonth, CatOrder, SortId;
+        RETURN;
+    END
+    -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    --  FILTERED  -  live re-aggregation
+    -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    -- Dimension filter staging tables
+    CREATE TABLE #FilterPanels   (Val NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL);
+    CREATE TABLE #FilterClinics  (Val NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL);
+    CREATE TABLE #FilterProviders(Val NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL);
+    CREATE TABLE #FilterReps     (Val NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL);
+    IF NULLIF(LTRIM(RTRIM(@Panels)),   '') IS NOT NULL
+        INSERT INTO #FilterPanels(Val)
+        SELECT LTRIM(RTRIM(value)) COLLATE DATABASE_DEFAULT FROM STRING_SPLIT(@Panels, ',') WHERE LTRIM(RTRIM(value)) <> '';
+    IF NULLIF(LTRIM(RTRIM(@Clinics)),  '') IS NOT NULL
+        INSERT INTO #FilterClinics(Val)
+        SELECT LTRIM(RTRIM(value)) COLLATE DATABASE_DEFAULT FROM STRING_SPLIT(@Clinics, ',') WHERE LTRIM(RTRIM(value)) <> '';
+    IF NULLIF(LTRIM(RTRIM(@Providers)),'') IS NOT NULL
+        INSERT INTO #FilterProviders(Val)
+        SELECT LTRIM(RTRIM(value)) COLLATE DATABASE_DEFAULT FROM STRING_SPLIT(@Providers, ',') WHERE LTRIM(RTRIM(value)) <> '';
+    IF NULLIF(LTRIM(RTRIM(@Reps)),     '') IS NOT NULL
+        INSERT INTO #FilterReps(Val)
+        SELECT LTRIM(RTRIM(value)) COLLATE DATABASE_DEFAULT FROM STRING_SPLIT(@Reps, ',') WHERE LTRIM(RTRIM(value)) <> '';
+    DECLARE @HasPanelFilter    BIT = CASE WHEN EXISTS (SELECT 1 FROM #FilterPanels)    THEN 1 ELSE 0 END;
+    DECLARE @HasClinicFilter   BIT = CASE WHEN EXISTS (SELECT 1 FROM #FilterClinics)   THEN 1 ELSE 0 END;
+    DECLARE @HasProviderFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM #FilterProviders) THEN 1 ELSE 0 END;
+    DECLARE @HasRepFilter      BIT = CASE WHEN EXISTS (SELECT 1 FROM #FilterReps)      THEN 1 ELSE 0 END;
+    -- LIS dimension filter: Panel, Clinic, and Provider apply to LIMSMaster for
+    -- Inhealth (Panel->PanelType, Clinic->Account, Provider->LastName,FirstName).
+    -- SalesRep is not available on LIMSMaster -> always skipped for LIS.
+    DECLARE @HasLisFilter BIT = CASE
+        WHEN @HasPanelFilter = 1 OR @HasClinicFilter = 1 OR @HasProviderFilter = 1
+        THEN 1 ELSE 0 END;
+    -- Period-bucket column choice for PMS/Cash/Avg:
+    --   * If a FirstBilledDate range is selected (and no DateofService range),
+    --     bucket the ClaimLevelData rows by FirstBilledDate.
+    --   * Otherwise (DateofService range, or only dimension filters) bucket by
+    --     DateofService â€” same default as usp_RefreshInh_ExecutiveSummary.
+    -- The actual row filtering (DOS, FirstBilledDate, dimensions) is unchanged;
+    -- this only decides which date drives the monthly split of the output.
+    DECLARE @BucketByBilled BIT =
+        CASE WHEN (@BilledFrom IS NOT NULL OR @BilledTo IS NOT NULL)
+                  AND @DosFrom IS NULL AND @DosTo IS NULL
+             THEN 1 ELSE 0 END;
+    -- â”€â”€ LIS: build #Lis from dbo.LIMSMaster.
+    --    DateofService (Entry_DateCreated) and FirstBilledDate (BilledDate) ARE
+    --    now applied to LIMSMaster, mirroring Cove's usp_GetCove_ExecutiveSummary
+    --    (17_Cove_ExecutiveSummary_Read.sql): the period bucket (ESYear/ESMonth)
+    --    and the date-range predicate both switch to BilledDate when
+    --    @BucketByBilled = 1 (First Billed Date mode), otherwise both use
+    --    Entry_DateCreated (DOS mode). This is independent of the PMS/Cash/Avg
+    --    (#Base) section below â€” no cross-table bridge.
+    DROP TABLE IF EXISTS #Lis;
+    CREATE TABLE #Lis
+    (
+        OrderID       NVARCHAR(100) NOT NULL,
+        NAFlag        NVARCHAR(50)  NOT NULL,
+        SampleStatus  NVARCHAR(200) NOT NULL,
+        BillCategory  NVARCHAR(200) NOT NULL,
+        SubStatus     NVARCHAR(200) NOT NULL,
+        LRNPanelName  NVARCHAR(200) NOT NULL,
+        ESYear        INT           NULL,
+        ESMonth       INT           NULL
+    );
+    IF OBJECT_ID('dbo.LIMSMaster', 'U') IS NOT NULL
+    BEGIN
+        DECLARE @OrderIDCol SYSNAME = (
+            SELECT TOP 1 name FROM sys.columns
+            WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+              AND name IN ('OrderID','OrderId','AccessionNumber','Accession','AccessionNo')
+            ORDER BY CASE name WHEN 'OrderID' THEN 0 WHEN 'OrderId' THEN 1
+                               WHEN 'AccessionNumber' THEN 2 WHEN 'Accession' THEN 3 WHEN 'AccessionNo' THEN 4 ELSE 5 END);
+        DECLARE @NACol SYSNAME = (
+            SELECT TOP 1 name FROM sys.columns
+            WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+              AND name IN ('NA','IsNA','NotApplicable','NA_Flag','NAStatus')
+            ORDER BY CASE name WHEN 'NA' THEN 0 WHEN 'IsNA' THEN 1 WHEN 'NotApplicable' THEN 2
+                               WHEN 'NA_Flag' THEN 3 WHEN 'NAStatus' THEN 4 ELSE 5 END);
+        -- LIS month / DateofService for Inhealth maps to LIMSMaster.LastTest (matches the client report).
+        DECLARE @DateCol SYSNAME = (
+            SELECT TOP 1 name FROM sys.columns
+            WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+              AND name IN ('LastTest','Entry_DateCreated','ReqCollectDate','RequestCollectDate','DateOfCollection','DateofService','CollectionDate','ServiceDate','AccessionDate')
+            ORDER BY CASE name
+                WHEN 'LastTest' THEN -1 WHEN 'Entry_DateCreated' THEN 0 WHEN 'ReqCollectDate' THEN 1 WHEN 'RequestCollectDate' THEN 2
+                WHEN 'DateOfCollection' THEN 3 WHEN 'DateofService' THEN 4
+                WHEN 'CollectionDate' THEN 5 WHEN 'ServiceDate' THEN 6 WHEN 'AccessionDate' THEN 7 ELSE 8 END);
+        -- FirstBilledDate for Inhealth maps to LIMSMaster.BilledDate (per spec,
+        -- same candidate list/priority as Cove's @BilledDateCol).
+        DECLARE @BilledDateCol SYSNAME = (
+            SELECT TOP 1 name FROM sys.columns
+            WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+              AND name IN ('BilledDate','FirstBilledDate','BilledOn','BillDate','FirstBillDate')
+            ORDER BY CASE name
+                WHEN 'BilledDate' THEN 0 WHEN 'FirstBilledDate' THEN 1
+                WHEN 'BilledOn'   THEN 2 WHEN 'BillDate'        THEN 3
+                WHEN 'FirstBillDate' THEN 4 ELSE 5 END);
+        -- Period expression for #Lis.ESYear/ESMonth, mirrors Cove's @LisPeriodExpr:
+        --   Billed mode (@BucketByBilled=1) -> BilledDate
+        --   DOS mode (default)              -> Entry_DateCreated (@DateCol)
+        DECLARE @LisPeriodExpr NVARCHAR(200) =
+            CASE WHEN @BucketByBilled = 1 AND @BilledDateCol IS NOT NULL
+                 THEN N'TRY_CAST([' + @BilledDateCol + N'] AS DATE)'
+                 ELSE N'TRY_CAST([' + @DateCol + N'] AS DATE)' END;
+        DECLARE @SampleStatusCol SYSNAME = (
+            SELECT TOP 1 name FROM sys.columns
+            WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+              AND name IN ('SampleStatus','BillTo','Sample_Status','SampleType')
+            ORDER BY CASE name WHEN 'SampleStatus' THEN 0 WHEN 'BillTo' THEN 1 WHEN 'Sample_Status' THEN 2 WHEN 'SampleType' THEN 3 ELSE 4 END);
+        DECLARE @BillCategoryCol SYSNAME = (
+            SELECT TOP 1 name FROM sys.columns
+            WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+              AND name IN ('BillCategory','BillingStatus','Bill_Category','BillingCategory','BillStatus')
+            ORDER BY CASE name WHEN 'BillCategory' THEN 0 WHEN 'BillingStatus' THEN 1 WHEN 'Bill_Category' THEN 2 WHEN 'BillingCategory' THEN 3 WHEN 'BillStatus' THEN 4 ELSE 5 END);
+        DECLARE @SubStatusCol SYSNAME = (
+            SELECT TOP 1 name FROM sys.columns
+            WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+              AND name IN ('SubStatus','FinalStatus','Sub_Status','ClientStatus')
+            ORDER BY CASE name WHEN 'SubStatus' THEN 0 WHEN 'FinalStatus' THEN 1 WHEN 'Sub_Status' THEN 2 WHEN 'ClientStatus' THEN 3 ELSE 4 END);
+        -- Panel for Inhealth maps to LIMSMaster.PanelType (per spec).
+        DECLARE @PanelNameCol SYSNAME = (
+            SELECT TOP 1 name FROM sys.columns
+            WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+              AND name IN ('PanelType','LRNPanelName','LRN_PanelName','LRNPanel','PanelName','Panelname',
+                           'PanelCategory','TestPanel','TestPanelName')
+            ORDER BY CASE name
+                WHEN 'PanelType'     THEN 0 WHEN 'LRNPanelName'  THEN 1 WHEN 'LRN_PanelName' THEN 2
+                WHEN 'LRNPanel'      THEN 3 WHEN 'PanelName'     THEN 4 WHEN 'Panelname'     THEN 5
+                WHEN 'PanelCategory' THEN 6 WHEN 'TestPanel'     THEN 7 WHEN 'TestPanelName' THEN 8 ELSE 9 END);
+        -- ClinicName for Inhealth maps to LIMSMaster.Account (per spec).
+        DECLARE @AccountCol SYSNAME = (
+            SELECT TOP 1 name FROM sys.columns
+            WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+              AND name IN ('Account','ClinicName','Facility','FacilityName','Clinic')
+            ORDER BY CASE name
+                WHEN 'Account' THEN 0 WHEN 'ClinicName' THEN 1 WHEN 'Facility' THEN 2
+                WHEN 'FacilityName' THEN 3 WHEN 'Clinic' THEN 4 ELSE 5 END);
+        -- Provider name: two separate columns in Inhealth LIMSMaster.
+        -- Both must be found for the provider filter to apply.
+        DECLARE @ProvFirstNameCol SYSNAME = (
+            SELECT TOP 1 name FROM sys.columns
+            WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+              AND name IN ('ProviderFirstName','FirstName','ProvFirstName','PhysFirstName')
+            ORDER BY CASE name
+                WHEN 'ProviderFirstName' THEN 0 WHEN 'FirstName'   THEN 1
+                WHEN 'ProvFirstName'     THEN 2 WHEN 'PhysFirstName' THEN 3 ELSE 4 END);
+        DECLARE @ProvLastNameCol SYSNAME = (
+            SELECT TOP 1 name FROM sys.columns
+            WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+              AND name IN ('ProviderLastName','LastName','ProvLastName','PhysLastName')
+            ORDER BY CASE name
+                WHEN 'ProviderLastName' THEN 0 WHEN 'LastName'    THEN 1
+                WHEN 'ProvLastName'     THEN 2 WHEN 'PhysLastName' THEN 3 ELSE 4 END);
+        IF @OrderIDCol IS NOT NULL AND @DateCol IS NOT NULL AND @SampleStatusCol IS NOT NULL
+           AND @BillCategoryCol IS NOT NULL AND @SubStatusCol IS NOT NULL
+        BEGIN
+            DECLARE @NAExpr       NVARCHAR(300) = CASE WHEN @NACol IS NOT NULL
+                THEN N'ISNULL(CONVERT(NVARCHAR(50), [' + @NACol + N']), '''')'
+                ELSE N'''''' END;
+            DECLARE @PanelExpr    NVARCHAR(400) = CASE WHEN @PanelNameCol IS NOT NULL
+                THEN N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), [' + @PanelNameCol + N']), '''')))'
+                ELSE N'''''' END;
+            -- DateofService (Entry_DateCreated) and FirstBilledDate (BilledDate) are
+            -- now applied via @LisPeriodExpr for the period bucket, and as explicit
+            -- range predicates below â€” mirrors Cove's usp_GetCove_ExecutiveSummary.
+            -- Dimension filters (Panel, Clinic, Provider) ARE applied when
+            -- @HasLisFilter = 1. SalesRep is not available for Inhealth LIS â†’ skipped.
+            DECLARE @LisSql NVARCHAR(MAX) = N'
+                INSERT INTO #Lis (OrderID, NAFlag, SampleStatus, BillCategory, SubStatus, LRNPanelName, ESYear, ESMonth)
+                SELECT
+                    LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @OrderIDCol + N']))),
+                    ' + @NAExpr + N',
+                    LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), [' + @SampleStatusCol + N']), ''''))),
+                    LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), [' + @BillCategoryCol + N']), ''''))),
+                    LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), [' + @SubStatusCol + N']), ''''))),
+                    ' + @PanelExpr + N',
+                    YEAR (' + @LisPeriodExpr + N'),
+                    MONTH(' + @LisPeriodExpr + N')
+                FROM dbo.LIMSMaster
+                WHERE ' + @LisPeriodExpr + N' IS NOT NULL
+                  AND NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @OrderIDCol + N']))), '''') IS NOT NULL';
+            -- DateofService range â†’ Entry_DateCreated (@DateCol). Always appended;
+            -- no-ops when @iDosFrom/@iDosTo are NULL (matches Cove's pattern).
+            SET @LisSql += N'
+                  AND (@iDosFrom IS NULL OR TRY_CAST([' + @DateCol + N'] AS DATE) >= @iDosFrom)
+                  AND (@iDosTo   IS NULL OR TRY_CAST([' + @DateCol + N'] AS DATE) <= @iDosTo)';
+            -- FirstBilledDate range â†’ BilledDate (@BilledDateCol), when the column exists.
+            IF @BilledDateCol IS NOT NULL
+                SET @LisSql += N'
+                  AND (@iBilledFrom IS NULL OR TRY_CAST([' + @BilledDateCol + N'] AS DATE) >= @iBilledFrom)
+                  AND (@iBilledTo   IS NULL OR TRY_CAST([' + @BilledDateCol + N'] AS DATE) <= @iBilledTo)';
+            -- Apply LIS dimension filters when active.
+            -- COLLATE DATABASE_DEFAULT on both sides of CHARINDEX prevents collation
+            -- conflict errors when LIMSMaster columns have a different collation than
+            -- the NVARCHAR(MAX) SP parameters.
+            IF @HasLisFilter = 1
+            BEGIN
+                IF @HasPanelFilter = 1 AND @PanelNameCol IS NOT NULL
+                    SET @LisSql += N'
+                  AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @PanelNameCol + N']), ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iPanels + '','') COLLATE DATABASE_DEFAULT) > 0';
+                -- Clinic: Account column, match against @iClinics.
+                IF @HasClinicFilter = 1 AND @AccountCol IS NOT NULL
+                    SET @LisSql += N'
+                  AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @AccountCol + N']), ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iClinics + '','') COLLATE DATABASE_DEFAULT) > 0';
+                -- Provider: concatenate LastName + '','' + FirstName, match against @iProviders.
+                -- This matches ClaimLevelData.ReferringProvider's "LastName,FirstName"
+                -- format used by the filter dropdown and the PMS/Cash/Avg provider match.
+                -- Both columns must exist; if either is missing the filter is skipped.
+                IF @HasProviderFilter = 1 AND @ProvFirstNameCol IS NOT NULL AND @ProvLastNameCol IS NOT NULL
+                    SET @LisSql += N'
+                  AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), [' + @ProvLastNameCol + N']), '''') + '','' + ISNULL(CONVERT(NVARCHAR(200), [' + @ProvFirstNameCol + N']), ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iProviders + '','') COLLATE DATABASE_DEFAULT) > 0';
+            END
+            SET @LisSql += N';';
+            EXEC sp_executesql @LisSql,
+                N'@iPanels NVARCHAR(MAX), @iClinics NVARCHAR(MAX), @iProviders NVARCHAR(MAX),
+                  @iDosFrom DATE, @iDosTo DATE, @iBilledFrom DATE, @iBilledTo DATE',
+                @iPanels = @Panels, @iClinics = @Clinics, @iProviders = @Providers,
+                @iDosFrom = @DosFrom, @iDosTo = @DosTo,
+                @iBilledFrom = @BilledFrom, @iBilledTo = @BilledTo;
+        END
+    END
+    -- â”€â”€ PMS/Cash/Avg: build #Base from dbo.ClaimLevelData, date-filtered â”€â”€â”€â”€â”€
+    --    ESYear/ESMonth = the period bucket, taken from FirstBilledDate when a
+    --    FirstBilledDate range drives the request, otherwise from DateofService.
+    DROP TABLE IF EXISTS #Base;
+    SELECT
+        AccessionNumber,
+        CASE WHEN @BucketByBilled = 1
+             THEN YEAR (TRY_CAST(FirstBilledDate AS DATE))
+             ELSE YEAR (TRY_CAST(DateofService   AS DATE)) END AS ESYear,
+        CASE WHEN @BucketByBilled = 1
+             THEN MONTH(TRY_CAST(FirstBilledDate AS DATE))
+             ELSE MONTH(TRY_CAST(DateofService   AS DATE)) END AS ESMonth,
+        ISNULL(LTRIM(RTRIM(BillStatus)),  '')   AS BillStatus,
+        ISNULL(LTRIM(RTRIM(ClaimStatus)), '')   AS ClaimStatus,
+        ISNULL(TRY_CAST(ChargeAmount          AS DECIMAL(18,2)), 0) AS ChargeAmount,
+        ISNULL(TRY_CAST(InsurancePayment      AS DECIMAL(18,2)), 0) AS InsurancePayment,
+        ISNULL(TRY_CAST(PatientPayment        AS DECIMAL(18,2)), 0) AS PatientPayment,
+        ISNULL(TRY_CAST(InsuranceAdjustments  AS DECIMAL(18,2)), 0) AS InsuranceAdjustments,
+        ISNULL(TRY_CAST(PatientAdjustments    AS DECIMAL(18,2)), 0) AS PatientAdjustments,
+        ISNULL(TRY_CAST(InsuranceBalance      AS DECIMAL(18,2)), 0) AS InsuranceBalance,
+        ISNULL(TRY_CAST(PatientBalance        AS DECIMAL(18,2)), 0) AS PatientBalance
+    INTO #Base
+    FROM dbo.ClaimLevelData
+    WHERE TRY_CAST(DateofService AS DATE) IS NOT NULL
+      AND (ISNULL(@YearFrom,0)=0  OR YEAR (TRY_CAST(DateofService AS DATE)) >= @YearFrom)
+      AND (ISNULL(@YearTo,0)=0    OR YEAR (TRY_CAST(DateofService AS DATE)) <= @YearTo)
+      AND (ISNULL(@MonthFrom,0)=0 OR MONTH(TRY_CAST(DateofService AS DATE)) >= @MonthFrom)
+      AND (ISNULL(@MonthTo,0)=0   OR MONTH(TRY_CAST(DateofService AS DATE)) <= @MonthTo)
+      AND (@DosFrom    IS NULL OR TRY_CAST(DateofService   AS DATE) >= @DosFrom)
+      AND (@DosTo      IS NULL OR TRY_CAST(DateofService   AS DATE) <= @DosTo)
+      AND (@BilledFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @BilledFrom)
+      AND (@BilledTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @BilledTo)
+      -- Dimension matching uses comma-delimited TOKEN search (CHARINDEX) rather
+      -- than STRING_SPLIT, because the values themselves can contain commas
+      -- (e.g. ReferringProvider = 'LastName,FirstName' â†’ 'ABBOTT,JOEL').
+      -- Splitting on ',' would shred those values; wrapping both the parameter
+      -- and the column value in commas and substring-searching matches the
+      -- whole value as a single token. CHARINDEX is used (not LIKE) so wildcard
+      -- characters in the data are treated literally.
+      AND (@HasPanelFilter    = 0 OR CHARINDEX((',' + LTRIM(RTRIM(ISNULL(PanelNameBasedOnCPT,''))) + ',') COLLATE DATABASE_DEFAULT, (',' + @Panels    + ',') COLLATE DATABASE_DEFAULT) > 0)
+      AND (@HasClinicFilter   = 0 OR CHARINDEX((',' + LTRIM(RTRIM(ISNULL(ClinicName,        ''))) + ',') COLLATE DATABASE_DEFAULT, (',' + @Clinics   + ',') COLLATE DATABASE_DEFAULT) > 0)
+      AND (@HasProviderFilter = 0 OR CHARINDEX((',' + LTRIM(RTRIM(ISNULL(ReferringProvider, ''))) + ',') COLLATE DATABASE_DEFAULT, (',' + @Providers + ',') COLLATE DATABASE_DEFAULT) > 0)
+      AND (@HasRepFilter      = 0 OR CHARINDEX((',' + LTRIM(RTRIM(ISNULL(SalesRepname,      ''))) + ',') COLLATE DATABASE_DEFAULT, (',' + @Reps      + ',') COLLATE DATABASE_DEFAULT) > 0);
+    -- â”€â”€ #Periods : distinct (ESYear, ESMonth) in #Base + (0,0) grand total â”€â”€
+    --    Same period-split logic as usp_RefreshInh_ExecutiveSummary, but scoped
+    --    to the selected/filtered range. When the range spans more than one
+    --    month, multiple period rows are produced; a single month yields one.
+    DROP TABLE IF EXISTS #Periods;
+    SELECT DISTINCT ESYear, ESMonth INTO #Periods
+    FROM #Base
+    WHERE ESYear IS NOT NULL AND ESMonth IS NOT NULL
+    UNION ALL SELECT 0, 0;
+    -- â”€â”€ #LisBilled : LIMSMaster BillCategory='Billed' counts per period
+    --    (+ (0,0) grand total), used for PMS row G (Billed Mismatches).
+    --    Mirrors usp_RefreshInh_ExecutiveSummary.
+    DROP TABLE IF EXISTS #LisBilled;
+    --    LIS Billed = Billable -> Billed (row C) + Other Samples -> Billed (row E.1), NA blank.
+    SELECT ESYear, ESMonth,
+           COUNT(DISTINCT CASE WHEN SampleStatus = 'Billable'      THEN OrderID END)
+         + COUNT(DISTINCT CASE WHEN SampleStatus = 'Other Samples' THEN OrderID END) AS BilledCount
+    INTO #LisBilled
+    FROM #Lis
+    WHERE ISNULL(NAFlag, '') = '' AND BillCategory = 'Billed'
+      AND ESYear IS NOT NULL AND ESMonth IS NOT NULL
+    GROUP BY ESYear, ESMonth
+    UNION ALL
+    SELECT 0, 0,
+           COUNT(DISTINCT CASE WHEN SampleStatus = 'Billable'      THEN OrderID END)
+         + COUNT(DISTINCT CASE WHEN SampleStatus = 'Other Samples' THEN OrderID END)
+    FROM #Lis
+    WHERE ISNULL(NAFlag, '') = '' AND BillCategory = 'Billed';
+    -- â”€â”€ #LisPeriods : distinct (ESYear, ESMonth) from #Lis + (0,0) grand total â”€
+    --    LIS uses its own period table (from LIMSMaster's Entry_DateCreated /
+    --    BilledDate, via @LisPeriodExpr) independent of #Periods (which comes
+    --    from ClaimLevelData). #Lis is now date-filtered (DOS or FirstBilledDate,
+    --    matching @BucketByBilled) at build time above, so only the months
+    --    actually within the selected range are present here.
+    DROP TABLE IF EXISTS #LisPeriods;
+    SELECT DISTINCT ESYear, ESMonth INTO #LisPeriods
+    FROM #Lis WHERE ESYear IS NOT NULL AND ESMonth IS NOT NULL AND ISNULL(NAFlag, '') = ''
+    UNION ALL SELECT 0, 0;
+    -- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    --  LIS  -  A, B, B1.{LRNPanelName}, C, C.1, D, D.1-D.6, E, E.1-E.7
+    --  Split by period from #LisPeriods (mirrors how PMS uses #Periods).
+    --  Grand total appears at ESYear=0, ESMonth=0.
+    -- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    ;WITH Lis AS
+    (
+        -- A  Total Samples (NA is blank/null).
+        --    Matches the ACTUALLY DEPLOYED usp_RefreshInh_ExecutiveSummary_LIS_Alt
+        --    (confirmed via OBJECT_DEFINITION): COUNT(CASE WHEN NAFlag='' OR NAFlag
+        --    IS NULL ...). The "NA is not blank" condition previously here was
+        --    inverted relative to production, which made Total Samples collapse to
+        --    ~0 for any period once DOS filtering was correctly wired up to LIS.
+        SELECT p.ESYear, p.ESMonth, 'A' AS RowCode, 'Total Samples' AS Description,
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'') = '' THEN l.OrderID END) AS DECIMAL(18,2)) AS MetricValue
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- B  Billable Samples
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'B', 'Billable Samples',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- C  Billed
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'C', '  Billed',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable' AND l.BillCategory='Billed' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- C.1  Billed Via AMD
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'C.1', '    Billed Via AMD',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable' AND l.BillCategory='Billed' AND l.SubStatus='Billed Via AMD' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- D  Unbilled
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'D', '  Unbilled',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable' AND l.BillCategory='Not Billed' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- D.1  Nexum_Claim_scrubber_Eligibility
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'D.1', '    Nexum_Claim_scrubber_Eligibility',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable' AND l.BillCategory='Not Billed' AND l.SubStatus='Nexum_Claim_scrubber_Eligibility' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- D.2  Requires Review
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'D.2', '    Requires Review',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable' AND l.BillCategory='Not Billed' AND l.SubStatus='Requires Review' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- D.3  Entered in AMD but not billed
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'D.3', '    Entered in AMD but not billed',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable' AND l.BillCategory='Not Billed' AND l.SubStatus='Entered in AMD but not billed' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- D.4  Nexum Pre Processing Queue
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'D.4', '    Nexum Pre Processing Queue',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable' AND l.BillCategory='Not Billed' AND l.SubStatus='Nexum Pre Processing Queue' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- D.5  Nexum_Claim_scrubber_AMD Output
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'D.5', '    Nexum_Claim_scrubber_AMD Output',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable' AND l.BillCategory='Not Billed' AND l.SubStatus='Nexum_Claim_scrubber_AMD Output' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- D.6  Nexum_Claim_scrubber_Diagnosis Validity
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'D.6', '    Nexum_Claim_scrubber_Diagnosis Validity',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable' AND l.BillCategory='Not Billed' AND l.SubStatus='Nexum_Claim_scrubber_Diagnosis Validity' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- E  Other Samples
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'E', 'Other Samples',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Other Samples' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- E.1  Billed (Other Samples + BillCategory=Billed)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'E.1', '  Billed',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Other Samples' AND l.BillCategory='Billed' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- E.2  Unbilled (Other Samples + BillCategory=Not Billed)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'E.2', '  Unbilled',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Other Samples' AND l.BillCategory='Not Billed' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- E.3  Other Samples (LIS Table provides Breakdown) - label row
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'E.3', '  Other Samples (LIS Table provides Breakdown)',
+               CAST(0 AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        GROUP BY p.ESYear, p.ESMonth
+        -- E.4  Self Pay
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'E.4', '  Self Pay',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Self Pay' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- E.5  Deleted/Rejected
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'E.5', '  Deleted/Rejected',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Deleted/Rejected' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- E.6  Duplicate
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'E.6', '  Duplicate',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Duplicate' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- E.7  System Test
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'E.7', '  System Test',
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='System Test' THEN l.OrderID END) AS DECIMAL(18,2))
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+    ),
+    -- Dynamic panel sub-rows under B (B1.{LRNPanelName}), split by period
+    LisPanels AS
+    (
+        SELECT p.ESYear, p.ESMonth,
+               'B1.' + pn.LRNPanelName AS RowCode,
+               '    ' + pn.LRNPanelName AS Description,
+               CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable'
+                                        AND l.LRNPanelName = pn.LRNPanelName THEN l.OrderID END) AS DECIMAL(18,2)) AS MetricValue
+        FROM #LisPeriods p
+        CROSS JOIN (
+            SELECT DISTINCT LRNPanelName FROM #Lis
+            WHERE NULLIF(LRNPanelName, '') IS NOT NULL
+              AND ISNULL(NAFlag,'') = '' AND SampleStatus = 'Billable'
+        ) pn
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth, pn.LRNPanelName
+    ),
+    -- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    --  PMS  -  F, G, H, H.1, H.2, I, J, K, L, M, N, O, O.1, O.2, O.3
+    -- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    PMS AS
+    (
+        -- F  No. of Billed Claims
+        SELECT p.ESYear, p.ESMonth, 'F' AS RowCode, 'No. of Billed Claims' AS Description,
+               CAST(SUM(CASE WHEN b.BillStatus='Billed' THEN 1 ELSE 0 END) AS DECIMAL(18,2)) AS MetricValue
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- G  Billed Mismatches = PMS Billed Claims - LIS (Billable -> Billed + Other Samples -> Billed), floored at 0
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'G', 'Billed Mismatches',
+               CAST(CASE WHEN SUM(CASE WHEN b.BillStatus='Billed' THEN 1 ELSE 0 END) - ISNULL(lb.BilledCount, 0) > 0
+                         THEN SUM(CASE WHEN b.BillStatus='Billed' THEN 1 ELSE 0 END) - ISNULL(lb.BilledCount, 0)
+                         ELSE 0 END AS DECIMAL(18,2))
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        LEFT JOIN #LisBilled lb ON lb.ESYear=p.ESYear AND lb.ESMonth=p.ESMonth
+        GROUP BY p.ESYear, p.ESMonth, lb.BilledCount
+        -- H  No. of UnBilled Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'H', 'No. of UnBilled Claims',
+               CAST(SUM(CASE WHEN b.BillStatus='Unbilled' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- H.1  Unbilled
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'H.1', '  Unbilled',
+               CAST(SUM(CASE WHEN b.BillStatus='Unbilled' AND b.ClaimStatus='Unbilled' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- H.2  Unbilled - Patient Balance
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'H.2', '  Unbilled - Patient Balance',
+               CAST(SUM(CASE WHEN b.BillStatus='Unbilled' AND b.ClaimStatus='Unbilled - Patient Balance' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- I  No. of Fully Paid Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'I', 'No. of Fully Paid Claims',
+               CAST(SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Fully Paid' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- J  No. of Patient Responsibility Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'J', 'No. of Patient Responsibility Claims',
+               CAST(SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Patient Responsibility' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- K  No. of Fully Adjusted Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'K', 'No. of Fully Adjusted Claims',
+               CAST(SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Complete W/O' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- L  No. of Partially Adjusted Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'L', 'No. of Partially Adjusted Claims',
+               CAST(SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Partially Adjusted' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- M  No. of Patient Payments Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'M', 'No. of Patient Payments Claims',
+               CAST(SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Patient Payment' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- N  No. of Partially Paid Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'N', 'No. of Partially Paid Claims',
+               CAST(SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Partially Paid' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- O  No. of Insurance Balance Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'O', 'No. of Insurance Balance Claims',
+               CAST(SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus IN ('FullyDenied','Partially Denied','No Response') THEN 1 ELSE 0 END) AS DECIMAL(18,2))
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- O.1  No. of Denied Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'O.1', '  No. of Denied Claims',
+               CAST(SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='FullyDenied' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- O.2  No. of Partially Denied Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'O.2', '  No. of Partially Denied Claims',
+               CAST(SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Partially Denied' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- O.3  No. of No Response from Payor Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'O.3', '  No. of No Response from Payor Claims',
+               CAST(SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='No Response' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+    ),
+    -- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    --  Cash  -  P, Q, Q.1, Q.2, R, S, T, U, V, W, W.1, W.2, W.3
+    -- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    Cash AS
+    (
+        -- P  Total Billed ($)
+        SELECT p.ESYear, p.ESMonth, 'P' AS RowCode, 'Total Billed ($)' AS Description,
+               ISNULL(SUM(CASE WHEN b.BillStatus='Billed' THEN b.ChargeAmount ELSE 0 END), 0) AS MetricValue
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- Q  Total Unbilled ($)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'Q', 'Total Unbilled ($)',
+               ISNULL(SUM(CASE WHEN b.BillStatus='Unbilled' THEN b.ChargeAmount ELSE 0 END), 0)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- Q.1  Unbilled
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'Q.1', '  Unbilled',
+               ISNULL(SUM(CASE WHEN b.BillStatus='Unbilled' AND b.ClaimStatus='Unbilled' THEN b.ChargeAmount ELSE 0 END), 0)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- Q.2  Unbilled - Patient Balance
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'Q.2', '  Unbilled - Patient Balance',
+               ISNULL(SUM(CASE WHEN b.BillStatus='Unbilled' AND b.ClaimStatus='Unbilled - Patient Balance' THEN b.ChargeAmount ELSE 0 END), 0)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- R  Insurance Payment ($)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'R', 'Insurance Payment ($)',
+               ISNULL(SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Fully Paid' THEN b.InsurancePayment ELSE 0 END), 0)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- S  Patient Payments ($)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'S', 'Patient Payments ($)',
+               ISNULL(SUM(CASE WHEN b.BillStatus='Billed' THEN b.PatientPayment ELSE 0 END), 0)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- T  Partially Paid ($)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'T', 'Partially Paid ($)',
+               ISNULL(SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Partially Paid' THEN b.InsurancePayment ELSE 0 END), 0)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- U  Patient Responsibility ($)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'U', 'Patient Responsibility ($)',
+               ISNULL(SUM(CASE WHEN b.BillStatus='Billed' THEN b.PatientBalance ELSE 0 END), 0)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- V  Total Adjustments ($)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'V', 'Total Adjustments ($)',
+               ISNULL(SUM(CASE WHEN b.BillStatus='Billed' THEN ISNULL(b.InsuranceAdjustments,0) + ISNULL(b.PatientAdjustments,0) ELSE 0 END), 0)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- W  Insurance Balance ($)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'W', 'Insurance Balance ($)',
+               ISNULL(SUM(CASE WHEN b.BillStatus='Billed' THEN b.InsuranceBalance ELSE 0 END), 0)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- W.1  Denials
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'W.1', '  Denials',
+               ISNULL(SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='FullyDenied' THEN b.InsuranceBalance ELSE 0 END), 0)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- W.2  Partially Denied
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'W.2', '  Partially Denied',
+               ISNULL(SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Partially Denied' THEN b.InsuranceBalance ELSE 0 END), 0)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- W.3  No Response from Payor
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'W.3', '  No Response from Payor',
+               ISNULL(SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='No Response' THEN b.InsuranceBalance ELSE 0 END), 0)
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+    ),
+    -- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    --  Avg  -  X, Y, Z
+    -- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    AvgRows AS
+    (
+        -- X  Average Payment ($) - Total Pay/Billed Claims
+        SELECT p.ESYear, p.ESMonth, 'X' AS RowCode, 'Average Payment ($) - Total Pay/Billed Claims' AS Description,
+               CASE WHEN SUM(CASE WHEN b.BillStatus='Billed' THEN 1 ELSE 0 END) > 0
+                    THEN SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus IN ('Fully Paid','Partially Paid')
+                                  THEN b.InsurancePayment ELSE 0 END)
+                         / SUM(CASE WHEN b.BillStatus='Billed' THEN 1 ELSE 0 END)
+                    ELSE 0 END AS MetricValue
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- Y  Average Payment ($) - Fully Paid Claim Value/Paid Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'Y', 'Average Payment ($) - Fully Paid Claim Value/Paid Claims',
+               CASE WHEN SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Fully Paid' THEN 1 ELSE 0 END) > 0
+                    THEN SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Fully Paid' THEN b.InsurancePayment ELSE 0 END)
+                         / SUM(CASE WHEN b.BillStatus='Billed' AND b.ClaimStatus='Fully Paid' THEN 1 ELSE 0 END)
+                    ELSE 0 END
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+        -- Z  Average Payment ($) - Total Pay/Adjudicated Claims
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'Z', 'Average Payment ($) - Total Pay/Adjudicated Claims',
+               CASE WHEN SUM(CASE WHEN b.BillStatus='Billed'
+                                             AND b.ClaimStatus IN ('Fully Paid','Complete W/O','Patient Responsibility',
+                                                                 'Partially Paid','Patient Payment','FullyDenied','Partially Denied')
+                                             THEN 1 ELSE 0 END) > 0
+                    THEN SUM(CASE WHEN b.BillStatus='Billed'
+                                  AND b.ClaimStatus IN ('Fully Paid','Complete W/O','Patient Responsibility',
+                                                      'Partially Paid','Patient Payment','FullyDenied','Partially Denied')
+                                  THEN b.InsurancePayment + b.PatientPayment ELSE 0 END)
+                         / SUM(CASE WHEN b.BillStatus='Billed'
+                                               AND b.ClaimStatus IN ('Fully Paid','Complete W/O','Patient Responsibility',
+                                                                   'Partially Paid','Patient Payment','FullyDenied','Partially Denied')
+                                               THEN 1 ELSE 0 END)
+                    ELSE 0 END
+        FROM #Periods p
+        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+    )
+    SELECT RowCode, Category, Description, BillYear, BillMonth, MetricValue
+    FROM
+    (
+        -- LIS rows are split per month from #LisPeriods (ESYear/ESMonth) + grand total (0,0)
+        SELECT RowCode, 'LIS'  AS Category, Description, ESYear AS BillYear, ESMonth AS BillMonth, MetricValue, 1 AS CatOrder FROM Lis
+        UNION ALL
+        SELECT RowCode, 'LIS',  Description, ESYear AS BillYear, ESMonth AS BillMonth, MetricValue, 1 FROM LisPanels
+        -- PMS / Cash / Avg are split per month (ESYear/ESMonth) + grand total (0,0)
+        UNION ALL
+        SELECT RowCode, 'PMS',  Description, ESYear, ESMonth, MetricValue, 2 FROM PMS
+        UNION ALL
+        SELECT RowCode, 'Cash', Description, ESYear, ESMonth, MetricValue, 3 FROM Cash
+        UNION ALL
+        SELECT RowCode, 'Avg',  Description, ESYear, ESMonth, MetricValue, 4 FROM AvgRows
+    ) result
+    ORDER BY BillYear, BillMonth, CatOrder, RowCode;
+    DROP TABLE IF EXISTS #Lis;
+    DROP TABLE IF EXISTS #LisPeriods;
+    DROP TABLE IF EXISTS #LisBilled;
+    DROP TABLE IF EXISTS #Base;
+    DROP TABLE IF EXISTS #Periods;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [dbo].[usp_RefreshInh_ExecutiveSummary_LIS_Alt]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    TRUNCATE TABLE dbo.Inhealth_ES_LIS;
+
+    IF OBJECT_ID('dbo.LIMSMaster', 'U') IS NULL
+    BEGIN
+        PRINT 'usp_RefreshInh_ExecutiveSummary_LIS_Alt: dbo.LIMSMaster not found - nothing to do.';
+        RETURN;
+    END
+
+    -- ── Dynamic column detection ─────────────────────────────────────────────
+    DECLARE @OrderIDCol SYSNAME = (
+        SELECT TOP 1 name FROM sys.columns
+        WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+          AND name IN ('OrderID','OrderId','AccessionNumber','Accession','AccessionNo')
+        ORDER BY CASE name WHEN 'OrderID' THEN 0 WHEN 'OrderId' THEN 1
+                           WHEN 'AccessionNumber' THEN 2 WHEN 'Accession' THEN 3 WHEN 'AccessionNo' THEN 4 ELSE 5 END);
+
+    DECLARE @NACol SYSNAME = (
+        SELECT TOP 1 name FROM sys.columns
+        WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+          AND name IN ('NA','IsNA','NotApplicable','NA_Flag','NAStatus')
+        ORDER BY CASE name WHEN 'NA' THEN 0 WHEN 'IsNA' THEN 1 WHEN 'NotApplicable' THEN 2
+                           WHEN 'NA_Flag' THEN 3 WHEN 'NAStatus' THEN 4 ELSE 5 END);
+
+    -- LastTest is the LIS month for Inhealth (matches the client report)
+    DECLARE @DateCol SYSNAME = (
+        SELECT TOP 1 name FROM sys.columns
+        WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+          AND name IN ('LastTest','ReqCollectDate','Entry_DateCreated','RequestCollectDate','DateOfCollection','DateofService','CollectionDate','ServiceDate','AccessionDate')
+        ORDER BY CASE name
+            WHEN 'LastTest' THEN -1 WHEN 'ReqCollectDate' THEN 0 WHEN 'Entry_DateCreated' THEN 1 WHEN 'RequestCollectDate' THEN 2
+            WHEN 'DateOfCollection' THEN 3 WHEN 'DateofService' THEN 4
+            WHEN 'CollectionDate' THEN 5 WHEN 'ServiceDate' THEN 6 WHEN 'AccessionDate' THEN 7 ELSE 8 END);
+
+    DECLARE @SampleStatusCol SYSNAME = (
+        SELECT TOP 1 name FROM sys.columns
+        WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+          AND name IN ('SampleStatus','BillTo','Sample_Status','SampleType')
+        ORDER BY CASE name WHEN 'SampleStatus' THEN 0 WHEN 'BillTo' THEN 1 WHEN 'Sample_Status' THEN 2 WHEN 'SampleType' THEN 3 ELSE 4 END);
+
+    DECLARE @BillCategoryCol SYSNAME = (
+        SELECT TOP 1 name FROM sys.columns
+        WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+          AND name IN ('BillCategory','BillingStatus','Bill_Category','BillingCategory','BillStatus')
+        ORDER BY CASE name WHEN 'BillCategory' THEN 0 WHEN 'BillingStatus' THEN 1 WHEN 'Bill_Category' THEN 2 WHEN 'BillingCategory' THEN 3 WHEN 'BillStatus' THEN 4 ELSE 5 END);
+
+    DECLARE @SubStatusCol SYSNAME = (
+        SELECT TOP 1 name FROM sys.columns
+        WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+          AND name IN ('SubStatus','FinalStatus','Sub_Status','ClientStatus')
+        ORDER BY CASE name WHEN 'SubStatus' THEN 0 WHEN 'FinalStatus' THEN 1 WHEN 'Sub_Status' THEN 2 WHEN 'ClientStatus' THEN 3 ELSE 4 END);
+
+    DECLARE @PanelNameCol SYSNAME = (
+        SELECT TOP 1 name FROM sys.columns
+        WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+          AND name IN ('LRNPanelName','LRN_PanelName','LRNPanel','PanelName','Panelname','PanelType','PanelCategory','TestPanel','TestPanelName')
+        ORDER BY CASE name
+            WHEN 'LRNPanelName'  THEN 0 WHEN 'LRN_PanelName' THEN 1 WHEN 'LRNPanel'      THEN 2
+            WHEN 'PanelName'     THEN 3 WHEN 'Panelname'     THEN 4 WHEN 'PanelType'     THEN 5
+            WHEN 'PanelCategory' THEN 6 WHEN 'TestPanel'     THEN 7 WHEN 'TestPanelName' THEN 8 ELSE 9 END);
+
+    IF @OrderIDCol IS NULL OR @DateCol IS NULL OR @SampleStatusCol IS NULL
+       OR @BillCategoryCol IS NULL OR @SubStatusCol IS NULL
+    BEGIN
+        PRINT 'usp_RefreshInh_ExecutiveSummary_LIS_Alt: required columns not found on dbo.LIMSMaster - skipping.';
+        RETURN;
+    END
+
+    -- ── Build #Lis ───────────────────────────────────────────────────────────
+    DROP TABLE IF EXISTS #Lis;
+    CREATE TABLE #Lis
+    (
+        OrderID       NVARCHAR(100) NOT NULL,
+        ESYear        INT           NOT NULL,
+        ESMonth       INT           NOT NULL,
+        NAFlag        NVARCHAR(50)  NOT NULL,
+        SampleStatus  NVARCHAR(200) NOT NULL,
+        BillCategory  NVARCHAR(200) NOT NULL,
+        SubStatus     NVARCHAR(200) NOT NULL,
+        LRNPanelName  NVARCHAR(200) NOT NULL
+    );
+
+    DECLARE @NAExpr    NVARCHAR(300) = CASE WHEN @NACol IS NOT NULL
+        THEN N'ISNULL(CONVERT(NVARCHAR(50), [' + @NACol + N']), '''')'
+        ELSE N'''''' END;
+    DECLARE @PanelExpr NVARCHAR(400) = CASE WHEN @PanelNameCol IS NOT NULL
+        THEN N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), [' + @PanelNameCol + N']), '''')))'
+        ELSE N'''''' END;
+
+    DECLARE @LisSql NVARCHAR(MAX) = N'
+        INSERT INTO #Lis (OrderID, ESYear, ESMonth, NAFlag, SampleStatus, BillCategory, SubStatus, LRNPanelName)
+        SELECT
+            LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @OrderIDCol + N']))),
+            YEAR (TRY_CAST([' + @DateCol + N'] AS DATE)),
+            MONTH(TRY_CAST([' + @DateCol + N'] AS DATE)),
+            ' + @NAExpr + N',
+            LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), [' + @SampleStatusCol + N']), ''''))),
+            LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), [' + @BillCategoryCol + N']), ''''))),
+            LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), [' + @SubStatusCol    + N']), ''''))),
+            ' + @PanelExpr + N'
+        FROM dbo.LIMSMaster'
+        --WHERE TRY_CAST([' + @DateCol + N'] AS DATE) IS NOT NULL
+        --  AND NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @OrderIDCol + N']))), '''') IS NOT NULL;';
+    EXEC sp_executesql @LisSql;
+
+    -- LIS periods + grand-total sentinel
+    DROP TABLE IF EXISTS #LisPeriods;
+    -- NA rows are never counted; skipping them keeps bad LastTest dates (e.g. 2027/2028) out of the month columns.
+    SELECT DISTINCT ESYear, ESMonth INTO #LisPeriods FROM #Lis WHERE ISNULL(NAFlag, '') = ''
+    UNION ALL SELECT 0, 0;
+
+    -- Distinct LRNPanelName values for Billable rows - drives B1.{PanelName} sub-rows
+    DROP TABLE IF EXISTS #PanelNames;
+    SELECT DISTINCT LRNPanelName
+    INTO #PanelNames
+    FROM #Lis
+    WHERE NULLIF(LRNPanelName, '') IS NOT NULL
+      AND ISNULL(NAFlag,'') = ''
+      AND SampleStatus = 'Billable';
+
+    -- ────────────────────────────────────────────────────────────────────────
+    --  Insert all LIS rows into Inhealth_ES_LIS
+    -- ────────────────────────────────────────────────────────────────────────
+    INSERT INTO dbo.Inhealth_ES_LIS (RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt)
+    SELECT RoleID, Description, ESYear, ESMonth, ClaimCount, 0, GETDATE()
+    FROM
+    (
+        -- A  Total Samples (NA not blank)
+        SELECT p.ESYear, p.ESMonth, 'A' AS RoleID, 'Total Samples' AS Description,
+               COUNT( CASE WHEN l.NAFlag='' or l.NAFlag  is null THEN l.OrderID END) AS ClaimCount
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- B  Billable Samples (NA=blank AND SampleStatus='Billable')
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'B', 'Billable Samples',
+               COUNT( CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- B1.{LRNPanelName}  Billable by Panel - dynamic
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth,
+               N'B1.' + pn.LRNPanelName,
+               N'    ' + pn.LRNPanelName,
+               COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable'
+                                   AND l.LRNPanelName = pn.LRNPanelName THEN l.OrderID END)
+        FROM #LisPeriods p
+        CROSS JOIN #PanelNames pn
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth, pn.LRNPanelName
+
+        -- C  Billed
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'C', '  Billed',
+               COUNT(DISTINCT CASE WHEN (l.NAFlag ='' or l.NAFlag is null) 
+			   AND l.BillCategory='Billed'  AND l.SampleStatus='Billable' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- C.1  Billed Via AMD
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'C.1', '    Billed Via AMD',
+               COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable'
+                                   AND l.BillCategory='Billed' AND l.SubStatus='Billed Via AMD' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- D  Unbilled
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'D', '  Unbilled',
+               COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable' AND l.BillCategory='Not Billed' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- D.1  Nexum_Claim_scrubber_Eligibility
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'D.1', '    Nexum_Claim_scrubber_Eligibility',
+               COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable'
+                                   AND l.BillCategory='Not Billed' AND l.SubStatus='Nexum_Claim_scrubber_Eligibility' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- D.2  Requires Review
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'D.2', '    Requires Review',
+               COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable'
+                                   AND l.BillCategory='Not Billed' AND l.SubStatus='Requires Review' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- D.3  Entered in AMD but not billed
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'D.3', '    Entered in AMD but not billed',
+               COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable'
+                                   AND l.BillCategory='Not Billed' AND l.SubStatus='Entered in AMD but not billed' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- D.4  Nexum Pre Processing Queue
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'D.4', '    Nexum Pre Processing Queue',
+               COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable'
+                                   AND l.BillCategory='Not Billed' AND l.SubStatus='Nexum Pre Processing Queue' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- D.5  Nexum_Claim_scrubber_AMD Output
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'D.5', '    Nexum_Claim_scrubber_AMD Output',
+               COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable'
+                                   AND l.BillCategory='Not Billed' AND l.SubStatus='Nexum_Claim_scrubber_AMD Output' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- D.6  Nexum_Claim_scrubber_Diagnosis Validity
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'D.6', '    Nexum_Claim_scrubber_Diagnosis Validity',
+               COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Billable'
+                                   AND l.BillCategory='Not Billed' AND l.SubStatus='Nexum_Claim_scrubber_Diagnosis Validity' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- E  Other Samples
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'E', 'Other Samples',
+               COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Other Samples' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- E.1  Billed (Other Samples + BillCategory=Billed)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'E.1', '  Billed',
+               COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Other Samples' AND l.BillCategory='Billed' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- E.2  Unbilled (Other Samples + BillCategory=Not Billed)
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'E.2', '  Unbilled',
+               COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Other Samples' AND l.BillCategory='Not Billed' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- E.3  Other Samples (LIS Table provides Breakdown) - label row, count = 0
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'E.3', '  Other Samples (LIS Table provides Breakdown)', 0
+        FROM #LisPeriods p
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- E.4  Self Pay
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'E.4', '  Self Pay',
+               COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Self Pay' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- E.5  Deleted/Rejected
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'E.5', '  Deleted/Rejected',
+               COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Deleted/Rejected' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- E.6  Duplicate
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'E.6', '  Duplicate',
+               COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Duplicate' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+
+        -- E.7  System Test
+        UNION ALL
+        SELECT p.ESYear, p.ESMonth, 'E.7', '  System Test',
+               COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='System Test' THEN l.OrderID END)
+        FROM #LisPeriods p
+        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth
+    ) lis_rows;
+
+    DROP TABLE IF EXISTS #Lis;
+    DROP TABLE IF EXISTS #LisPeriods;
+    DROP TABLE IF EXISTS #PanelNames;
+
+    PRINT 'usp_RefreshInh_ExecutiveSummary_LIS_Alt completed.';
+END;
+GO
+
+EXEC dbo.usp_RefreshInh_ExecutiveSummary_LIS_Alt;
+EXEC dbo.usp_RefreshInh_ExecutiveSummary;
+GO
+
+-- Verification 1: year and grand-total averages (ESMonth = 0 rows), plus F/G year totals
+SELECT a.ESYear,
+       f.F, f.G,
+       MAX(CASE WHEN a.RoleID = N'X' THEN a.ESMonthChargeAmount END) AS X,
+       MAX(CASE WHEN a.RoleID = N'Y' THEN a.ESMonthChargeAmount END) AS Y,
+       MAX(CASE WHEN a.RoleID = N'Z' THEN a.ESMonthChargeAmount END) AS Z
+FROM dbo.Inhealth_ES_Avg a
+OUTER APPLY
+(
+    SELECT SUM(CASE WHEN p.RoleID = N'F' THEN p.ESMonthClaimCount ELSE 0 END) AS F,
+           SUM(CASE WHEN p.RoleID = N'G' THEN p.ESMonthClaimCount ELSE 0 END) AS G
+    FROM dbo.Inhealth_ES_PMS p
+    WHERE p.RoleID IN (N'F', N'G') AND p.ESMonth > 0
+      AND (a.ESYear = 0 OR p.ESYear = a.ESYear)
+) f
+WHERE a.ESMonth = 0
+GROUP BY a.ESYear, f.F, f.G
+ORDER BY a.ESYear;
+
+-- Verification 2: monthly F, G and averages
+SELECT p.ESYear, p.ESMonth,
+       MAX(CASE WHEN p.RoleID = N'F' THEN p.ESMonthClaimCount END) AS F,
+       MAX(CASE WHEN p.RoleID = N'G' THEN p.ESMonthClaimCount END) AS G,
+       MAX(CASE WHEN a.RoleID = N'X' THEN a.ESMonthChargeAmount END) AS X,
+       MAX(CASE WHEN a.RoleID = N'Y' THEN a.ESMonthChargeAmount END) AS Y,
+       MAX(CASE WHEN a.RoleID = N'Z' THEN a.ESMonthChargeAmount END) AS Z
+FROM dbo.Inhealth_ES_PMS p
+LEFT JOIN dbo.Inhealth_ES_Avg a
+       ON a.ESYear = p.ESYear AND a.ESMonth = p.ESMonth AND p.RoleID = N'F'
+WHERE p.RoleID IN (N'F', N'G')
+GROUP BY p.ESYear, p.ESMonth
+ORDER BY p.ESYear, p.ESMonth;
+GO

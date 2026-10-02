@@ -1,4 +1,4 @@
-﻿/*
+/*
     Rising Tides Executive Summary - LIS Breakdown client remarks (2026-09-29)
 
     Based on the deployed dbo.usp_RefreshRT_ExecutiveSummary_LIS_Alt; only these rows change:

@@ -13,7 +13,7 @@
 SET NOCOUNT ON;
 GO
 
-PRINT 'Updating usp_RefreshCove_CS_AvgPayments (existing name — no ClientLogic SP)...';
+PRINT 'Updating usp_RefreshCove_CS_AvgPayments (usp_RefreshCove_CS_AvgPayments_ClientLogic wraps it)...';
 GO
 
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshCove_CS_AvgPayments
@@ -143,8 +143,13 @@ BEGIN
 END
 GO
 
-IF OBJECT_ID(N'dbo.usp_RefreshCove_CS_AvgPayments_ClientLogic', N'P') IS NOT NULL
-    DROP PROCEDURE dbo.usp_RefreshCove_CS_AvgPayments_ClientLogic;
+-- The importer calls this name after every Cove import; keep it as a wrapper.
+CREATE OR ALTER PROCEDURE dbo.usp_RefreshCove_CS_AvgPayments_ClientLogic
+AS
+BEGIN
+    SET NOCOUNT ON;
+    EXEC dbo.usp_RefreshCove_CS_AvgPayments;
+END
 GO
 
 PRINT 'Creating usp_GetCove_CS_AvgPayments v3.1...';

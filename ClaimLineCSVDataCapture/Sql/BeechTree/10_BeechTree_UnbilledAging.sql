@@ -1,4 +1,4 @@
--- BeechTree — Unbilled × Aging (by AgingBucket column)
+-- BeechTree ï¿½ Unbilled ï¿½ Aging (by AgingBucket column)
 -- Rule:
 --   Filter  : FirstBilledDate IS NULL or blank
 --   Row     : Panelname  (Panel Group)
@@ -46,7 +46,7 @@ BEGIN
 
     DROP TABLE IF EXISTS #Raw;
 
-    PRINT 'usp_RefreshBT_UnbilledAging completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
+    PRINT 'usp_RefreshBT_UnbilledAging completed ï¿½ ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END
 GO
 

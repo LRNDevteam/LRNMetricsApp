@@ -141,7 +141,7 @@
                         var key = ClinicDosCountViewModel.ColKey(col.Year, col.Month);
                         var val = clinic.MonthCounts.GetValueOrDefault(key);
                         var isFirst = Model.Columns.IndexOf(col) == 0 || Model.Columns[Model.Columns.IndexOf(col) - 1].Year != col.Year;
-                        <td class="@(isFirst ? "cdc-year-sep" : "") @(val == 0 ? "cdc-zero" : "")">@(val == 0 ? "–" : val.ToString("N0"))</td>
+                        <td class="@(isFirst ? "cdc-year-sep" : "") @(val == 0 ? "cdc-zero" : "")">@(val == 0 ? "ï¿½" : val.ToString("N0"))</td>
                     }
                     <td class="cdc-grand">@clinic.GrandTotal.ToString("N0")</td>
                 </tr>

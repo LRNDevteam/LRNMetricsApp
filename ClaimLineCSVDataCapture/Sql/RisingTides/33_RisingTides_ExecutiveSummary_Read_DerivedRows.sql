@@ -1,4 +1,4 @@
-﻿/*
+/*
     Rising Tides Executive Summary - read procedure (based on the currently deployed version).
 
     Changes in the FILTERED path (live re-aggregation):
