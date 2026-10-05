@@ -736,8 +736,9 @@ SELECT CASE WHEN EXISTS (
 
         var sql = $@"
 SELECT Id, Bucket, WeekStart, SortOrder, DenialCode, DenialDescription, PayerName, NoOfDenials,
-       TotalBalance, InsuranceBalance, ImpactPercentage, Observation, ActionCategory, Action,
-       FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate, UpdatedOn, UpdatedBy
+       TotalBalance, InsuranceNoOfDenials, InsuranceBalance, ImpactPercentage, Observation, Data,
+       ActionCategory, Action, FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate,
+       Status, UpdatedOn, UpdatedBy
 FROM {InsightTable}
 WHERE Bucket = @Bucket
 -- Newest week first, then the client's own ranking within the week. Previous Week draws a
@@ -764,12 +765,14 @@ ORDER BY WeekStart DESC, SortOrder, InsuranceBalance DESC, DenialCode;";
                 PayerName = Text(reader, "PayerName"),
                 NoOfDenials = GetIntOrZero(reader, "NoOfDenials"),
                 TotalBalance = GetDecimalOrZero(reader, "TotalBalance"),
+                InsuranceNoOfDenials = GetIntOrZero(reader, "InsuranceNoOfDenials"),
                 InsuranceBalance = GetDecimalOrZero(reader, "InsuranceBalance"),
                 // Normalized on read as well as on import, so rows stored as a fraction by an
                 // earlier import show as 57% without anyone re-uploading. Idempotent - 57 stays 57.
                 ImpactPercentage = DenialInsightPercent.Normalize(GetDecimalOrZero(reader, "ImpactPercentage")),
                 // Sanitized again on read: a row written directly in SQL must not reach a browser raw.
                 ObservationHtml = DenialInsightRichText.Sanitize(Text(reader, "Observation")),
+                Data = Text(reader, "Data"),
                 ActionCategory = Text(reader, "ActionCategory"),
                 ActionHtml = DenialInsightRichText.Sanitize(Text(reader, "Action")),
                 FeedbackResponse = Text(reader, "FeedbackResponse"),
@@ -777,6 +780,7 @@ ORDER BY WeekStart DESC, SortOrder, InsuranceBalance DESC, DenialCode;";
                 DiscussionDate = GetDate(reader, "DiscussionDate"),
                 Eta = GetDate(reader, "ETA"),
                 ClosedDate = GetDate(reader, "ClosedDate"),
+                Status = Text(reader, "Status"),
                 UpdatedOn = GetDate(reader, "UpdatedOn"),
                 UpdatedBy = Text(reader, "UpdatedBy")
             });
@@ -829,10 +833,11 @@ BEGIN
     UPDATE {InsightTable}
     SET SortOrder = @SortOrder, DenialCode = @DenialCode, DenialDescription = @DenialDescription,
         PayerName = @PayerName, NoOfDenials = @NoOfDenials, TotalBalance = @TotalBalance,
+        InsuranceNoOfDenials = @InsuranceNoOfDenials,
         InsuranceBalance = @InsuranceBalance, ImpactPercentage = @ImpactPercentage,
-        Observation = @Observation, ActionCategory = @ActionCategory, Action = @Action,
+        Observation = @Observation, Data = @Data, ActionCategory = @ActionCategory, Action = @Action,
         FeedbackResponse = @FeedbackResponse, Responsibility = @Responsibility,
-        DiscussionDate = @DiscussionDate, ETA = @Eta, ClosedDate = @ClosedDate,
+        DiscussionDate = @DiscussionDate, ETA = @Eta, ClosedDate = @ClosedDate, Status = @Status,
         UpdatedOn = SYSUTCDATETIME(), UpdatedBy = @UpdatedBy
     WHERE Id = @Id;
 
@@ -843,10 +848,11 @@ BEGIN
     UPDATE {InsightTable}
     SET SortOrder = @SortOrder, DenialDescription = @DenialDescription,
         NoOfDenials = @NoOfDenials, TotalBalance = @TotalBalance,
+        InsuranceNoOfDenials = @InsuranceNoOfDenials,
         InsuranceBalance = @InsuranceBalance, ImpactPercentage = @ImpactPercentage,
-        Observation = @Observation, ActionCategory = @ActionCategory, Action = @Action,
+        Observation = @Observation, Data = @Data, ActionCategory = @ActionCategory, Action = @Action,
         FeedbackResponse = @FeedbackResponse, Responsibility = @Responsibility,
-        DiscussionDate = @DiscussionDate, ETA = @Eta, ClosedDate = @ClosedDate,
+        DiscussionDate = @DiscussionDate, ETA = @Eta, ClosedDate = @ClosedDate, Status = @Status,
         UpdatedOn = SYSUTCDATETIME(), UpdatedBy = @UpdatedBy
     WHERE Bucket = @Bucket AND WeekStart = @WeekStart
       AND DenialCode = @DenialCode AND ISNULL(PayerName, '') = ISNULL(@PayerName, '');
@@ -855,12 +861,14 @@ BEGIN
     BEGIN
         INSERT {InsightTable}
             (Bucket, WeekStart, SortOrder, DenialCode, DenialDescription, PayerName, NoOfDenials,
-             TotalBalance, InsuranceBalance, ImpactPercentage, Observation, ActionCategory, Action,
-             FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate, UpdatedOn, UpdatedBy)
+             TotalBalance, InsuranceNoOfDenials, InsuranceBalance, ImpactPercentage, Observation, Data,
+             ActionCategory, Action, FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate,
+             Status, UpdatedOn, UpdatedBy)
         VALUES
             (@Bucket, @WeekStart, @SortOrder, @DenialCode, @DenialDescription, @PayerName, @NoOfDenials,
-             @TotalBalance, @InsuranceBalance, @ImpactPercentage, @Observation, @ActionCategory, @Action,
-             @FeedbackResponse, @Responsibility, @DiscussionDate, @Eta, @ClosedDate, SYSUTCDATETIME(), @UpdatedBy);
+             @TotalBalance, @InsuranceNoOfDenials, @InsuranceBalance, @ImpactPercentage, @Observation, @Data,
+             @ActionCategory, @Action, @FeedbackResponse, @Responsibility, @DiscussionDate, @Eta, @ClosedDate,
+             @Status, SYSUTCDATETIME(), @UpdatedBy);
         SELECT CAST(1 AS bit);
     END
     ELSE
@@ -883,9 +891,11 @@ END";
                 cmd.Parameters.Add("@PayerName", SqlDbType.NVarChar, 255).Value = Db(row.PayerName);
                 cmd.Parameters.Add("@NoOfDenials", SqlDbType.Int).Value = row.NoOfDenials;
                 cmd.Parameters.Add("@TotalBalance", SqlDbType.Decimal).Value = row.TotalBalance;
+                cmd.Parameters.Add("@InsuranceNoOfDenials", SqlDbType.Int).Value = row.InsuranceNoOfDenials;
                 cmd.Parameters.Add("@InsuranceBalance", SqlDbType.Decimal).Value = row.InsuranceBalance;
                 cmd.Parameters.Add("@ImpactPercentage", SqlDbType.Decimal).Value = row.ImpactPercentage;
                 cmd.Parameters.Add("@Observation", SqlDbType.NVarChar, -1).Value = Db(row.ObservationHtml);
+                cmd.Parameters.Add("@Data", SqlDbType.NVarChar, -1).Value = Db(row.Data);
                 cmd.Parameters.Add("@ActionCategory", SqlDbType.NVarChar, 500).Value = Db(row.ActionCategory);
                 cmd.Parameters.Add("@Action", SqlDbType.NVarChar, -1).Value = Db(row.ActionHtml);
                 cmd.Parameters.Add("@FeedbackResponse", SqlDbType.NVarChar, -1).Value = Db(row.FeedbackResponse);
@@ -893,6 +903,7 @@ END";
                 cmd.Parameters.Add("@DiscussionDate", SqlDbType.Date).Value = (object?)row.DiscussionDate?.Date ?? DBNull.Value;
                 cmd.Parameters.Add("@Eta", SqlDbType.Date).Value = (object?)row.Eta?.Date ?? DBNull.Value;
                 cmd.Parameters.Add("@ClosedDate", SqlDbType.Date).Value = (object?)row.ClosedDate?.Date ?? DBNull.Value;
+                cmd.Parameters.Add("@Status", SqlDbType.NVarChar, 50).Value = Db(row.Status);
                 cmd.Parameters.Add("@UpdatedBy", SqlDbType.NVarChar, 200).Value = Db(userName);
 
                 var inserted = Convert.ToBoolean(await cmd.ExecuteScalarAsync(ct));
@@ -952,11 +963,13 @@ DELETE FROM {InsightTable} WHERE Bucket = 'Previous';
 
 INSERT {InsightTable}
     (Bucket, WeekStart, SortOrder, DenialCode, DenialDescription, PayerName, NoOfDenials,
-     TotalBalance, InsuranceBalance, ImpactPercentage, Observation, ActionCategory, Action,
-     FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate, UpdatedOn, UpdatedBy)
+     TotalBalance, InsuranceNoOfDenials, InsuranceBalance, ImpactPercentage, Observation, Data,
+     ActionCategory, Action, FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate,
+     Status, UpdatedOn, UpdatedBy)
 SELECT 'Previous', WeekStart, SortOrder, DenialCode, DenialDescription, PayerName, NoOfDenials,
-       TotalBalance, InsuranceBalance, ImpactPercentage, Observation, ActionCategory, Action,
-       FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate, SYSUTCDATETIME(), @UpdatedBy
+       TotalBalance, InsuranceNoOfDenials, InsuranceBalance, ImpactPercentage, Observation, Data,
+       ActionCategory, Action, FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate,
+       Status, SYSUTCDATETIME(), @UpdatedBy
 FROM   {InsightTable}
 WHERE  Bucket = 'Current';
 
@@ -1094,9 +1107,11 @@ SELECT @@ROWCOUNT;";
                     PayerName         NVARCHAR(255)  NULL,
                     NoOfDenials       INT            NOT NULL CONSTRAINT DF_DCLI_NoOfDenials DEFAULT 0,
                     TotalBalance      DECIMAL(18,2)  NOT NULL CONSTRAINT DF_DCLI_TotalBalance DEFAULT 0,
+                    InsuranceNoOfDenials INT         NOT NULL CONSTRAINT DF_DCLI_InsuranceNoOfDenials DEFAULT 0,
                     InsuranceBalance  DECIMAL(18,2)  NOT NULL CONSTRAINT DF_DCLI_InsuranceBalance DEFAULT 0,
                     ImpactPercentage  DECIMAL(18,2)  NOT NULL CONSTRAINT DF_DCLI_ImpactPercentage DEFAULT 0,
                     Observation       NVARCHAR(MAX)  NULL,
+                    Data              NVARCHAR(MAX)  NULL,
                     ActionCategory    NVARCHAR(500)  NULL,
                     Action            NVARCHAR(MAX)  NULL,
                     FeedbackResponse  NVARCHAR(MAX)  NULL,
@@ -1104,6 +1119,7 @@ SELECT @@ROWCOUNT;";
                     DiscussionDate    DATE           NULL,
                     ETA               DATE           NULL,
                     ClosedDate        DATE           NULL,
+                    Status            NVARCHAR(50)   NULL,
                     UpdatedOn         DATETIME2(3)   NULL,
                     UpdatedBy         NVARCHAR(200)  NULL
                 );
@@ -1111,6 +1127,19 @@ SELECT @@ROWCOUNT;";
                 CREATE UNIQUE INDEX UX_DenialClaimLevelInsight_Bucket_Week_Code_Payer
                     ON dbo.DenialClaimLevelInsight (Bucket, WeekStart, DenialCode, PayerName);
             END
+
+            -- Template v1.0 columns, for a table created before it. Same as
+            -- SqlScripts/Alter_DenialClaimLevelInsight_TemplateV1.sql, so the app works whether or
+            -- not that script has been run yet.
+            IF COL_LENGTH('dbo.DenialClaimLevelInsight', 'InsuranceNoOfDenials') IS NULL
+                ALTER TABLE dbo.DenialClaimLevelInsight
+                    ADD InsuranceNoOfDenials INT NOT NULL CONSTRAINT DF_DCLI_InsuranceNoOfDenials DEFAULT 0;
+
+            IF COL_LENGTH('dbo.DenialClaimLevelInsight', 'Data') IS NULL
+                ALTER TABLE dbo.DenialClaimLevelInsight ADD Data NVARCHAR(MAX) NULL;
+
+            IF COL_LENGTH('dbo.DenialClaimLevelInsight', 'Status') IS NULL
+                ALTER TABLE dbo.DenialClaimLevelInsight ADD Status NVARCHAR(50) NULL;
             """;
 
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };

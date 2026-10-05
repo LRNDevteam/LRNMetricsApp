@@ -75,6 +75,7 @@ public sealed class DenialInsightPanelViewModel
     // Column totals for the footer row.
     public int TotalDenials => Rows.Sum(r => r.NoOfDenials);
     public decimal TotalBalance => Rows.Sum(r => r.TotalBalance);
+    public int TotalInsuranceDenials => Rows.Sum(r => r.InsuranceNoOfDenials);
     public decimal TotalInsuranceBalance => Rows.Sum(r => r.InsuranceBalance);
 
     /// <summary>

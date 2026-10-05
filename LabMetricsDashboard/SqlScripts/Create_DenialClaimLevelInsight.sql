@@ -56,9 +56,11 @@ BEGIN
         PayerName         NVARCHAR(255)  NULL,
         NoOfDenials       INT            NOT NULL CONSTRAINT DF_DCLI_NoOfDenials DEFAULT 0,
         TotalBalance      DECIMAL(18,2)  NOT NULL CONSTRAINT DF_DCLI_TotalBalance DEFAULT 0,
+        InsuranceNoOfDenials INT         NOT NULL CONSTRAINT DF_DCLI_InsuranceNoOfDenials DEFAULT 0,
         InsuranceBalance  DECIMAL(18,2)  NOT NULL CONSTRAINT DF_DCLI_InsuranceBalance DEFAULT 0,
         ImpactPercentage  DECIMAL(18,2)  NOT NULL CONSTRAINT DF_DCLI_ImpactPercentage DEFAULT 0,
         Observation       NVARCHAR(MAX)  NULL,
+        Data              NVARCHAR(MAX)  NULL,
         ActionCategory    NVARCHAR(500)  NULL,
         Action            NVARCHAR(MAX)  NULL,
         FeedbackResponse  NVARCHAR(MAX)  NULL,
@@ -66,6 +68,7 @@ BEGIN
         DiscussionDate    DATE           NULL,
         ETA               DATE           NULL,
         ClosedDate        DATE           NULL,
+        Status            NVARCHAR(50)   NULL,
         UpdatedOn         DATETIME2(3)   NULL,
         UpdatedBy         NVARCHAR(200)  NULL
     );
@@ -162,5 +165,33 @@ BEGIN
         ON dbo.DenialClaimLevelInsight (Bucket, WeekStart, DenialCode, PayerName);
 
     PRINT 'Created UX_DenialClaimLevelInsight_Bucket_Week_Code_Payer.';
+END
+GO
+
+/* Template v1.0 columns (see Alter_DenialClaimLevelInsight_TemplateV1.sql). */
+IF OBJECT_ID('dbo.DenialClaimLevelInsight', 'U') IS NOT NULL
+   AND COL_LENGTH('dbo.DenialClaimLevelInsight', 'InsuranceNoOfDenials') IS NULL
+BEGIN
+    ALTER TABLE dbo.DenialClaimLevelInsight
+        ADD InsuranceNoOfDenials INT NOT NULL CONSTRAINT DF_DCLI_InsuranceNoOfDenials DEFAULT 0;
+    PRINT 'Added InsuranceNoOfDenials.';
+END
+GO
+
+IF OBJECT_ID('dbo.DenialClaimLevelInsight', 'U') IS NOT NULL
+   AND COL_LENGTH('dbo.DenialClaimLevelInsight', 'Data') IS NULL
+BEGIN
+    ALTER TABLE dbo.DenialClaimLevelInsight
+        ADD Data NVARCHAR(MAX) NULL;
+    PRINT 'Added Data.';
+END
+GO
+
+IF OBJECT_ID('dbo.DenialClaimLevelInsight', 'U') IS NOT NULL
+   AND COL_LENGTH('dbo.DenialClaimLevelInsight', 'Status') IS NULL
+BEGIN
+    ALTER TABLE dbo.DenialClaimLevelInsight
+        ADD Status NVARCHAR(50) NULL;
+    PRINT 'Added Status.';
 END
 GO

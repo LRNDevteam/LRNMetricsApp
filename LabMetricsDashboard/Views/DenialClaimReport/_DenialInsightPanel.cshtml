@@ -126,12 +126,14 @@
                             <th class="col-idx sortable" data-sort-type="number">#<span class="sort-arrow"></span></th>
                             <th class="col-code sortable">Denial Codes<span class="sort-arrow"></span></th>
                             <th class="col-desc sortable">Descriptions<span class="sort-arrow"></span></th>
-                            <th class="num sortable" data-sort-type="number"># of Denial<span class="sort-arrow"></span></th>
+                            <th class="num sortable" data-sort-type="number"># of Denials<span class="sort-arrow"></span></th>
                             <th class="num sortable" data-sort-type="number">Total Balance ($)<span class="sort-arrow"></span></th>
-                            <th class="band-impact sortable">Highest $ Impact - Insurance<span class="sort-arrow"></span></th>
+                            <th class="band-impact sortable">Highest Impact - Insurance<span class="sort-arrow"></span></th>
+                            <th class="band-impact num sortable" data-sort-type="number" title="Denials for the highest-impact insurance"># of Denials<span class="sort-arrow"></span></th>
                             <th class="band-impact num sortable" data-sort-type="number">Ins. Balance ($)<span class="sort-arrow"></span></th>
                             <th class="band-impact num sortable" data-sort-type="number">$ Impact (%)<span class="sort-arrow"></span></th>
                             <th class="col-rich">Observation</th>
+                            <th class="col-data">Data</th>
                             <th class="band-action col-cat sortable">Category<span class="sort-arrow"></span></th>
                             <th class="band-action col-rich">Action</th>
                             <th class="col-feedback">Feedback / Response</th>
@@ -139,6 +141,7 @@
                             <th class="col-date sortable">Discussion Date<span class="sort-arrow"></span></th>
                             <th class="col-date sortable">ETA<span class="sort-arrow"></span></th>
                             <th class="band-closed col-date sortable">Closed Date<span class="sort-arrow"></span></th>
+                            <th class="col-status sortable">Status<span class="sort-arrow"></span></th>
                             @if (editable)
                             {
                                 <th class="col-actions"></th>
@@ -149,7 +152,7 @@
                         @if (Model.Rows.Count == 0)
                         {
                             <tr>
-                                <td colspan="@(editable ? 17 : 16)" class="insight-empty">
+                                <td colspan="@(editable ? 20 : 19)" class="insight-empty">
                                     @if (isCurrent)
                                     {
                                         <i class="bi bi-inbox d-block mb-2" style="font-size:1.6rem;opacity:.45;"></i>
@@ -171,7 +174,7 @@
                         }
                         else
                         {
-                            var colSpan = editable ? 17 : 16;
+                            var colSpan = editable ? 20 : 19;
 
                             @foreach (var week in Model.WeekGroups)
                             {
@@ -218,6 +221,7 @@
                                     <td class="num">@row.NoOfDenials.ToString("N0")</td>
                                     <td class="num">@Acct2(row.TotalBalance)</td>
                                     <td class="cell-impact">@row.PayerName</td>
+                                    <td class="cell-impact num">@row.InsuranceNoOfDenials.ToString("N0")</td>
                                     <td class="cell-impact num">
                                         @* Requirement 6i: the balance opens the claim-level data
                                            filtered by BOTH the denial code and the insurance. *@
@@ -243,6 +247,17 @@
                                         else
                                         {
                                             @Html.Raw(row.ObservationHtml)
+                                        }
+                                    </td>
+
+                                    <td class="col-data">
+                                        @if (editable)
+                                        {
+                                            <textarea name="datas" rows="2">@row.Data</textarea>
+                                        }
+                                        else
+                                        {
+                                            <span class="data-text">@(string.IsNullOrWhiteSpace(row.Data) ? "—" : row.Data)</span>
                                         }
                                     </td>
 
@@ -328,6 +343,16 @@
                                             @(row.ClosedDate?.ToString("dd-MMM") ?? "—")
                                         }
                                     </td>
+                                    <td class="col-status">
+                                        @if (editable)
+                                        {
+                                            <input type="text" name="statuses" value="@row.Status" list="insightStatuses" maxlength="50" />
+                                        }
+                                        else
+                                        {
+                                            @(string.IsNullOrWhiteSpace(row.Status) ? "—" : row.Status)
+                                        }
+                                    </td>
 
                                     @if (editable)
                                     {
@@ -353,8 +378,9 @@
                                 <th class="num">@Model.TotalDenials.ToString("N0")</th>
                                 <th class="num">@Acct2(Model.TotalBalance)</th>
                                 <th></th>
+                                <th class="num">@Model.TotalInsuranceDenials.ToString("N0")</th>
                                 <th class="num">@Acct2(Model.TotalInsuranceBalance)</th>
-                                <th colspan="@(editable ? 10 : 9)"></th>
+                                <th colspan="@(editable ? 12 : 11)"></th>
                             </tr>
                         </tfoot>
                     }
@@ -369,6 +395,12 @@
             <option value="Review &amp; Write Off"></option>
             <option value="Review / Rebill"></option>
             <option value="Review / Reprocess"></option>
+        </datalist>
+
+        <datalist id="insightStatuses">
+            <option value="Open"></option>
+            <option value="In Progress"></option>
+            <option value="Closed"></option>
         </datalist>
 
         @if (Model.Rows.Count > 0)

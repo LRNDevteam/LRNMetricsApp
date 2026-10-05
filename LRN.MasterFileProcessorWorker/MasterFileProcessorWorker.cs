@@ -2608,7 +2608,9 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		return lab.LabId == 19
 			|| IsNorthWestLab(lab)
 			|| labName.Contains("Augustus", StringComparison.OrdinalIgnoreCase)
-			|| labName.Contains("Certus", StringComparison.OrdinalIgnoreCase);
+			|| labName.Contains("Certus", StringComparison.OrdinalIgnoreCase)
+			// Analyze Pathology's Line Level sheet has no Claim Status; it is on the claim sheet only.
+			|| labName.Contains("Analyze Pathology", StringComparison.OrdinalIgnoreCase);
 	}
 
 	/// <summary>

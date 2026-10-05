@@ -1967,6 +1967,7 @@ public static class StandardCsvExporter
 		[NormKey("Augustus Labs")] = "AUG",
 		[NormKey("PCR Labs of America")] = "PLA",
 		[NormKey("NorthWest")] = "NWL",
+		[NormKey("Analyze Pathology")] = "ANP",
 	};
 
 	/// <summary>

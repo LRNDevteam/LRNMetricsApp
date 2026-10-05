@@ -84,16 +84,27 @@ public sealed class DenialInsightRow
     public string DenialCodeNormalized { get; set; } = string.Empty;
     public string DenialDescription { get; set; } = string.Empty;
 
-    /// <summary>"Highest $ Impact - Insurance" on the client's template.</summary>
+    /// <summary>"Highest Impact - Insurance" on the client's template.</summary>
     public string PayerName { get; set; } = string.Empty;
 
+    /// <summary>The denial code's "# of Denials" across every insurance.</summary>
     public int NoOfDenials { get; set; }
     public decimal TotalBalance { get; set; }
+
+    /// <summary>
+    /// The second "# of Denials" on the template (v1.0): the denials for <see cref="PayerName"/> alone,
+    /// sitting in the impact group beside its Ins. Balance.
+    /// </summary>
+    public int InsuranceNoOfDenials { get; set; }
+
     public decimal InsuranceBalance { get; set; }
     public decimal ImpactPercentage { get; set; }
 
     /// <summary>Sanitized HTML: the workbook's bold / bullets / line breaks are kept, not flattened.</summary>
     public string ObservationHtml { get; set; } = string.Empty;
+
+    /// <summary>The template's "Data" column - the figures behind the observation, as plain text.</summary>
+    public string Data { get; set; } = string.Empty;
 
     public string ActionCategory { get; set; } = string.Empty;
 
@@ -105,6 +116,10 @@ public sealed class DenialInsightRow
     public DateTime? DiscussionDate { get; set; }
     public DateTime? Eta { get; set; }
     public DateTime? ClosedDate { get; set; }
+
+    /// <summary>The template's "Status" column, free text (Open, In Progress, Closed...).</summary>
+    public string Status { get; set; } = string.Empty;
+
     public DateTime? UpdatedOn { get; set; }
     public string UpdatedBy { get; set; } = string.Empty;
 }

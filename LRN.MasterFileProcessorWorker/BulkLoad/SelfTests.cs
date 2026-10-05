@@ -931,6 +931,15 @@ public static class SelfTests
         Check("identifier-style integer has no decimals",
             ExcelCsvExporter.ConvertCellToString(87801m, "Claim Level CPT") == "87801");
 
+        // Analyze Pathology prefixes identifiers with "Charge"; the money word must not win.
+        Check("'Charge Claim ID' is an identifier, not money",
+            ExcelCsvExporter.ConvertCellToString(231933520m, "Charge Claim ID") == "231933520");
+        Check("'Charge Units' is an identifier, not money",
+            ExcelCsvExporter.ConvertCellToString(1m, "Charge Units") == "1");
+        Check("'Charge Amount' is still money",
+            ExcelCsvExporter.ConvertCellToString(496.85m, "Charge Amount") == "496.85"
+            && ExcelCsvExporter.ConvertCellToString(500m, "Charge Amount") == "500.00");
+
         Check("non-integer, non-amount value keeps its precision",
             ExcelCsvExporter.ConvertCellToString(0.5849d, "Ratio") == "0.5849");
 

@@ -414,8 +414,12 @@
                 var tbody = table.tBodies[0];
                 if (!tbody) return;
 
-                table.querySelectorAll('th.sortable:not([data-bound])').forEach(function (th, index) {
+                table.querySelectorAll('th.sortable:not([data-bound])').forEach(function (th) {
                     th.dataset.bound = '1';
+
+                    // The header's own column, not its position among the sortable headers: the
+                    // insight grid has unsortable columns (Observation, Data, Action...) in between.
+                    var index = th.cellIndex;
                     th.setAttribute('role', 'button');
                     th.setAttribute('tabindex', '0');
 
