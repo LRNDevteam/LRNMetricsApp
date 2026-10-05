@@ -118,8 +118,16 @@ public sealed class ClaimLineDbService
                           ? (object)File.GetCreationTime(sourceFilePath)
                           : DBNull.Value;
 
-        // Build DataTable schema once, then stream batches into it
-        var dt = CreateTvpSchema(mapping);
+        using var conn = new SqlConnection(_connectionString);
+        conn.Open();
+
+        // SQL Server binds a TVP by column POSITION, not name. Building the DataTable in the
+        // mapping's order therefore silently shifted every value after the first place the
+        // mapping and the type disagreed - Analyze Pathology loaded its check date into
+        // ClaimStatus and its claim status into DenialCode. The columns are laid out in the
+        // type's own order instead, and filled by name.
+        var tvpColumns = ReadTvpColumns(conn, mapping.TvpTypeName);
+        var dt = CreateTvpSchema(mapping, tvpColumns);
         int totalRows = 0;
         int batchNumber = 0;
 
@@ -128,7 +136,7 @@ public sealed class ClaimLineDbService
             if (batch.Count == 0) continue;
             batchNumber++;
 
-            AppendBatchToTvp(dt, batch, mapping);
+            AppendBatchToTvp(dt, batch);
             totalRows += batch.Count;
 
             onBatchLoaded?.Invoke(batchNumber, batch.Count);
@@ -137,8 +145,6 @@ public sealed class ClaimLineDbService
         if (totalRows == 0) return 0;
 
         // Single SP call with all rows � the SP handles internal chunked inserts
-        using var conn = new SqlConnection(_connectionString);
-        conn.Open();
 
         using var cmd = new SqlCommand(mapping.SprocName, conn)
         {
@@ -183,54 +189,107 @@ public sealed class ClaimLineDbService
         return StreamingInsert([rows], labName, weekFolder, mapping, sourceFilePath);
     }
 
+    /// <summary>The columns of a user-defined table type, in declaration order. Empty when the type is not found.</summary>
+    private static List<string> ReadTvpColumns(SqlConnection conn, string tvpTypeName)
+    {
+        var columns = new List<string>();
+        if (string.IsNullOrWhiteSpace(tvpTypeName)) return columns;
+
+        var parts = tvpTypeName.Replace("[", "").Replace("]", "").Split('.', 2);
+        var (schema, name) = parts.Length == 2 ? (parts[0], parts[1]) : ("dbo", parts[0]);
+
+        using var cmd = new SqlCommand(
+            """
+            SELECT c.name
+            FROM   sys.table_types tt
+            JOIN   sys.columns c ON c.object_id = tt.type_table_object_id
+            WHERE  tt.schema_id = SCHEMA_ID(@Schema) AND tt.name = @Name
+            ORDER  BY c.column_id
+            """, conn) { CommandTimeout = 60 };
+        cmd.Parameters.AddWithValue("@Schema", schema);
+        cmd.Parameters.AddWithValue("@Name", name);
+
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read()) columns.Add(reader.GetString(0));
+        return columns;
+    }
+
+    /// <summary>The seven columns the app stamps on every row, ahead of the mapped fields.</summary>
+    private static readonly Dictionary<string, Func<CsvDataRow, string>> SystemColumns =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["FileLogId"] = r => r.FileLogId,
+            ["RunId"] = r => r.RunId,
+            ["WeekFolder"] = r => r.WeekFolder,
+            ["SourceFullPath"] = r => r.SourceFullPath,
+            ["FileName"] = r => r.FileName,
+            ["FileType"] = r => r.FileType,
+            ["RowHash"] = r => r.RowHash,
+        };
+
     /// <summary>
-    /// Creates an empty DataTable with the TVP column schema.
+    /// Creates an empty DataTable laid out exactly as the TVP type, each column carrying the
+    /// accessor that fills it by NAME. A mapped field the type has no column for fails the load
+    /// rather than being dropped; a type column the mapping does not feed is sent as NULL.
+    /// When the type cannot be read, falls back to the original layout (system columns, then the
+    /// mapping's fields in file order), which is only correct when the two orders agree.
     /// </summary>
-    private static DataTable CreateTvpSchema(FileTypeMapping mapping)
+    private static DataTable CreateTvpSchema(FileTypeMapping mapping, IReadOnlyList<string> tvpColumns)
     {
         var dt = new DataTable();
 
-        // System columns (always present in every TVP)
-        dt.Columns.Add("FileLogId");
-        dt.Columns.Add("RunId");
-        dt.Columns.Add("WeekFolder");
-        dt.Columns.Add("SourceFullPath");
-        dt.Columns.Add("FileName");
-        dt.Columns.Add("FileType");
-        dt.Columns.Add("RowHash");
-
-        // Dynamic columns from field mapping (order must match TVP definition)
-        foreach (var fm in mapping.Fields)
+        if (tvpColumns.Count == 0)
         {
-            dt.Columns.Add(fm.SqlColumn);
+            foreach (var (name, accessor) in SystemColumns.Select(kv => (kv.Key, kv.Value)))
+                AddColumn(dt, name, r => accessor(r));
+            foreach (var fm in mapping.Fields)
+                AddColumn(dt, fm.SqlColumn, r => r.Get(fm.SqlColumn));
+            return dt;
+        }
+
+        var mapped = mapping.Fields
+            .GroupBy(f => f.SqlColumn, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        var notInType = mapped.Keys.Where(k => !tvpColumns.Contains(k, StringComparer.OrdinalIgnoreCase)).ToList();
+        if (notInType.Count > 0)
+            throw new InvalidOperationException(
+                $"{mapping.TvpTypeName} has no column for mapped field(s): {string.Join(", ", notInType)}. " +
+                "Recreate the TVP type (and its insert procedure) to include them.");
+
+        foreach (var col in tvpColumns)
+        {
+            if (SystemColumns.TryGetValue(col, out var system))
+                AddColumn(dt, col, r => system(r));
+            else if (mapped.TryGetValue(col, out var fm))
+                AddColumn(dt, col, r => r.Get(fm.SqlColumn));
+            else
+                AddColumn(dt, col, _ => DBNull.Value);
         }
 
         return dt;
     }
 
+    private static void AddColumn(DataTable dt, string name, Func<CsvDataRow, object> accessor)
+        => dt.Columns.Add(name).ExtendedProperties[AccessorKey] = accessor;
+
+    private const string AccessorKey = "accessor";
+
     /// <summary>
-    /// Appends a batch of rows to an existing DataTable.
+    /// Appends a batch of rows to an existing DataTable, each value taken by column name.
     /// The batch list can be released by the caller after this returns.
     /// </summary>
-    private static void AppendBatchToTvp(DataTable dt, List<CsvDataRow> rows, FileTypeMapping mapping)
+    private static void AppendBatchToTvp(DataTable dt, List<CsvDataRow> rows)
     {
-        var colCount = 7 + mapping.Fields.Count;
+        var accessors = dt.Columns.Cast<DataColumn>()
+            .Select(c => (Func<CsvDataRow, object>)c.ExtendedProperties[AccessorKey]!)
+            .ToArray();
 
         foreach (var r in rows)
         {
-            var values = new object[colCount];
-            values[0] = r.FileLogId;
-            values[1] = r.RunId;
-            values[2] = r.WeekFolder;
-            values[3] = r.SourceFullPath;
-            values[4] = r.FileName;
-            values[5] = r.FileType;
-            values[6] = r.RowHash;
-
-            for (int i = 0; i < mapping.Fields.Count; i++)
-            {
-                values[7 + i] = r.Get(mapping.Fields[i].SqlColumn);
-            }
+            var values = new object[accessors.Length];
+            for (int i = 0; i < accessors.Length; i++)
+                values[i] = accessors[i](r);
 
             dt.Rows.Add(values);
         }
