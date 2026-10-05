@@ -53,7 +53,7 @@
 			"DataType": "string"
 		},
 		{
-			"Name": "Procedure",
+			"Name": "CPT",
 			"Required": true,
 			"DataType": "string"
 		},

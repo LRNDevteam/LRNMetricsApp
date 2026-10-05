@@ -18,11 +18,21 @@ const PAGE_SIZES = [10, 25, 50, 100];
  * sticky header, and the Prev / Next + Rows per page footer.
  *
  * columns: [{ key, label, sortKey?, render?(row), csv?(row), align?: 'end', wrap?, defaultHidden? }]
+ *
+ * Selection (opt-in): selectable + selectedKeys (a Set of rowKey values, kept by the caller so a
+ * selection survives paging) + onSelectionChange(nextSet). The header box selects this page.
  */
+function SelectAll({ checked, indeterminate, onChange, disabled }) {
+  const ref = useRef(null);
+  useEffect(() => { if (ref.current) ref.current.indeterminate = indeterminate; }, [indeterminate]);
+  return <input ref={ref} type="checkbox" aria-label="Select every row on this page" checked={checked} disabled={disabled} onChange={onChange} />;
+}
+
 export default function DataTable({
   tableId, columns, rows, totalCount, page, pageSize, sortBy, sortDesc,
   onSort, onPage, onPageSize, onRowClick, loading, emptyText = 'No records match the current filters.',
-  exportName = 'export', toolbar, rowKey = (r, i) => r.claimKey ?? i
+  exportName = 'export', toolbar, rowKey = (r, i) => r.claimKey ?? i,
+  selectable = false, selectedKeys, onSelectionChange
 }) {
   const storageKey = `lrn.arwb.cols.${tableId}`;
   const [hidden, setHidden] = useState(() => {
@@ -52,6 +62,24 @@ export default function DataTable({
     writeHidden(storageKey, next);
   }
 
+  const selected = selectedKeys || new Set();
+  const pageKeys = rows.map((r, i) => rowKey(r, i));
+  const pageSelected = pageKeys.filter((k) => selected.has(k)).length;
+  const colCount = visible.length + (selectable ? 1 : 0);
+
+  function toggleRow(key) {
+    const next = new Set(selected);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    onSelectionChange?.(next);
+  }
+
+  function togglePage() {
+    const next = new Set(selected);
+    if (pageSelected === pageKeys.length) pageKeys.forEach((k) => next.delete(k));
+    else pageKeys.forEach((k) => next.add(k));
+    onSelectionChange?.(next);
+  }
+
   function exportCsv() {
     const stamp = new Date().toISOString().slice(0, 10);
     downloadText(`${exportName}_${stamp}.csv`, toCsv(visible, rows));
@@ -63,6 +91,12 @@ export default function DataTable({
         <span className="arwb-hint">
           {loading ? 'Loading…' : `${fmt.count(total)} record${total === 1 ? '' : 's'}${total > pageSize ? ` · showing ${fmt.count(firstRow)}–${fmt.count(lastRow)}` : ''}`}
         </span>
+        {selectable && selected.size > 0 && (
+          <span className="arwb-badge arwb-badge-accent">
+            {fmt.count(selected.size)} selected
+            <button type="button" className="arwb-badge-clear" onClick={() => onSelectionChange?.(new Set())} aria-label="Clear selection">×</button>
+          </span>
+        )}
         <div className="grow" />
         {toolbar}
         <div style={{ position: 'relative' }} ref={menuRef}>
@@ -90,6 +124,12 @@ export default function DataTable({
         <table className="arwb-data-table">
           <thead>
             <tr>
+              {selectable && (
+                <th className="arwb-select-col" scope="col">
+                  <SelectAll checked={pageKeys.length > 0 && pageSelected === pageKeys.length} indeterminate={pageSelected > 0 && pageSelected < pageKeys.length}
+                    disabled={!pageKeys.length} onChange={togglePage} />
+                </th>
+              )}
               {visible.map((c) => {
                 const active = c.sortKey && c.sortKey === sortBy;
                 const cls = [c.align === 'end' ? 'num' : '', c.sortKey ? 'sortable' : '', active ? 'sorted' : ''].join(' ').trim();
@@ -106,17 +146,27 @@ export default function DataTable({
           </thead>
           <tbody>
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={visible.length}><div className="arwb-empty-state"><Icon name="search" /><div>{emptyText}</div></div></td></tr>
+              <tr><td colSpan={colCount}><div className="arwb-empty-state"><Icon name="search" /><div>{emptyText}</div></div></td></tr>
             )}
-            {rows.map((row, i) => (
-              <tr key={rowKey(row, i)} onClick={onRowClick ? () => onRowClick(row) : undefined} className={onRowClick ? 'clickable' : ''}>
+            {rows.map((row, i) => {
+              const key = rowKey(row, i);
+              const isSelected = selectable && selected.has(key);
+              return (
+              <tr key={key} onClick={onRowClick ? () => onRowClick(row) : undefined}
+                className={[onRowClick ? 'clickable' : '', isSelected ? 'selected' : ''].join(' ').trim() || undefined}>
+                {selectable && (
+                  <td className="arwb-select-col" onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" aria-label={`Select row ${i + 1}`} checked={isSelected} onChange={() => toggleRow(key)} />
+                  </td>
+                )}
                 {visible.map((c) => (
                   <td key={c.key} className={[c.align === 'end' ? 'num' : '', c.wrap ? 'wrap' : ''].join(' ').trim() || undefined}>
                     {c.render ? c.render(row) : (row[c.key] ?? '—')}
                   </td>
                 ))}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

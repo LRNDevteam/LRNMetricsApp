@@ -18,7 +18,32 @@ public interface IArWorkbenchRepository
     Task<ArWorkbenchClaimDetail?> GetClaimDetailAsync(int labId, long claimKey, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchMasterData> GetMasterDataAsync(int labId, CancellationToken ct);
     Task<IReadOnlyList<ArWorkbenchRefreshRun>> GetRefreshRunsAsync(int labId, int top, CancellationToken ct);
-    Task<ArWorkbenchRefreshRun?> RunRefreshAsync(int labId, string runBy, string? note, CancellationToken ct);
+    /// <param name="reprocessAll">Re-derive every claim's denial category and queue from the current master data.</param>
+    Task<ArWorkbenchRefreshRun?> RunRefreshAsync(int labId, string runBy, string? note, CancellationToken ct, bool reprocessAll = false);
+
+    // Assignment Management (SqlArWorkbenchRepository.Assignment.cs)
+    Task<IReadOnlyList<ArWorkbenchAgent>> GetAgentsAsync(int labId, CancellationToken ct);
+    Task<ArWorkbenchAssignmentOverview> GetAssignmentOverviewAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<ArWorkbenchBatchPreview> PreviewBatchAsync(int labId, ArWorkbenchBatchCriteria criteria, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<ArWorkbenchAssignResult> CreateBatchAsync(int labId, ArWorkbenchBatchCreateRequest request, ArWorkbenchAgent agent, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<ArWorkbenchAssignResult> AssignClaimsAsync(int labId, ArWorkbenchAssignRequest request, ArWorkbenchAgent agent, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<IReadOnlyList<ArWorkbenchBatch>> GetBatchesAsync(int labId, string? status, int top, CancellationToken ct);
+    Task<ArWorkbenchBatchDetail?> GetBatchDetailAsync(int labId, int batchId, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> CancelBatchAsync(int labId, int batchId, string user, CancellationToken ct);
+
+    // Master File Maintenance (SqlArWorkbenchRepository.Masters.cs)
+    Task<ArWorkbenchMasterValuesResponse> GetMasterValuesAsync(int labId, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> AddMasterValueAsync(int labId, ArWorkbenchMasterType type, ArWorkbenchMasterValidated value, string user, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> UpdateMasterValueAsync(int labId, ArWorkbenchMasterType type, string originalValue, ArWorkbenchMasterValidated value, string user, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> DeleteMasterValueAsync(int labId, ArWorkbenchMasterType type, string value, CancellationToken ct);
+
+    Task<ArWorkbenchPagedResult<ArWorkbenchDenialCodeRow>> GetDenialCodesAsync(ArWorkbenchDenialCodeQuery query, CancellationToken ct);
+    Task<IReadOnlyList<ArWorkbenchDenialCodeRow>> GetAllDenialCodesAsync(int labId, CancellationToken ct);
+    Task<IReadOnlyList<ArWorkbenchUnmappedDenialCode>> GetUnmappedDenialCodesAsync(int labId, CancellationToken ct);
+    Task<ArWorkbenchDenialCodeImpact> GetDenialCodeImpactAsync(int labId, string denialCode, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> SaveDenialCodeAsync(int labId, string? originalDenialCode, ArWorkbenchDenialCodeValidated value, string user, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> DeleteDenialCodeAsync(int labId, string denialCode, CancellationToken ct);
+    Task<ArWorkbenchDenialCodeImportResult> ImportDenialCodesAsync(int labId, IReadOnlyList<ArWorkbenchDenialCodeImportRow> rows, int skippedCount, string user, CancellationToken ct);
 }
 
 /// <summary>
@@ -29,7 +54,7 @@ public interface IArWorkbenchRepository
 /// Derived state (queue, recovery, lifecycle flags) is NOT computed here. It is written by
 /// dbo.ARWB_usp_RecalculateClaimState, the single implementation of those rules; this class only reads it.
 /// </summary>
-public sealed class SqlArWorkbenchRepository : IArWorkbenchRepository
+public sealed partial class SqlArWorkbenchRepository : IArWorkbenchRepository
 {
     private const int MaxPageSize = 500;
 
@@ -48,10 +73,21 @@ public sealed class SqlArWorkbenchRepository : IArWorkbenchRepository
         ["agingDays"] = "w.AgingDays",
         ["priority"] = "CASE w.Priority WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 ELSE 1 END",
         ["nextFollowUpDate"] = "w.NextFollowUpDate",
-        ["daysSinceLastTouch"] = "DATEDIFF(day, w.LastTouchedOn, SYSUTCDATETIME())",
+        ["daysSinceLastTouch"] = $"DATEDIFF(day, {UntouchedSinceSql()}, SYSUTCDATETIME())",
         ["workflowStatus"] = "w.WorkflowStatus",
         ["denialCategory"] = "w.DenialCategory"
     };
+
+    /// <summary>
+    /// When a person last worked the claim. System entries - the claim sync's "Claim Identified" and
+    /// "Source Data Updated", auto-processing - are not touches: every claim gets one on each sync,
+    /// which would make every claim look freshly worked. A claim nobody has worked counts from when
+    /// it entered AR (first billed, else date of service, else first sync). Days Untouched, its sort
+    /// and the "untouched N+ days" filter all use this one definition.
+    /// </summary>
+    internal static string UntouchedSinceSql(string alias = "w") =>
+        $"COALESCE((SELECT MAX(ta.ActivityOn) FROM dbo.ARWB_ClaimActivity ta WHERE ta.ClaimKey = {alias}.ClaimKey AND ta.IsSystem = 0), " +
+        $"CONVERT(datetime2(0), {alias}.FirstBilledDate), CONVERT(datetime2(0), {alias}.DateOfService), {alias}.FirstIdentifiedOn)";
 
     private readonly IReadOnlyDictionary<int, string> _labConnectionsById;
     private readonly string _masterConnectionString;
@@ -736,10 +772,12 @@ SELECT
     v.InitialInsuranceAR, v.RecoveredAmount, v.RemainingAR, v.WorkflowStatus, v.Priority, v.AssignedAgentUser,
     v.LastFollowUpDate, v.NextFollowUpDate, v.FixResolution, v.AgingDays, v.AgingBucket,
     v.IsTflRisk, v.IsNonCollectible, v.ArQueueId, v.ArQueueLabel, v.ArQueueBadgeClass,
-    v.ArSubQueueId, v.ArSubQueueLabel, v.DaysSinceLastTouch, v.QaStatus, v.OpenCipCases, v.PendingAgentRequests,
+    v.ArSubQueueId, v.ArSubQueueLabel, DATEDIFF(day, {UntouchedSinceSql("tw")}, SYSUTCDATETIME()) AS DaysSinceLastTouch,
+    v.QaStatus, v.OpenCipCases, v.PendingAgentRequests,
     v.LineCount, cpt.CPTCode AS FirstCptCode
 FROM pg
 INNER JOIN dbo.ARWB_vw_ClaimWorklist v ON v.ClaimKey = pg.ClaimKey
+INNER JOIN dbo.ARWB_Claim tw ON tw.ClaimKey = pg.ClaimKey
 OUTER APPLY (SELECT TOP (1) l.CPTCode FROM dbo.ARWB_ClaimLine l WHERE l.ClaimKey = pg.ClaimKey ORDER BY l.LineNumber) cpt
 ORDER BY pg.Seq;";
 
@@ -881,6 +919,12 @@ ORDER BY pg.Seq;";
 
         if (filter.OpenInsuranceArOnly) where.Add("w.IsOpenInsuranceAR = 1");
         if (filter.TflRiskOnly) where.Add("w.IsTflRisk = 1");
+        if (filter.AssignedOnly) where.Add("w.AssignedAgentUser IS NOT NULL");
+        if (filter.MinDaysUntouched is > 0)
+        {
+            where.Add($"{UntouchedSinceSql()} <= DATEADD(day, -@MinUntouched, SYSUTCDATETIME())");
+            cmd.Parameters.Add("@MinUntouched", SqlDbType.Int).Value = Math.Min(filter.MinDaysUntouched.Value, 36_500);
+        }
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
             where.Add("(w.ClaimID LIKE @Search OR w.PatientID LIKE @Search OR w.PatientName LIKE @Search OR w.AccessionNumber LIKE @Search OR w.DenialCode LIKE @Search OR w.ReferringProvider LIKE @Search)");
@@ -1132,7 +1176,7 @@ SELECT SettingKey, SettingValue FROM dbo.ARWB_AppSetting;";
         return rows;
     }
 
-    public async Task<ArWorkbenchRefreshRun?> RunRefreshAsync(int labId, string runBy, string? note, CancellationToken ct)
+    public async Task<ArWorkbenchRefreshRun?> RunRefreshAsync(int labId, string runBy, string? note, CancellationToken ct, bool reprocessAll = false)
     {
         await using var connection = await OpenLabAsync(labId, ct);
 
@@ -1141,6 +1185,7 @@ SELECT SettingKey, SettingValue FROM dbo.ARWB_AppSetting;";
         {
             cmd.Parameters.Add("@RunBy", SqlDbType.NVarChar, 256).Value = runBy;
             cmd.Parameters.Add("@Note", SqlDbType.NVarChar, 1000).Value = (object?)note ?? DBNull.Value;
+            cmd.Parameters.Add("@ReprocessAll", SqlDbType.Bit).Value = reprocessAll;
             await cmd.ExecuteNonQueryAsync(ct);
         }
 

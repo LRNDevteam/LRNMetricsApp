@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
+import AssignModal from '../components/AssignModal';
 import DataTable from '../components/DataTable';
 import MultiSelect from '../components/MultiSelect';
-import { AgentName, ErrorBox, PriorityText, QueueBadge, StatusBadge, TflBadge } from '../components/Status';
+import { AgentName, ErrorBox, Notice, PriorityText, QueueBadge, StatusBadge, TflBadge } from '../components/Status';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
 import { fmt } from '../utils/format';
@@ -70,13 +71,19 @@ function buildColumns(openClaim) {
 }
 
 export default function WorkQueuePage() {
-  const { labId } = useWorkbench();
+  const { labId, can } = useWorkbench();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [options, setOptions] = useState(null);
   const [data, setData] = useState({ items: [], totalCount: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // Assign / reassign from the queue (System Administrator, RCM Manager, Team Lead).
+  const canAssign = can('assign');
+  const [selected, setSelected] = useState(() => new Set());
+  const [assigning, setAssigning] = useState(false);
+  const [notice, setNotice] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [searchText, setSearchText] = useState(params.get('q') || '');
 
   const pageSize = Number(params.get('size')) || DEFAULT_PAGE_SIZE;
@@ -129,7 +136,11 @@ export default function WorkQueuePage() {
       .then((result) => { setData(result); setLoading(false); })
       .catch((e) => { if (e.name !== 'AbortError') { setError(e.message); setLoading(false); } });
     return () => controller.abort();
-  }, [filter]);
+  }, [filter, reloadKey]);
+
+  // A selection belongs to one set of filters: changing them starts over.
+  const filterKey = JSON.stringify({ ...filter, page: 0, sortBy: '', sortDesc: false, pageSize: 0 });
+  useEffect(() => { setSelected(new Set()); }, [filterKey]);
 
   // Debounced search, so typing does not fire a query per keystroke.
   useEffect(() => {
@@ -181,6 +192,7 @@ export default function WorkQueuePage() {
       </div>
 
       <ErrorBox message={error} />
+      <Notice notice={notice} onClose={() => setNotice(null)} />
 
       <DataTable
         tableId="workqueue-v2"
@@ -197,7 +209,25 @@ export default function WorkQueuePage() {
         onPage={(page) => update({ page: page > 1 ? String(page) : '' }, false)}
         onPageSize={(size) => update({ size: size === DEFAULT_PAGE_SIZE ? '' : String(size) })}
         onRowClick={openClaim}
+        selectable={canAssign}
+        selectedKeys={selected}
+        onSelectionChange={setSelected}
+        toolbar={canAssign && (
+          <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" disabled={!selected.size} onClick={() => setAssigning(true)}>
+            Assign Selected{selected.size ? ` (${fmt.count(selected.size)})` : ''} →
+          </button>
+        )}
       />
+
+      {assigning && (
+        <AssignModal labId={labId} claimKeys={[...selected]} onClose={() => setAssigning(false)}
+          onDone={(result) => {
+            setAssigning(false);
+            setSelected(new Set());
+            setNotice({ kind: 'good', text: result?.message || 'Assigned.' });
+            setReloadKey((k) => k + 1);
+          }} />
+      )}
     </>
   );
 }

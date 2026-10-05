@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
 import { LOGOUT_URL } from '../config/apiConfig';
-import { NAV, navForUser } from '../config/navigation';
+import { navForUser, ROUTES } from '../config/navigation';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
 import { clearJwt } from '../services/auth';
@@ -26,8 +26,28 @@ function initials(name) {
 // Topbar title / subtitle for the current route (the mockup's VIEW_META).
 function viewMeta(pathname) {
   if (pathname.startsWith('/claims/')) return { title: 'Claim Workspace', subtitle: 'Recovery, CPT lines, denial detail, follow-ups and activity' };
-  const item = NAV.find((n) => n.path === pathname);
-  return item ? { title: item.label, subtitle: item.subtitle } : { title: '', subtitle: '' };
+  const item = ROUTES.find((n) => n.path === pathname);
+  if (!item) return { title: '', subtitle: '' };
+  return { title: item.groupLabel ? `${item.groupLabel} · ${item.label}` : item.label, subtitle: item.subtitle };
+}
+
+const HIDDEN_KEY = 'lrn.arwb.nav.hidden';
+const COLLAPSED_GROUPS_KEY = 'lrn.arwb.nav.collapsedGroups';
+const readStored = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
+const writeStored = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* per-session only */ } };
+// Same breakpoint as the CSS that turns the sidebar into a slide-in drawer.
+const isDrawer = () => window.matchMedia('(max-width: 980px)').matches;
+
+function NavItem({ item, count }) {
+  return (
+    <NavLink to={item.path} end={item.path === '/'} className={({ isActive }) => `arwb-nav-item ${isActive ? 'active' : ''}`}
+      title={item.built ? item.label : `${item.label} (planned - phase ${item.phase})`}>
+      {item.icon && <span className="arwb-nav-ic"><Icon name={item.icon} /></span>}
+      <span className="arwb-nav-label">{item.label}</span>
+      {count > 0 && <span className="arwb-nav-count">{fmt.count(count)}</span>}
+      {!item.built && !(count > 0) && <span className="arwb-planned-dot" />}
+    </NavLink>
+  );
 }
 
 /** The mockup's app shell: white sidebar (brand mark, icon nav, count pills) and a sticky topbar. */
@@ -35,7 +55,22 @@ export default function AppShell() {
   const { labs, labId, setLabId, user } = useWorkbench();
   const location = useLocation();
   const [counts, setCounts] = useState({});
-  const [navOpen, setNavOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);              // phone / tablet drawer
+  const [navHidden, setNavHidden] = useState(() => readStored(HIDDEN_KEY, false)); // desktop: sidebar hidden
+  const [collapsed, setCollapsed] = useState(() => readStored(COLLAPSED_GROUPS_KEY, []));
+
+  function toggleNav() {
+    if (isDrawer()) { setNavOpen((v) => !v); return; }
+    setNavHidden((v) => { writeStored(HIDDEN_KEY, !v); return !v; });
+  }
+
+  function toggleGroup(id) {
+    setCollapsed((prev) => {
+      const next = prev.includes(id) ? prev.filter((g) => g !== id) : [...prev, id];
+      writeStored(COLLAPSED_GROUPS_KEY, next);
+      return next;
+    });
+  }
 
   // Nav badges come from the same queue summary the dashboard reads, so a badge and the screen
   // behind it always agree.
@@ -60,29 +95,40 @@ export default function AppShell() {
   }
 
   return (
-    <div className="arwb-shell">
-      <aside className={`arwb-sidebar ${navOpen ? 'open' : ''}`} aria-label="Main menu">
+    <div className={`arwb-shell${navHidden ? ' nav-hidden' : ''}`}>
+      <aside className={`arwb-sidebar ${navOpen ? 'open' : ''}`} aria-label="Main menu" id="arwb-sidebar">
         <div className="arwb-sidebar-top">
           <div className="arwb-brand-mark">LRN</div>
           <div>
             <div className="arwb-brand-title-main">AR Workbench</div>
             <div className="arwb-brand-title-sub">Denial &amp; Insurance AR</div>
           </div>
-          <button type="button" className="arwb-icon-btn arwb-only-mobile ms-auto" onClick={() => setNavOpen(false)} aria-label="Close menu">
+          <button type="button" className="arwb-icon-btn ms-auto" onClick={toggleNav} aria-label="Hide menu" title="Hide menu">
             <Icon name="close" />
           </button>
         </div>
         <nav className="arwb-nav-list">
           {items.map((item) => {
-            const count = item.countKey ? counts[item.countKey] : 0;
+            if (!item.children) return <NavItem key={item.id} item={item} count={item.countKey ? counts[item.countKey] : 0} />;
+
+            // A group: a toggle with its children beneath. The group holding the current page
+            // always shows it, so the active item is never hidden inside a collapsed group.
+            const inGroup = item.children.some((c) => c.path === location.pathname);
+            const open = inGroup || !collapsed.includes(item.id);
             return (
-              <NavLink key={item.id} to={item.path} end={item.path === '/'} className={({ isActive }) => `arwb-nav-item ${isActive ? 'active' : ''}`}
-                title={item.built ? item.label : `${item.label} (planned - phase ${item.phase})`}>
-                <span className="arwb-nav-ic"><Icon name={item.icon} /></span>
-                <span className="arwb-nav-label">{item.label}</span>
-                {count > 0 && <span className="arwb-nav-count">{fmt.count(count)}</span>}
-                {!item.built && !(count > 0) && <span className="arwb-planned-dot" />}
-              </NavLink>
+              <div key={item.id}>
+                <button type="button" className={`arwb-nav-item arwb-nav-group-btn${inGroup ? ' in-group' : ''}`} aria-expanded={open}
+                  aria-controls={`nav-${item.id}`} onClick={() => { if (!inGroup) toggleGroup(item.id); }} title={item.label}>
+                  <span className="arwb-nav-ic"><Icon name={item.icon} /></span>
+                  <span className="arwb-nav-label">{item.label}</span>
+                  <span className={`arwb-nav-chev${open ? ' open' : ''}`}><Icon name="chevronDown" size={15} /></span>
+                </button>
+                {open && (
+                  <div className="arwb-nav-sub" id={`nav-${item.id}`}>
+                    {item.children.map((child) => <NavItem key={child.id} item={{ ...child, built: item.built, phase: item.phase }} count={0} />)}
+                  </div>
+                )}
+              </div>
             );
           })}
         </nav>
@@ -96,7 +142,8 @@ export default function AppShell() {
 
       <div className="arwb-main">
         <header className="arwb-topbar">
-          <button type="button" className="arwb-icon-btn arwb-only-mobile" onClick={() => setNavOpen(true)} aria-label="Open menu">
+          <button type="button" className="arwb-icon-btn" onClick={toggleNav} aria-controls="arwb-sidebar"
+            aria-label={navHidden ? 'Show menu' : 'Hide or show menu'} title={navHidden ? 'Show menu' : 'Hide menu'}>
             <Icon name="menu" />
           </button>
           <div className="arwb-topbar-title">
