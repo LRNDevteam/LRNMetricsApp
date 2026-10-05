@@ -157,6 +157,14 @@ IF COL_LENGTH('dbo.ClaimLevelData', 'DenialDate') IS NULL                    ALT
 IF COL_LENGTH('dbo.ClaimLevelData', 'Facility') IS NULL                      ALTER TABLE dbo.ClaimLevelData ADD Facility NVARCHAR(500) NULL;
 IF COL_LENGTH('dbo.ClaimLevelData', 'TotalInsuranceBalance') IS NULL         ALTER TABLE dbo.ClaimLevelData ADD TotalInsuranceBalance NVARCHAR(500) NULL;
 IF COL_LENGTH('dbo.ClaimLevelData', 'OtherBalance') IS NULL                  ALTER TABLE dbo.ClaimLevelData ADD OtherBalance NVARCHAR(500) NULL;
+IF COL_LENGTH('dbo.ClaimLevelData', 'CPTCodeList') IS NULL                 ALTER TABLE dbo.ClaimLevelData ADD CPTCodeList NVARCHAR(MAX) NULL;
+IF COL_LENGTH('dbo.ClaimLevelData', 'UnitsList') IS NULL                   ALTER TABLE dbo.ClaimLevelData ADD UnitsList NVARCHAR(500) NULL;
+IF COL_LENGTH('dbo.ClaimLevelData', 'ModifierList') IS NULL                ALTER TABLE dbo.ClaimLevelData ADD ModifierList NVARCHAR(500) NULL;
+IF COL_LENGTH('dbo.ClaimLevelData', 'CptWithUnits') IS NULL                  ALTER TABLE dbo.ClaimLevelData ADD CptWithUnits NVARCHAR(MAX) NULL;
+IF COL_LENGTH('dbo.ClaimLevelData', 'ChargeToDate') IS NULL                  ALTER TABLE dbo.ClaimLevelData ADD ChargeToDate NVARCHAR(500) NULL;
+IF COL_LENGTH('dbo.ClaimLevelData', 'ChargeTotalPayments') IS NULL           ALTER TABLE dbo.ClaimLevelData ADD ChargeTotalPayments NVARCHAR(500) NULL;
+IF COL_LENGTH('dbo.ClaimLevelData', 'ChargeTotalAdjustments') IS NULL        ALTER TABLE dbo.ClaimLevelData ADD ChargeTotalAdjustments NVARCHAR(500) NULL;
+IF COL_LENGTH('dbo.ClaimLevelData', 'OrderingProviderID') IS NULL            ALTER TABLE dbo.ClaimLevelData ADD OrderingProviderID NVARCHAR(500) NULL;
 IF COL_LENGTH('dbo.ClaimLevelData', 'AdditionalFields') IS NULL              ALTER TABLE dbo.ClaimLevelData ADD AdditionalFields NVARCHAR(MAX) NULL;
 GO
 
@@ -255,6 +263,11 @@ IF COL_LENGTH('dbo.LineLevelData', 'CPTModifier') IS NULL           ALTER TABLE 
 IF COL_LENGTH('dbo.LineLevelData', 'ClaimCPTs') IS NULL             ALTER TABLE dbo.LineLevelData ADD ClaimCPTs NVARCHAR(MAX) NULL;
 IF COL_LENGTH('dbo.LineLevelData', 'TotalInsuranceBalance') IS NULL ALTER TABLE dbo.LineLevelData ADD TotalInsuranceBalance NVARCHAR(500) NULL;
 IF COL_LENGTH('dbo.LineLevelData', 'OtherBalance') IS NULL          ALTER TABLE dbo.LineLevelData ADD OtherBalance NVARCHAR(500) NULL;
+IF COL_LENGTH('dbo.LineLevelData', 'ChargeToDate') IS NULL          ALTER TABLE dbo.LineLevelData ADD ChargeToDate NVARCHAR(500) NULL;
+IF COL_LENGTH('dbo.LineLevelData', 'ChargeTotalPayments') IS NULL   ALTER TABLE dbo.LineLevelData ADD ChargeTotalPayments NVARCHAR(500) NULL;
+IF COL_LENGTH('dbo.LineLevelData', 'ChargeTotalAdjustments') IS NULL ALTER TABLE dbo.LineLevelData ADD ChargeTotalAdjustments NVARCHAR(500) NULL;
+IF COL_LENGTH('dbo.LineLevelData', 'OrderingProviderID') IS NULL    ALTER TABLE dbo.LineLevelData ADD OrderingProviderID NVARCHAR(500) NULL;
+IF COL_LENGTH('dbo.LineLevelData', 'TF') IS NULL                    ALTER TABLE dbo.LineLevelData ADD TF NVARCHAR(10) NULL;
 IF COL_LENGTH('dbo.LineLevelData', 'AdditionalFields') IS NULL      ALTER TABLE dbo.LineLevelData ADD AdditionalFields NVARCHAR(MAX) NULL;
 GO
 

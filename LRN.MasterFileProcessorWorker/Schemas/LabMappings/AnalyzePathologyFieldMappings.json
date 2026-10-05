@@ -82,7 +82,15 @@
       { "CsvHeader": "30 Bucket #", "SqlColumn": "Bucket30", "IncludeInHash": false },
       { "CsvHeader": "30 Bucket $", "SqlColumn": "Bucket30Amount", "IncludeInHash": false },
       { "CsvHeader": "60 Bucket #", "SqlColumn": "Bucket60", "IncludeInHash": false },
-      { "CsvHeader": "60 Bucket $", "SqlColumn": "Bucket60Amount", "IncludeInHash": false }
+      { "CsvHeader": "60 Bucket $", "SqlColumn": "Bucket60Amount", "IncludeInHash": false },
+      { "CsvHeader": "Charge CPT Code", "SqlColumn": "CPTCodeList", "IncludeInHash": false },
+      { "CsvHeader": "Charge Units", "SqlColumn": "UnitsList", "IncludeInHash": false },
+      { "CsvHeader": "Charge Modifier List", "SqlColumn": "ModifierList", "IncludeInHash": false },
+      { "CsvHeader": "CPT Units", "SqlColumn": "CptWithUnits", "IncludeInHash": false },
+      { "CsvHeader": "Charge To Date", "SqlColumn": "ChargeToDate", "IncludeInHash": false },
+      { "CsvHeader": "Charge Total Payments", "SqlColumn": "ChargeTotalPayments", "IncludeInHash": false },
+      { "CsvHeader": "Charge Total Adjustments", "SqlColumn": "ChargeTotalAdjustments", "IncludeInHash": false },
+      { "CsvHeader": "Claim Ordering Provider ID", "SqlColumn": "OrderingProviderID", "IncludeInHash": false }
     ]
   },
   "LineLevel": {
@@ -165,7 +173,12 @@
       { "CsvHeader": "Claim Primary Member ID", "SqlColumn": "SubscriberId", "IncludeInHash": false },
       { "CsvHeader": "CPT Units", "SqlColumn": "CptWithUnits", "IncludeInHash": false },
       { "CsvHeader": "CPTMOD", "SqlColumn": "CPTModifier", "IncludeInHash": false },
-      { "CsvHeader": "CPTs", "SqlColumn": "ClaimCPTs", "IncludeInHash": false }
+      { "CsvHeader": "CPTs", "SqlColumn": "ClaimCPTs", "IncludeInHash": false },
+      { "CsvHeader": "Charge To Date", "SqlColumn": "ChargeToDate", "IncludeInHash": false },
+      { "CsvHeader": "Charge Total Payments", "SqlColumn": "ChargeTotalPayments", "IncludeInHash": false },
+      { "CsvHeader": "Charge Total Adjustments", "SqlColumn": "ChargeTotalAdjustments", "IncludeInHash": false },
+      { "CsvHeader": "Claim Ordering Provider ID", "SqlColumn": "OrderingProviderID", "IncludeInHash": false },
+      { "CsvHeader": "T/F", "SqlColumn": "TF", "IncludeInHash": false }
     ]
   }
 }
