@@ -55,8 +55,12 @@ public sealed class MenuAccessFilter : IAsyncAuthorizationFilter
         var user = context.HttpContext.User;
         if (user.Identity?.IsAuthenticated != true) return; // global auth policy handles this
 
-        // Admins always keep full access (the seed script grants them every menu anyway).
-        if (user.IsInRole("Admin") || user.IsInRole("LRN Admin") || user.IsInRole("LRNAdmin")) return;
+        // Admins always keep full access (the seed script grants them every menu anyway). The same
+        // admin set as login and the workflow JWT (WorkflowJwtIssuer): Admin, Super Admin, LRN Admin,
+        // compared without case or spaces. "Super Admin" was missing here, so a Super Admin with no
+        // Role Menu Mapping rows was refused every page and bounced to Account/Login?denied=1.
+        // Lab Admin is deliberately not in this set: its pages come from Role Menu Mapping.
+        if (IsFullAdmin(user)) return;
 
         var routeValues = context.RouteData.Values;
         var controller = routeValues["controller"] as string;
@@ -93,4 +97,11 @@ public sealed class MenuAccessFilter : IAsyncAuthorizationFilter
             context.Result = new ForbidResult(); // -> Account/AccessDenied
         }
     }
+
+    private static readonly HashSet<string> FullAdminRoles = new(StringComparer.Ordinal) { "ADMIN", "SUPERADMIN", "LRNADMIN" };
+
+    internal static bool IsFullAdmin(System.Security.Claims.ClaimsPrincipal user) =>
+        user.Claims
+            .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role)
+            .Any(c => FullAdminRoles.Contains(c.Value.Replace(" ", string.Empty).ToUpperInvariant()));
 }

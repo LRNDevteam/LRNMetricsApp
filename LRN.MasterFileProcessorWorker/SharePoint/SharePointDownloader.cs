@@ -1,4 +1,4 @@
-using Azure.Core;
+﻿using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -83,8 +83,10 @@ public sealed class SharePointDownloader
 		var driveId = _driveId!;
 		var labRootId = await GetLabRootFolderIdAsync(driveId, lab.SharePointRootPath, ct);
 
+		var rootChildren = await ListChildrenPagedAsync(driveId, labRootId, ct);
+
 		// 1) Pick year folder: prefer current year, else latest available year
-		var yearFolder = (await ListChildrenPagedAsync(driveId, labRootId, ct))
+		var yearFolder = rootChildren
 			.Where(x => x.IsFolder)
 			.Select(x => new { Item = x, Year = TryParseYearFolder(x.Name) })
 			.Where(x => x.Year.HasValue)
@@ -93,36 +95,69 @@ public sealed class SharePointDownloader
 			.Select(x => x.Item)
 			.FirstOrDefault();
 
-		if (yearFolder == null)
+		DriveChild? monthFolder;
+		string yearFolderName;
+		// The year as it appears in the SharePoint path. Normally the year folder's own name; empty
+		// for a dated-month lab, which has no year folder - yearFolderName ("2026") then only names
+		// local output folders and must not be written into the SharePoint path.
+		var spYearSegment = yearFolder?.Name ?? string.Empty;
+
+		if (yearFolder != null)
 		{
-			return new LatestFileLookupResult(
-				File: null,
-				Status: LatestFileLookupStatus.NoYearFolder,
-				YearFolderName: null,
-				MonthFolderName: null,
-				WeekFolderName: null,
-				Message: $"No year folder found under '{lab.SharePointRootPath}'.");
+			yearFolderName = yearFolder.Name;
+
+			// 2) Pick latest month folder
+			monthFolder = (await ListChildrenPagedAsync(driveId, yearFolder.Id, ct))
+				.Where(x => x.IsFolder)
+				.Select(x => new { Item = x, Month = TryParseMonthFolder(x.Name) })
+				.Where(x => x.Month.HasValue)
+				.OrderByDescending(x => x.Month!.Value)
+				.ThenByDescending(x => x.Item.LastModifiedUtc ?? DateTimeOffset.MinValue)
+				.Select(x => x.Item)
+				.FirstOrDefault();
+
+			if (monthFolder == null)
+			{
+				return new LatestFileLookupResult(
+					File: null,
+					Status: LatestFileLookupStatus.NoMonthFolder,
+					YearFolderName: yearFolder.Name,
+					MonthFolderName: null,
+					WeekFolderName: null,
+					Message: $"No month folder found under year folder '{yearFolder.Name}'.");
+			}
 		}
-
-		// 2) Pick latest month folder
-		var monthFolder = (await ListChildrenPagedAsync(driveId, yearFolder.Id, ct))
-			.Where(x => x.IsFolder)
-			.Select(x => new { Item = x, Month = TryParseMonthFolder(x.Name) })
-			.Where(x => x.Month.HasValue)
-			.OrderByDescending(x => x.Month!.Value)
-			.ThenByDescending(x => x.Item.LastModifiedUtc ?? DateTimeOffset.MinValue)
-			.Select(x => x.Item)
-			.FirstOrDefault();
-
-		if (monthFolder == null)
+		else
 		{
-			return new LatestFileLookupResult(
-				File: null,
-				Status: LatestFileLookupStatus.NoMonthFolder,
-				YearFolderName: yearFolder.Name,
-				MonthFolderName: null,
-				WeekFolderName: null,
-				Message: $"No month folder found under year folder '{yearFolder.Name}'.");
+			// No year folder: some labs keep month folders that carry their own year directly under
+			// the root (Analyze Pathology: "Master File/Sep'26/09.21.2026 - 09.27.2026"). Take the
+			// latest month by (year, month); the year then names the local output folder as a year
+			// folder would.
+			var datedMonth = rootChildren
+				.Where(x => x.IsFolder)
+				.Select(x => new { Item = x, Month = TryParseMonthFolder(x.Name), Year = TryParseMonthFolderYear(x.Name) })
+				.Where(x => x.Month.HasValue && x.Year.HasValue)
+				.OrderByDescending(x => x.Year!.Value)
+				.ThenByDescending(x => x.Month!.Value)
+				.ThenByDescending(x => x.Item.LastModifiedUtc ?? DateTimeOffset.MinValue)
+				.FirstOrDefault();
+
+			if (datedMonth == null)
+			{
+				return new LatestFileLookupResult(
+					File: null,
+					Status: LatestFileLookupStatus.NoYearFolder,
+					YearFolderName: null,
+					MonthFolderName: null,
+					WeekFolderName: null,
+					Message: $"No year folder (e.g. '2026') or dated month folder (e.g. \"Sep'26\") found under '{lab.SharePointRootPath}'.");
+			}
+
+			monthFolder = datedMonth.Item;
+			yearFolderName = datedMonth.Year!.Value.ToString(CultureInfo.InvariantCulture);
+			_logger.LogInformation(
+				"Lab {LabId}: no year folder under '{Root}'; using dated month folder '{MonthFolder}' (year {Year}).",
+				lab.LabId, lab.SharePointRootPath, monthFolder.Name, yearFolderName);
 		}
 
 		var monthChildren = await ListChildrenPagedAsync(driveId, monthFolder.Id, ct);
@@ -145,7 +180,7 @@ public sealed class SharePointDownloader
 			return new LatestFileLookupResult(
 				File: null,
 				Status: LatestFileLookupStatus.NoWeekFolder,
-				YearFolderName: yearFolder.Name,
+				YearFolderName: yearFolderName,
 				MonthFolderName: monthFolder.Name,
 				WeekFolderName: null,
 				Message: $"No week folder found under month folder '{monthFolder.Name}'.");
@@ -169,7 +204,7 @@ public sealed class SharePointDownloader
 		if (currentWeekFolder != null)
 		{
 			return await SelectFileFromWeekFolderAsync(
-				lab, driveId, yearFolder.Name, monthFolder.Name, currentWeekFolder.Item, isCurrentWeek: true, ct);
+				lab, driveId, yearFolderName, spYearSegment, monthFolder.Name, currentWeekFolder.Item, isCurrentWeek: true, ct);
 		}
 
 		// No week folder covers today. By default the run is skipped -- previous week folders
@@ -190,7 +225,7 @@ public sealed class SharePointDownloader
 			return new LatestFileLookupResult(
 				File: null,
 				Status: LatestFileLookupStatus.NoCurrentWeekFolder,
-				YearFolderName: yearFolder.Name,
+				YearFolderName: yearFolderName,
 				MonthFolderName: monthFolder.Name,
 				WeekFolderName: latestAvailableWeekFolder.Item.Name,
 				Message: $"No week folder covering today was found under month folder '{monthFolder.Name}'. Previous week folders are not processed (latest available: '{latestAvailableWeekFolder.Item.Name}'). Set MasterFileProcessor:ProcessPreviousWeekFile=true to allow the fallback.");
@@ -203,13 +238,14 @@ public sealed class SharePointDownloader
 			latestAvailableWeekFolder.Item.Name);
 
 		return await SelectFileFromWeekFolderAsync(
-			lab, driveId, yearFolder.Name, monthFolder.Name, latestAvailableWeekFolder.Item, isCurrentWeek: false, ct);
+			lab, driveId, yearFolderName, spYearSegment, monthFolder.Name, latestAvailableWeekFolder.Item, isCurrentWeek: false, ct);
 	}
 
 	private async Task<LatestFileLookupResult> SelectFileFromWeekFolderAsync(
 		LabFileMap lab,
 		string driveId,
 		string yearFolderName,
+		string spYearSegment,
 		string monthFolderName,
 		DriveChild weekFolder,
 		bool isCurrentWeek,
@@ -266,9 +302,11 @@ public sealed class SharePointDownloader
 
 		var eTagKey = BuildChangeKey(file);
 
+		// spYearSegment, not yearFolderName: a dated-month lab has no year folder in SharePoint, and
+		// the sibling LIMS / Client Paid lookups resolve the folder from this path.
 		var spPath = BuildSpPath(
 			lab.SharePointRootPath,
-			yearFolderName,
+			spYearSegment,
 			monthFolderName,
 			weekFolder.Name,
 			file.Name);
@@ -784,6 +822,28 @@ public sealed class SharePointDownloader
 		var anyYear = Regex.Match(name, @"(?<!\d)(20\d{2})(?!\d)");
 		if (anyYear.Success && int.TryParse(anyYear.Groups[1].Value, out var extractedYear))
 			return extractedYear;
+
+		return null;
+	}
+
+	/// <summary>
+	/// The year a month folder names itself, for labs with no year folder: "Sep'26" / "Sep’26" /
+	/// "Sep-26" / "Sep 26" -> 2026, "Sep 2026" / "09.Sep.2026" -> 2026. Null when it names none.
+	/// </summary>
+	internal static int? TryParseMonthFolderYear(string name)
+	{
+		name = NormalizeFolderName(name);
+		if (string.IsNullOrWhiteSpace(name))
+			return null;
+
+		var fourDigit = TryParseYearFolder(name);
+		if (fourDigit.HasValue)
+			return fourDigit;
+
+		// Two-digit year after an apostrophe, hyphen, dot or space at the end: Sep'26, Sep-26.
+		var twoDigit = Regex.Match(name, @"['’\-\.\s](\d{2})\s*$");
+		if (twoDigit.Success && int.TryParse(twoDigit.Groups[1].Value, out var yy))
+			return 2000 + yy;
 
 		return null;
 	}

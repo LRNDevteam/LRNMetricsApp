@@ -20,6 +20,19 @@ public static class SelfTests
     private static int _passed;
     private static readonly List<string> Failures = new();
 
+    // Labs with no year folder (Analyze Pathology: "Master File/Sep'26/<week>") name the year in the
+    // month folder; SharePointDownloader falls back to these when the lab root has no "2026" folder.
+    private static void DatedMonthFolderYears()
+    {
+        static int? Year(string name) => LRN.MasterFileProcessorWorker.SharePoint.SharePointDownloader.TryParseMonthFolderYear(name);
+
+        Check("Dated month: Sep'26 -> 2026", Year("Sep'26") == 2026);
+        Check("Dated month: curly apostrophe Sep’26 -> 2026", Year("Sep’26") == 2026);
+        Check("Dated month: Sep-26 / Oct 26 -> 2026", Year("Sep-26") == 2026 && Year("Oct 26") == 2026);
+        Check("Dated month: Sep 2026 / 09.Sep.2026 -> 2026", Year("Sep 2026") == 2026 && Year("09.Sep.2026") == 2026);
+        Check("Dated month: plain month names carry no year", Year("09.Sep") is null && Year("September") is null);
+    }
+
     public static int Run()
     {
         Console.WriteLine("BulkLoad self-tests");
@@ -59,6 +72,7 @@ public static class SelfTests
         DenialCodeNormalization();
         DenialCodeDescriptions();
         DenialDescriptionCascade();
+        DatedMonthFolderYears();
 
         Console.WriteLine(new string('-', 70));
 
