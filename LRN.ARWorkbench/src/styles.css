@@ -266,6 +266,11 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 /* The mockup's 25px value, scaled to the tile's width so a full dollar amount ("$4,061,160.93",
    13 characters) always fits; short values stay at 25px. Wraps as a last resort, never clips. */
 .arwb-kpi-tile .arwb-kpi-value { font-size: clamp(15px, 12.5cqi, 25px); line-height: 1.2; overflow-wrap: anywhere; }
+/* A tile that is also a quick filter (My Work, Follow-Up Management): the active one is outlined. */
+.arwb-kpi-tile-btn { text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.arwb-kpi-tile-btn:hover { border-color: var(--accent); }
+.arwb-kpi-tile-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.arwb-kpi-tile-btn.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow-1); }
 .arwb-kpi-label { font-size: 11.5px; font-weight: 700; color: var(--ink-muted); text-transform: uppercase; letter-spacing: .03em; }
 .arwb-kpi-value { font-family: var(--font-display); font-size: 25px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--ink); }
 .arwb-kpi-value-sm { font-size: 17px; }
@@ -620,3 +625,26 @@ table.arwb-data-table tbody tr.row-selected { background: var(--accent-softer); 
 @media (max-width: 620px) {
   .arwb-client-scope, .arwb-user-chip { display: none; }
 }
+
+/* Saved Views control in a filter bar: select, star / delete, Save View. */
+.arwb-saved-views { display: flex; align-items: center; gap: 6px; }
+.arwb-saved-views .arwb-select { min-width: 170px; max-width: 240px; }
+
+/* User Management: lab check list, password row, lab chips. */
+.arwb-card-head-actions { margin-left: auto; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.arwb-input-row { display: flex; gap: 6px; align-items: center; }
+.arwb-input-row .arwb-input { flex: 1; min-width: 0; }
+.arwb-check-list { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px; background: var(--surface); }
+.arwb-check-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px 12px; max-height: 220px; overflow-y: auto; }
+.arwb-check-item { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; min-width: 0; overflow-wrap: anywhere; }
+.arwb-check-all { font-weight: 700; padding-bottom: 4px; border-bottom: 1px solid var(--border-soft); }
+.arwb-chip-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.arwb-chip-row .arwb-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--surface-2, var(--border-soft)); color: var(--ink-2); white-space: nowrap; }
+.arwb-chip-row .arwb-chip-muted { background: transparent; border: 1px dashed var(--border); color: var(--ink-muted); }
+/* Status + Non-Collectible badge in list cells; Denial Code Master block on the claim's Denial tab. */
+.arwb-status-stack { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.arwb-code-info { padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
+.arwb-code-info:last-child { border-bottom: 0; }
+.arwb-code-info-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+.arwb-code-info-grid { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; font-size: 13px; color: var(--ink-2); }
+.arwb-code-info-grid > span { color: var(--ink-muted); }

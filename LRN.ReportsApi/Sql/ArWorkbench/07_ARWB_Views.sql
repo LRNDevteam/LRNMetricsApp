@@ -90,6 +90,7 @@ SELECT
     c.TflDeadline,
     c.IsTflRisk,
     c.IsNonCollectible,
+    c.HasNonCollectibleDenial,
     c.IsFinanciallyClosed,
     c.IsWorkComplete,
     c.IsOpenInsuranceAR,

@@ -136,7 +136,8 @@ public sealed class ReportBoardController : Controller
 
             var labConfig = configKey is not null && _labSettings.Labs.TryGetValue(configKey, out var cfg) ? cfg : null;
 
-            var labDisplayName = string.IsNullOrWhiteSpace(apiRow.Lab) ? (configKey ?? "Unknown lab") : apiRow.Lab!;
+            var labDisplayName = _labConfig.DisplayNameFor(
+                string.IsNullOrWhiteSpace(apiRow.Lab) ? (configKey ?? "Unknown lab") : apiRow.Lab!);
 
             // The tracker returns ONE run per lab, so a report that has not caught up with the
             // latest run shows up as a missing status inside it. Once the three source reports

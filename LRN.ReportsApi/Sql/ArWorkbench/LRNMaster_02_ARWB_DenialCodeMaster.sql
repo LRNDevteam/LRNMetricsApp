@@ -1,0 +1,179 @@
+/* ============================================================================================
+   AR Workbench - LRNMaster: central Denial Code Master (one list for every lab)
+   Target database: LRNMaster (DefaultConnection). Run ONCE per environment, not per lab.
+
+   One row per denial code WITHOUT its CARC group prefix: PR4, CO4, PI4 and OA4 are all code 4,
+   matching how the claim sync normalizes codes (dbo.ARWB_tvf_NormalizeDenialCode). Holds the
+   common description, the recommended Action Category, the Denial Mapper attributes
+   (Classification, Coverage Status, ICD Compliance, Denial Validity - same dropdown lists as the
+   Denial Mapper Super Master) and the Non-Collectible flag.
+
+   Separate from dbo.DenialMapperSuperMaster (Denial Workflow, full codes with prefixes, pushed to
+   labs) and from each lab's ARWB_DenialCodeCategoryMap (workbench Denial Category -> queues);
+   neither is changed. The AR Workbench reads this table for the claim Denial view, and
+   "Apply to lab" copies the Non-Collectible codes into a lab's NON_COLLECTIBLE_CODE list.
+
+   Maintained in AR Workbench > Master Values > Denial Code Descriptions (edit, Excel import /
+   export). Section 2 seeds it from DenialCodes&Categorization_Master.xlsx (116 codes); it
+   only ADDS codes that are not there yet, so edits made in the screen are kept on a re-run.
+   Idempotent - safe to run again.
+   ============================================================================================ */
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+/* ---------- 1. Table ------------------------------------------------------------------------ */
+IF OBJECT_ID(N'dbo.ARWB_DenialCodeMaster', N'U') IS NULL
+CREATE TABLE dbo.ARWB_DenialCodeMaster
+(
+    DenialCode              nvarchar(50)   NOT NULL CONSTRAINT PK_ARWB_DenialCodeMaster PRIMARY KEY,  -- normalized, no CO/PR/PI/OA
+    DenialDescription       nvarchar(1000) NULL,
+    ActionCategory          nvarchar(200)  NULL,      -- recommended action / root-cause category
+    DenialClassification    nvarchar(100)  NULL,      -- Denial Mapper list DenialClassification
+    CoverageStatus          nvarchar(100)  NULL,      -- Denial Mapper list CoverageStatus
+    ICDComplianceStatus     nvarchar(100)  NULL,      -- Denial Mapper list ICDComplianceStatus
+    DenialValidity          nvarchar(100)  NULL,      -- Denial Mapper list DenialValidity
+    IsNonCollectible        bit            NOT NULL CONSTRAINT DF_ARWB_DenialCodeMaster_IsNonCollectible DEFAULT (0),
+    IsActive                bit            NOT NULL CONSTRAINT DF_ARWB_DenialCodeMaster_IsActive DEFAULT (1),
+    CreatedOn               datetime2(0)   NOT NULL CONSTRAINT DF_ARWB_DenialCodeMaster_CreatedOn DEFAULT (SYSUTCDATETIME()),
+    CreatedBy               nvarchar(256)  NULL,
+    UpdatedOn               datetime2(0)   NULL,
+    UpdatedBy               nvarchar(256)  NULL
+);
+GO
+
+/* ---------- 2. Seed from DenialCodes&Categorization_Master.xlsx ------------------------------
+   Sheet "Denial Category Clasification": code, description, categorization (-> ActionCategory).
+   Sheet "Non-collectible Denials": IsNonCollectible = 1. Excel errors (#N/A) load as blank. Codes listed twice (merged; a blank later cell keeps the earlier value): B7 */
+DECLARE @Seed TABLE (DenialCode nvarchar(50) NOT NULL PRIMARY KEY, DenialDescription nvarchar(1000) NULL,
+                     ActionCategory nvarchar(200) NULL, IsNonCollectible bit NOT NULL);
+INSERT INTO @Seed (DenialCode, DenialDescription, ActionCategory, IsNonCollectible) VALUES
+    (N'4', N'Procedure code inconsistent with modifier', N'Procedure Code, Modifier or Coding Related Issues', 0),
+    (N'5', N'Procedure code/type of bill inconsistent with place of service', N'Procedure Code, Modifier or Coding Related Issues', 0),
+    (N'6', N'Procedure/revenue code inconsistent with patient age', N'Procedure Code, Modifier or Coding Related Issues', 0),
+    (N'7', N'Procedure/revenue code inconsistent with patient gender', N'Procedure Code, Modifier or Coding Related Issues', 0),
+    (N'9', N'Diagnosis inconsistent with patient age', N'ICD-10 Codes Related Issues', 0),
+    (N'10', N'Diagnosis inconsistent with patient gender', N'ICD-10 Codes Related Issues', 0),
+    (N'11', N'Diagnosis inconsistent with procedure', N'ICD-10 Codes Related Issues', 0),
+    (N'12', N'Diagnosis inconsistent with provider type', N'ICD-10 Codes Related Issues', 0),
+    (N'13', N'Date of death precedes date of service', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'16', N'Claim/service lacks information or has billing error', N'Claims Edits Related Issues', 0),
+    (N'18', N'Exact duplicate claim/service', N'Duplicates', 0),
+    (N'19', N'Work-related injury/illness; workers'' compensation liability', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'21', N'Injury/illness is liability of no-fault carrier', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'22', N'Service may be covered by another payer', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'23', N'Prior payer adjudication affected payment', N'Previous Payer Processing Information Related Denials', 0),
+    (N'24', N'Charges covered under capitation/managed care', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'26', N'Expenses incurred before coverage', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'27', N'Expenses incurred after coverage terminated', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'28', N'Coverage not active on date of service', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'29', N'Filing time limit expired', N'Timely Filing Limit Exceeded', 1),
+    (N'31', N'Patient not identified as insured', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'32', N'Patient not an eligible dependent', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'33', N'No dependent coverage', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'34', N'No newborn coverage', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'35', N'Lifetime benefit maximum reached', N'Maximum Benefit Reached', 0),
+    (N'38', N'Service not provided/authorized by designated provider', N'Missing Prior Authorization', 0),
+    (N'39', N'Service denied during authorization/pre-certification', N'Missing Prior Authorization', 0),
+    (N'40', N'Charges do not qualify as emergency/urgent care', N'Medical Necessity or Non Covered Charges Related Issues', 0),
+    (N'41', N'Preferred Provider contract discount', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'45', N'Charge exceeds fee schedule/contracted rate', N'Claims Edits Related Issues', 0),
+    (N'46', N'Service not covered', N'Medical Necessity or Non Covered Charges Related Issues', 0),
+    (N'47', N'Diagnosis not covered, missing, or invalid', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'49', N'Non-covered routine/preventive or screening service', N'Medical Necessity or Non Covered Charges Related Issues', 0),
+    (N'50', N'Service not medically necessary', N'Medical Necessity or Non Covered Charges Related Issues', 0),
+    (N'51', N'Service excluded due to pre-existing condition', N'Medical Necessity or Non Covered Charges Related Issues', 0),
+    (N'54', N'Multiple physicians/assistants not covered', N'Billing, Rendering or Referring Provider Eligibility Related Issues', 0),
+    (N'55', N'Procedure/treatment/drug considered experimental', N'Medical Necessity or Non Covered Charges Related Issues', 0),
+    (N'56', N'Procedure/treatment not proven effective', N'Medical Necessity or Non Covered Charges Related Issues', 0),
+    (N'58', N'Service performed at invalid/inappropriate place of service', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'59', N'Multiple/concurrent procedure rules applied', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'70', N'Cost outlier adjustment', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'92', N'Claim paid in full', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'94', N'Processed amount exceeds charges', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'95', N'Plan procedures not followed', N'Medical Necessity or Non Covered Charges Related Issues', 0),
+    (N'96', N'Non-covered charge', N'Medical Necessity or Non Covered Charges Related Issues', 0),
+    (N'97', N'Service included in payment for another service', N'Bundling', 0),
+    (N'106', N'Patient payment option/election not effective', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'109', N'Service not covered by this payer; submit to correct payer', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'119', N'Benefit maximum reached', N'Benefit maximum reached', 1),
+    (N'121', N'Adjustment for outstanding member responsibility', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'125', N'Submission/billing error', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'129', N'Prior processing information appears incorrect', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'131', N'Claim-specific negotiated discount', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'133', N'Service line pending further review', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'136', N'Prior payer coverage rules not followed', N'Previous Payer Processing Information Related Denials', 0),
+    (N'140', N'Patient ID and name do not match', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'143', N'Portion of payment deferred', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'146', N'Diagnosis invalid for date of service', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'147', N'Provider contracted rate expired/not on file', N'Billing, Rendering or Referring Provider Eligibility Related Issues', 0),
+    (N'150', N'Documentation does not support level of service', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'151', N'Documentation does not support service frequency', N'Claims Edits Related Issues', 0),
+    (N'160', N'Injury/illness resulted from excluded activity', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'163', N'Required attachment/documentation not received', N'Additional Documentation/ Information Requests', 0),
+    (N'164', N'Required attachment/documentation not received timely', N'Additional Documentation/ Information Requests', 0),
+    (N'165', N'Referral absent or exceeded', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'167', N'Diagnosis not covered', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'177', N'Patient did not meet eligibility requirements', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'179', N'Patient did not meet waiting-period requirements', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'180', N'Patient did not meet residency requirements', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'181', N'Procedure code invalid on date of service', N'Procedure Code, Modifier or Coding Related Issues', 0),
+    (N'183', N'Referring provider not eligible', N'Billing, Rendering or Referring Provider Eligibility Related Issues', 0),
+    (N'185', N'Rendering provider not eligible', N'Billing, Rendering or Referring Provider Eligibility Related Issues', 0),
+    (N'187', N'Consumer spending account payment', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'189', N'Unlisted procedure code used when specific code exists', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'193', N'Original payment decision upheld', N'Original payment decision upheld', 1),
+    (N'196', N'Denied based on prior payer''s coverage determination', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'197', N'Pre-certification/authorization absent', N'Missing Authorization', 1),
+    (N'198', N'Pre-certification/authorization exceeded', N'Missing Prior Authorization', 0),
+    (N'200', N'Expenses incurred during coverage lapse', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'204', N'Service/equipment/drug not covered under current benefit plan', N'Medical Necessity or Non Covered Charges Related Issues', 1),
+    (N'208', N'NPI not matched', N'Billing, Rendering or Referring Provider Eligibility Related Issues', 0),
+    (N'210', N'Authorization not received timely', N'Missing Prior Authorization', 0),
+    (N'216', N'Adjustment based on review organization/payer findings', N'Medical Necessity or Non Covered Charges Related Issues', 0),
+    (N'222', N'Provider exceeded contracted maximum units/hours/days', N'Maximum Benefit Reached', 0),
+    (N'226', N'Requested provider information missing/incomplete/untimely', N'Additional Documentation/ Information Requests', 0),
+    (N'227', N'Requested patient information missing/incomplete', N'Additional Documentation/ Information Requests', 0),
+    (N'231', N'Mutually exclusive procedures billed same day/setting', N'Bundling', 0),
+    (N'234', N'Procedure not separately payable', N'Bundling', 0),
+    (N'236', N'Procedure/modifier incompatible with another same-day procedure', N'Bundling', 0),
+    (N'239', N'Claim spans eligible/ineligible coverage periods; rebill separately', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'242', N'Service not provided by network/primary care provider', N'Provider Out of Network', 1),
+    (N'243', N'Service not authorized by network/primary care provider', N'Missing Authorization', 1),
+    (N'246', N'Non-payable code for reporting purposes', N'Procedure Code, Modifier or Coding Related Issues', 0),
+    (N'250', N'Incorrect attachment/document received', N'Additional Documentation/ Information Requests', 0),
+    (N'251', N'Attachment/document incomplete or deficient', N'Additional Documentation/ Information Requests', 0),
+    (N'252', N'Required attachment/documentation missing', N'Additional Documentation/ Information Requests', 0),
+    (N'256', N'Service not payable under managed care contract', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'257', N'Claim pending during premium payment grace period', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'258', N'Service not covered while patient is incarcerated', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'272', N'Coverage/program guidelines not met', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'273', N'Coverage/program guidelines exceeded', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'276', N'Prior payer denial not covered by this payer', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'279', N'Service provided by non-preferred network provider', N'Provider Out of Network', 1),
+    (N'299', N'Billing provider not eligible for payment', N'Billing, Rendering or Referring Provider Eligibility Related Issues', 0),
+    (N'852', NULL, N'Other Denials - Remark or Payer Review Required', 0),
+    (N'A1', N'Claim/service denied', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'B1', N'Non-covered visits', N'Medical Necessity or Non Covered Charges Related Issues', 0),
+    (N'B7', N'Provider not certified/eligible for payment on DOS', N'Billing, Rendering or Referring Provider Eligibility Related Issues', 0),
+    (N'B8', N'Alternative service was available', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'B9', N'Patient enrolled in hospice', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'B10', N'Allowed amount reduced because component procedure was paid', N'Other Denials - Remark or Payer Review Required', 0),
+    (N'B11', N'Claim transferred to proper payer; not covered by this payer', N'Coverage, Eligibility or Benefits Related Issues', 0),
+    (N'B12', N'Service not documented in medical records', N'Additional Documentation/ Information Requests', 0),
+    (N'B13', N'Previously paid', N'Previous Payer Processing Information Related Denials', 0),
+    (N'B15', N'Required qualifying service not received/adjudicated', N'Procedure Code, Modifier or Coding Related Issues', 0),
+    (N'B20', N'Service partially/fully furnished by another provider', N'Previous Payer Processing Information Related Denials', 0);
+
+INSERT INTO dbo.ARWB_DenialCodeMaster (DenialCode, DenialDescription, ActionCategory, IsNonCollectible, CreatedBy)
+SELECT s.DenialCode, s.DenialDescription, s.ActionCategory, s.IsNonCollectible, N'seed'
+FROM @Seed s
+WHERE NOT EXISTS (SELECT 1 FROM dbo.ARWB_DenialCodeMaster m WHERE m.DenialCode = s.DenialCode);
+DECLARE @Added int = @@ROWCOUNT, @SeedCount int = (SELECT COUNT(*) FROM @Seed);
+PRINT CONCAT('ARWB_DenialCodeMaster codes added: ', @Added, ' of ', @SeedCount, '.');
+GO
+
+PRINT 'AR Workbench central Denial Code Master ready.';
+GO

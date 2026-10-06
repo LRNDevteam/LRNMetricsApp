@@ -107,7 +107,9 @@ public sealed class ArWorkbenchController : ControllerBase
         if (denied is not null) return denied;
         var detail = await _repository.GetClaimDetailAsync(labId, claimKey, user!, ct);
         // Out-of-scope and missing look the same, so a scoped user cannot probe for claim keys.
-        return detail is null ? NotFound(new { message = "Claim not found." }) : Ok(detail);
+        if (detail is null) return NotFound(new { message = "Claim not found." });
+        detail.DenialCodeInfo = (await CodeMasterInfoForClaimAsync(detail, ct)).ToList();
+        return Ok(detail);
     }
 
     [HttpGet("master-data")]
@@ -143,6 +145,511 @@ public sealed class ArWorkbenchController : ControllerBase
     public sealed class ArWorkbenchRunRequest
     {
         public string? Note { get; set; }
+    }
+
+    // ==========================================================================================
+    // Follow-up notes - ARWorkbench.EditClaim. An agent reaches only their own claims (scope is
+    // applied in SQL); the claim must not already be waiting for QA.
+    // ==========================================================================================
+
+    /// <summary>My Work quick-filter tiles and Follow-Up Management window tiles, over the caller's scope.</summary>
+    [HttpGet("work-summary")]
+    public async Task<ActionResult<ArWorkbenchWorkSummary>> WorkSummary([FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        return Ok(await _repository.GetWorkSummaryAsync(labId, user!, ct));
+    }
+
+    // ==========================================================================================
+    // Denial Code Descriptions - the central Denial Code Master (LRNMaster dbo.ARWB_DenialCodeMaster).
+    // It serves every lab, so like the Super Master only an administrator maintains it. "Apply
+    // Non-Collectible codes" changes one lab and needs ManageSettings there.
+    // ==========================================================================================
+
+    [HttpGet("code-master")]
+    public async Task<ActionResult<ArWorkbenchCodeMasterData>> CodeMaster([FromQuery] int labId, CancellationToken ct)
+    {
+        var (_, denied) = await ResolveMapperAdminAsync(labId, ct);
+        if (denied is not null) return denied;
+        var (installed, rows) = await _repository.GetCodeMasterAsync(ct);
+        return Ok(new ArWorkbenchCodeMasterData { Installed = installed, Rows = rows.ToList(), Options = await CodeMasterOptionsAsync(labId, rows, ct) });
+    }
+
+    [HttpPost("code-master")]
+    public Task<ActionResult> AddCodeMasterRow([FromQuery] int labId, [FromBody] ArWorkbenchCodeMasterSaveRequest? request, CancellationToken ct)
+        => SaveCodeMasterRow(labId, request, isNew: true, ct);
+
+    [HttpPut("code-master")]
+    public Task<ActionResult> UpdateCodeMasterRow([FromQuery] int labId, [FromBody] ArWorkbenchCodeMasterSaveRequest? request, CancellationToken ct)
+        => SaveCodeMasterRow(labId, request, isNew: false, ct);
+
+    private async Task<ActionResult> SaveCodeMasterRow(int labId, ArWorkbenchCodeMasterSaveRequest? request, bool isNew, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveMapperAdminAsync(labId, ct);
+        if (denied is not null) return denied;
+        var (row, error) = ArWorkbenchCodeMasterRules.Validate(request);
+        if (row is null) return BadRequest(new { message = error });
+        return ToResult(await _repository.SaveCodeMasterRowAsync(row, isNew, user!.UserName, ct));
+    }
+
+    [HttpDelete("code-master")]
+    public async Task<ActionResult> DeleteCodeMasterRow([FromQuery] int labId, [FromQuery] string? code, CancellationToken ct)
+    {
+        var (_, denied) = await ResolveMapperAdminAsync(labId, ct);
+        if (denied is not null) return denied;
+        var normalized = ArWorkbenchMasterRules.NormalizeDenialCode(code);
+        if (normalized is null) return BadRequest(new { message = "Denial Code is required." });
+        return ToResult(await _repository.DeleteCodeMasterRowAsync(normalized, ct));
+    }
+
+    /// <summary>
+    /// Imports the business workbook as it is (any sheet with a "Denial Code" header; a
+    /// "Non-collectible" sheet is the complete non-collectible list) or this screen's export.
+    /// Nothing is written when any row has an error.
+    /// </summary>
+    [HttpPost("code-master/import")]
+    [RequestSizeLimit(30_000_000)]
+    public async Task<ActionResult<ArWorkbenchCodeMasterImportResult>> ImportCodeMaster([FromQuery] int labId, [FromForm] DenialCodeMasterImportRequest request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveMapperAdminAsync(labId, ct);
+        if (denied is not null) return denied;
+        var uploadError = await FileUploadGuard.ValidateExcelAsync(request.File, 25 * 1024 * 1024, ct);
+        if (uploadError != null) return BadRequest(new { message = uploadError });
+
+        ArWorkbenchCodeMasterParsed? parsed;
+        string? parseError;
+        await using (var stream = request.File!.OpenReadStream())
+            (parsed, parseError) = ArWorkbenchCodeMasterExcel.Parse(stream);
+        if (parsed is null) return BadRequest(new { message = parseError });
+
+        var (installed, rows) = await _repository.GetCodeMasterAsync(ct);
+        if (!installed) return BadRequest(new { message = "The Denial Code master is not installed. Run LRN.ReportsApi/Sql/ArWorkbench/LRNMaster_02_ARWB_DenialCodeMaster.sql in LRNMaster." });
+
+        var options = await CodeMasterOptionsAsync(labId, rows, ct);
+        var merge = ArWorkbenchCodeMasterRules.Merge(rows.ToDictionary(r => r.DenialCode, StringComparer.OrdinalIgnoreCase), parsed, options);
+        var result = new ArWorkbenchCodeMasterImportResult
+        {
+            RowsRead = merge.RowsRead, Inserted = merge.Inserts.Count, Updated = merge.Updates.Count, Unchanged = merge.Unchanged,
+            NonCollectibleCodes = merge.NonCollectibleCodes, Errors = merge.Errors.Take(200).ToList(), Warnings = merge.Warnings.Take(200).ToList()
+        };
+        if (merge.Errors.Count > 0)
+        {
+            result.Inserted = result.Updated = 0;
+            result.Message = $"Nothing was imported: {merge.Errors.Count} row(s) have errors. Fix them and import again.";
+            return BadRequest(result);
+        }
+
+        var saved = await _repository.ApplyCodeMasterImportAsync(merge, user!.UserName, ct);
+        if (saved.Status != ArWorkbenchSaveStatus.Ok) return ToResult(saved);
+        _logger.LogInformation("AR Workbench code master import by {User}: {File}, {Inserted} added, {Updated} updated", user.UserName, request.File.FileName, result.Inserted, result.Updated);
+        result.Message = $"{result.Inserted:N0} code(s) added, {result.Updated:N0} updated, {result.Unchanged:N0} unchanged."
+            + (parsed.NonCollectibleCodes is not null ? $" Non-collectible list set to {merge.NonCollectibleCodes:N0} code(s) - use Apply to Lab to route claims." : "");
+        return Ok(result);
+    }
+
+    [HttpGet("code-master/export")]
+    public async Task<ActionResult> ExportCodeMaster([FromQuery] int labId, CancellationToken ct)
+    {
+        var (_, denied) = await ResolveMapperAdminAsync(labId, ct);
+        if (denied is not null) return denied;
+        var (_, rows) = await _repository.GetCodeMasterAsync(ct);
+        return File(ArWorkbenchCodeMasterExcel.Build(rows, await CodeMasterOptionsAsync(labId, rows, ct)), XlsxContentType, "ARWorkbench_DenialCodeDescriptions.xlsx");
+    }
+
+    [HttpGet("code-master/template")]
+    public async Task<ActionResult> CodeMasterTemplate([FromQuery] int labId, CancellationToken ct)
+    {
+        var (_, denied) = await ResolveMapperAdminAsync(labId, ct);
+        if (denied is not null) return denied;
+        var (_, rows) = await _repository.GetCodeMasterAsync(ct);
+        return File(ArWorkbenchCodeMasterExcel.Build([], await CodeMasterOptionsAsync(labId, rows, ct)), XlsxContentType, "ARWorkbench_DenialCodeDescriptions_Template.xlsx");
+    }
+
+    /// <summary>Preview: how this lab's Non-Collectible list differs from the master.</summary>
+    [HttpGet("code-master/non-collectible-sync")]
+    public async Task<ActionResult<ArWorkbenchNonCollectibleSync>> NonCollectibleSyncPreview([FromQuery] int labId, CancellationToken ct)
+    {
+        var (_, denied) = await ResolveSettingsUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        return Ok(await PlanNonCollectibleSyncAsync(labId, ct));
+    }
+
+    [HttpPost("code-master/non-collectible-sync")]
+    public async Task<ActionResult<ArWorkbenchNonCollectibleSync>> ApplyNonCollectibleSync([FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveSettingsUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var plan = await PlanNonCollectibleSyncAsync(labId, ct);
+        if (plan.MasterCodes.Count == 0)
+            return BadRequest(new { message = "The Denial Code master has no active Non-Collectible codes; applying it would empty this lab's list." });
+
+        (plan.ClaimsRecalculated, plan.ClaimsWithNonCollectibleDenial) =
+            await _repository.ApplyNonCollectibleCodesAsync(labId, plan.ToAdd, plan.ToDeactivate, user!.UserName, ct);
+        _logger.LogInformation("AR Workbench non-collectible sync lab {LabId} by {User}: +{Add} -{Off}", labId, user.UserName, plan.ToAdd.Count, plan.ToDeactivate.Count);
+        plan.Message = $"Non-Collectible list updated ({plan.ToAdd.Count} added, {plan.ToDeactivate.Count} switched off). "
+            + $"{plan.ClaimsRecalculated:N0} claims recalculated; {plan.ClaimsWithNonCollectibleDenial:N0} have a non-collectible denial.";
+        return Ok(plan);
+    }
+
+    private async Task<ArWorkbenchNonCollectibleSync> PlanNonCollectibleSyncAsync(int labId, CancellationToken ct)
+    {
+        var (_, rows) = await _repository.GetCodeMasterAsync(ct);
+        var masterCodes = rows.Where(r => r.IsActive && r.IsNonCollectible).Select(r => r.DenialCode).ToList();
+        var labCodes = await _repository.GetLabNonCollectibleCodesAsync(labId, ct);
+        var (toAdd, toDeactivate, unchanged) = ArWorkbenchCodeMasterRules.PlanNonCollectibleSync(masterCodes, labCodes);
+        return new ArWorkbenchNonCollectibleSync
+        {
+            MasterCodes = masterCodes.OrderBy(ArWorkbenchCodeMasterRules.SortKey, StringComparer.Ordinal).ToList(),
+            ToAdd = toAdd, ToDeactivate = toDeactivate, Unchanged = unchanged
+        };
+    }
+
+    /// <summary>Dropdowns: Denial Mapper lists (active values) and Action Categories in use plus the lab's Denial Root Causes.</summary>
+    private async Task<ArWorkbenchCodeMasterOptions> CodeMasterOptionsAsync(int labId, IReadOnlyList<ArWorkbenchCodeMasterRow> rows, CancellationToken ct)
+    {
+        var mapper = await _mapperMasters.GetAllAsync(ct);
+        List<string> Active(string type) => mapper.Lists.FirstOrDefault(l => string.Equals(l.Type, type, StringComparison.OrdinalIgnoreCase))?
+            .Values.Where(v => v.IsActive).OrderBy(v => v.SortOrder).ThenBy(v => v.Value).Select(v => v.Value).ToList() ?? [];
+
+        var masterData = await _repository.GetMasterDataAsync(labId, ct);
+        var rootCauses = masterData.Lists.TryGetValue("DENIAL_ROOT_CAUSE", out var rc) ? rc : [];
+        var actions = rows.Select(r => r.ActionCategory).Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!)
+            .Concat(rootCauses).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToList();
+        return new ArWorkbenchCodeMasterOptions
+        {
+            ActionCategories = actions,
+            DenialClassifications = Active("DenialClassification"),
+            CoverageStatuses = Active("CoverageStatus"),
+            ICDComplianceStatuses = Active("ICDComplianceStatus"),
+            DenialValidities = Active("DenialValidity")
+        };
+    }
+
+    /// <summary>The master rows for a claim's primary and line-level codes (normalized). Never fails the claim view.</summary>
+    private async Task<IReadOnlyList<ArWorkbenchCodeMasterRow>> CodeMasterInfoForClaimAsync(ArWorkbenchClaimDetail detail, CancellationToken ct)
+    {
+        var codes = new List<string>();
+        if (detail.Claim.TryGetValue("PrimaryDenialCode", out var primary) && primary is string p) codes.Add(p);
+        if (detail.Claim.TryGetValue("LineDenialCodes", out var lineCodes) && lineCodes is string l)
+            codes.AddRange(l.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        var normalized = codes.Select(ArWorkbenchMasterRules.NormalizeDenialCode).Where(c => c is not null).Select(c => c!).ToList();
+        try
+        {
+            return await _repository.GetCodeMasterInfoAsync(normalized, ct);
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
+        {
+            _logger.LogWarning(ex, "AR Workbench: Denial Code master lookup failed; the claim view shows the claim without it.");
+            return [];
+        }
+    }
+
+    // ==========================================================================================
+    // Automatic Adjustment (non-collectible / auto-adjust denials) - run by a System
+    // Administrator, RCM Manager or Team Lead (ARWorkbench.Assign), as in the mockup's Work Queue.
+    // ==========================================================================================
+
+    private const int MaxAdjustmentKeys = 5000;
+
+    /// <summary>The confirmation figures: how many claims and how much would be adjusted.</summary>
+    [HttpPost("auto-adjustments/preview")]
+    public Task<ActionResult<ArWorkbenchAdjustmentResult>> PreviewAutoAdjustments([FromQuery] int labId, [FromBody] ArWorkbenchAdjustmentRequest? request, CancellationToken ct)
+        => RunAutoAdjustments(labId, request, previewOnly: true, ct);
+
+    /// <summary>Single (one claim key), selected, or every eligible claim (no keys).</summary>
+    [HttpPost("auto-adjustments/process")]
+    public Task<ActionResult<ArWorkbenchAdjustmentResult>> ProcessAutoAdjustments([FromQuery] int labId, [FromBody] ArWorkbenchAdjustmentRequest? request, CancellationToken ct)
+        => RunAutoAdjustments(labId, request, previewOnly: false, ct);
+
+    private async Task<ActionResult<ArWorkbenchAdjustmentResult>> RunAutoAdjustments(int labId, ArWorkbenchAdjustmentRequest? request, bool previewOnly, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveAssignerAsync(labId, ct);
+        if (denied is not null) return denied;
+        var keys = request?.ClaimKeys?.Where(k => k > 0).Distinct().ToList();
+        if (keys is { Count: 0 }) return BadRequest(new { message = "Select the claims to adjust, or send none to adjust every eligible claim." });
+        if (keys is { Count: > MaxAdjustmentKeys }) return BadRequest(new { message = $"Adjust at most {MaxAdjustmentKeys:N0} selected claims at a time." });
+
+        var result = await _repository.ProcessAutoAdjustmentsAsync(labId, keys, previewOnly, user!, ct);
+        if (!previewOnly)
+        {
+            _logger.LogInformation("AR Workbench auto-adjustment: lab {LabId}, {Count} claims, {Amount} by {User}", labId, result.ClaimCount, result.TotalAmount, user!.UserName);
+            result.Message = result.ClaimCount == 0
+                ? "No eligible claims to adjust."
+                : $"{result.ClaimCount:N0} claim(s) totaling ${result.TotalAmount.ToString("N2", System.Globalization.CultureInfo.InvariantCulture)} automatically adjusted and moved to Auto Adjustments. Post the adjustments in the PMS, then Mark as Posted.";
+        }
+        return Ok(result);
+    }
+
+    [HttpPost("auto-adjustments/mark-posted")]
+    public async Task<ActionResult> MarkAdjustmentsPosted([FromQuery] int labId, [FromBody] ArWorkbenchAdjustmentRequest? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveAssignerAsync(labId, ct);
+        if (denied is not null) return denied;
+        var keys = request?.ClaimKeys?.Where(k => k > 0).Distinct().ToList() ?? [];
+        if (keys.Count == 0) return BadRequest(new { message = "Select the claims whose adjustment was posted." });
+        if (keys.Count > MaxAdjustmentKeys) return BadRequest(new { message = $"Mark at most {MaxAdjustmentKeys:N0} claims at a time." });
+
+        var posted = await _repository.MarkAdjustmentsPostedAsync(labId, keys, user!, ct);
+        var skipped = keys.Count - posted;
+        return Ok(new
+        {
+            postedClaims = posted,
+            message = posted == 0
+                ? "None of the selected claims has an adjustment waiting to be posted."
+                : $"{posted:N0} claim(s) marked as posted in the PMS.{(skipped > 0 ? $" {skipped:N0} skipped (no adjustment pending)." : "")}"
+        });
+    }
+
+    // ==========================================================================================
+    // User Management - ARWorkbench.ManageUsers. Super Admin manages every lab; an AR Workbench
+    // System Administrator (or Lab Admin) manages the labs assigned to them in dbo.UserLabs.
+    // ==========================================================================================
+
+    [HttpGet("users")]
+    public async Task<ActionResult<ArWorkbenchUserManagement>> Users([FromQuery] int labId, CancellationToken ct)
+    {
+        var (manager, denied) = await ResolveUserManagerAsync(labId, ct);
+        if (denied is not null) return denied;
+        return Ok(new ArWorkbenchUserManagement
+        {
+            Users = (await _repository.GetManagedUsersAsync(manager!.User.LabUserId, manager.AllLabs, manager.Labs, ct)).ToList(),
+            Labs = manager.Labs.ToList(),
+            Roles = (await _repository.GetAssignableRolesAsync(ct)).ToList(),
+            AllLabs = manager.AllLabs
+        });
+    }
+
+    [HttpPost("users")]
+    public async Task<ActionResult> CreateUser([FromQuery] int labId, [FromBody] ArWorkbenchCreateUserRequest? request, CancellationToken ct)
+    {
+        var (manager, denied) = await ResolveUserManagerAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (request is null) return BadRequest(new { message = "Send the user to create." });
+
+        var (userName, nameError) = ArWorkbenchUserRules.ValidateUserName(request.UserName);
+        if (userName is null) return BadRequest(new { message = nameError });
+        var passwordError = ArWorkbenchUserRules.ValidatePassword(request.Password);
+        if (passwordError is not null) return BadRequest(new { message = passwordError });
+        var (email, emailError) = ArWorkbenchUserRules.ValidateEmail(request.Email);
+        if (email is null) return BadRequest(new { message = emailError });
+        var roleError = await ValidateAssignableRoleAsync(request.RoleId, ct);
+        if (roleError is not null) return BadRequest(new { message = roleError });
+        var (labIds, labError) = ArWorkbenchUserRules.ValidateLabs(request.LabIds, manager!.LabIds);
+        if (labIds is null) return BadRequest(new { message = labError });
+
+        var (result, id) = await _repository.CreateWorkbenchUserAsync(userName, ArWorkbenchUserRules.HashPassword(request.Password!), email,
+            request.RoleId!.Value, labIds, manager.User.UserName, ct);
+        if (result.Status == ArWorkbenchSaveStatus.Ok)
+            _logger.LogInformation("AR Workbench user {NewUser} (LabUserID {Id}) created by {Admin} for labs {Labs}", userName, id, manager.User.UserName, string.Join(",", labIds));
+        return result.Status == ArWorkbenchSaveStatus.Ok ? Ok(new { message = result.Message, labUserId = id }) : ToResult(result);
+    }
+
+    [HttpPut("users/{labUserId:int}")]
+    public async Task<ActionResult> UpdateUser([FromRoute] int labUserId, [FromQuery] int labId, [FromBody] ArWorkbenchUpdateUserRequest? request, CancellationToken ct)
+    {
+        var (manager, denied) = await ResolveUserManagerAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (request is null) return BadRequest(new { message = "Send the changes." });
+
+        var (email, emailError) = ArWorkbenchUserRules.ValidateEmail(request.Email);
+        if (email is null) return BadRequest(new { message = emailError });
+        var roleError = await ValidateAssignableRoleAsync(request.RoleId, ct);
+        if (roleError is not null) return BadRequest(new { message = roleError });
+        var (labIds, labError) = ArWorkbenchUserRules.ValidateLabs(request.LabIds, manager!.LabIds);
+        if (labIds is null) return BadRequest(new { message = labError });
+        string? hash = null;
+        if (!string.IsNullOrEmpty(request.Password))
+        {
+            var passwordError = ArWorkbenchUserRules.ValidatePassword(request.Password);
+            if (passwordError is not null) return BadRequest(new { message = passwordError });
+            hash = ArWorkbenchUserRules.HashPassword(request.Password);
+        }
+
+        var result = await _repository.UpdateWorkbenchUserAsync(labUserId, email, request.RoleId!.Value, labIds, request.IsActive ?? true, hash,
+            manager.User.LabUserId, manager.AllLabs, manager.LabIds, manager.User.UserName, ct);
+        if (result.Status == ArWorkbenchSaveStatus.Ok)
+            _logger.LogInformation("AR Workbench user LabUserID {Id} updated by {Admin}{Reset}", labUserId, manager.User.UserName, hash is null ? "" : " (password reset)");
+        return ToResult(result);
+    }
+
+    private sealed record UserManager(ArWorkbenchUserContext User, bool AllLabs, IReadOnlyList<ArWorkbenchLabOption> Labs, IReadOnlySet<int> LabIds);
+
+    private async Task<(UserManager? Manager, ActionResult? Denied)> ResolveUserManagerAsync(int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return (null, denied);
+        if (!user!.Permissions.ManageUsers)
+            return (null, Forbidden("Only a Super Admin or an AR Workbench System Administrator can manage users."));
+
+        // Super Admin (Admin / LRN Admin): every lab. Everyone else: the labs in their own dbo.UserLabs.
+        var site = SiteAdminRole();
+        var allLabs = site is not null && AllLabAdminRoles.Contains(site.Replace(" ", string.Empty).ToUpperInvariant());
+        var every = await _repository.GetAllLabsAsync(ct);
+        IReadOnlyList<ArWorkbenchLabOption> labs = every;
+        if (!allLabs)
+        {
+            var mine = user.LabUserId is int id ? await _repository.GetUserLabIdsAsync(id, ct) : new HashSet<int>();
+            labs = every.Where(l => mine.Contains(l.LabId)).ToList();
+        }
+        return (new UserManager(user, allLabs, labs, labs.Select(l => l.LabId).ToHashSet()), null);
+    }
+
+    private async Task<string?> ValidateAssignableRoleAsync(int? roleId, CancellationToken ct)
+    {
+        if (roleId is not > 0) return "Choose a role.";
+        var roles = await _repository.GetAssignableRolesAsync(ct);
+        return roles.Any(r => r.RoleId == roleId) ? null : "Choose one of the AR Workbench roles.";
+    }
+
+    // Saved Views: every AR Workbench user keeps their own named filter sets per screen.
+
+    [HttpGet("saved-views")]
+    public async Task<ActionResult<IReadOnlyList<ArWorkbenchSavedView>>> SavedViews([FromQuery] int labId, [FromQuery] string? viewKey, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var key = ArWorkbenchSavedViewRules.NormalizeViewKey(viewKey);
+        if (key is null) return BadRequest(new { message = "Unknown screen for a saved view." });
+        return Ok(await _repository.GetSavedViewsAsync(labId, user!.UserName, key, ct));
+    }
+
+    [HttpPost("saved-views")]
+    public async Task<ActionResult> SaveView([FromQuery] int labId, [FromBody] ArWorkbenchSavedViewRequest? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var (view, error) = ArWorkbenchSavedViewRules.Validate(request);
+        if (view is null) return BadRequest(new { message = error });
+        var (result, id) = await _repository.SaveViewAsync(labId, user!.UserName, view, ct);
+        return result.Status == ArWorkbenchSaveStatus.Ok ? Ok(new { message = result.Message, savedViewId = id }) : ToResult(result);
+    }
+
+    [HttpPut("saved-views/{savedViewId:int}")]
+    public async Task<ActionResult> UpdateSavedView([FromRoute] int savedViewId, [FromQuery] int labId, [FromBody] ArWorkbenchSavedViewUpdate? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        string? name = null;
+        if (request?.ViewName is not null)
+        {
+            name = ArWorkbenchSavedViewRules.NormalizeName(request.ViewName);
+            if (name is null) return BadRequest(new { message = $"Give the view a name of 1 to {ArWorkbenchSavedViewRules.MaxNameLength} characters." });
+        }
+        if (name is null && request?.IsDefault is null) return BadRequest(new { message = "Nothing to change." });
+        return ToResult(await _repository.UpdateSavedViewAsync(labId, user!.UserName, savedViewId, name, request!.IsDefault, ct));
+    }
+
+    [HttpDelete("saved-views/{savedViewId:int}")]
+    public async Task<ActionResult> DeleteSavedView([FromRoute] int savedViewId, [FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        return ToResult(await _repository.DeleteSavedViewAsync(labId, user!.UserName, savedViewId, ct));
+    }
+
+    [HttpPost("claims/{claimKey:long}/follow-ups")]
+    public async Task<ActionResult<ArWorkbenchFollowUpResult>> LogFollowUp([FromRoute] long claimKey, [FromQuery] int labId, [FromBody] ArWorkbenchFollowUpRequest? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!user!.Permissions.EditClaim) return Forbidden("Your role cannot log follow-up notes.");
+
+        var (status, message, result) = await _repository.LogFollowUpAsync(labId, claimKey, request ?? new(), user, ct);
+        return status switch
+        {
+            ArWorkbenchSaveStatus.Ok => Ok(result),
+            ArWorkbenchSaveStatus.NotFound => NotFound(new { message }),
+            ArWorkbenchSaveStatus.Invalid => BadRequest(new { message }),
+            _ => Conflict(new { message })
+        };
+    }
+
+    /// <summary>
+    /// Every claim matching the Work Queue filters (or every claim in the caller's scope when no
+    /// filter is set), as Excel - not only the page on screen. Capped at ArWorkbenchClaimExcel.MaxRows.
+    /// </summary>
+    [HttpGet("claims/export")]
+    public async Task<ActionResult> ExportClaims([FromQuery] ArWorkbenchClaimFilter filter, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
+        if (denied is not null) return denied;
+        if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+
+        var rows = new List<ArWorkbenchClaimRow>();
+        filter.PageSize = 500;
+        var total = 0;
+        for (filter.Page = 1; rows.Count < ArWorkbenchClaimExcel.MaxRows; filter.Page++)
+        {
+            var page = await _repository.GetClaimsAsync(filter, user!, ct);
+            total = page.TotalCount;
+            rows.AddRange(page.Items);
+            if (page.Items.Count < filter.PageSize) break;
+        }
+        if (rows.Count > ArWorkbenchClaimExcel.MaxRows) rows.RemoveRange(ArWorkbenchClaimExcel.MaxRows, rows.Count - ArWorkbenchClaimExcel.MaxRows);
+
+        var labName = (await _workflowService.GetLabsForUserAsync(CurrentUserName(), ct)).FirstOrDefault(l => l.LabId == filter.LabId)?.LabName ?? $"Lab {filter.LabId}";
+        var bytes = ArWorkbenchClaimExcel.Build(rows, $"AR Workbench claims — {labName} — {DateTime.Now:MM/dd/yyyy HH:mm}", total > rows.Count);
+        _logger.LogInformation("AR Workbench claim export for lab {LabId} by {User}: {Rows} of {Total} rows", filter.LabId, user!.UserName, rows.Count, total);
+        return File(bytes, XlsxContentType, $"ARWorkbench_Claims_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+    }
+
+    /// <summary>Denial Analysis Report on the Data Processing screen: current + previous sync week.</summary>
+    [HttpGet("data-processing/insights")]
+    public async Task<ActionResult<IReadOnlyList<ArWorkbenchInsightRow>>> Insights([FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!IsAdminOrManager(user!)) return Forbidden("Only an Administrator or RCM Manager can view data processing.");
+        return Ok(await _repository.GetInsightsAsync(labId, ct));
+    }
+
+    // ---- Timely-filing limits (Master Values) - ARWorkbench.ManageSettings ----------------------
+
+    [HttpGet("settings/tfl")]
+    public async Task<ActionResult<ArWorkbenchTflSettings>> TflSettings([FromQuery] int labId, CancellationToken ct)
+    {
+        var (_, denied) = await ResolveSettingsUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        return Ok(await _repository.GetTflSettingsAsync(labId, ct));
+    }
+
+    [HttpPost("settings/tfl")]
+    public Task<ActionResult> AddTflThreshold([FromQuery] int labId, [FromBody] ArWorkbenchTflThresholdRequest? request, CancellationToken ct)
+        => SaveTflThreshold(labId, request, isAdd: true, ct);
+
+    [HttpPut("settings/tfl")]
+    public Task<ActionResult> UpdateTflThreshold([FromQuery] int labId, [FromBody] ArWorkbenchTflThresholdRequest? request, CancellationToken ct)
+        => SaveTflThreshold(labId, request, isAdd: false, ct);
+
+    private async Task<ActionResult> SaveTflThreshold(int labId, ArWorkbenchTflThresholdRequest? request, bool isAdd, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveSettingsUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var name = request?.FinancialClass?.Trim() ?? string.Empty;
+        if (name.Length == 0 || name.Length > 200) return BadRequest(new { message = "Financial class is required (200 characters or fewer)." });
+        if (request!.ThresholdDays is not (>= 1 and <= 3650)) return BadRequest(new { message = "Days must be a whole number from 1 to 3,650." });
+        if (!isAdd && string.IsNullOrWhiteSpace(request.OriginalFinancialClass)) return BadRequest(new { message = "The financial class being edited was not supplied." });
+        return ToResult(await _repository.SaveTflThresholdAsync(labId, isAdd ? null : request.OriginalFinancialClass, name, request.ThresholdDays!.Value, user!.UserName, ct));
+    }
+
+    [HttpDelete("settings/tfl")]
+    public async Task<ActionResult> DeleteTflThreshold([FromQuery] int labId, [FromQuery] string? financialClass, CancellationToken ct)
+    {
+        var (_, denied) = await ResolveSettingsUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (string.IsNullOrWhiteSpace(financialClass)) return BadRequest(new { message = "No financial class was specified." });
+        return ToResult(await _repository.DeleteTflThresholdAsync(labId, financialClass, ct));
+    }
+
+    [HttpPut("settings/tfl/defaults")]
+    public async Task<ActionResult> SaveTflDefaults([FromQuery] int labId, [FromBody] ArWorkbenchTflDefaultsRequest? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveSettingsUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (request?.DefaultDays is not (>= 1 and <= 3650)) return BadRequest(new { message = "Default limit must be a whole number from 1 to 3,650 days." });
+        if (request.RiskWindowDays is not (>= 0 and <= 365)) return BadRequest(new { message = "Risk window must be a whole number from 0 to 365 days." });
+        return ToResult(await _repository.SaveTflDefaultsAsync(labId, request.DefaultDays.Value, request.RiskWindowDays.Value, user!.UserName, ct));
     }
 
     // ==========================================================================================

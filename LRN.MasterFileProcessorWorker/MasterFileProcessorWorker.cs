@@ -2610,7 +2610,8 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			|| labName.Contains("Augustus", StringComparison.OrdinalIgnoreCase)
 			|| labName.Contains("Certus", StringComparison.OrdinalIgnoreCase)
 			// Analyze Pathology's Line Level sheet has no Claim Status; it is on the claim sheet only.
-			|| labName.Contains("Analyze Pathology", StringComparison.OrdinalIgnoreCase);
+			// Configured as "Analyze_Pathology" (the name becomes file and folder names), so match either spelling.
+			|| labName.Replace('_', ' ').Contains("Analyze Pathology", StringComparison.OrdinalIgnoreCase);
 	}
 
 	/// <summary>

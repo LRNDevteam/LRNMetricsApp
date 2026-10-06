@@ -5,21 +5,30 @@ import { allows, REDIRECTS, ROUTES } from './config/navigation';
 import { useWorkbench, WorkbenchProvider } from './context/WorkbenchContext';
 import AssignmentPage from './pages/AssignmentPage';
 import ClaimDetailPage from './pages/ClaimDetailPage';
+import CodeMasterPage from './pages/CodeMasterPage';
 import DashboardPage from './pages/DashboardPage';
 import DataProcessingPage from './pages/DataProcessingPage';
 import DenialCodeMasterPage from './pages/DenialCodeMasterPage';
 import MasterDataPage from './pages/MasterDataPage';
 import PlannedPage from './pages/PlannedPage';
+import TflSettingsPage from './pages/TflSettingsPage';
+import UsersPage from './pages/UsersPage';
 import WorkQueuePage from './pages/WorkQueuePage';
+import { FollowUpPage, MyWorkPage } from './pages/WorklistPage';
 
 const SCREENS = {
   dashboard: DashboardPage,
   workqueue: WorkQueuePage,
   assignment: AssignmentPage,
+  mywork: MyWorkPage,
+  followup: FollowUpPage,
+  users: UsersPage,
   'data-processing': DataProcessingPage,
   // Master Values submenu: one page component serves several menu items, each a different view.
   'master-values': MasterDataPage,
-  'denial-codes': DenialCodeMasterPage
+  'denial-codes': DenialCodeMasterPage,
+  'tfl-limits': TflSettingsPage,
+  'code-master': CodeMasterPage
 };
 
 // Route access is checked against the same NAV list that builds the sidebar. The API enforces

@@ -4,6 +4,49 @@ const json = (method, body) => ({ method, body: JSON.stringify(body) });
 
 // One function per /api/ar-workbench endpoint (LRN.ReportsApi ArWorkbenchController).
 export const arWorkbenchService = {
+  workSummary: (labId) => api(`work-summary${qs({ labId })}`),
+
+  // Denial Code Descriptions: central Denial Code Master (all labs) + lab Non-Collectible sync
+  codeMaster: (labId) => api(`code-master${qs({ labId })}`),
+  addCodeMasterRow: (labId, body) => api(`code-master${qs({ labId })}`, json('POST', body)),
+  updateCodeMasterRow: (labId, body) => api(`code-master${qs({ labId })}`, json('PUT', body)),
+  deleteCodeMasterRow: (labId, code) => api(`code-master${qs({ labId, code })}`, { method: 'DELETE' }),
+  importCodeMaster: (labId, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api(`code-master/import${qs({ labId })}`, { method: 'POST', body: form });
+  },
+  exportCodeMaster: (labId) => downloadFile(`code-master/export${qs({ labId })}`, 'ARWorkbench_DenialCodeDescriptions.xlsx'),
+  downloadCodeMasterTemplate: (labId) => downloadFile(`code-master/template${qs({ labId })}`, 'ARWorkbench_DenialCodeDescriptions_Template.xlsx'),
+  nonCollectibleSyncPreview: (labId) => api(`code-master/non-collectible-sync${qs({ labId })}`),
+  applyNonCollectibleSync: (labId) => api(`code-master/non-collectible-sync${qs({ labId })}`, { method: 'POST' }),
+
+  // Automatic Adjustment (claimKeys null = every eligible claim)
+  previewAutoAdjust: (labId, claimKeys) => api(`auto-adjustments/preview${qs({ labId })}`, json('POST', { claimKeys })),
+  processAutoAdjust: (labId, claimKeys) => api(`auto-adjustments/process${qs({ labId })}`, json('POST', { claimKeys })),
+  markAdjustmentsPosted: (labId, claimKeys) => api(`auto-adjustments/mark-posted${qs({ labId })}`, json('POST', { claimKeys })),
+
+  // User Management (ARWorkbench.ManageUsers)
+  users: (labId) => api(`users${qs({ labId })}`),
+  createUser: (labId, body) => api(`users${qs({ labId })}`, json('POST', body)),
+  updateUser: (labId, id, body) => api(`users/${id}${qs({ labId })}`, json('PUT', body)),
+
+  // Saved Views (each user's own, per screen)
+  savedViews: (labId, viewKey) => api(`saved-views${qs({ labId, viewKey })}`),
+  saveView: (labId, body) => api(`saved-views${qs({ labId })}`, json('POST', body)),
+  updateSavedView: (labId, id, body) => api(`saved-views/${id}${qs({ labId })}`, json('PUT', body)),
+  deleteSavedView: (labId, id) => api(`saved-views/${id}${qs({ labId })}`, { method: 'DELETE' }),
+
+  // Follow-up notes, claim export, insights, timely-filing limits
+  logFollowUp: (labId, claimKey, body) => api(`claims/${encodeURIComponent(claimKey)}/follow-ups${qs({ labId })}`, json('POST', body)),
+  exportClaims: (filter) => downloadFile(`claims/export${qs(filter)}`, 'ARWorkbench_Claims.xlsx'),
+  insights: (labId, signal) => api(`data-processing/insights${qs({ labId })}`, { signal }),
+  tflSettings: (labId) => api(`settings/tfl${qs({ labId })}`),
+  addTflThreshold: (labId, body) => api(`settings/tfl${qs({ labId })}`, json('POST', body)),
+  updateTflThreshold: (labId, body) => api(`settings/tfl${qs({ labId })}`, json('PUT', body)),
+  deleteTflThreshold: (labId, financialClass) => api(`settings/tfl${qs({ labId, financialClass })}`, { method: 'DELETE' }),
+  saveTflDefaults: (labId, body) => api(`settings/tfl/defaults${qs({ labId })}`, json('PUT', body)),
+
   // Assignment Management (ARWorkbench.Assign)
   assignmentOverview: (labId, signal) => api(`assignment${qs({ labId })}`, { signal }),
   assignableAgents: (labId) => api(`assignment/agents${qs({ labId })}`),

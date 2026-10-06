@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
+import AssignModal from '../components/AssignModal';
+import AutoAdjustModal from '../components/AutoAdjustModal';
+import FollowUpModal from '../components/FollowUpModal';
 import Icon from '../components/Icon';
-import { AgentName, Badge, ErrorBox, Loading, QueueBadge, StatusBadge } from '../components/Status';
+import { AgentName, Badge, ErrorBox, Loading, Notice, QueueBadge, StatusBadge } from '../components/Status';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
 import { arQueueBadgeClass, fmt } from '../utils/format';
@@ -47,16 +50,39 @@ export default function ClaimDetailPage() {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('overview');
+  const [dialog, setDialog] = useState(null);   // 'followup' | 'assign' | 'autoadjust'
+  const [notice, setNotice] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
-    setDetail(null);
+    if (reloadKey === 0) setDetail(null);
     setError('');
     arWorkbenchService.claim(labId, claimKey, controller.signal)
       .then(setDetail)
       .catch((e) => { if (e.name !== 'AbortError') setError(e.message); });
     return () => controller.abort();
-  }, [labId, claimKey]);
+  }, [labId, claimKey, reloadKey]);
+
+  const [posting, setPosting] = useState(false);
+  async function markPosted() {
+    setPosting(true);
+    try {
+      const r = await arWorkbenchService.markAdjustmentsPosted(labId, [Number(claimKey)]);
+      done(r?.message || 'Marked as posted.', 'activity');
+    } catch (e) {
+      setNotice({ kind: 'warning', text: e.message });
+    } finally {
+      setPosting(false);
+    }
+  }
+
+  function done(message, nextTab) {
+    setDialog(null);
+    setNotice({ kind: 'good', text: message });
+    if (nextTab) setTab(nextTab);
+    setReloadKey((k) => k + 1);
+  }
 
   const backTo = location.state?.from || '/work-queue';
   const backLabel = BACK_LABELS[backTo.split('?')[0]] || 'Work Queue';
@@ -76,9 +102,16 @@ export default function ClaimDetailPage() {
     ['activity', 'Activity Timeline']
   ];
 
+  // As the mockup: no note while one waits for QA, or on a closed claim unless it was handed to an
+  // agent ad hoc. The API enforces the same rules.
+  const canLog = can('editClaim') && c.WorkflowStatus !== 'Submitted for QA' && (!c.IsFinanciallyClosed || c.AdHocFollowUpAssigned);
+  const logBlockedReason = c.WorkflowStatus === 'Submitted for QA' ? 'The last follow-up note is waiting for QA review.'
+    : c.IsFinanciallyClosed ? 'The claim is financially closed.' : '';
+
   return (
     <>
       {back}
+      <Notice notice={notice} onClose={() => setNotice(null)} />
 
       <div className="arwb-card arwb-section">
         <div className="arwb-claim-head" style={{ marginBottom: 0 }}>
@@ -89,6 +122,9 @@ export default function ClaimDetailPage() {
               <Badge className={arQueueBadgeClass(c.ArQueueId)}>{c.ArSubQueueLabel || c.ArQueueLabel}</Badge>
               {c.Priority && <span className={`priority-${c.Priority}`}>● {c.Priority} priority</span>}
               {c.IsTflRisk && <Badge className="arwb-badge-critical" dot>TFL At Risk</Badge>}
+              {(c.HasNonCollectibleDenial || c.IsNonCollectible) && (
+                <Badge className="arwb-badge-critical" dot title="A denial code on this claim is on the Non-Collectible list">Non-Collectible</Badge>
+              )}
               {c.PendingAgentRequests > 0 && <Badge className="arwb-badge-warning" dot>Request — Pending</Badge>}
               {!c.IsInCurrentSource && <Badge>Not in latest source file</Badge>}
               <span className="text-muted-ink">{c.LabName}</span>·<span className="text-muted-ink">{c.PayerName || '—'}</span>·<span className="text-muted-ink">{c.PanelName || '—'}</span>· DOS {fmt.date(c.DateOfService)}
@@ -100,9 +136,18 @@ export default function ClaimDetailPage() {
             </div>
           </div>
           <div className="arwb-claim-actions">
-            {can('assign') && <button type="button" className="arwb-btn arwb-btn-sm" disabled title="Assignment arrives with phase 3">{agent ? 'Reassign' : 'Assign'}</button>}
-            {can('editClaim') && c.WorkflowStatus !== 'Submitted for QA' && !c.IsFinanciallyClosed && (
-              <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" disabled title="Logging follow-ups arrives with phase 3">Log Follow-Up Note</button>
+            {can('assign') && c.IsAutoAdjustEligible && (
+              <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => setDialog('autoadjust')}
+                title="Non-collectible denial: write off the insurance balance automatically">Process Automatic Adjustment</button>
+            )}
+            {can('assign') && c.ArQueueId === 'autoadj' && (
+              <button type="button" className="arwb-btn arwb-btn-sm" disabled={posting} onClick={markPosted}
+                title="The adjustment / write-off has been posted in the PMS">{posting ? 'Saving…' : 'Mark as Posted'}</button>
+            )}
+            {can('assign') && <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => setDialog('assign')}>{agent ? 'Reassign' : 'Assign'}</button>}
+            {can('editClaim') && (
+              <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" disabled={!canLog} title={canLog ? undefined : logBlockedReason}
+                onClick={() => setDialog('followup')}>Log Follow-Up Note</button>
             )}
           </div>
         </div>
@@ -134,11 +179,25 @@ export default function ClaimDetailPage() {
         <div className="arwb-tab-panel">
           {tab === 'overview' && <Overview c={c} />}
           {tab === 'cpt' && <Cpt lines={detail.lines} />}
-          {tab === 'denial' && <Denial c={c} followUps={detail.followUps} />}
+          {tab === 'denial' && <Denial c={c} followUps={detail.followUps} codes={detail.denialCodeInfo || []} />}
           {tab === 'followups' && <FollowUps c={c} rows={detail.followUps} />}
           {tab === 'activity' && <Activity rows={detail.activity} />}
         </div>
       </div>
+
+      {dialog === 'followup' && (
+        <FollowUpModal claim={c} lastFollowUp={detail.followUps[0]} onClose={() => setDialog(null)}
+          suggestedRootCause={(detail.denialCodeInfo || []).find((r) => r.denialCode === c.PrimaryDenialCode)?.actionCategory}
+          onDone={(r) => done(r?.message || 'Follow-up logged and sent to QA.', 'followups')} />
+      )}
+      {dialog === 'autoadjust' && (
+        <AutoAdjustModal labId={labId} claimKeys={[c.ClaimKey]} onClose={() => setDialog(null)}
+          onDone={(r) => done(r?.message || 'Adjusted.', 'activity')} />
+      )}
+      {dialog === 'assign' && (
+        <AssignModal labId={labId} claimKeys={[c.ClaimKey]} excludeAgent={c.AssignedAgentUser || undefined}
+          onClose={() => setDialog(null)} onDone={(r) => done(r?.message || 'Assigned.')} />
+      )}
     </>
   );
 }
@@ -275,11 +334,48 @@ function Row({ label, children }) {
 }
 
 // Denial Info: the mockup's fields, as two titled sections with aligned label / value rows.
-function Denial({ c, followUps }) {
+// The central Denial Code Master (Master Values > Denial Code Descriptions) for every code on the
+// claim, primary first. Codes are without their group prefix (CO-4 and PR4 are both 4).
+function DenialCodeMaster({ codes, primary, lineCodes }) {
+  const order = [primary, ...lineCodes].filter(Boolean);
+  const byCode = Object.fromEntries(codes.map((r) => [r.denialCode, r]));
+  const listed = [...new Set(order)];
+  const missing = listed.filter((code) => !byCode[code]);
+  return (
+    <DetailSection title="Denial Code Master" hint={listed.length ? null : 'No denial codes on this claim'}>
+      {listed.filter((code) => byCode[code]).map((code) => {
+        const r = byCode[code];
+        return (
+          <div key={code} className="arwb-code-info">
+            <div className="arwb-code-info-head">
+              <span className={`arwb-code-chip${code === primary ? ' primary' : ''}`}>{code}</span>
+              {code === primary && <span className="arwb-hint">primary</span>}
+              {r.isNonCollectible && <Badge className="arwb-badge-critical">Non-Collectible</Badge>}
+              <span className="grow">{r.denialDescription || <span className="text-muted-ink">No description</span>}</span>
+            </div>
+            <div className="arwb-code-info-grid">
+              <span>Action Category</span><b>{r.actionCategory || '—'}</b>
+              <span>Classification</span><b>{r.denialClassification || '—'}</b>
+              <span>Coverage Status</span><b>{r.coverageStatus || '—'}</b>
+              <span>ICD Compliance</span><b>{r.icdComplianceStatus || '—'}</b>
+              <span>Denial Validity</span><b>{r.denialValidity || '—'}</b>
+            </div>
+          </div>
+        );
+      })}
+      {missing.length > 0 && (
+        <div className="arwb-hint">Not in the Denial Code master: {missing.map((code) => <span key={code} className="arwb-code-chip">{code}</span>)}</div>
+      )}
+    </DetailSection>
+  );
+}
+
+function Denial({ c, followUps, codes }) {
   const latest = followUps[0];
   const lineCodes = (c.LineDenialCodes || '').split(',').map((s) => s.trim()).filter(Boolean);
   const primary = c.PrimaryDenialCode;
   return (
+    <>
     <div className="arwb-grid-2">
       <DetailSection title="Denial" hint={c.DenialCategory ? null : 'No denial on this claim'}>
         <Row label="Denial Category">{c.DenialCategory ? <Badge className="arwb-badge-accent">{c.DenialCategory}</Badge> : null}</Row>
@@ -303,9 +399,17 @@ function Denial({ c, followUps }) {
         </Row>
         <Row label="Supporting Docs Required">{c.DenialCategory === 'Additional Documentation Required' ? <Badge className="arwb-badge-warning">Yes</Badge> : 'Not indicated'}</Row>
         <Row label="Latest Follow-Up">{latest ? `${latest.fixResolution} · ${latest.followUpClaimStatus}` : <span className="text-muted-ink">No follow-up logged yet</span>}</Row>
-        <Row label="Non-Collectible">{c.IsNonCollectible ? <Badge className="arwb-badge-critical">Yes</Badge> : 'No'}</Row>
+        <Row label="Non-Collectible">
+          {c.IsNonCollectible ? <><Badge className="arwb-badge-critical">Yes</Badge> <span className="arwb-hint">primary code — Non-Collectible queue</span></>
+            : c.HasNonCollectibleDenial ? <><Badge className="arwb-badge-critical">Yes</Badge> <span className="arwb-hint">a line-level code</span></>
+              : 'No'}
+        </Row>
       </DetailSection>
     </div>
+    <div style={{ marginTop: 16 }}>
+      <DenialCodeMaster codes={codes} primary={primary} lineCodes={lineCodes} />
+    </div>
+    </>
   );
 }
 
