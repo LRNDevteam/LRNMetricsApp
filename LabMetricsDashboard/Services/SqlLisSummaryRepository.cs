@@ -441,8 +441,10 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		["Rising Tides"] = new[] {
 				new TemplateRow("", "Total Samples", "Count [Unique Sample ID]"),
 				new TemplateRow("A", "Billable Samples - Resulted", "Resulted / Not = [Resulted]"),
-				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Billed]"),
-				new TemplateRow("•", "Billed In AMD", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Billed] AND Billed/Not = [Billed]"),
+				// LIS_Rising_Tides_10062026.xlsx: Test Entries claims billed to insurance belong under
+				// Test Entries (6), not here, so both rows exclude that client status (5,706 -> 5,665).
+				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Billed] AND Client Status != [Test Entries]"),
+				new TemplateRow("•", "Billed In AMD", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Billed] AND Client Status != [Test Entries]"),
 				new TemplateRow("2", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Payment Method = [Insurance] AND Billing Status != [No Bill]"),
 				new TemplateRow("•", "Received", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Payment Method = [Insurance] AND Billing Status != [No Bill] AND Sample Status = [Received]"),
 				// Rising Tide Lis Summary 29092026.xlsx: Billing Review Required is that client status only
@@ -472,6 +474,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("B", "Not Resulted", "Resulted / Not = [Not Resulted]"),
 				new TemplateRow("1", "Not Entered in AMD", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank]"),
 				new TemplateRow("•", "Collected", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Sample Status = [Collected]"),
+				// New in LIS_Rising_Tides_10062026.xlsx.
+				new TemplateRow("•", "In Transit", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Sample Status = [In Transit]"),
 				new TemplateRow("•", "Received", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Sample Status = [Received]"),
 				new TemplateRow("2", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Rejected Sample]"),
 				new TemplateRow("3", "Self Pay", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Self Pay]"),

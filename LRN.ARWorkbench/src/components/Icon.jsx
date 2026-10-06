@@ -29,7 +29,10 @@ const PATHS = {
   trash: <><line x1="3.5" y1="5.5" x2="16.5" y2="5.5" /><path d="M8 5.5V3.8h4v1.7" /><path d="M5 5.5l.8 11a1 1 0 0 0 1 .9h6.4a1 1 0 0 0 1-.9l.8-11" /></>,
   upload: <><line x1="10" y1="13" x2="10" y2="3.5" /><polyline points="6,7.5 10,3.5 14,7.5" /><path d="M3.5 13v2.5a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V13" /></>,
   download: <><line x1="10" y1="3.5" x2="10" y2="13" /><polyline points="6,9 10,13 14,9" /><path d="M3.5 13v2.5a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V13" /></>,
-  arrowLeft: <><line x1="16" y1="10" x2="4" y2="10" /><polyline points="9,5 4,10 9,15" /></>
+  star: <polygon points="10,2.8 12.2,7.4 17.2,8 13.5,11.4 14.5,16.4 10,13.9 5.5,16.4 6.5,11.4 2.8,8 7.8,7.4" />,
+  starFill: <polygon points="10,2.8 12.2,7.4 17.2,8 13.5,11.4 14.5,16.4 10,13.9 5.5,16.4 6.5,11.4 2.8,8 7.8,7.4" fill="currentColor" />,
+  save: <><path d="M4 3h9.5L17 6.5V16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><rect x="6" y="11" width="8" height="6" /><line x1="6.5" y1="3" x2="6.5" y2="7" /><line x1="6.5" y1="7" x2="12" y2="7" /></>,
+  arrowLeft:<><line x1="16" y1="10" x2="4" y2="10" /><polyline points="9,5 4,10 9,15" /></>
 };
 
 export default function Icon({ name, size = 17 }) {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
 import Icon from '../components/Icon';
 import { Badge, ErrorBox, Loading, PageHeader } from '../components/Status';
 import { useWorkbench } from '../context/WorkbenchContext';
@@ -7,7 +8,10 @@ import { fmt, runStatusBadgeClass } from '../utils/format';
 
 export default function DataProcessingPage() {
   const { labId, lab } = useWorkbench();
+  const navigate = useNavigate();
   const [runs, setRuns] = useState(null);
+  const [insights, setInsights] = useState(null);
+  const [week, setWeek] = useState('current');
   const [error, setError] = useState('');
   const [running, setRunning] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -16,7 +20,13 @@ export default function DataProcessingPage() {
   const load = useCallback(() => {
     setError('');
     arWorkbenchService.refreshRuns(labId, 15).then(setRuns).catch((e) => setError(e.message));
+    arWorkbenchService.insights(labId).then((r) => setInsights(r || [])).catch((e) => { setInsights([]); setError(e.message); });
   }, [labId]);
+
+  // "Route to Work Queue": the code's claims that are still unassigned with an open balance.
+  const route = (code) => navigate(`/work-queue?${new URLSearchParams({ q: code, status: 'Unassigned', open: '1' })}`);
+  const weekRows = (insights || []).filter((i) => (week === 'current' ? i.isCurrentWeek : !i.isCurrentWeek));
+  const weekStart = (current) => (insights || []).find((i) => i.isCurrentWeek === current)?.weekStart;
 
   useEffect(() => { load(); }, [load]);
 
@@ -73,6 +83,53 @@ export default function DataProcessingPage() {
           <Stat label="CPT lines read" value={fmt.count(last.sourceLineRows)} />
         </div>
       )}
+
+      <div className="arwb-table-card arwb-section">
+        <div className="arwb-panel-head">
+          <h3>Denial Analysis Report</h3>
+          <span className="arwb-card-sub">insights from each sync week · counts are what is still unassigned with an open balance</span>
+          <div className="arwb-panel-head-actions">
+            {[['current', 'Current week'], ['previous', 'Previous week']].map(([id, label]) => {
+              const ws = weekStart(id === 'current');
+              return (
+                <button key={id} type="button" className={`arwb-btn arwb-btn-sm ${week === id ? 'arwb-btn-primary' : ''}`} onClick={() => setWeek(id)} disabled={!ws}>
+                  {label}{ws ? ` · ${fmt.date(ws)}` : ''}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="arwb-table-wrap">
+          <table className="arwb-data-table">
+            <thead>
+              <tr>
+                <th>Denial Code</th><th>Description</th><th>Category</th><th className="num">Open Claims</th><th className="num">Open Balance</th>
+                <th>Top Payer</th><th className="num">Impact</th><th>Observation</th><th>Recommended Action</th><th />
+              </tr>
+            </thead>
+            <tbody>
+              {insights === null && <tr><td colSpan={10}><Loading /></td></tr>}
+              {insights !== null && weekRows.length === 0 && (
+                <tr><td colSpan={10}><div className="arwb-empty-state">No open insights for this week — every denial in it has been assigned or resolved.</div></td></tr>
+              )}
+              {weekRows.map((i) => (
+                <tr key={i.denialInsightId}>
+                  <td><span className="arwb-code-chip">{i.denialCode}</span></td>
+                  <td className="wrap">{i.denialDescription || '—'}</td>
+                  <td className="wrap">{i.denialCategory || '—'}{i.categoryTag && <div><Badge className="arwb-badge-info">{i.categoryTag}</Badge></div>}</td>
+                  <td className="num">{fmt.count(i.outstandingClaims)}<div className="arwb-hint">of {fmt.count(i.claimCountAtBuild)}</div></td>
+                  <td className="num mono">{fmt.money(i.outstandingBalance)}</td>
+                  <td className="wrap">{i.topPayer || '—'}{i.topPayerBalance ? <div className="arwb-hint">{fmt.money(i.topPayerBalance)}</div> : null}</td>
+                  <td className="num">{i.impactPct != null ? fmt.pct(i.impactPct) : '—'}</td>
+                  <td className="wrap">{i.observation || '—'}</td>
+                  <td className="wrap">{i.recommendedAction || '—'}</td>
+                  <td><button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" onClick={() => route(i.denialCode)}>Route to Work Queue →</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       {!runs ? <Loading /> : (
         <div className="arwb-table-card">

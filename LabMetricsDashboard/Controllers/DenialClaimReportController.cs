@@ -637,6 +637,7 @@ public sealed class DenialClaimReportController : Controller
         [FromForm] string[] denialCodes,
         [FromForm] string[] payerNames,
         [FromForm] string[] observations,
+        [FromForm] string[] datas,
         [FromForm] string[] actionCategories,
         [FromForm] string[] actions,
         [FromForm] string[] feedbackResponses,
@@ -644,6 +645,7 @@ public sealed class DenialClaimReportController : Controller
         [FromForm] string[] discussionDates,
         [FromForm] string[] etas,
         [FromForm] string[] closedDates,
+        [FromForm] string[] statuses,
         CancellationToken ct)
     {
         if (!CanEditInsights())
@@ -676,17 +678,20 @@ public sealed class DenialClaimReportController : Controller
                 DenialDescription = prior.DenialDescription,
                 NoOfDenials = prior.NoOfDenials,
                 TotalBalance = prior.TotalBalance,
+                InsuranceNoOfDenials = prior.InsuranceNoOfDenials,
                 InsuranceBalance = prior.InsuranceBalance,
                 ImpactPercentage = prior.ImpactPercentage,
                 // The editors post HTML; sanitize on the way in, the same as an import does.
                 ObservationHtml = DenialInsightRichText.Sanitize(observations.ElementAtOrDefault(i)),
+                Data = datas.ElementAtOrDefault(i) ?? string.Empty,
                 ActionCategory = Value(actionCategories, i, string.Empty),
                 ActionHtml = DenialInsightRichText.Sanitize(actions.ElementAtOrDefault(i)),
                 FeedbackResponse = feedbackResponses.ElementAtOrDefault(i) ?? string.Empty,
                 Responsibility = Value(responsibilities, i, string.Empty),
                 DiscussionDate = ParseDate(discussionDates.ElementAtOrDefault(i)),
                 Eta = ParseDate(etas.ElementAtOrDefault(i)),
-                ClosedDate = ParseDate(closedDates.ElementAtOrDefault(i))
+                ClosedDate = ParseDate(closedDates.ElementAtOrDefault(i)),
+                Status = Value(statuses, i, string.Empty)
             });
         }
 
@@ -767,45 +772,25 @@ public sealed class DenialClaimReportController : Controller
         var rows = await _repo.GetInsightsAsync(connectionString, tab, ct);
 
         using var workbook = new XLWorkbook();
-        var ws = workbook.Worksheets.Add(InsightSheetName);
+        var ws = workbook.Worksheets.Add(DenialInsightTemplate.SheetName);
 
-        for (var c = 0; c < TemplateHeaders.Length; c++)
-        {
-            var cell = ws.Cell(1, c + 1);
-            cell.Value = TemplateHeaders[c];
-            cell.Style.Font.SetBold();
-        }
+        // The client's template exactly - header on row 1, data from row 2, same merges - so the
+        // file can be filled in and imported straight back.
+        DenialInsightTemplate.WriteHeader(ws, 1);
 
         var row = 2;
         var index = 1;
         foreach (var r in rows)
-        {
-            ws.Cell(row, 1).Value = index++;
-            ws.Cell(row, 2).Value = r.DenialCode;
-            ws.Cell(row, 3).Value = r.DenialDescription;
-            ws.Cell(row, 4).Value = r.NoOfDenials;
-            ws.Cell(row, 5).Value = r.TotalBalance;
-            ws.Cell(row, 6).Value = r.PayerName;
-            ws.Cell(row, 7).Value = r.InsuranceBalance;
-            ws.Cell(row, 8).Value = r.ImpactPercentage;
-            ws.Cell(row, 9).Value = DenialInsightRichText.ToPlainText(r.ObservationHtml);
-            ws.Cell(row, 10).Value = r.ActionCategory;
-            ws.Cell(row, 11).Value = DenialInsightRichText.ToPlainText(r.ActionHtml);
-            ws.Cell(row, 12).Value = r.FeedbackResponse;
-            ws.Cell(row, 13).Value = r.Responsibility;
-            if (r.DiscussionDate.HasValue) ws.Cell(row, 14).Value = r.DiscussionDate.Value;
-            if (r.Eta.HasValue) ws.Cell(row, 15).Value = r.Eta.Value;
-            if (r.ClosedDate.HasValue) ws.Cell(row, 16).Value = r.ClosedDate.Value;
+            DenialInsightTemplate.WriteRow(ws, row++, index++, r);
 
-            ws.Cell(row, 9).Style.Alignment.WrapText = true;
-            ws.Cell(row, 11).Style.Alignment.WrapText = true;
-            row++;
+        if (row > 2)
+        {
+            var body = ws.Range(1, 1, row - 1, DenialInsightTemplate.LastColumn);
+            body.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            body.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
         }
 
-        ws.Columns().AdjustToContents();
-        ws.Column(3).Width = 38;
-        ws.Column(9).Width = 45;
-        ws.Column(11).Width = 45;
+        DenialInsightTemplate.SizeColumns(ws);
         ws.SheetView.FreezeRows(1);
 
         await using var stream = new MemoryStream();
@@ -837,19 +822,6 @@ public sealed class DenialClaimReportController : Controller
             tab = "insight",
             bucket = DenialInsightBuckets.Normalize(bucket)
         }) ?? "/DenialClaimReport";
-
-    private const string InsightSheetName = "Denial Insight";
-
-    /// <summary>
-    /// The template's columns, in the client's own workbook order. Denial Codes and the payer are
-    /// mandatory; the rest may be blank.
-    /// </summary>
-    private static readonly string[] TemplateHeaders =
-    [
-        "#", "Denial Codes", "Descriptions", "# of Denial", "Total Balance ($)",
-        "Highest $ Impact - Insurance", "Ins. Balance ($)", "$ Impact (%)", "Observation", "Category",
-        "Action", "Feedback / Response", "Responsibility", "Discussion Date", "ETA", "Closed Date"
-    ];
 
     private static string Value(string[] source, int index, string fallback)
     {
@@ -891,37 +863,52 @@ public sealed class DenialClaimReportController : Controller
 
         // Merged header groups store their text only in the left-most cell, which is where that
         // field's data starts - so matching on header text lands on the right column either way.
+        // Every column a header appears in, left to right: the v1.0 template carries "# of Denials"
+        // twice, so keeping only the first occurrence would lose the insurance-level count.
         var headers = headerRow.CellsUsed()
             .Select(c => new { Name = Key(c.GetString()), Column = c.Address.ColumnNumber })
             .Where(x => x.Name.Length > 0)
             .GroupBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(x => x.Key, x => x.First().Column, StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(x => x.Key, x => x.Select(y => y.Column).OrderBy(c => c).ToList(), StringComparer.OrdinalIgnoreCase);
 
         int? Col(params string[] names) => names.Select(Key)
-            .Select(n => headers.TryGetValue(n, out var c) ? c : (int?)null)
+            .Select(n => headers.TryGetValue(n, out var c) ? c[0] : (int?)null)
             .FirstOrDefault(c => c.HasValue);
 
+        List<int> Cols(params string[] names) => names.Select(Key).Distinct()
+            .SelectMany(n => headers.TryGetValue(n, out var c) ? c : new List<int>())
+            .Distinct().OrderBy(c => c).ToList();
+
         var codeCol = Col("Denial Codes", "Denial Code");
-        var payerCol = Col("Highest $ Impact - Insurance", "Insurance", "Payer Name", "Payer");
+        var payerCol = Col("Highest Impact - Insurance", "Highest $ Impact - Insurance", "Insurance", "Payer Name", "Payer");
         var observationCol = Col("Observation", "Observations");
 
         if (codeCol is null) result.Errors.Add("Mandatory column \"Denial Codes\" is missing.");
-        if (payerCol is null) result.Errors.Add("Mandatory column \"Highest $ Impact - Insurance\" is missing.");
+        if (payerCol is null) result.Errors.Add("Mandatory column \"Highest Impact - Insurance\" is missing.");
         if (observationCol is null) result.Warnings.Add("No \"Observation\" column was found; observations were left blank.");
         if (result.Errors.Count > 0) return result;
 
+        // "# of Denials" left of the insurance is the code's total; the one right of it, inside the
+        // impact group, is that insurance's own count. A pre-v1.0 workbook has only the first.
+        var denialCountCols = Cols("# of Denials", "# of Denial", "No of Denials", "No of Denial", "Denial Count");
+        int? denialCountCol = denialCountCols.Where(c => c < payerCol).Select(c => (int?)c).FirstOrDefault();
+        int? insDenialCountCol = Col("Ins. # of Denials", "Insurance # of Denials", "Ins # of Denials")
+            ?? denialCountCols.Where(c => c > payerCol).Select(c => (int?)c).FirstOrDefault();
+
         var descCol = Col("Descriptions", "Description", "Denial Description");
-        var denialCountCol = Col("# of Denial", "No of Denial", "Denial Count");
         var totalBalanceCol = Col("Total Balance ($)", "Total Balance");
         var insBalanceCol = Col("Ins. Balance ($)", "Insurance Balance", "Ins Balance");
         var impactCol = Col("$ Impact (%)", "Impact");
-        var categoryCol = Col("Category", "Action Category");
+        var dataCol = Col("Data");
+        // "Catergory" is how the v1.0 template spells it.
+        var categoryCol = Col("Category", "Catergory", "Action Category");
         var actionCol = Col("Action");
         var feedbackCol = Col("Feedback / Response", "Feedback/Response", "Feedback");
         var responsibilityCol = Col("Responsibility");
         var discussionCol = Col("Discussion Date");
         var etaCol = Col("ETA");
         var closedCol = Col("Closed Date");
+        var statusCol = Col("Status");
 
         string Text(int r, int? c) => c.HasValue ? ws.Cell(r, c.Value).GetString().Trim() : string.Empty;
         decimal Num(int r, int? c) => c.HasValue && decimal.TryParse(
@@ -991,17 +978,20 @@ public sealed class DenialClaimReportController : Controller
                 PayerName = Text(r, payerCol),
                 NoOfDenials = (int)Num(r, denialCountCol),
                 TotalBalance = Num(r, totalBalanceCol),
+                InsuranceNoOfDenials = (int)Num(r, insDenialCountCol),
                 InsuranceBalance = Num(r, insBalanceCol),
                 ImpactPercentage = Percent(r, impactCol),
                 // Rich text, not plain: the analyst's bold and bullets are the point of these columns.
                 ObservationHtml = DenialInsightRichText.FromCell(observationCol.HasValue ? ws.Cell(r, observationCol.Value) : null),
+                Data = Text(r, dataCol),
                 ActionCategory = Text(r, categoryCol),
                 ActionHtml = DenialInsightRichText.FromCell(actionCol.HasValue ? ws.Cell(r, actionCol.Value) : null),
                 FeedbackResponse = Text(r, feedbackCol),
                 Responsibility = Text(r, responsibilityCol),
                 DiscussionDate = Date(r, discussionCol, "Discussion Date", code),
                 Eta = Date(r, etaCol, "ETA", code),
-                ClosedDate = Date(r, closedCol, "Closed Date", code)
+                ClosedDate = Date(r, closedCol, "Closed Date", code),
+                Status = Text(r, statusCol)
             });
         }
 

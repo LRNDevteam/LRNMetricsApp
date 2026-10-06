@@ -64,6 +64,24 @@ public static class LabClaimLineColumnCatalog
 
     private static readonly Dictionary<string, string[]> ClaimByLab = new(StringComparer.OrdinalIgnoreCase)
     {
+        // Matches Sql/ClaimLineDetails_SPs/AnalyzePathology_Details.sql.
+        ["AnalyzePathology"] =
+            [
+                "LabID", "LabName", "ClaimID", "AccessionNumber", "SourceFileID", "IngestedOn",
+                "CsvRowHash", "PayerName_Raw", "PayerName", "Payer_Code", "Payer_Common_Code", "Payer_Group_Code",
+                "Global_Payer_ID", "PayerType", "BillingProvider", "ReferringProvider", "ClinicName", "Facility",
+                "SalesRepname", "PatientID", "PatientName", "PatientDOB", "SubscriberId", "OrderingProviderID",
+                "DateofService", "ChargeToDate", "ChargeEnteredDate", "FirstBilledDate", "LastBilledDate", "BilledWeek",
+                "BilledStatus", "Panelname", "CPTCodeXUnitsXModifier", "CPTCodeXUnitsXModifierOrginal", "CPTCodeList", "UnitsList",
+                "ModifierList", "CptWithUnits", "POS", "TOS", "ChargeAmount", "AllowedAmount",
+                "InsurancePayment", "PatientPayment", "TotalPayments", "ChargeTotalPayments", "InsuranceAdjustments", "PatientAdjustments",
+                "TotalAdjustments", "ChargeTotalAdjustments", "InsuranceBalance", "PatientBalance", "TotalBalance", "TotalInsuranceBalance",
+                "OtherBalance", "CheckDate", "PostedWeek", "ClaimStatus", "DenialCode", "DenialCodeNormalized",
+                "DenialDescription", "DenialDate", "ICDCode", "ICDPointer", "DaystoDOS", "RollingDays",
+                "DaystoBill", "DaystoPost", "AgingDOS", "PaymentPercent", "FullyPaidCount", "FullyPaidAmount",
+                "Adjudicated", "AdjudicatedAmount", "Bucket30", "Bucket30Amount", "Bucket60", "Bucket60Amount",
+                "ClaimUID", "InsertedDateTime"
+            ],
         ["Augustus"] =
             [
                 "LabID", "LabName", "ClaimID", "AccessionNumber", "SourceFileID", "IngestedOn",
@@ -309,6 +327,23 @@ public static class LabClaimLineColumnCatalog
 
     private static readonly Dictionary<string, string[]> LineByLab = new(StringComparer.OrdinalIgnoreCase)
     {
+        // Matches Sql/ClaimLineDetails_SPs/AnalyzePathology_Details.sql.
+        ["AnalyzePathology"] =
+            [
+                "LabID", "LabName", "ClaimID", "AccessionNumber", "SourceFileID", "IngestedOn",
+                "CsvRowHash", "PayerName_Raw", "PayerName", "Payer_Code", "Payer_Common_Code", "Payer_Group_Code",
+                "Global_Payer_ID", "PayerType", "BillingProvider", "ReferringProvider", "ClinicName", "Facility",
+                "SalesRepname", "PatientID", "PatientName", "PatientDOB", "SubscriberId", "OrderingProviderID",
+                "DateofService", "ChargeToDate", "ChargeEnteredDate", "FirstBilledDate", "LastBilledDate", "Panelname",
+                "CPTCode", "Units", "Modifier", "CptWithUnits", "CPTModifier", "ClaimCPTs",
+                "POS", "TOS", "ChargeAmount", "ChargeAmountPerUnit", "AllowedAmount", "AllowedAmountPerUnit",
+                "InsurancePayment", "InsurancePaymentPerUnit", "PatientPayment", "PatientPaymentPerUnit", "TotalPayments", "ChargeTotalPayments",
+                "InsuranceAdjustments", "PatientAdjustments", "TotalAdjustments", "ChargeTotalAdjustments", "InsuranceBalance", "PatientBalance",
+                "PatientBalancePerUnit", "TotalBalance", "TotalInsuranceBalance", "OtherBalance", "CheckDate", "PostingDate",
+                "PaymentPostedDate", "ClaimStatus", "PayStatus", "DenialCode", "DenialCodeNormalized", "DenialDescription",
+                "DenialDate", "ICDCode", "ICDPointer", "DaystoDOS", "RollingDays", "DaystoBill",
+                "DaystoPost", "UID", "LineLevelUID", "TF", "InsertedDateTime"
+            ],
         ["Augustus"] =
             [
                 "LabID", "LabName", "ClaimID", "AccessionNumber", "SourceFileID", "IngestedOn",

@@ -384,6 +384,7 @@ CREATE TABLE dbo.ARWB_Claim
     TflDeadline                 date           NULL,
     IsTflRisk                   bit            NOT NULL CONSTRAINT DF_ARWB_Claim_IsTflRisk           DEFAULT (0),
     IsNonCollectible            bit            NOT NULL CONSTRAINT DF_ARWB_Claim_IsNonCollectible    DEFAULT (0),
+    HasNonCollectibleDenial     bit            NOT NULL CONSTRAINT DF_ARWB_Claim_HasNonCollectibleDenial DEFAULT (0),  -- ANY code on the claim is non-collectible
     IsFinanciallyClosed         bit            NOT NULL CONSTRAINT DF_ARWB_Claim_IsFinanciallyClosed DEFAULT (0),
     IsWorkComplete              bit            NOT NULL CONSTRAINT DF_ARWB_Claim_IsWorkComplete      DEFAULT (0),
     IsOpenInsuranceAR           bit            NOT NULL CONSTRAINT DF_ARWB_Claim_IsOpenInsuranceAR   DEFAULT (0),
@@ -419,6 +420,12 @@ CREATE TABLE dbo.ARWB_Claim
     CONSTRAINT FK_ARWB_Claim_ArSubQueue       FOREIGN KEY (ArSubQueueId)        REFERENCES dbo.ARWB_ArQueue (QueueId),
     CONSTRAINT FK_ARWB_Claim_WorkflowTemplate FOREIGN KEY (WorkflowTemplateKey) REFERENCES dbo.ARWB_WorkflowTemplate (TemplateKey)
 );
+GO
+
+-- Added after the first release: existing installs get the column here (new installs above).
+IF COL_LENGTH(N'dbo.ARWB_Claim', N'HasNonCollectibleDenial') IS NULL
+    ALTER TABLE dbo.ARWB_Claim ADD HasNonCollectibleDenial bit NOT NULL
+        CONSTRAINT DF_ARWB_Claim_HasNonCollectibleDenial DEFAULT (0);
 GO
 
 /* ============================================================================================
@@ -1521,6 +1528,8 @@ GO
      IsRefollowupDue      worked at least once AND (45+ days since LastFollowUpDate OR NextFollowUpDate reached)
      IsFollowUpActionable (IsOpenInsuranceAR OR AdHocFollowUpAssigned) AND WorkflowStatus IN (Assigned, QA Rejected)
      IsNonCollectible     the PRIMARY denial code is on the NON_COLLECTIBLE_CODE list (not "any code")
+     HasNonCollectibleDenial  ANY denial code on the claim (primary or line level) is on that list - a flag
+                          only; queues still follow IsNonCollectible
 
    Financial fields (section 7)
      RevenueExpectation   sum of line RevenueExpectation (Medicare-rate allowable); 0 when no rate
@@ -1648,6 +1657,7 @@ BEGIN
         c.IsFollowUpActionable = CASE WHEN (f.RemainingAR > @Eps OR c.AdHocFollowUpAssigned = 1)
                                        AND c.WorkflowStatus IN ('Assigned', 'QA Rejected') THEN 1 ELSE 0 END,
         c.IsNonCollectible     = s.IsNonCollectible,
+        c.HasNonCollectibleDenial = s.HasNonCollectibleDenial,
         c.IsAutoAdjustEligible = CASE WHEN f.RemainingAR > @Eps AND f.IsNullified = 0
                                        AND c.WorkflowStatus <> 'Submitted for QA'
                                        AND (s.IsAutoAdjustCode = 1 OR (@AutoAdjNc = 1 AND s.IsNonCollectible = 1)) THEN 1 ELSE 0 END,
@@ -1732,6 +1742,12 @@ BEGIN
                                         AND EXISTS (SELECT 1 FROM dbo.ARWB_MasterListItem m
                                                     WHERE m.ListType = 'NON_COLLECTIBLE_CODE' AND m.IsActive = 1 AND m.ItemValue = c.PrimaryDenialCode)
                                        THEN 1 ELSE 0 END,
+            HasNonCollectibleDenial = CASE WHEN EXISTS (SELECT 1 FROM dbo.ARWB_MasterListItem m
+                                                        WHERE m.ListType = 'NON_COLLECTIBLE_CODE' AND m.IsActive = 1
+                                                          AND (m.ItemValue = c.PrimaryDenialCode
+                                                               OR EXISTS (SELECT 1 FROM dbo.ARWB_ClaimLineDenial ld
+                                                                          WHERE ld.ClaimKey = c.ClaimKey AND ld.DenialCode = m.ItemValue)))
+                                           THEN 1 ELSE 0 END,
             IsAutoAdjustCode    = CASE WHEN c.PrimaryDenialCode IS NOT NULL
                                         AND EXISTS (SELECT 1 FROM dbo.ARWB_MasterListItem m
                                                     WHERE m.ListType = 'AUTO_ADJUST_CODE' AND m.IsActive = 1 AND m.ItemValue = c.PrimaryDenialCode)
@@ -3130,6 +3146,7 @@ SELECT
     c.TflDeadline,
     c.IsTflRisk,
     c.IsNonCollectible,
+    c.HasNonCollectibleDenial,
     c.IsFinanciallyClosed,
     c.IsWorkComplete,
     c.IsOpenInsuranceAR,

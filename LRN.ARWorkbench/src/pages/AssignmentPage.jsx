@@ -242,7 +242,8 @@ export default function AssignmentPage() {
     { key: 'denialCategory', label: 'Denial Category', sortKey: 'denialCategory', wrap: true },
     { key: 'insuranceBalance', label: 'Ins. Balance', align: 'end', sortKey: 'insuranceBalance', render: (r) => money(r.insuranceBalance), csv: (r) => r.insuranceBalance },
     { key: 'assignedAgentName', label: 'Current Agent', render: (r) => r.assignedAgentName || r.assignedAgentUser || '—', csv: (r) => r.assignedAgentName || r.assignedAgentUser || '' },
-    { key: 'workflowStatus', label: 'Status', sortKey: 'workflowStatus', render: (r) => <StatusBadge status={r.workflowStatus} /> },
+    { key: 'workflowStatus', label: 'Status', sortKey: 'workflowStatus', render: (r) => <StatusBadge status={r.workflowStatus} nonCollectible={r.hasNonCollectibleDenial} />,
+      csv: (r) => r.workflowStatus + (r.hasNonCollectibleDenial ? ' (Non-Collectible)' : '') },
     { key: 'priority', label: 'Priority', sortKey: 'priority', render: (r) => <PriorityText priority={r.priority} /> },
     { key: 'agingBucket', label: 'Aging', sortKey: 'agingDays', render: (r) => r.agingBucket || '—' }
   ];

@@ -365,12 +365,21 @@ public static class ExcelCsvExporter
 		return value.ToString("0.###############", CultureInfo.InvariantCulture);
 	}
 
+	private static readonly System.Text.RegularExpressions.Regex IdentifierHeaderToken =
+		new(@"\b(id|code|units?|modifiers?|pos)\b", System.Text.RegularExpressions.RegexOptions.Compiled);
+
 	private static bool IsDecimalAmountColumn(string? headerName)
 	{
 		if (string.IsNullOrWhiteSpace(headerName))
 			return false;
 
 		var h = headerName.Trim().ToLowerInvariant();
+
+		// An identifier is never money, whatever money word its header carries. Analyze Pathology
+		// prefixes every field with "Charge" ("Charge Claim ID", "Charge Units", "Charge POS Code"),
+		// which turned claim id 231933520 into "231933520.00" and broke every join on it.
+		if (IdentifierHeaderToken.IsMatch(h))
+			return false;
 
 		return h.Contains("amount")
 			|| h.Contains("payment")

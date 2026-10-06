@@ -2608,7 +2608,10 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		return lab.LabId == 19
 			|| IsNorthWestLab(lab)
 			|| labName.Contains("Augustus", StringComparison.OrdinalIgnoreCase)
-			|| labName.Contains("Certus", StringComparison.OrdinalIgnoreCase);
+			|| labName.Contains("Certus", StringComparison.OrdinalIgnoreCase)
+			// Analyze Pathology's Line Level sheet has no Claim Status; it is on the claim sheet only.
+			// Configured as "Analyze_Pathology" (the name becomes file and folder names), so match either spelling.
+			|| labName.Replace('_', ' ').Contains("Analyze Pathology", StringComparison.OrdinalIgnoreCase);
 	}
 
 	/// <summary>

@@ -60,6 +60,7 @@ public sealed class LabInsuranceMasterRepository
 			("PCR Labs of America", "PCR Labs of America"),
 			("NorthWest",           "NWL"),
 			("Prism",               "Prism"),
+			("Analyze_Pathology",   "Analyze Pathology"),
 		};
 
 		var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

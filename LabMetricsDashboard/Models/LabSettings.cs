@@ -81,6 +81,27 @@ public sealed class LabConfigOptions
         return null;
     }
 
+    /// <summary>
+    /// How a lab key is shown on screen: lab key -> display name. Sourced from
+    /// <c>LabConfig:LabDisplayNames</c>. Lab keys double as file names (Configs\&lt;key&gt;.json,
+    /// output folders), so they carry no spaces; this puts the space back for display only.
+    /// Labs not listed show their key as before.
+    /// </summary>
+    public Dictionary<string, string> LabDisplayNames { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The configured display name for a lab key or tracker lab name, else the name itself.</summary>
+    public string DisplayNameFor(string? labName)
+    {
+        if (string.IsNullOrWhiteSpace(labName) || LabDisplayNames is null) return labName ?? string.Empty;
+        static string Key(string v) => new(v.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+        var wanted = Key(labName);
+        foreach (var (lab, display) in LabDisplayNames)
+        {
+            if (Key(lab) == wanted && !string.IsNullOrWhiteSpace(display)) return display.Trim();
+        }
+        return labName;
+    }
+
     public bool IsDemoLab(string? labName) =>
         !string.IsNullOrWhiteSpace(labName)
         && DemoLabs.Any(d => string.Equals(d, labName, StringComparison.OrdinalIgnoreCase));

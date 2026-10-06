@@ -23,11 +23,9 @@ public static class DenialClaimReportExcelBuilder
     private static readonly XLColor PivotInsuranceRow = XLColor.FromHtml("#EAF3EA");
     private static readonly XLColor PivotFooter = XLColor.FromHtml("#0F2E4C");
 
-    // Insight palette - matches denial_claim_report.css and the client's own workbook.
-    private static readonly XLColor InsightHeader = XLColor.FromHtml("#375623");
-    private static readonly XLColor InsightGold = XLColor.FromHtml("#BF8F00");
-    private static readonly XLColor InsightRed = XLColor.FromHtml("#B91C1C");
-    private static readonly XLColor InsightClosed = XLColor.FromHtml("#1F7A3D");
+    // Insight palette - matches denial_claim_report.css and the client's own workbook. The header
+    // group fills live in DenialInsightTemplate, alongside the column layout they colour.
+    private static readonly XLColor InsightHeader = DenialInsightTemplate.HeaderGreen;
     private static readonly XLColor ImpactTint = XLColor.FromHtml("#FDF8EC");
     private static readonly XLColor ClosedTint = XLColor.FromHtml("#F2F9F4");
     private static readonly XLColor WeekDivider = XLColor.FromHtml("#EEF3F8");
@@ -277,13 +275,10 @@ public static class DenialClaimReportExcelBuilder
 
     // ── Denial Insight ────────────────────────────────────────────────────────
 
-    private static readonly string[] InsightHeaders =
-    [
-        "#", "Denial Codes", "Descriptions", "# of Denial", "Total Balance ($)",
-        "Highest $ Impact - Insurance", "Ins. Balance ($)", "$ Impact (%)", "Observation", "Category",
-        "Action", "Feedback / Response", "Responsibility", "Discussion Date", "ETA", "Closed Date"
-    ];
-
+    /// <summary>
+    /// The Denial Insight sheet, laid out as the client's template (v1.0) - same columns, same merges -
+    /// with a title above it. The import finds the header row by its text, so this file round-trips.
+    /// </summary>
     private static void WriteInsight(IXLWorksheet ws, DenialInsightPanelViewModel insight, string lab)
     {
         ws.Cell(1, 1).Value = $"{lab} — Key Observations & Highlights";
@@ -293,32 +288,9 @@ public static class DenialClaimReportExcelBuilder
         ws.Cell(2, 1).Style.Font.SetFontSize(9).Font.SetFontColor(XLColor.FromHtml("#6B7A8C"));
 
         const int headerRow = 4;
-        var last = InsightHeaders.Length;
+        const int last = DenialInsightTemplate.LastColumn;
 
-        for (var i = 0; i < last; i++)
-        {
-            var cell = ws.Cell(headerRow, i + 1);
-            cell.Value = InsightHeaders[i];
-
-            // The three banded groups, same split as the screen: gold for the $ impact group,
-            // red for the two columns that say what to DO, green for the one that says it is done.
-            var column = i + 1;
-            cell.Style.Fill.SetBackgroundColor(column switch
-            {
-                >= 6 and <= 8 => InsightGold,
-                10 or 11 => InsightRed,
-                16 => InsightClosed,
-                _ => InsightHeader
-            });
-        }
-
-        var header = ws.Range(headerRow, 1, headerRow, last);
-        header.Style.Font.Bold = true;
-        header.Style.Font.FontColor = XLColor.White;
-        header.Style.Alignment.WrapText = true;
-        header.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-        header.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-        ws.Row(headerRow).Height = 30;
+        DenialInsightTemplate.WriteHeader(ws, headerRow);
 
         var row = headerRow + 1;
 
@@ -329,7 +301,7 @@ public static class DenialClaimReportExcelBuilder
             emptyBand.Style.Font.Italic = true;
             emptyBand.Style.Font.FontColor = XLColor.FromHtml("#6B7A8C");
             emptyBand.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-            SizeInsightColumns(ws);
+            DenialInsightTemplate.SizeColumns(ws);
             return;
         }
 
@@ -354,45 +326,21 @@ public static class DenialClaimReportExcelBuilder
             var index = 1;
             foreach (var insightRow in week.Rows)
             {
-                ws.Cell(row, 1).Value = index++;
-                ws.Cell(row, 2).Value = insightRow.DenialCode;
-                ws.Cell(row, 3).Value = insightRow.DenialDescription;
-                ws.Cell(row, 4).Value = insightRow.NoOfDenials;
-                ws.Cell(row, 5).Value = insightRow.TotalBalance;
-                ws.Cell(row, 6).Value = insightRow.PayerName;
-                ws.Cell(row, 7).Value = insightRow.InsuranceBalance;
-                ws.Cell(row, 8).Value = insightRow.ImpactPercentage / 100m;
-                ws.Cell(row, 9).Value = DenialInsightRichText.ToPlainText(insightRow.ObservationHtml);
-                ws.Cell(row, 10).Value = insightRow.ActionCategory;
-                ws.Cell(row, 11).Value = DenialInsightRichText.ToPlainText(insightRow.ActionHtml);
-                ws.Cell(row, 12).Value = insightRow.FeedbackResponse;
-                ws.Cell(row, 13).Value = insightRow.Responsibility;
-                if (insightRow.DiscussionDate.HasValue) ws.Cell(row, 14).Value = insightRow.DiscussionDate.Value;
-                if (insightRow.Eta.HasValue) ws.Cell(row, 15).Value = insightRow.Eta.Value;
-                if (insightRow.ClosedDate.HasValue) ws.Cell(row, 16).Value = insightRow.ClosedDate.Value;
-
-                ws.Cell(row, 4).Style.NumberFormat.SetFormat(Whole);
-                ws.Cell(row, 5).Style.NumberFormat.SetFormat(Money);
-                ws.Cell(row, 7).Style.NumberFormat.SetFormat(Money);
-                ws.Cell(row, 8).Style.NumberFormat.SetFormat("0.##%");
-                ws.Range(row, 14, row, 16).Style.NumberFormat.SetFormat("dd-mmm-yyyy");
+                DenialInsightTemplate.WriteRow(ws, row, index++, insightRow);
 
                 // The two body tints the screen carries, so the banded groups stay readable
                 // once the coloured headers have scrolled away.
-                ws.Range(row, 6, row, 8).Style.Fill.SetBackgroundColor(ImpactTint);
-                ws.Cell(row, 16).Style.Fill.SetBackgroundColor(ClosedTint);
+                ws.Range(row, DenialInsightTemplate.ColPayer, row, DenialInsightTemplate.ColImpactPercentage)
+                    .Style.Fill.SetBackgroundColor(ImpactTint);
+                ws.Cell(row, DenialInsightTemplate.ColClosedDate).Style.Fill.SetBackgroundColor(ClosedTint);
 
                 var (fill, font) = CategoryColours(insightRow.ActionCategory);
                 if (fill is not null)
                 {
-                    ws.Cell(row, 10).Style.Fill.SetBackgroundColor(fill);
-                    ws.Cell(row, 10).Style.Font.SetFontColor(font!).Font.SetBold();
+                    var category = ws.Cell(row, DenialInsightTemplate.ColCategory);
+                    category.Style.Fill.SetBackgroundColor(fill);
+                    category.Style.Font.SetFontColor(font!).Font.SetBold();
                 }
-
-                ws.Range(row, 3, row, 3).Style.Alignment.SetWrapText(true);
-                ws.Range(row, 9, row, 9).Style.Alignment.SetWrapText(true);
-                ws.Range(row, 11, row, 12).Style.Alignment.SetWrapText(true);
-                ws.Row(row).Style.Alignment.SetVertical(XLAlignmentVerticalValues.Top);
 
                 row++;
             }
@@ -400,13 +348,15 @@ public static class DenialClaimReportExcelBuilder
 
         var lastRow = row - 1;
         ws.Cell(row, 1).Value = "Total";
-        ws.Range(row, 1, row, 3).Merge();
-        ws.Cell(row, 4).Value = insight.TotalDenials;
-        ws.Cell(row, 5).Value = insight.TotalBalance;
-        ws.Cell(row, 7).Value = insight.TotalInsuranceBalance;
-        ws.Cell(row, 4).Style.NumberFormat.SetFormat(Whole);
-        ws.Cell(row, 5).Style.NumberFormat.SetFormat(Money);
-        ws.Cell(row, 7).Style.NumberFormat.SetFormat(Money);
+        ws.Range(row, 1, row, DenialInsightTemplate.ColDescription + 1).Merge();
+        ws.Cell(row, DenialInsightTemplate.ColNoOfDenials).Value = insight.TotalDenials;
+        ws.Cell(row, DenialInsightTemplate.ColTotalBalance).Value = insight.TotalBalance;
+        ws.Cell(row, DenialInsightTemplate.ColInsuranceNoOfDenials).Value = insight.TotalInsuranceDenials;
+        ws.Cell(row, DenialInsightTemplate.ColInsuranceBalance).Value = insight.TotalInsuranceBalance;
+        ws.Cell(row, DenialInsightTemplate.ColNoOfDenials).Style.NumberFormat.SetFormat(Whole);
+        ws.Cell(row, DenialInsightTemplate.ColInsuranceNoOfDenials).Style.NumberFormat.SetFormat(Whole);
+        ws.Cell(row, DenialInsightTemplate.ColTotalBalance).Style.NumberFormat.SetFormat(Money);
+        ws.Cell(row, DenialInsightTemplate.ColInsuranceBalance).Style.NumberFormat.SetFormat(Money);
 
         var totalRange = ws.Range(row, 1, row, last);
         totalRange.Style.Font.Bold = true;
@@ -420,7 +370,7 @@ public static class DenialClaimReportExcelBuilder
         body.Style.Border.OutsideBorderColor = Rule;
         body.Style.Border.InsideBorderColor = Rule;
 
-        SizeInsightColumns(ws);
+        DenialInsightTemplate.SizeColumns(ws);
         ws.SheetView.Freeze(headerRow, 2);
 
         // Filter across the data rows only - a header filter that swallowed the total row would
@@ -449,11 +399,5 @@ public static class DenialClaimReportExcelBuilder
             return (XLColor.FromHtml("#FCE4D6"), XLColor.FromHtml("#843C0C"));
 
         return (XLColor.FromHtml("#EEF1F5"), XLColor.FromHtml("#5A6A7A"));
-    }
-
-    private static void SizeInsightColumns(IXLWorksheet ws)
-    {
-        double[] widths = [5, 13, 40, 11, 16, 26, 16, 11, 46, 16, 46, 26, 16, 14, 14, 14];
-        for (var i = 0; i < widths.Length; i++) ws.Column(i + 1).Width = widths[i];
     }
 }

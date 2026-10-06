@@ -20,6 +20,19 @@ public static class SelfTests
     private static int _passed;
     private static readonly List<string> Failures = new();
 
+    // Labs with no year folder (Analyze Pathology: "Master File/Sep'26/<week>") name the year in the
+    // month folder; SharePointDownloader falls back to these when the lab root has no "2026" folder.
+    private static void DatedMonthFolderYears()
+    {
+        static int? Year(string name) => LRN.MasterFileProcessorWorker.SharePoint.SharePointDownloader.TryParseMonthFolderYear(name);
+
+        Check("Dated month: Sep'26 -> 2026", Year("Sep'26") == 2026);
+        Check("Dated month: curly apostrophe Sep’26 -> 2026", Year("Sep’26") == 2026);
+        Check("Dated month: Sep-26 / Oct 26 -> 2026", Year("Sep-26") == 2026 && Year("Oct 26") == 2026);
+        Check("Dated month: Sep 2026 / 09.Sep.2026 -> 2026", Year("Sep 2026") == 2026 && Year("09.Sep.2026") == 2026);
+        Check("Dated month: plain month names carry no year", Year("09.Sep") is null && Year("September") is null);
+    }
+
     public static int Run()
     {
         Console.WriteLine("BulkLoad self-tests");
@@ -59,6 +72,7 @@ public static class SelfTests
         DenialCodeNormalization();
         DenialCodeDescriptions();
         DenialDescriptionCascade();
+        DatedMonthFolderYears();
 
         Console.WriteLine(new string('-', 70));
 
@@ -930,6 +944,15 @@ public static class SelfTests
 
         Check("identifier-style integer has no decimals",
             ExcelCsvExporter.ConvertCellToString(87801m, "Claim Level CPT") == "87801");
+
+        // Analyze Pathology prefixes identifiers with "Charge"; the money word must not win.
+        Check("'Charge Claim ID' is an identifier, not money",
+            ExcelCsvExporter.ConvertCellToString(231933520m, "Charge Claim ID") == "231933520");
+        Check("'Charge Units' is an identifier, not money",
+            ExcelCsvExporter.ConvertCellToString(1m, "Charge Units") == "1");
+        Check("'Charge Amount' is still money",
+            ExcelCsvExporter.ConvertCellToString(496.85m, "Charge Amount") == "496.85"
+            && ExcelCsvExporter.ConvertCellToString(500m, "Charge Amount") == "500.00");
 
         Check("non-integer, non-amount value keeps its precision",
             ExcelCsvExporter.ConvertCellToString(0.5849d, "Ratio") == "0.5849");

@@ -60,8 +60,11 @@ export function QueueBadge({ queueId, label, subLabel }) {
   return <Badge className={`${arQueueBadgeClass(queueId)} arwb-queue-badge`} title={text}>{text}</Badge>;
 }
 
-export function StatusBadge({ status }) {
-  return <Badge className={statusBadgeClass(status)}>{status}</Badge>;
+// nonCollectible: a denial code on the claim is on the Non-Collectible list (HasNonCollectibleDenial).
+export function StatusBadge({ status, nonCollectible }) {
+  const badge = <Badge className={statusBadgeClass(status)}>{status}</Badge>;
+  if (!nonCollectible) return badge;
+  return <span className="arwb-status-stack">{badge}<Badge className="arwb-badge-critical" title="Has a non-collectible denial code">Non-Collectible</Badge></span>;
 }
 
 export function PriorityText({ priority }) {

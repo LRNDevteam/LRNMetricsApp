@@ -19,6 +19,8 @@
      IsRefollowupDue      worked at least once AND (45+ days since LastFollowUpDate OR NextFollowUpDate reached)
      IsFollowUpActionable (IsOpenInsuranceAR OR AdHocFollowUpAssigned) AND WorkflowStatus IN (Assigned, QA Rejected)
      IsNonCollectible     the PRIMARY denial code is on the NON_COLLECTIBLE_CODE list (not "any code")
+     HasNonCollectibleDenial  ANY denial code on the claim (primary or line level) is on that list - a flag
+                          only; queues still follow IsNonCollectible
 
    Financial fields (section 7)
      RevenueExpectation   sum of line RevenueExpectation (Medicare-rate allowable); 0 when no rate
@@ -146,6 +148,7 @@ BEGIN
         c.IsFollowUpActionable = CASE WHEN (f.RemainingAR > @Eps OR c.AdHocFollowUpAssigned = 1)
                                        AND c.WorkflowStatus IN ('Assigned', 'QA Rejected') THEN 1 ELSE 0 END,
         c.IsNonCollectible     = s.IsNonCollectible,
+        c.HasNonCollectibleDenial = s.HasNonCollectibleDenial,
         c.IsAutoAdjustEligible = CASE WHEN f.RemainingAR > @Eps AND f.IsNullified = 0
                                        AND c.WorkflowStatus <> 'Submitted for QA'
                                        AND (s.IsAutoAdjustCode = 1 OR (@AutoAdjNc = 1 AND s.IsNonCollectible = 1)) THEN 1 ELSE 0 END,
@@ -230,6 +233,12 @@ BEGIN
                                         AND EXISTS (SELECT 1 FROM dbo.ARWB_MasterListItem m
                                                     WHERE m.ListType = 'NON_COLLECTIBLE_CODE' AND m.IsActive = 1 AND m.ItemValue = c.PrimaryDenialCode)
                                        THEN 1 ELSE 0 END,
+            HasNonCollectibleDenial = CASE WHEN EXISTS (SELECT 1 FROM dbo.ARWB_MasterListItem m
+                                                        WHERE m.ListType = 'NON_COLLECTIBLE_CODE' AND m.IsActive = 1
+                                                          AND (m.ItemValue = c.PrimaryDenialCode
+                                                               OR EXISTS (SELECT 1 FROM dbo.ARWB_ClaimLineDenial ld
+                                                                          WHERE ld.ClaimKey = c.ClaimKey AND ld.DenialCode = m.ItemValue)))
+                                           THEN 1 ELSE 0 END,
             IsAutoAdjustCode    = CASE WHEN c.PrimaryDenialCode IS NOT NULL
                                         AND EXISTS (SELECT 1 FROM dbo.ARWB_MasterListItem m
                                                     WHERE m.ListType = 'AUTO_ADJUST_CODE' AND m.IsActive = 1 AND m.ItemValue = c.PrimaryDenialCode)

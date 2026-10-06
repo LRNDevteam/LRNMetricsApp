@@ -21,6 +21,45 @@ public interface IArWorkbenchRepository
     /// <param name="reprocessAll">Re-derive every claim's denial category and queue from the current master data.</param>
     Task<ArWorkbenchRefreshRun?> RunRefreshAsync(int labId, string runBy, string? note, CancellationToken ct, bool reprocessAll = false);
 
+    // My Work / Follow-Up Management tiles (SqlArWorkbenchRepository.WorkSummary.cs)
+    Task<ArWorkbenchWorkSummary> GetWorkSummaryAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
+
+    // Central Denial Code Master (SqlArWorkbenchRepository.CodeMaster.cs) - LRNMaster
+    Task<(bool Installed, IReadOnlyList<ArWorkbenchCodeMasterRow> Rows)> GetCodeMasterAsync(CancellationToken ct);
+    Task<IReadOnlyList<ArWorkbenchCodeMasterRow>> GetCodeMasterInfoAsync(IReadOnlyCollection<string> codes, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> SaveCodeMasterRowAsync(ArWorkbenchCodeMasterRow row, bool isNew, string user, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> DeleteCodeMasterRowAsync(string code, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> ApplyCodeMasterImportAsync(ArWorkbenchCodeMasterMerge merge, string user, CancellationToken ct);
+    Task<IReadOnlyList<string>> GetLabNonCollectibleCodesAsync(int labId, CancellationToken ct);
+    Task<(int Recalculated, int Flagged)> ApplyNonCollectibleCodesAsync(int labId, IReadOnlyList<string> toAdd, IReadOnlyList<string> toDeactivate, string user, CancellationToken ct);
+
+    // Automatic Adjustment (SqlArWorkbenchRepository.AutoAdjust.cs)
+    Task<ArWorkbenchAdjustmentResult> ProcessAutoAdjustmentsAsync(int labId, IReadOnlyList<long>? claimKeys, bool previewOnly, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<int> MarkAdjustmentsPostedAsync(int labId, IReadOnlyList<long> claimKeys, ArWorkbenchUserContext user, CancellationToken ct);
+
+    // User Management (SqlArWorkbenchRepository.Users.cs) - LRNMaster user tables
+    Task<IReadOnlyList<ArWorkbenchLabOption>> GetAllLabsAsync(CancellationToken ct);
+    Task<IReadOnlySet<int>> GetUserLabIdsAsync(int labUserId, CancellationToken ct);
+    Task<IReadOnlyList<ArWorkbenchRoleOption>> GetAssignableRolesAsync(CancellationToken ct);
+    Task<IReadOnlyList<ArWorkbenchManagedUser>> GetManagedUsersAsync(int? callerLabUserId, bool allLabs, IReadOnlyList<ArWorkbenchLabOption> manageableLabs, CancellationToken ct);
+    Task<(ArWorkbenchSaveResult Result, int? LabUserId)> CreateWorkbenchUserAsync(string userName, string passwordHash, string email, int roleId, IReadOnlyList<int> labIds, string createdBy, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> UpdateWorkbenchUserAsync(int labUserId, string email, int roleId, IReadOnlyList<int> requestedLabIds, bool isActive, string? passwordHash,
+        int? callerLabUserId, bool allLabs, IReadOnlySet<int> manageableLabIds, string modifiedBy, CancellationToken ct);
+
+    // Saved Views (SqlArWorkbenchRepository.SavedViews.cs)
+    Task<IReadOnlyList<ArWorkbenchSavedView>> GetSavedViewsAsync(int labId, string userName, string viewKey, CancellationToken ct);
+    Task<(ArWorkbenchSaveResult Result, int? SavedViewId)> SaveViewAsync(int labId, string userName, ArWorkbenchSavedViewInput view, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> UpdateSavedViewAsync(int labId, string userName, int savedViewId, string? newName, bool? isDefault, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> DeleteSavedViewAsync(int labId, string userName, int savedViewId, CancellationToken ct);
+
+    // Follow-up notes, insights, timely-filing limits (SqlArWorkbenchRepository.FollowUp.cs)
+    Task<(ArWorkbenchSaveStatus Status, string Message, ArWorkbenchFollowUpResult? Result)> LogFollowUpAsync(int labId, long claimKey, ArWorkbenchFollowUpRequest request, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<IReadOnlyList<ArWorkbenchInsightRow>> GetInsightsAsync(int labId, CancellationToken ct);
+    Task<ArWorkbenchTflSettings> GetTflSettingsAsync(int labId, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> SaveTflThresholdAsync(int labId, string? originalClass, string financialClass, int days, string user, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> DeleteTflThresholdAsync(int labId, string financialClass, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> SaveTflDefaultsAsync(int labId, int defaultDays, int riskWindowDays, string user, CancellationToken ct);
+
     // Assignment Management (SqlArWorkbenchRepository.Assignment.cs)
     Task<IReadOnlyList<ArWorkbenchAgent>> GetAgentsAsync(int labId, CancellationToken ct);
     Task<ArWorkbenchAssignmentOverview> GetAssignmentOverviewAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
@@ -68,6 +107,7 @@ public sealed partial class SqlArWorkbenchRepository : IArWorkbenchRepository
         ["clinicName"] = "w.ClinicName",
         ["lastFollowUpDate"] = "w.LastFollowUpDate",
         ["remainingAR"] = "w.RemainingAR",
+        ["revenueExpectation"] = "w.RevenueExpectation",
         ["recoveredAmount"] = "w.RecoveredAmount",
         ["insuranceBalance"] = "w.InsuranceBalance",
         ["agingDays"] = "w.AgingDays",
@@ -88,6 +128,13 @@ public sealed partial class SqlArWorkbenchRepository : IArWorkbenchRepository
     internal static string UntouchedSinceSql(string alias = "w") =>
         $"COALESCE((SELECT MAX(ta.ActivityOn) FROM dbo.ARWB_ClaimActivity ta WHERE ta.ClaimKey = {alias}.ClaimKey AND ta.IsSystem = 0), " +
         $"CONVERT(datetime2(0), {alias}.FirstBilledDate), CONVERT(datetime2(0), {alias}.DateOfService), {alias}.FirstIdentifiedOn)";
+
+    /// <summary>
+    /// The mockup's "Awaiting Payer Response" (MW_AWAITING_PAYER_FIX): the last note's fix /
+    /// resolution means the ball is with the payer.
+    /// </summary>
+    internal static readonly string[] AwaitingPayerResolutions =
+        ["Pending Payer Adjudication", "Resubmitted - E", "Resubmitted - F", "Resubmitted - P", "Reconsideration Submitted", "Appealed"];
 
     private readonly IReadOnlyDictionary<int, string> _labConnectionsById;
     private readonly string _masterConnectionString;
@@ -769,9 +816,9 @@ WITH pg AS
 SELECT
     v.ClaimKey, v.ClaimID, v.LabName, v.PatientID, v.PatientName, v.PayerName, v.PayerType, v.ClinicName, v.ReferringProvider, v.PanelName,
     v.DateOfService, v.DenialCode, v.DenialCategory, v.DenialReason, v.SourceClaimStatus, v.ChargeAmount, v.InsuranceBalance, v.PatientBalance,
-    v.InitialInsuranceAR, v.RecoveredAmount, v.RemainingAR, v.WorkflowStatus, v.Priority, v.AssignedAgentUser,
+    v.InitialInsuranceAR, v.RevenueExpectation, v.RecoveredAmount, v.RemainingAR, v.WorkflowStatus, v.Priority, v.AssignedAgentUser,
     v.LastFollowUpDate, v.NextFollowUpDate, v.FixResolution, v.AgingDays, v.AgingBucket,
-    v.IsTflRisk, v.IsNonCollectible, v.ArQueueId, v.ArQueueLabel, v.ArQueueBadgeClass,
+    v.IsTflRisk, v.IsNonCollectible, tw.HasNonCollectibleDenial, v.ArQueueId, v.ArQueueLabel, v.ArQueueBadgeClass,
     v.ArSubQueueId, v.ArSubQueueLabel, DATEDIFF(day, {UntouchedSinceSql("tw")}, SYSUTCDATETIME()) AS DaysSinceLastTouch,
     v.QaStatus, v.OpenCipCases, v.PendingAgentRequests,
     v.LineCount, cpt.CPTCode AS FirstCptCode
@@ -814,6 +861,7 @@ ORDER BY pg.Seq;";
                 InsuranceBalance = M("InsuranceBalance"),
                 PatientBalance = M("PatientBalance"),
                 InitialInsuranceAR = M("InitialInsuranceAR"),
+                RevenueExpectation = M("RevenueExpectation"),
                 RecoveredAmount = M("RecoveredAmount"),
                 RemainingAR = M("RemainingAR"),
                 WorkflowStatus = S("WorkflowStatus") ?? string.Empty,
@@ -826,6 +874,7 @@ ORDER BY pg.Seq;";
                 AgingBucket = S("AgingBucket"),
                 IsTflRisk = B("IsTflRisk"),
                 IsNonCollectible = B("IsNonCollectible"),
+                HasNonCollectibleDenial = B("HasNonCollectibleDenial"),
                 ArQueueId = S("ArQueueId"),
                 ArQueueLabel = S("ArQueueLabel"),
                 ArQueueBadgeClass = S("ArQueueBadgeClass"),
@@ -920,6 +969,28 @@ ORDER BY pg.Seq;";
         if (filter.OpenInsuranceArOnly) where.Add("w.IsOpenInsuranceAR = 1");
         if (filter.TflRiskOnly) where.Add("w.IsTflRisk = 1");
         if (filter.AssignedOnly) where.Add("w.AssignedAgentUser IS NOT NULL");
+        if (filter.FollowUpActionableOnly) where.Add("w.IsFollowUpActionable = 1");
+        if (filter.ActiveOnly) where.Add("w.IsFinanciallyClosed = 0");
+        if (filter.NonCollectibleOnly) where.Add("w.HasNonCollectibleDenial = 1");
+        if (filter.AwaitingPayerOnly)
+        {
+            var names = new List<string>();
+            for (var i = 0; i < AwaitingPayerResolutions.Length; i++)
+            {
+                names.Add($"@Ap{i}");
+                cmd.Parameters.Add($"@Ap{i}", SqlDbType.NVarChar, 200).Value = AwaitingPayerResolutions[i];
+            }
+            where.Add($"w.FixResolution IN ({string.Join(", ", names)})");
+        }
+        switch ((filter.FollowUpWindow ?? string.Empty).Trim().ToLowerInvariant())
+        {
+            case "overdue": where.Add("w.NextFollowUpDate < CONVERT(date, SYSUTCDATETIME())"); break;
+            case "today": where.Add("w.NextFollowUpDate = CONVERT(date, SYSUTCDATETIME())"); break;
+            case "upcoming": where.Add("w.NextFollowUpDate > CONVERT(date, SYSUTCDATETIME())"); break;
+            case "none": where.Add("w.NextFollowUpDate IS NULL"); break;
+        }
+        AddIn("w.FixResolution", "Fx", filter.FixResolution, 200, ArWorkbenchFilterValues.None);
+        AddIn("w.SourceClaimStatus", "Ss", filter.SourceStatus, 200, ArWorkbenchFilterValues.None);
         if (filter.MinDaysUntouched is > 0)
         {
             where.Add($"{UntouchedSinceSql()} <= DATEADD(day, -@MinUntouched, SYSUTCDATETIME())");
@@ -975,7 +1046,11 @@ ORDER BY p.Ord;
 SELECT m.ItemValue, ISNULL(c.Claims, 0)
 FROM dbo.ARWB_MasterListItem m
 OUTER APPLY (SELECT Claims = COUNT(*) FROM dbo.ARWB_Claim w WHERE w.AgingBucket = m.ItemValue {scope}) c
-WHERE m.ListType = 'AGING_BUCKET' AND m.IsActive = 1 ORDER BY m.SortOrder;";
+WHERE m.ListType = 'AGING_BUCKET' AND m.IsActive = 1 ORDER BY m.SortOrder;
+
+-- 9..10. Last note's fix / resolution, and the ingested source claim status
+SELECT w.FixResolution, COUNT(*) FROM dbo.ARWB_Claim w WHERE 1 = 1 {scope} GROUP BY w.FixResolution ORDER BY w.FixResolution;
+SELECT w.SourceClaimStatus, COUNT(*) FROM dbo.ARWB_Claim w WHERE 1 = 1 {scope} GROUP BY w.SourceClaimStatus ORDER BY w.SourceClaimStatus;";
 
         var options = new ArWorkbenchFilterOptions();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -1009,6 +1084,8 @@ WHERE m.ListType = 'AGING_BUCKET' AND m.IsActive = 1 ORDER BY m.SortOrder;";
         options.Statuses = await ReadAsync();
         options.Priorities = await ReadAsync();
         options.AgingBuckets = await ReadAsync();
+        options.FixResolutions = await ReadAsync(ArWorkbenchFilterValues.None, "(No follow-up yet)");
+        options.SourceStatuses = await ReadAsync(ArWorkbenchFilterValues.None, "(No status)");
         await reader.DisposeAsync();
 
         // Agent options show the person's name; the value stays the LabUsers.UserName.

@@ -376,6 +376,7 @@ CREATE TABLE dbo.ARWB_Claim
     TflDeadline                 date           NULL,
     IsTflRisk                   bit            NOT NULL CONSTRAINT DF_ARWB_Claim_IsTflRisk           DEFAULT (0),
     IsNonCollectible            bit            NOT NULL CONSTRAINT DF_ARWB_Claim_IsNonCollectible    DEFAULT (0),
+    HasNonCollectibleDenial     bit            NOT NULL CONSTRAINT DF_ARWB_Claim_HasNonCollectibleDenial DEFAULT (0),  -- ANY code on the claim is non-collectible
     IsFinanciallyClosed         bit            NOT NULL CONSTRAINT DF_ARWB_Claim_IsFinanciallyClosed DEFAULT (0),
     IsWorkComplete              bit            NOT NULL CONSTRAINT DF_ARWB_Claim_IsWorkComplete      DEFAULT (0),
     IsOpenInsuranceAR           bit            NOT NULL CONSTRAINT DF_ARWB_Claim_IsOpenInsuranceAR   DEFAULT (0),
@@ -411,6 +412,12 @@ CREATE TABLE dbo.ARWB_Claim
     CONSTRAINT FK_ARWB_Claim_ArSubQueue       FOREIGN KEY (ArSubQueueId)        REFERENCES dbo.ARWB_ArQueue (QueueId),
     CONSTRAINT FK_ARWB_Claim_WorkflowTemplate FOREIGN KEY (WorkflowTemplateKey) REFERENCES dbo.ARWB_WorkflowTemplate (TemplateKey)
 );
+GO
+
+-- Added after the first release: existing installs get the column here (new installs above).
+IF COL_LENGTH(N'dbo.ARWB_Claim', N'HasNonCollectibleDenial') IS NULL
+    ALTER TABLE dbo.ARWB_Claim ADD HasNonCollectibleDenial bit NOT NULL
+        CONSTRAINT DF_ARWB_Claim_HasNonCollectibleDenial DEFAULT (0);
 GO
 
 /* ============================================================================================

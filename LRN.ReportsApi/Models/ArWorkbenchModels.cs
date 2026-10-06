@@ -173,8 +173,21 @@ public sealed class ArWorkbenchClaimFilter
     public string? Search { get; set; }
     public bool OpenInsuranceArOnly { get; set; }
     public bool TflRiskOnly { get; set; }
-    /// <summary>Only claims that have an agent (Assignment Management's reassign table).</summary>
+    /// <summary>Only claims that have an agent (Assignment Management's reassign table, My Work).</summary>
     public bool AssignedOnly { get; set; }
+    /// <summary>Only claims waiting on the agent's next touch (dbo.ARWB_Claim.IsFollowUpActionable) - Follow-Up Management.</summary>
+    public bool FollowUpActionableOnly { get; set; }
+    /// <summary>Not financially closed.</summary>
+    public bool ActiveOnly { get; set; }
+    /// <summary>Only claims with a non-collectible denial code anywhere on the claim.</summary>
+    public bool NonCollectibleOnly { get; set; }
+    /// <summary>Next follow-up date window: overdue | today | upcoming | none.</summary>
+    public string? FollowUpWindow { get; set; }
+    /// <summary>My Work quick filter: fix / resolution of the last note is one that waits on the payer.</summary>
+    public bool AwaitingPayerOnly { get; set; }
+    public List<string> FixResolution { get; set; } = new();
+    /// <summary>The ingested source claim status (Fully Denied / Partially Paid / ...).</summary>
+    public List<string> SourceStatus { get; set; } = new();
     /// <summary>Only claims with no activity for at least this many days (never-touched claims count).</summary>
     public int? MinDaysUntouched { get; set; }
     public string? SortBy { get; set; }
@@ -208,6 +221,8 @@ public sealed class ArWorkbenchClaimRow
     public decimal InsuranceBalance { get; set; }
     public decimal PatientBalance { get; set; }
     public decimal InitialInsuranceAR { get; set; }
+    /// <summary>Expected payment: the fee-schedule allowable over the claim's lines (handoff section 7).</summary>
+    public decimal RevenueExpectation { get; set; }
     public decimal RecoveredAmount { get; set; }
     public decimal RemainingAR { get; set; }
     public string WorkflowStatus { get; set; } = string.Empty;
@@ -219,6 +234,8 @@ public sealed class ArWorkbenchClaimRow
     public string? AgingBucket { get; set; }
     public bool IsTflRisk { get; set; }
     public bool IsNonCollectible { get; set; }
+    /// <summary>Any denial code on the claim (not only the primary) is on the lab's Non-Collectible list.</summary>
+    public bool HasNonCollectibleDenial { get; set; }
     public string? ArQueueId { get; set; }
     public string? ArQueueLabel { get; set; }
     public string? ArQueueBadgeClass { get; set; }
@@ -248,6 +265,30 @@ public sealed class ArWorkbenchFilterOptions
     public List<ArWorkbenchFilterOption> Agents { get; set; } = new();
     public List<ArWorkbenchFilterOption> Priorities { get; set; } = new();
     public List<ArWorkbenchFilterOption> AgingBuckets { get; set; } = new();
+    public List<ArWorkbenchFilterOption> FixResolutions { get; set; } = new();
+    public List<ArWorkbenchFilterOption> SourceStatuses { get; set; } = new();
+}
+
+/// <summary>Tile counts for My Work and Follow-Up Management, over the caller's scope.</summary>
+public sealed class ArWorkbenchWorkSummary
+{
+    // My Work: every assigned claim (an agent's own, a lead's whole team)
+    public int TotalAssigned { get; set; }
+    public int DueToday { get; set; }
+    public int Overdue { get; set; }
+    public int HighPriority { get; set; }
+    public int RefollowupRequired { get; set; }
+    public int CipResponseReceived { get; set; }
+    public int AwaitingPayer { get; set; }
+    public int SubmittedForQa { get; set; }
+    public int QaRejected { get; set; }
+
+    // Follow-Up Management: claims waiting on the next touch
+    public int ActionableAll { get; set; }
+    public int ActionableOverdue { get; set; }
+    public int ActionableDueToday { get; set; }
+    public int ActionableUpcoming { get; set; }
+    public int ActionableNoFollowUp { get; set; }
 }
 
 public sealed class ArWorkbenchFilterOption
@@ -324,6 +365,8 @@ public sealed class ArWorkbenchClaimDetail
     public List<ArWorkbenchClaimLine> Lines { get; set; } = new();
     public List<ArWorkbenchActivity> Activity { get; set; } = new();
     public List<ArWorkbenchFollowUp> FollowUps { get; set; } = new();
+    /// <summary>Central Denial Code Master rows for the claim's primary and line-level codes.</summary>
+    public List<ArWorkbenchCodeMasterRow> DenialCodeInfo { get; set; } = new();
 }
 
 public sealed class ArWorkbenchMasterData

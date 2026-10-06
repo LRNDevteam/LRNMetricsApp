@@ -2,11 +2,13 @@ import { AR_WORKBENCH_API_BASE_URL } from '../config/apiConfig';
 import { clearJwt, ensureJwt } from './auth';
 
 export class ApiError extends Error {
-  constructor(message, status = 0, correlationId = '') {
+  constructor(message, status = 0, correlationId = '', body = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.correlationId = correlationId;
+    // The JSON error body of a 4xx, e.g. an import's row errors.
+    this.body = body;
   }
 }
 
@@ -41,15 +43,16 @@ async function send(path, options, token) {
 async function toError(response) {
   const correlationId = response.headers.get('x-correlation-id') || '';
   let message = `${response.status} ${response.statusText}`;
+  let data = null;
   if ((response.headers.get('content-type') || '').includes('application/json')) {
-    const data = await response.json().catch(() => null);
+    data = await response.json().catch(() => null);
     if (data?.message) message = data.message;
     else if (data?.title) message = data.title;
   }
   if (response.status >= 500) {
     message = 'Something went wrong. Please contact admin support.' + (correlationId ? ` Error ID: ${correlationId}` : '');
   }
-  return new ApiError(message, response.status, correlationId);
+  return new ApiError(message, response.status, correlationId, response.status < 500 ? data : null);
 }
 
 async function request(path, options) {

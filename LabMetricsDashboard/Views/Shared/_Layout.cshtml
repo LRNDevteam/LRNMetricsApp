@@ -1138,9 +1138,9 @@
                 {
                     @* One lab assigned: there is nothing to switch to, so show the lab name
                        as a highlighted label instead of a dropdown that can only reselect itself. *@
-                    <span class="nav-lab-single" title="@activeLab">
+                    <span class="nav-lab-single" title="@LabConfigInstance.DisplayNameFor(activeLab)">
                         <i class="bi bi-building"></i>
-                        @activeLab
+                        @LabConfigInstance.DisplayNameFor(activeLab)
                     </span>
                 }
                 else if (!string.IsNullOrEmpty(activeLab) && availableLabs.Count > 1)
@@ -1148,7 +1148,7 @@
                     <span class="nav-lab-wrap" id="navLabWrap">
                         <span class="nav-lab-btn" id="navLabBtn" tabindex="0" title="Switch lab">
                             <i class="bi bi-building"></i>
-                            @activeLab
+                            @LabConfigInstance.DisplayNameFor(activeLab)
                             <i class="bi bi-chevron-down"></i>
                         </span>
                         <div class="nav-lab-panel" id="navLabPanel">
@@ -1158,7 +1158,7 @@
                                 @foreach (var lab in availableLabs)
                                 {
                                     <a href="#" data-lab="@lab"
-                                       class="@(lab == activeLab ? "active" : "")">@lab</a>
+                                       class="@(lab == activeLab ? "active" : "")">@LabConfigInstance.DisplayNameFor(lab)</a>
                                 }
                             </div>
                         </div>
