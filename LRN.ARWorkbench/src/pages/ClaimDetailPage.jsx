@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
 import AssignModal from '../components/AssignModal';
 import AutoAdjustModal from '../components/AutoAdjustModal';
+import { Attachments } from '../components/CipShared';
 import FollowUpModal from '../components/FollowUpModal';
 import QaDecisionModal, { QA_CRITERIA } from '../components/QaDecisionModal';
 import Icon from '../components/Icon';
@@ -185,7 +186,7 @@ export default function ClaimDetailPage() {
           {tab === 'denial' && <Denial c={c} followUps={detail.followUps} codes={detail.denialCodeInfo || []} />}
           {tab === 'followups' && <FollowUps c={c} rows={detail.followUps} />}
           {tab === 'activity' && <Activity rows={detail.activity} />}
-          {tab === 'cip' && <CipCases cases={detail.cipCases || []} canManage={can('approve')} />}
+          {tab === 'cip' && <CipCases cases={detail.cipCases || []} canManage={can('approve')} labId={labId} />}
           {tab === 'qa' && detail.qaReview && (
             <QaTab review={detail.qaReview} c={c} latest={detail.followUps[0]} canDecide={can('qaDecide')} userName={user?.userName}
               onDecide={(decision) => setDialog(`qa-${decision}`)} />
@@ -350,7 +351,7 @@ function Row({ label, children }) {
 // Denial Info: the mockup's fields, as two titled sections with aligned label / value rows.
 // Mockup renderCipCases: each CIP escalation with its full history, read-only; decisions are made
 // in the CIP Escalations queue so the action and its context stay in one place.
-function CipCases({ cases, canManage }) {
+function CipCases({ cases, canManage, labId }) {
   const badge = { 'Awaiting QA': 'arwb-badge-neutral', 'Pending Approval': 'arwb-badge-warning', 'Sent to Client': 'arwb-badge-info', 'Client Responded': 'arwb-badge-purple', 'Returned to Agent': 'arwb-badge-good' };
   return (
     <div className="arwb-stack">
@@ -362,6 +363,7 @@ function CipCases({ cases, canManage }) {
           </div>
           <div className="fu-notes"><b>{cc.cipCategory}</b> · {cc.requiredInfo}<div>{cc.cipComment}</div></div>
           {cc.clientResponseText && <div className="fu-notes"><b>Client response</b> ({cc.clientRespondedBy} · {fmt.dateTime(cc.clientRespondedOn)}): {cc.clientResponseText}</div>}
+          {cc.attachments?.length > 0 && <div className="fu-notes"><b>Attachments</b> <Attachments labId={labId} files={cc.attachments} /></div>}
           <div className="arwb-timeline" style={{ marginTop: 8 }}>
             {history.map((h, i) => (
               <div key={i} className="arwb-hint">

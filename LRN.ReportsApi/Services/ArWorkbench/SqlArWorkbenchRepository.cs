@@ -29,6 +29,20 @@ public interface IArWorkbenchRepository
     Task<ArWorkbenchCipQueue> GetCipQueueAsync(ArWorkbenchCipFilter filter, ArWorkbenchUserContext user, bool clientView, CancellationToken ct);
     Task<List<ArWorkbenchCipCaseDetail>> GetClaimCipCasesAsync(int labId, long claimKey, CancellationToken ct);
     Task<(string Outcome, string CaseNumber, string? NewStatus)> CipActionAsync(int labId, long cipCaseId, ArWorkbenchCipAction action, string? note, ArWorkbenchUserContext user, Guid? bulkBatchId, CancellationToken ct);
+    // Client Management (SqlArWorkbenchRepository.Clients.cs) - LRNMaster activation + lab figures
+    Task<IReadOnlySet<int>> GetInactiveClientLabIdsAsync(CancellationToken ct);
+    Task<Dictionary<int, ArWorkbenchClientStatus>> GetClientStatusesAsync(CancellationToken ct);
+    Task<ArWorkbenchSaveResult> SetClientActiveAsync(int labId, bool isActive, string? note, string user, CancellationToken ct);
+    Task<ArWorkbenchClientStats?> GetClientStatsAsync(int labId, CancellationToken ct);
+
+    // Audit Logs (SqlArWorkbenchRepository.Audit.cs)
+    Task<ArWorkbenchAuditPage> GetAuditLogAsync(ArWorkbenchAuditFilter filter, ArWorkbenchUserContext user, bool withOptions, CancellationToken ct);
+
+    // Attachments (SqlArWorkbenchRepository.Documents.cs)
+    Task<IReadOnlyList<long>> AddCipResponseDocumentsAsync(int labId, long cipCaseId, IReadOnlyList<(string FileName, string? ContentType, StoredDocument Stored)> files, ArWorkbenchUserContext user, string? clientIp, CancellationToken ct);
+    Task<Dictionary<long, List<ArWorkbenchDocumentInfo>>> GetCipDocumentsAsync(int labId, IReadOnlyCollection<long> caseIds, CancellationToken ct);
+    Task<(ArWorkbenchDocumentInfo Info, string Container, string Path)?> GetDocumentForDownloadAsync(int labId, long documentId, ArWorkbenchUserContext user, string? clientIp, CancellationToken ct);
+    Task<Dictionary<string, (long CipCaseId, string Status)>> GetClientCipIndexAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchLegacyCipResult> ConvertLegacyEscalationsAsync(int labId, string runBy, bool previewOnly, CancellationToken ct);
     Task<Dictionary<long, string>> GetCipStatusesAsync(int labId, IReadOnlyCollection<long> caseIds, ArWorkbenchUserContext user, CancellationToken ct);
 

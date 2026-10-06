@@ -22,7 +22,8 @@ export const NAV = [
   { id: 'analytics',       label: 'Recovery & Financial Analytics',     icon: 'trend',     path: '/analytics',       roles: ALL_ROLES,                             built: false, phase: 6, subtitle: 'Insurance AR recovery performance' },
   { id: 'reports',         label: 'Reports',                            icon: 'filetext',  path: '/reports',         roles: ALL_ROLES,                             built: false, phase: 6, subtitle: 'Exportable views for stakeholders' },
   { id: 'users',           label: 'User Management',                    icon: 'users',     path: '/users',           roles: ['admin'],                             built: true,  phase: 4, subtitle: 'Roles, access and client assignments' },
-  { id: 'audit',           label: 'Audit Logs',                         icon: 'shield',    path: '/audit',           roles: ['admin', 'manager'],                  built: false, phase: 4, subtitle: 'Immutable trail of workflow-changing actions' },
+  { id: 'clients',         label: 'Client Management',                  icon: 'building',  path: '/clients',         roles: ['admin'],                             built: true,  phase: 3, subtitle: 'Laboratory clients: eligible claims, AR, recovery and activation' },
+  { id: 'audit',           label: 'Audit Logs',                         icon: 'shield',    path: '/audit',           roles: ['admin', 'manager'],                  built: true,  phase: 4, subtitle: 'Immutable trail of workflow-changing actions' },
   // A menu group: no page of its own; each child is a route. screen + view pick the page component
   // and the part of it to show (App.jsx SCREENS). Children inherit the group's roles.
   { id: 'masters',         label: 'Master Values',                      icon: 'settings',  path: '/masters',         roles: ['admin'],                             built: true,  phase: 3, subtitle: 'Denial codes, dropdown lists and workbench reference data',

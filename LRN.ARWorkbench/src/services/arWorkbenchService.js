@@ -10,6 +10,28 @@ export const arWorkbenchService = {
   cipQueue: (filter, signal) => api(`cip${qs(filter)}`, { signal }),
   clientCipQueue: (filter, signal) => api(`client-cip${qs(filter)}`, { signal }),
   cipAction: (labId, caseId, action, note) => api(`cip/${caseId}/action${qs({ labId })}`, json('POST', { action, note })),
+  // Client Management (ARWorkbench.ViewClientMgmt)
+  clients: (labId) => api(`clients${qs({ labId })}`),
+  setClientActive: (labId, targetLabId, isActive, note) => api(`clients/${targetLabId}/active${qs({ labId })}`, json('POST', { isActive, note })),
+
+  // Audit Logs (ARWorkbench.ViewAudit)
+  auditLog: (filter, signal) => api(`audit${qs(filter)}`, { signal }),
+  auditExport: (filter) => downloadFile(`audit/export${qs(filter)}`, 'ARWorkbench_AuditLog.xlsx'),
+
+  // Client portal: respond with attachments (multipart), CSV response template, attachment download
+  cipRespond: (labId, caseId, note, files) => {
+    const form = new FormData();
+    form.append('note', note);
+    (files || []).forEach((f) => form.append('files', f));
+    return api(`cip/${caseId}/respond${qs({ labId })}`, { method: 'POST', body: form });
+  },
+  clientCipTemplate: (labId) => downloadFile(`client-cip/template${qs({ labId })}`, 'EscalationRequests_ResponseTemplate.csv'),
+  clientCipUpload: (labId, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api(`client-cip/template${qs({ labId })}`, { method: 'POST', body: form });
+  },
+  downloadDocument: (labId, documentId, fileName) => downloadFile(`documents/${documentId}${qs({ labId })}`, fileName || 'attachment'),
   convertLegacyCip: (labId, preview) => api(`cip/convert-legacy${qs({ labId, preview })}`, { method: 'POST' }),
   cipBulk: (labId, caseIds, decision, note) => api(`cip/bulk${qs({ labId })}`, json('POST', { caseIds, decision, note })),
 

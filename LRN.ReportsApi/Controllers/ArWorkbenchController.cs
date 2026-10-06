@@ -53,10 +53,19 @@ public sealed class ArWorkbenchController : ControllerBase
     [HttpGet("labs")]
     public async Task<ActionResult<IReadOnlyList<DenialWorkflowLabOption>>> Labs(CancellationToken ct)
     {
-        var fromToken = LabsFromToken();
-        if (fromToken.Count > 0) return Ok(fromToken);
-        return Ok(await _workflowService.GetLabsForUserAsync(CurrentUserName(), ct));
+        IReadOnlyList<DenialWorkflowLabOption> labs = LabsFromToken();
+        if (labs.Count == 0) labs = await _workflowService.GetLabsForUserAsync(CurrentUserName(), ct);
+        // T068: a deactivated client is hidden except from those who can reactivate it.
+        if (IsClientAdminByRole()) return Ok(labs);
+        var inactive = await _repository.GetInactiveClientLabIdsAsync(ct);
+        return Ok(labs.Where(l => !inactive.Contains(l.LabId)).ToList());
     }
+
+    // Site admins and AR Workbench System Administrators (role names in the token).
+    private bool IsClientAdminByRole() =>
+        SiteAdminRole() is not null
+        || User.Claims.Any(c => (c.Type == ClaimTypes.Role || string.Equals(c.Type, "role", StringComparison.OrdinalIgnoreCase))
+                                && c.Value.Contains("System Administrator", StringComparison.OrdinalIgnoreCase));
 
     [HttpGet("me")]
     public async Task<ActionResult<ArWorkbenchUserContext>> Me([FromQuery] int labId, CancellationToken ct)
@@ -221,7 +230,7 @@ public sealed class ArWorkbenchController : ControllerBase
     {
         var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
         if (denied is not null) return denied;
-        if (!CanRespondToCip(user!)) return Forbidden("Escalation Requests are for client users.");
+        if (!CanViewClientCip(user!)) return Forbidden("Escalation Requests are for client users.");
         if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
         return Ok(await _repository.GetCipQueueAsync(filter, user!, clientView: true, ct));
     }
@@ -310,8 +319,276 @@ public sealed class ArWorkbenchController : ControllerBase
         }
     }
 
-    // A client (viewer) user, or an administrator acting for one.
-    private static bool CanRespondToCip(ArWorkbenchUserContext user) => user.RoleCode == "viewer" || user.SiteAdmin || user.Permissions.ManageSettings;
+    // ---- Client Management (T068) - ARWorkbench.ViewClientMgmt; activation also ManageSettings ---
+
+    [HttpGet("clients")]
+    public async Task<ActionResult<IReadOnlyList<ArWorkbenchClientCard>>> Clients([FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, labs, denied) = await ResolveClientAdminAsync(labId, ct);
+        if (denied is not null) return denied;
+        var statuses = await _repository.GetClientStatusesAsync(ct);
+        var cards = new List<ArWorkbenchClientCard>();
+        foreach (var lab in labs)
+        {
+            var status = statuses.GetValueOrDefault(lab.LabId);
+            cards.Add(new ArWorkbenchClientCard
+            {
+                LabId = lab.LabId, LabName = lab.LabName, IsActive = status?.IsActive ?? true, StatusNote = status?.StatusNote,
+                ChangedBy = status?.ChangedBy, ChangedOn = status?.ChangedOn,
+                Stats = await _repository.GetClientStatsAsync(lab.LabId, ct)
+            });
+        }
+        return Ok(cards.OrderBy(c => c.LabName, StringComparer.OrdinalIgnoreCase).ToList());
+    }
+
+    [HttpPost("clients/{targetLabId:int}/active")]
+    public async Task<ActionResult> SetClientActive([FromRoute] int targetLabId, [FromQuery] int labId, [FromBody] ArWorkbenchClientActiveRequest? request, CancellationToken ct)
+    {
+        var (user, labs, denied) = await ResolveClientAdminAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!user!.SiteAdmin && !user.Permissions.ManageSettings) return Forbidden("Only an administrator can activate or deactivate a client.");
+        if (!labs.Any(l => l.LabId == targetLabId)) return Forbidden("You can only change clients you manage.");
+        if (request is null) return BadRequest(new { message = "Send the new status." });
+        var note = string.IsNullOrWhiteSpace(request.Note) ? null : request.Note.Trim();
+        if (note is { Length: > 500 }) return BadRequest(new { message = "The note must be 500 characters or fewer." });
+        if (!request.IsActive && note is null) return BadRequest(new { message = "Add a reason for deactivating the client." });
+        var result = await _repository.SetClientActiveAsync(targetLabId, request.IsActive, note, user.UserName, ct);
+        if (result.Status == ArWorkbenchSaveStatus.Ok)
+            _logger.LogWarning("AR Workbench client lab {Target} {State} by {User}: {Note}", targetLabId, request.IsActive ? "reactivated" : "deactivated", user.UserName, note);
+        return ToResult(result);
+    }
+
+    // Super Admin: every lab configured for the AR Workbench; others: their own dbo.UserLabs among those.
+    private async Task<(ArWorkbenchUserContext? User, IReadOnlyList<ArWorkbenchLabOption> Labs, ActionResult? Denied)> ResolveClientAdminAsync(int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return (null, [], denied);
+        if (!user!.Permissions.ViewClientMgmt) return (null, [], Forbidden("Only an AR Workbench System Administrator can manage clients."));
+        var configured = _repository.GetConfiguredLabIds().ToHashSet();
+        var every = (await _repository.GetAllLabsAsync(ct)).Where(l => configured.Contains(l.LabId)).ToList();
+        var site = SiteAdminRole();
+        var allLabs = site is not null && AllLabAdminRoles.Contains(site.Replace(" ", string.Empty).ToUpperInvariant());
+        if (allLabs) return (user, every, null);
+        var mine = user.LabUserId is int id ? await _repository.GetUserLabIdsAsync(id, ct) : new HashSet<int>();
+        return (user, every.Where(l => mine.Contains(l.LabId)).ToList(), null);
+    }
+
+    // ---- Audit Logs (T067) - ARWorkbench.ViewAudit (System Administrator, RCM Manager) ---------
+
+    [HttpGet("audit")]
+    public async Task<ActionResult<ArWorkbenchAuditPage>> AuditLog([FromQuery] ArWorkbenchAuditFilter filter, [FromQuery] bool options, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
+        if (denied is not null) return denied;
+        if (!user!.Permissions.ViewAudit) return Forbidden("Only a System Administrator or RCM Manager can view the audit log.");
+        if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+        filter.PageSize = Math.Clamp(filter.PageSize, 5, 200);
+        return Ok(await _repository.GetAuditLogAsync(filter, user, options, ct));
+    }
+
+    /// <summary>Every matching entry (up to 50,000) as Excel.</summary>
+    [HttpGet("audit/export")]
+    public async Task<ActionResult> AuditExport([FromQuery] ArWorkbenchAuditFilter filter, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
+        if (denied is not null) return denied;
+        if (!user!.Permissions.ViewAudit) return Forbidden("Only a System Administrator or RCM Manager can view the audit log.");
+        filter.Page = 1;
+        filter.PageSize = 50_000;
+        var page = await _repository.GetAuditLogAsync(filter, user, false, ct);
+
+        using var wb = new ClosedXML.Excel.XLWorkbook();
+        var ws = wb.Worksheets.Add("Audit Log");
+        string[] headers = ["Timestamp (UTC)", "Claim ID", "Client", "User", "Role", "Action", "Previous Value", "New Value", "Description", "System"];
+        for (var i = 0; i < headers.Length; i++) DenialExcelTheme.StyleHeaderCell(ws.Cell(1, i + 1).SetValue(headers[i]));
+        var row = 2;
+        foreach (var a in page.Rows.Items)
+        {
+            ws.Cell(row, 1).Value = a.ActivityOn;
+            ws.Cell(row, 2).SetValue(a.ClaimID);
+            ws.Cell(row, 3).Value = a.LabName;
+            ws.Cell(row, 4).Value = a.UserName;
+            ws.Cell(row, 5).Value = a.RoleCode;
+            ws.Cell(row, 6).Value = a.ActionType;
+            ws.Cell(row, 7).Value = a.PreviousValue;
+            ws.Cell(row, 8).Value = a.NewValue;
+            ws.Cell(row, 9).Value = a.Detail;
+            ws.Cell(row, 10).Value = a.IsSystem ? "Yes" : "No";
+            row++;
+        }
+        ws.Column(1).Style.DateFormat.Format = "yyyy-mm-dd hh:mm:ss";
+        ws.SheetView.FreezeRows(1);
+        ws.Columns().AdjustToContents(1, 200);
+        ws.Column(9).Width = Math.Min(ws.Column(9).Width, 90);
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        _logger.LogInformation("AR Workbench audit export lab {LabId} by {User}: {Rows} rows", filter.LabId, user.UserName, page.Rows.Items.Count);
+        return File(ms.ToArray(), XlsxContentType, $"ARWorkbench_AuditLog_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+    }
+
+    // ---- Client portal (T064 / T065 / T066) ------------------------------------------------------
+
+    public const int MaxCipAttachments = 3;
+
+    /// <summary>T064: the client's response with up to 3 attachments (multipart: note + files).</summary>
+    [HttpPost("cip/{caseId:long}/respond")]
+    [RequestSizeLimit(80_000_000)]
+    public async Task<ActionResult> CipRespond([FromRoute] long caseId, [FromQuery] int labId, [FromForm] string? note, [FromForm] List<IFormFile>? files,
+        [FromServices] IArWorkbenchDocumentStore store, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!CanRespondToCip(user!)) return Forbidden(CipReadOnlyMessage(user!));
+        var noteError = ArWorkbenchCipRules.ValidateNote(ArWorkbenchCipAction.Respond, note);
+        if (noteError is not null) return BadRequest(new { message = noteError });
+
+        var uploads = (files ?? []).Where(f => f.Length > 0).ToList();
+        if (uploads.Count > MaxCipAttachments) return BadRequest(new { message = $"Attach at most {MaxCipAttachments} files." });
+        var (maxBytes, allowed) = await AttachmentRulesAsync(labId, ct);
+        foreach (var f in uploads)
+        {
+            var ext = Path.GetExtension(f.FileName).TrimStart('.').ToLowerInvariant();
+            if (!allowed.Contains(ext)) return BadRequest(new { message = $"{Path.GetFileName(f.FileName)}: file type .{ext} is not allowed ({string.Join(", ", allowed)})." });
+            var error = await FileUploadGuard.ValidateDocumentAsync(f, maxBytes, ct);
+            if (error is not null) return BadRequest(new { message = $"{Path.GetFileName(f.FileName)}: {error}" });
+        }
+
+        // Files first; if the response is refused (wrong stage, not found) they are removed again.
+        var stored = new List<(string FileName, string? ContentType, StoredDocument Stored)>();
+        try
+        {
+            foreach (var f in uploads)
+            {
+                await using var s = f.OpenReadStream();
+                stored.Add((Path.GetFileName(f.FileName), f.ContentType, await store.SaveAsync(labId, s, Path.GetExtension(f.FileName), ct)));
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            foreach (var s in stored) store.Delete(s.Stored.Container, s.Stored.Path);
+            _logger.LogError(ex, "AR Workbench attachment storage failed for lab {LabId}", labId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "The attachments could not be stored. Please contact support." });
+        }
+
+        var (outcome, caseNumber, status) = await _repository.CipActionAsync(labId, caseId, ArWorkbenchCipAction.Respond, note!.Trim(), user!, null, ct);
+        if (outcome != "ok")
+        {
+            foreach (var s in stored) store.Delete(s.Stored.Container, s.Stored.Path);
+            return outcome == "notfound"
+                ? NotFound(new { message = "That escalation was not found or is outside your access." })
+                : Conflict(new { message = $"{caseNumber} is {status}; it is no longer waiting for your response." });
+        }
+        if (stored.Count > 0)
+            await _repository.AddCipResponseDocumentsAsync(labId, caseId, stored, user!, HttpContext.Connection.RemoteIpAddress?.ToString(), ct);
+        return Ok(new { message = $"Response submitted for {caseNumber}{(stored.Count > 0 ? $" with {stored.Count} attachment(s)" : "")} - your AR team will review it.", status });
+    }
+
+    /// <summary>Download an attachment (scope-checked, logged). Clients reach only CIP responses.</summary>
+    [HttpGet("documents/{documentId:long}")]
+    public async Task<ActionResult> DownloadDocument([FromRoute] long documentId, [FromQuery] int labId, [FromServices] IArWorkbenchDocumentStore store, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var doc = await _repository.GetDocumentForDownloadAsync(labId, documentId, user!, HttpContext.Connection.RemoteIpAddress?.ToString(), ct);
+        if (doc is null) return NotFound(new { message = "Document not found." });
+        var stream = store.OpenRead(doc.Value.Container, doc.Value.Path);
+        if (stream is null) return NotFound(new { message = "The file is no longer in storage." });
+        return File(stream, string.IsNullOrWhiteSpace(doc.Value.Info.ContentType) ? "application/octet-stream" : doc.Value.Info.ContentType!, doc.Value.Info.FileName);
+    }
+
+    private static readonly string[] CipTemplateHeaders =
+        ["Case ID", "Claim ID", "Patient Acct", "DOS", "Rendering Provider", "Payer", "CIP Category", "Required Information", "Request From AR Team", "Response", "Attachment Notes"];
+
+    /// <summary>T065: CSV of the requests awaiting the client's response, to fill the Response column.</summary>
+    [HttpGet("client-cip/template")]
+    public async Task<ActionResult> ClientCipTemplate([FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!CanRespondToCip(user!)) return Forbidden(CipReadOnlyMessage(user!));
+        var rows = new List<ArWorkbenchCipCaseRow>();
+        for (var page = 1; ; page++)
+        {
+            var q = await _repository.GetCipQueueAsync(new ArWorkbenchCipFilter { LabId = labId, Status = ["Sent to Client"], Page = page, PageSize = 200, SortBy = "requestedOn" }, user!, clientView: true, ct);
+            rows.AddRange(q.Rows.Items);
+            if (q.Rows.Items.Count < 200 || rows.Count >= 5000) break;
+        }
+        var csv = ArWorkbenchCsv.Write(CipTemplateHeaders, rows.Select(r => (IReadOnlyList<string?>)new[]
+        {
+            r.CaseNumber, r.ClaimID, r.PatientID, r.DateOfService?.ToString("MM/dd/yyyy"), r.ReferringProvider, r.PayerName,
+            r.CipCategory, r.RequiredInfo, r.CipComment, string.Empty, string.Empty
+        }));
+        return File(System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(csv)).ToArray(), "text/csv", $"EscalationRequests_ResponseTemplate_{DateTime.Now:yyyyMMdd}.csv");
+    }
+
+    /// <summary>T065: upload the filled template - every row with a Response answers its open request.</summary>
+    [HttpPost("client-cip/template")]
+    [RequestSizeLimit(10_000_000)]
+    public async Task<ActionResult<ArWorkbenchCipBulkResponseResult>> ClientCipUpload([FromQuery] int labId, [FromForm] DenialCodeMasterImportRequest request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!CanRespondToCip(user!)) return Forbidden(CipReadOnlyMessage(user!));
+        var uploadError = await FileUploadGuard.ValidateCsvOrExcelAsync(request.File, 5 * 1024 * 1024, ct);
+        if (uploadError != null) return BadRequest(new { message = uploadError });
+
+        string text;
+        using (var reader = new StreamReader(request.File!.OpenReadStream(), System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+            text = await reader.ReadToEndAsync(ct);
+        var rows = ArWorkbenchCsv.Parse(text);
+        if (rows.Count < 2) return BadRequest(new { message = "That file has no rows." });
+        var header = rows[0].Select(h => h.Trim().ToLowerInvariant()).ToList();
+        int iCase = header.IndexOf("case id"), iResp = header.IndexOf("response"), iNote = header.IndexOf("attachment notes");
+        if (iCase < 0 || iResp < 0) return BadRequest(new { message = "That doesn't look like the response template - the Case ID / Response columns are missing." });
+
+        var index = await _repository.GetClientCipIndexAsync(labId, user!, ct);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new ArWorkbenchCipBulkResponseResult();
+        foreach (var row in rows.Skip(1))
+        {
+            string Cell(int i) => i >= 0 && i < row.Count ? row[i].Trim() : string.Empty;
+            var caseNumber = Cell(iCase);
+            if (caseNumber.Length == 0) continue;
+            if (!index.TryGetValue(caseNumber, out var c)) { result.SkippedNotFound++; continue; }
+            if (!seen.Add(caseNumber) || c.Status != "Sent to Client") { result.SkippedNotOpen++; continue; }
+            var response = Cell(iResp);
+            if (response.Length == 0) { result.SkippedBlank++; continue; }
+            var notes = Cell(iNote);
+            var combined = notes.Length > 0 ? $"{response}\n\nAttachment notes: {notes}" : response;
+            if (combined.Length > ArWorkbenchCipRules.NoteMaxLength) { result.Errors.Add($"{caseNumber}: the response is longer than {ArWorkbenchCipRules.NoteMaxLength:N0} characters."); continue; }
+            var (outcome, _, _) = await _repository.CipActionAsync(labId, c.CipCaseId, ArWorkbenchCipAction.Respond, combined, user!, null, ct);
+            if (outcome == "ok") result.Updated++; else result.SkippedNotOpen++;
+        }
+        var parts = new List<string> { $"{result.Updated:N0} updated" };
+        if (result.SkippedBlank > 0) parts.Add($"{result.SkippedBlank:N0} skipped - no response text");
+        if (result.SkippedNotOpen > 0) parts.Add($"{result.SkippedNotOpen:N0} skipped - already responded or not awaiting a response");
+        if (result.SkippedNotFound > 0) parts.Add($"{result.SkippedNotFound:N0} skipped - case not found (was the Case ID edited?)");
+        if (result.Errors.Count > 0) parts.Add($"{result.Errors.Count:N0} with errors");
+        result.Message = string.Join(" · ", parts) + ".";
+        return Ok(result);
+    }
+
+    private async Task<(long MaxBytes, HashSet<string> Allowed)> AttachmentRulesAsync(int labId, CancellationToken ct)
+    {
+        var settings = (await _repository.GetMasterDataAsync(labId, ct)).Settings;
+        var max = settings.TryGetValue("AttachmentMaxBytes", out var m) && long.TryParse(m, out var mb) && mb > 0 ? mb : 15L * 1024 * 1024;
+        var types = settings.TryGetValue("AttachmentAllowedTypes", out var t) && !string.IsNullOrWhiteSpace(t) ? t : "pdf,png,jpg,jpeg,tif,tiff,gif,doc,docx,xls,xlsx,csv,txt";
+        return (max, types.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => x.TrimStart('.').ToLowerInvariant()).ToHashSet());
+    }
+
+    /// <summary>
+    /// T066: client (viewer) users with whole-client access respond; Clinic and Provider Viewers see
+    /// their clinic's / provider's requests read-only. Administrators may respond on a client's behalf.
+    /// </summary>
+    private static bool CanRespondToCip(ArWorkbenchUserContext user) =>
+        user.SiteAdmin || user.Permissions.ManageSettings
+        || (user.RoleCode == "viewer" && user.Access.Level is not ("clinic" or "provider"));
+
+    private static string CipReadOnlyMessage(ArWorkbenchUserContext user) =>
+        user.RoleCode == "viewer" ? "Your access is limited to a clinic or provider, so escalation requests are read-only for you." : "Only a client user can respond to an escalation.";
+
+    // Viewers (any scope) see their requests; the API decides who may respond.
+    private static bool CanViewClientCip(ArWorkbenchUserContext user) => user.RoleCode == "viewer" || user.SiteAdmin || user.Permissions.ManageSettings;
 
     private static string CipMessage(ArWorkbenchCipAction action, string caseNumber) => action switch
     {
@@ -1566,6 +1843,14 @@ public sealed class ArWorkbenchController : ControllerBase
         var user = await _repository.GetUserContextAsync(labId, CurrentUserName(), SiteAdminRole(), ct);
         if (user is null)
             return (null, Forbidden("You do not have an AR Workbench role. Ask an administrator to give you one of the 'AR Workbench - ...' roles."));
+
+        // T068: a deactivated client stays open only to the administrators who can reactivate it.
+        if ((await _repository.GetInactiveClientLabIdsAsync(ct)).Contains(labId))
+        {
+            if (!user.SiteAdmin && !user.Permissions.ManageSettings)
+                return (null, Forbidden("This client is deactivated in the AR Workbench. Contact your administrator."));
+            user.ClientActive = false;
+        }
         return (user, null);
     }
 

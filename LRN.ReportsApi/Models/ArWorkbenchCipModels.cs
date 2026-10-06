@@ -26,6 +26,7 @@ public sealed class ArWorkbenchCipCaseRow
     public string? PatientID { get; set; }
     public DateTime? DateOfService { get; set; }
     public string? ClinicName { get; set; }
+    public string? ReferringProvider { get; set; }
     public string CaseStatus { get; set; } = string.Empty;
     public int RoundNumber { get; set; }
     public string CipCategory { get; set; } = string.Empty;
@@ -46,6 +47,30 @@ public sealed class ArWorkbenchCipCaseRow
     public string? ClientRespondedBy { get; set; }
     public DateTime? ClientRespondedOn { get; set; }
     public DateTime? ClosedOn { get; set; }
+    /// <summary>Files the client attached to their responses.</summary>
+    public List<ArWorkbenchDocumentInfo> Attachments { get; set; } = new();
+}
+
+public sealed class ArWorkbenchDocumentInfo
+{
+    public long DocumentId { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string? ContentType { get; set; }
+    public long SizeBytes { get; set; }
+    public int? RoundNumber { get; set; }
+    public string UploadedBy { get; set; } = string.Empty;
+    public DateTime UploadedOn { get; set; }
+}
+
+/// <summary>T065 bulk CSV response upload outcome (mockup handleBulkCipUpload).</summary>
+public sealed class ArWorkbenchCipBulkResponseResult
+{
+    public int Updated { get; set; }
+    public int SkippedBlank { get; set; }
+    public int SkippedNotOpen { get; set; }
+    public int SkippedNotFound { get; set; }
+    public List<string> Errors { get; set; } = new();
+    public string Message { get; set; } = string.Empty;
 }
 
 public sealed class ArWorkbenchCipCounts

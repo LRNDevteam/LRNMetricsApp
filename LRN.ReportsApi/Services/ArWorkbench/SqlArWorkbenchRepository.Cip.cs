@@ -29,7 +29,7 @@ public sealed partial class SqlArWorkbenchRepository
     private const string CipRowColumns = @"c.CipCaseId, c.CaseNumber, w.ClaimKey, w.ClaimID, w.LabName, w.PayerName, w.PatientID, w.DateOfService, w.ClinicName,
        c.CaseStatus, c.RoundNumber, c.CipCategory, c.RequiredInfo, c.CipComment, w.InsuranceBalance, w.ArQueueId, q.QueueLabel,
        c.RequestedBy, c.RequestedOn, c.FollowUpDate, c.OriginalAgentUser, c.LastReviewDecision, c.LastReviewNote, c.LastReviewedBy, c.LastReviewedOn,
-       c.ClientResponseText, c.ClientRespondedBy, c.ClientRespondedOn, c.ClosedOn";
+       c.ClientResponseText, c.ClientRespondedBy, c.ClientRespondedOn, c.ClosedOn, w.ReferringProvider";
 
     private static ArWorkbenchCipCaseRow ReadCipRow(SqlDataReader r) => new()
     {
@@ -39,7 +39,7 @@ public sealed partial class SqlArWorkbenchRepository
         InsuranceBalance = r.GetDecimal(14), ArQueueId = Str(r, 15), ArQueueLabel = Str(r, 16), RequestedBy = r.GetString(17),
         RequestedOn = r.GetDateTime(18), FollowUpDate = Date(r, 19), OriginalAgentUser = Str(r, 20), LastReviewDecision = Str(r, 21),
         LastReviewNote = Str(r, 22), LastReviewedBy = Str(r, 23), LastReviewedOn = Date(r, 24), ClientResponseText = Str(r, 25),
-        ClientRespondedBy = Str(r, 26), ClientRespondedOn = Date(r, 27), ClosedOn = Date(r, 28)
+        ClientRespondedBy = Str(r, 26), ClientRespondedOn = Date(r, 27), ClosedOn = Date(r, 28), ReferringProvider = Str(r, 29)
     };
 
     /// <param name="clientView">The client's Escalation Requests: only cases that reached the client
@@ -110,6 +110,10 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         if (await r.ReadAsync(ct)) queue.Rows.TotalCount = r.GetInt32(0);
         await r.NextResultAsync(ct);
         while (await r.ReadAsync(ct)) queue.Rows.Items.Add(ReadCipRow(r));
+        await r.DisposeAsync();
+
+        var docs = await GetCipDocumentsAsync(filter.LabId, queue.Rows.Items.Select(i => i.CipCaseId).ToList(), ct);
+        foreach (var item in queue.Rows.Items) item.Attachments = docs.GetValueOrDefault(item.CipCaseId) ?? new();
         return queue;
     }
 
@@ -142,6 +146,9 @@ WHERE c.ClaimKey = @K ORDER BY h.ActionOn, h.CipCaseHistoryId;", connection);
                 ActionName = r.GetString(5), Note = Str(r, 6), IsBulkAction = r.GetBoolean(7)
             });
         }
+        await r.DisposeAsync();
+        var docs = await GetCipDocumentsAsync(labId, cases.Select(c => c.Case.CipCaseId).ToList(), ct);
+        foreach (var c in cases) c.Case.Attachments = docs.GetValueOrDefault(c.Case.CipCaseId) ?? new();
         return cases;
     }
 

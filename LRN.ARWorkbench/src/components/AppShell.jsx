@@ -172,6 +172,11 @@ export default function AppShell() {
           </div>
         </header>
         <main className="arwb-view-container">
+          {user?.clientActive === false && (
+            <div className="arwb-alert" role="status" style={{ marginBottom: 14 }}>
+              <span className="grow">This client is <b>deactivated</b> in the AR Workbench: only administrators can open it, and the nightly snapshot skips it. Reactivate it in Client Management.</span>
+            </div>
+          )}
           <Outlet />
         </main>
       </div>

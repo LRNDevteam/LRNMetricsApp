@@ -8,6 +8,7 @@ import { Badge, ErrorBox, Notice } from '../components/Status';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
 import { arQueueBadgeClass, fmt } from '../utils/format';
+import { Attachments, CIP_BADGE } from '../components/CipShared';
 
 // CIP - Client Escalations (mockup App.views['cip-escalations']) for Team Lead / RCM Manager /
 // Administrator, and the client's Escalation Requests (App.views['client-cip']), one component:
@@ -16,10 +17,6 @@ import { arQueueBadgeClass, fmt } from '../utils/format';
 //             bulk approve / bulk send back over a mixed selection (each case by its own stage).
 //   client:   the requests sent to them; Respond with the requested information.
 
-export const CIP_BADGE = {
-  'Awaiting QA': 'arwb-badge-neutral', 'Pending Approval': 'arwb-badge-warning', 'Sent to Client': 'arwb-badge-info',
-  'Client Responded': 'arwb-badge-purple', 'Returned to Agent': 'arwb-badge-good'
-};
 const INTERNAL_STATUSES = ['Pending Approval', 'Sent to Client', 'Client Responded', 'Returned to Agent'];
 const CLIENT_STATUSES = ['Sent to Client', 'Client Responded', 'Returned to Agent'];
 
@@ -209,6 +206,8 @@ export default function CipPage({ view = 'internal' }) {
       render: (r) => (r.clientResponseText
         ? <span><span className="arwb-clamp-2">{r.clientResponseText}</span><div className="arwb-hint">{r.clientRespondedBy} · {fmt.date(r.clientRespondedOn)}</div></span>
         : <span className="text-muted-ink">—</span>) },
+    { key: 'attachments', label: 'Attachments', csv: (r) => (r.attachments || []).map((a) => a.fileName).join('; '),
+      render: (r) => <Attachments labId={labId} files={r.attachments} /> },
     { key: 'action', label: 'Action', align: 'end', csv: () => '',
       render: (r) => {
         const btn = (label, mode, primary = true) => (
@@ -330,5 +329,3 @@ export default function CipPage({ view = 'internal' }) {
     </>
   );
 }
-
-export function ClientCipPage() { return <CipPage view="client" />; }

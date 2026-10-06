@@ -45,6 +45,8 @@ public sealed class ArWorkbenchUserContext
     public List<string> RoleNames { get; set; } = new();
     /// <summary>True for Super Admin / Admin / LRN Admin / Lab Admin: every page opens, whatever the RoleCode's menu.</summary>
     public bool SiteAdmin { get; set; }
+    /// <summary>False when this lab is deactivated in Client Management (only admins reach it then).</summary>
+    public bool ClientActive { get; set; } = true;
     public ArWorkbenchPermissions Permissions { get; set; } = new();
     public ArWorkbenchAccessScope Access { get; set; } = new();
 }

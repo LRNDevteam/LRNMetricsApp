@@ -4,7 +4,10 @@ import { ErrorBox, Loading } from './components/Status';
 import { allows, REDIRECTS, ROUTES } from './config/navigation';
 import { useWorkbench, WorkbenchProvider } from './context/WorkbenchContext';
 import AssignmentPage from './pages/AssignmentPage';
-import CipPage, { ClientCipPage } from './pages/CipPage';
+import AuditPage from './pages/AuditPage';
+import CipPage from './pages/CipPage';
+import ClientCipPage from './pages/ClientCipPage';
+import ClientsPage from './pages/ClientsPage';
 import ClaimDetailPage from './pages/ClaimDetailPage';
 import CodeMasterPage from './pages/CodeMasterPage';
 import DashboardPage from './pages/DashboardPage';
@@ -26,6 +29,8 @@ const SCREENS = {
   followup: FollowUpPage,
   users: UsersPage,
   qa: QaPage,
+  audit: AuditPage,
+  clients: ClientsPage,
   cip: CipPage,
   'client-cip': ClientCipPage,
   'data-processing': DataProcessingPage,

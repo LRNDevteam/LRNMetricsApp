@@ -97,6 +97,8 @@ builder.Services.AddScoped<LRN.ReportsApi.Services.ArReports.IArActivityReportRe
 // AR Workbench (new denial application; [arwb] schema per lab, React app LRN.ARWorkbench).
 builder.Services.AddScoped<LRN.ReportsApi.Services.ArWorkbench.IArWorkbenchRepository,
                            LRN.ReportsApi.Services.ArWorkbench.SqlArWorkbenchRepository>();
+// AR Workbench attachments (CIP responses): local-disk store until Azure Blob is provisioned.
+builder.Services.AddSingleton<LRN.ReportsApi.Services.ArWorkbench.IArWorkbenchDocumentStore, LRN.ReportsApi.Services.ArWorkbench.LocalArWorkbenchDocumentStore>();
 // AR Workbench nightly queue snapshot (T038): recalculate + snapshot each lab once a day.
 builder.Services.Configure<LRN.ReportsApi.Services.ArWorkbench.ArWorkbenchSnapshotOptions>(builder.Configuration.GetSection("ArWorkbenchSnapshots"));
 builder.Services.AddHostedService<LRN.ReportsApi.Services.ArWorkbench.ArWorkbenchSnapshotScheduler>();

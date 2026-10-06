@@ -153,8 +153,12 @@ public sealed class ArWorkbenchSnapshotScheduler : BackgroundService
         if (_options.DueDate(DateTime.UtcNow) is not { } date) return;
         using var scope = _scopeFactory.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IArWorkbenchRepository>();
+        IReadOnlySet<int> inactive;
+        try { inactive = await repo.GetInactiveClientLabIdsAsync(ct); }
+        catch (SqlException ex) { _logger.LogWarning(ex, "AR Workbench snapshot: client activation lookup failed; taking every lab."); inactive = new HashSet<int>(); }
         foreach (var labId in repo.GetConfiguredLabIds())
         {
+            if (inactive.Contains(labId)) continue;     // deactivated client (T068)
             try
             {
                 if (await repo.HasSnapshotAsync(labId, date, ct)) continue;
