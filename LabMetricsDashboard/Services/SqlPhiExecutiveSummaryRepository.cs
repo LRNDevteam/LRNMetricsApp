@@ -42,10 +42,10 @@ public sealed class SqlPhiExecutiveSummaryRepository
         "L_A3",
         "L_A4","L_A4a","L_A4b","L_A4c",
         "L_A5","L_A5a","L_A5b","L_A5c",
-        "L_A6","L_A6a",
+        "L_A6","L_A6a","L_A6b","L_A6c",
         "L_A7","L_A7a","L_A7b","L_A7c",
         "L_B",
-        "L_B1","L_B1a","L_B1b",
+        "L_B1","L_B1a","L_B1b","L_B1c",
         "L_B2","L_B3","L_B4",
     ];
 

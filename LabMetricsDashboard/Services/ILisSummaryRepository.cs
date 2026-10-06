@@ -21,8 +21,31 @@ public sealed record LisLineExportPlan(
     IReadOnlyList<string> AdditionalFieldKeys,
     int TotalRows);
 
+/// <summary>Outcome of one LIS Summary aggregate refresh (see <see cref="LisSummaryAggregateLabs"/>).</summary>
+public sealed record LisSummaryAggregateRefreshResult(
+    bool Refreshed,
+    string Message,
+    int SummaryRows,
+    int KeyMetricRows,
+    int FilterOptionRows,
+    string SourceFileName,
+    long ElapsedMs);
+
 public interface ILisSummaryRepository
 {
+	/// <summary>
+	/// Rebuilds the lab's LIS Summary aggregate tables from dbo.LIMSMaster with the same
+	/// grouping logic the page uses live. With <paramref name="onlyIfLimsChanged"/> the
+	/// rebuild is skipped when LIMSMaster's row count / latest CreatedOn / latest RunId
+	/// match the last refresh. Labs without aggregate tables return Refreshed = false.
+	/// </summary>
+	Task<LisSummaryAggregateRefreshResult> RefreshSummaryAggregateAsync(
+		string connectionString,
+		string labName,
+		int? labId = null,
+		bool onlyIfLimsChanged = true,
+		CancellationToken ct = default);
+
 	Task<LisSummaryResult> GetLisSummaryAsync(
 		string connectionString,
 		string labName,

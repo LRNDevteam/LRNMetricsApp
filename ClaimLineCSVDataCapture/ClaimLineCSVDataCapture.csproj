@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net9.0</TargetFramework>
@@ -28,6 +28,16 @@
     <Compile Remove="Services\ProductionReportExcelExportBuilder.cs" />
     <Compile Remove="Services\SqlProductionReportRepository.cs" />
     <Compile Remove="Services\WeekRangeHelper.cs" />
+  </ItemGroup>
+
+  <!-- LIS Summary aggregate refresh reuses the dashboard's LIS repository as-is. -->
+  <ItemGroup>
+    <Compile Include="..\LabMetricsDashboard\Services\SqlLisSummaryRepository.cs" Link="Shared\LisSummary\SqlLisSummaryRepository.cs" />
+    <Compile Include="..\LabMetricsDashboard\Services\ILisSummaryRepository.cs" Link="Shared\LisSummary\ILisSummaryRepository.cs" />
+    <Compile Include="..\LabMetricsDashboard\Services\LisSummaryAggregateLabs.cs" Link="Shared\LisSummary\LisSummaryAggregateLabs.cs" />
+    <Compile Include="..\LabMetricsDashboard\Services\FirstPaintLog.cs" Link="Shared\LisSummary\FirstPaintLog.cs" />
+    <Compile Include="..\LabMetricsDashboard\Models\LisSummaryViewModel.cs" Link="Shared\LisSummary\LisSummaryViewModel.cs" />
+    <Compile Include="..\LabMetricsDashboard\Models\LabOption.cs" Link="Shared\LisSummary\LabOption.cs" />
   </ItemGroup>
 
   <ItemGroup>

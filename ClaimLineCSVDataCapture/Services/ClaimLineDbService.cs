@@ -419,6 +419,28 @@ public sealed class ClaimLineDbService
     }
 
     /// <summary>
+    /// Runs all Analyze Pathology production report stored procedures after ingestion.
+    /// Prefix AnP_. Production Summary follows the client logic sheet (billed = BilledStatus,
+    /// Monthly/Weekly by First Billed Date, Mon–Sun weeks); the rest mirror VariantX.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshAnalyzePathologyProductionReports()
+    {
+        string[] procedures =
+        [
+            "dbo.usp_RefreshAnP_MonthlyBilledProductionSummary",
+            "dbo.usp_RefreshAnP_WeeklyBilledProductionSummary",
+            "dbo.usp_RefreshAnP_PayerBreakdown",
+            "dbo.usp_RefreshAnP_PayerByPanel",
+            "dbo.usp_RefreshAnP_PanelBreakdownWithPayers",
+            "dbo.usp_RefreshAnP_UnbilledAging",
+            "dbo.usp_RefreshAnP_CPTBreakdown",
+            "dbo.usp_RefreshAnP_CodingBreakdown_Unbilled",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>
     /// Runs all PCRLabsofAmerica-specific production report stored procedures after ingestion.
     /// Each SP is executed independently so a failure in one does not block the others.
     /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging.
@@ -638,6 +660,7 @@ public sealed class ClaimLineDbService
             ["Elixir_LRN"]       = "Elix",
             ["VariantX"]         = "VarX",
             ["VariantX_LRN"]     = "VarX",
+            ["AnalyzePathology"] = "AnP",
             ["NorthWest"]        = "NW",
             ["NWL"]              = "NW",
             ["PCRLabsofAmerica"] = "PCR",
@@ -902,6 +925,10 @@ public sealed class ClaimLineDbService
     /// <summary>Refreshes the VariantX Collection Summary aggregates (Elixir clone).</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshVariantXCollectionReports()
         => RunProductionReportSPs(BuildCollectionSummarySpList("VarX"));
+
+    /// <summary>Refreshes the Analyze Pathology Collection Summary aggregates (VariantX logic).</summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshAnalyzePathologyCollectionReports()
+        => RunProductionReportSPs(BuildCollectionSummarySpList("AnP"));
 
     /// <summary>Refreshes the NorthWest Collection Summary aggregates.</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshNorthWestCollectionReports()

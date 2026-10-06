@@ -53,6 +53,7 @@ public sealed class ExecutiveSummaryController : Controller
             ["Elixir_LRN"]       = "Elix",
             ["VariantX"]         = "VarX",
             ["VariantX_LRN"]     = "VarX",
+            ["AnalyzePathology"] = "AnP",
             ["NorthWest"]        = "NW",
             ["NWL"]              = "NW",
             ["PCRLabsofAmerica"] = "PCR",

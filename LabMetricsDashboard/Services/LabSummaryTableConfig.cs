@@ -51,6 +51,12 @@ public record LabSummaryTableConfig(
     /// </summary>
     public bool SupportsFilteredMonthlyWeeklySp { get; init; }
 
+    /// <summary>
+    /// <c>true</c> when the Monthly/Weekly Production Summary panels and their
+    /// top-3 payers are ordered by total charge amount instead of claim count.
+    /// </summary>
+    public bool SortByCharges { get; init; }
+
     // ?? Static per-lab configs ????????????????????????????????????????????
 
     /// <summary>Certus Labs � prefix <c>Cert_</c>. Row key = PayerName. Supports coding tables/read SPs.</summary>
@@ -73,6 +79,11 @@ public record LabSummaryTableConfig(
         new("VarX_", "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
         { SupportsFilteredMonthlyWeeklySp = true };
 
+    /// <summary>Analyze Pathology — prefix <c>AnP_</c> (VariantX clone; Production Summary per client sheet, Mon–Sun weeks).</summary>
+    public static readonly LabSummaryTableConfig AnalyzePathology =
+        new("AnP_",  "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
+        { SupportsFilteredMonthlyWeeklySp = true };
+
     /// <summary>PCR Labs of America � prefix <c>PCR_</c>. Monthly/Weekly read SPs accept filter parameters.</summary>
     public static readonly LabSummaryTableConfig PCRLabsofAmerica =
         new("PCR_",  "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
@@ -86,7 +97,7 @@ public record LabSummaryTableConfig(
     /// <summary>Rising Tides � prefix <c>RT_</c>.</summary>
     public static readonly LabSummaryTableConfig RisingTides =
         new("RT_",   "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
-        { SupportsFilteredMonthlyWeeklySp = true };
+        { SupportsFilteredMonthlyWeeklySp = true, SortByCharges = true };
 
     /// <summary>Phi Life – prefix <c>Phi_</c>. Supports filtered monthly/weekly SPs.</summary>
     public static readonly LabSummaryTableConfig PhiLife =

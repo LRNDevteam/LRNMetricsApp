@@ -20,6 +20,7 @@
 //                   - dataChanged = (RunIds differ) OR (ClaimLineRefresh = true)
 //      STEP 12    ClientPaidList .xlsx        (RisingTides only)
 //      STEP 13    TransactionDetail .xlsx     (BeechTree only)
+//      STEP 13b   LIS Summary aggregate       (AnalyzePathology, on new LIMS file)
 //      STEP 14    No-change exit / OnNewFile Executive Summary refresh
 //      STEP 15    BTWOSummary, decimal cleanup, dashboard, lab report SPs
 //      STEP 16    Executive Summary refresh
@@ -728,6 +729,16 @@ foreach (var lab in labConfigs)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // STEP 13b — LIS Summary aggregate (Analyze Pathology)
+    //
+    // Runs regardless of the STEP 8 outcome: LIMS files arrive independently of
+    // Claim/Line runs. The refresh compares dbo.LIMSMaster's signature with the
+    // last aggregate refresh and rebuilds only when a new LIMS file landed
+    // (always when ClaimLineRefresh=true).
+    // ─────────────────────────────────────────────────────────────────────────
+    LisSummaryAggregateRefresher.Run(log, lab, lab.DbConnectionString);
+
+    // ─────────────────────────────────────────────────────────────────────────
     // STEP 14 — No-change exit
     //
     // STEP 8 found no new RunId and ClaimLineRefresh was false, so there is no
@@ -1055,6 +1066,37 @@ foreach (var lab in labConfigs)
             }
 
             collSummaryResults = RunCollectionSummary(log, db, "VarX CS", db.RefreshVariantXCollectionReports);
+        }
+
+        // ── Analyze Pathology production report aggregates ────────────────────
+        // Production Summary per client logic sheet; other reports mirror VariantX. Prefix AnP_.
+        if (lab.LabName.Equals("AnalyzePathology", StringComparison.OrdinalIgnoreCase))
+        {
+            log.Info($"  [AnP Reports] Running Analyze Pathology production report SPs…");
+            try
+            {
+                var anpResults = db.RefreshAnalyzePathologyProductionReports();
+                prodSummaryResults = anpResults;
+                foreach (var (spName, elapsedMs, error) in anpResults)
+                {
+                    if (error is null)
+                        log.Info($"  [AnP Reports] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [AnP Reports] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+
+                var failed = anpResults.Count(r => r.Error is not null);
+                var passed = anpResults.Count(r => r.Error is null);
+                log.Info($"  [AnP Reports] {passed}/{anpResults.Count} SP(s) succeeded.");
+                if (failed > 0)
+                    log.Warn($"  [AnP Reports] {failed} SP(s) failed — see errors above.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [AnP Reports] Unexpected error running Analyze Pathology production report SPs: {ex.Message}");
+            }
+
+            collSummaryResults = RunCollectionSummary(log, db, "AnP CS", db.RefreshAnalyzePathologyCollectionReports);
         }
 
         // ── PCRLabsofAmerica production report aggregates ─────────────────────
@@ -2040,6 +2082,9 @@ static (string? Rule, string? WeekRule, string? WeekRange) ResolveProductionSumm
         var name when name.Equals("VariantX", StringComparison.OrdinalIgnoreCase)
                 => ("Rule5", "Rule5", "Wed to Tue"),
 
+        var name when name.Equals("AnalyzePathology", StringComparison.OrdinalIgnoreCase)
+                => ("Rule5", "Rule5", "Mon to Sun"),
+
         var name when name.Equals("PCRLabsofAmerica", StringComparison.OrdinalIgnoreCase)
             || name.Equals("PCRLAPSOfAmerica", StringComparison.OrdinalIgnoreCase)
             || name.Equals("Beech_Tree", StringComparison.OrdinalIgnoreCase)
@@ -2114,6 +2159,7 @@ static string? GetCollectionSummarySpPrefix(ClaimLineCSVDataCapture.Models.LabCo
     if (name.Equals("Cove",             StringComparison.OrdinalIgnoreCase)) return "Cove";
     if (name.Equals("Elixir",           StringComparison.OrdinalIgnoreCase)) return "Elix";
     if (name.Equals("VariantX",         StringComparison.OrdinalIgnoreCase)) return "VarX";
+    if (name.Equals("AnalyzePathology", StringComparison.OrdinalIgnoreCase)) return "AnP";
     if (name.Equals("PCRLabsofAmerica", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("PCR_Labs_of_America", StringComparison.OrdinalIgnoreCase)) return "PCR";
     if (name.Equals("PhiLife",          StringComparison.OrdinalIgnoreCase) ||

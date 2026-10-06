@@ -36,6 +36,9 @@ public static class LabCollectionPrefix
         // VariantX is an Elixir clone (Rule5 / Wed–Tue); aggregate prefix VarX_*.
         ["VariantX"]           = "VarX",
         ["VariantX_LRN"]       = "VarX",
+        // Analyze Pathology: VariantX clone; Production Summary follows the client sheet. Prefix AnP_*.
+        ["AnalyzePathology"]   = "AnP",
+        ["Analyze_Pathology"]  = "AnP",
         ["PhiLife"]            = "Phi",
         ["Phi_Life"]           = "Phi",
         ["PCRLabsofAmerica"]   = "PCR",
@@ -90,7 +93,7 @@ public static class LabCollectionPrefix
     /// the caller, so a lab listed here must have the DateOfService version of its SPs deployed.
     /// </summary>
     public static bool UsesDateOfServiceAvgPayments(string? labName) =>
-        GetPrefix(labName) is "Elix" or "VarX" or "Cove";
+        GetPrefix(labName) is "Elix" or "VarX" or "AnP" or "Cove";
 
     /// <summary>
     /// Labs with the client "Genetics vs ID Avg" summary. Requires

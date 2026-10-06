@@ -37,6 +37,8 @@ public static class LabClaimLineColumnCatalog
         ["VariantX"] = "VariantX",
         ["Variant_X"] = "VariantX",
         ["VariantX_LRN"] = "VariantX",
+        ["AnalyzePathology"] = "AnalyzePathology",
+        ["Analyze_Pathology"] = "AnalyzePathology",
     };
 
     private static readonly string[] DefaultClaim =
@@ -288,6 +290,21 @@ public static class LabClaimLineColumnCatalog
                 "Bucket30Count", "Bucket30Amount", "Bucket60Count", "Bucket60Amount", "ClaimStatus", "DaystoDOS",
                 "RollingDays", "DaystoBill", "DaystoPost", "InsertedDateTime", "DenialCodeNormalized", "DenialDescription"
             ],
+        ["AnalyzePathology"] =
+            [
+                "LabID", "LabName", "ClaimID", "AccessionNumber", "PayerName_Raw", "PayerName",
+                "PayerType", "ReferringProvider", "BillingProvider", "ClinicName", "SalesRepname", "PatientID",
+                "PatientName", "PatientDOB", "SubscriberId", "DateofService", "ChargeEnteredDate", "FirstBilledDate",
+                "LastBilledDate", "BilledWeek", "BilledStatus", "Panelname", "CPTCodeXUnitsXModifier", "CPTCodeList",
+                "UnitsList", "ModifierList", "CptWithUnits", "Modifier", "POS", "ChargeAmount",
+                "InsurancePayment", "PatientPayment", "TotalPayments", "InsuranceAdjustments", "PatientAdjustments", "TotalAdjustments",
+                "InsuranceBalance", "PatientBalance", "TotalBalance", "TotalInsuranceBalance", "OtherBalance", "ChargeToDate",
+                "ChargeTotalPayments", "ChargeTotalAdjustments", "CheckDate", "PostedWeek", "ClaimStatus", "DenialCode",
+                "DenialCodeNormalized", "DenialDescription", "DenialDate", "ICDCode", "ICDPointer", "AgingDOS",
+                "PaymentPercent", "FullyPaidCount", "FullyPaidAmount", "Adjudicated", "AdjudicatedAmount", "Bucket30",
+                "Bucket30Amount", "Bucket60", "Bucket60Amount", "Facility", "OrderingProviderID", "ClaimUID",
+                "DaystoDOS", "RollingDays", "DaystoBill", "DaystoPost", "InsertedDateTime"
+            ],
     };
 
     private static readonly Dictionary<string, string[]> LineByLab = new(StringComparer.OrdinalIgnoreCase)
@@ -506,6 +523,20 @@ public static class LabClaimLineColumnCatalog
                 "CreatedBy", "UpdatedOn", "UpdatedBy", "ClaimStatus", "PayStatus", "DaystoDOS",
                 "RollingDays", "DaystoBill", "DaystoPost", "ICDPointer", "PaymentPostedDate", "UID",
                 "Source", "InsuranceBalance_Decimal", "InsertedDateTime"
+            ],
+        ["AnalyzePathology"] =
+            [
+                "LabID", "LabName", "ClaimID", "AccessionNumber", "LineLevelUID", "PayerName_Raw",
+                "PayerName", "PayerType", "ReferringProvider", "BillingProvider", "ClinicName", "PatientID",
+                "PatientName", "PatientDOB", "SubscriberId", "DateofService", "ChargeEnteredDate", "FirstBilledDate",
+                "LastBilledDate", "Panelname", "CPTCode", "Units", "Modifier", "CPTUnits",
+                "CPTMOD", "CPTs", "ClaimCPTs", "CptWithUnits", "CPTModifier", "POS",
+                "ChargeAmount", "InsurancePayment", "PatientPayment", "TotalPayments", "InsuranceAdjustments", "PatientAdjustments",
+                "TotalAdjustments", "InsuranceBalance", "PatientBalance", "TotalBalance", "TotalInsuranceBalance", "OtherBalance",
+                "ChargeToDate", "ChargeTotalPayments", "ChargeTotalAdjustments", "CheckDate", "PostingDate", "PaymentPostedDate",
+                "PostedWeek", "ClaimStatus", "PayStatus", "DenialCode", "DenialCodeNormalized", "DenialDescription",
+                "DenialDate", "ICDCode", "ICDPointer", "Facility", "OrderingProviderID", "TF",
+                "DaystoDOS", "RollingDays", "DaystoBill", "DaystoPost", "InsertedDateTime"
             ],
     };
 

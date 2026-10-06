@@ -34,6 +34,9 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
     /// <inheritdoc/>
     public bool SupportsFilteredMonthlyWeeklySp => _cfg.SupportsFilteredMonthlyWeeklySp;
 
+    private decimal RankKey(IEnumerable<(int c, decimal ch)> cells) =>
+        _cfg.SortByCharges ? cells.Sum(v => v.ch) : cells.Sum(v => v.c);
+
     /// <inheritdoc/>
     public bool IsCertus => string.Equals(_cfg.Prefix, "Cert_", StringComparison.OrdinalIgnoreCase);
 
@@ -180,7 +183,9 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                 }
             }
 
-            foreach (var (panel, pm) in panelMonth.OrderByDescending(x => x.Value.Values.Sum(v => v.c)))
+            foreach (var (panel, pm) in panelMonth
+                         .OrderByDescending(x => RankKey(x.Value.Values))
+                         .ThenByDescending(x => x.Value.Values.Sum(v => v.c)))
             {
                 var byMonth = pm.ToDictionary(kv => kv.Key, kv => new ProductionMonthCell(kv.Value.c, kv.Value.ch));
 
@@ -190,11 +195,12 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                     else grandByMonth[mk] = new ProductionMonthCell(g.ClaimCount + cell.ClaimCount, g.BilledCharges + cell.BilledCharges);
                 }
 
-                // Top 3 payers ranked by total claim count across all months.
+                // Top 3 payers ranked by total claim count (or charges when SortByCharges) across all months.
                 var topPayers = payerMonthMap.TryGetValue(panel, out var payM)
                     ? payM
                         .Select(kv => (Payer: kv.Key, ByMonth: kv.Value, Total: kv.Value.Values.Sum(v => v.c)))
-                        .OrderByDescending(x => x.Total)
+                        .OrderByDescending(x => RankKey(x.ByMonth.Values))
+                        .ThenByDescending(x => x.Total)
                         .Take(3)
                         .Select(x => new ProductionPayerDrillDown
                         {
@@ -324,7 +330,9 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                 }
             }
 
-            foreach (var (panel, pw) in panelWeek.OrderByDescending(x => x.Value.Values.Sum(v => v.c)))
+            foreach (var (panel, pw) in panelWeek
+                         .OrderByDescending(x => RankKey(x.Value.Values))
+                         .ThenByDescending(x => x.Value.Values.Sum(v => v.c)))
             {
                 var byWeek = pw.ToDictionary(kv => kv.Key, kv => new ProductionMonthCell(kv.Value.c, kv.Value.ch));
 
@@ -334,11 +342,12 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                     else grandByWeek[wk] = new ProductionMonthCell(g.ClaimCount + cell.ClaimCount, g.BilledCharges + cell.BilledCharges);
                 }
 
-                // Top 3 payers ranked by total claim count across all 4 weeks.
+                // Top 3 payers ranked by total claim count (or charges when SortByCharges) across all 4 weeks.
                 var topPayers = payerWeekMap.TryGetValue(panel, out var payW)
                     ? payW
                         .Select(kv => (Payer: kv.Key, ByWeek: kv.Value, Total: kv.Value.Values.Sum(v => v.c)))
-                        .OrderByDescending(x => x.Total)
+                        .OrderByDescending(x => RankKey(x.ByWeek.Values))
+                        .ThenByDescending(x => x.Total)
                         .Take(3)
                         .Select(x => new WeeklyPayerDrillDown
                         {

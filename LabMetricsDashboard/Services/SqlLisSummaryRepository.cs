@@ -515,13 +515,18 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 		var profile = ResolveProfile(labName, labId, columns, dateType);
 		var filterColumns = ResolveFilterColumns(columns, profile.LogicSheetName);
-		var sourceFileName = await GetLatestSourceFileNameAsync(conn, columns, ct);
+		var aggregate = await TryGetAggregateStateAsync(conn, labName, labId, ct);
+		var sourceFileName = aggregate?.SourceFileName ?? await GetLatestSourceFileNameAsync(conn, columns, ct);
 		FirstPaintLog.Write(_logger, "LIS", labName, "summary-sourcefile", sw.ElapsedMilliseconds,
-			$"dateCol={profile.DateColumn} logic={profile.LogicSheetName}");
+			$"dateCol={profile.DateColumn} logic={profile.LogicSheetName} source={(aggregate is null ? "live" : "aggregate")}");
 
-		var raw = await LoadDynamicGroupsAsync(
-			conn, profile, filterColumns, columnTypes, dateFrom, dateTo,
-			panel, clinic, refPhy, salesRep, collector, ct);
+		var raw = aggregate is not null
+			? await LoadAggregateGroupsAsync(
+				conn, aggregate.Prefix, dateType, profile, filterColumns, dateFrom, dateTo,
+				panel, clinic, refPhy, salesRep, collector, ct)
+			: await LoadDynamicGroupsAsync(
+				conn, profile, filterColumns, columnTypes, dateFrom, dateTo,
+				panel, clinic, refPhy, salesRep, collector, ct);
 		FirstPaintLog.Write(_logger, "LIS", labName, "summary-groups", sw.ElapsedMilliseconds, $"rawGroups={raw.Count}");
 
 		var summaryRaw = UsesBlankIncorrectDosSummary(profile.LogicSheetName)
@@ -561,7 +566,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			var kmSw = Stopwatch.StartNew();
 			keyMetrics = await LoadKeyMetricsAsync(
 				conn, columns, columnTypes, profile.LogicSheetName, filterColumns, dateFrom, dateTo,
-				panel, clinic, refPhy, salesRep, collector, ct);
+				panel, clinic, refPhy, salesRep, collector, ct, aggregate?.Prefix);
 			FirstPaintLog.Write(_logger, "LIS", labName, "summary-keymetrics", kmSw.ElapsedMilliseconds,
 				$"months={keyMetrics?.Months.Count ?? 0}");
 		}
@@ -610,9 +615,10 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 		var logicSheet = ResolveLogicSheet(labName, labId);
 		var filterColumns = ResolveFilterColumns(columns, logicSheet);
+		var aggregate = await TryGetAggregateStateAsync(conn, labName, labId, ct);
 		var result = await LoadKeyMetricsAsync(
 			conn, columns, columnTypes, logicSheet, filterColumns, dateFrom, dateTo,
-			panel, clinic, refPhy, salesRep, collector, ct);
+			panel, clinic, refPhy, salesRep, collector, ct, aggregate?.Prefix);
 
 		FirstPaintLog.Write(_logger, "LIS", labName, "keymetrics-done", sw.ElapsedMilliseconds,
 			$"months={result?.Months.Count ?? 0}");
@@ -678,6 +684,12 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 		await using var conn = new SqlConnection(connectionString);
 		await conn.OpenAsync(ct);
+
+		var aggregate = await TryGetAggregateStateAsync(conn, labName, null, ct);
+		if (aggregate is not null)
+		{
+			return await LoadAggregateFilterOptionsAsync(conn, aggregate.Prefix, ct);
+		}
 
 		var columns = await GetLimsMasterColumnsAsync(conn, ct);
 		var logicSheet = ResolveLogicSheet(labName, null);
@@ -1148,6 +1160,47 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		return new DimensionProfile(logicSheet, dateColumn, countDistinctColumn, incorrectDosColumn, fields);
 	}
 
+	/// <summary>
+	/// The LIMSMaster grouping shared by the live pivot query and the aggregate refresh:
+	/// date expression, row filters that always apply, field list, GROUP BY columns and
+	/// the sample-count expression.
+	/// </summary>
+	private sealed record GroupQueryParts(
+		string DateExpr,
+		List<string> BaseWhere,
+		List<string> FieldList,
+		List<string> GroupByDimensions,
+		string CountExpr);
+
+	private static GroupQueryParts BuildGroupQueryParts(DimensionProfile profile, IReadOnlyDictionary<string, string> columnTypes)
+	{
+		var dateExpr = BuildDateExpr(profile.DateColumn, columnTypes);
+		var where = new List<string>
+		{
+			$"{dateExpr} IS NOT NULL",
+			$"YEAR({dateExpr}) > 1900"
+		};
+
+		if (RequiresBlankIncorrectDos(profile.LogicSheetName) && !string.IsNullOrWhiteSpace(profile.IncorrectDosColumn))
+		{
+			where.Add($"{TextExpr(profile.IncorrectDosColumn)} = ''");
+		}
+
+		var fieldList = profile.FieldColumns.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+
+		var groupByDimensions = profile.FieldColumns.Values
+			.Where(c => !string.IsNullOrWhiteSpace(c))
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.Select(c => TextExpr(c))
+			.ToList();
+
+		var countExpr = !string.IsNullOrWhiteSpace(profile.CountDistinctColumn)
+			? $"COUNT(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(profile.CountDistinctColumn)}))), ''))"
+			: "COUNT(*)";
+
+		return new GroupQueryParts(dateExpr, where, fieldList, groupByDimensions, countExpr);
+	}
+
 	private static async Task<List<RawLisGroup>> LoadDynamicGroupsAsync(
 		SqlConnection conn,
 		DimensionProfile profile,
@@ -1162,12 +1215,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		string? collector,
 		CancellationToken ct)
 	{
-		var dateExpr = BuildDateExpr(profile.DateColumn, columnTypes);
-		var where = new List<string>
-		{
-			$"{dateExpr} IS NOT NULL",
-			$"YEAR({dateExpr}) > 1900"
-		};
+		var parts = BuildGroupQueryParts(profile, columnTypes);
+		var dateExpr = parts.DateExpr;
+		var where = new List<string>(parts.BaseWhere);
 
 		// No default date window — blank From/To means ALL records (user requirement).
 		var parameters = new List<SqlParameter>();
@@ -1189,36 +1239,21 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		AddOptionalFilter(where, parameters, filterColumns.SalesRepExpression, "@salesRep", salesRep);
 		AddOptionalFilter(where, parameters, filterColumns.CollectorExpression, "@collector", collector);
 
-		if (RequiresBlankIncorrectDos(profile.LogicSheetName) && !string.IsNullOrWhiteSpace(profile.IncorrectDosColumn))
-		{
-			where.Add($"{TextExpr(profile.IncorrectDosColumn)} = ''");
-		}
-
-		var fieldList = profile.FieldColumns.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+		var fieldList = parts.FieldList;
 		var selectDimensions = fieldList
 			.Select(f => TextExpr(profile.FieldColumns[f], FieldAlias(f)))
 			.ToList();
 
-		var groupByDimensions = profile.FieldColumns.Values
-			.Where(c => !string.IsNullOrWhiteSpace(c))
-			.Distinct(StringComparer.OrdinalIgnoreCase)
-			.Select(c => TextExpr(c))
-			.ToList();
-
-		var groupBy = groupByDimensions
+		var groupBy = parts.GroupByDimensions
 			.Concat(new[] { $"YEAR({dateExpr})", $"MONTH({dateExpr})" })
 			.ToList();
-
-		var countExpr = !string.IsNullOrWhiteSpace(profile.CountDistinctColumn)
-			? $"COUNT(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(profile.CountDistinctColumn)}))), ''))"
-			: "COUNT(*)";
 
 		var sql = $"""
             SELECT
                 {string.Join("," + Environment.NewLine + "                ", selectDimensions)},
                 YEAR({dateExpr}) AS CollectedYear,
                 MONTH({dateExpr}) AS CollectedMonth,
-                {countExpr} AS TotalClaims
+                {parts.CountExpr} AS TotalClaims
             FROM dbo.LIMSMaster WITH (NOLOCK)
             WHERE {string.Join(" AND ", where)}
             GROUP BY
@@ -1249,6 +1284,532 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		return raw;
 	}
 
+	// ── LIS Summary aggregate tables (labs listed in LisSummaryAggregateLabs) ───────────
+
+	private const string FieldSetsAggregateTable = "LIS_FieldSets";
+	private const string SummaryAggregateTable = "LIS_SummaryGroups";
+	private const string KeyMetricsAggregateTable = "LIS_KeyMetricsDaily";
+	private const string FilterOptionsAggregateTable = "LIS_FilterOptions";
+	private const string RefreshLogAggregateTable = "LIS_RefreshLog";
+	private const string SummaryStagingTable = "#LisSummaryGroups";
+
+	/// <summary>Bump when the aggregate shape or grouping changes so the next run rebuilds even if LIMSMaster did not change.</summary>
+	private const int AggregateVersion = 2;
+
+	private static readonly string[] AggregateDateTypes = ["Collected", "Received", "Resulted"];
+
+	private sealed record AggregateState(string Prefix, string SourceFileName, string LimsSignature);
+
+	private sealed record KeyMetricsColumns(string CollectionDateColumn, string TimeToResultColumn, string TimeToBillColumn);
+
+	public async Task<LisSummaryAggregateRefreshResult> RefreshSummaryAggregateAsync(
+		string connectionString,
+		string labName,
+		int? labId = null,
+		bool onlyIfLimsChanged = true,
+		CancellationToken ct = default)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+		var sw = Stopwatch.StartNew();
+		if (!LisSummaryAggregateLabs.TryGetTablePrefix(labName, labId, out var prefix))
+		{
+			return new LisSummaryAggregateRefreshResult(false, $"{labName} has no LIS Summary aggregate tables.", 0, 0, 0, string.Empty, 0);
+		}
+
+		await using var conn = new SqlConnection(connectionString);
+		await conn.OpenAsync(ct);
+
+		var columnTypes = await GetLimsMasterColumnTypesAsync(conn, ct);
+		var columns = new HashSet<string>(columnTypes.Keys, StringComparer.OrdinalIgnoreCase);
+		if (columns.Count == 0)
+		{
+			throw new InvalidOperationException("dbo.LIMSMaster was not found, or no columns were found in dbo.LIMSMaster.");
+		}
+
+		var signature = await GetLimsSignatureAsync(conn, columns, ct);
+		var state = await TryGetAggregateStateAsync(conn, labName, labId, ct);
+		if (onlyIfLimsChanged && state is not null && string.Equals(state.LimsSignature, signature, StringComparison.Ordinal))
+		{
+			return new LisSummaryAggregateRefreshResult(
+				false, $"LIMSMaster unchanged since the last refresh ({signature}).", 0, 0, 0, state.SourceFileName, sw.ElapsedMilliseconds);
+		}
+
+		var logicSheet = ResolveLogicSheet(labName, labId);
+		var filterColumns = ResolveFilterColumns(columns, logicSheet);
+		var sourceFileName = await GetLatestSourceFileNameAsync(conn, columns, ct);
+
+		var fieldSetsTable = $"dbo.{Q(prefix + FieldSetsAggregateTable)}";
+		var summaryTable = $"dbo.{Q(prefix + SummaryAggregateTable)}";
+		var keyMetricsTable = $"dbo.{Q(prefix + KeyMetricsAggregateTable)}";
+		var filterOptionsTable = $"dbo.{Q(prefix + FilterOptionsAggregateTable)}";
+		var refreshLogTable = $"dbo.{Q(prefix + RefreshLogAggregateTable)}";
+
+		var summaryInserts = new List<(string DateType, string Sql)>();
+		foreach (var dateType in AggregateDateTypes)
+		{
+			DimensionProfile profile;
+			try
+			{
+				profile = ResolveProfile(labName, labId, columns, dateType);
+			}
+			catch (InvalidOperationException)
+			{
+				// Same error the page raises for this date type; nothing to pre-aggregate.
+				continue;
+			}
+
+			summaryInserts.Add((dateType, BuildSummaryAggregateInsert(SummaryStagingTable, profile, filterColumns, columnTypes)));
+		}
+
+		var keyMetricsInsert = BuildKeyMetricsAggregateInsert(keyMetricsTable, columns, columnTypes, logicSheet, filterColumns);
+
+		var filterOptions = new (string Name, List<string> Values)[]
+		{
+			("Panel", await LoadFilterValuesAsync(conn, filterColumns.PanelExpression, ct)),
+			("Clinic", await LoadFilterValuesAsync(conn, filterColumns.ClinicExpression, ct)),
+			("RefPhy", await LoadFilterValuesAsync(conn, filterColumns.RefPhyExpression, ct)),
+			("SalesRep", await LoadFilterValuesAsync(conn, filterColumns.SalesRepExpression, ct)),
+			("Collector", await LoadFilterValuesAsync(conn, filterColumns.CollectorExpression, ct)),
+		};
+
+		await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct);
+		try
+		{
+			await ExecuteAggregateCommandAsync(conn, tx, $"""
+                DELETE FROM {summaryTable};
+                DELETE FROM {fieldSetsTable};
+                DELETE FROM {keyMetricsTable};
+                DELETE FROM {filterOptionsTable};
+                CREATE TABLE {SummaryStagingTable}
+                (
+                    DateType     VARCHAR(20)     NOT NULL,
+                    GroupDate    DATE            NOT NULL,
+                    FieldsJson   NVARCHAR(MAX)   COLLATE DATABASE_DEFAULT NOT NULL,
+                    Panel        NVARCHAR(4000)  NOT NULL,
+                    Clinic       NVARCHAR(4000)  NOT NULL,
+                    RefPhy       NVARCHAR(4000)  NOT NULL,
+                    SalesRep     NVARCHAR(4000)  NOT NULL,
+                    Collector    NVARCHAR(4000)  NOT NULL,
+                    TotalClaims  INT             NOT NULL
+                );
+                """, [], ct);
+
+			foreach (var (dateType, sql) in summaryInserts)
+			{
+				await ExecuteAggregateCommandAsync(conn, tx, sql,
+					[new SqlParameter("@dateType", SqlDbType.VarChar, 20) { Value = dateType }], ct);
+			}
+
+			// Few distinct field combinations, many day x filter rows: keep the JSON once per combination.
+			await ExecuteAggregateCommandAsync(conn, tx, $"""
+                INSERT INTO {fieldSetsTable} (FieldSetId, FieldsJson)
+                SELECT ROW_NUMBER() OVER (ORDER BY (SELECT NULL)), d.FieldsJson
+                FROM (SELECT DISTINCT FieldsJson FROM {SummaryStagingTable}) d;
+                """, [], ct);
+
+			var summaryRows = await ExecuteAggregateCommandAsync(conn, tx, $"""
+                INSERT INTO {summaryTable}
+                    (DateType, GroupDate, FieldSetId, Panel, Clinic, RefPhy, SalesRep, Collector, TotalClaims)
+                SELECT g.DateType, g.GroupDate, fs.FieldSetId, g.Panel, g.Clinic, g.RefPhy, g.SalesRep, g.Collector, g.TotalClaims
+                FROM {SummaryStagingTable} g
+                INNER JOIN {fieldSetsTable} fs ON fs.FieldsJson = g.FieldsJson;
+                DROP TABLE {SummaryStagingTable};
+                """, [], ct);
+
+			var keyMetricRows = keyMetricsInsert is null
+				? 0
+				: await ExecuteAggregateCommandAsync(conn, tx, keyMetricsInsert, [], ct);
+
+			var filterOptionRows = await InsertFilterOptionsAsync(conn, tx, filterOptionsTable, filterOptions, ct);
+
+			await ExecuteAggregateCommandAsync(conn, tx, $"""
+                INSERT INTO {refreshLogTable}
+                    (LogicSheet, SourceFileName, LimsSignature, DateTypes, SummaryRows, KeyMetricRows, FilterOptionRows, DurationMs)
+                VALUES
+                    (@logicSheet, @sourceFileName, @signature, @dateTypes, @summaryRows, @keyMetricRows, @filterOptionRows, @durationMs);
+                """,
+				[
+					new SqlParameter("@logicSheet", SqlDbType.NVarChar, 50) { Value = logicSheet },
+					new SqlParameter("@sourceFileName", SqlDbType.NVarChar, 500) { Value = sourceFileName },
+					new SqlParameter("@signature", SqlDbType.NVarChar, 400) { Value = signature },
+					new SqlParameter("@dateTypes", SqlDbType.VarChar, 100) { Value = string.Join(",", summaryInserts.Select(x => x.DateType)) },
+					new SqlParameter("@summaryRows", SqlDbType.Int) { Value = summaryRows },
+					new SqlParameter("@keyMetricRows", SqlDbType.Int) { Value = keyMetricRows },
+					new SqlParameter("@filterOptionRows", SqlDbType.Int) { Value = filterOptionRows },
+					new SqlParameter("@durationMs", SqlDbType.Int) { Value = (int)Math.Min(int.MaxValue, sw.ElapsedMilliseconds) },
+				], ct);
+
+			await tx.CommitAsync(ct);
+
+			_logger.LogInformation(
+				"LIS aggregate refreshed for {Lab}: {SummaryRows} summary rows, {KeyMetricRows} key-metric rows, {FilterOptionRows} filter options in {Elapsed} ms.",
+				labName, summaryRows, keyMetricRows, filterOptionRows, sw.ElapsedMilliseconds);
+
+			return new LisSummaryAggregateRefreshResult(
+				true,
+				$"Refreshed from {(string.IsNullOrWhiteSpace(sourceFileName) ? "LIMSMaster" : sourceFileName)} ({signature}).",
+				summaryRows, keyMetricRows, filterOptionRows, sourceFileName, sw.ElapsedMilliseconds);
+		}
+		catch
+		{
+			await tx.RollbackAsync(CancellationToken.None);
+			throw;
+		}
+	}
+
+	/// <summary>Latest successful aggregate refresh, or null when the lab is not aggregated or was never refreshed.</summary>
+	private static async Task<AggregateState?> TryGetAggregateStateAsync(
+		SqlConnection conn, string labName, int? labId, CancellationToken ct)
+	{
+		if (!LisSummaryAggregateLabs.TryGetTablePrefix(labName, labId, out var prefix))
+		{
+			return null;
+		}
+
+		var refreshLogTable = $"dbo.{Q(prefix + RefreshLogAggregateTable)}";
+		var sql = $"""
+            IF OBJECT_ID(N'{refreshLogTable.Replace("'", "''", StringComparison.Ordinal)}', N'U') IS NOT NULL
+                SELECT TOP (1) SourceFileName, LimsSignature
+                FROM {refreshLogTable}
+                ORDER BY RefreshId DESC;
+            """;
+
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 30 };
+		await using var rdr = await cmd.ExecuteReaderAsync(ct);
+		return await rdr.ReadAsync(ct)
+			? new AggregateState(prefix, rdr.GetString(0), rdr.GetString(1))
+			: null;
+	}
+
+	/// <summary>Changes whenever a LIMS file is loaded or removed (row count, latest CreatedOn, latest RunId).</summary>
+	private static async Task<string> GetLimsSignatureAsync(SqlConnection conn, HashSet<string> columns, CancellationToken ct)
+	{
+		var hasCreatedOn = columns.Contains("CreatedOn");
+		var maxCreatedOn = hasCreatedOn
+			? "ISNULL(CONVERT(nvarchar(30), MAX([CreatedOn]), 126), N'')"
+			: "N''";
+		var latestRunId = hasCreatedOn && columns.Contains("RunId")
+			? "ISNULL((SELECT TOP (1) CONVERT(nvarchar(100), [RunId]) FROM dbo.LIMSMaster WITH (NOLOCK) ORDER BY [CreatedOn] DESC), N'')"
+			: "N''";
+
+		var sql = $"""
+            SELECT CONVERT(nvarchar(30), COUNT_BIG(*)) + N'|' + {maxCreatedOn} + N'|' + {latestRunId}
+            FROM dbo.LIMSMaster WITH (NOLOCK);
+            """;
+
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+		var value = Convert.ToString(await cmd.ExecuteScalarAsync(ct)) ?? string.Empty;
+		return $"v{AggregateVersion}|cols={columns.Count}|{value}";
+	}
+
+	/// <summary>
+	/// One INSERT…SELECT per date type: the live pivot's GROUP BY at day grain, plus the
+	/// five filter values, so any date range and filter combination re-groups exactly.
+	/// </summary>
+	private static string BuildSummaryAggregateInsert(
+		string summaryTable,
+		DimensionProfile profile,
+		FilterColumnProfile filterColumns,
+		IReadOnlyDictionary<string, string> columnTypes)
+	{
+		var parts = BuildGroupQueryParts(profile, columnTypes);
+		var groupDateExpr = $"CONVERT(date, {parts.DateExpr})";
+
+		var fieldSelects = parts.FieldList
+			.Select((f, i) => TextExpr(profile.FieldColumns[f], $"F{i}"))
+			.ToList();
+
+		var fieldsJson = parts.FieldList.Count == 0
+			? "N'{}'"
+			: "N'{' + " + string.Join(" + N',' + ", parts.FieldList.Select((f, i) =>
+				$"{SqlUnicodeLiteral(JsonSerializer.Serialize(f) + ":\"")} + STRING_ESCAPE(g.{Q($"F{i}")}, 'json') + N'\"'")) + " + N'}'";
+
+		var (filterSelects, filterGroupBy) = BuildAggregateFilterSelects(filterColumns);
+		var groupBy = parts.GroupByDimensions
+			.Append(groupDateExpr)
+			.Concat(filterGroupBy)
+			.ToList();
+
+		const string sep = ",\n                    ";
+		return $"""
+            INSERT INTO {summaryTable}
+                (DateType, GroupDate, FieldsJson, Panel, Clinic, RefPhy, SalesRep, Collector, TotalClaims)
+            SELECT
+                @dateType,
+                g.GroupDate,
+                {fieldsJson},
+                ISNULL(g.P_Panel, N''), ISNULL(g.P_Clinic, N''), ISNULL(g.P_RefPhy, N''),
+                ISNULL(g.P_SalesRep, N''), ISNULL(g.P_Collector, N''),
+                g.TotalClaims
+            FROM (
+                SELECT
+                    {string.Join(sep, fieldSelects.Concat(new[] { $"{groupDateExpr} AS GroupDate" }).Concat(filterSelects))},
+                    {parts.CountExpr} AS TotalClaims
+                FROM dbo.LIMSMaster WITH (NOLOCK)
+                WHERE {string.Join(" AND ", parts.BaseWhere)}
+                GROUP BY
+                    {string.Join(sep, groupBy)}
+            ) g;
+            """;
+	}
+
+	private static string? BuildKeyMetricsAggregateInsert(
+		string keyMetricsTable,
+		HashSet<string> columns,
+		IReadOnlyDictionary<string, string> columnTypes,
+		string logicSheetName,
+		FilterColumnProfile filterColumns)
+	{
+		var kmColumns = ResolveKeyMetricsColumns(columns, logicSheetName);
+		if (kmColumns is null)
+		{
+			return null;
+		}
+
+		var dateExpr = BuildDateExpr(kmColumns.CollectionDateColumn, columnTypes);
+		var resultExpr = $"CAST({BuildDurationAvgExpr(kmColumns.TimeToResultColumn, columnTypes)} AS float)";
+		var billExpr = $"CAST({BuildDurationAvgExpr(kmColumns.TimeToBillColumn, columnTypes)} AS float)";
+		var groupDateExpr = $"CONVERT(date, {dateExpr})";
+		var (filterSelects, filterGroupBy) = BuildAggregateFilterSelects(filterColumns);
+
+		const string sep = ",\n                    ";
+		return $"""
+            INSERT INTO {keyMetricsTable}
+                (GroupDate, Panel, Clinic, RefPhy, SalesRep, Collector, ResultSum, ResultCount, BillSum, BillCount)
+            SELECT
+                g.GroupDate,
+                ISNULL(g.P_Panel, N''), ISNULL(g.P_Clinic, N''), ISNULL(g.P_RefPhy, N''),
+                ISNULL(g.P_SalesRep, N''), ISNULL(g.P_Collector, N''),
+                g.ResultSum, g.ResultCount, g.BillSum, g.BillCount
+            FROM (
+                SELECT
+                    {string.Join(sep, new[] { $"{groupDateExpr} AS GroupDate" }.Concat(filterSelects))},
+                    SUM({resultExpr}) AS ResultSum,
+                    COUNT({resultExpr}) AS ResultCount,
+                    SUM({billExpr}) AS BillSum,
+                    COUNT({billExpr}) AS BillCount
+                FROM dbo.LIMSMaster WITH (NOLOCK)
+                WHERE {dateExpr} IS NOT NULL
+                  AND YEAR({dateExpr}) > 1900
+                GROUP BY
+                    {string.Join(sep, new[] { groupDateExpr }.Concat(filterGroupBy))}
+            ) g;
+            """;
+	}
+
+	private static (List<string> Selects, List<string> GroupBy) BuildAggregateFilterSelects(FilterColumnProfile filterColumns)
+	{
+		var selects = new List<string>();
+		var groupBy = new List<string>();
+		foreach (var (expr, alias) in new[]
+		{
+			(filterColumns.PanelExpression, "P_Panel"),
+			(filterColumns.ClinicExpression, "P_Clinic"),
+			(filterColumns.RefPhyExpression, "P_RefPhy"),
+			(filterColumns.SalesRepExpression, "P_SalesRep"),
+			(filterColumns.CollectorExpression, "P_Collector"),
+		})
+		{
+			if (string.IsNullOrWhiteSpace(expr))
+			{
+				selects.Add($"CAST(N'' AS nvarchar(4000)) AS {alias}");
+				continue;
+			}
+
+			selects.Add($"{expr} AS {alias}");
+			groupBy.Add(expr);
+		}
+
+		return (selects, groupBy);
+	}
+
+	/// <summary>The aggregate tables store each filter's value in its own column; unresolved filters stay unresolved.</summary>
+	private static FilterColumnProfile ToAggregateFilterColumns(FilterColumnProfile live)
+		=> new(
+			live.PanelExpression is null ? null : "[Panel]",
+			live.ClinicExpression is null ? null : "[Clinic]",
+			live.RefPhyExpression is null ? null : "[RefPhy]",
+			live.SalesRepExpression is null ? null : "[SalesRep]",
+			live.CollectorExpression is null ? null : "[Collector]");
+
+	private static KeyMetricsColumns? ResolveKeyMetricsColumns(HashSet<string> columns, string logicSheetName)
+	{
+		var timeToResultColumn = FirstExisting(columns, "TimetoResult", "TimeToResult", "Time to Result");
+		var timeToBillColumn = FirstExisting(columns, "TimetoBill", "TimeToBill", "Time to Bill");
+		if (string.IsNullOrWhiteSpace(timeToResultColumn) || string.IsNullOrWhiteSpace(timeToBillColumn))
+		{
+			return null;
+		}
+
+		try
+		{
+			return new KeyMetricsColumns(ResolveDateColumn(columns, logicSheetName, "Collected"), timeToResultColumn, timeToBillColumn);
+		}
+		catch (InvalidOperationException)
+		{
+			return null;
+		}
+	}
+
+	/// <summary>Aggregate counterpart of <see cref="LoadDynamicGroupsAsync"/>: same RawLisGroup rows, read from the day-grain table.</summary>
+	private static async Task<List<RawLisGroup>> LoadAggregateGroupsAsync(
+		SqlConnection conn,
+		string prefix,
+		string dateType,
+		DimensionProfile profile,
+		FilterColumnProfile filterColumns,
+		DateOnly? dateFrom,
+		DateOnly? dateTo,
+		string? panel,
+		string? clinic,
+		string? refPhy,
+		string? salesRep,
+		string? collector,
+		CancellationToken ct)
+	{
+		var where = new List<string> { "DateType = @dateType" };
+		var parameters = new List<SqlParameter>
+		{
+			new("@dateType", SqlDbType.VarChar, 20) { Value = NormalizeDateType(dateType) }
+		};
+
+		if (dateFrom.HasValue)
+		{
+			where.Add("GroupDate >= @fromDate");
+			parameters.Add(new SqlParameter("@fromDate", SqlDbType.Date) { Value = dateFrom.Value.ToDateTime(TimeOnly.MinValue) });
+		}
+
+		if (dateTo.HasValue)
+		{
+			where.Add("GroupDate <= @toDate");
+			parameters.Add(new SqlParameter("@toDate", SqlDbType.Date) { Value = dateTo.Value.ToDateTime(TimeOnly.MinValue) });
+		}
+
+		var aggregateFilters = ToAggregateFilterColumns(filterColumns);
+		AddOptionalFilter(where, parameters, aggregateFilters.PanelExpression, "@panel", panel);
+		AddOptionalFilter(where, parameters, aggregateFilters.ClinicExpression, "@clinic", clinic);
+		AddOptionalFilter(where, parameters, aggregateFilters.RefPhyExpression, "@refPhy", refPhy);
+		AddOptionalFilter(where, parameters, aggregateFilters.SalesRepExpression, "@salesRep", salesRep);
+		AddOptionalFilter(where, parameters, aggregateFilters.CollectorExpression, "@collector", collector);
+
+		var sql = $"""
+            ;WITH g AS (
+                SELECT
+                    FieldSetId,
+                    YEAR(GroupDate) AS CollectedYear,
+                    MONTH(GroupDate) AS CollectedMonth,
+                    SUM(TotalClaims) AS TotalClaims
+                FROM dbo.{Q(prefix + SummaryAggregateTable)}
+                WHERE {string.Join(" AND ", where)}
+                GROUP BY FieldSetId, YEAR(GroupDate), MONTH(GroupDate)
+            )
+            SELECT fs.FieldsJson, g.CollectedYear, g.CollectedMonth, g.TotalClaims
+            FROM g
+            INNER JOIN dbo.{Q(prefix + FieldSetsAggregateTable)} fs ON fs.FieldSetId = g.FieldSetId
+            ORDER BY g.CollectedYear, g.CollectedMonth;
+            """;
+
+		var fieldList = profile.FieldColumns.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+		var raw = new List<RawLisGroup>();
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+		foreach (var p in parameters) cmd.Parameters.Add(p);
+
+		await using var rdr = await cmd.ExecuteReaderAsync(ct);
+		while (await rdr.ReadAsync(ct))
+		{
+			var stored = JsonSerializer.Deserialize<Dictionary<string, string>>(rdr.GetString(0))
+				?? new Dictionary<string, string>();
+			var lookup = new Dictionary<string, string>(stored, StringComparer.OrdinalIgnoreCase);
+
+			var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+			foreach (var field in fieldList)
+			{
+				fields[field] = NormalizeFieldValue(field, lookup.GetValueOrDefault(field));
+			}
+
+			raw.Add(new RawLisGroup(fields, rdr.GetInt32(1), rdr.GetInt32(2), rdr.GetInt32(3)));
+		}
+
+		return raw;
+	}
+
+	private static async Task<LisSummaryFilterOptions> LoadAggregateFilterOptionsAsync(
+		SqlConnection conn, string prefix, CancellationToken ct)
+	{
+		var byName = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+		var sql = $"""
+            SELECT FilterName, Value
+            FROM dbo.{Q(prefix + FilterOptionsAggregateTable)}
+            ORDER BY FilterName, SortOrder;
+            """;
+
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 30 };
+		await using var rdr = await cmd.ExecuteReaderAsync(ct);
+		while (await rdr.ReadAsync(ct))
+		{
+			var name = rdr.GetString(0);
+			if (!byName.TryGetValue(name, out var values))
+			{
+				byName[name] = values = [];
+			}
+			values.Add(rdr.GetString(1));
+		}
+
+		return new LisSummaryFilterOptions(
+			byName.GetValueOrDefault("Panel") ?? [],
+			byName.GetValueOrDefault("Clinic") ?? [],
+			byName.GetValueOrDefault("RefPhy") ?? [],
+			byName.GetValueOrDefault("SalesRep") ?? [],
+			byName.GetValueOrDefault("Collector") ?? []);
+	}
+
+	private static async Task<int> InsertFilterOptionsAsync(
+		SqlConnection conn,
+		SqlTransaction tx,
+		string filterOptionsTable,
+		IEnumerable<(string Name, List<string> Values)> filterOptions,
+		CancellationToken ct)
+	{
+		using var table = new DataTable();
+		table.Columns.Add("FilterName", typeof(string));
+		table.Columns.Add("SortOrder", typeof(int));
+		table.Columns.Add("Value", typeof(string));
+		foreach (var (name, values) in filterOptions)
+		{
+			for (var i = 0; i < values.Count; i++)
+			{
+				table.Rows.Add(name, i, values[i]);
+			}
+		}
+
+		if (table.Rows.Count == 0)
+		{
+			return 0;
+		}
+
+		using var bulk = new SqlBulkCopy(conn, SqlBulkCopyOptions.Default, tx)
+		{
+			DestinationTableName = filterOptionsTable,
+			BulkCopyTimeout = 120
+		};
+		bulk.ColumnMappings.Add("FilterName", "FilterName");
+		bulk.ColumnMappings.Add("SortOrder", "SortOrder");
+		bulk.ColumnMappings.Add("Value", "Value");
+		await bulk.WriteToServerAsync(table, ct);
+		return table.Rows.Count;
+	}
+
+	private static async Task<int> ExecuteAggregateCommandAsync(
+		SqlConnection conn, SqlTransaction tx, string sql, IEnumerable<SqlParameter> parameters, CancellationToken ct)
+	{
+		await using var cmd = new SqlCommand(sql, conn, tx) { CommandTimeout = 600 };
+		foreach (var p in parameters) cmd.Parameters.Add(p);
+		return await cmd.ExecuteNonQueryAsync(ct);
+	}
+
+	private static string SqlUnicodeLiteral(string value) => $"N'{value.Replace("'", "''", StringComparison.Ordinal)}'";
+
 	/// <summary>
 	/// Recent four months by Date of Collection. Always buckets on the lab's collected
 	/// date column regardless of the summary pivot's date type. Respects the same
@@ -1267,48 +1828,75 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		string? refPhy,
 		string? salesRep,
 		string? collector,
-		CancellationToken ct)
+		CancellationToken ct,
+		string? aggregatePrefix = null)
 	{
-		var timeToResultColumn = FirstExisting(columns, "TimetoResult", "TimeToResult", "Time to Result");
-		var timeToBillColumn = FirstExisting(columns, "TimetoBill", "TimeToBill", "Time to Bill");
-		if (string.IsNullOrWhiteSpace(timeToResultColumn) || string.IsNullOrWhiteSpace(timeToBillColumn))
+		var kmColumns = ResolveKeyMetricsColumns(columns, logicSheetName);
+		if (kmColumns is null)
 		{
 			return null;
 		}
 
-		string collectionDateColumn;
-		try
-		{
-			collectionDateColumn = ResolveDateColumn(columns, logicSheetName, "Collected");
-		}
-		catch (InvalidOperationException)
-		{
-			return null;
-		}
-
+		var collectionDateColumn = kmColumns.CollectionDateColumn;
 		var dateExpr = BuildDateExpr(collectionDateColumn, columnTypes);
-		var resultExpr = BuildDurationAvgExpr(timeToResultColumn, columnTypes);
-		var billExpr = BuildDurationAvgExpr(timeToBillColumn, columnTypes);
+		var resultExpr = BuildDurationAvgExpr(kmColumns.TimeToResultColumn, columnTypes);
+		var billExpr = BuildDurationAvgExpr(kmColumns.TimeToBillColumn, columnTypes);
 
 		// Recent-4-months is always relative to the latest collection date in LIMSMaster
 		// (plus panel/clinic/etc. filters). The page Date From/To must NOT shrink this to
 		// a single month — that produced "only Aug" while the template expects 4 columns.
-		var where = new List<string>
-		{
-			$"{dateExpr} IS NOT NULL",
-			$"YEAR({dateExpr}) > 1900"
-		};
+		var where = aggregatePrefix is null
+			? new List<string>
+			{
+				$"{dateExpr} IS NOT NULL",
+				$"YEAR({dateExpr}) > 1900"
+			}
+			: new List<string> { "1 = 1" };
 
+		var activeFilters = aggregatePrefix is null ? filterColumns : ToAggregateFilterColumns(filterColumns);
 		var parameters = new List<SqlParameter>();
-		AddOptionalFilter(where, parameters, filterColumns.PanelExpression, "@kmPanel", panel);
-		AddOptionalFilter(where, parameters, filterColumns.ClinicExpression, "@kmClinic", clinic);
-		AddOptionalFilter(where, parameters, filterColumns.RefPhyExpression, "@kmRefPhy", refPhy);
-		AddOptionalFilter(where, parameters, filterColumns.SalesRepExpression, "@kmSalesRep", salesRep);
-		AddOptionalFilter(where, parameters, filterColumns.CollectorExpression, "@kmCollector", collector);
+		AddOptionalFilter(where, parameters, activeFilters.PanelExpression, "@kmPanel", panel);
+		AddOptionalFilter(where, parameters, activeFilters.ClinicExpression, "@kmClinic", clinic);
+		AddOptionalFilter(where, parameters, activeFilters.RefPhyExpression, "@kmRefPhy", refPhy);
+		AddOptionalFilter(where, parameters, activeFilters.SalesRepExpression, "@kmSalesRep", salesRep);
+		AddOptionalFilter(where, parameters, activeFilters.CollectorExpression, "@kmCollector", collector);
 
 		var whereSql = string.Join(" AND ", where);
 
-		var sql = $"""
+		var sql = aggregatePrefix is not null
+			? $"""
+            ;WITH Src AS (
+                SELECT GroupDate, ResultSum, ResultCount, BillSum, BillCount
+                FROM dbo.{Q(aggregatePrefix + KeyMetricsAggregateTable)}
+                WHERE {whereSql}
+            ),
+            Bounds AS (
+                SELECT MAX(GroupDate) AS MaxCollectionDate
+                FROM Src
+            ),
+            Window AS (
+                SELECT
+                    DATEFROMPARTS(
+                        YEAR(DATEADD(month, -3, MaxCollectionDate)),
+                        MONTH(DATEADD(month, -3, MaxCollectionDate)),
+                        1) AS FromDate,
+                    EOMONTH(MaxCollectionDate) AS ToDate
+                FROM Bounds
+                WHERE MaxCollectionDate IS NOT NULL
+            )
+            SELECT
+                YEAR(s.GroupDate) AS MetricYear,
+                MONTH(s.GroupDate) AS MetricMonth,
+                SUM(s.ResultSum) / NULLIF(SUM(s.ResultCount), 0) AS AvgTimeToResult,
+                SUM(s.BillSum) / NULLIF(SUM(s.BillCount), 0) AS AvgTimeToBill
+            FROM Src s
+            CROSS JOIN Window w
+            WHERE s.GroupDate >= w.FromDate
+              AND s.GroupDate <= w.ToDate
+            GROUP BY YEAR(s.GroupDate), MONTH(s.GroupDate)
+            ORDER BY MetricYear, MetricMonth;
+            """
+			: $"""
             ;WITH Bounds AS (
                 SELECT MAX({dateExpr}) AS MaxCollectionDate
                 FROM dbo.LIMSMaster WITH (NOLOCK)
@@ -1429,8 +2017,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				return configuredDateColumn;
 			}
 
-			var alternateDateColumn = ResolveAlternateDateColumn(logicSheet, normalized);
-			if (alternateDateColumn is not null && columns.Contains(alternateDateColumn))
+			var alternateDateColumn = ResolveAlternateDateColumns(logicSheet, normalized).FirstOrDefault(columns.Contains);
+			if (alternateDateColumn is not null)
 			{
 				return alternateDateColumn;
 			}
@@ -1485,16 +2073,17 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		};
 
 	/// <summary>
-	/// Second choice when a sheet's configured date column is absent. VariantX reports on Cove's
-	/// sheet but its LIMSMaster names the dates RequestCollectDate / RequestReceivedDate. It has no
-	/// resulted date, so "Resulted" still fails with the configured-column message.
+	/// Second choices when a sheet's configured date column is absent. VariantX reports on Cove's
+	/// sheet but its LIMSMaster names the dates RequestCollectDate / RequestReceivedDate, and has no
+	/// resulted date. Analyze Pathology also reports on Cove's sheet with ReqReceivedDate / ReqReportedDate.
 	/// </summary>
-	private static string? ResolveAlternateDateColumn(string logicSheet, string dateType)
+	private static string[] ResolveAlternateDateColumns(string logicSheet, string dateType)
 		=> (logicSheet, dateType) switch
 		{
-			("Cove", "Collected") => "RequestCollectDate",
-			("Cove", "Received") => "RequestReceivedDate",
-			_ => null
+			("Cove", "Collected") => new[] { "RequestCollectDate" },
+			("Cove", "Received") => new[] { "RequestReceivedDate", "ReqReceivedDate" },
+			("Cove", "Resulted") => new[] { "ReqReportedDate" },
+			_ => Array.Empty<string>()
 		};
 
 	private static FilterColumnProfile ResolveFilterColumns(HashSet<string> columns, string logicSheetName)
@@ -1511,9 +2100,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				ExpressionForColumn(FirstExisting(columns, "PanelCategory")),
 				null, null, null, null),
 			"Cove" => new FilterColumnProfile(
-				ExpressionForColumn(FirstExisting(columns, "PanelType")),
-				ExpressionForColumn(FirstExisting(columns, "FacilityName")),
-				ExpressionForColumn(FirstExisting(columns, "ProviderName")),
+				ExpressionForColumn(FirstExisting(columns, "PanelType", "PanelName")),
+				ExpressionForColumn(FirstExisting(columns, "FacilityName", "Facility")),
+				ExpressionForColumn(FirstExisting(columns, "ProviderName", "Provider")),
 				ExpressionForColumn(FirstExisting(columns, "SaleRepName")),
 				null),
 			"Elixir" => new FilterColumnProfile(
@@ -2980,6 +3569,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				// Sub Status shape, so it also inherits Cove's date columns (DateOfCollection,
 				// ReceivedDate, ValidatedDate) and panel/clinic/provider filters.
 				25 => "Cove",
+				// Analyze Pathology follows VariantX until its own LIS logic arrives: NewStatus / BillCategory /
+				// SubStatus fill Cove's Final Status / Billed-Not / Sub Status ("Unbilled" matches "Not Billed").
+				26 => "Cove",
 				// LRNLabDemo: its LIMSMaster is Cove's (RunIds read R...COV..., and Cove's DateOfCollection /
 				// NewStatus shape - PCRLOA's RequestCollectDate is absent), so it reports on Cove's sheet.
 				// Unmapped, it fell to "Dynamic", whose rows all repeated the Total.
@@ -3004,6 +3596,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		if (n.Contains("RISINGTIDES") || n.Contains("RISING")) return "Rising Tides";
 		// Kept beside Cove because it is Cove's template: see the LabId 25 note above.
 		if (n.Contains("VARIANTX") || n.Contains("VARIANT")) return "Cove";
+		if (n.Contains("ANALYZEPATHOLOGY")) return "Cove";
 		if (n.Contains("COVE")) return "Cove";
 		if (n.Contains("ELIXIR")) return "Elixir";
 		if (n.Contains("INHEALTH")) return "InHealth";

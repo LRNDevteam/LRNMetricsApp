@@ -41,6 +41,8 @@
 
    Augustus and NorthWest are intentionally skipped - they already have
    their own Panel Breakdown objects and the app routes them elsewhere.
+   Analyze Pathology is skipped too: its database is a Beech Tree clone (so
+   auto-detect would pick BT_) and Sql/AnalyzePathology/40_... builds AnP_.
    If auto-detect cannot identify the lab, set @Prefix by hand at the top.
 
    Re-runnable: table is only created when missing, SPs are CREATE OR ALTER.
@@ -54,6 +56,12 @@ DECLARE @MonthCol sysname;
 DECLARE @BaseWhere NVARCHAR(MAX);
 DECLARE @Tbl      sysname;
 DECLARE @Sql      NVARCHAR(MAX);
+
+IF OBJECT_ID('dbo.AnP_MonthlyBilledProductionSummary', 'U') IS NOT NULL
+BEGIN
+    RAISERROR('This looks like the Analyze Pathology database - use Sql/AnalyzePathology/40_AnalyzePathology_PanelBreakdownWithPayers.sql. Nothing to do.', 16, 1);
+    RETURN;
+END
 
 IF @Prefix IS NULL
     SELECT @Prefix =

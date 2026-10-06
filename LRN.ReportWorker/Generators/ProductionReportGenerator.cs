@@ -164,15 +164,20 @@ public sealed class ProductionReportGenerator : IReportGenerator
         // reads the lab's usp_Get{Prefix}* SPs (usp_GetBT_* / usp_GetInH_*).
         var useLabSps = (isBeechTree || isInHealthDtr) && labSummaryRepo is not null;
 
+        // Rising Tides Monthly/Weekly are sorted by Total Charges on the page
+        // (usp_GetRT_*BilledProductionSummary), so the Excel reads the same SPs.
+        var isRisingTides = job.LabName.Equals("Rising_Tides", StringComparison.OrdinalIgnoreCase);
+        var useLabVolumeSps = useLabSps || (isRisingTides && labSummaryRepo is not null);
+
         // Phase 1 — 7 summary queries concurrently.
         // Cove Production Summary breakdowns use SqlLabProductionSummaryRepository
         // (usp_GetCove_*_CountCpt / FullCharges / FullClaims / FirstBilled).
-        var monthlyTask = useLabSps
+        var monthlyTask = useLabVolumeSps
             ? labSummaryRepo!.GetMonthlyAsync(
                 connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct)
             : _repo.GetMonthlyClaimVolumeAsync(
                 connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, productionRule, ct);
-        var weeklyTask = useLabSps
+        var weeklyTask = useLabVolumeSps
             ? labSummaryRepo!.GetWeeklyAsync(
                 connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct)
             : _repo.GetWeeklyClaimVolumeAsync(

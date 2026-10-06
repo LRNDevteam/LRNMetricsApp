@@ -1,0 +1,1371 @@
+/* =============================================================================
+   Analyze Pathology (prefix AnP_) - GENERATED from Sql/VariantX/14b_VariantX_CollectionSummary_ReadSPs_Fix.sql
+   by Generate-FromVariantX.ps1. Edit the VariantX script or the generator, not this file.
+   Database: AnalyzePathology
+
+   Analyze Pathology mappings applied on top of the VariantX logic:
+     ClaimLevelData.AdjucticatedCount / Bucket30Count / Bucket60Count
+         -> Adjudicated / Bucket30 / Bucket60  (AdjucticatedAmount -> AdjudicatedAmount)
+     Billed / Unbilled from ClaimLevelData.BilledStatus LIKE 'Unbilled%'
+     ClaimStatus 'Fully Denied' counts as 'Denied', '0 Billed Amount' as 'Billed Amount 0'
+     LIMSMaster.BillCategory 'Unbilled' counts as 'Not Billed',
+         NewStatus 'Yet to Be Validate' as 'Yet to be validated'
+     LIMSMaster panel column: PanelName (PanelCategory is never populated)
+   Comments further down were written for VariantX ("AnalyzePathology" there
+   was substituted for "VariantX").
+   ============================================================================= */
+/* =============================================================================
+   AnalyzePathology — re-run fix for Collection Summary READ SPs (script 14)
+   Safe when skipping ClaimLevelData/LineLevelData alters (02-05).
+
+   Changes vs prior 14:
+   - PostingDate -> CheckDate (column not present on AnalyzePathology)
+   - Filter table PK NVARCHAR(500)->NVARCHAR(450) (900-byte key warning)
+   - Rep/Provider live paths: dynamic column resolve / empty if missing
+   - AvgPayments / InsuranceVsPaymentPct: no script-02-only columns
+   ============================================================================= */
+/* =============================================================================
+   Analyze Pathology — cloned from Elixir (14_Elixir_CollectionSummary_ReadSPs.sql)
+   Prefix: AnP_ / AnP_CS_ / AnP_ES_
+   Refresh: usp_RefreshAnP_*
+   Read:    usp_GetAnP_*
+   Source tables: dbo.ClaimLevelData, dbo.LineLevelData, dbo.LIMSMaster
+   No inline UI queries — dashboard/ReportWorker must call these SPs only.
+   ============================================================================= */
+
+
+CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_CS_Top5ReimbursementPct
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @FirstBillFrom   DATE          = NULL,
+    @FirstBillTo     DATE          = NULL,
+    @CheckDateFrom   DATE          = NULL,
+    @CheckDateTo     DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @HasFilter BIT =
+        CASE
+            WHEN NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL THEN 1
+            WHEN NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL THEN 1
+            WHEN @DosFrom       IS NOT NULL OR @DosTo       IS NOT NULL THEN 1
+            WHEN @FirstBillFrom IS NOT NULL OR @FirstBillTo IS NOT NULL THEN 1
+            WHEN @CheckDateFrom IS NOT NULL OR @CheckDateTo IS NOT NULL THEN 1
+            ELSE 0
+        END;
+
+    IF @HasFilter = 0
+    BEGIN
+        SELECT PayerRank, PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount
+        FROM   dbo.AnP_CS_Top5ReimbursementPct
+        ORDER  BY PayerRank;
+        RETURN;
+    END;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PayerNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PanelNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    -- ReimbursementPct = SUM(InsurancePayment) / UniqueVisitCount * 100
+    ;WITH base AS (
+        SELECT
+            LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) AS PayerName,
+            COALESCE(NULLIF(LTRIM(RTRIM(AccessionNumber)), ''), LTRIM(RTRIM(ClaimID))) AS VisitKey,
+            TRY_CAST(InsurancePayment AS DECIMAL(18,2)) AS InsPay,
+            TRY_CAST(ChargeAmount     AS DECIMAL(18,2)) AS Chg
+        FROM dbo.ClaimLevelData
+        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+          AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
+          AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
+          AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
+          AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
+          AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+          AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
+          AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate       AS DATE) >= @CheckDateFrom)
+          AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate       AS DATE) <= @CheckDateTo)
+    ),
+    agg AS (
+        SELECT PayerName,
+               ISNULL(SUM(InsPay), 0) AS SumInsurancePayment,
+               ISNULL(SUM(Chg),    0) AS SumChargeAmount,
+               COUNT(DISTINCT NULLIF(VisitKey, '')) AS UniqueVisitCount
+        FROM base GROUP BY PayerName
+    )
+    SELECT TOP 5
+        CAST(ROW_NUMBER() OVER (ORDER BY SumInsurancePayment DESC) AS INT) AS PayerRank,
+        PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount
+    FROM agg
+    ORDER BY PayerRank;
+END
+GO
+
+------------------
+
+CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_CS_Top5ReimbursementPay
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @FirstBillFrom   DATE          = NULL,
+    @FirstBillTo     DATE          = NULL,
+    @CheckDateFrom   DATE          = NULL,
+    @CheckDateTo     DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @HasFilter BIT =
+        CASE
+            WHEN NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL THEN 1
+            WHEN NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL THEN 1
+            WHEN @DosFrom       IS NOT NULL OR @DosTo       IS NOT NULL THEN 1
+            WHEN @FirstBillFrom IS NOT NULL OR @FirstBillTo IS NOT NULL THEN 1
+            WHEN @CheckDateFrom IS NOT NULL OR @CheckDateTo IS NOT NULL THEN 1
+            ELSE 0
+        END;
+
+    IF @HasFilter = 0
+    BEGIN
+        SELECT PayerRank, PayerName, TotalPayments, UniqueVisitCount
+        FROM   dbo.AnP_CS_Top5ReimbursementPay
+        ORDER  BY PayerRank;
+        RETURN;
+    END;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PayerNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PanelNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    ;WITH base AS (
+        SELECT
+            LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) AS PayerName,
+            COALESCE(NULLIF(LTRIM(RTRIM(AccessionNumber)), ''), LTRIM(RTRIM(ClaimID))) AS VisitKey,
+            TRY_CAST(InsurancePayment AS DECIMAL(18,2)) AS InsPay
+        FROM dbo.ClaimLevelData
+        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+          AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
+          AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
+          AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
+          AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
+          AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+          AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
+          AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate       AS DATE) >= @CheckDateFrom)
+          AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate       AS DATE) <= @CheckDateTo)
+    ),
+    agg AS (
+        SELECT PayerName,
+               ISNULL(SUM(InsPay), 0) AS TotalPayments,
+               COUNT(DISTINCT NULLIF(VisitKey, '')) AS UniqueVisitCount
+        FROM base GROUP BY PayerName
+    )
+    SELECT TOP 5
+        CAST(ROW_NUMBER() OVER (ORDER BY TotalPayments DESC) AS INT) AS PayerRank,
+        PayerName, TotalPayments, UniqueVisitCount
+    FROM agg
+    ORDER BY PayerRank;
+END
+GO
+
+
+-- =====================================================================
+-- AnalyzePathology - Collection Summary READ Stored Procedures
+-- Used by LabMetricsDashboard Collection Summary page (Monthly + Weekly
+-- Claim Volume tabs) and the related Excel export.
+--
+-- Pattern mirrors dbo.usp_GetNW_CS_MonthlyClaimVolume / WeeklyClaimVolume:
+--   1) No filters  -> read pre-aggregated dbo.AnP_CS_* snapshot tables.
+--   2) Any filters -> aggregate live from dbo.LineLevelData.
+--
+-- List parameters use '|' delimiter.
+-- =====================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+SET NOCOUNT ON;
+GO
+
+-- =====================================================================
+-- Monthly Claim Volume - Collection Summary
+-- Source: dbo.LineLevelData / dbo.AnP_CS_MonthlyClaimVolume
+-- Filter: InsurancePayment > 0, valid CheckDate
+-- Rows: Panelname, PayerName_Raw with PayerRank
+-- Columns: Year/Month from CheckDate
+-- =====================================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_CS_MonthlyClaimVolume
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @FirstBillFrom   DATE          = NULL,
+    @FirstBillTo     DATE          = NULL,
+    @CheckDateFrom   DATE          = NULL,
+    @CheckDateTo     DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @HasFilter BIT =
+        CASE
+            WHEN NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL THEN 1
+            WHEN NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL THEN 1
+            WHEN @DosFrom       IS NOT NULL OR @DosTo       IS NOT NULL THEN 1
+            WHEN @FirstBillFrom IS NOT NULL OR @FirstBillTo IS NOT NULL THEN 1
+            WHEN @CheckDateFrom IS NOT NULL OR @CheckDateTo IS NOT NULL THEN 1
+            ELSE 0
+        END;
+
+    IF @HasFilter = 0
+    BEGIN
+        SELECT  PanelName,
+                PayerName,
+                PayerRank,
+                BillYear,
+                BillMonth,
+                NoOfClaims,
+                InsurancePayment,
+                CAST(InsurancePayment / NULLIF(NoOfClaims, 0) AS DECIMAL(18,2)) AS AveragePaidAmount
+        FROM    dbo.AnP_CS_MonthlyClaimVolume
+        ORDER BY PanelName, PayerRank, BillYear, BillMonth;
+        RETURN;
+    END;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList(Value)
+        SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PayerNames, '|')
+        WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList(Value)
+        SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PanelNames, '|')
+        WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    ;WITH Agg AS (
+        SELECT
+            LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) AS PanelName,
+            LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) AS PayerName,
+            YEAR (TRY_CAST(CheckDate AS DATE))             AS BillYear,
+            MONTH(TRY_CAST(CheckDate AS DATE))             AS BillMonth,
+            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), '')) AS NoOfClaims,
+            ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0) AS InsurancePayment
+        FROM dbo.LineLevelData
+        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+          AND TRY_CAST(CheckDate AS DATE) IS NOT NULL
+          AND YEAR(TRY_CAST(CheckDate AS DATE)) > 1900
+          AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
+          AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
+          AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
+          AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
+          AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+          AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
+          AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate       AS DATE) >= @CheckDateFrom)
+          AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate       AS DATE) <= @CheckDateTo)
+        GROUP BY
+            LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))),
+            LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
+            YEAR (TRY_CAST(CheckDate AS DATE)),
+            MONTH(TRY_CAST(CheckDate AS DATE))
+    ),
+    Ranks AS (
+        SELECT PanelName, PayerName,
+               DENSE_RANK() OVER (PARTITION BY PanelName ORDER BY SUM(NoOfClaims) DESC) AS PayerRank
+        FROM Agg
+        GROUP BY PanelName, PayerName
+    )
+    SELECT  a.PanelName,
+            a.PayerName,
+            CAST(r.PayerRank AS INT) AS PayerRank,
+            a.BillYear,
+            CAST(a.BillMonth AS TINYINT) AS BillMonth,
+            a.NoOfClaims,
+            a.InsurancePayment,
+            CAST(a.InsurancePayment / NULLIF(a.NoOfClaims, 0) AS DECIMAL(18,2)) AS AveragePaidAmount
+    FROM Agg a
+    JOIN Ranks r ON r.PanelName = a.PanelName AND r.PayerName = a.PayerName
+    ORDER BY a.PanelName, r.PayerRank, a.BillYear, a.BillMonth;
+END
+GO
+
+-- =====================================================================
+-- Weekly Claim Volume - Collection Summary
+-- Source: dbo.LineLevelData / dbo.AnP_CS_WeeklyClaimVolume
+-- Filter: InsurancePayment > 0, valid CheckDate
+-- No-filter path reads aggregate values.
+-- Filter path calculates last 4 weeks from latest CheckDate in filtered data.
+-- =====================================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_CS_WeeklyClaimVolume
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @FirstBillFrom   DATE          = NULL,
+    @FirstBillTo     DATE          = NULL,
+    @CheckDateFrom   DATE          = NULL,
+    @CheckDateTo     DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @HasFilter BIT =
+        CASE
+            WHEN NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL THEN 1
+            WHEN NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL THEN 1
+            WHEN @DosFrom       IS NOT NULL OR @DosTo       IS NOT NULL THEN 1
+            WHEN @FirstBillFrom IS NOT NULL OR @FirstBillTo IS NOT NULL THEN 1
+            WHEN @CheckDateFrom IS NOT NULL OR @CheckDateTo IS NOT NULL THEN 1
+            ELSE 0
+        END;
+
+    IF @HasFilter = 0
+    BEGIN
+        SELECT  PanelName,
+                PayerName,
+                PayerRank,
+                WeekKey,
+                WeekStart,
+                WeekEnd,
+                NoOfClaims,
+                InsurancePayment,
+                CAST(InsurancePayment / NULLIF(NoOfClaims, 0) AS DECIMAL(18,2)) AS AveragePaidAmount
+        FROM    dbo.AnP_CS_WeeklyClaimVolume
+        ORDER BY PanelName, PayerRank, WeekKey;
+        RETURN;
+    END;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList(Value)
+        SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PayerNames, '|')
+        WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList(Value)
+        SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PanelNames, '|')
+        WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    DECLARE @LatestCheckDate DATE;
+
+    SELECT @LatestCheckDate = MAX(TRY_CAST(CheckDate AS DATE))
+    FROM dbo.LineLevelData
+    WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+      AND TRY_CAST(CheckDate AS DATE) IS NOT NULL
+      AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
+      AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
+      AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
+      AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
+      AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+      AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
+      AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate       AS DATE) >= @CheckDateFrom)
+      AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate       AS DATE) <= @CheckDateTo);
+
+    IF @LatestCheckDate IS NULL
+    BEGIN
+        SELECT  CAST(NULL AS NVARCHAR(500)) AS PanelName,
+                CAST(NULL AS NVARCHAR(500)) AS PayerName,
+                CAST(NULL AS INT) AS PayerRank,
+                CAST(NULL AS TINYINT)       AS WeekKey,
+                CAST(NULL AS DATE)          AS WeekStart,
+                CAST(NULL AS DATE)          AS WeekEnd,
+                CAST(NULL AS INT)           AS NoOfClaims,
+                CAST(NULL AS DECIMAL(18,2)) AS InsurancePayment,
+                CAST(NULL AS DECIMAL(18,2)) AS AveragePaidAmount
+        WHERE 1 = 0;
+        RETURN;
+    END;
+
+    -- Sunday-ending weeks, with Week 4 ending on the latest data point's week end.
+    DECLARE @DaysSinceSun INT = ((DATEDIFF(DAY, '1900-01-07', @LatestCheckDate) % 7) + 7) % 7;
+    DECLARE @W4End DATE = DATEADD(DAY, 6 - @DaysSinceSun, @LatestCheckDate);
+    DECLARE @W4Start DATE = DATEADD(DAY, -6, @W4End);
+    DECLARE @W3End DATE = DATEADD(DAY, -7, @W4End),  @W3Start DATE = DATEADD(DAY, -13, @W4End);
+    DECLARE @W2End DATE = DATEADD(DAY,-14, @W4End),  @W2Start DATE = DATEADD(DAY, -20, @W4End);
+    DECLARE @W1End DATE = DATEADD(DAY,-21, @W4End),  @W1Start DATE = DATEADD(DAY, -27, @W4End);
+
+    ;WITH Src AS (
+        SELECT
+            LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) AS PanelName,
+            LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) AS PayerName,
+            CASE
+                WHEN TRY_CAST(CheckDate AS DATE) BETWEEN @W1Start AND @W1End THEN 1
+                WHEN TRY_CAST(CheckDate AS DATE) BETWEEN @W2Start AND @W2End THEN 2
+                WHEN TRY_CAST(CheckDate AS DATE) BETWEEN @W3Start AND @W3End THEN 3
+                WHEN TRY_CAST(CheckDate AS DATE) BETWEEN @W4Start AND @W4End THEN 4
+            END AS WeekKey,
+            ClaimID,
+            TRY_CAST(InsurancePayment AS DECIMAL(18,2)) AS InsurancePayment
+        FROM dbo.LineLevelData
+        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+          AND TRY_CAST(CheckDate AS DATE) BETWEEN @W1Start AND @W4End
+          AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
+          AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
+          AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
+          AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
+          AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+          AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
+          AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate       AS DATE) >= @CheckDateFrom)
+          AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate       AS DATE) <= @CheckDateTo)
+    ),
+    Agg AS (
+        SELECT PanelName, PayerName, WeekKey,
+               COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), '')) AS NoOfClaims,
+               ISNULL(SUM(InsurancePayment), 0) AS InsurancePayment
+        FROM Src
+        WHERE WeekKey IS NOT NULL
+        GROUP BY PanelName, PayerName, WeekKey
+    ),
+    Ranks AS (
+        SELECT PanelName, PayerName,
+               DENSE_RANK() OVER (PARTITION BY PanelName ORDER BY SUM(NoOfClaims) DESC) AS PayerRank
+        FROM Agg
+        GROUP BY PanelName, PayerName
+    )
+    SELECT  a.PanelName,
+            a.PayerName,
+            CAST(r.PayerRank AS INT) AS PayerRank,
+            CAST(a.WeekKey AS TINYINT) AS WeekKey,
+            CASE a.WeekKey WHEN 1 THEN @W1Start WHEN 2 THEN @W2Start WHEN 3 THEN @W3Start WHEN 4 THEN @W4Start END AS WeekStart,
+            CASE a.WeekKey WHEN 1 THEN @W1End   WHEN 2 THEN @W2End   WHEN 3 THEN @W3End   WHEN 4 THEN @W4End   END AS WeekEnd,
+            a.NoOfClaims,
+            a.InsurancePayment,
+            CAST(a.InsurancePayment / NULLIF(a.NoOfClaims, 0) AS DECIMAL(18,2)) AS AveragePaidAmount
+    FROM Agg a
+    JOIN Ranks r ON r.PanelName = a.PanelName AND r.PayerName = a.PayerName
+    ORDER BY a.PanelName, r.PayerRank, a.WeekKey;
+END
+GO
+
+-- =====================================================================
+-- 5. Panel Averages
+-- Source: dbo.ClaimLevelData / dbo.AnP_CS_PanelAverages
+-- No-filter: reads snapshot.
+-- Filter: live aggregate from ClaimLevelData using CheckDate.
+-- Note: AnP_CS_PanelAverages has no AdjudicatedCount/Amount columns;
+--       0 placeholders are returned to satisfy the shared C# reader.
+-- =====================================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_CS_PanelAverages
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @FirstBillFrom   DATE          = NULL,
+    @FirstBillTo     DATE          = NULL,
+    @CheckDateFrom   DATE          = NULL,
+    @CheckDateTo     DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @HasFilter BIT =
+        CASE
+            WHEN NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL THEN 1
+            WHEN NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL THEN 1
+            WHEN @DosFrom       IS NOT NULL OR @DosTo       IS NOT NULL THEN 1
+            WHEN @FirstBillFrom IS NOT NULL OR @FirstBillTo IS NOT NULL THEN 1
+            WHEN @CheckDateFrom IS NOT NULL OR @CheckDateTo IS NOT NULL THEN 1
+            ELSE 0
+        END;
+
+    IF @HasFilter = 0
+    BEGIN
+        SELECT  PanelName, PayerName,
+                NoOfClaims,
+                TotalCharges,
+                CarrierPayment,
+                FullyPaidCount,  FullyPaidAmount,
+                0                        AS AdjudicatedCount,
+                CAST(0 AS DECIMAL(18,2)) AS AdjudicatedAmount,
+                Days30Count,     Days30Amount,
+                Days60Count,     Days60Amount
+        FROM    dbo.AnP_CS_PanelAverages
+        ORDER BY PanelName, PayerName;
+        RETURN;
+    END;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PayerNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PanelNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    ;WITH src AS (
+        SELECT
+            LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) AS PanelName,
+            LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) AS PayerName,
+            COALESCE(NULLIF(LTRIM(RTRIM(AccessionNumber)), ''), LTRIM(RTRIM(ClaimID))) AS VisitKey,
+            TRY_CAST(ChargeAmount     AS DECIMAL(18,2))    AS Chg,
+            TRY_CAST(InsurancePayment AS DECIMAL(18,2))    AS InsPay,
+            LTRIM(RTRIM(ClaimStatus))                      AS ClaimStatus,
+            ISNULL(TRY_CAST(DaystoDOS AS INT), 9999)       AS Days
+        FROM dbo.ClaimLevelData
+        WHERE TRY_CAST(CheckDate AS DATE) IS NOT NULL
+          AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
+          AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
+          AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
+          AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
+          AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+          AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
+          AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate      AS DATE) >= @CheckDateFrom)
+          AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate      AS DATE) <= @CheckDateTo)
+    )
+    SELECT
+        PanelName, PayerName,
+        COUNT(DISTINCT CASE WHEN ClaimStatus <> 'No Response' THEN VisitKey END)               AS NoOfClaims,
+        ISNULL(SUM(CASE WHEN ClaimStatus <> 'No Response' THEN Chg    ELSE 0 END), 0)          AS TotalCharges,
+        ISNULL(SUM(CASE WHEN ClaimStatus <> 'No Response' THEN InsPay ELSE 0 END), 0)          AS CarrierPayment,
+        COUNT(DISTINCT CASE WHEN ClaimStatus = 'Fully Paid' THEN VisitKey END)                 AS FullyPaidCount,
+        ISNULL(SUM(CASE WHEN ClaimStatus = 'Fully Paid' THEN InsPay ELSE 0 END), 0)            AS FullyPaidAmount,
+        0                                                                                       AS AdjudicatedCount,
+        CAST(0 AS DECIMAL(18,2))                                                               AS AdjudicatedAmount,
+        COUNT(DISTINCT CASE WHEN Days <= 30 THEN VisitKey END)                                 AS Days30Count,
+        ISNULL(SUM(CASE WHEN Days <= 30 THEN InsPay ELSE 0 END), 0)                            AS Days30Amount,
+        COUNT(DISTINCT CASE WHEN Days <= 60 THEN VisitKey END)                                 AS Days60Count,
+        ISNULL(SUM(CASE WHEN Days <= 60 THEN InsPay ELSE 0 END), 0)                            AS Days60Amount
+    FROM src
+    GROUP BY PanelName, PayerName
+    ORDER BY PanelName, PayerName;
+END
+GO
+
+-- =====================================================================
+-- 6. Average Payments (DateOfService rows; 3/6 months from latest week-range end)
+-- Source: dbo.ClaimLevelData
+-- Aliases: ClaimCount->NoOfClaims, InsurancePayment->CarrierPayment,
+--          Over30/60->Days30/60 (to match C# reader).
+-- =====================================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_CS_AvgPayments
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @FirstBillFrom   DATE          = NULL,
+    @FirstBillTo     DATE          = NULL,
+    @CheckDateFrom   DATE          = NULL,
+    @CheckDateTo     DATE          = NULL,
+    @LastMonths      INT           = 6
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF ISNULL(@LastMonths, 0) NOT IN (3, 6)
+        SET @LastMonths = 6;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 450)
+        FROM STRING_SPLIT(@PayerNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 450)
+        FROM STRING_SPLIT(@PanelNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    DECLARE @WindowEnd DATE;
+
+    IF OBJECT_ID(N'dbo.LineClaimFileLogs', N'U') IS NOT NULL
+        SELECT @WindowEnd = MAX(TRY_CONVERT(DATE,
+            REPLACE(LTRIM(RTRIM(SUBSTRING(WeekFolder, CHARINDEX(' - ', WeekFolder) + 3, 50))), '.', '/'),
+            101))
+        FROM dbo.LineClaimFileLogs
+        WHERE NULLIF(LTRIM(RTRIM(RunId)), '') IS NOT NULL
+          AND CHARINDEX(' - ', WeekFolder) > 0;
+
+    -- Safety fallback for older databases without usable week-folder history.
+    IF @WindowEnd IS NULL
+        SELECT @WindowEnd = MAX(TRY_CAST(DateOfService AS DATE))
+        FROM dbo.ClaimLevelData;
+
+    DECLARE @Cutoff DATE = DATEADD(MONTH, -@LastMonths, @WindowEnd);
+    DECLARE @WindowFrom DATE = DATEADD(DAY, 1, @Cutoff);
+
+    ;WITH base AS (
+        SELECT
+            LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) AS PanelName,
+            LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) AS PayerName,
+            ClaimID,
+            TRY_CAST(ChargeAmount     AS DECIMAL(18,2)) AS Chg,
+            TRY_CAST(InsurancePayment AS DECIMAL(18,2)) AS InsPay,
+            LTRIM(RTRIM(ClaimStatus)) AS ClaimStatus,
+            ISNULL(TRY_CAST(DaystoDOS AS INT), 9999) AS Days
+        FROM dbo.ClaimLevelData
+        WHERE TRY_CAST(DateOfService AS DATE) >= @WindowFrom
+          AND TRY_CAST(DateOfService AS DATE) < @WindowEnd
+          AND Panelname    IS NOT NULL AND LTRIM(RTRIM(Panelname))    <> ''
+          AND PayerName_Raw IS NOT NULL AND LTRIM(RTRIM(PayerName_Raw)) <> ''
+          AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
+          AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
+          AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
+          AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
+          AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+          AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
+          AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate        AS DATE) >= @CheckDateFrom)
+          AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate        AS DATE) <= @CheckDateTo)
+    )
+    SELECT
+        PanelName, PayerName,
+        COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), ''))                                    AS NoOfClaims,
+        ISNULL(SUM(Chg),    0)                                                      AS TotalCharges,
+        ISNULL(SUM(InsPay), 0)                                                      AS CarrierPayment,
+        COUNT(CASE WHEN ClaimStatus = 'Fully Paid' THEN ClaimID END)                        AS FullyPaidCount,
+        ISNULL(SUM(CASE WHEN ClaimStatus = 'Fully Paid' THEN InsPay ELSE 0 END), 0)         AS FullyPaidAmount,
+        0                                                                                   AS AdjudicatedCount,
+        CAST(0 AS DECIMAL(18,2))                                                            AS AdjudicatedAmount,
+        COUNT(CASE WHEN Days <= 30 THEN ClaimID END)                                        AS Days30Count,
+        ISNULL(SUM(CASE WHEN Days <= 30 THEN InsPay ELSE 0 END), 0)                         AS Days30Amount,
+        COUNT(CASE WHEN Days <= 60 THEN ClaimID END)                                        AS Days60Count,
+        ISNULL(SUM(CASE WHEN Days <= 60 THEN InsPay ELSE 0 END), 0)                         AS Days60Amount
+    FROM base
+    GROUP BY PanelName, PayerName
+    ORDER BY PanelName, PayerName;
+END
+GO
+
+-- =====================================================================
+-- 7. Insurance vs Aging
+-- Source: dbo.ClaimLevelData / dbo.AnP_CS_InsuranceVsAging
+-- AgingBucket values: Current / 30 Days / 60 Days / 90 Days / 120+ Days
+-- =====================================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_CS_InsuranceVsAging
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @FirstBillFrom   DATE          = NULL,
+    @FirstBillTo     DATE          = NULL,
+    @CheckDateFrom   DATE          = NULL,
+    @CheckDateTo     DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @HasFilter BIT =
+        CASE
+            WHEN NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL THEN 1
+            WHEN NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL THEN 1
+            WHEN @DosFrom       IS NOT NULL OR @DosTo       IS NOT NULL THEN 1
+            WHEN @FirstBillFrom IS NOT NULL OR @FirstBillTo IS NOT NULL THEN 1
+            WHEN @CheckDateFrom IS NOT NULL OR @CheckDateTo IS NOT NULL THEN 1
+            ELSE 0
+        END;
+
+    IF @HasFilter = 0
+    BEGIN
+        SELECT PayerName, AgingBucket, VisitCount, InsuranceBalance
+        FROM   dbo.AnP_CS_InsuranceVsAging
+        ORDER  BY PayerName, AgingBucket;
+        RETURN;
+    END;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PayerNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PanelNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    SELECT
+        LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))                         AS PayerName,
+        CASE
+            WHEN ISNULL(TRY_CAST(DaystoDOS AS INT), -1) < 0  THEN '(blank)'
+            WHEN TRY_CAST(DaystoDOS AS INT) < 30              THEN 'Current'
+            WHEN TRY_CAST(DaystoDOS AS INT) < 60              THEN '30 Days'
+            WHEN TRY_CAST(DaystoDOS AS INT) < 90              THEN '60 Days'
+            WHEN TRY_CAST(DaystoDOS AS INT) < 120             THEN '90 Days'
+            ELSE '120+ Days'
+        END                                                                     AS AgingBucket,
+        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(AccessionNumber)), ''))               AS VisitCount,
+        ISNULL(SUM(TRY_CAST(InsuranceBalance AS DECIMAL(18,2))), 0)            AS InsuranceBalance
+    FROM dbo.ClaimLevelData
+    WHERE PayerName_Raw IS NOT NULL AND LTRIM(RTRIM(PayerName_Raw)) <> ''
+      AND ISNULL(TRY_CAST(InsuranceBalance AS DECIMAL(18,2)), 0) <> 0
+      AND LTRIM(RTRIM(ClaimStatus)) <> 'No Response'
+      AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
+      AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
+      AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
+      AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
+      AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+      AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
+      AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate      AS DATE) >= @CheckDateFrom)
+      AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate      AS DATE) <= @CheckDateTo)
+    GROUP BY
+        LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
+        CASE
+            WHEN ISNULL(TRY_CAST(DaystoDOS AS INT), -1) < 0  THEN '(blank)'
+            WHEN TRY_CAST(DaystoDOS AS INT) < 30              THEN 'Current'
+            WHEN TRY_CAST(DaystoDOS AS INT) < 60              THEN '30 Days'
+            WHEN TRY_CAST(DaystoDOS AS INT) < 90              THEN '60 Days'
+            WHEN TRY_CAST(DaystoDOS AS INT) < 120             THEN '90 Days'
+            ELSE '120+ Days'
+        END
+    ORDER BY PayerName, AgingBucket;
+END
+GO
+
+-- =====================================================================
+-- 8. Panel vs Payment
+-- Source: dbo.ClaimLevelData / dbo.AnP_CS_PanelVsPayment
+-- =====================================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_CS_PanelVsPayment
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @FirstBillFrom   DATE          = NULL,
+    @FirstBillTo     DATE          = NULL,
+    @CheckDateFrom   DATE          = NULL,
+    @CheckDateTo     DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @HasFilter BIT =
+        CASE
+            WHEN NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL THEN 1
+            WHEN NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL THEN 1
+            WHEN @DosFrom       IS NOT NULL OR @DosTo       IS NOT NULL THEN 1
+            WHEN @FirstBillFrom IS NOT NULL OR @FirstBillTo IS NOT NULL THEN 1
+            WHEN @CheckDateFrom IS NOT NULL OR @CheckDateTo IS NOT NULL THEN 1
+            ELSE 0
+        END;
+
+    IF @HasFilter = 0
+    BEGIN
+        SELECT  PanelName,
+                BilledYear,
+                BilledMonth,
+                SUM(NoOfClaims)       AS NoOfClaims,
+                SUM(InsurancePayment) AS InsurancePayments
+        FROM    dbo.AnP_CS_PanelVsPayment
+        GROUP BY PanelName, BilledYear, BilledMonth
+        ORDER BY PanelName, BilledYear, BilledMonth;
+        RETURN;
+    END;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PayerNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PanelNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    SELECT
+        LTRIM(RTRIM(ISNULL(Panelname, 'Unknown')))                           AS PanelName,
+        YEAR (TRY_CAST(CheckDate AS DATE))                                    AS BilledYear,
+        CAST(MONTH(TRY_CAST(CheckDate AS DATE)) AS TINYINT)                   AS BilledMonth,
+        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))                     AS NoOfClaims,
+        ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)          AS InsurancePayments
+    FROM dbo.ClaimLevelData
+    WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+      AND TRY_CAST(CheckDate AS DATE) IS NOT NULL AND CheckDate <> ''
+      AND YEAR(TRY_CAST(CheckDate AS DATE)) > 1900
+      AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
+      AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
+      AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
+      AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
+      AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+      AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
+      AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate       AS DATE) >= @CheckDateFrom)
+      AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate       AS DATE) <= @CheckDateTo)
+    GROUP BY
+        LTRIM(RTRIM(ISNULL(Panelname, 'Unknown'))),
+        YEAR (TRY_CAST(CheckDate AS DATE)),
+        MONTH(TRY_CAST(CheckDate AS DATE))
+    ORDER BY PanelName, BilledYear, BilledMonth;
+END
+GO
+
+-- =====================================================================
+-- 9. Rep vs Payment
+-- Source: dbo.ClaimLevelData / dbo.AnP_CS_RepVsPayment
+-- Uses CheckDate (AnalyzePathology has no PostingDate; scripts 02-05 skipped).
+-- =====================================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_CS_RepVsPayment
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @FirstBillFrom   DATE          = NULL,
+    @FirstBillTo     DATE          = NULL,
+    @CheckDateFrom   DATE          = NULL,
+    @CheckDateTo     DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @HasFilter BIT =
+        CASE
+            WHEN NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL THEN 1
+            WHEN NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL THEN 1
+            WHEN @DosFrom       IS NOT NULL OR @DosTo       IS NOT NULL THEN 1
+            WHEN @FirstBillFrom IS NOT NULL OR @FirstBillTo IS NOT NULL THEN 1
+            WHEN @CheckDateFrom IS NOT NULL OR @CheckDateTo IS NOT NULL THEN 1
+            ELSE 0
+        END;
+
+    IF @HasFilter = 0
+    BEGIN
+        SELECT SalesRepName, CheckYear, CheckMonth, NoOfClaims, InsurancePayment
+        FROM   dbo.AnP_CS_RepVsPayment
+        ORDER  BY SalesRepName, CheckYear, CheckMonth;
+        RETURN;
+    END;
+
+    DECLARE @RepCol SYSNAME =
+    (
+        SELECT TOP (1) c.name
+        FROM sys.columns c
+        WHERE c.object_id = OBJECT_ID(N'dbo.ClaimLevelData')
+          AND c.name IN (N'SalesRepname', N'SalesRepName', N'SalesRep', N'SalesRep_Name')
+        ORDER BY CASE c.name
+            WHEN N'SalesRepname' THEN 1
+            WHEN N'SalesRepName' THEN 2
+            WHEN N'SalesRep' THEN 3
+            ELSE 4
+        END
+    );
+
+    IF @RepCol IS NULL
+    BEGIN
+        SELECT TOP (0)
+            CAST(NULL AS NVARCHAR(500)) AS SalesRepName,
+            CAST(NULL AS INT) AS CheckYear,
+            CAST(NULL AS INT) AS CheckMonth,
+            CAST(NULL AS INT) AS NoOfClaims,
+            CAST(NULL AS DECIMAL(18,2)) AS InsurancePayment;
+        RETURN;
+    END;
+
+    DECLARE @sql NVARCHAR(MAX) = N'
+    SELECT
+        LTRIM(RTRIM(' + QUOTENAME(@RepCol) + N')) AS SalesRepName,
+        CAST(YEAR (TRY_CAST(CheckDate AS DATE)) AS INT) AS CheckYear,
+        CAST(MONTH(TRY_CAST(CheckDate AS DATE)) AS INT) AS CheckMonth,
+        COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), '''')) AS NoOfClaims,
+        ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0) AS InsurancePayment
+    FROM dbo.ClaimLevelData
+    WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+      AND (' + QUOTENAME(@RepCol) + N' IS NOT NULL AND LTRIM(RTRIM(' + QUOTENAME(@RepCol) + N')) <> '''')
+      AND (@PayerNames IS NULL OR NULLIF(LTRIM(RTRIM(@PayerNames)), '''') IS NULL
+           OR LTRIM(RTRIM(ISNULL(PayerName_Raw, ''Unknown''))) IN (
+                SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@PayerNames, ''|'')
+                WHERE NULLIF(LTRIM(RTRIM(value)), '''') IS NOT NULL))
+      AND (@PanelNames IS NULL OR NULLIF(LTRIM(RTRIM(@PanelNames)), '''') IS NULL
+           OR LTRIM(RTRIM(ISNULL(Panelname, ''Unknown''))) IN (
+                SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@PanelNames, ''|'')
+                WHERE NULLIF(LTRIM(RTRIM(value)), '''') IS NOT NULL))
+      AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
+      AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
+      AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+      AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
+      AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate      AS DATE) >= @CheckDateFrom)
+      AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate      AS DATE) <= @CheckDateTo)
+    GROUP BY
+        LTRIM(RTRIM(' + QUOTENAME(@RepCol) + N')),
+        CAST(YEAR (TRY_CAST(CheckDate AS DATE)) AS INT),
+        CAST(MONTH(TRY_CAST(CheckDate AS DATE)) AS INT)
+    ORDER BY SalesRepName, CheckYear, CheckMonth;';
+
+    EXEC sys.sp_executesql @sql,
+        N'@PayerNames NVARCHAR(MAX), @PanelNames NVARCHAR(MAX),
+          @DosFrom DATE, @DosTo DATE, @FirstBillFrom DATE, @FirstBillTo DATE,
+          @CheckDateFrom DATE, @CheckDateTo DATE',
+        @PayerNames=@PayerNames, @PanelNames=@PanelNames,
+        @DosFrom=@DosFrom, @DosTo=@DosTo,
+        @FirstBillFrom=@FirstBillFrom, @FirstBillTo=@FirstBillTo,
+        @CheckDateFrom=@CheckDateFrom, @CheckDateTo=@CheckDateTo;
+END
+GO
+
+-- =====================================================================
+-- 10. Insurance vs Payment %
+-- Source: dbo.ClaimLevelData / dbo.AnP_CS_InsuranceVsPaymentPct
+-- No-filter: returns PanelGroupCount AS NoOfClaims (snapshot column).
+-- Filter: live re-aggregate using AVG(PaymentPercent) * 100.
+-- =====================================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_CS_InsuranceVsPaymentPct
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @FirstBillFrom   DATE          = NULL,
+    @FirstBillTo     DATE          = NULL,
+    @CheckDateFrom   DATE          = NULL,
+    @CheckDateTo     DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @HasFilter BIT =
+        CASE
+            WHEN NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL THEN 1
+            WHEN NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL THEN 1
+            WHEN @DosFrom       IS NOT NULL OR @DosTo       IS NOT NULL THEN 1
+            WHEN @FirstBillFrom IS NOT NULL OR @FirstBillTo IS NOT NULL THEN 1
+            WHEN @CheckDateFrom IS NOT NULL OR @CheckDateTo IS NOT NULL THEN 1
+            ELSE 0
+        END;
+
+    IF @HasFilter = 0
+    BEGIN
+        SELECT  PayerName,
+                PanelGroupCount AS NoOfClaims,
+                InsurancePayment,
+                PaymentPct
+        FROM    dbo.AnP_CS_InsuranceVsPaymentPct
+        ORDER BY InsurancePayment DESC;
+        RETURN;
+    END;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PayerNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PanelNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    ;WITH base AS (
+        SELECT
+            LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) AS PayerName,
+            LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) AS PanelName,
+            TRY_CAST(InsurancePayment AS DECIMAL(18,2))    AS InsPay,
+            CASE
+                WHEN TRY_CAST(ChargeAmount AS DECIMAL(18,2)) IS NULL
+                  OR TRY_CAST(ChargeAmount AS DECIMAL(18,2)) = 0 THEN CAST(NULL AS DECIMAL(9,4))
+                ELSE CAST(TRY_CAST(InsurancePayment AS DECIMAL(18,2))
+                          / TRY_CAST(ChargeAmount AS DECIMAL(18,2)) AS DECIMAL(9,4))
+            END AS PayPct
+        FROM dbo.ClaimLevelData
+        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+          AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
+          AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
+          AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
+          AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
+          AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+          AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
+          AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate      AS DATE) >= @CheckDateFrom)
+          AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate      AS DATE) <= @CheckDateTo)
+    )
+    SELECT
+        PayerName,
+        COUNT(PanelName)                               AS NoOfClaims,
+        ISNULL(SUM(InsPay), 0)                         AS InsurancePayment,
+        ROUND(ISNULL(AVG(PayPct), 0) * 100, 0)         AS PaymentPct
+    FROM base
+    GROUP BY PayerName
+    ORDER BY InsurancePayment DESC;
+END
+GO
+
+-- =====================================================================
+-- 11. CPT vs Payment %
+-- Source: dbo.LineLevelData / dbo.AnP_CS_CptVsPaymentPct
+-- =====================================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_CS_CptVsPaymentPct
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @FirstBillFrom   DATE          = NULL,
+    @FirstBillTo     DATE          = NULL,
+    @CheckDateFrom   DATE          = NULL,
+    @CheckDateTo     DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @HasFilter BIT =
+        CASE
+            WHEN NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL THEN 1
+            WHEN NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL THEN 1
+            WHEN @DosFrom       IS NOT NULL OR @DosTo       IS NOT NULL THEN 1
+            WHEN @FirstBillFrom IS NOT NULL OR @FirstBillTo IS NOT NULL THEN 1
+            WHEN @CheckDateFrom IS NOT NULL OR @CheckDateTo IS NOT NULL THEN 1
+            ELSE 0
+        END;
+
+    IF @HasFilter = 0
+    BEGIN
+        SELECT CPTCode, SumUnits, PaidInsurancePayment, PaidChargeAmount, PaymentPct
+        FROM   dbo.AnP_CS_CptVsPaymentPct
+        ORDER  BY SumUnits DESC;
+        RETURN;
+    END;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PayerNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PanelNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    SELECT
+        LTRIM(RTRIM(CPTCode))                                                      AS CPTCode,
+        ISNULL(SUM(TRY_CAST(Units AS DECIMAL(18,2))), 0)                          AS SumUnits,
+        ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
+                        THEN TRY_CAST(InsurancePayment AS DECIMAL(18,2)) ELSE 0 END), 0) AS PaidInsurancePayment,
+        ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
+                        THEN TRY_CAST(ChargeAmount     AS DECIMAL(18,2)) ELSE 0 END), 0) AS PaidChargeAmount
+    FROM dbo.LineLevelData
+    WHERE CPTCode IS NOT NULL AND LTRIM(RTRIM(CPTCode)) <> ''
+      AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
+      AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
+      AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
+      AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
+      AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+      AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
+      AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate      AS DATE) >= @CheckDateFrom)
+      AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate      AS DATE) <= @CheckDateTo)
+    GROUP BY LTRIM(RTRIM(CPTCode))
+    ORDER BY SumUnits DESC;
+END
+GO
+
+-- =====================================================================
+-- 12. Status Summary
+-- Source: dbo.ClaimLevelData / dbo.AnP_CS_StatusSummary
+-- =====================================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_CS_StatusSummary
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @FirstBillFrom   DATE          = NULL,
+    @FirstBillTo     DATE          = NULL,
+    @CheckDateFrom   DATE          = NULL,
+    @CheckDateTo     DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @HasFilter BIT =
+        CASE
+            WHEN NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL THEN 1
+            WHEN NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL THEN 1
+            WHEN @DosFrom       IS NOT NULL OR @DosTo       IS NOT NULL THEN 1
+            WHEN @FirstBillFrom IS NOT NULL OR @FirstBillTo IS NOT NULL THEN 1
+            WHEN @CheckDateFrom IS NOT NULL OR @CheckDateTo IS NOT NULL THEN 1
+            ELSE 0
+        END;
+
+    IF @HasFilter = 0
+    BEGIN
+        SELECT ClaimStatus, PanelName, CptCode, PayerName,
+               NoOfClaims, InsurancePayment, InsuranceBalance, PatientBalance
+        FROM   dbo.AnP_CS_StatusSummary;
+        RETURN;
+    END;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PayerNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PanelNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    SELECT
+        ISNULL(LTRIM(RTRIM(ClaimStatus)),            '(blank)') AS ClaimStatus,
+        ISNULL(LTRIM(RTRIM(Panelname)),              '(blank)') AS PanelName,
+        ISNULL(LTRIM(RTRIM(CPTCodeXUnitsXModifier)), '(blank)') AS CptCode,
+        ISNULL(LTRIM(RTRIM(PayerName_Raw)),          '(blank)') AS PayerName,
+        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))                    AS NoOfClaims,
+        ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)         AS InsurancePayment,
+        ISNULL(SUM(TRY_CAST(InsuranceBalance AS DECIMAL(18,2))), 0)         AS InsuranceBalance,
+        ISNULL(SUM(TRY_CAST(PatientBalance   AS DECIMAL(18,2))), 0)         AS PatientBalance
+    FROM dbo.ClaimLevelData
+    WHERE (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
+      AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
+      AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
+      AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
+      AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+      AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
+      AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate      AS DATE) >= @CheckDateFrom)
+      AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate      AS DATE) <= @CheckDateTo)
+    GROUP BY
+        LTRIM(RTRIM(ClaimStatus)),
+        LTRIM(RTRIM(Panelname)),
+        LTRIM(RTRIM(CPTCodeXUnitsXModifier)),
+        LTRIM(RTRIM(PayerName_Raw));
+END
+GO
+
+-- =====================================================================
+-- 13. Provider Summary
+-- Source: dbo.ClaimLevelData / dbo.AnP_CS_ProviderSummary
+-- =====================================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_CS_ProviderSummary
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @FirstBillFrom   DATE          = NULL,
+    @FirstBillTo     DATE          = NULL,
+    @CheckDateFrom   DATE          = NULL,
+    @CheckDateTo     DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @HasFilter BIT =
+        CASE
+            WHEN NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL THEN 1
+            WHEN NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL THEN 1
+            WHEN @DosFrom       IS NOT NULL OR @DosTo       IS NOT NULL THEN 1
+            WHEN @FirstBillFrom IS NOT NULL OR @FirstBillTo IS NOT NULL THEN 1
+            WHEN @CheckDateFrom IS NOT NULL OR @CheckDateTo IS NOT NULL THEN 1
+            ELSE 0
+        END;
+
+    IF @HasFilter = 0
+    BEGIN
+        SELECT ProviderRank, ReferringProvider, NoOfClaims,
+               InsurancePayment AS InsurancePayments,
+               InsuranceBalance, PatientBalance
+        FROM   dbo.AnP_CS_ProviderSummary
+        ORDER  BY ProviderRank;
+        RETURN;
+    END;
+
+    DECLARE @ProvCol SYSNAME =
+    (
+        SELECT TOP (1) c.name
+        FROM sys.columns c
+        WHERE c.object_id = OBJECT_ID(N'dbo.ClaimLevelData')
+          AND c.name IN (
+                N'ReferringProvider', N'ReferringPhysician',
+                N'Provider', N'ProviderName', N'OrderingProvider', N'DoctorFullName', N'BillingProvider')
+        ORDER BY CASE c.name
+            WHEN N'ReferringProvider' THEN 1
+            WHEN N'ReferringPhysician' THEN 2
+            WHEN N'Provider' THEN 3
+            WHEN N'ProviderName' THEN 4
+            WHEN N'OrderingProvider' THEN 5
+            WHEN N'DoctorFullName' THEN 6
+            WHEN N'BillingProvider' THEN 7
+            ELSE 8
+        END
+    );
+
+    IF @ProvCol IS NULL
+    BEGIN
+        SELECT TOP (0)
+            CAST(NULL AS INT) AS ProviderRank,
+            CAST(NULL AS NVARCHAR(500)) AS ReferringProvider,
+            CAST(NULL AS INT) AS NoOfClaims,
+            CAST(NULL AS DECIMAL(18,2)) AS InsurancePayments,
+            CAST(NULL AS DECIMAL(18,2)) AS InsuranceBalance,
+            CAST(NULL AS DECIMAL(18,2)) AS PatientBalance;
+        RETURN;
+    END;
+
+    DECLARE @sql NVARCHAR(MAX) = N'
+    ;WITH agg AS (
+        SELECT
+            LTRIM(RTRIM(' + QUOTENAME(@ProvCol) + N')) AS ReferringProvider,
+            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), '''')) AS NoOfClaims,
+            ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0) AS InsurancePayments,
+            ISNULL(SUM(TRY_CAST(InsuranceBalance AS DECIMAL(18,2))), 0) AS InsuranceBalance,
+            ISNULL(SUM(TRY_CAST(PatientBalance   AS DECIMAL(18,2))), 0) AS PatientBalance
+        FROM dbo.ClaimLevelData
+        WHERE ' + QUOTENAME(@ProvCol) + N' IS NOT NULL
+          AND LTRIM(RTRIM(' + QUOTENAME(@ProvCol) + N')) <> ''''
+          AND (@PayerNames IS NULL OR NULLIF(LTRIM(RTRIM(@PayerNames)), '''') IS NULL
+               OR LTRIM(RTRIM(ISNULL(PayerName_Raw, ''Unknown''))) IN (
+                    SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@PayerNames, ''|'')
+                    WHERE NULLIF(LTRIM(RTRIM(value)), '''') IS NOT NULL))
+          AND (@PanelNames IS NULL OR NULLIF(LTRIM(RTRIM(@PanelNames)), '''') IS NULL
+               OR LTRIM(RTRIM(ISNULL(Panelname, ''Unknown''))) IN (
+                    SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@PanelNames, ''|'')
+                    WHERE NULLIF(LTRIM(RTRIM(value)), '''') IS NOT NULL))
+          AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
+          AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
+          AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+          AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
+          AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate      AS DATE) >= @CheckDateFrom)
+          AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate      AS DATE) <= @CheckDateTo)
+        GROUP BY LTRIM(RTRIM(' + QUOTENAME(@ProvCol) + N'))
+    )
+    SELECT
+        CAST(ROW_NUMBER() OVER (ORDER BY NoOfClaims DESC) AS INT) AS ProviderRank,
+        ReferringProvider, NoOfClaims,
+        InsurancePayments, InsuranceBalance, PatientBalance
+    FROM agg
+    ORDER BY ProviderRank;';
+
+    EXEC sys.sp_executesql @sql,
+        N'@PayerNames NVARCHAR(MAX), @PanelNames NVARCHAR(MAX),
+          @DosFrom DATE, @DosTo DATE, @FirstBillFrom DATE, @FirstBillTo DATE,
+          @CheckDateFrom DATE, @CheckDateTo DATE',
+        @PayerNames=@PayerNames, @PanelNames=@PanelNames,
+        @DosFrom=@DosFrom, @DosTo=@DosTo,
+        @FirstBillFrom=@FirstBillFrom, @FirstBillTo=@FirstBillTo,
+        @CheckDateFrom=@CheckDateFrom, @CheckDateTo=@CheckDateTo;
+END
+GO
+
+-- =====================================================================
+-- 14. Insurance vs Payment (Payer x Year/Month)
+-- Source: dbo.ClaimLevelData / dbo.AnP_CS_InsuranceVsPayment (no snapshot)
+-- Uses all valid CheckDate values; no hard-coded month/date exclusion.
+-- =====================================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_CS_InsuranceVsPayment
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @FirstBillFrom   DATE          = NULL,
+    @FirstBillTo     DATE          = NULL,
+    @CheckDateFrom   DATE          = NULL,
+    @CheckDateTo     DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(450) NOT NULL PRIMARY KEY);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PayerNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PanelNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    ;WITH agg AS (
+        SELECT
+            LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))             AS PayerName,
+            CAST(YEAR (TRY_CAST(CheckDate AS DATE)) AS INT)             AS BillYear,
+            CAST(MONTH(TRY_CAST(CheckDate AS DATE)) AS TINYINT)         AS BillMonth,
+            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))           AS NoOfPaidClaims,
+            ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0) AS InsurancePayment
+        FROM dbo.ClaimLevelData
+        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+          AND NULLIF(LTRIM(RTRIM(CheckDate)), '') IS NOT NULL
+          AND TRY_CAST(CheckDate AS DATE) IS NOT NULL
+          AND YEAR(TRY_CAST(CheckDate AS DATE)) > 1900
+          AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
+          AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
+          AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
+          AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
+          AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
+          AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
+          AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate AS DATE) >= @CheckDateFrom)
+          AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate AS DATE) <= @CheckDateTo)
+        GROUP BY
+            LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
+            CAST(YEAR (TRY_CAST(CheckDate AS DATE)) AS INT),
+            CAST(MONTH(TRY_CAST(CheckDate AS DATE)) AS TINYINT)
+    ),
+    grand AS (
+        SELECT BillYear, BillMonth,
+               NULLIF(SUM(InsurancePayment), 0) AS Total
+        FROM agg GROUP BY BillYear, BillMonth
+    )
+    SELECT a.PayerName, a.BillYear, a.BillMonth, a.NoOfPaidClaims,
+           a.InsurancePayment,
+           CAST(a.InsurancePayment * 100.0 / ISNULL(g.Total, 1) AS DECIMAL(9,4)) AS PaymentPct
+    FROM agg a
+    INNER JOIN grand g ON a.BillYear = g.BillYear AND a.BillMonth = g.BillMonth
+    ORDER BY a.BillYear, a.BillMonth, a.InsurancePayment DESC;
+END
+GO
+
