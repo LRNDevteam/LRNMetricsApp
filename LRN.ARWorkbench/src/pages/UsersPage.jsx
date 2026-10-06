@@ -52,12 +52,32 @@ function UserModal({ data, user, onClose, onSaved }) {
     password: '',
     roleId: currentRole || '',
     labIds: user ? user.labs.map((l) => l.labId) : (data.labs.length === 1 ? [data.labs[0].labId] : []),
-    isActive: user ? user.isActive : true
+    isActive: user ? user.isActive : true,
+    managerUserId: user?.managerUserId || '',
+    teamName: user?.teamName || '',
+    // { [labId]: clinic or provider } for a Clinic / Provider Viewer
+    scopes: Object.fromEntries((user?.scopes || []).map((s) => [s.labId, s.clinicName || s.providerName || '']))
   }));
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  // T054 cascading access picker: a Clinic / Provider Viewer picks, per selected lab, a value from that lab's claims.
+  const roleScope = data.roles.find((r) => String(r.roleId) === String(form.roleId))?.scope || null;
+  const [scopeChoices, setScopeChoices] = useState({});   // `${level}|${labId}` -> string[] | { error }
+  useEffect(() => {
+    if (!roleScope) return;
+    form.labIds.forEach((id) => {
+      const key = `${roleScope}|${id}`;
+      if (scopeChoices[key]) return;
+      setScopeChoices((c) => ({ ...c, [key]: { loading: true } }));
+      arWorkbenchService.userScopeOptions(labId, id, roleScope)
+        .then((list) => setScopeChoices((c) => ({ ...c, [key]: list })))
+        .catch((e) => setScopeChoices((c) => ({ ...c, [key]: { error: e.message } })));
+    });
+  }, [roleScope, form.labIds]); // eslint-disable-line react-hooks/exhaustive-deps
+  const managers = data.managers.filter((m) => !user || m.labUserId !== user.labUserId);
 
   async function save() {
     if (isNew && !form.userName.trim()) { setError('Enter a username.'); return; }
@@ -65,10 +85,17 @@ function UserModal({ data, user, onClose, onSaved }) {
     if (isNew && !form.password) { setError('Enter a password.'); return; }
     if (!form.roleId) { setError('Choose a role.'); return; }
     if (form.labIds.length === 0) { setError('Choose at least one lab.'); return; }
+    if (roleScope && form.labIds.some((id) => !form.scopes[id])) { setError(`Choose the ${roleScope === 'clinic' ? 'clinic' : 'referring provider'} for every selected lab.`); return; }
     setBusy(true);
     setError('');
     try {
-      const body = { email: form.email.trim(), roleId: Number(form.roleId), labIds: form.labIds };
+      const scopes = roleScope
+        ? form.labIds.map((id) => (roleScope === 'clinic' ? { labId: id, clinicName: form.scopes[id] } : { labId: id, providerName: form.scopes[id] }))
+        : [];
+      const body = {
+        email: form.email.trim(), roleId: Number(form.roleId), labIds: form.labIds,
+        managerUserId: form.managerUserId ? Number(form.managerUserId) : null, teamName: form.teamName.trim() || null, scopes
+      };
       const result = isNew
         ? await arWorkbenchService.createUser(labId, { ...body, userName: form.userName.trim(), password: form.password })
         : await arWorkbenchService.updateUser(labId, user.labUserId, { ...body, isActive: form.isActive, password: form.password || null });
@@ -111,6 +138,18 @@ function UserModal({ data, user, onClose, onSaved }) {
             {data.roles.map((r) => <option key={r.roleId} value={r.roleId}>{r.label}</option>)}
           </select>
         </div>
+        <div className="arwb-field">
+          <label htmlFor="u-manager">Manager</label>
+          <select id="u-manager" className="arwb-select" value={form.managerUserId} onChange={(e) => set('managerUserId', e.target.value)}>
+            <option value="">No manager</option>
+            {managers.map((m) => <option key={m.labUserId} value={m.labUserId}>{m.label}</option>)}
+          </select>
+        </div>
+        <div className="arwb-field">
+          <label htmlFor="u-team">Team</label>
+          <input id="u-team" className="arwb-input" list="u-team-list" maxLength={100} value={form.teamName} onChange={(e) => set('teamName', e.target.value)} />
+          <datalist id="u-team-list">{data.teams.map((t) => <option key={t} value={t} />)}</datalist>
+        </div>
         {!isNew && (
           <div className="arwb-checkbox-row">
             <input id="u-active" type="checkbox" checked={form.isActive} onChange={(e) => set('isActive', e.target.checked)} />
@@ -125,6 +164,35 @@ function UserModal({ data, user, onClose, onSaved }) {
           <small className="arwb-hint">Also has {user.otherLabCount} lab{user.otherLabCount === 1 ? '' : 's'} outside yours; those stay as they are.</small>
         )}
       </div>
+      {roleScope && form.labIds.length > 0 && (
+        <div className="arwb-field" style={{ marginTop: 12 }}>
+          <span className="arwb-field-label">Access — {roleScope === 'clinic' ? 'Clinic' : 'Referring Provider'} per lab</span>
+          <small className="arwb-hint">This user sees only the claims of the {roleScope === 'clinic' ? 'clinic' : 'referring provider'} chosen for each lab (drawn from that lab&rsquo;s claims).</small>
+          <div className="arwb-scope-grid">
+            {form.labIds.map((id) => {
+              const lab = data.labs.find((l) => l.labId === id);
+              const choices = scopeChoices[`${roleScope}|${id}`];
+              const list = Array.isArray(choices) ? choices : [];
+              const current = form.scopes[id] || '';
+              return (
+                <div key={id} className="arwb-field">
+                  <label htmlFor={`u-scope-${id}`}>{lab?.labName || `Lab ${id}`}</label>
+                  {choices?.error
+                    ? <small className="text-critical">{choices.error}</small>
+                    : (
+                      <select id={`u-scope-${id}`} className="arwb-select" value={current} disabled={!Array.isArray(choices)}
+                        onChange={(e) => set('scopes', { ...form.scopes, [id]: e.target.value })}>
+                        <option value="">{Array.isArray(choices) ? `Choose a ${roleScope === 'clinic' ? 'clinic' : 'provider'}…` : 'Loading…'}</option>
+                        {current && !list.includes(current) && <option value={current}>{current}</option>}
+                        {list.map((v) => <option key={v} value={v}>{v}</option>)}
+                      </select>
+                    )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }
@@ -178,19 +246,21 @@ export default function UsersPage() {
           </div>
           <div className="arwb-table-wrap">
             <table className="arwb-data-table">
-              <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Labs</th><th>Status</th><th>Created By</th><th /></tr></thead>
+              <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Labs</th><th>Manager / Team</th><th>Status</th><th>Created By</th><th /></tr></thead>
               <tbody>
                 {rows.map((u) => (
                   <tr key={u.labUserId}>
                     <td className="mono">{u.userName}</td>
                     <td>{u.email || '—'}</td>
-                    <td>{u.roles.map((r) => r.label).join(', ') || '—'}{u.isSiteAdmin && <> <Badge className="arwb-badge-purple">Site admin</Badge></>}</td>
+                    <td>{u.roles.map((r) => r.label).join(', ') || '—'}{u.isSiteAdmin && <> <Badge className="arwb-badge-purple">Site admin</Badge></>}
+                      {u.scopes?.length > 0 && <div className="arwb-hint">{u.scopes.map((s) => s.clinicName || s.providerName).join(', ')}</div>}</td>
                     <td>
                       <div className="arwb-chip-row">
                         {u.labs.map((l) => <span key={l.labId} className="arwb-chip">{l.labName}</span>)}
                         {u.otherLabCount > 0 && <span className="arwb-chip arwb-chip-muted" title="Labs outside the ones you manage">+{u.otherLabCount} other</span>}
                       </div>
                     </td>
+                    <td>{u.managerName || <span className="text-muted-ink">—</span>}{u.teamName && <div className="arwb-hint">{u.teamName}</div>}</td>
                     <td>{u.isActive ? <Badge className="arwb-badge-good">Active</Badge> : <Badge className="arwb-badge-neutral">Inactive</Badge>}</td>
                     <td className="arwb-hint">{u.createdBy || '—'}</td>
                     <td className="num">
@@ -200,7 +270,7 @@ export default function UsersPage() {
                     </td>
                   </tr>
                 ))}
-                {rows.length === 0 && <tr><td colSpan={7} className="arwb-hint" style={{ textAlign: 'center', padding: 24 }}>No users match.</td></tr>}
+                {rows.length === 0 && <tr><td colSpan={8} className="arwb-hint" style={{ textAlign: 'center', padding: 24 }}>No users match.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -212,7 +282,7 @@ export default function UsersPage() {
           {data.allLabs
             ? <>As a <b>Super Admin</b> you can create AR Workbench users for <b>every lab</b>.</>
             : <>You can create AR Workbench users for <b>your assigned labs</b> ({data.labs.map((l) => l.labName).join(', ') || 'none'}). Users who also have other labs or LRN Metrics roles are changed by a Super Admin.</>}
-          {' '}Clinic and Provider Viewer access, which also needs the clinic or provider, is set up by a Super Admin.
+          {' '}Clinic and Provider Viewers pick the clinic or referring provider per lab from that lab&rsquo;s claims. Manager and Team feed the team hierarchy used by AR reports.
         </div>
       )}
 

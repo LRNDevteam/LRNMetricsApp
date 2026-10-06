@@ -159,6 +159,9 @@ public sealed class ArWorkbenchClaimFilter
     /// <summary>The value for "no agent" in <see cref="Agent"/>.</summary>
     public const string UnassignedAgent = "__unassigned";
 
+    /// <summary>A shallow copy: replace a list property on it (don't mutate the list) to drop that filter.</summary>
+    public ArWorkbenchClaimFilter Copy() => (ArWorkbenchClaimFilter)MemberwiseClone();
+
     public int LabId { get; set; }
     /// <summary>"queueId" for a whole top-level queue, or "queueId|subQueueId" for one sub-queue.</summary>
     public List<string> Queue { get; set; } = new();
@@ -181,6 +184,8 @@ public sealed class ArWorkbenchClaimFilter
     public bool ActiveOnly { get; set; }
     /// <summary>Only claims with a non-collectible denial code anywhere on the claim.</summary>
     public bool NonCollectibleOnly { get; set; }
+    /// <summary>Only these claims (the Bulk Update template for a selection). Empty = no restriction.</summary>
+    public List<long>? ClaimKeys { get; set; }
     /// <summary>Next follow-up date window: overdue | today | upcoming | none.</summary>
     public string? FollowUpWindow { get; set; }
     /// <summary>My Work quick filter: fix / resolution of the last note is one that waits on the payer.</summary>
@@ -367,6 +372,10 @@ public sealed class ArWorkbenchClaimDetail
     public List<ArWorkbenchFollowUp> FollowUps { get; set; } = new();
     /// <summary>Central Denial Code Master rows for the claim's primary and line-level codes.</summary>
     public List<ArWorkbenchCodeMasterRow> DenialCodeInfo { get; set; } = new();
+    /// <summary>The claim's current QA review (null before the first follow-up note).</summary>
+    public ArWorkbenchQaReview? QaReview { get; set; }
+    /// <summary>The claim's CIP escalations with their history (internal users only).</summary>
+    public List<ArWorkbenchCipCaseDetail> CipCases { get; set; } = new();
 }
 
 public sealed class ArWorkbenchMasterData

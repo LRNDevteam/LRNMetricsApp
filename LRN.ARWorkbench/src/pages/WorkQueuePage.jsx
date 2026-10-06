@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import AssignModal from '../components/AssignModal';
 import AutoAdjustModal from '../components/AutoAdjustModal';
+import BulkUpdateModal from '../components/BulkUpdateModal';
 import DataTable from '../components/DataTable';
 import Icon from '../components/Icon';
 import MultiSelect from '../components/MultiSelect';
@@ -91,6 +92,7 @@ export default function WorkQueuePage() {
   // Automatic Adjustment (mockup: managers / leads / admins, from the Work Queue): the selected
   // claims, or every eligible claim when nothing is selected.
   const [adjusting, setAdjusting] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);       // Bulk Update (Excel)
   const [posting, setPosting] = useState(false);
   const [notice, setNotice] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -170,13 +172,17 @@ export default function WorkQueuePage() {
     setParams(next, { replace: true });
   }
 
+  // Cascading filter lists (T047): re-counted for the current filters, sort and paging ignored.
+  const optionsKey = JSON.stringify({ ...filter, page: 0, pageSize: 0, sortBy: '', sortDesc: false });
   useEffect(() => {
     const controller = new AbortController();
-    arWorkbenchService.claimFilterOptions(labId, controller.signal)
-      .then(setOptions)
-      .catch((e) => { if (e.name !== 'AbortError') setError(e.message); });
-    return () => controller.abort();
-  }, [labId]);
+    const t = setTimeout(() => {
+      arWorkbenchService.claimFilterOptions(labId, controller.signal, filter)
+        .then(setOptions)
+        .catch((e) => { if (e.name !== 'AbortError') setError(e.message); });
+    }, 250);
+    return () => { clearTimeout(t); controller.abort(); };
+  }, [labId, optionsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const controller = new AbortController();
@@ -286,6 +292,12 @@ export default function WorkQueuePage() {
                 {posting ? <span className="arwb-spinner" /> : <Icon name="check" size={15} />} Mark as Posted
               </button>
             )}
+            {(canAssign || can('editClaim')) && (
+              <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => setBulkOpen(true)}
+                title="Assign or log follow-ups for many claims from an Excel file (template with dropdowns)">
+                <Icon name="upload" size={15} /> Bulk Update (Excel)
+              </button>
+            )}
             <button type="button" className="arwb-btn arwb-btn-sm" disabled={exporting !== ''} onClick={() => exportExcel(true)}
               title="Every claim that matches the current filters, not just this page">
               {exporting === 'filtered' ? <span className="arwb-spinner" /> : <Icon name="download" size={15} />} Export Filtered
@@ -298,6 +310,10 @@ export default function WorkQueuePage() {
         )}
       />
 
+      {bulkOpen && (
+        <BulkUpdateModal filter={filter} selectedKeys={selected} onClose={() => setBulkOpen(false)}
+          onDone={() => { setBulkOpen(false); setSelected(new Set()); setNotice({ kind: 'good', text: 'Bulk update finished - the list is refreshed.' }); setReloadKey((k) => k + 1); }} />
+      )}
       {adjusting && (
         <AutoAdjustModal labId={labId} claimKeys={selected.size ? [...selected] : null} onClose={() => setAdjusting(false)}
           onDone={(result) => {

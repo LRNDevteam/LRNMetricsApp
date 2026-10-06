@@ -4,6 +4,7 @@ import { ErrorBox, Loading } from './components/Status';
 import { allows, REDIRECTS, ROUTES } from './config/navigation';
 import { useWorkbench, WorkbenchProvider } from './context/WorkbenchContext';
 import AssignmentPage from './pages/AssignmentPage';
+import CipPage, { ClientCipPage } from './pages/CipPage';
 import ClaimDetailPage from './pages/ClaimDetailPage';
 import CodeMasterPage from './pages/CodeMasterPage';
 import DashboardPage from './pages/DashboardPage';
@@ -11,6 +12,7 @@ import DataProcessingPage from './pages/DataProcessingPage';
 import DenialCodeMasterPage from './pages/DenialCodeMasterPage';
 import MasterDataPage from './pages/MasterDataPage';
 import PlannedPage from './pages/PlannedPage';
+import QaPage from './pages/QaPage';
 import TflSettingsPage from './pages/TflSettingsPage';
 import UsersPage from './pages/UsersPage';
 import WorkQueuePage from './pages/WorkQueuePage';
@@ -23,6 +25,9 @@ const SCREENS = {
   mywork: MyWorkPage,
   followup: FollowUpPage,
   users: UsersPage,
+  qa: QaPage,
+  cip: CipPage,
+  'client-cip': ClientCipPage,
   'data-processing': DataProcessingPage,
   // Master Values submenu: one page component serves several menu items, each a different view.
   'master-values': MasterDataPage,

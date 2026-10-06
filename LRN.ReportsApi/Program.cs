@@ -97,6 +97,9 @@ builder.Services.AddScoped<LRN.ReportsApi.Services.ArReports.IArActivityReportRe
 // AR Workbench (new denial application; [arwb] schema per lab, React app LRN.ARWorkbench).
 builder.Services.AddScoped<LRN.ReportsApi.Services.ArWorkbench.IArWorkbenchRepository,
                            LRN.ReportsApi.Services.ArWorkbench.SqlArWorkbenchRepository>();
+// AR Workbench nightly queue snapshot (T038): recalculate + snapshot each lab once a day.
+builder.Services.Configure<LRN.ReportsApi.Services.ArWorkbench.ArWorkbenchSnapshotOptions>(builder.Configuration.GetSection("ArWorkbenchSnapshots"));
+builder.Services.AddHostedService<LRN.ReportsApi.Services.ArWorkbench.ArWorkbenchSnapshotScheduler>();
 builder.Services.AddScoped<IPayerMasterWorkflowService, PayerMasterWorkflowService>();
 builder.Services.AddHostedService<PayerMasterSlaEscalationService>();
 // Denial Summary observations and weekly/monthly Excel snapshots (Denial Workflow v1.1, 4a-4i).

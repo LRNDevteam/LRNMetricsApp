@@ -745,6 +745,13 @@ builder.Services.AddControllersWithViews(options =>
     options.Filters.Add(new AuthorizeFilter(policy));
 });
 
+// The same admin set MenuAccessFilter and login use (Admin, Super Admin, LRN Admin, ignoring case and
+// spaces). [Authorize(Roles = "Admin")] matched the literal "Admin" only, so a Super Admin opening
+// Menu Master / Role Menu Mapping was bounced to Account/Login?denied=1.
+builder.Services.AddAuthorization(options =>
+    options.AddPolicy(MenuAccessFilter.FullAdminPolicy, p =>
+        p.RequireAuthenticatedUser().RequireAssertion(ctx => MenuAccessFilter.IsFullAdmin(ctx.User))));
+
 builder.Services.AddRequestTimeouts();
 
 // ── Cookie authentication ─────────────────────────────────────────

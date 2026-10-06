@@ -3,6 +3,7 @@ import { Link, useLocation, useParams } from 'react-router';
 import AssignModal from '../components/AssignModal';
 import AutoAdjustModal from '../components/AutoAdjustModal';
 import FollowUpModal from '../components/FollowUpModal';
+import QaDecisionModal, { QA_CRITERIA } from '../components/QaDecisionModal';
 import Icon from '../components/Icon';
 import { AgentName, Badge, ErrorBox, Loading, Notice, QueueBadge, StatusBadge } from '../components/Status';
 import { useWorkbench } from '../context/WorkbenchContext';
@@ -46,7 +47,7 @@ function lineStatusBadge(status) {
 export default function ClaimDetailPage() {
   const { claimKey } = useParams();
   const location = useLocation();
-  const { labId, can } = useWorkbench();
+  const { labId, can, user } = useWorkbench();
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('overview');
@@ -99,7 +100,9 @@ export default function ClaimDetailPage() {
     ['cpt', 'CPT / Line Detail'],
     ['denial', 'Denial Info'],
     ['followups', `Follow-Ups (${detail.followUps.length})`],
-    ['activity', 'Activity Timeline']
+    ['activity', 'Activity Timeline'],
+    ...(detail.qaReview ? [['qa', 'QA Review']] : []),
+    ...(detail.cipCases?.length ? [['cip', `CIP Case${detail.cipCases.length > 1 ? `s (${detail.cipCases.length})` : ''}`]] : [])
   ];
 
   // As the mockup: no note while one waits for QA, or on a closed claim unless it was handed to an
@@ -182,6 +185,11 @@ export default function ClaimDetailPage() {
           {tab === 'denial' && <Denial c={c} followUps={detail.followUps} codes={detail.denialCodeInfo || []} />}
           {tab === 'followups' && <FollowUps c={c} rows={detail.followUps} />}
           {tab === 'activity' && <Activity rows={detail.activity} />}
+          {tab === 'cip' && <CipCases cases={detail.cipCases || []} canManage={can('approve')} />}
+          {tab === 'qa' && detail.qaReview && (
+            <QaTab review={detail.qaReview} c={c} latest={detail.followUps[0]} canDecide={can('qaDecide')} userName={user?.userName}
+              onDecide={(decision) => setDialog(`qa-${decision}`)} />
+          )}
         </div>
       </div>
 
@@ -189,6 +197,12 @@ export default function ClaimDetailPage() {
         <FollowUpModal claim={c} lastFollowUp={detail.followUps[0]} onClose={() => setDialog(null)}
           suggestedRootCause={(detail.denialCodeInfo || []).find((r) => r.denialCode === c.PrimaryDenialCode)?.actionCategory}
           onDone={(r) => done(r?.message || 'Follow-up logged and sent to QA.', 'followups')} />
+      )}
+      {(dialog === 'qa-approve' || dialog === 'qa-reject') && (
+        <QaDecisionModal decision={dialog === 'qa-approve' ? 'approve' : 'reject'} onClose={() => setDialog(null)}
+          row={{ claimKey: c.ClaimKey, claimID: c.ClaimID, isEscalation: detail.qaReview?.isEscalation, isWriteOff: detail.qaReview?.isWriteOff,
+            fixResolution: detail.followUps[0]?.fixResolution, followUpComment: detail.followUps[0]?.followUpComment }}
+          onDone={(r) => done(r?.message || 'Saved.', 'qa')} />
       )}
       {dialog === 'autoadjust' && (
         <AutoAdjustModal labId={labId} claimKeys={[c.ClaimKey]} onClose={() => setDialog(null)}
@@ -334,6 +348,79 @@ function Row({ label, children }) {
 }
 
 // Denial Info: the mockup's fields, as two titled sections with aligned label / value rows.
+// Mockup renderCipCases: each CIP escalation with its full history, read-only; decisions are made
+// in the CIP Escalations queue so the action and its context stay in one place.
+function CipCases({ cases, canManage }) {
+  const badge = { 'Awaiting QA': 'arwb-badge-neutral', 'Pending Approval': 'arwb-badge-warning', 'Sent to Client': 'arwb-badge-info', 'Client Responded': 'arwb-badge-purple', 'Returned to Agent': 'arwb-badge-good' };
+  return (
+    <div className="arwb-stack">
+      {cases.map(({ case: cc, history }) => (
+        <div key={cc.cipCaseId} className="arwb-followup-item">
+          <div className="fu-top">
+            <span><b className="mono">{cc.caseNumber}</b> · <Badge className={badge[cc.caseStatus]}>{cc.caseStatus}{cc.roundNumber > 1 ? ` · Round ${cc.roundNumber}` : ''}</Badge></span>
+            <span className="arwb-hint">requested by {cc.requestedBy} · {fmt.date(cc.requestedOn)}</span>
+          </div>
+          <div className="fu-notes"><b>{cc.cipCategory}</b> · {cc.requiredInfo}<div>{cc.cipComment}</div></div>
+          {cc.clientResponseText && <div className="fu-notes"><b>Client response</b> ({cc.clientRespondedBy} · {fmt.dateTime(cc.clientRespondedOn)}): {cc.clientResponseText}</div>}
+          <div className="arwb-timeline" style={{ marginTop: 8 }}>
+            {history.map((h, i) => (
+              <div key={i} className="arwb-hint">
+                {fmt.dateTime(h.actionOn)} · <b>{h.actionName}</b>{h.roundNumber > 1 ? ` (round ${h.roundNumber})` : ''} · {h.actor}{h.isBulkAction ? ' · bulk' : ''}{h.note ? ` — ${h.note}` : ''}
+              </div>
+            ))}
+          </div>
+          {canManage && (cc.caseStatus === 'Pending Approval' || cc.caseStatus === 'Client Responded') && (
+            <Link to="/cip" className="arwb-btn arwb-btn-sm" style={{ marginTop: 8, textDecoration: 'none' }}>Manage in CIP Escalations</Link>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Mockup renderQa: the claim's current QA review, with Approve / Reject for a reviewer who did not
+// write the note and does not hold the claim.
+function QaTab({ review, c, latest, canDecide, userName, onDecide }) {
+  const own = userName && (review.submittedBy?.toLowerCase() === userName.toLowerCase() || c.AssignedAgentUser?.toLowerCase() === userName.toLowerCase());
+  const badge = { 'Awaiting QA': 'arwb-badge-purple', Approved: 'arwb-badge-good', Rejected: 'arwb-badge-critical' }[review.reviewStatus];
+  return (
+    <>
+      <div className="arwb-grid-2">
+        <DetailSection title="QA Review">
+          <Row label="QA Status"><Badge className={badge}>{review.reviewStatus}</Badge>{review.isEscalation && <> <Badge className="arwb-badge-purple" dot>CIP Escalation</Badge></>}{review.isWriteOff && <> <Badge className="arwb-badge-warning">Write Off</Badge></>}</Row>
+          <Row label="Submitted">{`${review.submittedBy} · ${fmt.dateTime(review.submittedOn)}`}</Row>
+          <Row label="Reviewer">{review.reviewedBy ? `${review.reviewedBy} · ${fmt.dateTime(review.reviewedOn)}` : <span className="text-muted-ink">Unassigned</span>}</Row>
+          <Row label="Error Type">{review.errorType || (review.reviewStatus === 'Approved' ? 'None' : null)}</Row>
+          <Row label="Notes">{review.reviewNote}</Row>
+          <Row label="Note under review">{latest ? `${latest.fixResolution} · ${latest.followUpClaimStatus}${latest.followUpComment ? ` — ${latest.followUpComment}` : ''}` : null}</Row>
+        </DetailSection>
+        <DetailSection title="Quality Scoring Criteria" hint={review.reviewStatus === 'Awaiting QA' ? 'Scored when QA decides' : null}>
+          {review.reviewStatus !== 'Awaiting QA' && QA_CRITERIA.map(([k, label]) => {
+            const v = review.scores?.[k];
+            return (
+              <div key={k} className="arwb-qa-score">
+                <span className={v === true ? 'text-good' : v === false ? 'text-critical' : 'text-muted-ink'}>{v === true ? '✓' : v === false ? '✕' : '–'}</span> {label}
+              </div>
+            );
+          })}
+        </DetailSection>
+      </div>
+      {canDecide && review.reviewStatus === 'Awaiting QA' && (
+        <div className="arwb-flex-row" style={{ marginTop: 16, gap: 8, display: 'flex', alignItems: 'center' }}>
+          {own
+            ? <span className="arwb-hint">Business rule: you cannot QA your own work — another reviewer must decide this note.</span>
+            : (
+              <>
+                <button type="button" className="arwb-btn arwb-btn-primary" onClick={() => onDecide('approve')}><Icon name="check" size={15} /> Approve</button>
+                <button type="button" className="arwb-btn arwb-btn-danger" onClick={() => onDecide('reject')}>Reject / Return for Correction</button>
+              </>
+            )}
+        </div>
+      )}
+    </>
+  );
+}
+
 // The central Denial Code Master (Master Values > Denial Code Descriptions) for every code on the
 // claim, primary first. Codes are without their group prefix (CO-4 and PR4 are both 4).
 function DenialCodeMaster({ codes, primary, lineCodes }) {

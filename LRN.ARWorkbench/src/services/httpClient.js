@@ -79,8 +79,9 @@ export async function api(path, options = {}) {
 
 // A file download (Excel export / template): the bearer token rules out a plain link, so fetch it
 // and save the blob under the server's file name.
-export async function downloadFile(path, fallbackName) {
-  const response = await request(path, {});
+// options: e.g. { method: 'POST', body } for a download built from a request body.
+export async function downloadFile(path, fallbackName, options = {}) {
+  const response = await request(path, options);
   const disposition = response.headers.get('content-disposition') || '';
   const match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition);
   const fileName = match ? decodeURIComponent(match[1] || match[2]) : fallbackName;

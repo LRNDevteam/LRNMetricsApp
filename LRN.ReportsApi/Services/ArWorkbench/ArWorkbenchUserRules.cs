@@ -17,6 +17,9 @@ namespace LRN.ReportsApi.Services.ArWorkbench;
 /// whose labs and roles are all within their reach - otherwise they could reset the password of
 /// someone with access they themselves do not have.
 /// </summary>
+/// <summary>Validated manager / team / scope for a user (T054).</summary>
+public sealed record ArWorkbenchUserProfile(int? ManagerUserId, string? TeamName, IReadOnlyList<ArWorkbenchUserScopeValue> Scopes);
+
 public static partial class ArWorkbenchUserRules
 {
     public const int MinPasswordLength = 8;
@@ -116,6 +119,55 @@ public static partial class ArWorkbenchUserRules
         var result = new HashSet<int>(currentLabIds.Where(id => !manageableLabIds.Contains(id)));
         result.UnionWith(requestedLabIds.Where(manageableLabIds.Contains));
         return result;
+    }
+
+    public const int MaxTeamNameLength = 100;
+    public const int MaxScopeValueLength = 500;
+
+    /// <summary>The role labels that can head a team (be another user's manager).</summary>
+    public static readonly string[] ManagerRoleLabels = ["System Administrator", "RCM Manager", "Senior AR Analyst / Team Lead"];
+
+    /// <summary>
+    /// T054 manager / team / access scope. A Clinic or Provider Viewer role (roleScope clinic |
+    /// provider) needs exactly one value for every selected lab, chosen from that lab's claims
+    /// (scopeChoices); any other role keeps no scope. The manager must be one of the offered
+    /// managers and not the user themselves.
+    /// </summary>
+    public static (ArWorkbenchUserProfile? Profile, string? Error) ValidateProfile(
+        string? roleScope, IReadOnlyList<int> labIds, IReadOnlyList<ArWorkbenchUserScopeValue>? scopes,
+        IReadOnlyDictionary<int, IReadOnlyList<string>> scopeChoices,
+        int? managerUserId, IReadOnlyCollection<int> allowedManagerIds, int? targetLabUserId, string? teamName)
+    {
+        var team = string.IsNullOrWhiteSpace(teamName) ? null : string.Join(' ', teamName.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (team is { Length: > MaxTeamNameLength }) return (null, $"Team name must be {MaxTeamNameLength} characters or fewer.");
+
+        int? manager = managerUserId is > 0 ? managerUserId : null;
+        if (manager is not null)
+        {
+            if (manager == targetLabUserId) return (null, "A user cannot be their own manager.");
+            if (!allowedManagerIds.Contains(manager.Value)) return (null, "Choose the manager from the list (a System Administrator, RCM Manager or Team Lead in these labs).");
+        }
+
+        var result = new List<ArWorkbenchUserScopeValue>();
+        if (roleScope is "clinic" or "provider")
+        {
+            var byLab = (scopes ?? []).GroupBy(s => s.LabId).ToDictionary(g => g.Key, g => g.Last());
+            foreach (var labId in labIds)
+            {
+                var raw = byLab.TryGetValue(labId, out var s) ? (roleScope == "clinic" ? s.ClinicName : s.ProviderName) : null;
+                var value = raw?.Trim();
+                if (string.IsNullOrEmpty(value))
+                    return (null, $"Choose the {(roleScope == "clinic" ? "clinic" : "referring provider")} for every selected lab.");
+                if (value.Length > MaxScopeValueLength) return (null, "That clinic / provider name is too long.");
+                var choices = scopeChoices.TryGetValue(labId, out var c) ? c : [];
+                var match = choices.FirstOrDefault(x => string.Equals(x, value, StringComparison.OrdinalIgnoreCase));
+                if (match is null) return (null, $"\"{value}\" is not a {(roleScope == "clinic" ? "clinic" : "referring provider")} on that lab's claims.");
+                result.Add(roleScope == "clinic"
+                    ? new ArWorkbenchUserScopeValue { LabId = labId, ClinicName = match }
+                    : new ArWorkbenchUserScopeValue { LabId = labId, ProviderName = match });
+            }
+        }
+        return (new ArWorkbenchUserProfile(manager, team, result), null);
     }
 
     /// <summary>Requested labs: at least one, no duplicates, every one manageable by the caller.</summary>

@@ -1,3 +1,4 @@
+using LabMetricsDashboard.Filters;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Models.Menu;
 using LabMetricsDashboard.Services;
@@ -551,15 +552,15 @@ public class AdminController : Controller
     // ─────────────────────────────────────────────────────────────────────
 
     [HttpGet]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
     public IActionResult MenuMaster() => View();
 
     [HttpGet]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
     public IActionResult RoleMenuMapping() => View();
 
     [HttpGet]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
     public async Task<IActionResult> MenuItems(CancellationToken ct)
     {
         try { return Json(await _menuApi.GetMenuItemsAsync(ct)); }
@@ -567,7 +568,7 @@ public class AdminController : Controller
     }
 
     [HttpPost]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> SaveMenuItem(int? id, [FromBody] MenuItemSaveRequest request, CancellationToken ct)
     {
@@ -588,7 +589,7 @@ public class AdminController : Controller
     }
 
     [HttpPost]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> SetMenuDisabled([FromBody] MenuDisabledDto dto, CancellationToken ct)
     {
@@ -602,7 +603,7 @@ public class AdminController : Controller
     }
 
     [HttpPost]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> DeleteMenuItem([FromBody] MenuDeleteDto dto, CancellationToken ct)
     {
@@ -616,7 +617,7 @@ public class AdminController : Controller
     }
 
     [HttpGet]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
     public async Task<IActionResult> MenuRoles(CancellationToken ct)
     {
         try { return Json(await _menuApi.GetRolesAsync(ct)); }
@@ -624,7 +625,7 @@ public class AdminController : Controller
     }
 
     [HttpGet]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
     public async Task<IActionResult> RoleMenus(int roleId, CancellationToken ct)
     {
         try { return Json(await _menuApi.GetRoleMenuIdsAsync(roleId, ct)); }
@@ -632,7 +633,7 @@ public class AdminController : Controller
     }
 
     [HttpPost]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> SaveRoleMenus([FromBody] RoleMenuSaveDto dto, CancellationToken ct)
     {
@@ -649,7 +650,7 @@ public class AdminController : Controller
 
     /// <summary>The Enable/Disable rows the Role Menu Mapping screen renders under the menu tree.</summary>
     [HttpGet]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
     public async Task<IActionResult> MenuFeatures(CancellationToken ct)
     {
         try { return Json(await _menuApi.GetFeatureCatalogAsync(ct)); }
@@ -657,7 +658,7 @@ public class AdminController : Controller
     }
 
     [HttpGet]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
     public async Task<IActionResult> RoleFeatures(int roleId, CancellationToken ct)
     {
         try { return Json(await _menuApi.GetRoleFeaturesAsync(roleId, ct)); }

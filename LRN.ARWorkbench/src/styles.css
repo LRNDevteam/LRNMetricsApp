@@ -648,3 +648,20 @@ table.arwb-data-table tbody tr.row-selected { background: var(--accent-softer); 
 .arwb-code-info-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
 .arwb-code-info-grid { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; font-size: 13px; color: var(--ink-2); }
 .arwb-code-info-grid > span { color: var(--ink-muted); }
+
+/* Bulk Update (Excel) dialog: numbered steps. */
+.arwb-bulk-step { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border-soft); }
+.arwb-bulk-step:last-child { border-bottom: 0; }
+.arwb-bulk-step-no { flex: 0 0 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.arwb-bulk-options { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 10px; font-size: 13px; }
+.arwb-bulk-options label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+/* QA Verification: scoring checklist, clamped note text. */
+.arwb-qa-criteria { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 14px; font-size: 13px; }
+.arwb-qa-criteria label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.arwb-qa-score { font-size: 13px; padding: 3px 0; }
+.arwb-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 360px; }
+/* CIP decision dialog: its own button row (several outcomes). */
+.arwb-modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 14px; }
+
+/* User Management access picker: one clinic / provider dropdown per lab. */
+.arwb-scope-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px 14px; margin-top: 8px; }

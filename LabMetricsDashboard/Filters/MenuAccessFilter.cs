@@ -98,6 +98,9 @@ public sealed class MenuAccessFilter : IAsyncAuthorizationFilter
         }
     }
 
+    /// <summary>Authorization policy for admin-only actions; satisfied by <see cref="IsFullAdmin"/>.</summary>
+    public const string FullAdminPolicy = "FullAdmin";
+
     private static readonly HashSet<string> FullAdminRoles = new(StringComparer.Ordinal) { "ADMIN", "SUPERADMIN", "LRNADMIN" };
 
     internal static bool IsFullAdmin(System.Security.Claims.ClaimsPrincipal user) =>

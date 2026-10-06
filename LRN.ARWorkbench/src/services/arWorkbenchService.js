@@ -6,6 +6,28 @@ const json = (method, body) => ({ method, body: JSON.stringify(body) });
 export const arWorkbenchService = {
   workSummary: (labId) => api(`work-summary${qs({ labId })}`),
 
+  // CIP - Client Escalations (internal: ARWorkbench.Approve; client: viewer)
+  cipQueue: (filter, signal) => api(`cip${qs(filter)}`, { signal }),
+  clientCipQueue: (filter, signal) => api(`client-cip${qs(filter)}`, { signal }),
+  cipAction: (labId, caseId, action, note) => api(`cip/${caseId}/action${qs({ labId })}`, json('POST', { action, note })),
+  convertLegacyCip: (labId, preview) => api(`cip/convert-legacy${qs({ labId, preview })}`, { method: 'POST' }),
+  cipBulk: (labId, caseIds, decision, note) => api(`cip/bulk${qs({ labId })}`, json('POST', { caseIds, decision, note })),
+
+  // QA Verification Queue (ARWorkbench.QaDecide)
+  qaQueue: (filter, signal) => api(`qa${qs(filter)}`, { signal }),
+  qaDecision: (labId, claimKey, body) => api(`qa/${claimKey}/decision${qs({ labId })}`, json('POST', body)),
+  qaBulkApprove: (labId, claimKeys, note) => api(`qa/bulk-approve${qs({ labId })}`, json('POST', { claimKeys, note })),
+
+  // Bulk Update (Excel): template (mode filtered | selected | blank), upload job, status, result log
+  bulkTemplate: (labId, body) => downloadFile(`bulk-update/template${qs({ labId })}`, 'ARWorkbench_BulkUpdate.xlsx', json('POST', body)),
+  bulkUpload: (labId, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api(`bulk-update${qs({ labId })}`, { method: 'POST', body: form });
+  },
+  bulkJob: (labId, jobId) => api(`bulk-update/jobs/${encodeURIComponent(jobId)}${qs({ labId })}`),
+  bulkLog: (labId, jobId) => downloadFile(`bulk-update/jobs/${encodeURIComponent(jobId)}/log${qs({ labId })}`, 'ARWorkbench_BulkUpdateLog.csv'),
+
   // Denial Code Descriptions: central Denial Code Master (all labs) + lab Non-Collectible sync
   codeMaster: (labId) => api(`code-master${qs({ labId })}`),
   addCodeMasterRow: (labId, body) => api(`code-master${qs({ labId })}`, json('POST', body)),
@@ -29,6 +51,7 @@ export const arWorkbenchService = {
   // User Management (ARWorkbench.ManageUsers)
   users: (labId) => api(`users${qs({ labId })}`),
   createUser: (labId, body) => api(`users${qs({ labId })}`, json('POST', body)),
+  userScopeOptions: (labId, targetLabId, level) => api(`users/scope-options${qs({ labId, targetLabId, level })}`),
   updateUser: (labId, id, body) => api(`users/${id}${qs({ labId })}`, json('PUT', body)),
 
   // Saved Views (each user's own, per screen)
@@ -101,9 +124,16 @@ export const arWorkbenchService = {
   queues: (labId, signal) => api(`queues${qs({ labId })}`, { signal }),
   dashboard: (labId, signal) => api(`dashboard${qs({ labId })}`, { signal }),
   claims: (filter, signal) => api(`claims${qs(filter)}`, { signal }),
-  claimFilterOptions: (labId, signal) => api(`claims/filter-options${qs({ labId })}`, { signal }),
+  // With filter: cascading lists (T047) - each list counted over the page's other filters.
+  claimFilterOptions: (labId, signal, filter) => {
+    if (!filter) return api(`claims/filter-options${qs({ labId })}`, { signal });
+    const { page, pageSize, sortBy, sortDesc, ...rest } = filter; // eslint-disable-line no-unused-vars
+    return api(`claims/filter-options${qs({ ...rest, labId, cascade: true })}`, { signal });
+  },
   claim: (labId, claimKey, signal) => api(`claims/${encodeURIComponent(claimKey)}${qs({ labId })}`, { signal }),
   masterData: (labId) => api(`master-data${qs({ labId })}`),
+  snapshots: (labId, top = 14) => api(`data-processing/snapshots${qs({ labId, top })}`),
+  runSnapshot: (labId) => api(`data-processing/snapshots/run${qs({ labId })}`, { method: 'POST' }),
   refreshRuns: (labId, top = 10) => api(`data-processing/runs${qs({ labId, top })}`),
   runRefresh: (labId, note) => api(`data-processing/run${qs({ labId })}`, { method: 'POST', body: JSON.stringify({ note }) })
 };

@@ -131,6 +131,8 @@ export default function DataProcessingPage() {
         </div>
       </div>
 
+      <SnapshotHistory labId={labId} />
+
       {!runs ? <Loading /> : (
         <div className="arwb-table-card">
           <div className="arwb-table-toolbar"><h3 className="arwb-section-title" style={{ margin: 0 }}>Run history</h3></div>
@@ -166,6 +168,68 @@ export default function DataProcessingPage() {
         </div>
       )}
     </>
+  );
+}
+
+// T038: the nightly queue snapshots (one per day per lab) - the base for trend and movement reports.
+function SnapshotHistory({ labId }) {
+  const [days, setDays] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const load = useCallback(() => {
+    arWorkbenchService.snapshots(labId, 14).then(setDays).catch((e) => { setDays([]); setError(e.message); });
+  }, [labId]);
+  useEffect(() => { load(); }, [load]);
+
+  async function runNow() {
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const r = await arWorkbenchService.runSnapshot(labId);
+      setMessage(r.message);
+      load();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="arwb-table-card arwb-section">
+      <div className="arwb-panel-head">
+        <h3>Nightly Queue Snapshots</h3>
+        <span className="arwb-card-sub">taken automatically every night after aging / TFL / re-follow-up are recalculated · used for trend and movement reporting</span>
+        <div className="arwb-panel-head-actions">
+          <button type="button" className="arwb-btn arwb-btn-sm" disabled={busy} onClick={runNow} title="Recalculate every claim and take today's snapshot now">
+            {busy ? <><span className="arwb-spinner" /> Taking snapshot…</> : <><Icon name="refresh" size={15} /> Take snapshot now</>}
+          </button>
+        </div>
+      </div>
+      <ErrorBox message={error} />
+      {message && <div className="arwb-hint" style={{ padding: '8px 16px' }}>{message}</div>}
+      <div className="arwb-table-wrap">
+        <table className="arwb-data-table">
+          <thead><tr><th>Date</th><th className="num">Claims</th><th className="num">Open (insurance AR)</th><th className="num">Assigned</th><th className="num">Remaining AR</th></tr></thead>
+          <tbody>
+            {days === null && <tr><td colSpan={5}><Loading /></td></tr>}
+            {days?.length === 0 && <tr><td colSpan={5}><div className="arwb-empty-state">No snapshots yet. The first one is taken tonight, or use Take snapshot now.</div></td></tr>}
+            {days?.map((d) => (
+              <tr key={d.snapshotDate}>
+                <td>{fmt.date(d.snapshotDate)}</td>
+                <td className="num">{fmt.count(d.claims)}</td>
+                <td className="num">{fmt.count(d.openClaims)}</td>
+                <td className="num">{fmt.count(d.assignedClaims)}</td>
+                <td className="num mono">{fmt.money(d.remainingAR)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

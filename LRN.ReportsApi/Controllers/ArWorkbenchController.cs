@@ -91,13 +91,18 @@ public sealed class ArWorkbenchController : ControllerBase
         return Ok(await _repository.GetClaimsAsync(filter, user!, ct));
     }
 
-    /// <summary>Option lists (with counts) for the Work Queue's multi-select filters, over the caller's scope.</summary>
+    /// <summary>
+    /// Option lists (with counts) for the multi-select filters, over the caller's scope. With
+    /// cascade=true the query string carries the page's current filters (same names as GET claims)
+    /// and each list is narrowed by the others (T047).
+    /// </summary>
     [HttpGet("claims/filter-options")]
-    public async Task<ActionResult<ArWorkbenchFilterOptions>> ClaimFilterOptions([FromQuery] int labId, CancellationToken ct)
+    public async Task<ActionResult<ArWorkbenchFilterOptions>> ClaimFilterOptions([FromQuery] ArWorkbenchClaimFilter filter, [FromQuery] bool cascade, CancellationToken ct)
     {
-        var (user, denied) = await ResolveUserAsync(labId, ct);
+        var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
         if (denied is not null) return denied;
-        return Ok(await _repository.GetFilterOptionsAsync(labId, user!, ct));
+        if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+        return Ok(await _repository.GetFilterOptionsAsync(filter.LabId, user!, ct, cascade ? filter : null));
     }
 
     [HttpGet("claims/{claimKey:long}")]
@@ -109,6 +114,9 @@ public sealed class ArWorkbenchController : ControllerBase
         // Out-of-scope and missing look the same, so a scoped user cannot probe for claim keys.
         if (detail is null) return NotFound(new { message = "Claim not found." });
         detail.DenialCodeInfo = (await CodeMasterInfoForClaimAsync(detail, ct)).ToList();
+        detail.QaReview = await _repository.GetCurrentQaReviewAsync(labId, claimKey, ct);
+        // Client users never see Awaiting QA / Pending Approval cases or internal history.
+        if (user!.RoleCode != "viewer") detail.CipCases = await _repository.GetClaimCipCasesAsync(labId, claimKey, ct);
         return Ok(detail);
     }
 
@@ -127,6 +135,36 @@ public sealed class ArWorkbenchController : ControllerBase
         if (denied is not null) return denied;
         if (!IsAdminOrManager(user!)) return Forbidden("Only an Administrator or RCM Manager can view data processing.");
         return Ok(await _repository.GetRefreshRunsAsync(labId, top, ct));
+    }
+
+    /// <summary>T038: the nightly queue snapshots on file (Data Processing), newest first.</summary>
+    [HttpGet("data-processing/snapshots")]
+    public async Task<ActionResult<IReadOnlyList<ArWorkbenchSnapshotDay>>> Snapshots([FromQuery] int labId, [FromQuery] int top, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!IsAdminOrManager(user!)) return Forbidden("Only an Administrator or RCM Manager can view data processing.");
+        return Ok(await _repository.GetSnapshotHistoryAsync(labId, top <= 0 ? 14 : top, ct));
+    }
+
+    /// <summary>T038: take (or retake) today's snapshot now instead of waiting for the night run.</summary>
+    [HttpPost("data-processing/snapshots/run")]
+    public async Task<ActionResult> RunSnapshot([FromQuery] int labId, [FromServices] Microsoft.Extensions.Options.IOptions<ArWorkbenchSnapshotOptions> options, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!IsAdminOrManager(user!)) return Forbidden("Only an Administrator or RCM Manager can run a snapshot.");
+        var date = options.Value.LocalNow(DateTime.UtcNow).Date;
+        try
+        {
+            var rows = await _repository.RunSnapshotAsync(labId, date, ct);
+            _logger.LogInformation("AR Workbench snapshot {Date:yyyy-MM-dd} for lab {LabId} run by {User}: {Rows} claims", date, labId, user!.UserName, rows);
+            return Ok(new { rows, message = $"Snapshot for {date:MM/dd/yyyy} taken: {rows:N0} claims (claims recalculated first)." });
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("already running", StringComparison.OrdinalIgnoreCase))
+        {
+            return Conflict(new { message = ex.Message });
+        }
     }
 
     /// <summary>Runs dbo.ARWB_usp_LoadClaimsFromSource: every claim-level row -> dbo.ARWB_Claim, every line -> dbo.ARWB_ClaimLine.</summary>
@@ -159,6 +197,319 @@ public sealed class ArWorkbenchController : ControllerBase
         var (user, denied) = await ResolveUserAsync(labId, ct);
         if (denied is not null) return denied;
         return Ok(await _repository.GetWorkSummaryAsync(labId, user!, ct));
+    }
+
+    // ==========================================================================================
+    // CIP - Client Escalations - T061 / T062. The internal queue and decisions need
+    // ARWorkbench.Approve (System Administrator, RCM Manager, Team Lead); the client's response
+    // comes from a viewer (client) user, within their clinic / provider scope.
+    // ==========================================================================================
+
+    [HttpGet("cip")]
+    public async Task<ActionResult<ArWorkbenchCipQueue>> CipQueue([FromQuery] ArWorkbenchCipFilter filter, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
+        if (denied is not null) return denied;
+        if (!user!.Permissions.Approve) return Forbidden("Only a Team Lead, RCM Manager or System Administrator can manage CIP escalations.");
+        if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+        return Ok(await _repository.GetCipQueueAsync(filter, user, clientView: false, ct));
+    }
+
+    /// <summary>The client's Escalation Requests: cases sent to them, what they answered, and what was sent back.</summary>
+    [HttpGet("client-cip")]
+    public async Task<ActionResult<ArWorkbenchCipQueue>> ClientCipQueue([FromQuery] ArWorkbenchCipFilter filter, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
+        if (denied is not null) return denied;
+        if (!CanRespondToCip(user!)) return Forbidden("Escalation Requests are for client users.");
+        if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+        return Ok(await _repository.GetCipQueueAsync(filter, user!, clientView: true, ct));
+    }
+
+    [HttpPost("cip/{caseId:long}/action")]
+    public async Task<ActionResult> CipAction([FromRoute] long caseId, [FromQuery] int labId, [FromBody] ArWorkbenchCipActionRequest? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (ArWorkbenchCipRules.Parse(request?.Action) is not { } action) return BadRequest(new { message = "Unknown CIP action." });
+        if (ArWorkbenchCipRules.IsClientAction(action) ? !CanRespondToCip(user!) : !user!.Permissions.Approve)
+            return Forbidden(ArWorkbenchCipRules.IsClientAction(action) ? "Only a client user can respond to an escalation." : "Only a Team Lead, RCM Manager or System Administrator can decide CIP escalations.");
+        var noteError = ArWorkbenchCipRules.ValidateNote(action, request!.Note);
+        if (noteError is not null) return BadRequest(new { message = noteError });
+
+        var (outcome, caseNumber, status) = await _repository.CipActionAsync(labId, caseId, action, request.Note?.Trim() is { Length: > 0 } n ? n : null, user!, null, ct);
+        return outcome switch
+        {
+            "notfound" => NotFound(new { message = "That escalation was not found or is outside your access." }),
+            "wrongstage" => Conflict(new { message = $"{caseNumber} is now {status}; it may have just been decided. Reload." }),
+            _ => Ok(new { message = CipMessage(action, caseNumber), status })
+        };
+    }
+
+    /// <summary>Bulk Approve / Bulk Reject-Send Back over a mixed selection: each case gets the action for its own stage.</summary>
+    [HttpPost("cip/bulk")]
+    public async Task<ActionResult<ArWorkbenchCipBulkResult>> CipBulk([FromQuery] int labId, [FromBody] ArWorkbenchCipBulkRequest? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!user!.Permissions.Approve) return Forbidden("Only a Team Lead, RCM Manager or System Administrator can decide CIP escalations.");
+        var positive = (request?.Decision ?? string.Empty).Trim().ToLowerInvariant() switch { "approve" => true, "sendback" => false, _ => (bool?)null };
+        if (positive is null) return BadRequest(new { message = "Decision must be approve or sendback." });
+        var ids = (request!.CaseIds ?? []).Where(i => i > 0).Distinct().ToList();
+        if (ids.Count == 0) return BadRequest(new { message = "Select the escalations." });
+        if (ids.Count > 1000) return BadRequest(new { message = "At most 1,000 escalations at a time." });
+        var note = request.Note?.Trim();
+        if (positive == false && string.IsNullOrEmpty(note)) return BadRequest(new { message = "Add a reason - it is applied to every case sent back." });
+        if (note is { Length: > ArWorkbenchCipRules.NoteMaxLength }) return BadRequest(new { message = "The note is too long." });
+        var tagged = string.IsNullOrEmpty(note) ? "Bulk action - no additional note." : $"Bulk action: {note}";
+
+        var stages = await _repository.GetCipStatusesAsync(labId, ids, user, ct);
+        var batch = Guid.NewGuid();
+        var result = new ArWorkbenchCipBulkResult();
+        foreach (var id in ids)
+        {
+            if (!stages.TryGetValue(id, out var stage) || ArWorkbenchCipRules.ForStage(stage, positive.Value) is not { } action) { result.Skipped++; continue; }
+            var (outcome, _, _) = await _repository.CipActionAsync(labId, id, action, tagged, user, batch, ct);
+            if (outcome != "ok") { result.Skipped++; continue; }
+            switch (action)
+            {
+                case ArWorkbenchCipAction.Approve: result.SentToClient++; break;
+                case ArWorkbenchCipAction.Insufficient: result.ResentToClient++; break;
+                default: result.ReturnedToAgent++; break;
+            }
+        }
+        var parts = new List<string>();
+        if (result.SentToClient > 0) parts.Add($"{result.SentToClient:N0} sent to the client");
+        if (result.ReturnedToAgent > 0) parts.Add($"{result.ReturnedToAgent:N0} returned to the agent");
+        if (result.ResentToClient > 0) parts.Add($"{result.ResentToClient:N0} re-sent to the client");
+        if (result.Skipped > 0) parts.Add($"{result.Skipped:N0} skipped (not awaiting a decision)");
+        result.Message = parts.Count == 0 ? "Nothing selected was awaiting a decision." : string.Join(" · ", parts) + ".";
+        _logger.LogInformation("AR Workbench CIP bulk {Decision} lab {LabId} by {User}: {Message}", request.Decision, labId, user.UserName, result.Message);
+        return Ok(result);
+    }
+
+    /// <summary>T063: bring the Denial Workflow's external escalations / responses into CIP Escalations (preview first).</summary>
+    [HttpPost("cip/convert-legacy")]
+    public async Task<ActionResult<ArWorkbenchLegacyCipResult>> ConvertLegacyCip([FromQuery] int labId, [FromQuery] bool preview, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!IsAdminOrManager(user!)) return Forbidden("Only an Administrator or RCM Manager can convert legacy escalations.");
+        try
+        {
+            var r = await _repository.ConvertLegacyEscalationsAsync(labId, user!.UserName, preview, ct);
+            r.Message = r.Note ?? (preview
+                ? $"{r.Candidates:N0} external escalation(s) not yet converted: {r.SentToClient:N0} would be Sent to Client, {r.ClientResponded:N0} Client Responded, {r.ReturnedToAgent:N0} Returned to Agent; {r.NoMatchingClaim:N0} have no matching claim in the workbench and would be skipped."
+                : $"{r.Converted:N0} escalation(s) converted ({r.SentToClient:N0} Sent to Client, {r.ClientResponded:N0} Client Responded, {r.ReturnedToAgent:N0} Returned to Agent); {r.NoMatchingClaim:N0} skipped - no matching claim.");
+            if (!preview) _logger.LogInformation("AR Workbench legacy CIP conversion lab {LabId} by {User}: {Message}", labId, user.UserName, r.Message);
+            return Ok(r);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("not installed", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    // A client (viewer) user, or an administrator acting for one.
+    private static bool CanRespondToCip(ArWorkbenchUserContext user) => user.RoleCode == "viewer" || user.SiteAdmin || user.Permissions.ManageSettings;
+
+    private static string CipMessage(ArWorkbenchCipAction action, string caseNumber) => action switch
+    {
+        ArWorkbenchCipAction.Approve => $"{caseNumber} approved - now visible to the client.",
+        ArWorkbenchCipAction.Reject => $"{caseNumber} returned to the AR agent (not sent to the client).",
+        ArWorkbenchCipAction.Respond => $"Response submitted for {caseNumber} - your AR team will review it.",
+        ArWorkbenchCipAction.ApproveResponse => $"{caseNumber}: response approved - the claim is back with the AR agent.",
+        _ => $"{caseNumber} marked insufficient - re-sent to the client (next round)."
+    };
+
+    // ==========================================================================================
+    // QA Verification Queue - T059 / T060. ARWorkbench.QaDecide (System Administrator, RCM
+    // Manager, Team Lead, QA Reviewer). Nobody decides their own note or a claim they hold.
+    // ==========================================================================================
+
+    [HttpGet("qa")]
+    public async Task<ActionResult<ArWorkbenchQaQueue>> QaQueue([FromQuery] ArWorkbenchQaFilter filter, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveQaUserAsync(filter.LabId, ct);
+        if (denied is not null) return denied;
+        if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+        return Ok(await _repository.GetQaQueueAsync(filter, user!, ct));
+    }
+
+    [HttpPost("qa/{claimKey:long}/decision")]
+    public async Task<ActionResult> QaDecision([FromRoute] long claimKey, [FromQuery] int labId, [FromBody] ArWorkbenchQaDecisionRequest? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveQaUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var (decision, error) = ArWorkbenchQaRules.Validate(request, await QaErrorTypesAsync(labId, ct));
+        if (decision is null) return BadRequest(new { message = error });
+
+        var (outcome, claimId, esc, wo) = await _repository.DecideQaAsync(labId, claimKey, decision, user!, null, ct);
+        return outcome switch
+        {
+            "notfound" => NotFound(new { message = "Claim not found." }),
+            "notawaiting" => Conflict(new { message = $"Claim {claimId} has no note waiting for QA (it may have just been decided). Reload." }),
+            "ownwork" => Conflict(new { message = "Business rule: you cannot QA your own work (you wrote this note or hold the claim)." }),
+            _ => Ok(new
+            {
+                message = decision.Approve
+                    ? $"QA approved {claimId}: claim Completed." + (esc ? " The CIP escalation is now Pending Approval." : "") + (wo ? " The write-off is approved; post it in the PMS." : "")
+                    : $"QA rejected {claimId}: returned to the same agent under QA Rejected."
+            })
+        };
+    }
+
+    /// <summary>Approve Selected: each claim on its own; own work and already-decided claims are skipped and counted.</summary>
+    [HttpPost("qa/bulk-approve")]
+    public async Task<ActionResult<ArWorkbenchQaBulkResult>> QaBulkApprove([FromQuery] int labId, [FromBody] ArWorkbenchQaBulkApproveRequest? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveQaUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var keys = (request?.ClaimKeys ?? []).Where(k => k > 0).Distinct().ToList();
+        if (keys.Count == 0) return BadRequest(new { message = "Select the claims to approve." });
+        if (keys.Count > 1000) return BadRequest(new { message = "Approve at most 1,000 claims at a time." });
+        var note = string.IsNullOrWhiteSpace(request!.Note) ? null : request.Note.Trim();
+        if (note is { Length: > ArWorkbenchQaRules.NoteMaxLength }) return BadRequest(new { message = "The note is too long." });
+
+        var batch = Guid.NewGuid();
+        var result = new ArWorkbenchQaBulkResult();
+        foreach (var key in keys)
+        {
+            var (outcome, _, esc, wo) = await _repository.DecideQaAsync(labId, key, new ArWorkbenchQaDecision(true, null, note, null), user!, batch, ct);
+            switch (outcome)
+            {
+                case "ok": result.Approved++; if (esc) result.EscalationsReleased++; if (wo) result.WriteOffsApproved++; break;
+                case "ownwork": result.SkippedOwnWork++; break;
+                case "notawaiting": result.SkippedNotAwaiting++; break;
+                default: result.SkippedNotFound++; break;
+            }
+        }
+        var parts = new List<string> { $"{result.Approved:N0} approved" };
+        if (result.EscalationsReleased > 0) parts.Add($"{result.EscalationsReleased:N0} CIP escalation(s) now Pending Approval");
+        if (result.WriteOffsApproved > 0) parts.Add($"{result.WriteOffsApproved:N0} write-off(s) approved");
+        if (result.SkippedOwnWork > 0) parts.Add($"{result.SkippedOwnWork:N0} skipped - your own work");
+        if (result.SkippedNotAwaiting > 0) parts.Add($"{result.SkippedNotAwaiting:N0} skipped - already decided");
+        if (result.SkippedNotFound > 0) parts.Add($"{result.SkippedNotFound:N0} not found");
+        result.Message = string.Join(" · ", parts) + ".";
+        _logger.LogInformation("AR Workbench QA bulk approve lab {LabId} by {User}: {Message}", labId, user!.UserName, result.Message);
+        return Ok(result);
+    }
+
+    private async Task<(ArWorkbenchUserContext? User, ActionResult? Denied)> ResolveQaUserAsync(int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return (null, denied);
+        if (!user!.Permissions.QaDecide)
+            return (null, Forbidden("Only a QA Reviewer, Team Lead, RCM Manager or System Administrator can use the QA Verification Queue."));
+        return (user, null);
+    }
+
+    private async Task<IReadOnlyCollection<string>> QaErrorTypesAsync(int labId, CancellationToken ct)
+    {
+        var lists = (await _repository.GetMasterDataAsync(labId, ct)).Lists;
+        return lists.TryGetValue("QA_ERROR_TYPE", out var list) && list.Count > 0
+            ? list
+            : ["Incomplete Documentation", "Incorrect Denial Category", "Missed Follow-Up", "Financial Update Error", "Other"];
+    }
+
+    // ==========================================================================================
+    // Bulk Update (Excel) - T030. Template (pre-filled with the page's claims, the selection, or
+    // blank) with dropdowns, then an upload that runs as a background job (the Denial Workflow's
+    // upload job runner) and returns a per-row result with a downloadable log.
+    // Assign To needs ARWorkbench.Assign; the follow-up columns need ARWorkbench.EditClaim.
+    // ==========================================================================================
+
+    [HttpPost("bulk-update/template")]
+    public async Task<ActionResult> BulkUpdateTemplate([FromQuery] int labId, [FromBody] ArWorkbenchBulkTemplateRequest? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!user!.Permissions.Assign && !user.Permissions.EditClaim)
+            return Forbidden("Your role cannot assign claims or log follow-up notes.");
+
+        var mode = (request?.Mode ?? "filtered").Trim().ToLowerInvariant();
+        var claims = new List<ArWorkbenchClaimRow>();
+        if (mode != "blank")
+        {
+            var filter = request?.Filter ?? new ArWorkbenchClaimFilter();
+            filter.LabId = labId;
+            if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+            HashSet<long>? wanted = null;
+            if (mode == "selected")
+            {
+                wanted = (request?.ClaimKeys ?? []).Where(k => k > 0).ToHashSet();
+                if (wanted.Count == 0) return BadRequest(new { message = "Select the claims to put in the template." });
+                if (wanted.Count > ArWorkbenchBulkUpdate.MaxRows) return BadRequest(new { message = $"Select at most {ArWorkbenchBulkUpdate.MaxRows:N0} claims." });
+                filter = new ArWorkbenchClaimFilter { LabId = labId, SortBy = filter.SortBy, SortDesc = filter.SortDesc };
+                filter.ClaimKeys = wanted.ToList();
+            }
+            filter.PageSize = 500;
+            for (filter.Page = 1; claims.Count < ArWorkbenchBulkUpdate.MaxRows; filter.Page++)
+            {
+                var page = await _repository.GetClaimsAsync(filter, user, ct);
+                claims.AddRange(page.Items);
+                if (page.Items.Count < filter.PageSize) break;
+            }
+            if (claims.Count > ArWorkbenchBulkUpdate.MaxRows) claims.RemoveRange(ArWorkbenchBulkUpdate.MaxRows, claims.Count - ArWorkbenchBulkUpdate.MaxRows);
+        }
+
+        var states = await _repository.GetBulkClaimStatesAsync(labId, claims.Select(c => c.ClaimID).ToList(), user, ct);
+        var versions = states.Values.ToDictionary(s => s.ClaimKey, s => s.Version);
+        var lists = (await _repository.GetMasterDataAsync(labId, ct)).Lists;
+        var agents = user.Permissions.Assign ? await _repository.GetAgentsAsync(labId, ct) : [];
+        var labName = LabsFromToken().FirstOrDefault(l => l.LabId == labId)?.LabName ?? $"Lab {labId}";
+        var bytes = ArWorkbenchBulkUpdate.BuildTemplate(claims, versions, lists, agents,
+            $"AR WORKBENCH - BULK UPDATE — {labName} — {claims.Count:N0} claim(s) — downloaded {DateTime.Now:MM/dd/yyyy HH:mm} by {user.UserName}");
+        return File(bytes, XlsxContentType, $"ARWorkbench_BulkUpdate_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+    }
+
+    [HttpPost("bulk-update")]
+    [RequestSizeLimit(30_000_000)]
+    public async Task<ActionResult<ClaimUploadStartResponse>> BulkUpdateUpload([FromQuery] int labId, [FromForm] DenialCodeMasterImportRequest request,
+        [FromServices] IDenialWorkflowUploadJobService jobs, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!user!.Permissions.Assign && !user.Permissions.EditClaim)
+            return Forbidden("Your role cannot assign claims or log follow-up notes.");
+        var uploadError = await FileUploadGuard.ValidateExcelAsync(request.File, 25 * 1024 * 1024, ct);
+        if (uploadError != null) return BadRequest(new { message = uploadError });
+
+        List<ArWorkbenchBulkRow>? rows;
+        string? parseError;
+        await using (var stream = request.File!.OpenReadStream())
+            (rows, parseError) = ArWorkbenchBulkUpdate.Parse(stream);
+        if (rows is null) return BadRequest(new { message = parseError });
+        if (rows.Count == 0) return BadRequest(new { message = "The file has no rows to update." });
+
+        var fileName = $"AR Workbench bulk update · {request.File.FileName}";
+        _logger.LogInformation("AR Workbench bulk update upload by {User} for lab {LabId}: {File}, {Rows} rows", user.UserName, labId, request.File.FileName, rows.Count);
+        var start = jobs.StartUpload(labId, fileName, rows.Count, user.UserName,
+            (services, token) => ArWorkbenchBulkUpdate.ProcessAsync(services.GetRequiredService<IArWorkbenchRepository>(), labId, rows, user, token));
+        return Ok(start);
+    }
+
+    [HttpGet("bulk-update/jobs/{jobId}")]
+    public async Task<ActionResult<ClaimUploadStatusResponse>> BulkUpdateStatus([FromRoute] string jobId, [FromQuery] int labId,
+        [FromServices] IDenialWorkflowUploadJobService jobs, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var status = jobs.GetStatus(jobId, user!.UserName);
+        if (status is null) return NotFound(new { message = "That upload is no longer available." });
+        status.DownloadUrl = null;      // the workbench downloads the log from bulk-update/jobs/{id}/log
+        return Ok(status);
+    }
+
+    [HttpGet("bulk-update/jobs/{jobId}/log")]
+    public async Task<ActionResult> BulkUpdateLog([FromRoute] string jobId, [FromQuery] int labId,
+        [FromServices] IDenialWorkflowUploadJobService jobs, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var log = jobs.GetLogFile(jobId, user!.UserName);
+        if (log is null) return NotFound(new { message = "The result log is no longer available." });
+        return PhysicalFile(log.FilePath, log.ContentType, log.FileName.Replace("UploadLog_", "ARWorkbench_BulkUpdateLog_"));
     }
 
     // ==========================================================================================
@@ -411,13 +762,58 @@ public sealed class ArWorkbenchController : ControllerBase
     {
         var (manager, denied) = await ResolveUserManagerAsync(labId, ct);
         if (denied is not null) return denied;
+        var users = (await _repository.GetManagedUsersAsync(manager!.User.LabUserId, manager.AllLabs, manager.Labs, ct)).ToList();
         return Ok(new ArWorkbenchUserManagement
         {
-            Users = (await _repository.GetManagedUsersAsync(manager!.User.LabUserId, manager.AllLabs, manager.Labs, ct)).ToList(),
+            Users = users,
             Labs = manager.Labs.ToList(),
             Roles = (await _repository.GetAssignableRolesAsync(ct)).ToList(),
+            Managers = ManagerOptions(users),
+            Teams = users.Select(u => u.TeamName).Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t!)
+                .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList(),
             AllLabs = manager.AllLabs
         });
+    }
+
+    /// <summary>T054 access picker: the clinics or referring providers on one lab's claims.</summary>
+    [HttpGet("users/scope-options")]
+    public async Task<ActionResult<IReadOnlyList<string>>> UserScopeOptions([FromQuery] int labId, [FromQuery] int targetLabId, [FromQuery] string? level, CancellationToken ct)
+    {
+        var (manager, denied) = await ResolveUserManagerAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!manager!.LabIds.Contains(targetLabId)) return Forbidden("You can only set access for labs you manage.");
+        var lvl = string.Equals(level, "provider", StringComparison.OrdinalIgnoreCase) ? "provider" : "clinic";
+        try
+        {
+            return Ok(await _repository.GetScopeOptionsAsync(targetLabId, lvl, ct));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = $"That lab has no AR Workbench claims to choose from yet ({ex.Message})" });
+        }
+    }
+
+    // Managers: active AR Workbench System Administrators, RCM Managers and Team Leads the caller can see.
+    private static List<ArWorkbenchManagerOption> ManagerOptions(IEnumerable<ArWorkbenchManagedUser> users) => users
+        .Where(u => u.IsActive && u.Roles.Any(r => ArWorkbenchUserRules.ManagerRoleLabels.Contains(r.Label, StringComparer.OrdinalIgnoreCase)))
+        .Select(u => new ArWorkbenchManagerOption { LabUserId = u.LabUserId, UserName = u.UserName, Label = $"{u.UserName} ({string.Join(", ", u.Roles.Select(r => r.Label))})" })
+        .OrderBy(m => m.UserName, StringComparer.OrdinalIgnoreCase).ToList();
+
+    private async Task<(ArWorkbenchUserProfile? Profile, string? Error)> ValidateUserProfileAsync(UserManager manager, int roleId, IReadOnlyList<int> labIds,
+        IReadOnlyList<ArWorkbenchUserScopeValue>? scopes, int? managerUserId, string? teamName, int? targetLabUserId, CancellationToken ct)
+    {
+        var roleScope = (await _repository.GetAssignableRolesAsync(ct)).FirstOrDefault(r => r.RoleId == roleId)?.Scope;
+        var choices = new Dictionary<int, IReadOnlyList<string>>();
+        if (roleScope is not null)
+        {
+            foreach (var lab in labIds)
+            {
+                try { choices[lab] = await _repository.GetScopeOptionsAsync(lab, roleScope, ct); }
+                catch (InvalidOperationException) { return (null, $"Lab {manager.Labs.FirstOrDefault(l => l.LabId == lab)?.LabName ?? lab.ToString()} has no AR Workbench claims yet, so a clinic / provider cannot be chosen there."); }
+            }
+        }
+        var allowedManagers = ManagerOptions(await _repository.GetManagedUsersAsync(manager.User.LabUserId, manager.AllLabs, manager.Labs, ct)).Select(m => m.LabUserId).ToHashSet();
+        return ArWorkbenchUserRules.ValidateProfile(roleScope, labIds, scopes, choices, managerUserId, allowedManagers, targetLabUserId, teamName);
     }
 
     [HttpPost("users")]
@@ -437,9 +833,11 @@ public sealed class ArWorkbenchController : ControllerBase
         if (roleError is not null) return BadRequest(new { message = roleError });
         var (labIds, labError) = ArWorkbenchUserRules.ValidateLabs(request.LabIds, manager!.LabIds);
         if (labIds is null) return BadRequest(new { message = labError });
+        var (profile, profileError) = await ValidateUserProfileAsync(manager, request.RoleId!.Value, labIds, request.Scopes, request.ManagerUserId, request.TeamName, null, ct);
+        if (profile is null) return BadRequest(new { message = profileError });
 
         var (result, id) = await _repository.CreateWorkbenchUserAsync(userName, ArWorkbenchUserRules.HashPassword(request.Password!), email,
-            request.RoleId!.Value, labIds, manager.User.UserName, ct);
+            request.RoleId!.Value, labIds, profile, manager.LabIds, manager.User.UserName, ct);
         if (result.Status == ArWorkbenchSaveStatus.Ok)
             _logger.LogInformation("AR Workbench user {NewUser} (LabUserID {Id}) created by {Admin} for labs {Labs}", userName, id, manager.User.UserName, string.Join(",", labIds));
         return result.Status == ArWorkbenchSaveStatus.Ok ? Ok(new { message = result.Message, labUserId = id }) : ToResult(result);
@@ -466,7 +864,10 @@ public sealed class ArWorkbenchController : ControllerBase
             hash = ArWorkbenchUserRules.HashPassword(request.Password);
         }
 
-        var result = await _repository.UpdateWorkbenchUserAsync(labUserId, email, request.RoleId!.Value, labIds, request.IsActive ?? true, hash,
+        var (profile, profileError) = await ValidateUserProfileAsync(manager, request.RoleId!.Value, labIds, request.Scopes, request.ManagerUserId, request.TeamName, labUserId, ct);
+        if (profile is null) return BadRequest(new { message = profileError });
+
+        var result = await _repository.UpdateWorkbenchUserAsync(labUserId, email, request.RoleId!.Value, labIds, request.IsActive ?? true, hash, profile,
             manager.User.LabUserId, manager.AllLabs, manager.LabIds, manager.User.UserName, ct);
         if (result.Status == ArWorkbenchSaveStatus.Ok)
             _logger.LogInformation("AR Workbench user LabUserID {Id} updated by {Admin}{Reset}", labUserId, manager.User.UserName, hash is null ? "" : " (password reset)");

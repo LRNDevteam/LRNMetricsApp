@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import AssignModal from '../components/AssignModal';
+import BulkUpdateModal from '../components/BulkUpdateModal';
 import { BarList } from '../components/Charts';
 import DataTable from '../components/DataTable';
 import Icon from '../components/Icon';
@@ -77,11 +78,16 @@ export default function AssignmentPage() {
     return () => controller.abort();
   }, [labId, refreshKey]);
 
+  // Bulk Reassign's lists cascade over its own filters (T047): picking an agent narrows the
+  // categories / panels / priorities to that agent's open caseload.
+  const [raContext, setRaContext] = useState(null);
   useEffect(() => {
     const controller = new AbortController();
-    arWorkbenchService.claimFilterOptions(labId, controller.signal).then(setOptions).catch(() => {});
-    return () => controller.abort();
-  }, [labId, refreshKey]);
+    const t = setTimeout(() => {
+      arWorkbenchService.claimFilterOptions(labId, controller.signal, raContext || undefined).then(setOptions).catch(() => {});
+    }, 250);
+    return () => { clearTimeout(t); controller.abort(); };
+  }, [labId, refreshKey, raContext]);
 
   const agents = overview?.agents || [];
   const assignable = agents.filter((a) => a.isAssignable);
@@ -186,6 +192,7 @@ export default function AssignmentPage() {
   const [raData, setRaData] = useState({ items: [], totalCount: 0 });
   const [raLoading, setRaLoading] = useState(true);
   const [raSelected, setRaSelected] = useState(() => new Set());
+  const [bulk, setBulk] = useState(null);     // Bulk Update (Excel): { filter, keys }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -199,6 +206,10 @@ export default function AssignmentPage() {
       .catch((e) => { if (e.name !== 'AbortError') { setError(e.message); setRaLoading(false); } });
     return () => controller.abort();
   }, [labId, raFilter, raQuery, refreshKey]);
+
+  useEffect(() => {
+    setRaContext({ labId, assignedOnly: true, openInsuranceArOnly: true, agent: raFilter.agent, category: raFilter.category, panel: raFilter.panel, priority: raFilter.priority });
+  }, [labId, raFilter]);
 
   const setRa = (k, v) => { setRaFilter((f) => ({ ...f, [k]: v })); setRaQuery((q) => ({ ...q, page: 1 })); setRaSelected(new Set()); };
   const raOptions = useMemo(() => ({
@@ -360,10 +371,19 @@ export default function AssignmentPage() {
           selectedKeys={uaSelected}
           onSelectionChange={setUaSelected}
           toolbar={(
-            <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" disabled={!uaSelected.size}
-              onClick={() => setAssigning({ keys: [...uaSelected], source: 'unassigned' })}>
-              Assign Selected &rarr;
-            </button>
+            <>
+              <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" disabled={!uaSelected.size}
+                onClick={() => setAssigning({ keys: [...uaSelected], source: 'unassigned' })}>
+                Assign Selected &rarr;
+              </button>
+              <button type="button" className="arwb-btn arwb-btn-sm" title="Assign or log follow-ups for many claims from an Excel file"
+                onClick={() => setBulk({
+                  keys: uaSelected,
+                  filter: { status: ['Unassigned'], agent: ['__unassigned'], openInsuranceArOnly: true, minDaysUntouched: untouchedDays, sortBy: uaQuery.sortBy, sortDesc: uaQuery.sortDesc }
+                })}>
+                <Icon name="upload" size={15} /> Bulk Update (Excel)
+              </button>
+            </>
           )}
         />
       </div>
@@ -402,13 +422,28 @@ export default function AssignmentPage() {
           selectedKeys={raSelected}
           onSelectionChange={setRaSelected}
           toolbar={(
-            <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" disabled={!raSelected.size}
-              onClick={() => setAssigning({ keys: [...raSelected], source: 'reassign', excludeAgent: raFilter.agent.length === 1 ? raFilter.agent[0] : undefined })}>
-              Reassign Selected &rarr;
-            </button>
+            <>
+              <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" disabled={!raSelected.size}
+                onClick={() => setAssigning({ keys: [...raSelected], source: 'reassign', excludeAgent: raFilter.agent.length === 1 ? raFilter.agent[0] : undefined })}>
+                Reassign Selected &rarr;
+              </button>
+              <button type="button" className="arwb-btn arwb-btn-sm" title="Reassign or log follow-ups for many claims from an Excel file"
+                onClick={() => setBulk({
+                  keys: raSelected,
+                  filter: { assignedOnly: true, openInsuranceArOnly: true, agent: raFilter.agent, category: raFilter.category, panel: raFilter.panel,
+                    priority: raFilter.priority, sortBy: raQuery.sortBy, sortDesc: raQuery.sortDesc }
+                })}>
+                <Icon name="upload" size={15} /> Bulk Update (Excel)
+              </button>
+            </>
           )}
         />
       </div>
+
+      {bulk && (
+        <BulkUpdateModal filter={bulk.filter} selectedKeys={bulk.keys} onClose={() => setBulk(null)}
+          onDone={() => { setBulk(null); setUaSelected(new Set()); setRaSelected(new Set()); setRefreshKey((k) => k + 1); }} />
+      )}
 
       {assigning && (
         <AssignModal labId={labId} claimKeys={assigning.keys} agents={agents} excludeAgent={assigning.excludeAgent}

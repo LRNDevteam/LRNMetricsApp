@@ -14,7 +14,8 @@ public interface IArWorkbenchRepository
     Task<ArWorkbenchQueueSummary> GetQueueSummaryAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchDashboard> GetDashboardAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchPagedResult<ArWorkbenchClaimRow>> GetClaimsAsync(ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, CancellationToken ct);
-    Task<ArWorkbenchFilterOptions> GetFilterOptionsAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
+    /// <param name="context">The page's current filters: lists cascade (each counted over the other filters). Null = lab-wide.</param>
+    Task<ArWorkbenchFilterOptions> GetFilterOptionsAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct, ArWorkbenchClaimFilter? context = null);
     Task<ArWorkbenchClaimDetail?> GetClaimDetailAsync(int labId, long claimKey, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchMasterData> GetMasterDataAsync(int labId, CancellationToken ct);
     Task<IReadOnlyList<ArWorkbenchRefreshRun>> GetRefreshRunsAsync(int labId, int top, CancellationToken ct);
@@ -23,6 +24,27 @@ public interface IArWorkbenchRepository
 
     // My Work / Follow-Up Management tiles (SqlArWorkbenchRepository.WorkSummary.cs)
     Task<ArWorkbenchWorkSummary> GetWorkSummaryAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
+
+    // CIP - Client Escalations (SqlArWorkbenchRepository.Cip.cs)
+    Task<ArWorkbenchCipQueue> GetCipQueueAsync(ArWorkbenchCipFilter filter, ArWorkbenchUserContext user, bool clientView, CancellationToken ct);
+    Task<List<ArWorkbenchCipCaseDetail>> GetClaimCipCasesAsync(int labId, long claimKey, CancellationToken ct);
+    Task<(string Outcome, string CaseNumber, string? NewStatus)> CipActionAsync(int labId, long cipCaseId, ArWorkbenchCipAction action, string? note, ArWorkbenchUserContext user, Guid? bulkBatchId, CancellationToken ct);
+    Task<ArWorkbenchLegacyCipResult> ConvertLegacyEscalationsAsync(int labId, string runBy, bool previewOnly, CancellationToken ct);
+    Task<Dictionary<long, string>> GetCipStatusesAsync(int labId, IReadOnlyCollection<long> caseIds, ArWorkbenchUserContext user, CancellationToken ct);
+
+    // QA Verification (SqlArWorkbenchRepository.Qa.cs)
+    Task<ArWorkbenchQaQueue> GetQaQueueAsync(ArWorkbenchQaFilter filter, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<ArWorkbenchQaReview?> GetCurrentQaReviewAsync(int labId, long claimKey, CancellationToken ct);
+    Task<(string Outcome, string ClaimId, bool Escalation, bool WriteOff)> DecideQaAsync(int labId, long claimKey, ArWorkbenchQaDecision decision, ArWorkbenchUserContext user, Guid? bulkBatchId, CancellationToken ct);
+
+    // Nightly queue snapshot (SqlArWorkbenchRepository.Snapshots.cs)
+    IReadOnlyList<int> GetConfiguredLabIds();
+    Task<IReadOnlyList<ArWorkbenchSnapshotDay>> GetSnapshotHistoryAsync(int labId, int top, CancellationToken ct);
+    Task<bool> HasSnapshotAsync(int labId, DateTime date, CancellationToken ct);
+    Task<int> RunSnapshotAsync(int labId, DateTime date, CancellationToken ct);
+
+    // Bulk Update (Excel) (SqlArWorkbenchRepository.Bulk.cs)
+    Task<Dictionary<string, ArWorkbenchBulkClaimState>> GetBulkClaimStatesAsync(int labId, IReadOnlyCollection<string> claimIds, ArWorkbenchUserContext user, CancellationToken ct);
 
     // Central Denial Code Master (SqlArWorkbenchRepository.CodeMaster.cs) - LRNMaster
     Task<(bool Installed, IReadOnlyList<ArWorkbenchCodeMasterRow> Rows)> GetCodeMasterAsync(CancellationToken ct);
@@ -42,9 +64,11 @@ public interface IArWorkbenchRepository
     Task<IReadOnlySet<int>> GetUserLabIdsAsync(int labUserId, CancellationToken ct);
     Task<IReadOnlyList<ArWorkbenchRoleOption>> GetAssignableRolesAsync(CancellationToken ct);
     Task<IReadOnlyList<ArWorkbenchManagedUser>> GetManagedUsersAsync(int? callerLabUserId, bool allLabs, IReadOnlyList<ArWorkbenchLabOption> manageableLabs, CancellationToken ct);
-    Task<(ArWorkbenchSaveResult Result, int? LabUserId)> CreateWorkbenchUserAsync(string userName, string passwordHash, string email, int roleId, IReadOnlyList<int> labIds, string createdBy, CancellationToken ct);
+    Task<(ArWorkbenchSaveResult Result, int? LabUserId)> CreateWorkbenchUserAsync(string userName, string passwordHash, string email, int roleId, IReadOnlyList<int> labIds,
+        ArWorkbenchUserProfile profile, IReadOnlyCollection<int> manageableLabIds, string createdBy, CancellationToken ct);
     Task<ArWorkbenchSaveResult> UpdateWorkbenchUserAsync(int labUserId, string email, int roleId, IReadOnlyList<int> requestedLabIds, bool isActive, string? passwordHash,
-        int? callerLabUserId, bool allLabs, IReadOnlySet<int> manageableLabIds, string modifiedBy, CancellationToken ct);
+        ArWorkbenchUserProfile profile, int? callerLabUserId, bool allLabs, IReadOnlySet<int> manageableLabIds, string modifiedBy, CancellationToken ct);
+    Task<IReadOnlyList<string>> GetScopeOptionsAsync(int labId, string level, CancellationToken ct);
 
     // Saved Views (SqlArWorkbenchRepository.SavedViews.cs)
     Task<IReadOnlyList<ArWorkbenchSavedView>> GetSavedViewsAsync(int labId, string userName, string viewKey, CancellationToken ct);
@@ -972,6 +996,11 @@ ORDER BY pg.Seq;";
         if (filter.FollowUpActionableOnly) where.Add("w.IsFollowUpActionable = 1");
         if (filter.ActiveOnly) where.Add("w.IsFinanciallyClosed = 0");
         if (filter.NonCollectibleOnly) where.Add("w.HasNonCollectibleDenial = 1");
+        if (filter.ClaimKeys is { Count: > 0 } keys)
+        {
+            where.Add("w.ClaimKey IN (SELECT k.ClaimKey FROM dbo.ARWB_tvf_ParseKeyList(@ClaimKeyList) k)");
+            cmd.Parameters.Add("@ClaimKeyList", SqlDbType.NVarChar, -1).Value = string.Join(",", keys.Where(k => k > 0).Distinct());
+        }
         if (filter.AwaitingPayerOnly)
         {
             var names = new List<string>();
@@ -1006,87 +1035,90 @@ ORDER BY pg.Seq;";
     }
 
     /// <summary>
-    /// Option lists for every Work Queue filter popover, counted over the caller's scoped claims, so a
-    /// clinic viewer or agent only sees values that exist in their own data.
+    /// Option lists for every filter popover, counted over the caller's scoped claims, so a clinic
+    /// viewer or agent only sees values that exist in their own data.
+    ///
+    /// Cascading (T047): with a context filter each list is counted over the claims matching every
+    /// OTHER current filter (tile, search, flags and the other lists) - picking a payer narrows the
+    /// panels, categories, agents ... to what that payer has. A list never filters itself, so its own
+    /// selected values always stay visible to untick. A value with no claims left is dropped unless
+    /// it is selected.
     /// </summary>
-    public async Task<ArWorkbenchFilterOptions> GetFilterOptionsAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct)
+    public async Task<ArWorkbenchFilterOptions> GetFilterOptionsAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct, ArWorkbenchClaimFilter? context = null)
     {
         await using var connection = await OpenLabAsync(labId, ct);
-        await using var cmd = connection.CreateCommand();
-        var scope = AppendScope(cmd, user);
+        var cascading = context is not null;
+        context ??= new ArWorkbenchClaimFilter { LabId = labId };
 
-        cmd.CommandText = $@"
--- 0. AR queue leaves: a sub-queue, or a top-level queue that has none
+        // One query per list: its WHERE is the context minus that list's own selection.
+        async Task<List<ArWorkbenchFilterOption>> FacetAsync(Func<ArWorkbenchClaimFilter, ArWorkbenchClaimFilter> without, Func<string, string> sql,
+            IReadOnlyCollection<string>? selected, string? noneValue = null, string? noneLabel = null, bool keepZero = false)
+        {
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandTimeout = 120;
+            var where = BuildClaimFilter(cmd, without(context.Copy())) + AppendScope(cmd, user);
+            cmd.CommandText = sql(where);
+            var chosen = new HashSet<string>(selected ?? [], StringComparer.OrdinalIgnoreCase);
+            var list = new List<ArWorkbenchFilterOption>();
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var count = reader.GetInt32(reader.FieldCount - 1);
+                if (reader.IsDBNull(0))
+                {
+                    if (noneValue is not null && (count > 0 || chosen.Contains(noneValue)))
+                        list.Insert(0, new ArWorkbenchFilterOption { Value = noneValue, Label = noneLabel ?? "(blank)", Count = count });
+                    continue;
+                }
+                var value = reader.GetString(0);
+                // Fixed lists (statuses, priorities, aging, queues) keep every value until a filter narrows them.
+                if (count == 0 && cascading && !keepZero && !chosen.Contains(value)) continue;
+                list.Add(new ArWorkbenchFilterOption { Value = value, Label = reader.FieldCount > 2 ? reader.GetString(1) : value, Count = count });
+            }
+            return list;
+        }
+
+        static string Distinct(string column, string where) =>
+            $"SELECT {column}, COUNT(*) FROM dbo.ARWB_Claim w WHERE {where} GROUP BY {column} ORDER BY {column};";
+
+        var options = new ArWorkbenchFilterOptions
+        {
+            // AR queue leaves: a sub-queue, or a top-level queue that has none
+            Queues = await FacetAsync(f => { f.Queue = new(); return f; }, where => $@"
 SELECT CASE WHEN s.QueueId IS NULL THEN t.QueueId ELSE t.QueueId + '|' + s.QueueId END,
        CASE WHEN s.QueueId IS NULL THEN t.QueueLabel ELSE t.QueueLabel + N' · ' + s.QueueLabel END,
        ISNULL(cnt.Claims, 0)
 FROM dbo.ARWB_ArQueue t
 LEFT JOIN dbo.ARWB_ArQueue s ON s.ParentQueueId = t.QueueId
 OUTER APPLY (SELECT Claims = COUNT(*) FROM dbo.ARWB_Claim w
-             WHERE w.ArQueueId = t.QueueId AND (s.QueueId IS NULL OR w.ArSubQueueId = s.QueueId) {scope}) cnt
+             WHERE w.ArQueueId = t.QueueId AND (s.QueueId IS NULL OR w.ArSubQueueId = s.QueueId) AND {where}) cnt
 WHERE t.ParentQueueId IS NULL
-ORDER BY t.SortOrder, s.SortOrder;
-
--- 1..5. Distinct values with counts (NULL is the 'none' option)
-SELECT w.PayerName, COUNT(*) FROM dbo.ARWB_Claim w WHERE 1 = 1 {scope} GROUP BY w.PayerName ORDER BY w.PayerName;
-SELECT w.PanelName, COUNT(*) FROM dbo.ARWB_Claim w WHERE 1 = 1 {scope} GROUP BY w.PanelName ORDER BY w.PanelName;
-SELECT w.ClinicName, COUNT(*) FROM dbo.ARWB_Claim w WHERE 1 = 1 {scope} GROUP BY w.ClinicName ORDER BY w.ClinicName;
-SELECT w.DenialCategory, COUNT(*) FROM dbo.ARWB_Claim w WHERE 1 = 1 {scope} GROUP BY w.DenialCategory ORDER BY w.DenialCategory;
-SELECT w.AssignedAgentUser, COUNT(*) FROM dbo.ARWB_Claim w WHERE 1 = 1 {scope} GROUP BY w.AssignedAgentUser ORDER BY w.AssignedAgentUser;
-
--- 6..8. Fixed lists in master-data order, with counts
+ORDER BY t.SortOrder, s.SortOrder;", context.Queue, keepZero: !cascading),
+            Payers = await FacetAsync(f => { f.Payer = new(); return f; }, w => Distinct("w.PayerName", w), context.Payer, ArWorkbenchFilterValues.None, "(No payer)"),
+            Panels = await FacetAsync(f => { f.Panel = new(); return f; }, w => Distinct("w.PanelName", w), context.Panel, ArWorkbenchFilterValues.None, "(No panel)"),
+            Clinics = await FacetAsync(f => { f.Clinic = new(); return f; }, w => Distinct("w.ClinicName", w), context.Clinic, ArWorkbenchFilterValues.None, "(No clinic)"),
+            Categories = await FacetAsync(f => { f.Category = new(); return f; }, w => Distinct("w.DenialCategory", w), context.Category, ArWorkbenchFilterValues.None, "(No denial)"),
+            Agents = await FacetAsync(f => { f.Agent = new(); return f; }, w => Distinct("w.AssignedAgentUser", w), context.Agent, ArWorkbenchClaimFilter.UnassignedAgent, "Unassigned"),
+            // Fixed lists in master-data order
+            Statuses = await FacetAsync(f => { f.Status = new(); return f; }, where => $@"
 SELECT m.ItemValue, ISNULL(c.Claims, 0)
 FROM dbo.ARWB_MasterListItem m
-OUTER APPLY (SELECT Claims = COUNT(*) FROM dbo.ARWB_Claim w WHERE w.WorkflowStatus = m.ItemValue {scope}) c
-WHERE m.ListType = 'WORKFLOW_STATUS' AND m.IsActive = 1 ORDER BY m.SortOrder;
+OUTER APPLY (SELECT Claims = COUNT(*) FROM dbo.ARWB_Claim w WHERE w.WorkflowStatus = m.ItemValue AND {where}) c
+WHERE m.ListType = 'WORKFLOW_STATUS' AND m.IsActive = 1 ORDER BY m.SortOrder;", context.Status, keepZero: true),
+            Priorities = await FacetAsync(f => { f.Priority = new(); return f; }, where => $@"
 SELECT p.Priority, ISNULL(c.Claims, 0)
 FROM (VALUES ('High', 1), ('Medium', 2), ('Low', 3)) p (Priority, Ord)
-OUTER APPLY (SELECT Claims = COUNT(*) FROM dbo.ARWB_Claim w WHERE w.Priority = p.Priority {scope}) c
-ORDER BY p.Ord;
+OUTER APPLY (SELECT Claims = COUNT(*) FROM dbo.ARWB_Claim w WHERE w.Priority = p.Priority AND {where}) c
+ORDER BY p.Ord;", context.Priority, keepZero: true),
+            AgingBuckets = await FacetAsync(f => { f.Aging = new(); return f; }, where => $@"
 SELECT m.ItemValue, ISNULL(c.Claims, 0)
 FROM dbo.ARWB_MasterListItem m
-OUTER APPLY (SELECT Claims = COUNT(*) FROM dbo.ARWB_Claim w WHERE w.AgingBucket = m.ItemValue {scope}) c
-WHERE m.ListType = 'AGING_BUCKET' AND m.IsActive = 1 ORDER BY m.SortOrder;
-
--- 9..10. Last note's fix / resolution, and the ingested source claim status
-SELECT w.FixResolution, COUNT(*) FROM dbo.ARWB_Claim w WHERE 1 = 1 {scope} GROUP BY w.FixResolution ORDER BY w.FixResolution;
-SELECT w.SourceClaimStatus, COUNT(*) FROM dbo.ARWB_Claim w WHERE 1 = 1 {scope} GROUP BY w.SourceClaimStatus ORDER BY w.SourceClaimStatus;";
-
-        var options = new ArWorkbenchFilterOptions();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-
-        async Task<List<ArWorkbenchFilterOption>> ReadAsync(string? noneValue = null, string? noneLabel = null)
-        {
-            var list = new List<ArWorkbenchFilterOption>();
-            while (await reader.ReadAsync(ct))
-            {
-                var count = reader.GetInt32(reader.FieldCount - 1);
-                if (reader.IsDBNull(0))
-                {
-                    if (noneValue is not null && count > 0)
-                        list.Insert(0, new ArWorkbenchFilterOption { Value = noneValue, Label = noneLabel ?? "(blank)", Count = count });
-                    continue;
-                }
-                var value = reader.GetString(0);
-                var label = reader.FieldCount > 2 ? reader.GetString(1) : value;
-                list.Add(new ArWorkbenchFilterOption { Value = value, Label = label, Count = count });
-            }
-            await reader.NextResultAsync(ct);
-            return list;
-        }
-
-        options.Queues = await ReadAsync();
-        options.Payers = await ReadAsync(ArWorkbenchFilterValues.None, "(No payer)");
-        options.Panels = await ReadAsync(ArWorkbenchFilterValues.None, "(No panel)");
-        options.Clinics = await ReadAsync(ArWorkbenchFilterValues.None, "(No clinic)");
-        options.Categories = await ReadAsync(ArWorkbenchFilterValues.None, "(No denial)");
-        options.Agents = await ReadAsync(ArWorkbenchClaimFilter.UnassignedAgent, "Unassigned");
-        options.Statuses = await ReadAsync();
-        options.Priorities = await ReadAsync();
-        options.AgingBuckets = await ReadAsync();
-        options.FixResolutions = await ReadAsync(ArWorkbenchFilterValues.None, "(No follow-up yet)");
-        options.SourceStatuses = await ReadAsync(ArWorkbenchFilterValues.None, "(No status)");
-        await reader.DisposeAsync();
+OUTER APPLY (SELECT Claims = COUNT(*) FROM dbo.ARWB_Claim w WHERE w.AgingBucket = m.ItemValue AND {where}) c
+WHERE m.ListType = 'AGING_BUCKET' AND m.IsActive = 1 ORDER BY m.SortOrder;", context.Aging, keepZero: true),
+            // Last note's fix / resolution, and the ingested source claim status
+            FixResolutions = await FacetAsync(f => { f.FixResolution = new(); return f; }, w => Distinct("w.FixResolution", w), context.FixResolution, ArWorkbenchFilterValues.None, "(No follow-up yet)"),
+            SourceStatuses = await FacetAsync(f => { f.SourceStatus = new(); return f; }, w => Distinct("w.SourceClaimStatus", w), context.SourceStatus, ArWorkbenchFilterValues.None, "(No status)")
+        };
 
         // Agent options show the person's name; the value stays the LabUsers.UserName.
         var names = await GetDisplayNamesAsync(options.Agents.Select(a => a.Value), ct);

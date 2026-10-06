@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import DataTable from '../components/DataTable';
+import BulkUpdateModal from '../components/BulkUpdateModal';
 import FollowUpModal from '../components/FollowUpModal';
+import Icon from '../components/Icon';
 import MultiSelect from '../components/MultiSelect';
 import SavedViews from '../components/SavedViews';
 import { AgentName, ErrorBox, Notice, PriorityText, QueueBadge, StatusBadge, TflBadge } from '../components/Status';
@@ -88,6 +90,7 @@ export default function WorklistPage({ view = 'mywork' }) {
   const [notice, setNotice] = useState(null);
   const [logging, setLogging] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [bulkOpen, setBulkOpen] = useState(false);       // Bulk Update (Excel)
 
   // An agent's caseload is theirs by scope, so the agent filter is for leads and above.
   const moreFilters = cfg.more.filter(([k]) => k !== 'agent' || user?.roleCode !== 'agent');
@@ -96,12 +99,6 @@ export default function WorklistPage({ view = 'mywork' }) {
     const t = setTimeout(() => { if (searchText.trim() !== search) { setSearch(searchText.trim()); setQuery((q) => ({ ...q, page: 1 })); } }, 400);
     return () => clearTimeout(t);
   }, [searchText]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    const controller = new AbortController();
-    arWorkbenchService.claimFilterOptions(labId, controller.signal).then(setOptions).catch(() => {});
-    return () => controller.abort();
-  }, [labId]);
 
   useEffect(() => {
     arWorkbenchService.workSummary(labId).then(setSummary).catch(() => {});
@@ -116,6 +113,16 @@ export default function WorklistPage({ view = 'mywork' }) {
       sortBy: query.sortBy, sortDesc: query.sortDesc, page: query.page, pageSize: query.pageSize
     };
   }, [cfg, labId, lists, quick, tflOnly, search, query]);
+
+  // Cascading filter lists (T047): each list counted over the view's other filters (tile included).
+  const optionsKey = JSON.stringify({ ...filter, page: 0, pageSize: 0, sortBy: '', sortDesc: false });
+  useEffect(() => {
+    const controller = new AbortController();
+    const t = setTimeout(() => {
+      arWorkbenchService.claimFilterOptions(labId, controller.signal, filter).then(setOptions).catch(() => {});
+    }, 250);
+    return () => { clearTimeout(t); controller.abort(); };
+  }, [labId, optionsKey, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const controller = new AbortController();
@@ -250,9 +257,19 @@ export default function WorklistPage({ view = 'mywork' }) {
           onPage={(page) => setQuery((q) => ({ ...q, page }))}
           onPageSize={(pageSize) => setQuery((q) => ({ ...q, pageSize, page: 1 }))}
           onRowClick={openClaim}
+          toolbar={(can('assign') || can('editClaim')) && (
+            <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => setBulkOpen(true)}
+              title="Log follow-ups (and assign) for many claims from an Excel file - the template lists this view's claims">
+              <Icon name="upload" size={15} /> Bulk Update (Excel)
+            </button>
+          )}
         />
       </div>
 
+      {bulkOpen && (
+        <BulkUpdateModal filter={filter} onClose={() => setBulkOpen(false)}
+          onDone={() => { setBulkOpen(false); setNotice({ kind: 'good', text: 'Bulk update finished - the list is refreshed.' }); setReloadKey((k) => k + 1); }} />
+      )}
       {logging && <FollowUpModal claim={logging} lastFollowUp={null} onClose={() => setLogging(null)} onDone={onLogged} />}
     </>
   );
