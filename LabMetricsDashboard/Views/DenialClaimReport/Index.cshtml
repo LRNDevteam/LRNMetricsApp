@@ -119,6 +119,21 @@
                 <i class="bi bi-calendar-week me-2"></i>Weekly Summary
             </button>
         </li>
+        @if (Model.HasDenialLists)
+        {
+            <li class="nav-item" role="presentation">
+                <button class="nav-link @(tab == "list" ? "active" : "")" data-bs-toggle="pill"
+                        data-bs-target="#dcr-list" type="button" data-tab-key="list">
+                    <i class="bi bi-list-ol me-2"></i>Denial List
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link @(tab == "plantype" ? "active" : "")" data-bs-toggle="pill"
+                        data-bs-target="#dcr-plantype" type="button" data-tab-key="plantype">
+                    <i class="bi bi-diagram-3 me-2"></i>Denial List - Plan Type
+                </button>
+            </li>
+        }
         <li class="nav-item" role="presentation">
             <button class="nav-link @(tab == "insight" ? "active" : "")" data-bs-toggle="pill"
                     data-bs-target="#dcr-insight" type="button" data-tab-key="insight">
@@ -157,7 +172,7 @@
                                 <i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span>
                             </button>
                         </div>
-                        @await Html.PartialAsync("../DenialDashboard/_BreakdownPivotTable", Model.Monthly)
+                        @await Html.PartialAsync("_DenialPivotGrid", Model.Monthly)
                     </div>
                 </div>
             </div>
@@ -172,11 +187,61 @@
                                 <i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span>
                             </button>
                         </div>
-                        @await Html.PartialAsync("../DenialDashboard/_BreakdownPivotTable", Model.Weekly)
+                        @await Html.PartialAsync("_DenialPivotGrid", Model.Weekly)
                     </div>
                 </div>
             </div>
         </div>
+
+        @if (Model.HasDenialLists)
+        {
+            <div class="tab-pane fade @(tab == "list" ? "show active" : "")" id="dcr-list">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body">
+                        <form method="get" asp-action="Index" class="dcr-list-search" role="search">
+                            <input type="hidden" name="lab" value="@Model.CurrentLab" />
+                            <input type="hidden" name="tab" value="list" />
+                            <input type="hidden" name="bucket" value="@Model.Insight.Bucket" />
+                            <label for="dcrListCode" class="dcr-list-search-label">Denial Code</label>
+                            <div class="input-group input-group-sm dcr-list-search-box">
+                                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                <input id="dcrListCode" name="listCode" type="search" class="form-control"
+                                       list="dcrListCodeOptions" value="@Model.DenialListSearch"
+                                       placeholder="Search denial code, e.g. CO-16" autocomplete="off" maxlength="200" />
+                                <button class="btn btn-primary" type="submit">Search</button>
+                            </div>
+                            @if (Model.DenialListSearch is not null)
+                            {
+                                <a class="btn btn-sm btn-outline-secondary" asp-action="Index"
+                                   asp-route-lab="@Model.CurrentLab" asp-route-tab="list" asp-route-bucket="@Model.Insight.Bucket">
+                                    <i class="bi bi-x-lg"></i> Clear
+                                </a>
+                                <span class="dcr-list-search-result">
+                                    @Model.DenialList.Count(r => r.RowType == "D").ToString("N0") denial code row(s) with
+                                    &ldquo;<strong>@Model.DenialListSearch</strong>&rdquo;
+                                </span>
+                            }
+                            <datalist id="dcrListCodeOptions">
+                                @foreach (var code in Model.DenialListCodeOptions)
+                                {
+                                    <option value="@code"></option>
+                                }
+                            </datalist>
+                        </form>
+                        @{ ViewData["DenialListSearch"] = Model.DenialListSearch; }
+                        @await Html.PartialAsync("_DenialListGrid", Model.DenialList)
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-pane fade @(tab == "plantype" ? "show active" : "")" id="dcr-plantype">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body">
+                        @await Html.PartialAsync("_DenialPlanTypeGrid", Model.PlanType)
+                    </div>
+                </div>
+            </div>
+        }
 
         <div class="tab-pane fade @(tab == "insight" ? "show active" : "")" id="dcr-insight">
             @await Html.PartialAsync("_DenialInsightPanel", Model.Insight)
@@ -190,6 +255,20 @@
 
 @section Scripts {
     <script nonce="@Context.Items["CspNonce"]">
+        // ── Production-style grids: insurance / denial code rows open their child rows ──
+        document.addEventListener('click', function (e) {
+            var row = e.target && e.target.closest ? e.target.closest('.dcr-page tr.pr-hp-toggle') : null;
+            if (!row) return;
+            var group = row.getAttribute('data-hp-group');
+            var table = row.closest('table');
+            if (!group || !table) return;
+            var open = row.classList.toggle('pr-hp-open');
+            row.setAttribute('aria-expanded', open ? 'true' : 'false');
+            table.querySelectorAll('tr.pr-hp-child[data-hp-parent="' + group + '"]').forEach(function (child) {
+                child.classList.toggle('pr-hp-shown', open);
+            });
+        });
+
         // ── Excel download ───────────────────────────────────────────────────
         // Queues a DenialSummary report; LRN.ReportWorker builds the four-sheet workbook (Monthly,
         // Weekly, Denial Insight and the Denial Claim Level rows) and the Reports badge says when

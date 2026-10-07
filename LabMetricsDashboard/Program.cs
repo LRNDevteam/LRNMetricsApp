@@ -548,6 +548,7 @@ builder.Services.AddSingleton<LRN.ReportQueue.Shared.IReportRequestRepository,
 builder.Services.AddScoped<UserReportService>();
 
 builder.Services.AddScoped<ILisSummaryRepository, SqlLisSummaryRepository>();
+builder.Services.AddScoped<IDenialSummaryRepository, SqlDenialSummaryRepository>();
 builder.Services.AddScoped<SqlPhiExecutiveSummaryRepository>();
 builder.Services.AddScoped<BeechTreeRevenuePipelineLisService>();
 builder.Services.AddScoped<INotesRepository, SqlNotesRepository>();

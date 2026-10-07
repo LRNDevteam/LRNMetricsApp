@@ -536,6 +536,9 @@ List<PanelAveragesRow> PanelRows)
     /// <summary>Date window the SP applied, when it reports one.</summary>
     public DateOnly? WindowFrom { get; init; }
     public DateOnly? WindowTo { get; init; }
+
+    /// <summary>Grand Total row returned by the SP (RowType 'T'); <c>null</c> when the SP has none.</summary>
+    public PanelAveragesMetrics? GrandTotal { get; init; }
 }
 
 /// <summary>Date column that anchors the client-logic Average Payments window.</summary>
@@ -559,18 +562,25 @@ public sealed record PanelAveragesMetrics(
     int Days60Count,
     decimal Days60Amount)
 {
+    /// <summary>Averages returned by the SP; when set they are shown as-is.</summary>
+    public decimal? SpAvgBilled { get; init; }
+    public decimal? SpAvgFullyPaid { get; init; }
+    public decimal? SpAvgAdjudicated { get; init; }
+    public decimal? SpAvgDays30 { get; init; }
+    public decimal? SpAvgDays60 { get; init; }
+
     /// <summary>Average billed amount per claim.</summary>
-    public decimal AvgBilled => ClaimCount == 0 ? 0m : Math.Round(TotalCharges / ClaimCount, 2);
+    public decimal AvgBilled => SpAvgBilled ?? (ClaimCount == 0 ? 0m : Math.Round(TotalCharges / ClaimCount, 2));
     /// <summary>Average carrier payment per claim.</summary>
     public decimal AvgCarrierPayment => ClaimCount == 0 ? 0m : Math.Round(CarrierPayment / ClaimCount, 2);
     /// <summary>Average fully-paid amount per fully-paid claim.</summary>
-    public decimal AvgFullyPaid => FullyPaidCount == 0 ? 0m : Math.Round(FullyPaidAmount / FullyPaidCount, 2);
+    public decimal AvgFullyPaid => SpAvgFullyPaid ?? (FullyPaidCount == 0 ? 0m : Math.Round(FullyPaidAmount / FullyPaidCount, 2));
     /// <summary>Average adjudicated amount per adjudicated claim.</summary>
-    public decimal AvgAdjudicated => AdjudicatedCount == 0 ? 0m : Math.Round(AdjudicatedAmount / AdjudicatedCount, 2);
+    public decimal AvgAdjudicated => SpAvgAdjudicated ?? (AdjudicatedCount == 0 ? 0m : Math.Round(AdjudicatedAmount / AdjudicatedCount, 2));
     /// <summary>Average 30-day amount per 30-day claim.</summary>
-    public decimal AvgDays30 => Days30Count == 0 ? 0m : Math.Round(Days30Amount / Days30Count, 2);
+    public decimal AvgDays30 => SpAvgDays30 ?? (Days30Count == 0 ? 0m : Math.Round(Days30Amount / Days30Count, 2));
     /// <summary>Average 60-day amount per 60-day claim.</summary>
-    public decimal AvgDays60 => Days60Count == 0 ? 0m : Math.Round(Days60Amount / Days60Count, 2);
+    public decimal AvgDays60 => SpAvgDays60 ?? (Days60Count == 0 ? 0m : Math.Round(Days60Amount / Days60Count, 2));
 }
 
 /// <summary>One panel row in the Panel Averages tab with payer drill-down.</summary>

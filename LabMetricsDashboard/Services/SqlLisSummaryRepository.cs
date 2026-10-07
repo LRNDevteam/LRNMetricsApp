@@ -524,6 +524,20 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		FirstPaintLog.Write(_logger, "LIS", labName, "summary-sourcefile", sw.ElapsedMilliseconds,
 			$"dateCol={profile.DateColumn} logic={profile.LogicSheetName} source={(aggregate is null ? "live" : "aggregate")}");
 
+		var spSummary = await TryLoadSpSummaryAsync(
+			conn, labName, labId, dateType, dateFrom, dateTo, panel, clinic, refPhy, salesRep, collector, ct);
+		if (spSummary is not null)
+		{
+			LisKeyMetricsBlock? spKeyMetrics = includeKeyMetrics
+				? await LoadKeyMetricsAsync(
+					conn, columns, columnTypes, profile.LogicSheetName, filterColumns, dateFrom, dateTo,
+					panel, clinic, refPhy, salesRep, collector, ct, aggregate?.Prefix)
+				: null;
+			FirstPaintLog.Write(_logger, "LIS", labName, "summary-done", sw.ElapsedMilliseconds,
+				$"source=sp rows={spSummary.Rows.Count} months={spSummary.Months.Count} total={spSummary.GrandTotal}");
+			return spSummary with { SourceFileName = sourceFileName, KeyMetrics = spKeyMetrics };
+		}
+
 		var raw = aggregate is not null
 			? await LoadAggregateGroupsAsync(
 				conn, aggregate.Prefix, dateType, profile, filterColumns, dateFrom, dateTo,
@@ -589,6 +603,139 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			grandByMonth.Values.Sum(),
 			kpiCards,
 			keyMetrics);
+	}
+
+	/// <summary>
+	/// Labs that ship dbo.usp_Get{Prefix}_LISSummary get their rows, row order, month / year /
+	/// grand totals and KPI cards from that SP as-is. Returns null when the lab has no such SP.
+	/// </summary>
+	private static async Task<LisSummaryResult?> TryLoadSpSummaryAsync(
+		SqlConnection conn,
+		string labName,
+		int? labId,
+		string dateType,
+		DateOnly? dateFrom,
+		DateOnly? dateTo,
+		string? panel,
+		string? clinic,
+		string? refPhy,
+		string? salesRep,
+		string? collector,
+		CancellationToken ct)
+	{
+		if (!LisSummaryAggregateLabs.TryGetTablePrefix(labName, labId, out var prefix))
+			return null;
+
+		var spName = $"dbo.usp_Get{prefix.TrimEnd('_')}_LISSummary";
+		await using (var exists = new SqlCommand("SELECT OBJECT_ID(@sp, 'P');", conn))
+		{
+			exists.Parameters.Add(new SqlParameter("@sp", SqlDbType.NVarChar, 256) { Value = spName });
+			if (await exists.ExecuteScalarAsync(ct) is null or DBNull)
+				return null;
+		}
+
+		await using var cmd = new SqlCommand(spName, conn)
+		{
+			CommandType = CommandType.StoredProcedure,
+			CommandTimeout = 120
+		};
+		cmd.Parameters.Add(new SqlParameter("@DateType", SqlDbType.VarChar, 10) { Value = NormalizeDateType(dateType) });
+		cmd.Parameters.Add(new SqlParameter("@DateFrom", SqlDbType.Date) { Value = dateFrom.HasValue ? dateFrom.Value.ToDateTime(TimeOnly.MinValue) : DBNull.Value });
+		cmd.Parameters.Add(new SqlParameter("@DateTo", SqlDbType.Date) { Value = dateTo.HasValue ? dateTo.Value.ToDateTime(TimeOnly.MinValue) : DBNull.Value });
+		cmd.Parameters.Add(new SqlParameter("@Panel", SqlDbType.NVarChar, -1) { Value = (object?)NullIfBlank(panel) ?? DBNull.Value });
+		cmd.Parameters.Add(new SqlParameter("@Clinic", SqlDbType.NVarChar, -1) { Value = (object?)NullIfBlank(clinic) ?? DBNull.Value });
+		cmd.Parameters.Add(new SqlParameter("@RefPhy", SqlDbType.NVarChar, -1) { Value = (object?)NullIfBlank(refPhy) ?? DBNull.Value });
+		cmd.Parameters.Add(new SqlParameter("@SalesRep", SqlDbType.NVarChar, -1) { Value = (object?)NullIfBlank(salesRep) ?? DBNull.Value });
+		cmd.Parameters.Add(new SqlParameter("@Collector", SqlDbType.NVarChar, -1) { Value = (object?)NullIfBlank(collector) ?? DBNull.Value });
+
+		var rowMeta = new SortedDictionary<int, (string Code, string Description, string Logic, int Level)>();
+		var rowByMonth = new Dictionary<int, Dictionary<string, int>>();
+		var rowByYear = new Dictionary<int, Dictionary<int, int>>();
+		var rowTotal = new Dictionary<int, int>();
+		var grandByMonth = new Dictionary<string, int>();
+		var grandByYear = new Dictionary<int, int>();
+		var grandTotal = 0;
+		var grandLabel = "Grand Total";
+		var months = new SortedSet<string>(StringComparer.Ordinal);
+		var kpi = new LisSummaryKpiCards(0, 0, 0, 0);
+
+		await using (var reader = await cmd.ExecuteReaderAsync(ct))
+		{
+			while (await reader.ReadAsync(ct))
+			{
+				var sortOrder = Convert.ToInt32(reader["SortOrder"]);
+				var isGrandTotal = Convert.ToInt32(reader["IsGrandTotal"]) == 1;
+				var year = Convert.ToInt32(reader["RowYear"]);
+				var month = Convert.ToInt32(reader["RowMonth"]);
+				var count = Convert.ToInt32(reader["SampleCount"]);
+				var monthKey = year > 0 && month > 0 ? $"{year:D4}-{month:D2}" : null;
+				if (monthKey is not null) months.Add(monthKey);
+
+				if (isGrandTotal)
+				{
+					grandLabel = Convert.ToString(reader["Description"]) ?? grandLabel;
+					if (monthKey is not null) grandByMonth[monthKey] = count;
+					else if (year > 0) grandByYear[year] = count;
+					else grandTotal = count;
+					continue;
+				}
+
+				if (!rowMeta.ContainsKey(sortOrder))
+				{
+					rowMeta[sortOrder] = (
+						Convert.ToString(reader["Code"]) ?? string.Empty,
+						Convert.ToString(reader["Description"]) ?? string.Empty,
+						Convert.ToString(reader["Logic"]) ?? string.Empty,
+						Convert.ToInt32(reader["RowLevel"]));
+					rowByMonth[sortOrder] = [];
+					rowByYear[sortOrder] = [];
+					rowTotal[sortOrder] = 0;
+				}
+
+				if (monthKey is not null) rowByMonth[sortOrder][monthKey] = count;
+				else if (year > 0) rowByYear[sortOrder][year] = count;
+				else rowTotal[sortOrder] = count;
+			}
+
+			if (await reader.NextResultAsync(ct) && await reader.ReadAsync(ct))
+			{
+				kpi = new LisSummaryKpiCards(
+					Convert.ToInt32(reader["TotalSamples"]),
+					Convert.ToInt32(reader["BilledCount"]),
+					Convert.ToInt32(reader["UnbilledCount"]),
+					Convert.ToInt32(reader["SelfPayCount"]));
+			}
+		}
+
+		var monthList = months.ToList();
+		var years = monthList.Select(x => int.Parse(x[..4])).Distinct().OrderBy(x => x).ToList();
+		var rows = rowMeta
+			.Select(kv => new LisSummaryRow
+			{
+				Code = kv.Value.Code,
+				Description = kv.Value.Description,
+				Logic = kv.Value.Logic,
+				Level = kv.Value.Level,
+				ByMonth = rowByMonth[kv.Key],
+				ByYear = rowByYear[kv.Key],
+				Total = rowTotal[kv.Key]
+			})
+			.ToList();
+
+		return new LisSummaryResult(
+			labName,
+			string.Empty,
+			monthList,
+			years,
+			rows,
+			grandByMonth,
+			grandByYear,
+			grandTotal,
+			kpi,
+			null,
+			grandLabel);
+
+		static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 	}
 
 	public async Task<LisKeyMetricsBlock?> GetKeyMetricsAsync(
@@ -1426,6 +1573,13 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				: await ExecuteAggregateCommandAsync(conn, tx, keyMetricsInsert, [], ct);
 
 			var filterOptionRows = await InsertFilterOptionsAsync(conn, tx, filterOptionsTable, filterOptions, ct);
+
+			// SP-built LIS Summary (see TryLoadSpSummaryAsync), for labs that deploy it.
+			var spRefresh = $"usp_Refresh{prefix.TrimEnd('_')}_LISSummary";
+			await ExecuteAggregateCommandAsync(conn, tx, $"""
+                IF OBJECT_ID(N'dbo.{spRefresh}', N'P') IS NOT NULL
+                    EXEC dbo.{Q(spRefresh)};
+                """, [], ct);
 
 			await ExecuteAggregateCommandAsync(conn, tx, $"""
                 INSERT INTO {refreshLogTable}

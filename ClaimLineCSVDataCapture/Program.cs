@@ -1097,6 +1097,29 @@ foreach (var lab in labConfigs)
             }
 
             collSummaryResults = RunCollectionSummary(log, db, "AnP CS", db.RefreshAnalyzePathologyCollectionReports);
+
+            log.Info($"  [AnP Denial] Running Analyze Pathology Denial Summary SPs…");
+            try
+            {
+                var denialResults = db.RefreshAnalyzePathologyDenialReports();
+                foreach (var (spName, elapsedMs, error) in denialResults)
+                {
+                    if (error is null)
+                        log.Info($"  [AnP Denial] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [AnP Denial] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+
+                var failed = denialResults.Count(r => r.Error is not null);
+                var passed = denialResults.Count(r => r.Error is null);
+                log.Info($"  [AnP Denial] {passed}/{denialResults.Count} SP(s) succeeded.");
+                if (failed > 0)
+                    log.Warn($"  [AnP Denial] {failed} SP(s) failed — see errors above.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [AnP Denial] Unexpected error running Analyze Pathology Denial Summary SPs: {ex.Message}");
+            }
         }
 
         // ── PCRLabsofAmerica production report aggregates ─────────────────────

@@ -2397,6 +2397,8 @@ public class DashboardController : Controller
                 CptBreakdownGrandByMonth       = cptResult.GrandTotalByMonth,
                 CptBreakdownGrandTotalUnits    = cptResult.GrandTotalUnits,
                 CptBreakdownGrandTotalCharges  = cptResult.GrandTotalCharges,
+                CptBreakdownGrandTotalClaims   = cptResult.GrandTotalClaims,
+                CptTotalsOnly                  = cptResult.TotalsOnly,
                 CptUnitsLabel                  = isAugustusLab
                     || selectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
                     ? "Count of CPT"
@@ -2932,6 +2934,8 @@ public class DashboardController : Controller
                     vm.CptBreakdownGrandByMonth = cptResult.GrandTotalByMonth;
                     vm.CptBreakdownGrandTotalUnits = cptResult.GrandTotalUnits;
                     vm.CptBreakdownGrandTotalCharges = cptResult.GrandTotalCharges;
+                    vm.CptBreakdownGrandTotalClaims = cptResult.GrandTotalClaims;
+                    vm.CptTotalsOnly = cptResult.TotalsOnly;
                     break;
                 }
                 case "panel-breakdown-pane":
@@ -3368,6 +3372,8 @@ public class DashboardController : Controller
                 CptBreakdownGrandByMonth        = cptResult.GrandTotalByMonth,
                 CptBreakdownGrandTotalUnits     = cptResult.GrandTotalUnits,
                 CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
+                CptBreakdownGrandTotalClaims    = cptResult.GrandTotalClaims,
+                CptTotalsOnly                   = cptResult.TotalsOnly,
                 CptUnitsLabel                   = isAugustusLab
                     || selectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
                     ? "Count of CPT"

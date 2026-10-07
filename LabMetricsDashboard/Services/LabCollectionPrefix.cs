@@ -117,6 +117,21 @@ public static class LabCollectionPrefix
         GetPrefix(labName) is "IHD";
 
     /// <summary>
+    /// Labs whose Collection Summary calculations, rankings, totals and row order all come
+    /// from <c>usp_Get{prefix}_CS_*</c> (snapshot when unfiltered, live when filtered). The page
+    /// and Excel never read the <c>{prefix}_CS_*</c> tables directly and keep the SP row order.
+    /// </summary>
+    public static bool UsesSpCollectionLogic(string? labName) =>
+        GetPrefix(labName) is "AnP";
+
+    /// <summary>
+    /// Labs with the Denial Summary page: <c>usp_Get{prefix}_Denial*</c> read SPs over the
+    /// <c>{prefix}_Denial*</c> aggregate tables refreshed at claim-file ingest.
+    /// </summary>
+    public static bool HasDenialSummary(string? labName) =>
+        GetPrefix(labName) is "AnP";
+
+    /// <summary>
     /// Labs whose Clinic Panel Status, Clinic $ Analysis and Count by DOS Month pivots only
     /// include claims with <c>BilledUnbilled = 'Billed'</c>.
     /// </summary>

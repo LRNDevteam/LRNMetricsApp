@@ -257,7 +257,9 @@ public sealed class ExecutiveSummaryExcelBuilder
                         colIdx++;
                     }
                     decimal ytVal;
-                    if (row.Category == "Avg" && row.ValuesByYearMonth.TryGetValue((year, 0), out var ytSentinel))
+                    if (row.HasSpTotals)
+                        ytVal = row.YearTotal(year);
+                    else if (row.Category == "Avg" && row.ValuesByYearMonth.TryGetValue((year, 0), out var ytSentinel))
                         ytVal = ytSentinel;
                     else
                         ytVal = row.ValuesByYearMonth
@@ -272,7 +274,7 @@ public sealed class ExecutiveSummaryExcelBuilder
 
                 bool hasMonthlyBuckets = row.ValuesByYearMonth.Keys.Any(k => k.Year != 0 && k.Month != 0);
                 decimal grandVal;
-                if (row.Category == "Avg" || !hasMonthlyBuckets)
+                if (row.HasSpTotals || row.Category == "Avg" || !hasMonthlyBuckets)
                     row.ValuesByYearMonth.TryGetValue((0, 0), out grandVal);
                 else
                     grandVal = row.ValuesByYearMonth
@@ -437,6 +439,8 @@ public sealed class ExecutiveSummaryExcelBuilder
     private static List<ExecSummaryRow> FilterRowsWithValues(List<ExecSummaryRow> rows, string? cpParentCode)
     {
         if (rows.Count == 0) return rows;
+        // SP-ordered rows: the SP decides which rows are listed, same as the page.
+        if (rows.All(r => r.HasSpTotals)) return rows;
 
         var keep = new bool[rows.Count];
         var levels = new int[rows.Count];

@@ -989,6 +989,18 @@ public sealed class ClaimLineDbService
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshAnalyzePathologyCollectionReports()
         => RunProductionReportSPs(BuildCollectionSummarySpList("AnP"));
 
+    /// <summary>
+    /// Refreshes the Analyze Pathology Denial Summary aggregates (Monthly / Weekly Denial
+    /// Analysis, Denial List, Denial List - Plan Type) from dbo.ClaimLevelData.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshAnalyzePathologyDenialReports()
+        => RunProductionReportSPs([
+            "dbo.usp_RefreshAnP_DenialMonthly",
+            "dbo.usp_RefreshAnP_DenialWeekly",
+            "dbo.usp_RefreshAnP_DenialList",
+            "dbo.usp_RefreshAnP_DenialPlanType",
+        ]);
+
     /// <summary>Refreshes the NorthWest Collection Summary aggregates.</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshNorthWestCollectionReports()
         => RunProductionReportSPs([

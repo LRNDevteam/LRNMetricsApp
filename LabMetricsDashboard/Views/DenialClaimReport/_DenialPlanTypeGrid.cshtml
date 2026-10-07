@@ -1,0 +1,48 @@
+@model IReadOnlyList<LabMetricsDashboard.Models.DenialPlanTypeRow>
+@* Denial List - Plan Type - rows, order and totals come from dbo.usp_Get{prefix}_DenialPlanType. *@
+@if (Model.Count == 0)
+{
+    <div class="text-center text-muted py-4">No plan type rows were found for the selected lab.</div>
+}
+else
+{
+    <div class="pr-wrap" style="max-width:760px">
+        <div class="pr-scroll dcr-pr-scroll">
+            <table class="pr-table" style="width:100%">
+                <colgroup><col style="width:360px" /><col style="width:150px" /><col style="width:200px" /></colgroup>
+                <thead>
+                    <tr>
+                        <th>Payer Type</th>
+                        <th>No. of Claims</th>
+                        <th class="pr-grand-total">Total Insurance Balance</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in Model.Where(r => r.RowType != "T"))
+                    {
+                        <tr class="pr-panel-row">
+                            <td>@r.PayerType</td>
+                            <td>@r.ClaimCount.N0OrDash()</td>
+                            <td class="pr-grand-total">@Acct2(r.TotalInsuranceBalance)</td>
+                        </tr>
+                    }
+                </tbody>
+                @if (Model.FirstOrDefault(r => r.RowType == "T") is { } total)
+                {
+                    <tfoot>
+                        <tr class="pr-total-row">
+                            <td>Grand Total</td>
+                            <td>@total.ClaimCount.N0OrDash()</td>
+                            <td>@Acct2(total.TotalInsuranceBalance)</td>
+                        </tr>
+                    </tfoot>
+                }
+            </table>
+        </div>
+    </div>
+}
+<div class="dcr-pr-note">
+    <strong>Source:</strong> Claim Level &nbsp;|&nbsp; <strong>Filter:</strong> Total Insurance Balance &gt; 0 and Denial Code is not blank
+    &nbsp;|&nbsp; <strong>Rows:</strong> Payer Type
+    &nbsp;|&nbsp; <strong>Sorted by:</strong> Total Insurance Balance DESC
+</div>

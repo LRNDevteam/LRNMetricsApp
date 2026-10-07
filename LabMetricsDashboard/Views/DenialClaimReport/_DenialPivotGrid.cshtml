@@ -1,0 +1,130 @@
+@model LabMetricsDashboard.ViewModels.BreakdownPivotViewModel
+@using System.Globalization
+@using LabMetricsDashboard.ViewModels
+@*
+    Monthly / Weekly Summary in the Production Summary grid: navy header bands, lettered insurance
+    rows that open to their top denials, amber year-subtotal and Grand Total columns, navy total
+    row. Same BreakdownPivotViewModel as the shared _BreakdownPivotTable, so the numbers (and the
+    Excel built from the same model) are unchanged - only the presentation differs.
+*@
+@{
+    var gridId = "dcrpr_" + Guid.NewGuid().ToString("N")[..10];
+    var monthly = Model.Periods.Any(p => p.IsYearTotal);
+    var dateBasis = ViewData["DenialDateColumn"] as string is { Length: > 0 } dc ? dc : "Denial Date";
+    var yearGroups = Model.ColumnGroups
+        .Where(g => !string.Equals(g.Label, Model.GrandTotalTitle, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    string PeriodClass(BreakdownPivotPeriod p) => p.IsYearTotal ? "pr-year-total" : "pr-month-data";
+    string PeriodLabel(BreakdownPivotPeriod p) =>
+        p.IsYearTotal ? $"{p.Year.ToString(CultureInfo.InvariantCulture)} Total" : p.Label;
+}
+
+@if (!Model.HasData)
+{
+    <div class="text-center text-muted py-4">No denial rows were found for the selected lab.</div>
+    return;
+}
+
+<div class="dcr-pr-caption">
+    Top @Model.TopPayerCount.ToString("N0") insurances by claim count, each with its top denials
+    &middot; covering @Model.CoveragePercentage.ToString("0", CultureInfo.InvariantCulture)% of the AR
+    &middot; click an insurance to open its denials
+</div>
+
+<div class="pr-wrap">
+    <div class="pr-scroll dcr-pr-scroll">
+        <table class="pr-table" id="@gridId" style="width:100%; min-width:@(360 + Model.Periods.Count * 150 + 170)px;">
+            <colgroup>
+                <col style="width:360px" />
+                @foreach (var p in Model.Periods)
+                {
+                    <col style="width:@(p.IsYearTotal ? 62 : 56)px" />
+                    <col style="width:@(p.IsYearTotal ? 100 : 94)px" />
+                }
+                <col style="width:66px" />
+                <col style="width:108px" />
+            </colgroup>
+            <thead>
+                <tr>
+                    <th rowspan="3">Insurance &amp; Top Denials</th>
+                    @if (monthly)
+                    {
+                        foreach (var g in yearGroups)
+                        {
+                            <th colspan="@g.ColumnSpan">Data based on @dateBasis &mdash; @g.Label</th>
+                        }
+                    }
+                    else
+                    {
+                        <th colspan="@(Model.Periods.Count * 2)">Data based on Last @Model.Periods.Count Week [@dateBasis]</th>
+                    }
+                    <th colspan="2" rowspan="2" class="pr-grand-total">@Model.GrandTotalTitle</th>
+                </tr>
+                <tr>
+                    @foreach (var p in Model.Periods)
+                    {
+                        <th colspan="2" class="@(p.IsYearTotal ? "pr-year-total" : "")">@PeriodLabel(p)</th>
+                    }
+                </tr>
+                <tr>
+                    @foreach (var p in Model.Periods)
+                    {
+                        <th class="@PeriodClass(p)">No. of Claims</th>
+                        <th class="@PeriodClass(p)">Insurance Balance</th>
+                    }
+                    <th class="pr-grand-total">No. of Claims</th>
+                    <th class="pr-grand-total">Insurance Balance</th>
+                </tr>
+            </thead>
+            <tbody>
+                @{ var groupNo = 0; string? groupId = null; }
+                @foreach (var row in Model.Rows)
+                {
+                    if (row.IsInsuranceRow)
+                    {
+                        groupId = $"{gridId}-{groupNo++}";
+                        <tr class="pr-panel-row pr-hp-toggle" data-hp-group="@groupId" role="button" aria-expanded="false" title="Open / close denials">
+                            <td title="@row.Label"><span class="dcr-lbl"><i class="bi bi-chevron-right pr-hp-chevron" aria-hidden="true"></i><span class="dcr-lbl-idx">@row.IndexLabel</span><span class="dcr-lbl-txt">@row.Label</span></span></td>
+                            @for (var ci = 0; ci < row.Cells.Count && ci < Model.Periods.Count; ci++)
+                            {
+                                var cls = PeriodClass(Model.Periods[ci]);
+                                <td class="@cls">@row.Cells[ci].ClaimCount.N0OrDash()</td>
+                                <td class="@cls">@Acct2(row.Cells[ci].DenialBalance)</td>
+                            }
+                            <td class="pr-grand-total">@row.TotalClaimCount.N0OrDash()</td>
+                            <td class="pr-grand-total">@Acct2(row.TotalBalance)</td>
+                        </tr>
+                    }
+                    else
+                    {
+                        <tr class="pr-payer-row pr-hp-child" data-hp-parent="@groupId">
+                            <td title="@row.Label"><span class="dcr-lbl"><span class="dcr-lbl-idx">@row.IndexLabel</span><span class="dcr-lbl-txt">@row.Label</span></span></td>
+                            @for (var ci = 0; ci < row.Cells.Count && ci < Model.Periods.Count; ci++)
+                            {
+                                var cls = PeriodClass(Model.Periods[ci]);
+                                <td class="@cls">@row.Cells[ci].ClaimCount.N0OrDash()</td>
+                                <td class="@cls">@Acct2(row.Cells[ci].DenialBalance)</td>
+                            }
+                            <td class="pr-grand-total">@row.TotalClaimCount.N0OrDash()</td>
+                            <td class="pr-grand-total">@Acct2(row.TotalBalance)</td>
+                        </tr>
+                    }
+                }
+            </tbody>
+            <tfoot>
+                <tr class="pr-total-row">
+                    <td>Grand Total</td>
+                    @for (var ti = 0; ti < Model.TotalsByPeriod.Count && ti < Model.Periods.Count; ti++)
+                    {
+                        var cls = PeriodClass(Model.Periods[ti]);
+                        <td class="@cls">@Model.TotalsByPeriod[ti].ClaimCount.N0OrDash()</td>
+                        <td class="@cls">@Acct2(Model.TotalsByPeriod[ti].DenialBalance)</td>
+                    }
+                    <td class="pr-grand-total">@Model.GrandTotalClaimCount.N0OrDash()</td>
+                    <td class="pr-grand-total">@Acct2(Model.GrandTotalBalance)</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>

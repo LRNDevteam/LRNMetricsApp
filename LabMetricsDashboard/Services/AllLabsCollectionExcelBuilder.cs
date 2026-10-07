@@ -198,7 +198,8 @@ public sealed class AllLabsCollectionExcelBuilder
         string? aggregatePrefix = config.EnableCollectionSummaryReport && !hasFilters
             ? LabCollectionPrefix.GetPrefix(labName)
             : null;
-        bool useAggregates = aggregatePrefix is not null;
+        bool useAggregates = aggregatePrefix is not null
+            && !LabCollectionPrefix.UsesSpCollectionLogic(labName);
 
         // Fetch report tabs in parallel
         var monthlyTask     = useAggregates

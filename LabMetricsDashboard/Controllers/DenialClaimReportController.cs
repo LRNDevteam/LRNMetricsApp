@@ -69,6 +69,7 @@ public sealed class DenialClaimReportController : Controller
     private readonly LabSettings _labSettings;
     private readonly LabConfigOptions _labConfig;
     private readonly IDenialClaimReportRepository _repo;
+    private readonly IDenialSummaryRepository _denialLists;
     private readonly IConfiguration _configuration;
     private readonly ILogger<DenialClaimReportController> _logger;
 
@@ -76,12 +77,14 @@ public sealed class DenialClaimReportController : Controller
         LabSettings labSettings,
         LabConfigOptions labConfig,
         IDenialClaimReportRepository repo,
+        IDenialSummaryRepository denialLists,
         IConfiguration configuration,
         ILogger<DenialClaimReportController> logger)
     {
         _labSettings = labSettings;
         _labConfig = labConfig;
         _repo = repo;
+        _denialLists = denialLists;
         _configuration = configuration;
         _logger = logger;
     }
@@ -190,6 +193,7 @@ public sealed class DenialClaimReportController : Controller
     public async Task<IActionResult> Index(string? lab, string? tab, string? bucket,
                                            string? denialCode, string? payerName,
                                            int claimPage, int claimPageSize,
+                                           string? listCode,
                                            CancellationToken ct)
     {
         ViewData["PageLabel"] = "Denial Summary";
@@ -261,6 +265,39 @@ public sealed class DenialClaimReportController : Controller
         {
             _logger.LogError(ex, "Denial Claim Report summary failed for lab {Lab}.", labName);
             model.Error = "The denial summary could not be loaded for this lab.";
+        }
+
+        if (LabCollectionPrefix.HasDenialSummary(labName))
+        {
+            model.HasDenialLists = true;
+            model.DenialListSearch = string.IsNullOrWhiteSpace(listCode) ? null : listCode.Trim();
+            try
+            {
+                var prefix = LabCollectionPrefix.GetPrefix(labName);
+                var noFilters = new DenialSummaryFilters();
+                var allListTask = _denialLists.GetDenialListAsync(connectionString, prefix, noFilters, ct);
+                var searchTask = model.DenialListSearch is null
+                    ? allListTask
+                    : _denialLists.GetDenialListAsync(connectionString, prefix,
+                        new DenialSummaryFilters { DenialCodeSearch = model.DenialListSearch }, ct);
+                var planTask = _denialLists.GetPlanTypeAsync(connectionString, prefix, noFilters, ct);
+                await Task.WhenAll(allListTask, searchTask, planTask);
+                model.DenialList = searchTask.Result;
+                model.DenialListCodeOptions = allListTask.Result
+                    .Where(r => r.RowType == "D")
+                    .Select(r => r.DenialCode)
+                    .ToList();
+                model.PlanType = planTask.Result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Denial List / Plan Type failed for lab {Lab}.", labName);
+                model.Error ??= "The Denial List and Plan Type tabs could not be loaded for this lab.";
+            }
+        }
+        else if (model.ActiveTab is "list" or "plantype")
+        {
+            model.ActiveTab = "monthly";
         }
 
         try
@@ -448,6 +485,8 @@ public sealed class DenialClaimReportController : Controller
     private static string NormalizeTab(string? tab) => tab?.Trim().ToLowerInvariant() switch
     {
         "weekly" => "weekly",
+        "list" => "list",
+        "plantype" => "plantype",
         "insight" => "insight",
         "claims" => "claims",
         _ => "monthly"

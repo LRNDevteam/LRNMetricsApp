@@ -102,6 +102,19 @@
         </div>
     </div>
 
+    @if (Model.UsesSpCollectionLogic)
+    {
+    <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+        <strong>Source:</strong> Claim Level Data &bull;
+        <strong>Filter:</strong> ClaimStatus IN (Fully Paid, Partially Paid) &bull;
+        <strong>Rows:</strong> Panel name &rarr; Top 3 payers by Claim Count &bull;
+        <strong>Columns:</strong> Last 4 completed weeks, Monday&ndash;Sunday (Posted Date = CheckDate) &bull;
+        <strong>Values:</strong> Count of unique ClaimID, Sum of InsurancePayment &bull;
+        <strong>Sorted by:</strong> Claim Count DESC
+    </div>
+    }
+    else
+    {
     <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
         <strong>Source:</strong> @(Model.UsesLineEncounters ? "Line Level Data (encounters) + Claim Level Data (payments)" : "Claim Level Data") &bull;
         <strong>Filter:</strong> InsurancePayment &gt; 0, ClaimStatus IN (Fully Paid, Partially Paid, Paid-Client) &bull;
@@ -110,6 +123,7 @@
         <strong>Columns:</strong> Last 4 Weeks (PostingDate) — No. of Claims + Insurance Paid Amount &bull;
         <strong>Sorted by:</strong> Grand Total @(Model.UsesLineEncounters ? "Encounters" : "Paid Claims") DESC
     </div>
+    }
 }
 else
 {

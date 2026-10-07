@@ -560,6 +560,10 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
 #panelavg-pane .cs-rpt-table { width: auto; }
 #panelavg-pane .cs-rpt-table thead th:nth-child(n+3) { white-space: nowrap; padding: .4rem .4rem; font-size: .62rem; width: 100px; min-width: 100px; max-width: 100px; }
 #panelavg-pane .cs-rpt-table td:nth-child(n+3) { white-space: nowrap; padding: .4rem .4rem; width: 100px; min-width: 100px; max-width: 100px; }
+#panelavg-pane .cs-rpt-table.pa-sp thead tr:first-child th:nth-child(1) { min-width: 300px; }
+#panelavg-pane .cs-rpt-table.pa-sp thead tr:first-child th:nth-child(n+2) { position: static; min-width: 0; width: auto; max-width: none; border-right: 0; }
+#panelavg-pane .cs-rpt-table.pa-sp thead tr:nth-child(2) th { white-space: normal; line-height: 1.2; width: 110px; min-width: 110px; max-width: 110px; }
+#panelavg-pane .cs-rpt-table.pa-sp td:nth-child(n+3) { width: 110px; min-width: 110px; max-width: 110px; }
 
 /* Avg Payments (6-month + last 3 months) — Monthly Claim Volume navy/teal + green panels */
 #avgpay-pane .cs-pr-table,
@@ -994,14 +998,15 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 var reimbTotalPaid = reimbTotal.Sum(r => r.SumInsurancePayment);
                 var reimbTotalVisits = reimbTotal.Sum(r => r.UniqueVisitCount);
                 var reimbTotalCharge = reimbTotal.Sum(r => r.SumChargeAmount);
-                var reimbAvgPct = reimbTotalCharge == 0
-                    ? 0m
-                    : Math.Round(reimbTotalPaid / reimbTotalCharge * 100m, 2);
+                var reimbAvgPct = reimbTotal[0].TotalPaymentPctFromSp
+                    ?? (reimbTotalCharge == 0
+                        ? 0m
+                        : Math.Round(reimbTotalPaid / reimbTotalCharge * 100m, 2));
 
                 <div class="top5-card-hdr reimb-hdr">
                     <div>
                         <div class="top5-card-hdr-title">Reimbursement Rate</div>
-                        <div class="top5-card-hdr-sub">Top 5 payers by unique visit count</div>
+                        <div class="top5-card-hdr-sub">@(Model.UsesSpCollectionLogic ? "Top 5 payers by insurance payment" : "Top 5 payers by unique visit count")</div>
                     </div>
                     <span class="top5-card-badge reimb-badge">
                         <i class="bi bi-percent"></i> Reimbursement
@@ -1052,8 +1057,16 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 </div>
 
                 <div class="top5-card-footer">
-                    Ranked by <span class="top5-hl-blue">@(Model.IsAugustusLab ? "Count of ClaimID" : "InsurancePayment")</span> &bull;
-                    Formula: SUM(InsurancePayment) / SUM(ChargeAmount) &times; 100
+                    @if (Model.UsesSpCollectionLogic)
+                    {
+                        <span>Top 5 by <span class="top5-hl-blue">Insurance Payment</span>, sorted by Claim Count &bull;
+                        ClaimStatus: Fully Paid, Partially Paid &bull; Payment % = Average(PaymentPercent)</span>
+                    }
+                    else
+                    {
+                        <span>Ranked by <span class="top5-hl-blue">@(Model.IsAugustusLab ? "Count of ClaimID" : "InsurancePayment")</span> &bull;
+                        Formula: SUM(InsurancePayment) / SUM(ChargeAmount) &times; 100</span>
+                    }
                 </div>
             }
             else
@@ -1081,12 +1094,14 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 var payTotalAmt = payTotal.Sum(r => r.TotalPayments);
                 var payTotalVisits = payTotal.Sum(r => r.UniqueVisitCount);
                 var maxPay = payTotal.Max(r => r.TotalPayments);
-                var topPayerPct = maxPay == 0m ? 0m : Math.Round(payTotal[0].TotalPayments / payTotalAmt * 100m, 1);
+                // Analyze Pathology lists the top 5 by claim count, so the first row is not the top payer.
+                var topPayerAmt = Model.UsesSpCollectionLogic ? maxPay : payTotal[0].TotalPayments;
+                var topPayerPct = maxPay == 0m ? 0m : Math.Round(topPayerAmt / payTotalAmt * 100m, 1);
 
                 <div class="top5-card-hdr totpay-hdr">
                     <div>
                         <div class="top5-card-hdr-title">Total Payments</div>
-                        <div class="top5-card-hdr-sub">Top 5 payers by unique visit count</div>
+                        <div class="top5-card-hdr-sub">@(Model.UsesSpCollectionLogic ? "Top 5 payers by insurance payment" : "Top 5 payers by unique visit count")</div>
                     </div>
                     <span class="top5-card-badge totpay-badge">
                         <i class="bi bi-cash-stack"></i> Payments
@@ -1135,7 +1150,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 </div>
 
                 <div class="top5-card-footer">
-                    Ranked by <span class="top5-hl-green">unique visit count</span> &bull;
+                    @(Model.UsesSpCollectionLogic ? "Sorted by" : "Ranked by") <span class="top5-hl-green">@(Model.UsesSpCollectionLogic ? "claim count" : "unique visit count")</span> &bull;
                     Top payer accounts for <span class="top5-hl-green">@topPayerPct.ToString("F0")%</span> of total payments
                 </div>
             }
@@ -1206,6 +1221,16 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                         data-bs-target="#avgpay3-pane" type="button" role="tab"
                         aria-controls="avgpay3-pane" aria-selected="false">
                     <i class="bi bi-cash-coin"></i> Avg Payments Last 3 Months
+                </button>
+            </li>
+        }
+        @if (Model.UsesSpCollectionLogic)
+        {
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="panelavg-tab" data-bs-toggle="pill"
+                        data-bs-target="#panelavg-pane" type="button" role="tab"
+                        aria-controls="panelavg-pane" aria-selected="false">
+                    <i class="bi bi-bar-chart-steps"></i> Panel Average
                 </button>
             </li>
         }
@@ -1444,7 +1469,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
 
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> ClaimLevelData (all rows) &bull;
-                    <strong>Filter (base):</strong> InsurancePayment &gt; 0 &nbsp;·&nbsp; CheckDate not blank/invalid &bull;
+                    <strong>Filter (base):</strong> @(Model.UsesSpCollectionLogic ? "ClaimStatus IN (Fully Paid, Partially Paid)" : "InsurancePayment > 0") &nbsp;·&nbsp; CheckDate not blank/invalid &bull;
                     <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) – @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &nbsp;|&nbsp; DOS: @(string.IsNullOrWhiteSpace(Model.FilterDosFrom) ? "-" : Model.FilterDosFrom) – @(string.IsNullOrWhiteSpace(Model.FilterDosTo) ? "-" : Model.FilterDosTo) &nbsp;|&nbsp; CheckDate: @(string.IsNullOrWhiteSpace(Model.FilterCheckDateFrom) ? "-" : Model.FilterCheckDateFrom) – @(string.IsNullOrWhiteSpace(Model.FilterCheckDateTo) ? "-" : Model.FilterCheckDateTo) &bull;
                     <strong>Rows:</strong> PanelName &bull;
                     <strong>Drill-down:</strong> Top 3 PayerName_Raw by Unique ClaimID count &bull;
@@ -1472,7 +1497,11 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         {
         <!-- Weekly Claim Volume tab -->
         <div class="tab-pane fade" id="wcv-pane"           role="tabpanel" aria-labelledby="wcv-tab"           data-cs-tab="wcv">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabWcv",          Model) } else { <div class="cs-lazy-pane" data-lazy-tab="wcv"></div> }</div>
-        <!-- Average Payments tab (Panel Averages tab hidden from UI) -->
+        @if (Model.UsesSpCollectionLogic)
+        {
+            <div class="tab-pane fade" id="panelavg-pane" role="tabpanel" aria-labelledby="panelavg-tab" data-cs-tab="panelavg">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabPanelAvg", Model) } else { <div class="cs-lazy-pane" data-lazy-tab="panelavg"></div> }</div>
+        }
+        <!-- Average Payments tab -->
         <div class="tab-pane fade" id="avgpay-pane"        role="tabpanel" aria-labelledby="avgpay-tab"        data-cs-tab="avgpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabAvgPayments",  Model) } else { <div class="cs-lazy-pane" data-lazy-tab="avgpay"></div> }</div>
         @if (Model.ShowAvgPaymentsByDateBasis)
         {
