@@ -36,7 +36,9 @@ SELECT
     CAST(CASE WHEN LTRIM(RTRIM(ISNULL(c.BilledStatus, ''))) LIKE 'Unbilled%'
               THEN 0 ELSE 1 END AS BIT)                                     AS IsBilled,
     ISNULL(NULLIF(LTRIM(RTRIM(c.AgingDOS)), ''), 'Unknown')                 AS AgingDOS,
-    LTRIM(RTRIM(ISNULL(c.CPTCodeXUnitsXModifier, '')))                      AS CPTCodeXUnitsXModifier
+    LTRIM(RTRIM(ISNULL(c.CPTCodeXUnitsXModifier, '')))                      AS CPTCodeXUnitsXModifier,
+    CAST(CASE WHEN NULLIF(LTRIM(RTRIM(c.LastBilledDate)), '') IS NULL
+              THEN 0 ELSE 1 END AS BIT)                                     AS HasLastBilledDate
 FROM dbo.ClaimLevelData c;
 GO
 

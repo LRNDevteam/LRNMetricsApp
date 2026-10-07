@@ -104,8 +104,9 @@ GO
    Result contract (SqlLabProductionSummaryRepository, CptTotalsOnly labs):
      RowType      'D' = one row per CPT code, 'T' = Grand Total (last row)
      CPTCode      CPT code ('Grand Total' on the T row)
-     ClaimCount   COUNT(DISTINCT ClaimID); on the T row it is the distinct claim
-                  count across all CPT codes (pivot "Count of Unique Claim ID")
+     ClaimCount   COUNT(DISTINCT ClaimID) per CPT code; on the T row it is the SUM
+                  of the per-CPT counts (client validation 10/07/2026), so a claim
+                  billed with several CPT codes is counted once per code
      TotalCharges SUM(ChargeAmount)
      SortOrder    D rows by ClaimCount DESC, TotalCharges DESC, CPTCode; T last
    Always aggregates live (fast on line-level data); no snapshot table.
@@ -123,15 +124,20 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    ;WITH g AS
+    ;WITH d AS
     (
-        SELECT CASE WHEN GROUPING(CPTCode) = 1 THEN 'T' ELSE 'D' END AS RowType,
-               CAST(ISNULL(CPTCode, N'') AS NVARCHAR(200))           AS CPTCode,
+        SELECT CAST(CPTCode AS NVARCHAR(200))                        AS CPTCode,
                COUNT(DISTINCT ClaimID)                               AS ClaimCount,
                CAST(ISNULL(SUM(ChargeAmount), 0) AS DECIMAL(18,2))   AS TotalCharges
         FROM   dbo.fn_AnP_ProductionLines(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                                           @FirstBillFrom, @FirstBillTo, @FirstBilledFrom, @FirstBilledTo)
-        GROUP  BY GROUPING SETS ((CPTCode), ())
+        GROUP  BY CPTCode
+    ),
+    g AS
+    (
+        SELECT 'D' AS RowType, CPTCode, ClaimCount, TotalCharges FROM d
+        UNION ALL
+        SELECT 'T', N'', ISNULL(SUM(ClaimCount), 0), CAST(ISNULL(SUM(TotalCharges), 0) AS DECIMAL(18,2)) FROM d
     )
     SELECT RowType,
            CASE WHEN RowType = 'T' THEN N'Grand Total' ELSE CPTCode END AS CPTCode,

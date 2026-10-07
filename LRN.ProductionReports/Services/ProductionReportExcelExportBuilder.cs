@@ -1198,6 +1198,8 @@ public static partial class ProductionReportExcelExportBuilder
         foreach (var cptRow in vm.CptBreakdownRows)
         {
             WriteCell(ws, row, 1, cptRow.CptCode, XLColor.White, isText: true);
+            if (vm.CptTotalsOnly && IsPlainNumber(cptRow.CptCode, out var cptNumber))
+                ws.Cell(row, 1).Value = cptNumber;
             WriteCell(ws, row, 2, cptRow.GrandTotalClaims, XLColor.White);
             WriteCurrencyCell(ws, row, 3, cptRow.GrandTotalCharges, XLColor.White);
             row++;
@@ -1215,6 +1217,21 @@ public static partial class ProductionReportExcelExportBuilder
         ws.Cell(row, 3).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
 
         ExcelTheme.AutoFitColumns(ws, colCount);
+    }
+
+    /// <summary>
+    /// True for an all-digit code without a leading zero (e.g. 80307), so it can be
+    /// written as a number and Excel does not flag "number stored as text".
+    /// Codes such as 0001U or G0483 stay text.
+    /// </summary>
+    private static bool IsPlainNumber(string? code, out long number)
+    {
+        number = 0;
+        var s = code?.Trim();
+        return !string.IsNullOrEmpty(s)
+            && s[0] != '0'
+            && s.All(char.IsAsciiDigit)
+            && long.TryParse(s, out number);
     }
 
     private static void BuildCptBreakdownSheet(XLWorkbook wb, ProductionReportViewModel vm)

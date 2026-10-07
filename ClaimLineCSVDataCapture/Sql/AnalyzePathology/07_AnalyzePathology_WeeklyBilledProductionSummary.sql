@@ -5,6 +5,7 @@
    Client logic (sheet "Production Summary", report 2):
      Source  : Claim Level
      Filter  : Bill Status not in (Unbilled, Unbilled - Self Pay)
+               AND Last Billed Date not blank (client validation 10/07/2026)
      Rows    : Panel Name, then Top 3 Insurance by claim count within the panel
      Columns : First Billed Date in Monday-Sunday week ranges (same weeks as the
                file's Billed Week column) - the 4 weeks ending with the week of
@@ -67,6 +68,7 @@ BEGIN
         FROM   dbo.fn_AnP_ProductionClaims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                                            @FirstBillFrom, @FirstBillTo, @FirstBilledFrom, @FirstBilledTo)
         WHERE  IsBilled = 1
+          AND  HasLastBilledDate = 1
     );
 
     -- 1900-01-01 was a Monday.
@@ -90,6 +92,7 @@ BEGIN
                                            @FirstBillFrom, @FirstBillTo, @FirstBilledFrom, @FirstBilledTo) c
         JOIN   Weeks w ON c.FirstBilledDate BETWEEN w.WeekStart AND w.WeekEnd
         WHERE  c.IsBilled = 1
+          AND  c.HasLastBilledDate = 1
     ),
     PayerRanks AS
     (

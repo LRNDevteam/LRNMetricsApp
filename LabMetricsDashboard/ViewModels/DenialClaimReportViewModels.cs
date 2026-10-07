@@ -14,11 +14,25 @@ public sealed class DenialClaimReportViewModel
     public string CurrentLab { get; set; } = string.Empty;
     public string? Error { get; set; }
 
-    /// <summary>"monthly", "weekly", "insight" or "claims" - which tab opens.</summary>
+    /// <summary>"monthly", "weekly", "list", "plantype", "insight" or "claims" - which tab opens.</summary>
     public string ActiveTab { get; set; } = "monthly";
 
     public BreakdownPivotViewModel Monthly { get; set; } = new();
     public BreakdownPivotViewModel Weekly { get; set; } = new();
+
+    /// <summary>
+    /// True for labs whose database carries the Denial aggregate SPs (usp_Get{prefix}_DenialList /
+    /// _DenialPlanType); only those labs show the Denial List and Plan Type tabs.
+    /// </summary>
+    public bool HasDenialLists { get; set; }
+    public IReadOnlyList<LabMetricsDashboard.Models.DenialListRow> DenialList { get; set; } = [];
+    public IReadOnlyList<LabMetricsDashboard.Models.DenialPlanTypeRow> PlanType { get; set; } = [];
+
+    /// <summary>Denial List tab search (whole denial codes, see usp_GetAnP_DenialList); null when not searching.</summary>
+    public string? DenialListSearch { get; set; }
+
+    /// <summary>Every denial code on the unfiltered Denial List, in SP order - the search box suggestions.</summary>
+    public IReadOnlyList<string> DenialListCodeOptions { get; set; } = [];
 
     public DenialInsightPanelViewModel Insight { get; set; } = new();
     public DenialClaimLevelTabViewModel Claims { get; set; } = new();

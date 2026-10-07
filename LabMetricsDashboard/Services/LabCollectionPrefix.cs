@@ -125,6 +125,13 @@ public static class LabCollectionPrefix
         GetPrefix(labName) is "AnP";
 
     /// <summary>
+    /// Labs with the Denial Summary page: <c>usp_Get{prefix}_Denial*</c> read SPs over the
+    /// <c>{prefix}_Denial*</c> aggregate tables refreshed at claim-file ingest.
+    /// </summary>
+    public static bool HasDenialSummary(string? labName) =>
+        GetPrefix(labName) is "AnP";
+
+    /// <summary>
     /// Labs whose Clinic Panel Status, Clinic $ Analysis and Count by DOS Month pivots only
     /// include claims with <c>BilledUnbilled = 'Billed'</c>.
     /// </summary>

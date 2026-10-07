@@ -115,6 +115,15 @@
             </a>
         </li>
 
+        @if (LabMetricsDashboard.Services.LabCollectionPrefix.HasDenialSummary(activeLab))
+        {
+            <li>
+                <a class="dropdown-item" asp-controller="DenialClaimReport" asp-action="Index" data-lab-link="Denial Summary">
+                    <i class="bi bi-clipboard2-x"></i> Denial Summary
+                </a>
+            </li>
+        }
+
         <li><hr class="dropdown-divider" /></li>
         <li>
             <a class="dropdown-item" asp-controller="Dashboard" asp-action="ClaimLevel">

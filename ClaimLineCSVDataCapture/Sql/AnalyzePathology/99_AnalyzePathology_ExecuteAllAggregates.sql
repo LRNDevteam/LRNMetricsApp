@@ -13,6 +13,7 @@
      24  MappingFixes
      26  LIS Summary (SP-built rows / totals)
      27  Executive Summary client logic (replaces 16 / 17b / 19 procedures)
+     30  Denial Summary (Monthly / Weekly Denial Analysis, Denial List, Plan Type)
      99  this script
 
    Scripts 12-24 are generated from Sql/VariantX by Generate-FromVariantX.ps1.
@@ -55,7 +56,12 @@ INSERT INTO @Procs (ProcName) VALUES
     (N'usp_RefreshAnP_ExecutiveSummary'),
     (N'usp_RefreshAnP_ExecutiveSummary_LIS_Alt'),
     -- LIS Summary (26)
-    (N'usp_RefreshAnP_LISSummary');
+    (N'usp_RefreshAnP_LISSummary'),
+    -- Denial Summary (30)
+    (N'usp_RefreshAnP_DenialMonthly'),
+    (N'usp_RefreshAnP_DenialWeekly'),
+    (N'usp_RefreshAnP_DenialList'),
+    (N'usp_RefreshAnP_DenialPlanType');
 
 DECLARE @i INT = 1, @n INT = (SELECT COUNT(*) FROM @Procs), @p SYSNAME, @sql NVARCHAR(400);
 WHILE @i <= @n
@@ -97,7 +103,12 @@ FROM (VALUES
     (N'usp_GetAnP_ExecutiveSummary_FilterOptions'),
     (N'usp_GetAnP_ExecutiveSummary_Detail'),
     (N'usp_GetExecutiveSummaryDetail_PMSCash'),
-    (N'usp_GetExecutiveSummaryDetail_LIS')
+    (N'usp_GetExecutiveSummaryDetail_LIS'),
+    (N'usp_GetAnP_DenialMonthly'),
+    (N'usp_GetAnP_DenialWeekly'),
+    (N'usp_GetAnP_DenialList'),
+    (N'usp_GetAnP_DenialPlanType'),
+    (N'usp_GetAnP_DenialFilterOptions')
 ) v(ProcName);
 
 SELECT t.name AS TableName, SUM(p.rows) AS ApproxRows

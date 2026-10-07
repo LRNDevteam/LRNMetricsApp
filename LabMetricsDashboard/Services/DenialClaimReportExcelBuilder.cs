@@ -86,6 +86,16 @@ public static class DenialClaimReportExcelBuilder
 
         model.Insight.Rows = await repo.GetInsightsAsync(connectionString, model.Insight.Bucket, ct);
 
+        // Same SPs the page's Denial List / Plan Type tabs read.
+        if (LabCollectionPrefix.HasDenialSummary(labName))
+        {
+            var lists = new SqlDenialSummaryRepository();
+            var prefix = LabCollectionPrefix.GetPrefix(labName);
+            model.HasDenialLists = true;
+            model.DenialList = await lists.GetDenialListAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
+            model.PlanType = await lists.GetPlanTypeAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
+        }
+
         return model;
     }
 
@@ -95,9 +105,106 @@ public static class DenialClaimReportExcelBuilder
 
         WritePivot(workbook.Worksheets.Add("Monthly Summary"), model.Monthly, "Monthly Summary", model.CurrentLab);
         WritePivot(workbook.Worksheets.Add("Weekly Summary"), model.Weekly, "Weekly Summary", model.CurrentLab);
+        if (model.HasDenialLists)
+        {
+            WriteDenialList(workbook.Worksheets.Add("Denial List"), model.DenialList, model.CurrentLab);
+            WritePlanType(workbook.Worksheets.Add("Denial List - Plan Type"), model.PlanType, model.CurrentLab);
+        }
         WriteInsight(workbook.Worksheets.Add("Denial Insight"), model.Insight, model.CurrentLab);
 
         return workbook;
+    }
+
+    // ── Denial List / Plan Type ───────────────────────────────────────────────
+
+    private static void WriteDenialList(IXLWorksheet ws, IReadOnlyList<DenialListRow> rows, string lab)
+    {
+        var data = rows.Where(r => r.RowType != "T")
+            .Select(r => (Label: r.RowType == "D" ? r.DenialCode : r.PayerName, IsParent: r.RowType == "D", r.ClaimCount, r.TotalInsuranceBalance))
+            .ToList();
+        var total = rows.FirstOrDefault(r => r.RowType == "T");
+        WriteSimpleList(ws, $"{lab} — Denial List", "Total Insurance Balance > 0 and Denial Code not blank | Denial Code, drill down to Insurance | Sorted by Total Insurance Balance DESC",
+            "Denial Code / Insurance", data, total?.ClaimCount ?? 0, total?.TotalInsuranceBalance ?? 0m);
+    }
+
+    private static void WritePlanType(IXLWorksheet ws, IReadOnlyList<DenialPlanTypeRow> rows, string lab)
+    {
+        var data = rows.Where(r => r.RowType != "T")
+            .Select(r => (Label: r.PayerType, IsParent: true, r.ClaimCount, r.TotalInsuranceBalance))
+            .ToList();
+        var total = rows.FirstOrDefault(r => r.RowType == "T");
+        WriteSimpleList(ws, $"{lab} — Denial List - Plan Type", "Total Insurance Balance > 0 and Denial Code not blank | Sorted by Total Insurance Balance DESC",
+            "Payer Type", data, total?.ClaimCount ?? 0, total?.TotalInsuranceBalance ?? 0m);
+    }
+
+    private static void WriteSimpleList(
+        IXLWorksheet ws, string title, string caption, string labelHeader,
+        IReadOnlyList<(string Label, bool IsParent, int ClaimCount, decimal TotalInsuranceBalance)> data,
+        int totalClaims, decimal totalBalance)
+    {
+        ws.Cell(1, 1).Value = title;
+        ws.Cell(1, 1).Style.Font.SetBold().Font.SetFontSize(13).Font.SetFontColor(Ink);
+        ws.Cell(2, 1).Value = caption;
+        ws.Cell(2, 1).Style.Font.SetFontSize(9).Font.SetFontColor(XLColor.FromHtml("#6B7A8C"));
+
+        if (data.Count == 0)
+        {
+            ws.Cell(4, 1).Value = "No denial data for this lab.";
+            ws.Cell(4, 1).Style.Font.SetItalic().Font.SetFontColor(XLColor.FromHtml("#6B7A8C"));
+            ws.Column(1).Width = 60;
+            return;
+        }
+
+        const int headerRow = 4;
+        ws.Cell(headerRow, 1).Value = labelHeader;
+        ws.Cell(headerRow, 2).Value = "No. of Claims";
+        ws.Cell(headerRow, 3).Value = "Total Insurance Balance";
+        var header = ws.Range(headerRow, 1, headerRow, 3);
+        header.Style.Font.Bold = true;
+        header.Style.Font.FontColor = XLColor.White;
+        header.Style.Fill.BackgroundColor = PivotHeader;
+        header.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        ws.Cell(headerRow, 3).Style.Fill.BackgroundColor = PivotGrandTotal;
+
+        var row = headerRow + 1;
+        foreach (var d in data)
+        {
+            ws.Cell(row, 1).Value = d.Label;
+            ws.Cell(row, 2).Value = d.ClaimCount;
+            ws.Cell(row, 3).Value = d.TotalInsuranceBalance;
+            if (d.IsParent)
+            {
+                ws.Range(row, 1, row, 3).Style.Font.SetBold().Fill.SetBackgroundColor(PivotInsuranceRow);
+            }
+            else
+            {
+                ws.Cell(row, 1).Style.Alignment.SetIndent(2);
+                ws.Row(row).OutlineLevel = 1;
+            }
+            row++;
+        }
+
+        ws.Cell(row, 1).Value = "Grand Total";
+        ws.Cell(row, 2).Value = totalClaims;
+        ws.Cell(row, 3).Value = totalBalance;
+        var footer = ws.Range(row, 1, row, 3);
+        footer.Style.Font.Bold = true;
+        footer.Style.Font.FontColor = XLColor.White;
+        footer.Style.Fill.BackgroundColor = PivotFooter;
+
+        ws.Range(headerRow + 1, 2, row, 2).Style.NumberFormat.SetFormat(Whole);
+        ws.Range(headerRow + 1, 3, row, 3).Style.NumberFormat.SetFormat(Money);
+
+        var body = ws.Range(headerRow, 1, row, 3);
+        body.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        body.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        body.Style.Border.OutsideBorderColor = Rule;
+        body.Style.Border.InsideBorderColor = Rule;
+
+        ws.Column(1).Width = 52;
+        ws.Column(2).Width = 15;
+        ws.Column(3).Width = 24;
+        ws.SheetView.Freeze(headerRow, 1);
     }
 
     /// <summary>
