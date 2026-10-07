@@ -5,9 +5,14 @@
                 var grandInsPayments = Model.InsurancePaymentPct.Sum(r => r.InsurancePayments);
                 var grandPaidIns = Model.InsurancePaymentPct.Sum(r => r.PaidInsurancePayment);
                 var grandPaidChg = Model.InsurancePaymentPct.Sum(r => r.PaidChargeAmount);
-                var isInHealthPct = Model.IsInHealthDtrLab;
+                var isSpLogicPct = Model.UsesSpCollectionLogic;
+                var isInHealthPct = Model.IsInHealthDtrLab || isSpLogicPct;
                 var grandPaymentPct = grandPaidChg == 0 ? 0m : Math.Round(grandPaidIns / grandPaidChg * 100m, 2);
-                if (isInHealthPct && grandPaidChg == 0 && grandTotalClaims > 0)
+                if (Model.InsurancePaymentPct[0].TotalPaymentPctFromSp is { } spGrandPct)
+                {
+                    grandPaymentPct = spGrandPct;
+                }
+                else if (isInHealthPct && grandPaidChg == 0 && grandTotalClaims > 0)
                 {
                     // Average of PaymentPercent over every claim = claim-weighted payer averages.
                     grandPaymentPct = Math.Round(Model.InsurancePaymentPct.Sum(r => r.PaymentPct * r.TotalClaims) / grandTotalClaims, 2);
@@ -193,7 +198,7 @@
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> Claim Level Data &bull;
                     <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) — @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &bull;
-                    <strong>Sorted by:</strong> @(Model.IsAugustusLab ? "Count of ClaimID DESC" : "SUM(InsurancePayment) DESC") &bull;
+                    <strong>Sorted by:</strong> @(Model.IsAugustusLab || isSpLogicPct ? "Count of ClaimID DESC" : "SUM(InsurancePayment) DESC") &bull;
                     @if (isInHealthPct)
                     {
                         <span><strong>Filter:</strong> InsurancePayment &gt; 0, PayerName_Raw not blank &bull; <strong>Payment %:</strong> Average of PaymentPercent</span>

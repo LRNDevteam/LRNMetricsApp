@@ -41,7 +41,8 @@ public sealed record LisSummaryResult(
     Dictionary<int, int> GrandTotalByYear,
     int GrandTotal,
     LisSummaryKpiCards KpiCards,
-    LisKeyMetricsBlock? KeyMetrics = null);
+    LisKeyMetricsBlock? KeyMetrics = null,
+    string GrandTotalLabel = "Grand Total");
 
 public sealed record LisSummaryKpiCards(
     int TotalSamples,

@@ -1,28 +1,50 @@
 @model LabMetricsDashboard.Models.CollectionSummaryViewModel
+            @{ var paSp = Model.UsesSpCollectionLogic; }
             @if (Model.PanelAverages.Count > 0)
             {
                 <div class="cs-rpt-wrap">
                     <div class="cs-rpt-scroll">
-                        <table class="cs-rpt-table">
+                        <table class="cs-rpt-table@(paSp ? " pa-sp" : "")">
                             <thead>
-                                <tr>
-                                    <th colspan="2" rowspan="2" style="text-align:left;min-width:300px">Panel Name | Payer Name</th>
-                                    <th rowspan="2">No of Claims</th>
-                                    <th rowspan="2">Total Charges</th>
-                                    <th rowspan="2">Average Billed Amount</th>
-                                    <th rowspan="2">Carrier Payment</th>
-                                    <th rowspan="2">Average Carrier Payment</th>
-                                    <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">Fully Paid</th>
-                                    <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">Adjudicated</th>
-                                    <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">30 Days</th>
-                                    <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">60 Days</th>
-                                </tr>
-                                <tr>
-                                    <th>Count</th><th>$</th><th>Avg $</th>
-                                    <th>Count</th><th>$</th><th>Avg $</th>
-                                    <th>Count</th><th>$</th><th>Avg $</th>
-                                    <th>Count</th><th>$</th><th>Avg $</th>
-                                </tr>
+                                @if (paSp)
+                                {
+                                    <tr>
+                                        <th colspan="2" rowspan="2" style="text-align:left;min-width:300px">Description</th>
+                                        <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">Billed</th>
+                                        <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">Fully Paid</th>
+                                        <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">Adjudicated</th>
+                                        <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">30 Bucket</th>
+                                        <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">60 Bucket</th>
+                                    </tr>
+                                    <tr>
+                                        <th>No of Claims</th><th>Total Billed Amount</th><th>Average Billed Amount</th>
+                                        <th>No of Paid Claims</th><th>Fully Paid Amount</th><th>Average Fully Paid Amount</th>
+                                        <th>No of Adjudicated Claims</th><th>Total Payments (Fully Paid + Partial Paid)</th><th>Average Adjudicated Amount</th>
+                                        <th>No of Claims &gt; 30</th><th>All Payments - Above &gt; 30</th><th>Average Amount - Above &gt; 30</th>
+                                        <th>No of Claims &gt; 60</th><th>All Payments - Above &gt; 60</th><th>Average Amount - Above &gt; 60</th>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    <tr>
+                                        <th colspan="2" rowspan="2" style="text-align:left;min-width:300px">Panel Name | Payer Name</th>
+                                        <th rowspan="2">No of Claims</th>
+                                        <th rowspan="2">Total Charges</th>
+                                        <th rowspan="2">Average Billed Amount</th>
+                                        <th rowspan="2">Carrier Payment</th>
+                                        <th rowspan="2">Average Carrier Payment</th>
+                                        <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">Fully Paid</th>
+                                        <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">Adjudicated</th>
+                                        <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">30 Days</th>
+                                        <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">60 Days</th>
+                                    </tr>
+                                    <tr>
+                                        <th>Count</th><th>$</th><th>Avg $</th>
+                                        <th>Count</th><th>$</th><th>Avg $</th>
+                                        <th>Count</th><th>$</th><th>Avg $</th>
+                                        <th>Count</th><th>$</th><th>Avg $</th>
+                                    </tr>
+                                }
                             </thead>
                             <tbody>
                                 @{ var paIdx = 0; }
@@ -41,8 +63,11 @@
                                         <td style="text-align:right;font-weight:600">@m.ClaimCount.N0OrDash()</td>
                                         <td style="text-align:right;font-weight:600">@Acct(m.TotalCharges)</td>
                                         <td style="text-align:right;font-weight:600">@Acct2(m.AvgBilled)</td>
-                                        <td style="text-align:right;font-weight:600">@Acct(m.CarrierPayment)</td>
-                                        <td style="text-align:right;font-weight:600">@Acct2(m.AvgCarrierPayment)</td>
+                                        @if (!paSp)
+                                        {
+                                            <td style="text-align:right;font-weight:600">@Acct(m.CarrierPayment)</td>
+                                            <td style="text-align:right;font-weight:600">@Acct2(m.AvgCarrierPayment)</td>
+                                        }
                                         <td style="text-align:right;font-weight:600">@m.FullyPaidCount.N0OrDash()</td>
                                         <td style="text-align:right;font-weight:600">@Acct(m.FullyPaidAmount)</td>
                                         <td style="text-align:right;font-weight:600">@Acct2(m.AvgFullyPaid)</td>
@@ -65,8 +90,11 @@
                                             <td style="text-align:right">@pm.ClaimCount.N0OrDash()</td>
                                             <td style="text-align:right">@Acct(pm.TotalCharges)</td>
                                             <td style="text-align:right">@Acct2(pm.AvgBilled)</td>
-                                            <td style="text-align:right">@Acct(pm.CarrierPayment)</td>
-                                            <td style="text-align:right">@Acct2(pm.AvgCarrierPayment)</td>
+                                            @if (!paSp)
+                                            {
+                                                <td style="text-align:right">@Acct(pm.CarrierPayment)</td>
+                                                <td style="text-align:right">@Acct2(pm.AvgCarrierPayment)</td>
+                                            }
                                             <td style="text-align:right">@pm.FullyPaidCount.N0OrDash()</td>
                                             <td style="text-align:right">@Acct(pm.FullyPaidAmount)</td>
                                             <td style="text-align:right">@Acct2(pm.AvgFullyPaid)</td>
@@ -83,16 +111,63 @@
                                     }
                                 }
                             </tbody>
+                            @if (Model.PanelAveragesGrandTotal is { } gt)
+                            {
+                                <tfoot>
+                                    <tr>
+                                        <td></td>
+                                        <td style="text-align:left;font-weight:700">Grand Total</td>
+                                        <td style="text-align:right;font-weight:700">@gt.ClaimCount.N0OrDash()</td>
+                                        <td style="text-align:right;font-weight:700">@Acct(gt.TotalCharges)</td>
+                                        <td style="text-align:right;font-weight:700">@Acct2(gt.AvgBilled)</td>
+                                        @if (!paSp)
+                                        {
+                                            <td style="text-align:right;font-weight:700">@Acct(gt.CarrierPayment)</td>
+                                            <td style="text-align:right;font-weight:700">@Acct2(gt.AvgCarrierPayment)</td>
+                                        }
+                                        <td style="text-align:right;font-weight:700">@gt.FullyPaidCount.N0OrDash()</td>
+                                        <td style="text-align:right;font-weight:700">@Acct(gt.FullyPaidAmount)</td>
+                                        <td style="text-align:right;font-weight:700">@Acct2(gt.AvgFullyPaid)</td>
+                                        <td style="text-align:right;font-weight:700">@gt.AdjudicatedCount.N0OrDash()</td>
+                                        <td style="text-align:right;font-weight:700">@Acct(gt.AdjudicatedAmount)</td>
+                                        <td style="text-align:right;font-weight:700">@Acct2(gt.AvgAdjudicated)</td>
+                                        <td style="text-align:right;font-weight:700">@gt.Days30Count.N0OrDash()</td>
+                                        <td style="text-align:right;font-weight:700">@Acct(gt.Days30Amount)</td>
+                                        <td style="text-align:right;font-weight:700">@Acct2(gt.AvgDays30)</td>
+                                        <td style="text-align:right;font-weight:700">@gt.Days60Count.N0OrDash()</td>
+                                        <td style="text-align:right;font-weight:700">@Acct(gt.Days60Amount)</td>
+                                        <td style="text-align:right;font-weight:700">@Acct2(gt.AvgDays60)</td>
+                                    </tr>
+                                </tfoot>
+                            }
                         </table>
                     </div>
                 </div>
 
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
-                    <strong>Source:</strong> Claim Level Data &bull;
-                    <strong>Date Range:</strong> Last 6 months by CheckDate (Deposit / Posted Date) through MAX(CheckDate) &bull;
-                    <strong>Rows:</strong> Panel totals = all payers; drill-down = Top 3 payers (click a panel to open / close) &bull;
-                    <strong>Fully Paid / Adjudicated / 30/60:</strong> flag columns not blank (ClientLogic) &bull;
-                    <strong>Sorted by:</strong> No of Claims DESC
+                    @if (paSp)
+                    {
+                        <span>
+                            <strong>Source:</strong> Claim Level Data &bull;
+                            <strong>Filter:</strong> Bill Status = Billed, Billed - Self Pay &bull;
+                            <strong>Rows:</strong> Panel Name; drill-down = Top 3 insurance by claim count (click a panel to open / close) &bull;
+                            <strong>Fully Paid:</strong> Claim Status = Fully Paid &bull;
+                            <strong>Adjudicated:</strong> Adjudicated flag set &bull;
+                            <strong>30 / 60:</strong> 30 Bucket / 60 Bucket &bull;
+                            <strong>Values:</strong> Count of Claim ID; Billed = Sum / Average of Charge Amount; other groups = Sum / Average of Insurance Payment &bull;
+                            <strong>Sorted by:</strong> Claim Count DESC
+                        </span>
+                    }
+                    else
+                    {
+                        <span>
+                            <strong>Source:</strong> Claim Level Data &bull;
+                            <strong>Date Range:</strong> Last 6 months by CheckDate (Deposit / Posted Date) through MAX(CheckDate) &bull;
+                            <strong>Rows:</strong> Panel totals = all payers; drill-down = Top 3 payers (click a panel to open / close) &bull;
+                            <strong>Fully Paid / Adjudicated / 30/60:</strong> flag columns not blank (ClientLogic) &bull;
+                            <strong>Sorted by:</strong> No of Claims DESC
+                        </span>
+                    }
                 </div>
             }
             else
@@ -100,7 +175,9 @@
                 <div class="text-center py-5 text-muted">
                     <div style="font-size:2rem;opacity:.4">&#128202;</div>
                     <div class="fw-semibold mt-2">No panel averages data available</div>
-                    <div class="small mt-1">No matching claim records found for the last 6 months. Try adjusting your filters.</div>
+                    <div class="small mt-1">
+                        @(paSp ? "No billed claims match the current filters." : "No matching claim records found for the last 6 months. Try adjusting your filters.")
+                    </div>
                 </div>
             }
         

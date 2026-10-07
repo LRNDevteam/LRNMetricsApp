@@ -11,6 +11,8 @@
      12, 12b, 14b, 23                        Collection Summary
      15, 16, 17b, 18, 19, 20, 21b, 22, 22b   Executive Summary
      24  MappingFixes
+     26  LIS Summary (SP-built rows / totals)
+     27  Executive Summary client logic (replaces 16 / 17b / 19 procedures)
      99  this script
 
    Scripts 12-24 are generated from Sql/VariantX by Generate-FromVariantX.ps1.
@@ -49,9 +51,11 @@ INSERT INTO @Procs (ProcName) VALUES
     (N'usp_RefreshAnP_CS_CptVsPaymentPct'),
     (N'usp_RefreshAnP_CS_StatusSummary'),
     (N'usp_RefreshAnP_CS_ProviderSummary'),
-    -- Executive Summary
+    -- Executive Summary (27 rebuilds LIS + PMS + Cash + Avg in one pass)
     (N'usp_RefreshAnP_ExecutiveSummary'),
-    (N'usp_RefreshAnP_ExecutiveSummary_LIS_Alt');
+    (N'usp_RefreshAnP_ExecutiveSummary_LIS_Alt'),
+    -- LIS Summary (26)
+    (N'usp_RefreshAnP_LISSummary');
 
 DECLARE @i INT = 1, @n INT = (SELECT COUNT(*) FROM @Procs), @p SYSNAME, @sql NVARCHAR(400);
 WHILE @i <= @n
@@ -89,6 +93,7 @@ FROM (VALUES
     (N'usp_GetAnP_CS_PanelAverages'),
     (N'usp_GetAnP_CS_Top5ReimbursementPct'),
     (N'usp_GetAnP_ExecutiveSummary'),
+    (N'usp_GetAnP_LISSummary'),
     (N'usp_GetAnP_ExecutiveSummary_FilterOptions'),
     (N'usp_GetAnP_ExecutiveSummary_Detail'),
     (N'usp_GetExecutiveSummaryDetail_PMSCash'),

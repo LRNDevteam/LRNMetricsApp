@@ -104,7 +104,10 @@ public static partial class CollectionSummaryExcelExportBuilder
     private static void BuildInsuranceVsPaymentFlatSheet(
         XLWorkbook wb, List<InsuranceVsPaymentRow> rows, string labName)
     {
-        var isCove = labName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
+        var isSpLogic = LabCollectionPrefix.UsesSpCollectionLogic(labName);
+        // Analyze Pathology: payer-flat Count + Sum like Cove, rows in SP order (claim count).
+        var isCove = isSpLogic
+            || labName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
             || labName.Contains("Cove", StringComparison.OrdinalIgnoreCase);
         var isInHealth = LabCollectionPrefix.IsInHealthDtr(labName);
 
@@ -167,8 +170,9 @@ public static partial class CollectionSummaryExcelExportBuilder
                     Pay = g.Sum(x => x.InsurancePayment),
                     Pct = g.Average(x => x.PaymentPct),
                 })
-                .OrderByDescending(g => g.Pay)
                 .ToList();
+            if (!isSpLogic)
+                groups = groups.OrderByDescending(g => g.Pay).ToList();
             foreach (var g in groups)
             {
                 WriteCell(wsFlat, row0, 1, g.Payer, XLColor.White, isText: true);

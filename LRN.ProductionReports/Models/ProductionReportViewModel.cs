@@ -192,6 +192,15 @@ public sealed class ProductionReportViewModel
     /// <summary>Grand total billed charges across all CPT codes.</summary>
     public decimal CptBreakdownGrandTotalCharges { get; set; }
 
+    /// <summary>Grand total claim count from the SP (totals-only CPT Breakdown).</summary>
+    public int CptBreakdownGrandTotalClaims { get; set; }
+
+    /// <summary>
+    /// <c>true</c> when the CPT Breakdown is totals only: CPT Code | Claim Count | Charge Amount,
+    /// rows in SP order, Grand Total from the SP.
+    /// </summary>
+    public bool CptTotalsOnly { get; set; }
+
     /// <summary>
     /// Column header for the CPT Breakdown units column.
     /// Defaults to <c>"No. of Claims"</c>. Set to <c>"Billed Units"</c> for Certus,

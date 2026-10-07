@@ -1004,6 +1004,12 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default)
     {
+        if (_cfg.CptTotalsOnly && _cfg.SupportsFilteredMonthlyWeeklySp)
+            return await GetCptBreakdownTotalsAsync(
+                connectionString, filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo, ct);
+
         // When the lab's read SP is parameterised, call it. Otherwise fall back to the
         // legacy direct SELECT against the snapshot table (filters silently ignored).
         var spName = IsCove()
@@ -1107,6 +1113,69 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
         {
             _logger.LogError(ex, "[{Prefix}] GetCptBreakdownAsync failed.", _cfg.Prefix);
         return new SharedCptBreakdownResult([], [], [], new Dictionary<string, CptBreakdownCell>(), 0m, 0m);
+        }
+    }
+
+    /// <summary>
+    /// Totals-only CPT Breakdown: rows and Grand Total come from
+    /// <c>usp_Get{Prefix}CPTBreakdownTotals</c> in SP order; nothing is re-aggregated here.
+    /// </summary>
+    private async Task<SharedCptBreakdownResult> GetCptBreakdownTotalsAsync(
+        string connectionString,
+        List<string>? filterPayerNames, List<string>? filterPanelNames,
+        DateOnly? filterDosFrom, DateOnly? filterDosTo,
+        DateOnly? filterFirstBillFrom, DateOnly? filterFirstBillTo,
+        DateOnly? filterFirstBilledFrom, DateOnly? filterFirstBilledTo,
+        CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand($"dbo.usp_Get{_cfg.Prefix}CPTBreakdownTotals", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 180,
+            };
+            AddProductionFilterParameters(
+                cmd,
+                filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo);
+            await using var rdr = await cmd.ExecuteReaderAsync(ct);
+
+            var rows = new List<CptBreakdownRow>();
+            int grandClaims = 0;
+            decimal grandCharges = 0m;
+            while (await rdr.ReadAsync(ct))
+            {
+                var rowType = rdr.IsDBNull(0) ? "D" : rdr.GetString(0);
+                var claims  = rdr.IsDBNull(2) ? 0 : Convert.ToInt32(rdr.GetValue(2));
+                var charges = rdr.IsDBNull(3) ? 0m : Convert.ToDecimal(rdr.GetValue(3));
+                if (string.Equals(rowType, "T", StringComparison.OrdinalIgnoreCase))
+                {
+                    grandClaims  = claims;
+                    grandCharges = charges;
+                    continue;
+                }
+                rows.Add(new CptBreakdownRow
+                {
+                    CptCode           = rdr.IsDBNull(1) ? string.Empty : rdr.GetString(1),
+                    GrandTotalClaims  = claims,
+                    GrandTotalCharges = charges,
+                });
+            }
+
+            return new SharedCptBreakdownResult(
+                [], [], rows, new Dictionary<string, CptBreakdownCell>(),
+                0m, grandCharges, grandClaims, TotalsOnly: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[{Prefix}] GetCptBreakdownTotalsAsync failed.", _cfg.Prefix);
+            return new SharedCptBreakdownResult(
+                [], [], [], new Dictionary<string, CptBreakdownCell>(), 0m, 0m, TotalsOnly: true);
         }
     }
 

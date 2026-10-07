@@ -76,7 +76,10 @@ else
         .ToList();
     var years = periods.Select(p => p.Year).Distinct().OrderBy(y => y).ToList();
 
-    var pivotRows = rowsData
+    var isSpLogic = Model.UsesSpCollectionLogic;
+    var countLabel = isSpLogic ? "Claim Count" : "Count of Panel Name";
+    var paymentLabel = isSpLogic ? "Insurance Payments" : "Sum of CarrierPayment";
+    var pivotGroups = rowsData
         .Where(r => r.BillYear > 0 && r.BillMonth > 0)
         .GroupBy(r => r.PanelName, StringComparer.OrdinalIgnoreCase)
         .Select(g => new
@@ -92,9 +95,10 @@ else
                     }),
             TotalCount   = g.Sum(x => x.NoOfClaims),
             TotalPayment = g.Sum(x => x.InsurancePayments)
-        })
-        .OrderByDescending(r => Model.IsAugustusLab ? r.TotalCount : r.TotalPayment)
-        .ToList();
+        });
+    var pivotRows = isSpLogic
+        ? pivotGroups.ToList()
+        : pivotGroups.OrderByDescending(r => Model.IsAugustusLab ? r.TotalCount : r.TotalPayment).ToList();
 
     <div class="cs-rpt-wrap">
         <div class="cs-rpt-scroll">
@@ -125,14 +129,14 @@ else
                         {
                             foreach (var _ in periods.Where(p => p.Year == year))
                             {
-                                <th>Count of Panel Name</th>
-                                <th>Sum of CarrierPayment</th>
+                                <th>@countLabel</th>
+                                <th>@paymentLabel</th>
                             }
-                            <th class="cs-pr-year">Count of Panel Name</th>
-                            <th class="cs-pr-year">Sum of CarrierPayment</th>
+                            <th class="cs-pr-year">@countLabel</th>
+                            <th class="cs-pr-year">@paymentLabel</th>
                         }
-                        <th class="cs-pr-grand">Count of Panel Name</th>
-                        <th class="cs-pr-grand">Sum of CarrierPayment</th>
+                        <th class="cs-pr-grand">@countLabel</th>
+                        <th class="cs-pr-grand">@paymentLabel</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -191,8 +195,19 @@ else
     </div>
 
     <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
-        <strong>Source:</strong> @(Model.IsAugustusLab ? "Collection Claim Level Data" : "Aggregate snapshot table") <code>@(Model.IsAugustusLab ? "usp_GetAug_CS_PanelVsPayment_v2" : "{prefix}_CS_PanelVsPayment")</code> &bull;
+    @if (isSpLogic)
+    {
+        <span><strong>Source:</strong> Claim Level Data &bull;
+        <strong>Filter:</strong> InsurancePayment &gt; 0, CheckDate in @DateTime.Today.Year &bull;
+        <strong>Rows:</strong> Panel name &bull; <strong>Columns:</strong> CheckDate month &bull;
+        <strong>Sorted by:</strong> Claim Count DESC &bull;
+        <strong>Values:</strong> Count of unique ClaimID, Sum of InsurancePayment</span>
+    }
+    else
+    {
+        <span><strong>Source:</strong> @(Model.IsAugustusLab ? "Collection Claim Level Data" : "Aggregate snapshot table") <code>@(Model.IsAugustusLab ? "usp_GetAug_CS_PanelVsPayment_v2" : "{prefix}_CS_PanelVsPayment")</code> &bull;
         <strong>Grain:</strong> PanelNew &times; @(Model.IsAugustusLab ? "Posted Date" : "CheckDate") Year/Month
-        @(Model.IsAugustusLab ? " · Count of PanelNew, SUM(Ins. Pay)" : "")
+        @(Model.IsAugustusLab ? " · Count of PanelNew, SUM(Ins. Pay)" : "")</span>
+    }
     </div>
 }

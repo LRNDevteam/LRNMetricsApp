@@ -1347,9 +1347,20 @@ th.pr-month-data, td.pr-month-data {
                             var pbDateColLocal = pbUsesChargeLocal ? "ChargeEnteredDate" : "FirstBilledDate";
                         }
                         <span class="filter-dot">•</span>
+                        @if (LabCollectionPrefix.UsesSpCollectionLogic(Model.SelectedLab))
+                        {
+                            <span><span class="filter-label">Filter:</span>
+                                <span class="filter-key-2">Bill Status</span> not in (Unbilled, Unbilled - Self Pay)
+                                &nbsp;·&nbsp; Columns: Date of Service month
+                                &nbsp;·&nbsp; Values: Count of unique Claim ID, Sum of Charge Amount
+                                &nbsp;·&nbsp; Sorted by: Claim Count DESC</span>
+                        }
+                        else
+                        {
                         <span><span class="filter-label">Filter:</span>
                             @* <span class="filter-key">PayerName</span> not blank &nbsp;·&nbsp; *@
                             <span class="filter-key-2">@pbDateColLocal</span> is a valid date</span>
+                        }
                     </div>
                     <div class="pr-scroll">
                         <table class="pr-table">
@@ -1901,7 +1912,8 @@ th.pr-month-data, td.pr-month-data {
                 }
                 </div>
             }
-            else if (Model.CptBreakdownRows.Count > 0 && Model.SelectedLab.Contains("InHealth", StringComparison.OrdinalIgnoreCase))
+            else if (Model.CptBreakdownRows.Count > 0
+                     && (Model.CptTotalsOnly || Model.SelectedLab.Contains("InHealth", StringComparison.OrdinalIgnoreCase)))
             {
                 <div class="pr-wrap">
                     <div class="pr-scroll">
@@ -1913,9 +1925,9 @@ th.pr-month-data, td.pr-month-data {
                             </colgroup>
                             <thead>
                                 <tr>
-                                    <th>CPT Codes</th>
-                                    <th class="pr-grand-total">@(cptUnitsHeader)</th>
-                                    <th class="pr-grand-total">Total Charge</th>
+                                    <th>@(Model.CptTotalsOnly ? "CPT Code" : "CPT Codes")</th>
+                                    <th class="pr-grand-total">@(Model.CptTotalsOnly ? "Claim Count" : cptUnitsHeader)</th>
+                                    <th class="pr-grand-total">@(Model.CptTotalsOnly ? "Charge Amount" : "Total Charge")</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1931,13 +1943,31 @@ th.pr-month-data, td.pr-month-data {
                             <tfoot>
                                 <tr class="pr-total-row">
                                     <td>Grand Total</td>
-                                    <td class="pr-grand-total">@Model.CptBreakdownRows.Sum(r => r.GrandTotalClaims).N0OrDash()</td>
-                                    <td class="pr-grand-total">@Acct(Model.CptBreakdownRows.Sum(r => r.GrandTotalCharges))</td>
+                                    @if (Model.CptTotalsOnly)
+                                    {
+                                        <td class="pr-grand-total">@Model.CptBreakdownGrandTotalClaims.N0OrDash()</td>
+                                        <td class="pr-grand-total">@Acct(Model.CptBreakdownGrandTotalCharges)</td>
+                                    }
+                                    else
+                                    {
+                                        <td class="pr-grand-total">@Model.CptBreakdownRows.Sum(r => r.GrandTotalClaims).N0OrDash()</td>
+                                        <td class="pr-grand-total">@Acct(Model.CptBreakdownRows.Sum(r => r.GrandTotalCharges))</td>
+                                    }
                                 </tr>
                             </tfoot>
                         </table>
                     </div>
                 </div>
+                @if (Model.CptTotalsOnly)
+                {
+                    <div class="pr-filter-summary">
+                        <strong>Source:</strong> Line Level Data &bull;
+                        <strong>Rows:</strong> CPT Code &bull;
+                        <strong>Values:</strong> Claim Count = Count of unique Claim ID, Charge Amount = Sum of Charge Amount &bull;
+                        <strong>Sorted by:</strong> Claim Count DESC &bull;
+                        Grand Total claim count = unique claims across all CPT codes
+                    </div>
+                }
             }
             else if (Model.CptBreakdownRows.Count > 0 && cptYears.Count > 0)
             {

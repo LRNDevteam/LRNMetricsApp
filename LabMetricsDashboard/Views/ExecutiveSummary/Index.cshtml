@@ -86,6 +86,8 @@
 
     decimal RowYearTotal(ExecSummaryRow row, int year)
     {
+        if (row.HasSpTotals)
+            return row.YearTotal(year);
         if (row.Category == "Avg" && row.ValuesByYearMonth.TryGetValue((year, 0), out var yearSentinel))
             return yearSentinel;
         if (IsAriaWindowRow(row) && row.ValuesByYearMonth.TryGetValue((year, 0), out var ariaYear))
@@ -114,7 +116,7 @@
         // whenever a date/dimension filter was applied, even though the SP
         // returned the correct value in the (0,0) row.
         bool hasMonthlyBuckets = row.ValuesByYearMonth.Keys.Any(k => k.Year != 0 && k.Month != 0);
-        if (row.Category == "Avg" || IsAriaWindowRow(row) || !hasMonthlyBuckets)
+        if (row.HasSpTotals || row.Category == "Avg" || IsAriaWindowRow(row) || !hasMonthlyBuckets)
         {
             row.ValuesByYearMonth.TryGetValue((0, 0), out var total);
             return total;

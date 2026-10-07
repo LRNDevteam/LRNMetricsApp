@@ -132,7 +132,8 @@ public class CollectionSummaryController : Controller
         string? aggregatePrefix = config.EnableCollectionSummaryReport
             ? LabCollectionPrefix.GetPrefix(selectedLab)
             : null;
-        bool useAggregates = aggregatePrefix is not null && !hasActiveFilters;
+        bool useAggregates = aggregatePrefix is not null && !hasActiveFilters
+            && !LabCollectionPrefix.UsesSpCollectionLogic(selectedLab);
 
         // Page chrome first — monthly, Top 5, filters, and banner load after HTML.
         var pageSw = Stopwatch.StartNew();
@@ -251,7 +252,8 @@ public class CollectionSummaryController : Controller
         try
         {
             CollectionFilterOptions options;
-            if (aggregatePrefix is not null && !hasActiveFilters)
+            if (aggregatePrefix is not null && !hasActiveFilters
+                && !LabCollectionPrefix.UsesSpCollectionLogic(labName))
             {
                 // Aggregate snapshot is tiny � orders of magnitude faster than ClaimLevelData.
                 options = await _repo.GetFilterOptionsFromAggregatesAsync(connStr, aggregatePrefix, ct);
@@ -361,7 +363,8 @@ public class CollectionSummaryController : Controller
         string? aggregatePrefix = config.EnableCollectionSummaryReport
             ? LabCollectionPrefix.GetPrefix(selectedLab)
             : null;
-        bool useAggregates = aggregatePrefix is not null && !hasActiveFilters;
+        bool useAggregates = aggregatePrefix is not null && !hasActiveFilters
+            && !LabCollectionPrefix.UsesSpCollectionLogic(selectedLab);
 
         _logger.LogInformation("CollectionSummary[GetTabPartial] Lab={Lab}, AggregatePrefix={Prefix}, UseAggregates={UseAgg}, HasFilters={HasFilters}, Tab={Tab}",
             selectedLab, aggregatePrefix ?? "null", useAggregates, hasActiveFilters, tab);
@@ -443,8 +446,15 @@ public class CollectionSummaryController : Controller
                     return PartialView("_CsTabWcv", vm);
 
                 case "panelavg":
-                    // Panel Averages tab is hidden from Collection Summary UI.
-                    return Content(string.Empty);
+                    if (!LabCollectionPrefix.UsesSpCollectionLogic(selectedLab))
+                        return Content(string.Empty);
+                {
+                    var panelAvg = await _repo.GetPanelAveragesAsync(connStr, payerFilter, panelFilter,
+                        fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+                    vm.PanelAverages = panelAvg.PanelRows;
+                    vm.PanelAveragesGrandTotal = panelAvg.GrandTotal;
+                    return PartialView("_CsTabPanelAvg", vm);
+                }
 
                 case "avgpay":
                     if (LabCollectionPrefix.UsesAvgPaymentsByDateBasis(selectedLab))
@@ -603,7 +613,12 @@ public class CollectionSummaryController : Controller
         var cptPaymentPctTask = _repo.GetCptPaymentPctAsync(
             connStr, payerFilter, panelFilter,
             fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-        // Panel Averages omitted from Excel / UI — do not load.
+        // Panel Average is only shown for labs on the SP client logic (AnalyzePathology).
+        var showPanelAverage = LabCollectionPrefix.UsesSpCollectionLogic(selectedLab);
+        var panelAveragesTask = showPanelAverage
+            ? _repo.GetPanelAveragesAsync(connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
+            : Task.FromResult(new PanelAveragesResult([]));
         var avgPayByDateBasis = LabCollectionPrefix.UsesAvgPaymentsByDateBasis(selectedLab);
         var avgPaymentsTask = avgPayByDateBasis
             ? _repo.GetAvgPaymentsByDateBasisAsync(connStr, AvgPaymentsDateBasis.CheckDate,
@@ -668,6 +683,9 @@ public class CollectionSummaryController : Controller
             }
         }
 
+        var panelAveragesResult = await AwaitOrDefaultAsync(
+            panelAveragesTask, new PanelAveragesResult([]), "Panel Average", selectedLab, _logger);
+
         var emptyMonthly = new CollectionMonthlyVolumeResult([], [], [], [], [], 0, 0m);
         var emptyWeekly = new CollectionWeeklyVolumeResult([], [], [], 0, 0m);
 
@@ -692,7 +710,8 @@ public class CollectionSummaryController : Controller
                 insurancePaymentPctTask, new InsurancePaymentPctResult([]), "Insurance vs Payment %", selectedLab, _logger)).Rows,
             CptPaymentPct = (await AwaitOrDefaultAsync(
                 cptPaymentPctTask, new CptPaymentPctResult([]), "CPT vs Payment %", selectedLab, _logger)).Rows,
-            PanelAverages = [],
+            PanelAverages = panelAveragesResult.PanelRows,
+            PanelAveragesGrandTotal = panelAveragesResult.GrandTotal,
             AvgPayments = await AwaitOrDefaultAsync(
                 avgPaymentsTask, new PanelAveragesResult([]), "Avg Payments", selectedLab, _logger),
             AvgPaymentsLast3Months = await AwaitOrDefaultAsync(

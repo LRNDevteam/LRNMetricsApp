@@ -273,7 +273,7 @@ public sealed class SqlPhiExecutiveSummaryRepository
         var sw = Stopwatch.StartNew();
         try
         {
-            var rawRows = new List<(string RowCode, string Category, string Description, int BillYear, int BillMonth, decimal MetricValue)>();
+            var rawRows = new List<(string RowCode, string Category, string Description, int BillYear, int BillMonth, decimal MetricValue, int? SortOrder)>();
 
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
@@ -301,6 +301,15 @@ public sealed class SqlPhiExecutiveSummaryRepository
             }
 
             await using var reader = await cmd.ExecuteReaderAsync(ct);
+            var sortOrdinal = -1;
+            for (var i = 6; i < reader.FieldCount; i++)
+            {
+                if (string.Equals(reader.GetName(i), "SortOrder", StringComparison.OrdinalIgnoreCase))
+                {
+                    sortOrdinal = i;
+                    break;
+                }
+            }
             while (await reader.ReadAsync(ct))
             {
                 rawRows.Add((
@@ -309,7 +318,8 @@ public sealed class SqlPhiExecutiveSummaryRepository
                     Convert.ToString(reader.GetValue(2)) ?? "",
                     reader.IsDBNull(3) ? 0 : Convert.ToInt32(reader.GetValue(3)),
                     reader.IsDBNull(4) ? 0 : Convert.ToInt32(reader.GetValue(4)),
-                    reader.IsDBNull(5) ? 0m : Convert.ToDecimal(reader.GetValue(5))
+                    reader.IsDBNull(5) ? 0m : Convert.ToDecimal(reader.GetValue(5)),
+                    sortOrdinal < 0 || reader.IsDBNull(sortOrdinal) ? null : Convert.ToInt32(reader.GetValue(sortOrdinal))
                 ));
             }
 
@@ -326,7 +336,7 @@ public sealed class SqlPhiExecutiveSummaryRepository
             var yearSet = new SortedSet<int>();
             var yearlyTotals = new Dictionary<int, decimal>();
 
-            foreach (var (rowCode, category, description, billYear, billMonth, metricValue) in rawRows)
+            foreach (var (rowCode, category, description, billYear, billMonth, metricValue, sortOrder) in rawRows)
             {
                 // Key on Category+RowCode: the same RowCode (e.g. "X") can be reused
                 // across categories (PMS "Patient Payment" vs Cash "Total Billed ($)").
@@ -339,6 +349,7 @@ public sealed class SqlPhiExecutiveSummaryRepository
                         RowCode     = rowCode,
                         Category    = category,
                         Description = description,
+                        SortOrder   = sortOrder,
                     };
                     rowDict[rowKey] = row;
                 }
@@ -384,10 +395,12 @@ public sealed class SqlPhiExecutiveSummaryRepository
                 .Select((code, idx) => (code, idx))
                 .ToDictionary(t => t.code, t => t.idx, StringComparer.OrdinalIgnoreCase);
 
-            vm.Rows = rowDict.Values
-                .OrderBy(r => GetSortKey(r.RowCode, orderIndex))
-                .ThenBy(r => r.RowCode, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            vm.Rows = sortOrdinal >= 0
+                ? rowDict.Values.OrderBy(r => r.SortOrder ?? int.MaxValue).ToList()
+                : rowDict.Values
+                    .OrderBy(r => GetSortKey(r.RowCode, orderIndex))
+                    .ThenBy(r => r.RowCode, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
 
             DropEmptyCpExceptionPanelRows(vm.Rows);
 
