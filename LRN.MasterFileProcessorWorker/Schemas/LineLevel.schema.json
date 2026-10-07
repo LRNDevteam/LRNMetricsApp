@@ -454,7 +454,10 @@
 		},
 		{
 			"Name": "Last Billed Date",
-			"DataType": "date"
+			"DataType": "date",
+			"Aliases": [
+				"Charge Last Bill Date"
+			]
 		}
 	]
 }

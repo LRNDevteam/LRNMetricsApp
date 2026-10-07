@@ -9,7 +9,10 @@
 		"changes for any other lab.",
 		"'Posted Date' is deliberately NOT listed: it is a COMMON alias of both 'Payment Posted Date' and",
 		"'Denial Date', and declaring it here would make a blank Denial Date fall back to the posting date.",
-		"It still reaches 'Payment Posted Date' through the COMMON alias."
+		"It still reaches 'Payment Posted Date' through the COMMON alias.",
+		"'Charge Last Bill Date' deliberately has NO 'Last Billed Date' alias: the COMMON FirstBilledDate",
+		"aliases include 'Last billed date', so that alias made FirstBilledDate read the LAST bill date.",
+		"It reaches 'Last Billed Date' through the COMMON alias instead."
 	],
 	"Columns": [
 		{ "Name": "Charge Claim ID", "Aliases": [ "ClaimID" ], "Required": true, "DataType": "string" },
@@ -26,7 +29,7 @@
 		{ "Name": "Charge From Date", "Aliases": [ "DateofService" ], "Required": true, "DataType": "date" },
 		{ "Name": "Charge Entered Date", "Aliases": [ "ChargeEnteredDate" ], "Required": false, "DataType": "date" },
 		{ "Name": "Charge First Bill Date", "Aliases": [ "FirstBilledDate" ], "Required": true, "DataType": "date" },
-		{ "Name": "Charge Last Bill Date", "Aliases": [ "Last Billed Date" ], "Required": false, "DataType": "date" },
+		{ "Name": "Charge Last Bill Date", "Required": false, "DataType": "date" },
 		{ "Name": "Charge CPT Code", "Aliases": [ "CPTCode" ], "Required": true, "DataType": "string" },
 		{ "Name": "Charge Units", "Aliases": [ "Units" ], "Required": true, "DataType": "int" },
 		{ "Name": "Charge Modifier List", "Aliases": [ "Modifier" ], "Required": true, "DataType": "string" },

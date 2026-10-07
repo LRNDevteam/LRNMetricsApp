@@ -9,7 +9,10 @@
 		"'Deposit Date' is declared on its own so it is the ONLY source of CheckDate: the COMMON CheckDate",
 		"aliases also include 'Posted Date', which would otherwise fill CheckDate on denial-only postings.",
 		"Consequence: 'Posted Date' is consumed by the CheckDate alias scan and does not reach the claim CSV.",
-		"The same value is loaded at line level as PostingDate / PaymentPostedDate."
+		"The same value is loaded at line level as PostingDate / PaymentPostedDate.",
+		"'Charge Last Bill Date' deliberately has NO 'Last Billed Date' alias: the COMMON FirstBilledDate",
+		"aliases include 'Last billed date', so that alias made FirstBilledDate read the LAST bill date.",
+		"It reaches 'Last Billed Date' through the COMMON alias instead."
 	],
 	"Columns": [
 		{ "Name": "Charge Claim ID", "Aliases": [ "ClaimID" ], "Required": true, "DataType": "string" },
@@ -24,7 +27,7 @@
 		{ "Name": "Aging DOS", "Required": false, "DataType": "string" },
 		{ "Name": "Charge Entered Date", "Aliases": [ "ChargeEnteredDate" ], "Required": false, "DataType": "date" },
 		{ "Name": "Charge First Bill Date", "Aliases": [ "FirstBilledDate" ], "Required": true, "DataType": "date" },
-		{ "Name": "Charge Last Bill Date", "Aliases": [ "Last Billed Date" ], "Required": false, "DataType": "date" },
+		{ "Name": "Charge Last Bill Date", "Required": false, "DataType": "date" },
 		{ "Name": "Billed Week", "Required": false, "DataType": "string" },
 		{ "Name": "CPTs", "Aliases": [ "CPT Code X Units X Modifier Orginal" ], "Required": true, "DataType": "string" },
 		{ "Name": "Charge POS Code", "Aliases": [ "POS" ], "Required": false, "DataType": "string" },

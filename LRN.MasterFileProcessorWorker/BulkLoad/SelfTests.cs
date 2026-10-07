@@ -56,6 +56,7 @@ public static class SelfTests
         KeepRawAndLabAliasFeedTheirColumns();
         VariantXLinePhysicianNamesSurviveRepeatedHeader();
         VariantXClaimProvidersAreDistinct();
+        AnalyzePathologyBillDatesModifiersAndIcd();
         RelativeCsvLogFolderResolvesAgainstServiceDirectory();
         EmptyRowsAreNotImported();
         RowsWithoutIdentityAreImportedAndCounted();
@@ -2015,6 +2016,106 @@ public static class SelfTests
                 Loads("BillingProvider") == "DIAGNOSTICS LLC, VARIANTX", Loads("BillingProvider"));
             Check("VariantX line: no CSV column name is written twice",
                 header.Length == header.Distinct(StringComparer.OrdinalIgnoreCase).Count(), string.Join(",", header));
+        }
+        finally
+        {
+            TryDelete(folder);
+        }
+    }
+
+    /// <summary>
+    /// Analyze Pathology, shipped schemas: First and Last Bill Date each load their own column (the
+    /// COMMON FirstBilledDate alias "Last billed date" used to hand it the last bill date), a
+    /// space-separated modifier list keeps every modifier in the claim CPT summary, and placeholder
+    /// ICD entries ("ZZZ12345", "BQ") are kept rather than filtered to blank.
+    /// </summary>
+    private static void AnalyzePathologyBillDatesModifiersAndIcd()
+    {
+        var schemas = Path.Combine(AppContext.BaseDirectory, "Schemas");
+        var paths = new[]
+        {
+            Path.Combine(schemas, "ClaimLevel.schema.json"),
+            Path.Combine(schemas, "AnalyzePathology_ClaimLevel.schema.json"),
+            Path.Combine(schemas, "LineLevel.schema.json"),
+            Path.Combine(schemas, "AnalyzePathology_LineLevel.schema.json"),
+        };
+
+        if (paths.Any(p => !File.Exists(p)))
+        {
+            Check("Analyze Pathology schemas are deployed next to the service", false, schemas);
+            return;
+        }
+
+        var folder = TempFolder();
+        try
+        {
+            var loader = new LRN.MasterFileProcessorWorker.ExcelValidation.JsonColumnSchemaLoader();
+
+            string Run(string sourceCsv, string commonPath, string labPath, string name)
+            {
+                var source = Path.Combine(folder, name + "_src.csv");
+                File.WriteAllText(source, sourceCsv);
+                var outPath = Path.Combine(folder, name + "_out.csv");
+
+                StandardCsvExporter.Generate(
+                    sourceCsvPath: source,
+                    headerRow: 1,
+                    outputCsvPath: outPath,
+                    commonSchema: loader.LoadFromFile(commonPath),
+                    labId: 26,
+                    labName: "Analyze_Pathology",
+                    sourceFileName: name + "_src.csv",
+                    ingestedOnLocal: DateTime.Now,
+                    labSchema: loader.LoadFromFile(labPath),
+                    appendUnmappedSourceColumns: true);
+
+                return outPath;
+            }
+
+            var claimOut = Run(
+                "Charge Claim ID,Charge From Date,Charge First Bill Date,Charge Last Bill Date,CPTs,Claim ICD List\r\n" +
+                "C-1,08/05/2026,08/11/2026,09/15/2026,87481*4(90 59),ZZZ12345\r\n" +
+                "C-2,08/05/2026,08/12/2026,09/16/2026,G0483*1(59 90),BQ\r\n" +
+                "C-3,08/05/2026,08/13/2026,09/17/2026,G0482*1(90),F10.21 F11.21\r\n",
+                paths[0], paths[1], "claim");
+
+            var lineOut = Run(
+                "Charge Claim ID,Charge From Date,Charge First Bill Date,Charge Last Bill Date,Charge CPT Code,Charge Units,Charge Modifier List,Claim ICD List\r\n" +
+                "C-1,08/05/2026,08/11/2026,09/15/2026,87481,4,90 59,ZZZ12345\r\n" +
+                "C-1,08/05/2026,08/11/2026,09/15/2026,87500,1,90,ZZZ12345\r\n" +
+                "C-2,08/05/2026,08/12/2026,09/16/2026,G0483,1,59 90,BQ\r\n",
+                paths[2], paths[3], "line");
+
+            StandardCsvExporter.EnrichClaimLevelWithLineLevelCptSummary(claimOut, lineOut, "CPT Code X Units X Modifier");
+
+            string[] Header(string path) => SplitCsv(File.ReadAllLines(path)[0]);
+            string Val(string path, int rowIndex, string column)
+            {
+                var lines = File.ReadAllLines(path);
+                var header = SplitCsv(lines[0]);
+                var i = Array.FindIndex(header, h => h.Equals(column, StringComparison.OrdinalIgnoreCase));
+                return i < 0 ? $"<no column '{column}'>" : SplitCsv(lines[rowIndex + 1])[i];
+            }
+
+            Check("Analyze Pathology claim: FirstBilledDate is the first bill date", Val(claimOut, 0, "FirstBilledDate") == "08/11/2026", Val(claimOut, 0, "FirstBilledDate"));
+            Check("Analyze Pathology claim: Last Billed Date is the last bill date", Val(claimOut, 0, "Last Billed Date") == "09/15/2026", Val(claimOut, 0, "Last Billed Date"));
+            Check("Analyze Pathology line: FirstBilledDate is the first bill date", Val(lineOut, 0, "FirstBilledDate") == "08/11/2026", Val(lineOut, 0, "FirstBilledDate"));
+            Check("Analyze Pathology line: Last Billed Date is the last bill date", Val(lineOut, 0, "Last Billed Date") == "09/15/2026", Val(lineOut, 0, "Last Billed Date"));
+            Check("Analyze Pathology claim: bill date sources are not also appended raw",
+                !Header(claimOut).Contains("Charge Last Bill Date", StringComparer.OrdinalIgnoreCase), string.Join(",", Header(claimOut)));
+
+            Check("Analyze Pathology claim: CPT summary keeps both modifiers",
+                Val(claimOut, 0, "CPT Code X Units X Modifier") == "87481*4(90 59),87500*1(90)", Val(claimOut, 0, "CPT Code X Units X Modifier"));
+            Check("Analyze Pathology claim: modifier order follows the source",
+                Val(claimOut, 1, "CPT Code X Units X Modifier") == "G0483*1(59 90)", Val(claimOut, 1, "CPT Code X Units X Modifier"));
+
+            Check("Analyze Pathology claim: placeholder ICD ZZZ12345 is kept", Val(claimOut, 0, "ICDCode") == "ZZZ12345", Val(claimOut, 0, "ICDCode"));
+            Check("Analyze Pathology claim: placeholder ICD BQ is kept", Val(claimOut, 1, "ICDCode") == "BQ", Val(claimOut, 1, "ICDCode"));
+            Check("Analyze Pathology claim: real ICD codes are still split", Val(claimOut, 2, "ICDCode") == "F10.21,F11.21", Val(claimOut, 2, "ICDCode"));
+            Check("Analyze Pathology line: placeholder ICD is kept", Val(lineOut, 0, "ICDCode") == "ZZZ12345", Val(lineOut, 0, "ICDCode"));
+
+            Check("Other labs: ICD filtering is unchanged", StandardCsvExporter.ExtractIcdCodes("ZZZ12345 F10.21") == "F10.21",
+                StandardCsvExporter.ExtractIcdCodes("ZZZ12345 F10.21"));
         }
         finally
         {
