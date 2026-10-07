@@ -101,6 +101,12 @@ public sealed class CollectionSummaryViewModel
     /// </summary>
     public bool IsInHealthDtrLab => LabCollectionPrefix.IsInHealthDtr(SelectedLab);
 
+    /// <summary>
+    /// Analyze Pathology: rows arrive ranked and sorted (claim count) from the SPs, and
+    /// averages / percentages come from the SPs, so views must not re-sort or recompute them.
+    /// </summary>
+    public bool UsesSpCollectionLogic => LabCollectionPrefix.UsesSpCollectionLogic(SelectedLab);
+
     // ?? CPT vs Payment % ???????????????????????????????????????
     public List<CptPaymentPctRow> CptPaymentPct { get; set; } = [];
 
@@ -272,7 +278,8 @@ public sealed record InsuranceReimbursementRow(
     decimal SumInsurancePayment,
     decimal SumChargeAmount,
     int UniqueVisitCount,
-    decimal? PaymentPctFromSp = null)
+    decimal? PaymentPctFromSp = null,
+    decimal? TotalPaymentPctFromSp = null)
 {
     /// <summary>Reimbursement % = SUM(InsurancePayment) / SUM(ChargeAmount) × 100.</summary>
     public decimal ReimbursementPct => PaymentPctFromSp ?? (SumChargeAmount == 0
@@ -345,7 +352,9 @@ public sealed record InsurancePaymentPctRow(
     DateTime? RefreshedAt = null,
     int? BillYear = null,
     int? BillMonth = null,
-    decimal? SnapshotPaymentPct = null)
+    decimal? SnapshotPaymentPct = null,
+    bool SnapshotPctIsPoints = false,
+    decimal? TotalPaymentPctFromSp = null)
 {
     /// <summary>Payment % = SUM(InsurancePayment) / SUM(ChargeAmount) × 100 (same as Reimbursement Rate). Ignores file PaymentPercent when charges are present.</summary>
     public decimal PaymentPct
@@ -354,6 +363,8 @@ public sealed record InsurancePaymentPctRow(
         {
             if (PaidChargeAmount != 0m)
                 return Math.Round(PaidInsurancePayment / PaidChargeAmount * 100m, 2);
+            if (SnapshotPctIsPoints)
+                return SnapshotPaymentPct ?? 0m;
             var snap = SnapshotPaymentPct ?? 0m;
             if (snap == 0m) return 0m;
             return snap is > 0m and <= 1m ? Math.Round(snap * 100m, 2) : snap;
@@ -386,7 +397,13 @@ public sealed record CptPaymentPctRow(
     decimal SumServiceUnits,
     decimal PaidInsurancePayment,
     decimal PaidChargeAmount,
-    decimal? SnapshotPaymentPct = null)
+    decimal? SnapshotPaymentPct = null,
+    // Analyze Pathology Panel -> CPT hierarchy: IsPanelRow marks the panel subtotal row,
+    // CPT rows carry their panel in PanelName. SumServiceUnits holds the claim count there.
+    string? PanelName = null,
+    bool IsPanelRow = false,
+    bool SnapshotPctIsPoints = false,
+    decimal? TotalPaymentPctFromSp = null)
 {
     /// <summary>
     /// Payment % = SUM(InsurancePayment) / SUM(ChargeAmount) × 100.
@@ -399,6 +416,8 @@ public sealed record CptPaymentPctRow(
         {
             if (PaidChargeAmount != 0m)
                 return Math.Round(PaidInsurancePayment / PaidChargeAmount * 100m, 2);
+            if (SnapshotPctIsPoints)
+                return SnapshotPaymentPct ?? 0m;
             var snap = SnapshotPaymentPct ?? 0m;
             if (snap == 0m) return 0m;
             return snap is > 0m and <= 1m ? Math.Round(snap * 100m, 2) : snap;

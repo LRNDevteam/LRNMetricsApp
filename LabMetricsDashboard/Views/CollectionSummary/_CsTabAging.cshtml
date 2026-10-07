@@ -204,10 +204,21 @@
                 </div>
 
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
-                    <strong>Data:</strong> Claim Level Data (Source &times; Payer) &bull;
+                @if (Model.UsesSpCollectionLogic)
+                {
+                    <span><strong>Data:</strong> Claim Level Data &bull;
+                    <strong>Filter:</strong> TotalInsuranceBalance &gt; 0 &bull;
+                    <strong>Aging Buckets:</strong> AgingDOS (Current, 30+, 60+, 90+, 120+) &bull;
+                    <strong>Sorted by:</strong> Claim Count DESC &bull;
+                    <strong>Metric:</strong> Count of unique ClaimID, SUM(InsuranceBalance)</span>
+                }
+                else
+                {
+                    <span><strong>Data:</strong> Claim Level Data (Source &times; Payer) &bull;
                     <strong>Filter:</strong> ClaimStatus = No Response &bull;
                     <strong>Aging Buckets:</strong> Current (&lt;30 days), 30+, 60+, 90+, 120+ (based on DaysToDOS) &bull;
-                    <strong>Metric:</strong> COUNT(DISTINCT AccessionNumber), SUM(InsuranceBalance)
+                    <strong>Metric:</strong> COUNT(DISTINCT AccessionNumber), SUM(InsuranceBalance)</span>
+                }
                 </div>
 
             }

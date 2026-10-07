@@ -497,9 +497,14 @@ public class LisSummaryController : Controller
 		}
 
 		var selectedToken = NormalizeLabToken(selectedLabName);
-		return labOptions.FirstOrDefault(x => SameLab(x.LabName, selectedLabName))
-			?? labOptions.FirstOrDefault(x => NormalizeLabToken(x.LabName).Equals(selectedToken, StringComparison.OrdinalIgnoreCase))
-			?? labOptions.FirstOrDefault(x => SameLab(x.LabName, PreferredInitialLabName));
+		var match = labOptions.FirstOrDefault(x => SameLab(x.LabName, selectedLabName))
+			?? labOptions.FirstOrDefault(x => NormalizeLabToken(x.LabName).Equals(selectedToken, StringComparison.OrdinalIgnoreCase));
+		if (match is not null || !string.IsNullOrWhiteSpace(selectedLabName))
+			return match;
+
+		// A configured lab missing from dbo.LRNMetricsLab must keep its own name; falling back to
+		// another lab here would run that lab's LIS logic against this lab's database.
+		return labOptions.FirstOrDefault(x => SameLab(x.LabName, PreferredInitialLabName));
 	}
 
 	private static bool SameLab(string left, string right)

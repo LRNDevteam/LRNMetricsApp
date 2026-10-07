@@ -6,18 +6,20 @@
     // InHealth DTR client report: Row Labels | Sum of Insurance Payment.
     // Other labs keep CheckDate year/month pivot.
     var isInHealth = Model.IsInHealthDtrLab;
-    var usePayerFlat = Model.IsCoveLab || isInHealth;
+    var isSpLogic = Model.UsesSpCollectionLogic;
+    var usePayerFlat = Model.IsCoveLab || isInHealth || isSpLogic;
 
-    var flatRows = rowsData
+    var flatGroups = rowsData
         .GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
         .Select(g => new
         {
             PayerName = g.Key,
             TotalCount = g.Sum(x => x.NoOfPaidClaims),
             TotalPayment = g.Sum(x => x.InsurancePayment)
-        })
-        .OrderByDescending(r => Model.IsAugustusLab ? r.TotalCount : r.TotalPayment)
-        .ToList();
+        });
+    var flatRows = isSpLogic
+        ? flatGroups.ToList()
+        : flatGroups.OrderByDescending(r => Model.IsAugustusLab ? r.TotalCount : r.TotalPayment).ToList();
 
     var periods = rowsData
         .Where(r => r.BillYear > 1900 && r.BillMonth is >= 1 and <= 12)
@@ -90,7 +92,13 @@
     </div>
 
     <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
-        @if (isInHealth)
+        @if (isSpLogic)
+        {
+            <span><strong>Source:</strong> Claim Level Data &bull; <strong>Filter:</strong> InsurancePayment &gt; 0 &bull;
+            <strong>Rows:</strong> PayerName_Raw &bull; <strong>Sorted by:</strong> Count of ClaimID DESC &bull;
+            <strong>Values:</strong> Count of unique ClaimID, Sum of InsurancePayment.</span>
+        }
+        else if (isInHealth)
         {
             <span><strong>Source:</strong> <code>usp_GetIHD_CS_InsuranceVsPayment</code>
             — filter InsurancePayment &gt; 0, PayerName_Raw not blank &bull; Rows PayerName_Raw &bull; Sum of InsurancePayment (payer totals, no month columns).</span>

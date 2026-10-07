@@ -37,6 +37,21 @@ public sealed class ExecSummaryRow
 
     /// <summary>Grand-total value (Year=0, Month=0).</summary>
     public decimal Total => ValuesByYearMonth.TryGetValue((0, 0), out var v) ? v : 0m;
+
+    /// <summary>
+    /// Display position returned by the SP's SortOrder column. When set, the SP also
+    /// returns this row's year (Year, 0) and grand (0, 0) totals, so they are read
+    /// rather than summed from the month cells.
+    /// </summary>
+    public int? SortOrder { get; set; }
+
+    public bool HasSpTotals => SortOrder.HasValue;
+
+    /// <summary>Year total: the SP's (year, 0) value when supplied, else the sum of that year's months.</summary>
+    public decimal YearTotal(int year)
+        => HasSpTotals
+            ? (ValuesByYearMonth.TryGetValue((year, 0), out var v) ? v : 0m)
+            : ValuesByYearMonth.Where(kv => kv.Key.Year == year && kv.Key.Month != 0).Sum(kv => kv.Value);
 }
 
 /// <summary>

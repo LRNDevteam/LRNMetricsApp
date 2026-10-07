@@ -1,5 +1,57 @@
 @model LabMetricsDashboard.Models.CollectionSummaryViewModel
-            @if (Model.CptPaymentPct.Count > 0)
+            @if (Model.CptPaymentPct.Any(r => r.IsPanelRow))
+            {
+                // Panel -> CPT hierarchy from the SP (rows already sorted by claim count).
+                var hierRows = Model.CptPaymentPct;
+                var hierGrandClaims = hierRows.Where(r => r.IsPanelRow).Sum(r => r.SumServiceUnits);
+                var hierGrandPct = hierRows[0].TotalPaymentPctFromSp ?? 0m;
+                var hierMaxPct = hierRows.Max(r => r.PaymentPct);
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                <tr>
+                                    <th>Panel name / CPT Code</th>
+                                    <th>Claim Count</th>
+                                    <th>Average Payment %</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in hierRows)
+                                {
+                                    var pct = row.PaymentPct;
+                                    var barWidth = hierMaxPct == 0 ? 0m : Math.Round(pct / hierMaxPct * 100m, 1);
+                                    <tr style="@(row.IsPanelRow ? "background:#eef4fb" : "")">
+                                        <td style="text-align:left;@(row.IsPanelRow ? "font-weight:700" : "padding-left:2rem")">@row.CptCode</td>
+                                        <td style="text-align:right;@(row.IsPanelRow ? "font-weight:700" : "")">@row.SumServiceUnits.N0OrDash()</td>
+                                        <td>
+                                            <div class="reimb-bar-bg">
+                                                <div class="reimb-bar-fill" style="width:@(barWidth.ToString("F1"))%"></div>
+                                                <div class="reimb-bar-label">@pct.ToString("F2") %</div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                    <td style="text-align:right;color:#fff">@hierGrandClaims.N0OrDash()</td>
+                                    <td style="text-align:right;color:#fff">@hierGrandPct.ToString("F2") %</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> Claim Level Data &bull;
+                    <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &bull;
+                    <strong>Rows:</strong> Panel name &rarr; CPT Code &bull; <strong>Sorted by:</strong> Claim Count DESC &bull;
+                    <strong>Values:</strong> Count of unique ClaimID, Average of PaymentPercent
+                </div>
+            }
+            else if (Model.CptPaymentPct.Count > 0)
             {
                 var cptGrandUnits   = Model.CptPaymentPct.Sum(r => r.SumServiceUnits);
                 var cptGrandPaidIns = Model.CptPaymentPct.Sum(r => r.PaidInsurancePayment);

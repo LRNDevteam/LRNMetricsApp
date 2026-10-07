@@ -518,7 +518,7 @@ public static class LisSummaryExcelExportBuilder
     private static void WriteGrandTotalRow(IXLWorksheet sheet, int rowNumber, LisSummaryResult result, IReadOnlyList<MonthColumn> monthColumns, IReadOnlyList<int> years, int firstDataColumn, int lastColumn)
     {
         sheet.Cell(rowNumber, 1).Value = string.Empty;
-        sheet.Cell(rowNumber, 2).Value = "Grand Total";
+        sheet.Cell(rowNumber, 2).Value = result.GrandTotalLabel;
         if (firstDataColumn == 4)
         {
             sheet.Cell(rowNumber, 3).Value = string.Empty;

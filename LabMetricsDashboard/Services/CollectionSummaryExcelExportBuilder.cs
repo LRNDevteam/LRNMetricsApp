@@ -49,12 +49,13 @@ public static partial class CollectionSummaryExcelExportBuilder
         BuildTop5ReimbursementSheet(wb, vm.Top5Reimbursement, labName);
         if (vm.ShowTop5TotalPayments)
             BuildTop5TotalPaymentsSheet(wb, vm.Top5TotalPayments, labName);
+        if (vm.PanelAverages.Count > 0)
+            BuildPanelAveragesSheet(wb, vm.PanelAverages, labName);
         BuildInsuranceAgingSheet(wb, vm.InsuranceAging, labName);
         BuildPanelPaymentSheet(wb, vm.PanelPayments, labName);
         BuildInsurancePaymentPctSheet(wb, vm.InsurancePaymentPct, labName);
         BuildInsuranceVsPaymentSheet(wb, vm.InsuranceVsPayment, labName);
         BuildCptPaymentPctSheet(wb, vm.CptPaymentPct, labName);
-        // Panel Averages sheet intentionally omitted (hidden from UI + Excel).
         if (vm.ShowAvgPaymentsByDateBasis)
         {
             BuildAvgPaymentsSheet(wb, vm.AvgPaymentsDos, lastMonths: 6,
@@ -410,7 +411,10 @@ public static partial class CollectionSummaryExcelExportBuilder
         ws.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
 
-        string[] headers = ["Rank", "Payer Name", "Insurance Payment", "Charge Amount", "Unique Visits", "Reimbursement %"];
+        var isSpLogic = LabCollectionPrefix.UsesSpCollectionLogic(labName);
+        string[] headers = isSpLogic
+            ? ["Rank", "Payer Name", "Insurance Payment", "Charge Amount", "Claim Count", "Average Payment %"]
+            : ["Rank", "Payer Name", "Insurance Payment", "Charge Amount", "Unique Visits", "Reimbursement %"];
         int colCount = headers.Length;
 
         int row = 1;
@@ -432,6 +436,16 @@ public static partial class CollectionSummaryExcelExportBuilder
             row++;
         }
 
+        if (isSpLogic && rows.Count > 0)
+        {
+            WriteCell(ws, row, 1, "", ColTotal, isText: true);
+            WriteCell(ws, row, 2, "Grand Total", ColTotal, isText: true, bold: true);
+            WriteCell(ws, row, 3, rows.Sum(r => r.SumInsurancePayment), ColTotal, isCurrency: true, bold: true);
+            WriteCell(ws, row, 4, rows.Sum(r => r.SumChargeAmount), ColTotal, isCurrency: true, bold: true);
+            WriteCell(ws, row, 5, rows.Sum(r => r.UniqueVisitCount), ColTotal, bold: true);
+            WriteCell(ws, row, 6, rows[0].TotalPaymentPctFromSp ?? 0m, ColTotal, isPct: true, bold: true);
+        }
+
         AutoFitColumns(ws);
         ws.SheetView.FreezeRows(3);
     }
@@ -444,7 +458,9 @@ public static partial class CollectionSummaryExcelExportBuilder
         ws.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
 
-        string[] headers = ["Rank", "Payer Name", "Total Payments", "Unique Visits"];
+        string[] headers = LabCollectionPrefix.UsesSpCollectionLogic(labName)
+            ? ["Rank", "Payer Name", "Total Payments", "Claim Count"]
+            : ["Rank", "Payer Name", "Total Payments", "Unique Visits"];
         int colCount = headers.Length;
 
         int row = 1;
@@ -474,7 +490,8 @@ public static partial class CollectionSummaryExcelExportBuilder
     {
         if (TryBuildInsuranceAgingPivot(wb, rows, labName)) return;
 
-        var ws = wb.AddWorksheet("No Response Vs Aging");
+        var agingTitle = LabCollectionPrefix.UsesSpCollectionLogic(labName) ? "Insurance Vs Aging" : "No Response Vs Aging";
+        var ws = wb.AddWorksheet(agingTitle);
         ws.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
 
@@ -498,7 +515,7 @@ public static partial class CollectionSummaryExcelExportBuilder
         int colCount = headers.Length;
 
         int row = 1;
-        ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, $"No Response Vs Aging \u2014 {labName}");
+        ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, $"{agingTitle} \u2014 {labName}");
         row++;
         ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ColHeader);
         row++;
@@ -686,8 +703,9 @@ public static partial class CollectionSummaryExcelExportBuilder
                 TotalClaims = g.Sum(x => x.NoOfClaims),
                 TotalPay = g.Sum(x => x.InsurancePayments),
             })
-            .OrderByDescending(r => r.TotalPay)
             .ToList();
+        if (!LabCollectionPrefix.UsesSpCollectionLogic(labName))
+            pivotRows = pivotRows.OrderByDescending(r => r.TotalPay).ToList();
 
         const int metrics = 2;
         int colCount = 1 + periods.Count * metrics + years.Count * metrics + metrics;
@@ -791,7 +809,8 @@ public static partial class CollectionSummaryExcelExportBuilder
         ws.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
 
-        var isInHealth = LabCollectionPrefix.IsInHealthDtr(labName);
+        var isInHealth = LabCollectionPrefix.IsInHealthDtr(labName)
+            || LabCollectionPrefix.UsesSpCollectionLogic(labName);
         string[] headers = isInHealth
             ? ["Row Labels", "Count of ClaimID", "Sum of InsurancePayment", "Average of PaymentPercent"]
             : ["Payer Name", "Total Claims", "Insurance Payments", "Payment %"];
@@ -817,8 +836,9 @@ public static partial class CollectionSummaryExcelExportBuilder
         if (isInHealth && rows.Count > 0)
         {
             var totalClaims = rows.Sum(r => r.TotalClaims);
-            var avgPct = totalClaims == 0 ? 0m
-                : Math.Round(rows.Sum(r => r.PaymentPct * r.TotalClaims) / totalClaims, 2);
+            var avgPct = rows[0].TotalPaymentPctFromSp
+                ?? (totalClaims == 0 ? 0m
+                    : Math.Round(rows.Sum(r => r.PaymentPct * r.TotalClaims) / totalClaims, 2));
             WriteCell(ws, row, 1, "Grand Total", ColTotal, isText: true, bold: true);
             WriteCell(ws, row, 2, totalClaims, ColTotal, bold: true);
             WriteCell(ws, row, 3, rows.Sum(r => r.InsurancePayments), ColTotal, isCurrency: true, bold: true);
@@ -838,6 +858,12 @@ public static partial class CollectionSummaryExcelExportBuilder
         var ws = wb.AddWorksheet("CPT vs Payment %");
         ws.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
+
+        if (rows.Any(r => r.IsPanelRow))
+        {
+            WriteCptPanelHierarchy(ws, rows, labName);
+            return;
+        }
 
         string[] headers = LabCollectionPrefix.IsInHealthDtr(labName)
             ? ["CPT Code", "Count of ClaimID", "Average of PaymentPercent"]
@@ -873,28 +899,86 @@ public static partial class CollectionSummaryExcelExportBuilder
         ws.SheetView.FreezeRows(3);
     }
 
+    /// <summary>Panel -> CPT rows in SP order; each panel is a collapsible group over its CPT codes.</summary>
+    private static void WriteCptPanelHierarchy(IXLWorksheet ws, List<CptPaymentPctRow> rows, string labName)
+    {
+        string[] headers = ["Panel name / CPT Code", "Claim Count", "Average Payment %"];
+        int row = 1;
+        ExcelTheme.Collection.WriteTitleBar(ws, row, headers.Length, $"CPT vs Payment % \u2014 {labName}");
+        row++;
+        ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ColHeader);
+        row++;
+
+        ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
+        int firstChild = -1;
+        void CloseGroup(int lastRow)
+        {
+            if (firstChild > 0 && lastRow >= firstChild)
+                ws.Rows(firstChild, lastRow).Group();
+            firstChild = -1;
+        }
+
+        foreach (var r in rows)
+        {
+            if (r.IsPanelRow)
+            {
+                CloseGroup(row - 1);
+                WriteCell(ws, row, 1, r.CptCode, XLColor.White, isText: true, bold: true);
+                WriteCell(ws, row, 2, (int)r.SumServiceUnits, XLColor.White, bold: true);
+                WriteCell(ws, row, 3, r.PaymentPct, XLColor.White, isPct: true, bold: true);
+                firstChild = row + 1;
+            }
+            else
+            {
+                WriteCell(ws, row, 1, $"  {r.CptCode}", ColChild, isText: true);
+                WriteCell(ws, row, 2, (int)r.SumServiceUnits, ColChild);
+                WriteCell(ws, row, 3, r.PaymentPct, ColChild, isPct: true);
+            }
+            row++;
+        }
+        CloseGroup(row - 1);
+
+        WriteCell(ws, row, 1, "Grand Total", ColTotal, isText: true, bold: true);
+        WriteCell(ws, row, 2, (int)rows.Where(r => r.IsPanelRow).Sum(r => r.SumServiceUnits), ColTotal, bold: true);
+        WriteCell(ws, row, 3, rows[0].TotalPaymentPctFromSp ?? 0m, ColTotal, isPct: true, bold: true);
+
+        AutoFitColumns(ws);
+        ws.SheetView.FreezeRows(3);
+    }
+
     // ?? Panel Averages ??????????????????????????????????????????????
 
     private static void BuildPanelAveragesSheet(XLWorkbook wb, List<PanelAveragesRow> rows, string labName)
     {
-        var ws = wb.AddWorksheet("Panel Averages");
+        var spLogic = LabCollectionPrefix.UsesSpCollectionLogic(labName);
+        var ws = wb.AddWorksheet(spLogic ? "Panel Average" : "Panel Averages");
         ws.TabColor = ExcelTheme.Collection.TabPeach;
         ExcelTheme.ApplyDefaults(ws);
 
-        string[] headers =
-        [
-            "Panel / Payer", "Claims", "Total Charges", "Avg Billed",
-            "Carrier Payment", "Avg Carrier Payment",
-            "Fully Paid #", "Fully Paid Amt", "Avg Fully Paid",
-            "Adjudicated #", "Adjudicated Amt", "Avg Adjudicated",
-            "30-Day #", "30-Day Amt", "Avg 30-Day",
-            "60-Day #", "60-Day Amt", "Avg 60-Day"
-        ];
+        string[] headers = spLogic
+            ?
+            [
+                "Description", "No of Claims", "Total Billed Amount", "Average Billed Amount",
+                "No of Paid Claims", "Fully Paid Amount", "Average Fully Paid Amount",
+                "No of Adjudicated Claims", "Total Payments (Fully Paid + Partial Paid)", "Average Adjudicated Amount",
+                "No of Claims > 30", "All Payments - Above > 30", "Average Amount - Above > 30",
+                "No of Claims > 60", "All Payments - Above > 60", "Average Amount - Above > 60"
+            ]
+            :
+            [
+                "Panel / Payer", "Claims", "Total Charges", "Avg Billed",
+                "Carrier Payment", "Avg Carrier Payment",
+                "Fully Paid #", "Fully Paid Amt", "Avg Fully Paid",
+                "Adjudicated #", "Adjudicated Amt", "Avg Adjudicated",
+                "30-Day #", "30-Day Amt", "Avg 30-Day",
+                "60-Day #", "60-Day Amt", "Avg 60-Day"
+            ];
         int colCount = headers.Length;
 
         int row = 1;
-        ExcelTheme.Collection.WriteTitleBar(ws, row, colCount,
-            $"Panel Averages \u2014 Last 6 Months | Deposit / Posted Date \u2014 {labName}");
+        ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, spLogic
+            ? $"Panel Average \u2014 Bill Status: Billed, Billed - Self Pay | Top 3 insurance by claim count \u2014 {labName}"
+            : $"Panel Averages \u2014 Last 6 Months | Deposit / Posted Date \u2014 {labName}");
         row++;
         ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ColHeader);
         row++;
@@ -904,13 +988,13 @@ public static partial class CollectionSummaryExcelExportBuilder
 
         foreach (var panel in rows)
         {
-            WritePanelAveragesMetricsRow(ws, row, panel.PanelName, panel.Metrics, XLColor.White, bold: true);
+            WritePanelAveragesMetricsRow(ws, row, panel.PanelName, panel.Metrics, XLColor.White, bold: true, !spLogic);
             row++;
 
             int firstChild = row;
             foreach (var payer in panel.Payers)
             {
-                WritePanelAveragesMetricsRow(ws, row, $"  {payer.PayerName}", payer.Metrics, ColChild, bold: false);
+                WritePanelAveragesMetricsRow(ws, row, $"  {payer.PayerName}", payer.Metrics, ColChild, bold: false, !spLogic);
                 row++;
             }
             if (row > firstChild)
@@ -925,15 +1009,19 @@ public static partial class CollectionSummaryExcelExportBuilder
     }
 
     private static void WritePanelAveragesMetricsRow(
-        IXLWorksheet ws, int row, string label, PanelAveragesMetrics m, XLColor bg, bool bold)
+        IXLWorksheet ws, int row, string label, PanelAveragesMetrics m, XLColor bg, bool bold,
+        bool includeCarrierPayment = true)
     {
         int col = 1;
         WriteCell(ws, row, col++, label, bg, isText: true, bold: bold);
         WriteCell(ws, row, col++, m.ClaimCount, bg);
         WriteCell(ws, row, col++, m.TotalCharges, bg, isCurrency: true);
         WriteCell(ws, row, col++, m.AvgBilled, bg, isCurrency: true);
-        WriteCell(ws, row, col++, m.CarrierPayment, bg, isCurrency: true);
-        WriteCell(ws, row, col++, m.AvgCarrierPayment, bg, isCurrency: true);
+        if (includeCarrierPayment)
+        {
+            WriteCell(ws, row, col++, m.CarrierPayment, bg, isCurrency: true);
+            WriteCell(ws, row, col++, m.AvgCarrierPayment, bg, isCurrency: true);
+        }
         WriteCell(ws, row, col++, m.FullyPaidCount, bg);
         WriteCell(ws, row, col++, m.FullyPaidAmount, bg, isCurrency: true);
         WriteCell(ws, row, col++, m.AvgFullyPaid, bg, isCurrency: true);

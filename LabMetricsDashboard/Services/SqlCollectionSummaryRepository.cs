@@ -160,7 +160,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(prefix, "Cert", StringComparison.OrdinalIgnoreCase);
+        string.Equals(prefix, "Cert", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "AnP", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Labs whose live/filter Top5 Payments path prefers
@@ -172,7 +173,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase);
+        string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "AnP", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Augustus Collection Report client fixes live in *_v2 SPs so LIVE usp_GetAug_CS_* stay.
@@ -390,6 +392,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         // either SP variant without requiring a redeploy.
         int? adjCountOrd  = null;
         int? adjAmountOrd = null;
+        // SPs that return SortOrder also return their own averages and row order.
+        var spOrdered = HasColumn(r, "SortOrder");
         if (await r.ReadAsync(ct))
         {
             adjCountOrd  = TryGetOrdinal(r, "AdjudicatedCount")
@@ -416,13 +420,23 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                     Days30Count:       GetInt32OrDefault(r, "Days30Count"),
                     Days30Amount:      GetDecimalOrDefault(r, "Days30Amount"),
                     Days60Count:       GetInt32OrDefault(r, "Days60Count"),
-                    Days60Amount:      GetDecimalOrDefault(r, "Days60Amount")));
+                    Days60Amount:      GetDecimalOrDefault(r, "Days60Amount"))
+                {
+                    SpAverages = spOrdered
+                        ? new PanelAveragesSpAverages(
+                            GetDecimalOrNull(r, "AvgBilled"),
+                            GetDecimalOrNull(r, "AvgFullyPaid"),
+                            GetDecimalOrNull(r, "AvgAdjudicated"),
+                            GetDecimalOrNull(r, "AvgDays30"),
+                            GetDecimalOrNull(r, "AvgDays60"))
+                        : null
+                });
             }
             while (await r.ReadAsync(ct));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rawRows.Count, sw.ElapsedMilliseconds);
         // Panel totals prefer blank-PayerName rows from SP; drill-down shows Top 3 only.
-        return BuildPanelAveragesResult(rawRows, topPayersForDrilldown: 3);
+        return BuildPanelAveragesResult(rawRows, topPayersForDrilldown: 3, keepSourceOrder: spOrdered);
     }
 
     /// <summary>
@@ -582,6 +596,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         var firstRow = true;
         int cntOrdinal = -1;
         var hasSource = false;
+        var hasSpSortOrder = false;
+        var payerOrder = new List<string>();
 
         static string NormalizeAgingBucket(string bucket) => bucket.Trim() switch
         {
@@ -611,6 +627,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                            : throw new InvalidOperationException(
                                $"SP '{spName}' result set has neither 'VisitCount' nor 'Cnt' column.");
                 hasSource  = HasColumn(r, "Source");
+                hasSpSortOrder = HasColumn(r, "SortOrder");
             }
 
             var payer  = GetStringOrEmpty(r, "PayerName");
@@ -621,7 +638,10 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             var bal    = GetDecimalOrDefault(r, "InsuranceBalance");
             var key    = $"{source}\u0001{payer}";
             if (!perPayer.TryGetValue(key, out var entry))
+            {
                 perPayer[key] = entry = (source, payer, new Dictionary<string, (int, decimal)>(StringComparer.OrdinalIgnoreCase));
+                payerOrder.Add(key);
+            }
             entry.Buckets[bucket] = (cnt, bal);
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: payers={N}, {Ms}ms", spName, perPayer.Count, sw.ElapsedMilliseconds);
@@ -629,7 +649,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         static (int c, decimal b) Get(Dictionary<string, (int, decimal)> d, string key)
             => d.TryGetValue(key, out var v) ? v : (0, 0m);
 
-        var rows = perPayer.Values.Select(entry =>
+        var rows = payerOrder.Select(key => perPayer[key]).Select(entry =>
         {
             var (cur,  bCur)  = Get(entry.Buckets, "Current");
             var (b30,  x30)   = Get(entry.Buckets, "30 Days");
@@ -646,10 +666,14 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 ClaimsTotal: cur + b30 + b60 + b90 + b120,
                 BalanceTotal: bCur + x30 + x60 + x90 + x120,
                 Source: entry.Source);
-        })
-        .OrderBy(row => row.Source, StringComparer.OrdinalIgnoreCase)
-        .ThenByDescending(row => row.BalanceTotal)
-        .ToList();
+        }).ToList();
+
+        // SPs that return SortOrder own the payer order (e.g. Analyze Pathology: claim count).
+        if (!hasSpSortOrder)
+            rows = rows
+                .OrderBy(row => row.Source, StringComparer.OrdinalIgnoreCase)
+                .ThenByDescending(row => row.BalanceTotal)
+                .ToList();
 
         return new InsuranceAgingResult(rows);
     }
@@ -767,8 +791,11 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             var insPayOrd = r.GetOrdinal("InsurancePayment");
             var insPay    = r.IsDBNull(insPayOrd) ? 0m : Convert.ToDecimal(r.GetValue(insPayOrd));
 
+            // AvgPaymentPct (Analyze Pathology) is already in percent points.
+            var avgPctPoints = GetDecimalOrNull(r, "AvgPaymentPct");
             var pctOrd = HasColumn(r, "PaymentPct") ? r.GetOrdinal("PaymentPct") : -1;
-            var pct    = pctOrd >= 0 && !r.IsDBNull(pctOrd) ? Convert.ToDecimal(r.GetValue(pctOrd)) : 0m;
+            var pct    = avgPctPoints
+                ?? (pctOrd >= 0 && !r.IsDBNull(pctOrd) ? Convert.ToDecimal(r.GetValue(pctOrd)) : 0m);
 
             var paidChg = GetDecimalOrNull(r, "PaidChargeAmount")
                 ?? GetDecimalOrNull(r, "ChargeAmount")
@@ -817,7 +844,9 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 RefreshedAt:          null,
                 BillYear:             billYear,
                 BillMonth:            billMonth,
-                SnapshotPaymentPct:   paidChg != 0m ? null : pct));
+                SnapshotPaymentPct:   paidChg != 0m ? null : pct,
+                SnapshotPctIsPoints:  avgPctPoints.HasValue,
+                TotalPaymentPctFromSp: GetDecimalOrNull(r, "TotalPaymentPct")));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
         return new InsurancePaymentPctResult(rows);
@@ -853,6 +882,28 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         // stores 0 for PaidInsurancePayment/PaidChargeAmount.
         int paymentPctOrdinal = -1;
         try { paymentPctOrdinal = r.GetOrdinal("PaymentPct"); } catch { /* column absent in older SPs */ }
+
+        // Panel -> CPT hierarchy (Analyze Pathology): RowType P/C, claim counts, Average(PaymentPercent).
+        if (HasColumn(r, "RowType"))
+        {
+            while (await r.ReadAsync(ct))
+            {
+                var isPanel = string.Equals(GetStringOrEmpty(r, "RowType"), "P", StringComparison.OrdinalIgnoreCase);
+                var panel = GetStringOrEmpty(r, "PanelName");
+                rows.Add(new CptPaymentPctRow(
+                    CptCode:              isPanel ? panel : GetStringOrEmpty(r, "CPTCode"),
+                    SumServiceUnits:      GetInt32OrDefault(r, "NoOfClaims"),
+                    PaidInsurancePayment: 0m,
+                    PaidChargeAmount:     0m,
+                    SnapshotPaymentPct:   GetDecimalOrNull(r, "AvgPaymentPct") ?? 0m,
+                    PanelName:            panel,
+                    IsPanelRow:           isPanel,
+                    SnapshotPctIsPoints:  true,
+                    TotalPaymentPctFromSp: GetDecimalOrNull(r, "TotalPaymentPct")));
+            }
+            _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
+            return new CptPaymentPctResult(rows);
+        }
 
         while (await r.ReadAsync(ct))
         {
@@ -1661,7 +1712,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 SumInsurancePayment: GetDecimalOrDefault(r, "SumInsurancePayment"),
                 SumChargeAmount:     GetDecimalOrDefault(r, "SumChargeAmount"),
                 UniqueVisitCount:    GetInt32OrDefault(r, "UniqueVisitCount"),
-                PaymentPctFromSp:    paymentPctFromSp));
+                PaymentPctFromSp:    paymentPctFromSp,
+                TotalPaymentPctFromSp: GetDecimalOrNull(r, "TotalPaymentPct")));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
 
@@ -2583,11 +2635,18 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         int FullyPaidCount, decimal FullyPaidAmount,
         int AdjudicatedCount, decimal AdjudicatedAmount,
         int Days30Count, decimal Days30Amount,
-        int Days60Count, decimal Days60Amount);
+        int Days60Count, decimal Days60Amount)
+    {
+        public PanelAveragesSpAverages? SpAverages { get; init; }
+    }
+
+    private sealed record PanelAveragesSpAverages(
+        decimal? Billed, decimal? FullyPaid, decimal? Adjudicated, decimal? Days30, decimal? Days60);
 
     private static PanelAveragesResult BuildPanelAveragesResult(
         List<PanelAveragesRawRow> rawRows,
-        int? topPayersForDrilldown = null)
+        int? topPayersForDrilldown = null,
+        bool keepSourceOrder = false)
     {
         if (rawRows.Count == 0)
             return new PanelAveragesResult([]);
@@ -2604,7 +2663,14 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 r.FullyPaidCount, r.FullyPaidAmount,
                 r.AdjudicatedCount, r.AdjudicatedAmount,
                 r.Days30Count, r.Days30Amount,
-                r.Days60Count, r.Days60Amount);
+                r.Days60Count, r.Days60Amount)
+            {
+                SpAvgBilled      = r.SpAverages?.Billed,
+                SpAvgFullyPaid   = r.SpAverages?.FullyPaid,
+                SpAvgAdjudicated = r.SpAverages?.Adjudicated,
+                SpAvgDays30      = r.SpAverages?.Days30,
+                SpAvgDays60      = r.SpAverages?.Days60,
+            };
 
         static PanelAveragesMetrics Aggregate(IEnumerable<PanelAveragesRawRow> rows)
         {
@@ -2635,13 +2701,17 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         foreach (var pg in panelGroups)
         {
             var totalRows = pg.Where(IsPanelTotalRow).ToList();
-            var payerRowsRaw = pg.Where(r => !IsPanelTotalRow(r))
-                .OrderByDescending(r => r.ClaimCount)
-                .ToList();
+            var payerRowsRaw = keepSourceOrder
+                ? pg.Where(r => !IsPanelTotalRow(r)).ToList()
+                : pg.Where(r => !IsPanelTotalRow(r))
+                    .OrderByDescending(r => r.ClaimCount)
+                    .ToList();
 
-            var metrics = totalRows.Count > 0
-                ? Aggregate(totalRows)
-                : Aggregate(payerRowsRaw);
+            var metrics = totalRows.Count == 1
+                ? ToMetrics(totalRows[0])
+                : totalRows.Count > 0
+                    ? Aggregate(totalRows)
+                    : Aggregate(payerRowsRaw);
 
             var drillRows = topPayersForDrilldown is > 0
                 ? payerRowsRaw.Take(topPayersForDrilldown.Value)
@@ -2663,7 +2733,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             });
         }
 
-        panelRows.Sort((a, b) => b.Metrics.ClaimCount.CompareTo(a.Metrics.ClaimCount));
+        if (!keepSourceOrder)
+            panelRows.Sort((a, b) => b.Metrics.ClaimCount.CompareTo(a.Metrics.ClaimCount));
 
         return new PanelAveragesResult(panelRows);
     }
