@@ -45,7 +45,8 @@ public sealed class DenialWorkflowController : Controller
     {
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
 
-        Response.Cookies.Delete("LRN.Auth", new CookieOptions { Path = "/" });
+        var authCookie = _configuration["Authentication:CookieName"];
+        Response.Cookies.Delete(string.IsNullOrWhiteSpace(authCookie) ? "LRN.Auth" : authCookie.Trim(), new CookieOptions { Path = "/" });
         Response.Cookies.Delete("lmd_selected_lab", new CookieOptions { Path = "/" });
 
         return RedirectToAction("Login", "Account");

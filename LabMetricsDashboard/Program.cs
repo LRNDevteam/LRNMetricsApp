@@ -424,10 +424,15 @@ else
     LogStartupWarning($"DataProtection keys path: {dpKeysDir.FullName}");
 }
 
+// Each environment on the same server must have its OWN key ring and application name; otherwise
+// a cookie issued by one deployment (e.g. Test) decrypts in another (Production) and the user is
+// signed in to both. Set DataProtection:KeysPath and DataProtection:ApplicationName per deployment.
+var dataProtectionAppName = ConfigText(builder.Configuration, "DataProtection:ApplicationName", "LRNMetricsDashboard");
 builder.Services
     .AddDataProtection()
     .PersistKeysToFileSystem(dpKeysDir)
-    .SetApplicationName("LRNMetricsDashboard");
+    .SetApplicationName(dataProtectionAppName);
+LogStartupWarning($"DataProtection application name: {dataProtectionAppName}");
 
 builder.Services.AddAntiforgery(options =>
 {
@@ -446,7 +451,7 @@ builder.Services.AddAntiforgery(options =>
     //	options.Cookie.HttpOnly = true;
     //>>>>>>> 23cf9fdcfbffecee7d6826a98b7baa4821a4bc13
 
-    options.Cookie.Name = "LRN.Antiforgery";
+    options.Cookie.Name = ConfigText(builder.Configuration, "Antiforgery:CookieName", "LRN.Antiforgery");
     // Lax works for same-site forms on local IIS (http://localhost/LRNMetrics) and
     // HTTPS production. SameSite=None requires a Secure cookie and breaks plain HTTP.
     options.Cookie.SameSite = SameSiteMode.Lax;
@@ -781,7 +786,10 @@ builder.Services
         options.AccessDeniedPath = "/Account/AccessDenied";
         options.ExpireTimeSpan = TimeSpan.FromHours(8);
         options.SlidingExpiration = true;
-        options.Cookie.Name = "LRN.Auth";
+        // Per deployment (Authentication:CookieName): Test and Production share the host and path "/",
+        // so the same name lets one site's login cookie ride along to the other. Keep the "LRN."
+        // prefix - the stale-cookie recovery below clears cookies by that prefix.
+        options.Cookie.Name = ConfigText(builder.Configuration, "Authentication:CookieName", "LRN.Auth");
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = useWorkflowCrossOriginCookie ? SameSiteMode.None : SameSiteMode.Lax;
         options.Cookie.Path = "/";
@@ -1081,6 +1089,13 @@ static async Task ApplySecurityHeadersMiddleware(HttpContext context, Func<Task>
     context.Items["CspNonce"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
     ApplySecurityHeaders(context);
     await next();
+}
+
+/// <summary>A configuration value, or the fallback when it is absent or blank.</summary>
+static string ConfigText(IConfiguration configuration, string key, string fallback)
+{
+    var value = configuration[key]?.Trim();
+    return string.IsNullOrEmpty(value) ? fallback : value;
 }
 
 /// <summary>
