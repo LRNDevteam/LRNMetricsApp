@@ -195,3 +195,13 @@ BEGIN
     PRINT 'Added Status.';
 END
 GO
+
+/* "$ Impact (%)" as imported text (see Alter_DenialClaimLevelInsight_ImpactText.sql). */
+IF OBJECT_ID('dbo.DenialClaimLevelInsight', 'U') IS NOT NULL
+   AND COL_LENGTH('dbo.DenialClaimLevelInsight', 'ImpactPercentageText') IS NULL
+BEGIN
+    ALTER TABLE dbo.DenialClaimLevelInsight
+        ADD ImpactPercentageText NVARCHAR(100) NULL;
+    PRINT 'Added ImpactPercentageText.';
+END
+GO

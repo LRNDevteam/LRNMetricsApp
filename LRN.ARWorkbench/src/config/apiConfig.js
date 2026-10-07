@@ -16,7 +16,9 @@ const isProdHost =
 
 // Order: the deployment's config.js (public/config.js, editable after deploy) > the build's .env >
 // host-based defaults. config.js is what lets one build serve Test and Production.
-const runtime = window.LRN_AR_WORKBENCH_CONFIG || {};
+// Under `npm run dev` config.js is ignored: Vite serves public/config.js too, and its deployed-server
+// URLs would send a local run to that server's login and API instead of .env.development's.
+const runtime = import.meta.env.DEV ? {} : (window.LRN_AR_WORKBENCH_CONFIG || {});
 
 // LabMetricsDashboard (MVC) owns login and issues the workflow JWT, exactly as for LRN.WebUI.
 function resolveMetricsBase() {

@@ -115,8 +115,8 @@ public static class DenialInsightTemplate
         ws.Cell(row, ColPayer).Value = r.PayerName;
         ws.Cell(row, ColInsuranceNoOfDenials).Value = r.InsuranceNoOfDenials;
         ws.Cell(row, ColInsuranceBalance).Value = r.InsuranceBalance;
-        // Stored as 57 for 57%; written as a percent-formatted 0.57, which the import reads back as 57.
-        ws.Cell(row, ColImpactPercentage).Value = r.ImpactPercentage / 100m;
+        // Written back as the same text it was imported as ("57%"), so the round trip is exact.
+        ws.Cell(row, ColImpactPercentage).Value = r.ImpactPercentage;
         ws.Cell(row, ColObservation).Value = DenialInsightRichText.ToPlainText(r.ObservationHtml);
         ws.Cell(row, ColData).Value = r.Data;
         ws.Cell(row, ColCategory).Value = r.ActionCategory;
@@ -132,7 +132,7 @@ public static class DenialInsightTemplate
         ws.Cell(row, ColInsuranceNoOfDenials).Style.NumberFormat.SetFormat(Whole);
         ws.Cell(row, ColTotalBalance).Style.NumberFormat.SetFormat(Money);
         ws.Cell(row, ColInsuranceBalance).Style.NumberFormat.SetFormat(Money);
-        ws.Cell(row, ColImpactPercentage).Style.NumberFormat.SetFormat("0.##%");
+        ws.Cell(row, ColImpactPercentage).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
         ws.Range(row, ColDiscussionDate, row, ColClosedDate).Style.NumberFormat.SetFormat(DateFormat);
 
         var cells = ws.Range(row, 1, row, LastColumn);

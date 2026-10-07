@@ -35,6 +35,40 @@ export function BarList({ items, empty = 'No data in the current scope.', wide =
   );
 }
 
+/**
+ * The mockup's App.charts.comparisonBars: one split bar per row, a (recovered, good) then
+ * b (outstanding, warning), scaled to the largest a + b. items: [{ label, a, b, display, title, onClick }].
+ */
+export function ComparisonBars({ items, aLabel = 'Recovered', bLabel = 'Outstanding', empty = 'No data in the current scope.' }) {
+  if (!items.length) return <div className="arwb-hint py-2">{empty}</div>;
+  const max = Math.max(1, ...items.map((i) => Math.max(0, i.a) + Math.max(0, i.b)));
+  return (
+    <>
+      <div className="arwb-legend-row arwb-legend-top">
+        <span><span className="arwb-legend-sw" style={{ background: 'var(--good)' }} />{aLabel}</span>
+        <span><span className="arwb-legend-sw" style={{ background: 'var(--warning)' }} />{bLabel}</span>
+      </div>
+      <div className="arwb-bar-list">
+        {items.map((i) => {
+          const body = (
+            <>
+              <span className="arwb-br-label">{i.label}</span>
+              <span className="arwb-br-track arwb-br-track-split">
+                <span className="arwb-br-seg" style={{ width: `${(Math.max(0, i.a) / max) * 100}%`, background: 'var(--good)' }} />
+                <span className="arwb-br-seg" style={{ width: `${(Math.max(0, i.b) / max) * 100}%`, background: 'var(--warning)' }} />
+              </span>
+              <span className="arwb-br-val">{i.display}</span>
+            </>
+          );
+          return i.onClick
+            ? <button key={i.label} type="button" className="arwb-bar-row arwb-bar-row-btn" title={i.title} onClick={i.onClick}>{body}</button>
+            : <div key={i.label} className="arwb-bar-row" title={i.title}>{body}</div>;
+        })}
+      </div>
+    </>
+  );
+}
+
 /** Donut via SVG stroke-dasharray. segments: [{ label, value, color, display }]. */
 export function Donut({ segments, centerLabel, centerSub }) {
   const total = segments.reduce((s, x) => s + Math.max(0, x.value), 0) || 1;

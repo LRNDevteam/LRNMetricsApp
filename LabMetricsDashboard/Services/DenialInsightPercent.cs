@@ -25,4 +25,24 @@ public static class DenialInsightPercent
     /// </remarks>
     public static decimal Normalize(decimal value) =>
         value > 0m && value <= 1m ? value * 100m : value;
+
+    /// <summary>
+    /// The "$ Impact (%)" text to show: the workbook's own text, unless it is a number outside 0-100%.
+    /// </summary>
+    /// <remarks>
+    /// The column is the payer's insurance balance as a share of the code's total balance, so it can
+    /// never exceed 100%. A larger figure means the workbook cell computed something else - a client
+    /// sheet whose "Previously Discussed" formula divided Ins. Balance by # of Denials showed 41380.76%
+    /// - and is replaced by Ins. Balance / Total Balance. Text that is not a number ("-", "N/A") and
+    /// in-range values stay exactly as the workbook displayed them.
+    /// </remarks>
+    public static string DisplayText(string? text, decimal insuranceBalance, decimal totalBalance)
+    {
+        var shown = (text ?? string.Empty).Trim();
+        var raw = shown.Replace("%", string.Empty).Replace(",", string.Empty).Trim();
+        if (!decimal.TryParse(raw, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var value)) return shown;
+        if (value is >= 0m and <= 100m) return shown;
+        if (totalBalance <= 0m || insuranceBalance < 0m || insuranceBalance > totalBalance) return shown;
+        return (decimal.Round(insuranceBalance / totalBalance * 100m, 2)).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "%";
+    }
 }

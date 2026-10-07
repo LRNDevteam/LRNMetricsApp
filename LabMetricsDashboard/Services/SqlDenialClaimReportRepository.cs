@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using LabMetricsDashboard.Models;
 using Microsoft.Data.SqlClient;
 
@@ -736,9 +737,9 @@ SELECT CASE WHEN EXISTS (
 
         var sql = $@"
 SELECT Id, Bucket, WeekStart, SortOrder, DenialCode, DenialDescription, PayerName, NoOfDenials,
-       TotalBalance, InsuranceNoOfDenials, InsuranceBalance, ImpactPercentage, Observation, Data,
-       ActionCategory, Action, FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate,
-       Status, UpdatedOn, UpdatedBy
+       TotalBalance, InsuranceNoOfDenials, InsuranceBalance, ImpactPercentage, ImpactPercentageText,
+       Observation, Data, ActionCategory, Action, FeedbackResponse, Responsibility, DiscussionDate,
+       ETA, ClosedDate, Status, UpdatedOn, UpdatedBy
 FROM {InsightTable}
 WHERE Bucket = @Bucket
 -- Newest week first, then the client's own ranking within the week. Previous Week draws a
@@ -767,9 +768,9 @@ ORDER BY WeekStart DESC, SortOrder, InsuranceBalance DESC, DenialCode;";
                 TotalBalance = GetDecimalOrZero(reader, "TotalBalance"),
                 InsuranceNoOfDenials = GetIntOrZero(reader, "InsuranceNoOfDenials"),
                 InsuranceBalance = GetDecimalOrZero(reader, "InsuranceBalance"),
-                // Normalized on read as well as on import, so rows stored as a fraction by an
-                // earlier import show as 57% without anyone re-uploading. Idempotent - 57 stays 57.
-                ImpactPercentage = DenialInsightPercent.Normalize(GetDecimalOrZero(reader, "ImpactPercentage")),
+                // On read, so rows already imported (and copied to Previous Week) show the right figure.
+                ImpactPercentage = DenialInsightPercent.DisplayText(ImpactText(reader),
+                    GetDecimalOrZero(reader, "InsuranceBalance"), GetDecimalOrZero(reader, "TotalBalance")),
                 // Sanitized again on read: a row written directly in SQL must not reach a browser raw.
                 ObservationHtml = DenialInsightRichText.Sanitize(Text(reader, "Observation")),
                 Data = Text(reader, "Data"),
@@ -834,7 +835,7 @@ BEGIN
     SET SortOrder = @SortOrder, DenialCode = @DenialCode, DenialDescription = @DenialDescription,
         PayerName = @PayerName, NoOfDenials = @NoOfDenials, TotalBalance = @TotalBalance,
         InsuranceNoOfDenials = @InsuranceNoOfDenials,
-        InsuranceBalance = @InsuranceBalance, ImpactPercentage = @ImpactPercentage,
+        InsuranceBalance = @InsuranceBalance, ImpactPercentageText = @ImpactPercentageText,
         Observation = @Observation, Data = @Data, ActionCategory = @ActionCategory, Action = @Action,
         FeedbackResponse = @FeedbackResponse, Responsibility = @Responsibility,
         DiscussionDate = @DiscussionDate, ETA = @Eta, ClosedDate = @ClosedDate, Status = @Status,
@@ -849,7 +850,7 @@ BEGIN
     SET SortOrder = @SortOrder, DenialDescription = @DenialDescription,
         NoOfDenials = @NoOfDenials, TotalBalance = @TotalBalance,
         InsuranceNoOfDenials = @InsuranceNoOfDenials,
-        InsuranceBalance = @InsuranceBalance, ImpactPercentage = @ImpactPercentage,
+        InsuranceBalance = @InsuranceBalance, ImpactPercentageText = @ImpactPercentageText,
         Observation = @Observation, Data = @Data, ActionCategory = @ActionCategory, Action = @Action,
         FeedbackResponse = @FeedbackResponse, Responsibility = @Responsibility,
         DiscussionDate = @DiscussionDate, ETA = @Eta, ClosedDate = @ClosedDate, Status = @Status,
@@ -861,12 +862,12 @@ BEGIN
     BEGIN
         INSERT {InsightTable}
             (Bucket, WeekStart, SortOrder, DenialCode, DenialDescription, PayerName, NoOfDenials,
-             TotalBalance, InsuranceNoOfDenials, InsuranceBalance, ImpactPercentage, Observation, Data,
+             TotalBalance, InsuranceNoOfDenials, InsuranceBalance, ImpactPercentageText, Observation, Data,
              ActionCategory, Action, FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate,
              Status, UpdatedOn, UpdatedBy)
         VALUES
             (@Bucket, @WeekStart, @SortOrder, @DenialCode, @DenialDescription, @PayerName, @NoOfDenials,
-             @TotalBalance, @InsuranceNoOfDenials, @InsuranceBalance, @ImpactPercentage, @Observation, @Data,
+             @TotalBalance, @InsuranceNoOfDenials, @InsuranceBalance, @ImpactPercentageText, @Observation, @Data,
              @ActionCategory, @Action, @FeedbackResponse, @Responsibility, @DiscussionDate, @Eta, @ClosedDate,
              @Status, SYSUTCDATETIME(), @UpdatedBy);
         SELECT CAST(1 AS bit);
@@ -893,7 +894,10 @@ END";
                 cmd.Parameters.Add("@TotalBalance", SqlDbType.Decimal).Value = row.TotalBalance;
                 cmd.Parameters.Add("@InsuranceNoOfDenials", SqlDbType.Int).Value = row.InsuranceNoOfDenials;
                 cmd.Parameters.Add("@InsuranceBalance", SqlDbType.Decimal).Value = row.InsuranceBalance;
-                cmd.Parameters.Add("@ImpactPercentage", SqlDbType.Decimal).Value = row.ImpactPercentage;
+                // Stored as '' rather than NULL when blank: NULL is what marks a row written before
+                // this column existed, whose value still lives in the old decimal column.
+                cmd.Parameters.Add("@ImpactPercentageText", SqlDbType.NVarChar, 100).Value =
+                    Truncate((row.ImpactPercentage ?? string.Empty).Trim(), 100);
                 cmd.Parameters.Add("@Observation", SqlDbType.NVarChar, -1).Value = Db(row.ObservationHtml);
                 cmd.Parameters.Add("@Data", SqlDbType.NVarChar, -1).Value = Db(row.Data);
                 cmd.Parameters.Add("@ActionCategory", SqlDbType.NVarChar, 500).Value = Db(row.ActionCategory);
@@ -963,11 +967,13 @@ DELETE FROM {InsightTable} WHERE Bucket = 'Previous';
 
 INSERT {InsightTable}
     (Bucket, WeekStart, SortOrder, DenialCode, DenialDescription, PayerName, NoOfDenials,
-     TotalBalance, InsuranceNoOfDenials, InsuranceBalance, ImpactPercentage, Observation, Data,
+     TotalBalance, InsuranceNoOfDenials, InsuranceBalance, ImpactPercentage, ImpactPercentageText,
+     Observation, Data,
      ActionCategory, Action, FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate,
      Status, UpdatedOn, UpdatedBy)
 SELECT 'Previous', WeekStart, SortOrder, DenialCode, DenialDescription, PayerName, NoOfDenials,
-       TotalBalance, InsuranceNoOfDenials, InsuranceBalance, ImpactPercentage, Observation, Data,
+       TotalBalance, InsuranceNoOfDenials, InsuranceBalance, ImpactPercentage, ImpactPercentageText,
+       Observation, Data,
        ActionCategory, Action, FeedbackResponse, Responsibility, DiscussionDate, ETA, ClosedDate,
        Status, SYSUTCDATETIME(), @UpdatedBy
 FROM   {InsightTable}
@@ -1140,6 +1146,11 @@ SELECT @@ROWCOUNT;";
 
             IF COL_LENGTH('dbo.DenialClaimLevelInsight', 'Status') IS NULL
                 ALTER TABLE dbo.DenialClaimLevelInsight ADD Status NVARCHAR(50) NULL;
+
+            -- "$ Impact (%)" as the text the workbook carried. See
+            -- SqlScripts/Alter_DenialClaimLevelInsight_ImpactText.sql.
+            IF COL_LENGTH('dbo.DenialClaimLevelInsight', 'ImpactPercentageText') IS NULL
+                ALTER TABLE dbo.DenialClaimLevelInsight ADD ImpactPercentageText NVARCHAR(100) NULL;
             """;
 
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
@@ -1173,6 +1184,21 @@ SELECT @@ROWCOUNT;";
     }
 
     private static object Db(string? value) => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
+
+    private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
+
+    /// <summary>
+    /// "$ Impact (%)" for display. The text column is authoritative once a row has been written with
+    /// it (even as ''); a NULL means the row predates it, so the old decimal is shown as a percentage.
+    /// </summary>
+    private static string ImpactText(SqlDataReader reader)
+    {
+        var i = reader.GetOrdinal("ImpactPercentageText");
+        if (!reader.IsDBNull(i)) return reader.GetString(i).Trim();
+
+        var legacy = DenialInsightPercent.Normalize(GetDecimalOrZero(reader, "ImpactPercentage"));
+        return legacy == 0m ? string.Empty : legacy.ToString("0.##", CultureInfo.InvariantCulture) + "%";
+    }
 
     private static string Text(SqlDataReader reader, string column)
     {

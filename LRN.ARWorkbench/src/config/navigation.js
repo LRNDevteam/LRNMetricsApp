@@ -19,8 +19,8 @@ export const NAV = [
   { id: 'cip',             label: 'CIP Escalations',                    icon: 'warn',      path: '/cip',             roles: ['admin', 'manager', 'lead'],          built: true, phase: 5, subtitle: 'Client Involvement Process notes, tracked separately & ready to export for clients' },
   { id: 'agent-requests',  label: 'Escalation & Reassignment Requests', icon: 'flag',      path: '/agent-requests',  roles: ['admin', 'manager', 'lead'],          built: false, phase: 4, subtitle: 'Supervisor escalations and reassignment requests raised by AR agents' },
   { id: 'client-cip',      label: 'Escalation Requests',                icon: 'warn',      path: '/client-cip',      roles: ['viewer'],                            built: true, phase: 5, subtitle: 'Information your AR team needs from you — respond and attach documentation' },
-  { id: 'analytics',       label: 'Recovery & Financial Analytics',     icon: 'trend',     path: '/analytics',       roles: ALL_ROLES,                             built: false, phase: 6, subtitle: 'Insurance AR recovery performance' },
-  { id: 'reports',         label: 'Reports',                            icon: 'filetext',  path: '/reports',         roles: ALL_ROLES,                             built: false, phase: 6, subtitle: 'Exportable views for stakeholders' },
+  { id: 'analytics',       label: 'Recovery & Financial Analytics',     icon: 'trend',     path: '/analytics',       roles: ALL_ROLES,                             built: true,  phase: 6, subtitle: 'Insurance AR recovery performance' },
+  { id: 'reports',         label: 'Reports',                            icon: 'filetext',  path: '/reports',         roles: ALL_ROLES,                             built: true,  phase: 6, subtitle: 'Exportable views for stakeholders' },
   { id: 'users',           label: 'User Management',                    icon: 'users',     path: '/users',           roles: ['admin'],                             built: true,  phase: 4, subtitle: 'Roles, access and client assignments' },
   { id: 'clients',         label: 'Client Management',                  icon: 'building',  path: '/clients',         roles: ['admin'],                             built: true,  phase: 3, subtitle: 'Laboratory clients: eligible claims, AR, recovery and activation' },
   { id: 'audit',           label: 'Audit Logs',                         icon: 'shield',    path: '/audit',           roles: ['admin', 'manager'],                  built: true,  phase: 4, subtitle: 'Immutable trail of workflow-changing actions' },
@@ -35,7 +35,8 @@ export const NAV = [
       { id: 'category-map',    label: 'Workbench Category Map',     path: '/masters/category-map',    screen: 'denial-codes',  view: 'master',    subtitle: 'Denial code to workbench denial category, read by the claim sync — edit, import & apply to claims' },
       { id: 'unmapped-codes',  label: 'Unmapped Codes',             path: '/masters/unmapped',        screen: 'denial-codes',  view: 'unmapped',  subtitle: 'Denial codes on claims with no active category mapping' },
       { id: 'fix-resolution',  label: 'Fix / Resolution by Status', path: '/masters/fix-resolution',  screen: 'master-values', view: 'fix',       subtitle: 'Which Fix / Resolution options a follow-up note offers for each claim status' },
-      { id: 'tfl-limits',      label: 'Timely Filing Limits',       path: '/masters/tfl',             screen: 'tfl-limits',                       subtitle: 'Timely-filing limit per financial class, default limit and TFL risk window' }
+      { id: 'tfl-limits',      label: 'Timely Filing Limits',       path: '/masters/tfl',             screen: 'tfl-limits',                       subtitle: 'Timely-filing limit per financial class, default limit and TFL risk window' },
+      { id: 'sla-targets',     label: 'Operational SLA Targets',    path: '/masters/sla',             screen: 'sla-targets',                      subtitle: 'Target days per workflow milestone, measured by the Operational SLA report (RPT-09)' }
     ] }
 ];
 

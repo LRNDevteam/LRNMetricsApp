@@ -1185,7 +1185,16 @@ FROM (VALUES
     ('AttachmentAllowedTypes',           N'pdf,png,jpg,jpeg,tif,tiff,gif,doc,docx,xls,xlsx,csv,txt', N'Allowed attachment file extensions.'),
     ('DocumentBlobContainer',            N'arwb-documents', N'Azure Blob container for the Document Vault (private access, encryption at rest).'),
     ('InsightWeeksShown',                N'2',             N'Data Processing shows this many sync weeks of insights (current + previous).'),
-    ('QueueSnapshotRetentionDays',       N'400',           N'Nightly queue snapshots older than this are purged.')
+    ('QueueSnapshotRetentionDays',       N'400',           N'Nightly queue snapshots older than this are purged.'),
+    -- Operational SLA (Reports > RPT-09). DRAFT targets in calendar days until SlaTargetsConfirmed = 1;
+    -- edited on Master Values > Operational SLA Targets.
+    ('SlaFirstFollowUpDays',             N'3',             N'SLA: days from assignment to the first follow-up note (draft).'),
+    ('SlaFollowUpGraceDays',             N'0',             N'SLA: days of grace after Next Follow-Up Date for the next note (draft).'),
+    ('SlaQaDecisionDays',                N'2',             N'SLA: days from Submitted for QA to the QA decision (draft).'),
+    ('SlaCipApprovalDays',               N'2',             N'SLA: days from a CIP note''s QA approval to send-to-client / return (draft).'),
+    ('SlaClientResponseDays',            N'7',             N'SLA: days from a CIP escalation sent to the client to the client response (draft).'),
+    ('SlaCipResponseReviewDays',         N'2',             N'SLA: days from the client response to its review (draft).'),
+    ('SlaTargetsConfirmed',              N'0',             N'1 = the team has confirmed the SLA targets; 0 = the Operational SLA report labels them as drafts.')
 ) v (SettingKey, SettingValue, Description)
 WHERE NOT EXISTS (SELECT 1 FROM dbo.ARWB_AppSetting s WHERE s.SettingKey = v.SettingKey);
 GO

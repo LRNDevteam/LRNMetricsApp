@@ -1,4 +1,4 @@
-@using LabMetricsDashboard.Models
+﻿@using LabMetricsDashboard.Models
 @using LabMetricsDashboard.Services
 @model LabMetricsDashboard.ViewModels.DenialInsightPanelViewModel
 @{
@@ -104,9 +104,9 @@
 
             @if (editable && Model.Rows.Count > 0)
             {
-                <button type="submit" form="insightEditForm" class="btn btn-sm btn-primary">
-                    <i class="bi bi-save"></i> Save Changes
-                </button>
+                <span class="text-muted" style="font-size:.78rem;">
+                    <i class="bi bi-pencil"></i> Use <strong>Edit</strong> on a row to change it, then <strong>Save</strong>.
+                </span>
             }
             else if (!editable && Model.Rows.Count > 0)
             {
@@ -115,9 +115,6 @@
                 </span>
             }
         </div>
-
-        <form method="post" asp-action="SaveInsights" asp-route-lab="@Model.CurrentLab" id="insightEditForm">
-            @Html.AntiForgeryToken()
 
             <div class="insight-scroll">
                 <table class="table table-sm insight-table mb-0" id="insightTable">
@@ -131,9 +128,8 @@
                             <th class="band-impact sortable">Highest Impact - Insurance<span class="sort-arrow"></span></th>
                             <th class="band-impact num sortable" data-sort-type="number" title="Denials for the highest-impact insurance"># of Denials<span class="sort-arrow"></span></th>
                             <th class="band-impact num sortable" data-sort-type="number">Ins. Balance ($)<span class="sort-arrow"></span></th>
-                            <th class="band-impact num sortable" data-sort-type="number">$ Impact (%)<span class="sort-arrow"></span></th>
+                            <th class="band-impact num sortable">$ Impact (%)<span class="sort-arrow"></span></th>
                             <th class="col-rich">Observation</th>
-                            <th class="col-data">Data</th>
                             <th class="band-action col-cat sortable">Category<span class="sort-arrow"></span></th>
                             <th class="band-action col-rich">Action</th>
                             <th class="col-feedback">Feedback / Response</th>
@@ -152,7 +148,7 @@
                         @if (Model.Rows.Count == 0)
                         {
                             <tr>
-                                <td colspan="@(editable ? 20 : 19)" class="insight-empty">
+                                <td colspan="@(editable ? 19 : 18)" class="insight-empty">
                                     @if (isCurrent)
                                     {
                                         <i class="bi bi-inbox d-block mb-2" style="font-size:1.6rem;opacity:.45;"></i>
@@ -174,7 +170,7 @@
                         }
                         else
                         {
-                            var colSpan = editable ? 20 : 19;
+                            var colSpan = editable ? 19 : 18;
 
                             @foreach (var week in Model.WeekGroups)
                             {
@@ -200,169 +196,247 @@
                                 var row = week.Rows[i];
                                 var catClass = DenialInsightCategory.CssClass(row.ActionCategory);
 
-                                <tr>
+                                @* Row-level edit: every cell carries its read view (.cell-view) and, on an
+                                   editable tab, its editor (.cell-edit). Edit flips the row into
+                                   .is-editing; the editors post through the row's own form (see the
+                                   forms after the table) via the form="" attribute, so Save sends
+                                   this row and nothing else. Data is stored but deliberately not shown. *@
+                                var formId = "insightRow-" + row.Id;
+
+                                <tr data-row-id="@row.Id">
                                     <td class="col-idx">@(i + 1)</td>
                                     <td class="col-code">
-                                        @* Requirement 6i: the denial code opens the claim-level data
-                                           filtered to that code - now the Claim Level tab on this
-                                           same page, so the filter and the figure stay together. *@
-                                        <a data-panel="claims" data-panel-tab="claims"
-                                           data-panel-url="@Url.Action("ClaimsPanel", new { lab = Model.CurrentLab, denialCode = row.DenialCode })"
-                                           href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = row.DenialCode })"
-                                           title="Open Claim Level filtered to denial code @row.DenialCode">@row.DenialCode</a>
+                                        <span class="cell-view">
+                                            @* Requirement 6i: the denial code opens the claim-level data
+                                               filtered to that code - now the Claim Level tab on this
+                                               same page, so the filter and the figure stay together. *@
+                                            <a data-panel="claims" data-panel-tab="claims"
+                                               data-panel-url="@Url.Action("ClaimsPanel", new { lab = Model.CurrentLab, denialCode = row.DenialCode })"
+                                               href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = row.DenialCode })"
+                                               title="Open Claim Level filtered to denial code @row.DenialCode">@row.DenialCode</a>
+                                        </span>
                                         @if (editable)
                                         {
-                                            <input type="hidden" name="ids" value="@row.Id" />
-                                            <input type="hidden" name="denialCodes" value="@row.DenialCode" />
-                                            <input type="hidden" name="payerNames" value="@row.PayerName" />
+                                            <span class="cell-edit">
+                                                <input type="text" form="@formId" name="denialCode" value="@row.DenialCode" maxlength="100" required />
+                                            </span>
                                         }
                                     </td>
-                                    <td class="col-desc">@row.DenialDescription</td>
-                                    <td class="num">@row.NoOfDenials.ToString("N0")</td>
-                                    <td class="num">@Acct2(row.TotalBalance)</td>
-                                    <td class="cell-impact">@row.PayerName</td>
-                                    <td class="cell-impact num">@row.InsuranceNoOfDenials.ToString("N0")</td>
-                                    <td class="cell-impact num">
-                                        @* Requirement 6i: the balance opens the claim-level data
-                                           filtered by BOTH the denial code and the insurance. *@
-                                        <a data-panel="claims" data-panel-tab="claims"
-                                           data-panel-url="@Url.Action("ClaimsPanel", new { lab = Model.CurrentLab, denialCode = row.DenialCode, payerName = row.PayerName })"
-                                           href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = row.DenialCode, payerName = row.PayerName })"
-                                           title="@(string.IsNullOrWhiteSpace(row.PayerName)
-                                                     ? $"Open Claim Level filtered to denial code {row.DenialCode}"
-                                                     : $"Open Claim Level filtered to {row.DenialCode} and {row.PayerName}")">@Acct2(row.InsuranceBalance)</a>
+                                    <td class="col-desc">
+                                        <span class="cell-view">@row.DenialDescription</span>
+                                        @if (editable)
+                                        {
+                                            <span class="cell-edit">
+                                                <textarea form="@formId" name="denialDescription" rows="2" maxlength="1000">@row.DenialDescription</textarea>
+                                            </span>
+                                        }
                                     </td>
-                                    <td class="cell-impact num">@row.ImpactPercentage.ToString("0.##")%</td>
+                                    <td class="num">
+                                        <span class="cell-view">@row.NoOfDenials.ToString("N0")</span>
+                                        @if (editable)
+                                        {
+                                            <span class="cell-edit">
+                                                <input type="text" inputmode="numeric" form="@formId" name="noOfDenials"
+                                                       value="@row.NoOfDenials.ToString(System.Globalization.CultureInfo.InvariantCulture)" />
+                                            </span>
+                                        }
+                                    </td>
+                                    <td class="num">
+                                        <span class="cell-view">@Acct2(row.TotalBalance)</span>
+                                        @if (editable)
+                                        {
+                                            <span class="cell-edit">
+                                                <input type="text" inputmode="decimal" form="@formId" name="totalBalance"
+                                                       value="@row.TotalBalance.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)" />
+                                            </span>
+                                        }
+                                    </td>
+                                    <td class="cell-impact">
+                                        <span class="cell-view">@row.PayerName</span>
+                                        @if (editable)
+                                        {
+                                            <span class="cell-edit">
+                                                <input type="text" form="@formId" name="payerName" value="@row.PayerName" maxlength="255" />
+                                            </span>
+                                        }
+                                    </td>
+                                    <td class="cell-impact num">
+                                        <span class="cell-view">@row.InsuranceNoOfDenials.ToString("N0")</span>
+                                        @if (editable)
+                                        {
+                                            <span class="cell-edit">
+                                                <input type="text" inputmode="numeric" form="@formId" name="insuranceNoOfDenials"
+                                                       value="@row.InsuranceNoOfDenials.ToString(System.Globalization.CultureInfo.InvariantCulture)" />
+                                            </span>
+                                        }
+                                    </td>
+                                    <td class="cell-impact num">
+                                        <span class="cell-view">
+                                            @* Requirement 6i: the balance opens the claim-level data
+                                               filtered by BOTH the denial code and the insurance. *@
+                                            <a data-panel="claims" data-panel-tab="claims"
+                                               data-panel-url="@Url.Action("ClaimsPanel", new { lab = Model.CurrentLab, denialCode = row.DenialCode, payerName = row.PayerName })"
+                                               href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = row.DenialCode, payerName = row.PayerName })"
+                                               title="@(string.IsNullOrWhiteSpace(row.PayerName)
+                                                         ? $"Open Claim Level filtered to denial code {row.DenialCode}"
+                                                         : $"Open Claim Level filtered to {row.DenialCode} and {row.PayerName}")">@Acct2(row.InsuranceBalance)</a>
+                                        </span>
+                                        @if (editable)
+                                        {
+                                            <span class="cell-edit">
+                                                <input type="text" inputmode="decimal" form="@formId" name="insuranceBalance"
+                                                       value="@row.InsuranceBalance.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)" />
+                                            </span>
+                                        }
+                                    </td>
+                                    <td class="cell-impact num">
+                                        @* Shown exactly as imported - text, not a recalculated number. *@
+                                        <span class="cell-view">@(string.IsNullOrWhiteSpace(row.ImpactPercentage) ? "—" : row.ImpactPercentage)</span>
+                                        @if (editable)
+                                        {
+                                            <span class="cell-edit">
+                                                <input type="text" form="@formId" name="impactPercentage" value="@row.ImpactPercentage" maxlength="100" />
+                                            </span>
+                                        }
+                                    </td>
 
                                     <td class="col-rich">
+                                        <div class="cell-view">
+                                            @if (string.IsNullOrWhiteSpace(row.ObservationHtml))
+                                            {
+                                                <span class="text-muted">&mdash;</span>
+                                            }
+                                            else
+                                            {
+                                                @Html.Raw(row.ObservationHtml)
+                                            }
+                                        </div>
                                         @if (editable)
                                         {
-                                            <div class="rich-editor" contenteditable="true" data-target="observations">@Html.Raw(row.ObservationHtml)</div>
-                                            <input type="hidden" name="observations" value="@row.ObservationHtml" />
-                                        }
-                                        else if (string.IsNullOrWhiteSpace(row.ObservationHtml))
-                                        {
-                                            <span class="text-muted">&mdash;</span>
-                                        }
-                                        else
-                                        {
-                                            @Html.Raw(row.ObservationHtml)
-                                        }
-                                    </td>
-
-                                    <td class="col-data">
-                                        @if (editable)
-                                        {
-                                            <textarea name="datas" rows="2">@row.Data</textarea>
-                                        }
-                                        else
-                                        {
-                                            <span class="data-text">@(string.IsNullOrWhiteSpace(row.Data) ? "—" : row.Data)</span>
+                                            <div class="cell-edit">
+                                                <div class="rich-editor" contenteditable="true" data-target="observation">@Html.Raw(row.ObservationHtml)</div>
+                                                <input type="hidden" form="@formId" name="observation" value="@row.ObservationHtml" />
+                                            </div>
                                         }
                                     </td>
 
                                     <td class="col-cat @catClass">
+                                        <span class="cell-view">
+                                            @if (string.IsNullOrWhiteSpace(row.ActionCategory))
+                                            {
+                                                <span class="text-muted">&mdash;</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="cat-pill">@row.ActionCategory</span>
+                                            }
+                                        </span>
                                         @if (editable)
                                         {
-                                            <input type="text" name="actionCategories" class="cat-input @catClass"
-                                                   value="@row.ActionCategory" list="insightCategories" maxlength="120" />
-                                        }
-                                        else if (string.IsNullOrWhiteSpace(row.ActionCategory))
-                                        {
-                                            <span class="text-muted">&mdash;</span>
-                                        }
-                                        else
-                                        {
-                                            <span class="cat-pill">@row.ActionCategory</span>
+                                            <span class="cell-edit">
+                                                <input type="text" form="@formId" name="actionCategory" class="cat-input @catClass"
+                                                       value="@row.ActionCategory" list="insightCategories" maxlength="120" />
+                                            </span>
                                         }
                                     </td>
 
                                     <td class="col-rich">
+                                        <div class="cell-view">
+                                            @if (string.IsNullOrWhiteSpace(row.ActionHtml))
+                                            {
+                                                <span class="text-muted">&mdash;</span>
+                                            }
+                                            else
+                                            {
+                                                @Html.Raw(row.ActionHtml)
+                                            }
+                                        </div>
                                         @if (editable)
                                         {
-                                            <div class="rich-editor" contenteditable="true" data-target="actions">@Html.Raw(row.ActionHtml)</div>
-                                            <input type="hidden" name="actions" value="@row.ActionHtml" />
-                                        }
-                                        else if (string.IsNullOrWhiteSpace(row.ActionHtml))
-                                        {
-                                            <span class="text-muted">&mdash;</span>
-                                        }
-                                        else
-                                        {
-                                            @Html.Raw(row.ActionHtml)
+                                            <div class="cell-edit">
+                                                <div class="rich-editor" contenteditable="true" data-target="action">@Html.Raw(row.ActionHtml)</div>
+                                                <input type="hidden" form="@formId" name="action" value="@row.ActionHtml" />
+                                            </div>
                                         }
                                     </td>
 
                                     <td class="col-feedback">
+                                        <span class="cell-view">@(string.IsNullOrWhiteSpace(row.FeedbackResponse) ? "—" : row.FeedbackResponse)</span>
                                         @if (editable)
                                         {
-                                            <textarea name="feedbackResponses" rows="2">@row.FeedbackResponse</textarea>
-                                        }
-                                        else
-                                        {
-                                            @(string.IsNullOrWhiteSpace(row.FeedbackResponse) ? "—" : row.FeedbackResponse)
+                                            <span class="cell-edit">
+                                                <textarea form="@formId" name="feedbackResponse" rows="2">@row.FeedbackResponse</textarea>
+                                            </span>
                                         }
                                     </td>
                                     <td class="col-resp">
+                                        <span class="cell-view">@(string.IsNullOrWhiteSpace(row.Responsibility) ? "—" : row.Responsibility)</span>
                                         @if (editable)
                                         {
-                                            <input type="text" name="responsibilities" value="@row.Responsibility" maxlength="255" />
-                                        }
-                                        else
-                                        {
-                                            @(string.IsNullOrWhiteSpace(row.Responsibility) ? "—" : row.Responsibility)
+                                            <span class="cell-edit">
+                                                <input type="text" form="@formId" name="responsibility" value="@row.Responsibility" maxlength="255" />
+                                            </span>
                                         }
                                     </td>
                                     <td class="col-date">
+                                        <span class="cell-view">@(row.DiscussionDate?.ToString("dd-MMM") ?? "—")</span>
                                         @if (editable)
                                         {
-                                            <input type="date" name="discussionDates" value="@(row.DiscussionDate?.ToString("yyyy-MM-dd"))" />
-                                        }
-                                        else
-                                        {
-                                            @(row.DiscussionDate?.ToString("dd-MMM") ?? "—")
+                                            <span class="cell-edit">
+                                                <input type="date" form="@formId" name="discussionDate" value="@(row.DiscussionDate?.ToString("yyyy-MM-dd"))" />
+                                            </span>
                                         }
                                     </td>
                                     <td class="col-date">
+                                        <span class="cell-view">@(row.Eta?.ToString("dd-MMM") ?? "—")</span>
                                         @if (editable)
                                         {
-                                            <input type="date" name="etas" value="@(row.Eta?.ToString("yyyy-MM-dd"))" />
-                                        }
-                                        else
-                                        {
-                                            @(row.Eta?.ToString("dd-MMM") ?? "—")
+                                            <span class="cell-edit">
+                                                <input type="date" form="@formId" name="eta" value="@(row.Eta?.ToString("yyyy-MM-dd"))" />
+                                            </span>
                                         }
                                     </td>
                                     <td class="col-date cell-closed">
+                                        <span class="cell-view">@(row.ClosedDate?.ToString("dd-MMM") ?? "—")</span>
                                         @if (editable)
                                         {
-                                            <input type="date" name="closedDates" value="@(row.ClosedDate?.ToString("yyyy-MM-dd"))" />
-                                        }
-                                        else
-                                        {
-                                            @(row.ClosedDate?.ToString("dd-MMM") ?? "—")
+                                            <span class="cell-edit">
+                                                <input type="date" form="@formId" name="closedDate" value="@(row.ClosedDate?.ToString("yyyy-MM-dd"))" />
+                                            </span>
                                         }
                                     </td>
                                     <td class="col-status">
+                                        <span class="cell-view">@(string.IsNullOrWhiteSpace(row.Status) ? "—" : row.Status)</span>
                                         @if (editable)
                                         {
-                                            <input type="text" name="statuses" value="@row.Status" list="insightStatuses" maxlength="50" />
-                                        }
-                                        else
-                                        {
-                                            @(string.IsNullOrWhiteSpace(row.Status) ? "—" : row.Status)
+                                            <span class="cell-edit">
+                                                <input type="text" form="@formId" name="status" value="@row.Status" list="insightStatuses" maxlength="50" />
+                                            </span>
                                         }
                                     </td>
 
                                     @if (editable)
                                     {
                                         <td class="col-actions">
-                                            <button type="button" class="row-delete" title="Delete this insight row"
-                                                    data-bs-toggle="modal" data-bs-target="#confirmDeleteModal"
-                                                    data-row-id="@row.Id" data-row-code="@row.DenialCode"
-                                                    data-row-payer="@row.PayerName">
-                                                <i class="bi bi-trash"></i>
-                                            </button>
+                                            <span class="cell-view row-buttons">
+                                                <button type="button" class="row-btn row-edit" title="Edit this row">
+                                                    <i class="bi bi-pencil"></i>
+                                                </button>
+                                                <button type="button" class="row-delete" title="Delete this insight row"
+                                                        data-bs-toggle="modal" data-bs-target="#confirmDeleteModal"
+                                                        data-row-id="@row.Id" data-row-code="@row.DenialCode"
+                                                        data-row-payer="@row.PayerName">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </span>
+                                            <span class="cell-edit row-buttons">
+                                                <button type="submit" form="@formId" class="row-btn row-save" title="Save this row">
+                                                    <i class="bi bi-check-lg"></i>
+                                                </button>
+                                                <button type="button" class="row-btn row-cancel" title="Cancel - discard changes to this row">
+                                                    <i class="bi bi-x-lg"></i>
+                                                </button>
+                                            </span>
                                         </td>
                                     }
                                 </tr>
@@ -380,13 +454,26 @@
                                 <th></th>
                                 <th class="num">@Model.TotalInsuranceDenials.ToString("N0")</th>
                                 <th class="num">@Acct2(Model.TotalInsuranceBalance)</th>
-                                <th colspan="@(editable ? 12 : 11)"></th>
+                                <th colspan="@(editable ? 11 : 10)"></th>
                             </tr>
                         </tfoot>
                     }
                 </table>
             </div>
-        </form>
+
+        @if (editable)
+        {
+            @* One form per row. A <form> cannot sit inside a <tr>, so the row's editors point here
+               with form="insightRow-{id}" and only that row is posted when its Save is pressed. *@
+            foreach (var row in Model.Rows)
+            {
+                <form method="post" asp-action="SaveInsightRow" asp-route-lab="@Model.CurrentLab"
+                      id="insightRow-@row.Id" class="insight-row-form" data-row-id="@row.Id">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="id" value="@row.Id" />
+                </form>
+            }
+        }
 
         <datalist id="insightCategories">
             <option value="Appeal / MR"></option>

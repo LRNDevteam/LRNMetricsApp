@@ -98,12 +98,21 @@ public sealed class DenialInsightRow
     public int InsuranceNoOfDenials { get; set; }
 
     public decimal InsuranceBalance { get; set; }
-    public decimal ImpactPercentage { get; set; }
+
+    /// <summary>
+    /// "$ Impact (%)" exactly as the workbook displayed it ("57%", "57.25 %", "N/A"...). Kept as text
+    /// rather than a number: reading it as a number misread percent-formatted and pasted cells, and
+    /// the column is only ever shown, never calculated with.
+    /// </summary>
+    public string ImpactPercentage { get; set; } = string.Empty;
 
     /// <summary>Sanitized HTML: the workbook's bold / bullets / line breaks are kept, not flattened.</summary>
     public string ObservationHtml { get; set; } = string.Empty;
 
-    /// <summary>The template's "Data" column - the figures behind the observation, as plain text.</summary>
+    /// <summary>
+    /// The template's "Data" column - the figures behind the observation, as plain text. Still
+    /// imported and stored, but no longer shown or edited on the Denial Insight grid.
+    /// </summary>
     public string Data { get; set; } = string.Empty;
 
     public string ActionCategory { get; set; } = string.Empty;

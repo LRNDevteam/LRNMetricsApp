@@ -174,10 +174,36 @@
 .dcr-page .insight-table .col-feedback { width: 190px; }
 .dcr-page .insight-table .col-resp { width: 120px; }
 .dcr-page .insight-table .col-date { width: 118px; }
-.dcr-page .insight-table .col-data { width: 190px; }
-.dcr-page .insight-table .col-data .data-text { white-space: pre-line; }
 .dcr-page .insight-table .col-status { width: 110px; }
-.dcr-page .insight-table .col-actions { width: 46px; }
+.dcr-page .insight-table .col-actions { width: 70px; }
+
+/* ── Row-level edit ───────────────────────────────────────────────────── */
+/* Each cell holds its read view and its editor; the row's state picks which one shows. */
+.dcr-page .insight-table tr:not(.is-editing) .cell-edit { display: none; }
+.dcr-page .insight-table tr.is-editing .cell-view { display: none; }
+.dcr-page .insight-table tr.is-editing > td { background: #eef5ff !important; }
+.dcr-page .insight-table tr.is-editing > td:first-child { box-shadow: inset 3px 0 0 var(--ins-link); }
+.dcr-page .insight-table tr.is-editing .num input { text-align: right; }
+
+.dcr-page .row-buttons { display: inline-flex; gap: .2rem; white-space: nowrap; }
+
+.dcr-page .row-btn {
+    border: 1px solid transparent;
+    background: transparent;
+    color: #8592a3;
+    border-radius: .3rem;
+    width: 26px;
+    height: 26px;
+    line-height: 1;
+    cursor: pointer;
+    transition: color .12s ease, background .12s ease, border-color .12s ease;
+}
+
+.dcr-page .row-btn:hover { color: #fff; background: var(--ins-link); border-color: var(--ins-link); }
+.dcr-page .row-btn.row-save { color: #1f7a3d; border-color: #b9dcc4; }
+.dcr-page .row-btn.row-save:hover { color: #fff; background: #1f7a3d; border-color: #1f7a3d; }
+.dcr-page .row-btn.row-cancel:hover { background: #6b7a8c; border-color: #6b7a8c; }
+.dcr-page .row-btn:focus-visible { outline: 2px solid #9ec5f0; outline-offset: 1px; }
 
 .dcr-page .insight-table .col-code a,
 .dcr-page .insight-table .cell-impact a {
@@ -343,6 +369,7 @@
     .dcr-page .insight-table td.cell-closed { background: #16291d !important; }
 
     .dcr-page .insight-table > tfoot > tr > th { background: #1d2935; }
+    .dcr-page .insight-table tr.is-editing > td { background: #1a2b40 !important; }
 
     .dcr-page .rich-editor,
     .dcr-page .insight-table input[type="text"],

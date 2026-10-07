@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { BarList, Donut, sequentialRamp } from '../components/Charts';
 import Icon from '../components/Icon';
+import { Card, GoTo, Kpi } from '../components/Panel';
 import { canOpen } from '../config/navigation';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
@@ -15,36 +16,6 @@ const pct0 = (v) => `${Math.round(Number(v || 0) * 100)}%`;
 
 function Delta({ tone = 'flat', children }) {
   return <span className={`arwb-kpi-delta ${tone}`}>{children}</span>;
-}
-
-function Kpi({ label, value, delta }) {
-  return (
-    <div className="arwb-panel arwb-kpi-tile">
-      <span className="arwb-kpi-accent-bar" />
-      <span className="arwb-kpi-label">{label}</span>
-      <span className="arwb-kpi-value">{value}</span>
-      {delta}
-    </div>
-  );
-}
-
-// The mockup's .card with a .card-head (icon, h3, .card-sub, .card-head-actions).
-function Card({ icon, title, sub, action, children, flush }) {
-  return (
-    <div className="arwb-panel arwb-section">
-      <div className="arwb-panel-head">
-        {icon && <Icon name={icon} />}
-        <h3>{title}</h3>
-        {sub && <span className="arwb-card-sub">{sub}</span>}
-        {action && <div className="arwb-panel-head-actions">{action}</div>}
-      </div>
-      <div className={flush ? '' : 'arwb-panel-pad'}>{children}</div>
-    </div>
-  );
-}
-
-function GoTo({ onClick, children }) {
-  return <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-ghost" onClick={onClick}>{children} &rarr;</button>;
 }
 
 /**
@@ -127,7 +98,7 @@ export default function DashboardPage() {
       )}
 
       <Card icon="graph-up-arrow" title="AR Collections Progress" sub="revenue expectation by AR queue"
-        action={canOpen(user, 'reports') && <GoTo onClick={() => navigate('/reports')}>View Full Report</GoTo>}>
+        action={canOpen(user, 'reports') && <GoTo onClick={() => navigate('/reports?report=ar-collections')}>View Full Report</GoTo>}>
         <BarList wide items={d.arProgress.map((r) => ({
           label: r.label, value: r.amount,
           display: `${fmt.moneyCompact(r.amount)} · ${fmt.count(r.count)}`,

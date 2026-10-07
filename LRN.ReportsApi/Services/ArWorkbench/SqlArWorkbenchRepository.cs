@@ -35,6 +35,14 @@ public interface IArWorkbenchRepository
     Task<ArWorkbenchSaveResult> SetClientActiveAsync(int labId, bool isActive, string? note, string user, CancellationToken ct);
     Task<ArWorkbenchClientStats?> GetClientStatsAsync(int labId, CancellationToken ct);
 
+    // Recovery & Financial Analytics (SqlArWorkbenchRepository.Analytics.cs)
+    Task<ArWorkbenchAnalytics> GetAnalyticsAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
+    // Reports (SqlArWorkbenchRepository.Reports.cs); null for an unknown report id
+    Task<ArWorkbenchReport?> GetReportAsync(int labId, string reportId, ArWorkbenchReportRange range, ArWorkbenchUserContext user, CancellationToken ct);
+    // Operational SLA targets (SqlArWorkbenchRepository.Sla.cs) - ARWB_AppSetting
+    Task<ArWorkbenchSlaSettings> GetSlaSettingsAsync(int labId, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> SaveSlaSettingsAsync(int labId, IReadOnlyDictionary<string, int> values, bool confirmed, string user, CancellationToken ct);
+
     // Audit Logs (SqlArWorkbenchRepository.Audit.cs)
     Task<ArWorkbenchAuditPage> GetAuditLogAsync(ArWorkbenchAuditFilter filter, ArWorkbenchUserContext user, bool withOptions, CancellationToken ct);
 

@@ -145,6 +145,14 @@ export const arWorkbenchService = {
   me: (labId) => api(`me${qs({ labId })}`),
   queues: (labId, signal) => api(`queues${qs({ labId })}`, { signal }),
   dashboard: (labId, signal) => api(`dashboard${qs({ labId })}`, { signal }),
+  analytics: (labId, signal) => api(`analytics${qs({ labId })}`, { signal }),
+  // Reports (T073 / T074): catalog, one report as a table, the same table as Excel
+  // range: { from, to } (yyyy-mm-dd) for the event reports; ignored by the others
+  reports: (labId) => api(`reports${qs({ labId })}`),
+  report: (labId, reportId, range, signal) => api(`reports/${encodeURIComponent(reportId)}${qs({ labId, ...range })}`, { signal }),
+  reportExport: (labId, reportId, range, title) => downloadFile(`reports/${encodeURIComponent(reportId)}/export${qs({ labId, ...range })}`, `ARWorkbench_${String(title || reportId).replace(/\s+/g, '')}.xlsx`),
+  slaSettings: (labId) => api(`settings/sla${qs({ labId })}`),
+  saveSlaSettings: (labId, body) => api(`settings/sla${qs({ labId })}`, json('PUT', body)),
   claims: (filter, signal) => api(`claims${qs(filter)}`, { signal }),
   // With filter: cascading lists (T047) - each list counted over the page's other filters.
   claimFilterOptions: (labId, signal, filter) => {

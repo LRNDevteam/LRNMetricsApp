@@ -91,6 +91,88 @@ public sealed class ArWorkbenchController : ControllerBase
         return Ok(await _repository.GetDashboardAsync(labId, user!, ct));
     }
 
+    /// <summary>
+    /// T071 Recovery &amp; Financial Analytics: recovered vs outstanding by client, payer, panel,
+    /// denial category, agent and AR queue, plus the Follow-Up Comments Breakdown. Every role opens
+    /// it; the figures are limited to the caller's scope in SQL.
+    /// </summary>
+    [HttpGet("analytics")]
+    public async Task<ActionResult<ArWorkbenchAnalytics>> Analytics([FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        return Ok(await _repository.GetAnalyticsAsync(labId, user!, ct));
+    }
+
+    // ---- Reports (T073 / T074 / T075) - every role; the internal reports are refused to viewers ---
+
+    /// <summary>The reports this user can open, and where each of RPT-01..09 lives in the AR Workbench.</summary>
+    [HttpGet("reports")]
+    public async Task<ActionResult<ArWorkbenchReportCatalog>> Reports([FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        return Ok(new ArWorkbenchReportCatalog
+        {
+            Reports = ArWorkbenchReportRules.Catalog.Where(r => CanOpenReport(user!, r.Id)).ToList(),
+            Rpt = ArWorkbenchReportRules.RptCatalog.Where(r => r.ReportId is null || CanOpenReport(user!, r.ReportId)).ToList()
+        });
+    }
+
+    /// <param name="from">Event reports only: first day (default 30 days before <paramref name="to"/>).</param>
+    /// <param name="to">Event reports only: last day, inclusive (default today).</param>
+    [HttpGet("reports/{reportId}")]
+    public async Task<ActionResult<ArWorkbenchReport>> Report([FromRoute] string reportId, [FromQuery] int labId, [FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
+    {
+        var (report, denied) = await LoadReportAsync(reportId, labId, from, to, ct);
+        return denied ?? Ok(report);
+    }
+
+    /// <summary>The report as Excel: title, data date, the table (totals bold, detail rows indented), insights and note.</summary>
+    [HttpGet("reports/{reportId}/export")]
+    public async Task<ActionResult> ReportExport([FromRoute] string reportId, [FromQuery] int labId, [FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
+    {
+        var (report, denied) = await LoadReportAsync(reportId, labId, from, to, ct);
+        if (denied is not null) return denied;
+        var bytes = ArWorkbenchReportExcel.Build(report!);
+        _logger.LogInformation("AR Workbench report {Report} exported for lab {LabId} by {User}", report!.Id, labId, CurrentUserName());
+        return File(bytes, XlsxContentType, $"ARWorkbench_{report.Title.Replace(" ", string.Empty)}_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+    }
+
+    private static bool CanOpenReport(ArWorkbenchUserContext user, string reportId)
+        => user.SiteAdmin || user.RoleCode != "viewer" || !ArWorkbenchReportRules.InternalOnly.Contains(reportId);
+
+    private async Task<(ArWorkbenchReport? Report, ActionResult? Denied)> LoadReportAsync(string reportId, int labId, DateTime? from, DateTime? to, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return (null, denied);
+        if (!CanOpenReport(user!, reportId)) return (null, Forbidden("This report is only available to the AR team."));
+        var (range, rangeError) = ArWorkbenchReportRules.ResolveRange(from, to, DateTime.UtcNow.Date);
+        if (rangeError is not null) return (null, BadRequest(new { message = rangeError }));
+        var report = await _repository.GetReportAsync(labId, reportId, range!, user!, ct);
+        return report is null ? (null, NotFound(new { message = "Report not found." })) : (report, null);
+    }
+
+    // ---- Operational SLA targets (RPT-09) - ARWorkbench.ManageSettings, like the TFL limits -------
+
+    [HttpGet("settings/sla")]
+    public async Task<ActionResult<ArWorkbenchSlaSettings>> SlaSettings([FromQuery] int labId, CancellationToken ct)
+    {
+        var (_, denied) = await ResolveSettingsUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        return Ok(await _repository.GetSlaSettingsAsync(labId, ct));
+    }
+
+    [HttpPut("settings/sla")]
+    public async Task<ActionResult> SaveSlaSettings([FromQuery] int labId, [FromBody] ArWorkbenchSlaSettingsRequest? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveSettingsUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var (values, error) = ArWorkbenchReportRules.ValidateSlaTargets(request?.Targets);
+        if (error is not null) return BadRequest(new { message = error });
+        return ToResult(await _repository.SaveSlaSettingsAsync(labId, values!, request!.Confirmed, user!.UserName, ct));
+    }
+
     [HttpGet("claims")]
     public async Task<ActionResult<ArWorkbenchPagedResult<ArWorkbenchClaimRow>>> Claims([FromQuery] ArWorkbenchClaimFilter filter, CancellationToken ct)
     {

@@ -347,6 +347,10 @@ table.arwb-data-table td.wrap { white-space: normal; min-width: 12rem; }
 .arwb-legend-row { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--ink-2); margin-top: 8px; }
 .arwb-legend-col { flex-direction: column; gap: 8px; margin-top: 0; }
 .arwb-legend-sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; margin-right: 5px; }
+.arwb-legend-top { margin: 0 0 10px; }
+/* ComparisonBars: recovered + outstanding side by side in one track. */
+.arwb-br-track-split { display: flex; }
+.arwb-br-seg { display: block; height: 100%; }
 
 .arwb-donut-wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .arwb-donut { position: relative; width: 132px; height: 132px; flex: 0 0 auto; }
@@ -519,6 +523,20 @@ table.arwb-data-table tbody tr.row-selected { background: var(--accent-softer); 
 .arwb-payment-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 12px; color: var(--ink-2); }
 .arwb-lg-sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; margin-right: 5px; }
 .arwb-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+
+/* Reports (mockup App.views.reports) */
+.arwb-report-card { display: flex; flex-direction: column; gap: 8px; margin-bottom: 0; }
+.arwb-report-card > .arwb-btn { align-self: flex-start; }
+.arwb-report-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ink-muted); }
+.arwb-report-card-head h3 { margin: 0; color: var(--ink); }
+.arwb-report-featured { border-color: var(--accent); margin-bottom: 14px; }
+.arwb-report-table .arwb-report-total td { font-weight: 700; background: var(--surface-2); }
+.arwb-report-table .arwb-report-indent { padding-left: 28px; }
+.arwb-report-code { margin-left: 8px; vertical-align: middle; font-size: 11px; }
+.arwb-report-range { align-items: flex-end; border-bottom: 1px solid var(--border-soft); }
+.arwb-report-insights { margin-top: 12px; }
+.arwb-report-insights h3 { margin: 0 0 8px; }
+.arwb-report-insights ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink-2); }
 @media (max-width: 900px) { .arwb-grid-2 { grid-template-columns: 1fr; } }
 .arwb-dl > div > label { font-size: 12px; font-weight: 700; color: var(--ink-2); display: block; margin-bottom: 4px; }
 .arwb-flex-between { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }

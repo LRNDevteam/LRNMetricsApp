@@ -628,24 +628,32 @@ public sealed class DenialClaimReportController : Controller
         }
     }
 
-    /// <summary>Saves the grid's edits. Only Current Week is editable.</summary>
+    /// <summary>
+    /// Saves one row from the grid's row-level Edit. Every column on the grid is editable; Data is
+    /// not on the grid, so it keeps whatever the import stored. Only Current Week is editable.
+    /// </summary>
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> SaveInsights(
+    public async Task<IActionResult> SaveInsightRow(
         string? lab,
-        [FromForm] long[] ids,
-        [FromForm] string[] denialCodes,
-        [FromForm] string[] payerNames,
-        [FromForm] string[] observations,
-        [FromForm] string[] datas,
-        [FromForm] string[] actionCategories,
-        [FromForm] string[] actions,
-        [FromForm] string[] feedbackResponses,
-        [FromForm] string[] responsibilities,
-        [FromForm] string[] discussionDates,
-        [FromForm] string[] etas,
-        [FromForm] string[] closedDates,
-        [FromForm] string[] statuses,
+        [FromForm] long id,
+        [FromForm] string? denialCode,
+        [FromForm] string? denialDescription,
+        [FromForm] string? noOfDenials,
+        [FromForm] string? totalBalance,
+        [FromForm] string? payerName,
+        [FromForm] string? insuranceNoOfDenials,
+        [FromForm] string? insuranceBalance,
+        [FromForm] string? impactPercentage,
+        [FromForm] string? observation,
+        [FromForm] string? actionCategory,
+        [FromForm] string? action,
+        [FromForm] string? feedbackResponse,
+        [FromForm] string? responsibility,
+        [FromForm] string? discussionDate,
+        [FromForm] string? eta,
+        [FromForm] string? closedDate,
+        [FromForm] string? status,
         CancellationToken ct)
     {
         if (!CanEditInsights())
@@ -654,55 +662,50 @@ public sealed class DenialClaimReportController : Controller
         if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
             return Redirect(InsightError(error, lab));
 
-        var existing = (await _repo.GetInsightsAsync(connectionString, DenialInsightBuckets.Current, ct))
-            .ToDictionary(r => r.Id);
+        // An id that is not a Current Week row is refused rather than written. Previous Week is
+        // read-only, and this is the gate that enforces it against a hand-made post.
+        var prior = (await _repo.GetInsightsAsync(connectionString, DenialInsightBuckets.Current, ct))
+            .FirstOrDefault(r => r.Id == id);
+        if (prior is null)
+            return Redirect(InsightError("That insight row no longer exists on Current Week.", labName));
 
-        var rows = new List<DenialInsightRow>();
-        for (var i = 0; i < ids.Length; i++)
+        var code = denialCode?.Trim();
+        if (string.IsNullOrWhiteSpace(code))
+            return Redirect(InsightError("Denial Code cannot be blank. Nothing was saved.", labName));
+
+        var row = new DenialInsightRow
         {
-            var id = ids[i];
+            Id = prior.Id,
+            Bucket = prior.Bucket,
+            WeekStart = prior.WeekStart,
+            SortOrder = prior.SortOrder,
+            DenialCode = code,
+            DenialCodeNormalized = DenialCodeKey.Normalize(code),
+            DenialDescription = denialDescription?.Trim() ?? string.Empty,
+            NoOfDenials = (int)ParseNumber(noOfDenials),
+            TotalBalance = ParseNumber(totalBalance),
+            PayerName = payerName?.Trim() ?? string.Empty,
+            InsuranceNoOfDenials = (int)ParseNumber(insuranceNoOfDenials),
+            InsuranceBalance = ParseNumber(insuranceBalance),
+            ImpactPercentage = impactPercentage?.Trim() ?? string.Empty,
+            // The editors post HTML; sanitize on the way in, the same as an import does.
+            ObservationHtml = DenialInsightRichText.Sanitize(observation),
+            Data = prior.Data,
+            ActionCategory = actionCategory?.Trim() ?? string.Empty,
+            ActionHtml = DenialInsightRichText.Sanitize(action),
+            FeedbackResponse = feedbackResponse ?? string.Empty,
+            Responsibility = responsibility?.Trim() ?? string.Empty,
+            DiscussionDate = ParseDate(discussionDate),
+            Eta = ParseDate(eta),
+            ClosedDate = ParseDate(closedDate),
+            Status = status?.Trim() ?? string.Empty
+        };
 
-            // A posted id that is not a Current Week row is ignored rather than written. Previous
-            // Week is read-only, and this is the gate that enforces it against a hand-made post.
-            if (!existing.TryGetValue(id, out var prior)) continue;
+        var result = await _repo.SaveInsightsAsync(connectionString, [row], CurrentUser, ct);
 
-            rows.Add(new DenialInsightRow
-            {
-                Id = id,
-                Bucket = prior.Bucket,
-                WeekStart = prior.WeekStart,
-                SortOrder = prior.SortOrder,
-                DenialCode = Value(denialCodes, i, prior.DenialCode),
-                PayerName = Value(payerNames, i, prior.PayerName),
-                // The numeric columns come from the import and are not on the edit grid.
-                DenialDescription = prior.DenialDescription,
-                NoOfDenials = prior.NoOfDenials,
-                TotalBalance = prior.TotalBalance,
-                InsuranceNoOfDenials = prior.InsuranceNoOfDenials,
-                InsuranceBalance = prior.InsuranceBalance,
-                ImpactPercentage = prior.ImpactPercentage,
-                // The editors post HTML; sanitize on the way in, the same as an import does.
-                ObservationHtml = DenialInsightRichText.Sanitize(observations.ElementAtOrDefault(i)),
-                Data = datas.ElementAtOrDefault(i) ?? string.Empty,
-                ActionCategory = Value(actionCategories, i, string.Empty),
-                ActionHtml = DenialInsightRichText.Sanitize(actions.ElementAtOrDefault(i)),
-                FeedbackResponse = feedbackResponses.ElementAtOrDefault(i) ?? string.Empty,
-                Responsibility = Value(responsibilities, i, string.Empty),
-                DiscussionDate = ParseDate(discussionDates.ElementAtOrDefault(i)),
-                Eta = ParseDate(etas.ElementAtOrDefault(i)),
-                ClosedDate = ParseDate(closedDates.ElementAtOrDefault(i)),
-                Status = Value(statuses, i, string.Empty)
-            });
-        }
-
-        if (rows.Count == 0)
-            return Redirect(InsightError("There was nothing to save.", labName));
-
-        var result = await _repo.SaveInsightsAsync(connectionString, rows, CurrentUser, ct);
-        var message = $"Saved {result.Updated + result.Inserted:N0} denial insight row(s) for {labName}."
-            + (result.Errors.Count > 0 ? $" {result.Errors.Count} row(s) failed." : string.Empty);
-
-        return Redirect(result.Errors.Count > 0 ? InsightError(message, labName) : InsightOk(message, labName));
+        return Redirect(result.Errors.Count > 0
+            ? InsightError($"Row {code} could not be saved - another row may already use that denial code and insurance for this week.", labName)
+            : InsightOk($"Saved denial insight row {code}.", labName));
     }
 
     /// <summary>Deletes one insight row.</summary>
@@ -823,11 +826,10 @@ public sealed class DenialClaimReportController : Controller
             bucket = DenialInsightBuckets.Normalize(bucket)
         }) ?? "/DenialClaimReport";
 
-    private static string Value(string[] source, int index, string fallback)
-    {
-        var value = source.ElementAtOrDefault(index)?.Trim();
-        return string.IsNullOrWhiteSpace(value) ? fallback : value;
-    }
+    /// <summary>A number typed into the row editor; "$1,234.50" and "1234.5" both read, blank is 0.</summary>
+    private static decimal ParseNumber(string? value) =>
+        decimal.TryParse((value ?? string.Empty).Replace("$", "").Replace(",", "").Trim(),
+                         NumberStyles.Number, CultureInfo.InvariantCulture, out var d) ? d : 0m;
 
     private static DateTime? ParseDate(string? value) => DateTime.TryParse(value, out var parsed) ? parsed : null;
 
@@ -915,29 +917,16 @@ public sealed class DenialClaimReportController : Controller
             ws.Cell(r, c.Value).GetString().Replace("$", "").Replace(",", "").Replace("%", "").Trim(),
             out var d) ? d : 0m;
 
-        // A percent-formatted Excel cell showing "57%" holds 0.57, so taking the stored number at
-        // face value put 0.57 in the database and the page rendered "0.57%".
-        //
-        // Detecting that is fiddlier than it looks. Excel's BUILT-IN percent formats carry an empty
-        // format string and only a NumberFormatId (9 = "0%", 10 = "0.00%"), so checking the format
-        // text alone - which is what the first attempt at this did - never fired for the very cells
-        // that needed it. Both are checked here.
-        decimal Percent(int r, int? c)
+        // "$ Impact (%)" is taken as the text the cell DISPLAYS - "57%" stays "57%" - and is not
+        // validated. Reading it as a number kept misreading percent-formatted and pasted cells.
+        string DisplayedText(int r, int? c)
         {
-            if (!c.HasValue) return 0m;
-
+            if (!c.HasValue) return string.Empty;
             var cell = ws.Cell(r, c.Value);
-            var value = Num(r, c);
-            if (value == 0m) return 0m;
+            if (cell.IsEmpty()) return string.Empty;
 
-            var format = cell.Style.NumberFormat;
-            var isPercentFormatted = format.NumberFormatId is 9 or 10
-                                     || (format.Format?.Contains('%') ?? false)
-                                     || cell.GetString().Contains('%');
-
-            if (isPercentFormatted && cell.DataType == XLDataType.Number) return value * 100m;
-
-            return DenialInsightPercent.Normalize(value);
+            try { return cell.GetFormattedString().Trim(); }
+            catch { return cell.GetString().Trim(); }
         }
 
         DateTime? Date(int r, int? c, string columnName, string code)
@@ -980,9 +969,11 @@ public sealed class DenialClaimReportController : Controller
                 TotalBalance = Num(r, totalBalanceCol),
                 InsuranceNoOfDenials = (int)Num(r, insDenialCountCol),
                 InsuranceBalance = Num(r, insBalanceCol),
-                ImpactPercentage = Percent(r, impactCol),
+                // An impossible (> 100%) cell is recomputed from the balances; anything else is kept as shown.
+                ImpactPercentage = DenialInsightPercent.DisplayText(DisplayedText(r, impactCol), Num(r, insBalanceCol), Num(r, totalBalanceCol)),
                 // Rich text, not plain: the analyst's bold and bullets are the point of these columns.
                 ObservationHtml = DenialInsightRichText.FromCell(observationCol.HasValue ? ws.Cell(r, observationCol.Value) : null),
+                // Stored but not shown on the grid, and never validated.
                 Data = Text(r, dataCol),
                 ActionCategory = Text(r, categoryCol),
                 ActionHtml = DenialInsightRichText.FromCell(actionCol.HasValue ? ws.Cell(r, actionCol.Value) : null),

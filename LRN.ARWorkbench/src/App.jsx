@@ -3,6 +3,7 @@ import AppShell from './components/AppShell';
 import { ErrorBox, Loading } from './components/Status';
 import { allows, REDIRECTS, ROUTES } from './config/navigation';
 import { useWorkbench, WorkbenchProvider } from './context/WorkbenchContext';
+import AnalyticsPage from './pages/AnalyticsPage';
 import AssignmentPage from './pages/AssignmentPage';
 import AuditPage from './pages/AuditPage';
 import CipPage from './pages/CipPage';
@@ -16,6 +17,8 @@ import DenialCodeMasterPage from './pages/DenialCodeMasterPage';
 import MasterDataPage from './pages/MasterDataPage';
 import PlannedPage from './pages/PlannedPage';
 import QaPage from './pages/QaPage';
+import ReportsPage from './pages/ReportsPage';
+import SlaSettingsPage from './pages/SlaSettingsPage';
 import TflSettingsPage from './pages/TflSettingsPage';
 import UsersPage from './pages/UsersPage';
 import WorkQueuePage from './pages/WorkQueuePage';
@@ -30,6 +33,8 @@ const SCREENS = {
   users: UsersPage,
   qa: QaPage,
   audit: AuditPage,
+  analytics: AnalyticsPage,
+  reports: ReportsPage,
   clients: ClientsPage,
   cip: CipPage,
   'client-cip': ClientCipPage,
@@ -38,6 +43,7 @@ const SCREENS = {
   'master-values': MasterDataPage,
   'denial-codes': DenialCodeMasterPage,
   'tfl-limits': TflSettingsPage,
+  'sla-targets': SlaSettingsPage,
   'code-master': CodeMasterPage
 };
 

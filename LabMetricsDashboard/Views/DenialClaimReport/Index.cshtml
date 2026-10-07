@@ -398,7 +398,9 @@
             // Money and dates have to compare as values, not as the strings they are rendered as:
             // "$9,100.00" sorts above "$103,472.40" alphabetically, which is nonsense.
             var sortKey = function (cell, type) {
-                var text = (cell.textContent || '').trim();
+                // An insight cell holds its read view and its (hidden) editor; sort on what is shown.
+                var view = cell.querySelector('.cell-view');
+                var text = ((view || cell).textContent || '').trim();
                 if (type === 'number' || /^[-+$(]?[\d,]+(\.\d+)?\)?%?$/.test(text)) {
                     var negative = /^\(.*\)$/.test(text);
                     var n = parseFloat(text.replace(/[^0-9.\-]/g, ''));
@@ -526,20 +528,67 @@
                 });
             });
 
+            // Row-level edit on the Denial Insight grid. Edit flips one row into .is-editing (CSS
+            // swaps each cell's read view for its editor); Cancel puts every editor back to what was
+            // rendered; Save posts that row's own form.
+            var insightTable = document.getElementById('insightTable');
+            if (insightTable && !insightTable.dataset.rowEditBound) {
+                insightTable.dataset.rowEditBound = '1';
+
+                var resetRow = function (tr) {
+                    tr.querySelectorAll('.cell-edit input:not([type="hidden"]), .cell-edit textarea').forEach(function (el) {
+                        el.value = el.defaultValue;
+                        if (el.classList.contains('cat-input')) el.dispatchEvent(new Event('input'));
+                    });
+                    tr.querySelectorAll('.rich-editor').forEach(function (editor) {
+                        if (editor.dataset.original !== undefined) editor.innerHTML = editor.dataset.original;
+                    });
+                    tr.classList.remove('is-editing');
+                };
+
+                insightTable.addEventListener('click', function (e) {
+                    var btn = e.target.closest('.row-edit, .row-cancel');
+                    if (!btn) return;
+                    var tr = btn.closest('tr');
+                    if (!tr) return;
+
+                    if (btn.classList.contains('row-edit')) {
+                        tr.querySelectorAll('.rich-editor').forEach(function (editor) {
+                            editor.dataset.original = editor.innerHTML;
+                        });
+                        tr.classList.add('is-editing');
+                        var first = tr.querySelector('.cell-edit input:not([type="hidden"])');
+                        if (first) first.focus();
+                    } else {
+                        resetRow(tr);
+                    }
+                });
+
+                // Esc inside an editing row cancels it.
+                insightTable.addEventListener('keydown', function (e) {
+                    if (e.key !== 'Escape') return;
+                    var tr = e.target.closest && e.target.closest('tr.is-editing');
+                    if (tr) { e.stopPropagation(); resetRow(tr); }
+                });
+            }
+
             // The Observation / Action cells are contenteditable so the workbook's bold and bullets
             // stay visible while editing. They are not form fields, so their HTML is copied into the
-            // hidden input beside them just before the form serializes.
-            var editForm = document.getElementById('insightEditForm');
-            if (editForm) {
-                editForm.addEventListener('submit', function () {
-                    editForm.querySelectorAll('.rich-editor').forEach(function (editor) {
+            // hidden input beside them just before the row's form serializes.
+            document.querySelectorAll('form.insight-row-form:not([data-bound])').forEach(function (form) {
+                form.dataset.bound = '1';
+                form.addEventListener('submit', function () {
+                    var tr = document.querySelector('#insightTable tr[data-row-id="' + form.dataset.rowId + '"]');
+                    if (!tr) return;
+                    tr.querySelectorAll('.rich-editor').forEach(function (editor) {
                         var hidden = editor.parentElement
                             ? editor.parentElement.querySelector('input[type="hidden"][name="' + editor.dataset.target + '"]')
                             : null;
                         if (hidden) hidden.value = editor.innerHTML;
                     });
+                    tr.querySelectorAll('.row-save').forEach(function (b) { b.disabled = true; });
                 });
-            }
+            });
 
             // Re-band the Category cell as it is typed, so the colour tracks the value instead of
             // waiting for a save to catch up.
