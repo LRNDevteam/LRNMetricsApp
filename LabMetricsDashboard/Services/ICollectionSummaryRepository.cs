@@ -536,6 +536,9 @@ List<PanelAveragesRow> PanelRows)
     /// <summary>Date window the SP applied, when it reports one.</summary>
     public DateOnly? WindowFrom { get; init; }
     public DateOnly? WindowTo { get; init; }
+
+    /// <summary>Grand Total row returned by the SP (RowType 'T'); <c>null</c> when the SP has none.</summary>
+    public PanelAveragesMetrics? GrandTotal { get; init; }
 }
 
 /// <summary>Date column that anchors the client-logic Average Payments window.</summary>

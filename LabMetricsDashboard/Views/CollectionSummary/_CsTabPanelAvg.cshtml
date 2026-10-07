@@ -111,6 +111,35 @@
                                     }
                                 }
                             </tbody>
+                            @if (Model.PanelAveragesGrandTotal is { } gt)
+                            {
+                                <tfoot>
+                                    <tr>
+                                        <td></td>
+                                        <td style="text-align:left;font-weight:700">Grand Total</td>
+                                        <td style="text-align:right;font-weight:700">@gt.ClaimCount.N0OrDash()</td>
+                                        <td style="text-align:right;font-weight:700">@Acct(gt.TotalCharges)</td>
+                                        <td style="text-align:right;font-weight:700">@Acct2(gt.AvgBilled)</td>
+                                        @if (!paSp)
+                                        {
+                                            <td style="text-align:right;font-weight:700">@Acct(gt.CarrierPayment)</td>
+                                            <td style="text-align:right;font-weight:700">@Acct2(gt.AvgCarrierPayment)</td>
+                                        }
+                                        <td style="text-align:right;font-weight:700">@gt.FullyPaidCount.N0OrDash()</td>
+                                        <td style="text-align:right;font-weight:700">@Acct(gt.FullyPaidAmount)</td>
+                                        <td style="text-align:right;font-weight:700">@Acct2(gt.AvgFullyPaid)</td>
+                                        <td style="text-align:right;font-weight:700">@gt.AdjudicatedCount.N0OrDash()</td>
+                                        <td style="text-align:right;font-weight:700">@Acct(gt.AdjudicatedAmount)</td>
+                                        <td style="text-align:right;font-weight:700">@Acct2(gt.AvgAdjudicated)</td>
+                                        <td style="text-align:right;font-weight:700">@gt.Days30Count.N0OrDash()</td>
+                                        <td style="text-align:right;font-weight:700">@Acct(gt.Days30Amount)</td>
+                                        <td style="text-align:right;font-weight:700">@Acct2(gt.AvgDays30)</td>
+                                        <td style="text-align:right;font-weight:700">@gt.Days60Count.N0OrDash()</td>
+                                        <td style="text-align:right;font-weight:700">@Acct(gt.Days60Amount)</td>
+                                        <td style="text-align:right;font-weight:700">@Acct2(gt.AvgDays60)</td>
+                                    </tr>
+                                </tfoot>
+                            }
                         </table>
                     </div>
                 </div>

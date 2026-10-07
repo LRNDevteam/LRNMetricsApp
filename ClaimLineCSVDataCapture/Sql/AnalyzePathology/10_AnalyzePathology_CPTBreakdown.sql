@@ -9,9 +9,10 @@
      Values  : Claim Count = COUNT(DISTINCT ClaimID), Charge Amount = SUM(ChargeAmount)
                sorted by claim count
 
-   The dashboard pivots this tab by month, so rows are split by Date of Service
-   month (every line of a claim carries the claim's DOS, so the per-CPT total
-   across months is the distinct claim count the client asked for).
+   The CPT Breakdown tab / Excel sheet show totals only (client feedback):
+   usp_GetAnP_CPTBreakdownTotals returns one row per CPT code, sorted by claim
+   count, plus the Grand Total row. usp_GetAnP_CPTBreakdown (by Date of Service
+   month) is kept for the snapshot table and any month-level consumers.
 
    Result contract (SqlLabProductionSummaryRepository.GetCptBreakdownAsync):
      CPTCode, BilledYearMonth, CPTCount, BilledUnits, TotalCharges
@@ -93,6 +94,53 @@ BEGIN
     FROM   @Rows;
 
     PRINT 'usp_RefreshAnP_CPTBreakdown completed - ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
+END
+GO
+
+/* -----------------------------------------------------------------------------
+   usp_GetAnP_CPTBreakdownTotals - the CPT Breakdown tab and Excel sheet
+   (totals only, no month/year columns, per client feedback).
+
+   Result contract (SqlLabProductionSummaryRepository, CptTotalsOnly labs):
+     RowType      'D' = one row per CPT code, 'T' = Grand Total (last row)
+     CPTCode      CPT code ('Grand Total' on the T row)
+     ClaimCount   COUNT(DISTINCT ClaimID); on the T row it is the distinct claim
+                  count across all CPT codes (pivot "Count of Unique Claim ID")
+     TotalCharges SUM(ChargeAmount)
+     SortOrder    D rows by ClaimCount DESC, TotalCharges DESC, CPTCode; T last
+   Always aggregates live (fast on line-level data); no snapshot table.
+   ----------------------------------------------------------------------------- */
+CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_CPTBreakdownTotals
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @FirstBillFrom   DATE          = NULL,
+    @FirstBillTo     DATE          = NULL,
+    @FirstBilledFrom DATE          = NULL,
+    @FirstBilledTo   DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    ;WITH g AS
+    (
+        SELECT CASE WHEN GROUPING(CPTCode) = 1 THEN 'T' ELSE 'D' END AS RowType,
+               CAST(ISNULL(CPTCode, N'') AS NVARCHAR(200))           AS CPTCode,
+               COUNT(DISTINCT ClaimID)                               AS ClaimCount,
+               CAST(ISNULL(SUM(ChargeAmount), 0) AS DECIMAL(18,2))   AS TotalCharges
+        FROM   dbo.fn_AnP_ProductionLines(@PayerNames, @PanelNames, @DosFrom, @DosTo,
+                                          @FirstBillFrom, @FirstBillTo, @FirstBilledFrom, @FirstBilledTo)
+        GROUP  BY GROUPING SETS ((CPTCode), ())
+    )
+    SELECT RowType,
+           CASE WHEN RowType = 'T' THEN N'Grand Total' ELSE CPTCode END AS CPTCode,
+           ClaimCount,
+           TotalCharges,
+           ROW_NUMBER() OVER (ORDER BY CASE WHEN RowType = 'T' THEN 1 ELSE 0 END,
+                                       ClaimCount DESC, TotalCharges DESC, CPTCode) AS SortOrder
+    FROM   g
+    ORDER  BY SortOrder;
 END
 GO
 

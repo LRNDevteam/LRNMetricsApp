@@ -159,10 +159,12 @@ public sealed class ProductionReportGenerator : IReportGenerator
             _labSummaryRepos.TryGetValue("Cove", out labSummaryRepo);
 
         var isInHealthDtr = job.LabName.Equals("Inhealth_DTR", StringComparison.OrdinalIgnoreCase);
+        var isAnalyzePathology = job.LabName.Equals("AnalyzePathology", StringComparison.OrdinalIgnoreCase)
+                              || job.LabName.Equals("Analyze_Pathology", StringComparison.OrdinalIgnoreCase);
 
-        // Beech Tree and InHealth DTR must match the Production Summary page, so every tab
-        // reads the lab's usp_Get{Prefix}* SPs (usp_GetBT_* / usp_GetInH_*).
-        var useLabSps = (isBeechTree || isInHealthDtr) && labSummaryRepo is not null;
+        // Beech Tree, InHealth DTR and Analyze Pathology must match the Production Summary page,
+        // so every tab reads the lab's usp_Get{Prefix}* SPs (usp_GetBT_* / usp_GetInH_* / usp_GetAnP_*).
+        var useLabSps = (isBeechTree || isInHealthDtr || isAnalyzePathology) && labSummaryRepo is not null;
 
         // Rising Tides Monthly/Weekly are sorted by Total Charges on the page
         // (usp_GetRT_*BilledProductionSummary), so the Excel reads the same SPs.
@@ -280,6 +282,8 @@ public sealed class ProductionReportGenerator : IReportGenerator
             CptBreakdownGrandByMonth        = cptResult.GrandTotalByMonth,
             CptBreakdownGrandTotalUnits     = cptResult.GrandTotalUnits,
             CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
+            CptBreakdownGrandTotalClaims    = cptResult.GrandTotalClaims,
+            CptTotalsOnly                   = cptResult.TotalsOnly,
             CptUnitsLabel                   = isCove || useLabSps ? "Count of CPT" : "No. of Claims",
             // The Excel builder only writes Payer Breakdown charge columns for Rule3/Rule4.
             ProductionSummaryRule           = useLabSps ? "Rule3" : null,

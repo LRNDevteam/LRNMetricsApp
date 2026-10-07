@@ -721,7 +721,10 @@ public static partial class ProductionReportExcelExportBuilder
         colCount += metrics;
 
         int row = 1;
-        ExcelTheme.WriteTitleBar(ws, row, colCount, "Payer Breakdown (Charge Entered Date)", ExcelTheme.InsightsHeaderBg);
+        var pbTitle = IsAnalyzePathologyLab(vm)
+            ? "Payer Breakdown (Date of Service | Bill Status not Unbilled)"
+            : "Payer Breakdown (Charge Entered Date)";
+        ExcelTheme.WriteTitleBar(ws, row, colCount, pbTitle, ExcelTheme.InsightsHeaderBg);
         row++;
 
         int headerRows = showCharges ? 2 : 1;
@@ -1167,6 +1170,9 @@ public static partial class ProductionReportExcelExportBuilder
     private static bool IsInHealthLab(ProductionReportViewModel vm) =>
         vm.SelectedLab.Contains("InHealth", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsAnalyzePathologyLab(ProductionReportViewModel vm) =>
+        vm.SelectedLab.Replace("_", "").Contains("AnalyzePathology", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>InHealth CPT Breakdown: one row per CPT code, no month/year columns.</summary>
     private static void BuildCptFlatSheet(XLWorkbook wb, ProductionReportViewModel vm)
     {
@@ -1176,13 +1182,17 @@ public static partial class ProductionReportExcelExportBuilder
 
         const int colCount = 3;
         int row = 1;
-        ExcelTheme.WriteTitleBar(ws, row, colCount, "CPT Breakdown", ExcelTheme.InsightsHeaderBg);
+        ExcelTheme.WriteTitleBar(ws, row, colCount,
+            vm.CptTotalsOnly ? "CPT Breakdown (Line Level | sorted by Claim Count)" : "CPT Breakdown",
+            ExcelTheme.InsightsHeaderBg);
         row++;
 
-        var countHeader = string.IsNullOrWhiteSpace(vm.CptUnitsLabel) ? "Count of CPT" : vm.CptUnitsLabel;
-        WriteHeaderCell(ws, row, 1, "CPT Codes", ExcelTheme.InsightsHeaderBg);
+        var countHeader = vm.CptTotalsOnly
+            ? "Claim Count"
+            : string.IsNullOrWhiteSpace(vm.CptUnitsLabel) ? "Count of CPT" : vm.CptUnitsLabel;
+        WriteHeaderCell(ws, row, 1, vm.CptTotalsOnly ? "CPT Code" : "CPT Codes", ExcelTheme.InsightsHeaderBg);
         WriteHeaderCell(ws, row, 2, countHeader, ExcelTheme.InsightsHeaderBg);
-        WriteHeaderCell(ws, row, 3, "Total Charge", ExcelTheme.InsightsHeaderBg);
+        WriteHeaderCell(ws, row, 3, vm.CptTotalsOnly ? "Charge Amount" : "Total Charge", ExcelTheme.InsightsHeaderBg);
         row++;
 
         foreach (var cptRow in vm.CptBreakdownRows)
@@ -1195,9 +1205,13 @@ public static partial class ProductionReportExcelExportBuilder
 
         ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
         ws.Cell(row, 1).Value = "Grand Total";
-        ws.Cell(row, 2).Value = vm.CptBreakdownRows.Sum(r => r.GrandTotalClaims);
+        ws.Cell(row, 2).Value = vm.CptTotalsOnly
+            ? vm.CptBreakdownGrandTotalClaims
+            : vm.CptBreakdownRows.Sum(r => r.GrandTotalClaims);
         ws.Cell(row, 2).Style.NumberFormat.Format = ExcelTheme.CountNumberFormat;
-        ws.Cell(row, 3).Value = vm.CptBreakdownRows.Sum(r => r.GrandTotalCharges);
+        ws.Cell(row, 3).Value = vm.CptTotalsOnly
+            ? vm.CptBreakdownGrandTotalCharges
+            : vm.CptBreakdownRows.Sum(r => r.GrandTotalCharges);
         ws.Cell(row, 3).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
 
         ExcelTheme.AutoFitColumns(ws, colCount);
@@ -1207,7 +1221,7 @@ public static partial class ProductionReportExcelExportBuilder
     {
         if (TryBuildCptBreakdownPivot(wb, vm)) return;
         if (vm.CptBreakdownRows.Count == 0) return;
-        if (IsInHealthLab(vm))
+        if (IsInHealthLab(vm) || vm.CptTotalsOnly)
         {
             BuildCptFlatSheet(wb, vm);
             return;

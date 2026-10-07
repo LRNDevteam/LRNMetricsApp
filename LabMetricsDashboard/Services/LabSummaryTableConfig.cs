@@ -57,6 +57,13 @@ public record LabSummaryTableConfig(
     /// </summary>
     public bool SortByCharges { get; init; }
 
+    /// <summary>
+    /// <c>true</c> when the CPT Breakdown is totals only (no month/year columns):
+    /// <c>usp_Get{Prefix}CPTBreakdownTotals</c> returns CPT rows in display order plus the
+    /// Grand Total row (RowType, CPTCode, ClaimCount, TotalCharges, SortOrder).
+    /// </summary>
+    public bool CptTotalsOnly { get; init; }
+
     // ?? Static per-lab configs ????????????????????????????????????????????
 
     /// <summary>Certus Labs � prefix <c>Cert_</c>. Row key = PayerName. Supports coding tables/read SPs.</summary>
@@ -82,7 +89,7 @@ public record LabSummaryTableConfig(
     /// <summary>Analyze Pathology — prefix <c>AnP_</c> (VariantX clone; Production Summary per client sheet, Mon–Sun weeks).</summary>
     public static readonly LabSummaryTableConfig AnalyzePathology =
         new("AnP_",  "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
-        { SupportsFilteredMonthlyWeeklySp = true };
+        { SupportsFilteredMonthlyWeeklySp = true, CptTotalsOnly = true };
 
     /// <summary>PCR Labs of America � prefix <c>PCR_</c>. Monthly/Weekly read SPs accept filter parameters.</summary>
     public static readonly LabSummaryTableConfig PCRLabsofAmerica =

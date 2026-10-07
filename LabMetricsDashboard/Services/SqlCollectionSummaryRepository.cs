@@ -394,6 +394,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         int? adjAmountOrd = null;
         // SPs that return SortOrder also return their own averages and row order.
         var spOrdered = HasColumn(r, "SortOrder");
+        var hasRowType = HasColumn(r, "RowType");
         if (await r.ReadAsync(ct))
         {
             adjCountOrd  = TryGetOrdinal(r, "AdjudicatedCount")
@@ -429,14 +430,21 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                             GetDecimalOrNull(r, "AvgAdjudicated"),
                             GetDecimalOrNull(r, "AvgDays30"),
                             GetDecimalOrNull(r, "AvgDays60"))
-                        : null
+                        : null,
+                    IsGrandTotal = hasRowType
+                        && string.Equals(GetStringOrEmpty(r, "RowType"), "T", StringComparison.OrdinalIgnoreCase)
                 });
             }
             while (await r.ReadAsync(ct));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rawRows.Count, sw.ElapsedMilliseconds);
+        var grandRow = rawRows.FirstOrDefault(x => x.IsGrandTotal);
+        rawRows.RemoveAll(x => x.IsGrandTotal);
         // Panel totals prefer blank-PayerName rows from SP; drill-down shows Top 3 only.
-        return BuildPanelAveragesResult(rawRows, topPayersForDrilldown: 3, keepSourceOrder: spOrdered);
+        return BuildPanelAveragesResult(rawRows, topPayersForDrilldown: 3, keepSourceOrder: spOrdered) with
+        {
+            GrandTotal = grandRow is null ? null : ToPanelAveragesMetrics(grandRow)
+        };
     }
 
     /// <summary>
@@ -2638,10 +2646,25 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         int Days60Count, decimal Days60Amount)
     {
         public PanelAveragesSpAverages? SpAverages { get; init; }
+        public bool IsGrandTotal { get; init; }
     }
 
     private sealed record PanelAveragesSpAverages(
         decimal? Billed, decimal? FullyPaid, decimal? Adjudicated, decimal? Days30, decimal? Days60);
+
+    private static PanelAveragesMetrics ToPanelAveragesMetrics(PanelAveragesRawRow r) =>
+        new(r.ClaimCount, r.TotalCharges, r.CarrierPayment,
+            r.FullyPaidCount, r.FullyPaidAmount,
+            r.AdjudicatedCount, r.AdjudicatedAmount,
+            r.Days30Count, r.Days30Amount,
+            r.Days60Count, r.Days60Amount)
+        {
+            SpAvgBilled      = r.SpAverages?.Billed,
+            SpAvgFullyPaid   = r.SpAverages?.FullyPaid,
+            SpAvgAdjudicated = r.SpAverages?.Adjudicated,
+            SpAvgDays30      = r.SpAverages?.Days30,
+            SpAvgDays60      = r.SpAverages?.Days60,
+        };
 
     private static PanelAveragesResult BuildPanelAveragesResult(
         List<PanelAveragesRawRow> rawRows,
@@ -2658,19 +2681,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             || r.PayerName.Equals("(All)", StringComparison.OrdinalIgnoreCase)
             || r.PayerName.Equals("(Panel Total)", StringComparison.OrdinalIgnoreCase);
 
-        static PanelAveragesMetrics ToMetrics(PanelAveragesRawRow r) =>
-            new(r.ClaimCount, r.TotalCharges, r.CarrierPayment,
-                r.FullyPaidCount, r.FullyPaidAmount,
-                r.AdjudicatedCount, r.AdjudicatedAmount,
-                r.Days30Count, r.Days30Amount,
-                r.Days60Count, r.Days60Amount)
-            {
-                SpAvgBilled      = r.SpAverages?.Billed,
-                SpAvgFullyPaid   = r.SpAverages?.FullyPaid,
-                SpAvgAdjudicated = r.SpAverages?.Adjudicated,
-                SpAvgDays30      = r.SpAverages?.Days30,
-                SpAvgDays60      = r.SpAverages?.Days60,
-            };
+        static PanelAveragesMetrics ToMetrics(PanelAveragesRawRow r) => ToPanelAveragesMetrics(r);
 
         static PanelAveragesMetrics Aggregate(IEnumerable<PanelAveragesRawRow> rows)
         {

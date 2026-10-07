@@ -280,4 +280,5 @@ public sealed record CptBreakdownResult(
     Dictionary<string, CptBreakdownCell> GrandTotalByMonth,
     decimal GrandTotalUnits,
     decimal GrandTotalCharges,
-    int GrandTotalClaims = 0);
+    int GrandTotalClaims = 0,
+    bool TotalsOnly = false);

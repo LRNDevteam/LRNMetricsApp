@@ -50,7 +50,7 @@ public static partial class CollectionSummaryExcelExportBuilder
         if (vm.ShowTop5TotalPayments)
             BuildTop5TotalPaymentsSheet(wb, vm.Top5TotalPayments, labName);
         if (vm.PanelAverages.Count > 0)
-            BuildPanelAveragesSheet(wb, vm.PanelAverages, labName);
+            BuildPanelAveragesSheet(wb, vm.PanelAverages, vm.PanelAveragesGrandTotal, labName);
         BuildInsuranceAgingSheet(wb, vm.InsuranceAging, labName);
         BuildPanelPaymentSheet(wb, vm.PanelPayments, labName);
         BuildInsurancePaymentPctSheet(wb, vm.InsurancePaymentPct, labName);
@@ -948,7 +948,8 @@ public static partial class CollectionSummaryExcelExportBuilder
 
     // ?? Panel Averages ??????????????????????????????????????????????
 
-    private static void BuildPanelAveragesSheet(XLWorkbook wb, List<PanelAveragesRow> rows, string labName)
+    private static void BuildPanelAveragesSheet(
+        XLWorkbook wb, List<PanelAveragesRow> rows, PanelAveragesMetrics? grandTotal, string labName)
     {
         var spLogic = LabCollectionPrefix.UsesSpCollectionLogic(labName);
         var ws = wb.AddWorksheet(spLogic ? "Panel Average" : "Panel Averages");
@@ -1002,6 +1003,12 @@ public static partial class CollectionSummaryExcelExportBuilder
                 ws.Rows(firstChild, row - 1).Group();
                 ws.Rows(firstChild, row - 1).Collapse();
             }
+        }
+
+        if (grandTotal is not null)
+        {
+            WritePanelAveragesMetricsRow(ws, row, "Grand Total", grandTotal, ColTotal, bold: true, !spLogic);
+            ws.Range(row, 1, row, colCount).Style.Font.Bold = true;
         }
 
         AutoFitColumns(ws);

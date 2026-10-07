@@ -243,7 +243,7 @@ CREATE TABLE dbo.AnP_CS2_CptVsPaymentPct
 DROP TABLE IF EXISTS dbo.AnP_CS2_PanelAverages;
 CREATE TABLE dbo.AnP_CS2_PanelAverages
 (
-    RowType           CHAR(1)       NOT NULL,   -- P = panel total (PayerName = ''), D = top-3 payer drill-down
+    RowType           CHAR(1)       NOT NULL,   -- P = panel total (PayerName = ''), D = top-3 payer drill-down, T = Grand Total
     PanelName         NVARCHAR(500) NOT NULL,
     PayerName         NVARCHAR(500) NOT NULL,
     PayerRank         INT           NOT NULL,
@@ -1060,7 +1060,9 @@ GO
 /* =============================================================================
    11. Panel Average
        Panel rows (RowType P) carry the panel totals over every payer; the
-       drill-down rows (RowType D) are the top 3 payers by claim count.
+       drill-down rows (RowType D) are the top 3 payers by claim count; the
+       Grand Total row (RowType T, blank PanelName/PayerName) is last and is
+       computed over every billed claim (not a sum of the panel rows).
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_AnP_CS_PanelAverages_Compute
     @PayerNames NVARCHAR(MAX) = NULL, @PanelNames NVARCHAR(MAX) = NULL,
@@ -1082,8 +1084,9 @@ BEGIN
     WHERE BilledStatus IN (N'Billed', N'Billed - Self Pay');
 
     WITH grp AS (
-        SELECT PanelName,
+        SELECT PanelName = ISNULL(PanelName, N''),
                PayerName = ISNULL(PayerName, N''),
+               IsGrand   = GROUPING(PanelName),
                IsPanel   = GROUPING(PayerName),
                NoOfClaims        = COUNT(DISTINCT ClaimKey),
                TotalCharges      = SUM(ChargeAmt),
@@ -1102,17 +1105,17 @@ BEGIN
                Days60Amount      = SUM(CASE WHEN Is60 = 1 THEN InsPay END),
                AvgDays60         = AVG(CASE WHEN Is60 = 1 THEN InsPay END)
         FROM #pa
-        GROUP BY GROUPING SETS ((PanelName), (PanelName, PayerName))
+        GROUP BY GROUPING SETS ((PanelName), (PanelName, PayerName), ())
     ),
     ranked AS (
         SELECT g.*,
                PayerRank = CASE WHEN IsPanel = 1 THEN 0
-                                ELSE ROW_NUMBER() OVER (PARTITION BY PanelName, IsPanel
+                                ELSE ROW_NUMBER() OVER (PARTITION BY IsGrand, PanelName, IsPanel
                                                         ORDER BY NoOfClaims DESC, CarrierPayment DESC, PayerName) END,
-               PanelClaims = MAX(CASE WHEN IsPanel = 1 THEN NoOfClaims END) OVER (PARTITION BY PanelName)
+               PanelClaims = MAX(CASE WHEN IsPanel = 1 THEN NoOfClaims END) OVER (PARTITION BY IsGrand, PanelName)
         FROM grp g
     )
-    SELECT CAST(CASE WHEN IsPanel = 1 THEN 'P' ELSE 'D' END AS CHAR(1)) AS RowType,
+    SELECT CAST(CASE WHEN IsGrand = 1 THEN 'T' WHEN IsPanel = 1 THEN 'P' ELSE 'D' END AS CHAR(1)) AS RowType,
            PanelName,
            PayerName,
            CAST(PayerRank AS INT)                                   AS PayerRank,
@@ -1132,7 +1135,7 @@ BEGIN
            Days60Count,
            CAST(ISNULL(Days60Amount, 0)      AS DECIMAL(18,2))      AS Days60Amount,
            CAST(ISNULL(AvgDays60, 0)         AS DECIMAL(18,2))      AS AvgDays60,
-           CAST(ROW_NUMBER() OVER (ORDER BY PanelClaims DESC, PanelName, PayerRank) AS INT) AS SortOrder
+           CAST(ROW_NUMBER() OVER (ORDER BY IsGrand, PanelClaims DESC, PanelName, PayerRank) AS INT) AS SortOrder
     FROM ranked
     WHERE PayerRank <= 3
     ORDER BY SortOrder;
