@@ -187,6 +187,12 @@ public sealed class DenialClaimReportController : Controller
     /// </summary>
     private string? DateColumnFor(string? labName) => _labConfig.GetDenialSummaryDateColumn(labName);
 
+    /// <summary>
+    /// The ClaimLevelData column the lab's denied balance is read from: LabConfig:DenialSummaryBalanceColumn
+    /// when the lab is listed (AnalyzePathology: TotalInsuranceBalance), else null - InsuranceBalance.
+    /// </summary>
+    private string? BalanceColumnFor(string? labName) => _labConfig.GetDenialSummaryBalanceColumn(labName);
+
     // ── The page ──────────────────────────────────────────────────────────────
 
     [HttpGet]
@@ -236,30 +242,45 @@ public sealed class DenialClaimReportController : Controller
         ViewData["DenialWeekStartsOn"] = weekStartsOn.ToString();
         var dateColumn = DateColumnFor(labName);
         ViewData["DenialDateColumn"] = dateColumn;
+        var balanceColumn = BalanceColumnFor(labName);
+        ViewData["DenialBalanceColumn"] = balanceColumn;
 
         try
         {
-            var groups = await _repo.GetDenialSummaryAsync(connectionString, dateColumn, ct);
+            // Labs with Denial Summary SPs: tiles, Monthly and Weekly are computed at claim-file
+            // ingest into the lab's aggregate tables and only read here.
+            if (LabCollectionPrefix.HasDenialSummary(labName))
+            {
+                var range = await _repo.GetClaimDataWeekRangeAsync(connectionString, ct);
+                model.WeekRange = range.WeekFolder;
+                model.RunId = range.RunId;
+                await DenialSummarySpPivot.LoadAsync(_denialLists, connectionString,
+                    LabCollectionPrefix.GetPrefix(labName), model, ct);
+            }
+            else
+            {
+                var groups = await _repo.GetDenialSummaryAsync(connectionString, dateColumn, balanceColumn, ct);
 
-            model.TotalClaims = groups.Sum(g => g.ClaimCount);
-            model.TotalInsuranceBalance = groups.Sum(g => g.InsuranceBalance);
-            model.DenialCodeCount = groups.Select(g => g.DenialCodeNormalized)
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Distinct(StringComparer.OrdinalIgnoreCase).Count();
-            model.PayerCount = groups.Select(g => g.PayerName)
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Distinct(StringComparer.OrdinalIgnoreCase).Count();
-            model.UndatedGroups = groups.Count(g => !g.DenialDate.HasValue);
+                model.TotalClaims = groups.Sum(g => g.ClaimCount);
+                model.TotalInsuranceBalance = groups.Sum(g => g.InsuranceBalance);
+                model.DenialCodeCount = groups.Select(g => g.DenialCodeNormalized)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+                model.PayerCount = groups.Select(g => g.PayerName)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+                model.UndatedGroups = groups.Count(g => !g.DenialDate.HasValue);
 
-            // The columns are clamped to how far ClaimLevelData is actually loaded, so the weekly
-            // summary shows the four weeks the data covers rather than opening a column for a week
-            // a stray denial date fell into.
-            var weekRange = await _repo.GetClaimDataWeekRangeAsync(connectionString, ct);
-            model.WeekRange = weekRange.WeekFolder;
-            model.RunId = weekRange.RunId;
+                // The columns are clamped to how far ClaimLevelData is actually loaded, so the weekly
+                // summary shows the four weeks the data covers rather than opening a column for a week
+                // a stray denial date fell into.
+                var weekRange = await _repo.GetClaimDataWeekRangeAsync(connectionString, ct);
+                model.WeekRange = weekRange.WeekFolder;
+                model.RunId = weekRange.RunId;
 
-            model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods, loadedThrough: weekRange.LoadedThrough);
-            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: weekRange.LoadedThrough, weekStartsOn: WeekStartsOnFor(labName));
+                model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods, loadedThrough: weekRange.LoadedThrough);
+                model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: weekRange.LoadedThrough, weekStartsOn: WeekStartsOnFor(labName));
+            }
         }
         catch (Exception ex)
         {
@@ -341,10 +362,11 @@ public sealed class DenialClaimReportController : Controller
         try
         {
             model = await DenialClaimReportExcelBuilder.LoadAsync(
-                _repo, connectionString, labName, bucket, WeekStartsOnFor(labName), DateColumnFor(labName), ct);
+                _repo, connectionString, labName, bucket, WeekStartsOnFor(labName), DateColumnFor(labName),
+                BalanceColumnFor(labName), ct);
 
             var claimQuery = await _repo.BuildDeniedClaimExportQueryAsync(
-                connectionString, LabClaimLineColumnCatalog.GetClaimColumns(labName), ct);
+                connectionString, LabClaimLineColumnCatalog.GetClaimColumns(labName), BalanceColumnFor(labName), ct);
             if (claimQuery is not null)
                 claims = await _repo.ReadDeniedClaimsAsync(connectionString, claimQuery, ct);
         }
@@ -388,7 +410,7 @@ public sealed class DenialClaimReportController : Controller
         {
             var result = await _repo.GetClaimRowsAsync(
                 connectionString, columns, claims.DenialCode, claims.PayerName,
-                claims.Page, claims.PageSize, ct);
+                claims.Page, claims.PageSize, BalanceColumnFor(labName), ct);
 
             claims.Rows = result.Rows;
             claims.TotalFiltered = result.TotalFiltered;

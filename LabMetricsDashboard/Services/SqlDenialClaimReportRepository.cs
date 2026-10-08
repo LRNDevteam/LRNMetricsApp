@@ -26,7 +26,12 @@ public interface IDenialClaimReportRepository
     /// The ClaimLevelData column that dates each claim (LabConfig:DenialSummaryDateColumn, e.g.
     /// CheckDate for Beech Tree). Null, or a column the table does not have, uses the Denial Date.
     /// </param>
-    Task<IReadOnlyList<DenialSummaryGroup>> GetDenialSummaryAsync(string connectionString, string? dateColumn, CancellationToken ct);
+    /// <param name="balanceColumn">
+    /// The ClaimLevelData column the balance is read from (LabConfig:DenialSummaryBalanceColumn, e.g.
+    /// TotalInsuranceBalance for Analyze Pathology). Null, or a column the table does not have, uses
+    /// InsuranceBalance.
+    /// </param>
+    Task<IReadOnlyList<DenialSummaryGroup>> GetDenialSummaryAsync(string connectionString, string? dateColumn, string? balanceColumn, CancellationToken ct);
 
     /// <summary>
     /// How far the lab's claim data is loaded: the newest <c>ClaimLevelData.WeekFolder</c> as it is
@@ -46,7 +51,7 @@ public interface IDenialClaimReportRepository
     /// insurance.
     /// </summary>
     Task<DenialClaimPage> GetClaimRowsAsync(string connectionString, IReadOnlyList<string> columns,
-        string? denialCode, string? payerName, int page, int pageSize, CancellationToken ct);
+        string? denialCode, string? payerName, int page, int pageSize, string? balanceColumn, CancellationToken ct);
 
     /// <summary>
     /// The SELECT behind the download's Denial Claim Level sheet: every denied claim with an
@@ -54,7 +59,7 @@ public interface IDenialClaimReportRepository
     /// has no claim-level table or no DenialCode column.
     /// </summary>
     Task<DeniedClaimExportQuery?> BuildDeniedClaimExportQueryAsync(
-        string connectionString, IReadOnlyList<string> columns, CancellationToken ct);
+        string connectionString, IReadOnlyList<string> columns, string? balanceColumn, CancellationToken ct);
 
     /// <summary>Runs <paramref name="query"/> into memory - for the page's direct download only.</summary>
     Task<DataTable> ReadDeniedClaimsAsync(string connectionString, DeniedClaimExportQuery query, CancellationToken ct);
@@ -141,7 +146,7 @@ public sealed class SqlDenialClaimReportRepository : IDenialClaimReportRepositor
 
     // ── Denial summary ────────────────────────────────────────────────────────
 
-    public async Task<IReadOnlyList<DenialSummaryGroup>> GetDenialSummaryAsync(string connectionString, string? dateColumn, CancellationToken ct)
+    public async Task<IReadOnlyList<DenialSummaryGroup>> GetDenialSummaryAsync(string connectionString, string? dateColumn, string? balanceColumn, CancellationToken ct)
     {
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
@@ -150,6 +155,14 @@ public sealed class SqlDenialClaimReportRepository : IDenialClaimReportRepositor
 
         var cols = await GetColumnsAsync(conn, "ClaimLevelData", ct);
         if (!cols.Contains("DenialCode")) return Array.Empty<DenialSummaryGroup>();
+
+        var balanceExpr = BalanceExpr(cols, balanceColumn);
+        if (!string.IsNullOrWhiteSpace(balanceColumn) && ResolveBalanceColumn(cols, balanceColumn) is null)
+        {
+            _logger.LogWarning(
+                "Denial summary: configured balance column '{Column}' is not on ClaimLevelData; using InsuranceBalance.",
+                balanceColumn);
+        }
 
         // PayerName_Raw is the payer as the lab billed it, and it is the column the requirements
         // name for the Top Insurance rows. PayerName is the mapped/cleaned variant and is only a
@@ -219,12 +232,12 @@ FROM (
             {descriptionExpr}                                             AS DenialDescription,
             {denialDateExpr}                                              AS DenialDate,
             {claimKeyExpr}                                                AS ClaimKey,
-            TRY_CONVERT(decimal(18,2), [InsuranceBalance])                AS InsuranceBalance
+            {balanceExpr}                                                 AS InsuranceBalance
     FROM    dbo.ClaimLevelData AS cld
     {lineDateJoin}
     WHERE   [DenialCode] IS NOT NULL
       AND   LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> ''
-      AND   TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0
+      AND   {balanceExpr} > 0
       {normalizedFilter}
 ) AS d
 GROUP BY PayerName, DenialCodeNormalized, DenialDescription, DenialDate;";
@@ -392,7 +405,7 @@ GROUP BY LTRIM(RTRIM(CONVERT(nvarchar(100), [WeekFolder])));";
     /// </remarks>
     public async Task<DenialClaimPage> GetClaimRowsAsync(
         string connectionString, IReadOnlyList<string> columns,
-        string? denialCode, string? payerName, int page, int pageSize, CancellationToken ct)
+        string? denialCode, string? payerName, int page, int pageSize, string? balanceColumn, CancellationToken ct)
     {
         var empty = new DenialClaimPage(Array.Empty<IReadOnlyDictionary<string, string>>(),
                                         Array.Empty<string>(), 0, 0);
@@ -404,6 +417,8 @@ GROUP BY LTRIM(RTRIM(CONVERT(nvarchar(100), [WeekFolder])));";
 
         var present = await GetColumnsAsync(conn, "ClaimLevelData", ct);
         if (!present.Contains("DenialCode")) return empty;
+
+        var balanceExpr = BalanceExpr(present, balanceColumn);
 
         // Only the catalog columns this lab's table actually carries. A column configured but never
         // loaded would otherwise fail the whole query with "Invalid column name".
@@ -418,7 +433,7 @@ GROUP BY LTRIM(RTRIM(CONVERT(nvarchar(100), [WeekFolder])));";
         {
             "[DenialCode] IS NOT NULL",
             "LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> ''",
-            "TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0"
+            $"{balanceExpr} > 0"
         };
 
         var codeMatch = BuildDenialCodeMatch(present);
@@ -440,15 +455,15 @@ GROUP BY LTRIM(RTRIM(CONVERT(nvarchar(100), [WeekFolder])));";
         var filter = string.Join("\n  AND ", where);
 
         // ORDER BY is required by OFFSET/FETCH. Highest balance first - the claims worth working.
-        var orderBy = present.Contains("InsuranceBalance")
-            ? "ISNULL(TRY_CONVERT(decimal(18,2), [InsuranceBalance]), 0) DESC"
+        var orderBy = present.Contains("InsuranceBalance") || ResolveBalanceColumn(present, balanceColumn) is not null
+            ? $"ISNULL({balanceExpr}, 0) DESC"
             : "(SELECT NULL)";
 
         var sql = $@"
 SELECT COUNT_BIG(1) FROM dbo.ClaimLevelData
 WHERE [DenialCode] IS NOT NULL
   AND LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> ''
-  AND TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0;
+  AND {balanceExpr} > 0;
 
 SELECT COUNT_BIG(1) FROM dbo.ClaimLevelData WHERE {filter};
 
@@ -493,7 +508,7 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         {
             result = result with
             {
-                Diagnosis = await DiagnoseAsync(conn, codeMatch, payerColumns, denialCode, payerName, ct)
+                Diagnosis = await DiagnoseAsync(conn, codeMatch, payerColumns, denialCode, payerName, balanceExpr, ct)
             };
         }
 
@@ -510,7 +525,7 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
     /// even for a lab whose catalog does not list them: they are the point of this sheet.</para>
     /// </remarks>
     public async Task<DeniedClaimExportQuery?> BuildDeniedClaimExportQueryAsync(
-        string connectionString, IReadOnlyList<string> columns, CancellationToken ct)
+        string connectionString, IReadOnlyList<string> columns, string? balanceColumn, CancellationToken ct)
     {
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
@@ -518,7 +533,10 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         if (!await TableExistsAsync(conn, "ClaimLevelData", ct)) return null;
 
         var present = await GetColumnsAsync(conn, "ClaimLevelData", ct);
-        if (!present.Contains("DenialCode") || !present.Contains("InsuranceBalance")) return null;
+        if (!present.Contains("DenialCode")
+            || (!present.Contains("InsuranceBalance") && ResolveBalanceColumn(present, balanceColumn) is null)) return null;
+
+        var balanceExpr = BalanceExpr(present, balanceColumn);
 
         var selected = columns.Where(present.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
@@ -535,8 +553,8 @@ SELECT {LabClaimLineColumnCatalog.ToSqlSelectList(selected, isLineLevel: false)}
 FROM   dbo.ClaimLevelData
 WHERE  [DenialCode] IS NOT NULL
   AND  LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> ''
-  AND  TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0
-ORDER BY ISNULL(TRY_CONVERT(decimal(18,2), [InsuranceBalance]), 0) DESC;";
+  AND  {balanceExpr} > 0
+ORDER BY ISNULL({balanceExpr}, 0) DESC;";
 
         return new DeniedClaimExportQuery(sql, selected);
     }
@@ -561,7 +579,7 @@ ORDER BY ISNULL(TRY_CONVERT(decimal(18,2), [InsuranceBalance]), 0) DESC;";
     /// </summary>
     private static async Task<DenialClaimDiagnosis> DiagnoseAsync(
         SqlConnection conn, string codeMatch, IReadOnlyList<string> payerColumns,
-        string? denialCode, string? payerName, CancellationToken ct)
+        string? denialCode, string? payerName, string balanceExpr, CancellationToken ct)
     {
         var hasCode = !string.IsNullOrWhiteSpace(denialCode);
         var hasPayer = !string.IsNullOrWhiteSpace(payerName) && payerColumns.Count > 0;
@@ -587,7 +605,7 @@ SELECT SUM(CASE WHEN {(hasCode ? codeMatch : "1 = 0")} THEN 1 ELSE 0 END),
 FROM   dbo.ClaimLevelData
 WHERE  [DenialCode] IS NOT NULL
   AND  LTRIM(RTRIM(CONVERT(nvarchar(255), [DenialCode]))) <> ''
-  AND  TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0;";
+  AND  {balanceExpr} > 0;";
 
         if (hasCode && payerSample is not null)
         {
@@ -597,7 +615,7 @@ WHERE  [DenialCode] IS NOT NULL
 SELECT DISTINCT TOP (5) LTRIM(RTRIM(CONVERT(nvarchar(255), [{payerSample}])))
 FROM   dbo.ClaimLevelData
 WHERE  {codeMatch}
-  AND  TRY_CONVERT(decimal(18,2), [InsuranceBalance]) > 0
+  AND  {balanceExpr} > 0
   AND  ISNULL(CONVERT(nvarchar(255), [{payerSample}]), '') <> '';";
         }
 
@@ -1181,6 +1199,27 @@ SELECT @@ROWCOUNT;";
         while (await reader.ReadAsync(ct)) cols.Add(reader.GetString(0));
 
         return cols;
+    }
+
+    /// <summary>The configured balance column, spelled as the table spells it; null when unset or absent.</summary>
+    private static string? ResolveBalanceColumn(HashSet<string> cols, string? balanceColumn)
+        => string.IsNullOrWhiteSpace(balanceColumn)
+            ? null
+            : cols.FirstOrDefault(c => string.Equals(c, balanceColumn.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The balance every figure on the page is counted from. A configured column is text in some labs
+    /// ("$1,892.33", Analyze Pathology's TotalInsuranceBalance), so '$' and ',' are stripped before the
+    /// convert; labs not configured keep the plain InsuranceBalance convert they always had.
+    /// </summary>
+    private static string BalanceExpr(HashSet<string> cols, string? balanceColumn)
+    {
+        var configured = ResolveBalanceColumn(cols, balanceColumn);
+        if (configured is null || string.Equals(configured, "InsuranceBalance", StringComparison.OrdinalIgnoreCase))
+            return "TRY_CONVERT(decimal(18,2), [InsuranceBalance])";
+
+        var col = configured.Replace("]", "]]");
+        return $"TRY_CONVERT(decimal(18,2), REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(nvarchar(100), [{col}]))), '$', ''), ',', ''))";
     }
 
     private static object Db(string? value) => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();

@@ -30,6 +30,7 @@
                    data-lab="@Model.CurrentLab" data-bucket="@Model.Insight.Bucket"
                    data-week-starts-on="@(ViewData["DenialWeekStartsOn"] as string)"
                    data-date-column="@(ViewData["DenialDateColumn"] as string)"
+                   data-balance-column="@(ViewData["DenialBalanceColumn"] as string)"
                    data-run-id="@Model.RunId" data-week-folder="@Model.WeekRange"
                    title="Download Excel - Monthly Summary, Weekly Summary, Denial Insight and Denial Claim Level in one workbook"
                    aria-label="Download Excel">
@@ -39,8 +40,8 @@
         </div>
     </div>
     <div class="text-muted mb-3" style="font-size:.85rem;">
-        Calculated from <strong>@Model.CurrentLab</strong>&rsquo;s claim-level data &mdash; denied claims with an
-        insurance balance still outstanding, grouped on @(ViewData["DenialDateColumn"] as string is { Length: > 0 } dc ? dc : "Denial Date"). Denial codes roll up to their
+        Calculated from <strong>@Model.CurrentLab</strong>&rsquo;s claim-level data &mdash; denied claims with
+        @(ViewData["DenialBalanceColumn"] as string is { Length: > 0 } bc ? bc : "an insurance balance") still outstanding, grouped on @(ViewData["DenialDateColumn"] as string is { Length: > 0 } dc ? dc : "Denial Date"). Denial codes roll up to their
         common code, so CO45, PI45 and PR45 all count as 45.
     </div>
 
@@ -294,6 +295,7 @@
                     Bucket:       bucket,
                     WeekStartsOn: btn.dataset.weekStartsOn || null,
                     DateColumn:   btn.dataset.dateColumn || null,
+                    BalanceColumn: btn.dataset.balanceColumn || null,
                     // Not filters - these name the downloaded file after the run it came from.
                     RunId:        btn.dataset.runId || null,
                     WeekFolder:   btn.dataset.weekFolder || null

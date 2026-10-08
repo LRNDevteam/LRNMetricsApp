@@ -54,7 +54,26 @@ public sealed record DenialPeriodRow(
     int ClaimCount,
     decimal TotalInsuranceBalance,
     int SortOrder,
-    int PeriodOrder);
+    int PeriodOrder,
+    string IndexLabel = "",
+    string RowLabel = "",
+    decimal CoveragePct = 0m);
+
+/// <summary>
+/// Denial Summary tiles (usp_GetAnP_DenialSummaryTiles): every denied claim with a balance,
+/// whatever its Denial Date.
+/// </summary>
+public sealed record DenialSummaryTiles(
+    int DeniedClaims,
+    decimal InsuranceBalance,
+    int DenialCodes,
+    int Insurances,
+    int UndatedGroups,
+    DateTime? LoadedThrough,
+    DateTime? RefreshedAt)
+{
+    public static readonly DenialSummaryTiles Empty = new(0, 0m, 0, 0, 0, null, null);
+}
 
 /// <summary>A column of the Monthly / Weekly pivot, in SP PeriodOrder.</summary>
 public sealed record DenialPeriodColumn(
@@ -72,7 +91,9 @@ public sealed record DenialPeriodPivotRow(
     int PayerRank,
     int CodeRank,
     int SortOrder,
-    IReadOnlyDictionary<string, DenialPeriodRow> Cells);
+    IReadOnlyDictionary<string, DenialPeriodRow> Cells,
+    string IndexLabel = "",
+    string RowLabel = "");
 
 /// <summary>
 /// Monthly / Weekly result reshaped for display only: columns and rows come straight from the
@@ -117,7 +138,7 @@ public sealed class DenialPeriodResult
                 var first = g.First();
                 return new DenialPeriodPivotRow(
                     first.RowType, first.PayerName, first.DenialCode, first.PayerRank, first.CodeRank, first.SortOrder,
-                    g.ToDictionary(r => r.PeriodKey, StringComparer.Ordinal));
+                    g.ToDictionary(r => r.PeriodKey, StringComparer.Ordinal), first.IndexLabel, first.RowLabel);
             })
             .ToList();
 

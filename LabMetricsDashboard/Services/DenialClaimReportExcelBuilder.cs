@@ -59,6 +59,7 @@ public static class DenialClaimReportExcelBuilder
         string? bucket,
         DayOfWeek weekStartsOn,
         string? dateColumn,
+        string? balanceColumn,
         CancellationToken ct)
     {
         var model = new DenialClaimReportViewModel
@@ -71,18 +72,27 @@ public static class DenialClaimReportExcelBuilder
             }
         };
 
-        var groups = await repo.GetDenialSummaryAsync(connectionString, dateColumn, ct);
-
-        // Same clamp as the page, so the file and the screen agree on the columns.
         var weekRange = await repo.GetClaimDataWeekRangeAsync(connectionString, ct);
         model.WeekRange = weekRange.WeekFolder;
         model.RunId = weekRange.RunId;
 
-        model.TotalClaims = groups.Sum(g => g.ClaimCount);
-        model.TotalInsuranceBalance = groups.Sum(g => g.InsuranceBalance);
+        if (LabCollectionPrefix.HasDenialSummary(labName))
+        {
+            // Same SPs as the page: tiles, Monthly and Weekly from the ingest aggregate tables.
+            await DenialSummarySpPivot.LoadAsync(new SqlDenialSummaryRepository(), connectionString,
+                LabCollectionPrefix.GetPrefix(labName), model, ct);
+        }
+        else
+        {
+            var groups = await repo.GetDenialSummaryAsync(connectionString, dateColumn, balanceColumn, ct);
 
-        model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods, loadedThrough: weekRange.LoadedThrough);
-        model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: weekRange.LoadedThrough, weekStartsOn: weekStartsOn);
+            model.TotalClaims = groups.Sum(g => g.ClaimCount);
+            model.TotalInsuranceBalance = groups.Sum(g => g.InsuranceBalance);
+
+            // Same clamp as the page, so the file and the screen agree on the columns.
+            model.Monthly = DenialClaimPivotBuilder.Build(groups, weekly: false, MonthlyPeriods, loadedThrough: weekRange.LoadedThrough);
+            model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: weekRange.LoadedThrough, weekStartsOn: weekStartsOn);
+        }
 
         model.Insight.Rows = await repo.GetInsightsAsync(connectionString, model.Insight.Bucket, ct);
 

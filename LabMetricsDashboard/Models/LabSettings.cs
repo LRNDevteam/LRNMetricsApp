@@ -82,6 +82,26 @@ public sealed class LabConfigOptions
     }
 
     /// <summary>
+    /// Denial Summary balance column per lab: lab name -> the ClaimLevelData column the Monthly /
+    /// Weekly summaries, tiles, Claim Level tab and download are measured on ("TotalInsuranceBalance").
+    /// Sourced from <c>LabConfig:DenialSummaryBalanceColumn</c>. Labs not listed keep InsuranceBalance.
+    /// </summary>
+    public Dictionary<string, string> DenialSummaryBalanceColumn { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The configured Denial Summary balance column for a lab, or null when not configured.</summary>
+    public string? GetDenialSummaryBalanceColumn(string? labName)
+    {
+        if (string.IsNullOrWhiteSpace(labName) || DenialSummaryBalanceColumn is null) return null;
+        static string Key(string v) => new(v.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+        var wanted = Key(labName);
+        foreach (var (lab, column) in DenialSummaryBalanceColumn)
+        {
+            if (Key(lab) == wanted && !string.IsNullOrWhiteSpace(column)) return column.Trim();
+        }
+        return null;
+    }
+
+    /// <summary>
     /// How a lab key is shown on screen: lab key -> display name. Sourced from
     /// <c>LabConfig:LabDisplayNames</c>. Lab keys double as file names (Configs\&lt;key&gt;.json,
     /// output folders), so they carry no spaces; this puts the space back for display only.

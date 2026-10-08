@@ -15,6 +15,7 @@ public interface IDenialSummaryRepository
     Task<IReadOnlyList<DenialListRow>> GetDenialListAsync(string connectionString, string prefix, DenialSummaryFilters filters, CancellationToken ct = default);
     Task<IReadOnlyList<DenialPlanTypeRow>> GetPlanTypeAsync(string connectionString, string prefix, DenialSummaryFilters filters, CancellationToken ct = default);
     Task<DenialSummaryFilterOptions> GetFilterOptionsAsync(string connectionString, string prefix, CancellationToken ct = default);
+    Task<DenialSummaryTiles> GetSummaryTilesAsync(string connectionString, string prefix, CancellationToken ct = default);
 }
 
 public sealed class SqlDenialSummaryRepository : IDenialSummaryRepository
@@ -40,7 +41,8 @@ public sealed class SqlDenialSummaryRepository : IDenialSummaryRepository
             oPeriodType = rd.GetOrdinal("PeriodType"), oPeriodKey = rd.GetOrdinal("PeriodKey"),
             oPeriodYear = rd.GetOrdinal("PeriodYear"), oStart = rd.GetOrdinal("PeriodStart"), oEnd = rd.GetOrdinal("PeriodEnd"),
             oLabel = rd.GetOrdinal("PeriodLabel"), oClaims = rd.GetOrdinal("ClaimCount"),
-            oBal = rd.GetOrdinal("TotalInsuranceBalance"), oSort = rd.GetOrdinal("SortOrder"), oPeriodOrder = rd.GetOrdinal("PeriodOrder");
+            oBal = rd.GetOrdinal("TotalInsuranceBalance"), oSort = rd.GetOrdinal("SortOrder"), oPeriodOrder = rd.GetOrdinal("PeriodOrder"),
+            oIndex = rd.GetOrdinal("IndexLabel"), oRowLabel = rd.GetOrdinal("RowLabel"), oCoverage = rd.GetOrdinal("CoveragePct");
 
         while (await rd.ReadAsync(ct))
         {
@@ -51,10 +53,33 @@ public sealed class SqlDenialSummaryRepository : IDenialSummaryRepository
                 rd.IsDBNull(oPeriodYear) ? null : Convert.ToInt32(rd.GetValue(oPeriodYear)),
                 rd.IsDBNull(oStart) ? null : rd.GetDateTime(oStart),
                 rd.IsDBNull(oEnd) ? null : rd.GetDateTime(oEnd),
-                Str(rd, oLabel), Int(rd, oClaims), Dec(rd, oBal), Int(rd, oSort), Int(rd, oPeriodOrder)));
+                Str(rd, oLabel), Int(rd, oClaims), Dec(rd, oBal), Int(rd, oSort), Int(rd, oPeriodOrder),
+                Str(rd, oIndex), Str(rd, oRowLabel), Dec(rd, oCoverage)));
         }
 
         return DenialPeriodResult.From(rows);
+    }
+
+    public async Task<DenialSummaryTiles> GetSummaryTilesAsync(string connectionString, string prefix, CancellationToken ct = default)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand($"dbo.usp_Get{prefix}_DenialSummaryTiles", conn)
+        {
+            CommandType = CommandType.StoredProcedure,
+            CommandTimeout = CommandTimeoutSeconds,
+        };
+        await using var rd = await cmd.ExecuteReaderAsync(ct);
+        if (!await rd.ReadAsync(ct)) return DenialSummaryTiles.Empty;
+
+        return new DenialSummaryTiles(
+            Int(rd, rd.GetOrdinal("DeniedClaims")),
+            Dec(rd, rd.GetOrdinal("InsuranceBalance")),
+            Int(rd, rd.GetOrdinal("DenialCodes")),
+            Int(rd, rd.GetOrdinal("Insurances")),
+            Int(rd, rd.GetOrdinal("UndatedGroups")),
+            rd.IsDBNull(rd.GetOrdinal("LoadedThrough")) ? null : rd.GetDateTime(rd.GetOrdinal("LoadedThrough")),
+            rd.IsDBNull(rd.GetOrdinal("RefreshedAt")) ? null : rd.GetDateTime(rd.GetOrdinal("RefreshedAt")));
     }
 
     public async Task<IReadOnlyList<DenialListRow>> GetDenialListAsync(string connectionString, string prefix, DenialSummaryFilters filters, CancellationToken ct = default)

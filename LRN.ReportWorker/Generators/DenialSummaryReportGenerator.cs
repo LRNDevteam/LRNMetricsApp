@@ -54,11 +54,11 @@ public sealed class DenialSummaryReportGenerator : IReportGenerator
 
         var model = await DenialClaimReportExcelBuilder.LoadAsync(
             _repo, connStr, job.LabName, f.Bucket,
-            f.ParsedWeekStartsOn ?? SqlDenialClaimReportRepository.DefaultWeekStartsOn, f.DateColumn, ct);
+            f.ParsedWeekStartsOn ?? SqlDenialClaimReportRepository.DefaultWeekStartsOn, f.DateColumn, f.BalanceColumn, ct);
         await Progress(20);
 
         var claimQuery = await _repo.BuildDeniedClaimExportQueryAsync(
-            connStr, LabClaimLineColumnCatalog.GetClaimColumns(job.LabName), ct);
+            connStr, LabClaimLineColumnCatalog.GetClaimColumns(job.LabName), f.BalanceColumn, ct);
 
         // DenialSummary_<Lab>_<RunId>_<Week>.xlsx — the page sends its run and week; the claim
         // table's own are the fallback, so the name is filled in either way.

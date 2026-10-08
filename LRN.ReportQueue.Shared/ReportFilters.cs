@@ -680,6 +680,8 @@ public sealed record DenialSummaryReportFilters(
     string? WeekStartsOn = null,
     // ClaimLevelData column that dates the denials (LabConfig:DenialSummaryDateColumn); null = Denial Date.
     string? DateColumn   = null,
+    // ClaimLevelData balance column (LabConfig:DenialSummaryBalanceColumn); null = InsuranceBalance.
+    string? BalanceColumn = null,
     // Identify the run in the downloaded file name; not filters.
     string? RunId        = null,
     string? WeekFolder   = null)
