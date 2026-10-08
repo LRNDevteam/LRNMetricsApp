@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import DataTable from '../components/DataTable';
+import DataTable, { withSortKeys } from '../components/DataTable';
+import { QA_SORT_KEYS } from '../config/sortKeys';
 import Icon from '../components/Icon';
 import Modal from '../components/Modal';
 import MultiSelect from '../components/MultiSelect';
@@ -25,7 +26,7 @@ export default function QaPage() {
   const [escalation, setEscalation] = useState('');
   const [searchText, setSearchText] = useState('');
   const [search, setSearch] = useState('');
-  const [query, setQuery] = useState({ page: 1, pageSize: 25, sortBy: 'submittedOn', sortDesc: false });
+  const [query, setQuery] = useState({ page: 1, pageSize: 50, sortBy: 'submittedOn', sortDesc: false });
   const [data, setData] = useState(null);
   const [options, setOptions] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -163,7 +164,7 @@ export default function QaPage() {
         <DataTable
           tableId="qa-v1"
           exportName="qa-verification-queue"
-          columns={columns}
+          columns={withSortKeys(columns, QA_SORT_KEYS)}
           rows={rows}
           totalCount={data?.rows?.totalCount || 0}
           page={query.page}

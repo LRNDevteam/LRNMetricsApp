@@ -21,7 +21,9 @@ public sealed partial class SqlArWorkbenchRepository
     {
         ["claimId"] = "w.ClaimID", ["payerName"] = "w.PayerName", ["denialCategory"] = "w.DenialCategory",
         ["insuranceBalance"] = "w.InsuranceBalance", ["submittedOn"] = "r.SubmittedOn", ["reviewStatus"] = "r.ReviewStatus",
-        ["reviewedOn"] = "r.ReviewedOn", ["agent"] = "w.AssignedAgentUser", ["reviewer"] = "r.ReviewedBy"
+        ["reviewedOn"] = "r.ReviewedOn", ["agent"] = "w.AssignedAgentUser", ["reviewer"] = "r.ReviewedBy",
+        ["labName"] = "w.LabName", ["panelName"] = "w.PanelName", ["escalation"] = "r.IsEscalation", ["errorType"] = "r.ErrorType",
+        ["note"] = "f.FixResolution"
     };
 
     public async Task<ArWorkbenchQaQueue> GetQaQueueAsync(ArWorkbenchQaFilter filter, ArWorkbenchUserContext user, CancellationToken ct)
@@ -64,7 +66,7 @@ public sealed partial class SqlArWorkbenchRepository
         }
 
         var page = Math.Max(1, filter.Page);
-        var pageSize = Math.Clamp(filter.PageSize, 5, 200);
+        var pageSize = Math.Clamp(filter.PageSize, 5, 1000);
         var order = QaSortColumns.TryGetValue(filter.SortBy ?? string.Empty, out var col) ? col : "r.SubmittedOn";
         var dir = filter.SortDesc ? "DESC" : "ASC";
         cmd.Parameters.Add("@Offset", SqlDbType.Int).Value = (page - 1) * pageSize;

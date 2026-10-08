@@ -73,6 +73,8 @@ public sealed class ArWorkbenchQueueSummary
     public int UnassignedOpen { get; set; }
     public int AwaitingQa { get; set; }
     public int RefollowupDue { get; set; }
+    /// <summary>Escalation &amp; reassignment requests waiting for a lead's answer (nav badge).</summary>
+    public int AgentRequestsPending { get; set; }
     public List<ArWorkbenchQueueNode> Queues { get; set; } = new();
 }
 
@@ -175,6 +177,11 @@ public sealed class ArWorkbenchClaimFilter
     public List<string> Aging { get; set; } = new();
     public List<string> Panel { get; set; } = new();
     public List<string> Clinic { get; set; } = new();
+    /// <summary>
+    /// Denial codes in any spelling ('CO-242', 'PR 204', 'M127'): a claim matches when its primary
+    /// denial or any line denial is one of them, after the claim sync's normalization.
+    /// </summary>
+    public List<string> DenialCode { get; set; } = new();
     public string? Search { get; set; }
     public bool OpenInsuranceArOnly { get; set; }
     public bool TflRiskOnly { get; set; }
@@ -330,6 +337,9 @@ public sealed class ArWorkbenchClaimLine
     public string? DenialCode { get; set; }
     public DateTime? DenialDate { get; set; }
     public string? ICDCode { get; set; }
+    /// <summary>dbo.LineLevelData.RecordId of the line: ICD Code, Units and Modifier are read from it live.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int? SourceRecordId { get; set; }
 }
 
 public sealed class ArWorkbenchActivity
@@ -378,6 +388,27 @@ public sealed class ArWorkbenchClaimDetail
     public ArWorkbenchQaReview? QaReview { get; set; }
     /// <summary>The claim's CIP escalations with their history (internal users only).</summary>
     public List<ArWorkbenchCipCaseDetail> CipCases { get; set; } = new();
+    /// <summary>Patient and provider details for calling the payer, from dbo.LineLevelData.</summary>
+    public ArWorkbenchClaimPatient? Patient { get; set; }
+    /// <summary>Escalation &amp; reassignment requests raised on the claim (internal users only).</summary>
+    public List<ArWorkbenchAgentRequestRow> AgentRequests { get; set; } = new();
+}
+
+/// <summary>
+/// The claim header's Patient &amp; Provider block - the fields an AR caller needs - read from the
+/// lab's dbo.LineLevelData (first line of the claim). A field the lab's source does not carry (not
+/// every lab has Facility), or a claim with no line row, falls back to the synced dbo.ARWB_Claim value.
+/// </summary>
+public sealed class ArWorkbenchClaimPatient
+{
+    public string? PatientName { get; set; }
+    public string? PatientID { get; set; }
+    public string? PatientDOB { get; set; }
+    public string? SubscriberID { get; set; }
+    public string? ReferringProvider { get; set; }
+    public string? Facility { get; set; }
+    /// <summary>LineLevelData when the source row was found, else Claim (synced values).</summary>
+    public string Source { get; set; } = "Claim";
 }
 
 public sealed class ArWorkbenchMasterData

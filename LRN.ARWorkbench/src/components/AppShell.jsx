@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
+import ChangePasswordModal from './ChangePasswordModal';
+import { Notice } from './Status';
 import { LOGOUT_URL } from '../config/apiConfig';
 import { navForUser, ROUTES } from '../config/navigation';
 import { useWorkbench } from '../context/WorkbenchContext';
@@ -58,6 +60,20 @@ export default function AppShell() {
   const [navOpen, setNavOpen] = useState(false);              // phone / tablet drawer
   const [navHidden, setNavHidden] = useState(() => readStored(HIDDEN_KEY, false)); // desktop: sidebar hidden
   const [collapsed, setCollapsed] = useState(() => readStored(COLLAPSED_GROUPS_KEY, []));
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [accountNotice, setAccountNotice] = useState(null);
+  const userMenuRef = useRef(null);
+
+  // The account menu closes on an outside click or Escape.
+  useEffect(() => {
+    if (!userMenuOpen) return undefined;
+    const onDown = (e) => { if (userMenuRef.current && !userMenuRef.current.contains(e.target)) setUserMenuOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setUserMenuOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [userMenuOpen]);
 
   function toggleNav() {
     if (isDrawer()) { setNavOpen((v) => !v); return; }
@@ -78,7 +94,7 @@ export default function AppShell() {
     if (!labId || !user) return undefined;
     const controller = new AbortController();
     arWorkbenchService.queues(labId, controller.signal)
-      .then((s) => setCounts({ unassignedOpen: s.unassignedOpen, awaitingQa: s.awaitingQa, refollowupDue: s.refollowupDue }))
+      .then((s) => setCounts({ unassignedOpen: s.unassignedOpen, awaitingQa: s.awaitingQa, refollowupDue: s.refollowupDue, agentRequestsPending: s.agentRequestsPending }))
       .catch(() => { /* badges are optional; the page itself reports errors */ });
     return () => controller.abort();
   }, [labId, user, location.pathname]);
@@ -159,12 +175,30 @@ export default function AppShell() {
               ) : labName && <span className="arwb-badge arwb-badge-accent">{labName}</span>}
             </div>
             <ScopeBadge access={user?.access} roleCode={user?.roleCode} labName={labName} />
-            <div className="arwb-user-chip">
-              <span className="arwb-user-avatar">{initials(user?.displayName)}</span>
-              <span className="lh-sm">
-                <span className="arwb-u-name">{user?.displayName}</span><br />
-                <span className="arwb-u-role">{user?.roleLabel}</span>
-              </span>
+            <div className="arwb-user-menu" ref={userMenuRef}>
+              <button type="button" className="arwb-user-chip arwb-user-chip-btn" onClick={() => setUserMenuOpen((v) => !v)}
+                aria-haspopup="menu" aria-expanded={userMenuOpen} title="Account">
+                <span className="arwb-user-avatar">{initials(user?.displayName)}</span>
+                <span className="lh-sm arwb-user-chip-text">
+                  <span className="arwb-u-name">{user?.displayName}</span><br />
+                  <span className="arwb-u-role">{user?.roleLabel}</span>
+                </span>
+                <Icon name="chevronDown" size={14} />
+              </button>
+              {userMenuOpen && (
+                <div className="arwb-popover right arwb-user-dropdown" role="menu">
+                  <div className="arwb-user-dropdown-head">
+                    <b>{user?.displayName}</b>
+                    <span className="arwb-hint">{user?.userName}</span>
+                  </div>
+                  <button type="button" role="menuitem" className="arwb-menu-item" onClick={() => { setUserMenuOpen(false); setChangingPassword(true); }}>
+                    <Icon name="key" size={15} /> Change password
+                  </button>
+                  <button type="button" role="menuitem" className="arwb-menu-item" onClick={logout}>
+                    <Icon name="logout" size={15} /> Sign out
+                  </button>
+                </div>
+              )}
             </div>
             <button type="button" className="arwb-btn arwb-btn-ghost arwb-btn-sm" onClick={logout} title="Sign out">
               <Icon name="logout" size={15} /><span className="d-none d-md-inline">Sign out</span>
@@ -172,6 +206,7 @@ export default function AppShell() {
           </div>
         </header>
         <main className="arwb-view-container">
+          <Notice notice={accountNotice} onClose={() => setAccountNotice(null)} />
           {user?.clientActive === false && (
             <div className="arwb-alert" role="status" style={{ marginBottom: 14 }}>
               <span className="grow">This client is <b>deactivated</b> in the AR Workbench: only administrators can open it, and the nightly snapshot skips it. Reactivate it in Client Management.</span>
@@ -180,6 +215,10 @@ export default function AppShell() {
           <Outlet />
         </main>
       </div>
+      {changingPassword && (
+        <ChangePasswordModal onClose={() => setChangingPassword(false)}
+          onChanged={(message) => { setChangingPassword(false); setAccountNotice({ kind: 'good', text: message }); }} />
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { ComparisonBars } from '../components/Charts';
 import Icon from '../components/Icon';
 import { Card, GoTo, Kpi } from '../components/Panel';
+import useTableSort from '../components/useTableSort';
 import { ErrorBox, Loading, PageHeader } from '../components/Status';
 import { canOpen } from '../config/navigation';
 import { useWorkbench } from '../context/WorkbenchContext';
@@ -16,6 +17,34 @@ const BREAKDOWNS = [
   { id: 'byFixResolution', label: 'Fix / Resolution' },
   { id: 'byDenialRootCause', label: 'Denial Root Cause' }
 ];
+
+function BreakdownTable({ label, rows: all }) {
+  const { rows, th } = useTableSort(all, { label: (r) => r.label, notes: (r) => r.notes, claims: (r) => r.claims, balance: (r) => r.balance });
+  return (
+    <div className="arwb-table-wrap">
+      <table className="arwb-data-table">
+        <thead>
+          <tr>
+            {th('label', label)}
+            {th('notes', '# Follow-Up Notes', { className: 'num' })}
+            {th('claims', '# Claims', { className: 'num' })}
+            {th('balance', 'Outstanding Balance', { className: 'num' })}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.label}>
+              <td className="wrap">{r.label}</td>
+              <td className="num mono">{fmt.count(r.notes)}</td>
+              <td className="num mono">{fmt.count(r.claims)}</td>
+              <td className="num mono">{fmt.money(r.balance)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 /**
  * T072 Recovery & Financial Analytics (mockup App.views.analytics): KPI tiles, recovered vs.
@@ -116,30 +145,7 @@ export default function AnalyticsPage() {
               className={`arwb-tab-btn ${b.id === dim.id ? 'active' : ''}`} onClick={() => setDim(b)}>By {b.label}</button>
           ))}
         </div>
-        {breakdown.length ? (
-          <div className="arwb-table-wrap">
-            <table className="arwb-data-table">
-              <thead>
-                <tr>
-                  <th scope="col">{dim.label}</th>
-                  <th scope="col" className="num"># Follow-Up Notes</th>
-                  <th scope="col" className="num"># Claims</th>
-                  <th scope="col" className="num">Outstanding Balance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {breakdown.map((r) => (
-                  <tr key={r.label}>
-                    <td className="wrap">{r.label}</td>
-                    <td className="num mono">{fmt.count(r.notes)}</td>
-                    <td className="num mono">{fmt.count(r.claims)}</td>
-                    <td className="num mono">{fmt.money(r.balance)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
+        {breakdown.length ? <BreakdownTable label={dim.label} rows={breakdown} /> : (
           <div className="arwb-empty-state">No follow-up notes logged with a {dim.label} yet in the current scope.</div>
         )}
       </Card>

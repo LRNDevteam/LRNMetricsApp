@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Icon from '../components/Icon';
 import Modal from '../components/Modal';
+import useTableSort from '../components/useTableSort';
 import { ErrorBox, Loading, Notice, PageHeader } from '../components/Status';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
@@ -33,6 +34,8 @@ export default function TflSettingsPage() {
   }, [labId]);
 
   useEffect(() => { load(); }, [load]);
+  const limits = useTableSort(data?.thresholds || [], { cls: (t) => t.financialClass, days: (t) => t.thresholdDays, claims: (t) => t.claimCount });
+  const unmapped = useTableSort(data?.unmappedClasses || [], { cls: (u) => u.financialClass, claims: (u) => u.claimCount });
 
   async function run(action, fallback) {
     setBusy(true);
@@ -105,9 +108,9 @@ export default function TflSettingsPage() {
             <div className="arwb-panel-head"><h3>Limits by financial class</h3><span className="arwb-card-sub">matched to the claim's financial class (payer type) exactly</span></div>
             <div className="arwb-table-wrap">
               <table className="arwb-data-table">
-                <thead><tr><th>Financial Class</th><th className="num">Limit (days)</th><th className="num">Claims</th><th /></tr></thead>
+                <thead><tr>{limits.th('cls', 'Financial Class')}{limits.th('days', 'Limit (days)', { className: 'num' })}{limits.th('claims', 'Claims', { className: 'num' })}<th /></tr></thead>
                 <tbody>
-                  {data.thresholds.map((t) => (
+                  {limits.rows.map((t) => (
                     <tr key={t.financialClass}>
                       <td>{t.financialClass}</td>
                       <td className="num">{fmt.count(t.thresholdDays)}</td>
@@ -137,9 +140,9 @@ export default function TflSettingsPage() {
               <div className="arwb-panel-head"><h3>Financial classes using the default</h3><span className="arwb-card-sub">on synced claims, with no limit of their own</span></div>
               <div className="arwb-table-wrap">
                 <table className="arwb-data-table">
-                  <thead><tr><th>Financial Class</th><th className="num">Claims</th><th /></tr></thead>
+                  <thead><tr>{unmapped.th('cls', 'Financial Class')}{unmapped.th('claims', 'Claims', { className: 'num' })}<th /></tr></thead>
                   <tbody>
-                    {data.unmappedClasses.map((u) => (
+                    {unmapped.rows.map((u) => (
                       <tr key={u.financialClass}>
                         <td>{u.financialClass}</td>
                         <td className="num">{fmt.count(u.claimCount)}</td>

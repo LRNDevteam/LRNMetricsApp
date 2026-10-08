@@ -35,6 +35,11 @@ export const arWorkbenchService = {
   convertLegacyCip: (labId, preview) => api(`cip/convert-legacy${qs({ labId, preview })}`, { method: 'POST' }),
   cipBulk: (labId, caseIds, decision, note) => api(`cip/bulk${qs({ labId })}`, json('POST', { caseIds, decision, note })),
 
+  // Escalation & Reassignment Requests: raised by an agent on a claim, answered by a lead / manager / admin
+  createAgentRequest: (labId, claimKey, body) => api(`claims/${encodeURIComponent(claimKey)}/agent-requests${qs({ labId })}`, json('POST', body)),
+  agentRequests: (filter, signal) => api(`agent-requests${qs(filter)}`, { signal }),
+  resolveAgentRequests: (labId, body) => api(`agent-requests/resolve${qs({ labId })}`, json('POST', body)),
+
   // QA Verification Queue (ARWorkbench.QaDecide)
   qaQueue: (filter, signal) => api(`qa${qs(filter)}`, { signal }),
   qaDecision: (labId, claimKey, body) => api(`qa/${claimKey}/decision${qs({ labId })}`, json('POST', body)),
@@ -86,6 +91,7 @@ export const arWorkbenchService = {
   logFollowUp: (labId, claimKey, body) => api(`claims/${encodeURIComponent(claimKey)}/follow-ups${qs({ labId })}`, json('POST', body)),
   exportClaims: (filter) => downloadFile(`claims/export${qs(filter)}`, 'ARWorkbench_Claims.xlsx'),
   insights: (labId, signal) => api(`data-processing/insights${qs({ labId })}`, { signal }),
+  uploadedInsights: (labId, signal) => api(`data-processing/uploaded-insights${qs({ labId })}`, { signal }),
   tflSettings: (labId) => api(`settings/tfl${qs({ labId })}`),
   addTflThreshold: (labId, body) => api(`settings/tfl${qs({ labId })}`, json('POST', body)),
   updateTflThreshold: (labId, body) => api(`settings/tfl${qs({ labId })}`, json('PUT', body)),
@@ -143,6 +149,7 @@ export const arWorkbenchService = {
 
   labs: () => api('labs'),
   me: (labId) => api(`me${qs({ labId })}`),
+  changeOwnPassword: (labId, body) => api(`me/password${qs({ labId })}`, json('POST', body)),
   queues: (labId, signal) => api(`queues${qs({ labId })}`, { signal }),
   dashboard: (labId, signal) => api(`dashboard${qs({ labId })}`, { signal }),
   analytics: (labId, signal) => api(`analytics${qs({ labId })}`, { signal }),

@@ -166,6 +166,8 @@ IF COL_LENGTH('dbo.ClaimLevelData', 'ChargeTotalPayments') IS NULL           ALT
 IF COL_LENGTH('dbo.ClaimLevelData', 'ChargeTotalAdjustments') IS NULL        ALTER TABLE dbo.ClaimLevelData ADD ChargeTotalAdjustments NVARCHAR(500) NULL;
 IF COL_LENGTH('dbo.ClaimLevelData', 'OrderingProviderID') IS NULL            ALTER TABLE dbo.ClaimLevelData ADD OrderingProviderID NVARCHAR(500) NULL;
 IF COL_LENGTH('dbo.ClaimLevelData', 'AdditionalFields') IS NULL              ALTER TABLE dbo.ClaimLevelData ADD AdditionalFields NVARCHAR(MAX) NULL;
+IF COL_LENGTH('dbo.ClaimLevelData', 'PostingDate') IS NULL                   ALTER TABLE dbo.ClaimLevelData ADD PostingDate NVARCHAR(500) NULL;
+IF COL_LENGTH('dbo.ClaimLevelData', 'PaymentPostedDate') IS NULL             ALTER TABLE dbo.ClaimLevelData ADD PaymentPostedDate NVARCHAR(500) NULL;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID('dbo.ClaimLevelData') AND name = 'IX_ClaimLevelData_ClaimID')

@@ -57,6 +57,8 @@
       { "CsvHeader": "Total Insurance Balance", "SqlColumn": "TotalInsuranceBalance", "IncludeInHash": true },
       { "CsvHeader": "Charge Balance Due Other", "SqlColumn": "OtherBalance", "IncludeInHash": true },
       { "CsvHeader": "CheckDate", "SqlColumn": "CheckDate", "IncludeInHash": true },
+      { "CsvHeader": "Payment Posted Date", "SqlColumn": "PostingDate", "IncludeInHash": true },
+      { "CsvHeader": "Payment Posted Date", "SqlColumn": "PaymentPostedDate", "IncludeInHash": true },
       { "CsvHeader": "ClaimStatus", "SqlColumn": "ClaimStatus", "IncludeInHash": true },
       { "CsvHeader": "DenialCode", "SqlColumn": "DenialCode", "IncludeInHash": true },
       { "CsvHeader": "Denial Date", "SqlColumn": "DenialDate", "IncludeInHash": true },

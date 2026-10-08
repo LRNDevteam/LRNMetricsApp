@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import DataTable from '../components/DataTable';
+import DataTable, { withSortKeys } from '../components/DataTable';
+import { CIP_SORT_KEYS } from '../config/sortKeys';
 import Icon from '../components/Icon';
 import Modal from '../components/Modal';
 import MultiSelect from '../components/MultiSelect';
@@ -126,7 +127,7 @@ export default function CipPage({ view = 'internal' }) {
   const [category, setCategory] = useState([]);
   const [searchText, setSearchText] = useState('');
   const [search, setSearch] = useState('');
-  const [query, setQuery] = useState({ page: 1, pageSize: 25, sortBy: 'caseStatus', sortDesc: false });
+  const [query, setQuery] = useState({ page: 1, pageSize: 50, sortBy: 'caseStatus', sortDesc: false });
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -270,7 +271,7 @@ export default function CipPage({ view = 'internal' }) {
         <DataTable
           tableId={client ? 'client-cip-v1' : 'cip-v1'}
           exportName={client ? 'escalation-requests' : 'cip-client-escalations'}
-          columns={columns}
+          columns={withSortKeys(columns, CIP_SORT_KEYS)}
           rows={rows}
           totalCount={data?.rows?.totalCount || 0}
           page={query.page}

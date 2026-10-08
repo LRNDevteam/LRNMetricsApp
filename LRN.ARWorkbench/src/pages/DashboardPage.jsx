@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { BarList, Donut, sequentialRamp } from '../components/Charts';
 import Icon from '../components/Icon';
 import { Card, GoTo, Kpi } from '../components/Panel';
+import useTableSort from '../components/useTableSort';
 import { canOpen } from '../config/navigation';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
@@ -93,7 +94,7 @@ export default function DashboardPage() {
       {!isViewer && (
         <Card icon="layers" title="Latest Denial Analysis Report insights" sub="from the latest data load" flush
           action={canOpen(user, 'data-processing') && <GoTo onClick={() => navigate('/data-processing')}>Open Data Processing</GoTo>}>
-          <DenialHighlights rows={d.denialHighlights} onRoute={canDrill ? (code) => openQueue({ q: code }) : null} />
+          <DenialHighlights rows={d.denialHighlights} onRoute={canDrill ? (code) => openQueue({ code }) : null} />
         </Card>
       )}
 
@@ -146,19 +147,31 @@ export default function DashboardPage() {
 
       {!isViewer && (
         <Card title="Agent Productivity" sub="current portfolio, all statuses" flush>
+          <AgentTable agents={d.agents} />
+        </Card>
+      )}
+    </>
+  );
+}
+
+function AgentTable({ agents }) {
+  const { rows, th } = useTableSort(agents, {
+    agent: (a) => a.displayName, assigned: (a) => a.assigned, completed: (a) => a.completed, review: (a) => a.awaitingReview, recovery: (a) => a.recovery
+  });
+  return (
           <div className="arwb-table-wrap">
             <table className="arwb-data-table">
               <thead>
                 <tr>
-                  <th scope="col">Agent</th>
-                  <th scope="col" className="num">Assigned</th>
-                  <th scope="col" className="num">Completed</th>
-                  <th scope="col" className="num">Awaiting Review</th>
-                  <th scope="col" className="num">Recovery $</th>
+                  {th('agent', 'Agent')}
+                  {th('assigned', 'Assigned', { className: 'num' })}
+                  {th('completed', 'Completed', { className: 'num' })}
+                  {th('review', 'Awaiting Review', { className: 'num' })}
+                  {th('recovery', 'Recovery $', { className: 'num' })}
                 </tr>
               </thead>
               <tbody>
-                {d.agents.length ? d.agents.map((a) => (
+                {rows.length ? rows.map((a) => (
                   <tr key={a.userName}>
                     <td><span className="arwb-avatar-sm">{initials(a.displayName)}</span>{a.displayName} <span className="arwb-hint">({a.userName})</span></td>
                     <td className="num mono">{fmt.count(a.assigned)}</td>
@@ -172,9 +185,6 @@ export default function DashboardPage() {
               </tbody>
             </table>
           </div>
-        </Card>
-      )}
-    </>
   );
 }
 
@@ -182,23 +192,27 @@ function initials(name) {
   return String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join('');
 }
 
-function DenialHighlights({ rows, onRoute }) {
-  if (!rows.length) return <div className="arwb-empty-state">No denial code groups with an open balance in the current scope.</div>;
+function DenialHighlights({ rows: all, onRoute }) {
+  const { rows, th } = useTableSort(all, {
+    code: (h) => h.code, description: (h) => h.description, count: (h) => h.count, balance: (h) => h.balance, payer: (h) => h.topPayer,
+    payerBalance: (h) => h.topPayerBalance, impact: (h) => h.impactPct, category: (h) => h.category
+  });
+  if (!all.length) return <div className="arwb-empty-state">No denial code groups with an open balance in the current scope.</div>;
   return (
     <div className="arwb-table-wrap">
       <table className="arwb-data-table">
         <thead>
           <tr>
             <th scope="col">#</th>
-            <th scope="col">Denial Codes</th>
-            <th scope="col">Description</th>
-            <th scope="col" className="num"># of Denial</th>
-            <th scope="col" className="num">Total Balance ($)</th>
-            <th scope="col">Highest $ Impact — Insurance</th>
-            <th scope="col" className="num">Ins. Balance ($)</th>
-            <th scope="col" className="num">$ Impact (%)</th>
+            {th('code', 'Denial Codes')}
+            {th('description', 'Description')}
+            {th('count', '# of Denial', { className: 'num' })}
+            {th('balance', 'Total Balance ($)', { className: 'num' })}
+            {th('payer', 'Highest $ Impact — Insurance')}
+            {th('payerBalance', 'Ins. Balance ($)', { className: 'num' })}
+            {th('impact', '$ Impact (%)', { className: 'num' })}
             <th scope="col">Observation</th>
-            <th scope="col">Category</th>
+            {th('category', 'Category')}
             <th scope="col">Recommended Action</th>
             {onRoute && <th scope="col" className="num">Action</th>}
           </tr>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import DataTable from '../components/DataTable';
+import DataTable, { withSortKeys } from '../components/DataTable';
+import { CLAIM_SORT_KEYS } from '../config/sortKeys';
 import BulkUpdateModal from '../components/BulkUpdateModal';
 import FollowUpModal from '../components/FollowUpModal';
 import Icon from '../components/Icon';
@@ -83,7 +84,7 @@ export default function WorklistPage({ view = 'mywork' }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [search, setSearch] = useState('');
-  const [query, setQuery] = useState({ page: 1, pageSize: 25, sortBy: 'nextFollowUpDate', sortDesc: false });
+  const [query, setQuery] = useState({ page: 1, pageSize: 50, sortBy: 'nextFollowUpDate', sortDesc: false });
   const [data, setData] = useState({ items: [], totalCount: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -244,7 +245,7 @@ export default function WorklistPage({ view = 'mywork' }) {
         <DataTable
           tableId={`${view}-v1`}
           exportName={cfg.exportName}
-          columns={columns}
+          columns={withSortKeys(columns, CLAIM_SORT_KEYS)}
           rows={data.items || []}
           totalCount={data.totalCount}
           page={query.page}

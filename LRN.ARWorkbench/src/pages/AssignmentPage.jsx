@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router';
 import AssignModal from '../components/AssignModal';
 import BulkUpdateModal from '../components/BulkUpdateModal';
 import { BarList } from '../components/Charts';
-import DataTable from '../components/DataTable';
+import DataTable, { withSortKeys } from '../components/DataTable';
+import { CLAIM_SORT_KEYS } from '../config/sortKeys';
 import Icon from '../components/Icon';
 import Modal from '../components/Modal';
 import MultiSelect from '../components/MultiSelect';
@@ -168,7 +169,7 @@ export default function AssignmentPage() {
   }
 
   // ---- Unassigned Claims -----------------------------------------------------------------------
-  const [uaQuery, setUaQuery] = useState({ page: 1, pageSize: 25, sortBy: 'daysSinceLastTouch', sortDesc: true });
+  const [uaQuery, setUaQuery] = useState({ page: 1, pageSize: 50, sortBy: 'daysSinceLastTouch', sortDesc: true });
   const [uaData, setUaData] = useState({ items: [], totalCount: 0 });
   const [uaLoading, setUaLoading] = useState(true);
   const [uaSelected, setUaSelected] = useState(() => new Set());
@@ -188,7 +189,7 @@ export default function AssignmentPage() {
 
   // ---- Assigned Claims - Bulk Reassign ---------------------------------------------------------
   const [raFilter, setRaFilter] = useState(BLANK_REASSIGN);
-  const [raQuery, setRaQuery] = useState({ page: 1, pageSize: 25, sortBy: 'remainingAR', sortDesc: true });
+  const [raQuery, setRaQuery] = useState({ page: 1, pageSize: 50, sortBy: 'remainingAR', sortDesc: true });
   const [raData, setRaData] = useState({ items: [], totalCount: 0 });
   const [raLoading, setRaLoading] = useState(true);
   const [raSelected, setRaSelected] = useState(() => new Set());
@@ -354,7 +355,7 @@ export default function AssignmentPage() {
         <DataTable
           tableId="assignment-unassigned"
           exportName="unassigned-claims"
-          columns={uaColumns}
+          columns={withSortKeys(uaColumns, CLAIM_SORT_KEYS)}
           rows={uaData.items || []}
           totalCount={uaData.totalCount}
           page={uaQuery.page}
@@ -405,7 +406,7 @@ export default function AssignmentPage() {
         <DataTable
           tableId="assignment-reassign"
           exportName="assigned-claims-reassign"
-          columns={raColumns}
+          columns={withSortKeys(raColumns, CLAIM_SORT_KEYS)}
           rows={raData.items || []}
           totalCount={raData.totalCount}
           page={raQuery.page}

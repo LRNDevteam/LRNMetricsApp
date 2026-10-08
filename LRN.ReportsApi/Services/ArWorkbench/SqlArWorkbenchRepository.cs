@@ -35,6 +35,12 @@ public interface IArWorkbenchRepository
     Task<ArWorkbenchSaveResult> SetClientActiveAsync(int labId, bool isActive, string? note, string user, CancellationToken ct);
     Task<ArWorkbenchClientStats?> GetClientStatsAsync(int labId, CancellationToken ct);
 
+    // Escalation & Reassignment Requests (SqlArWorkbenchRepository.AgentRequests.cs)
+    Task<(ArWorkbenchSaveStatus Status, string Message, long? RequestId)> CreateAgentRequestAsync(int labId, long claimKey, string requestType, string reason, string note, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<ArWorkbenchAgentRequestQueue> GetAgentRequestsAsync(ArWorkbenchAgentRequestFilter filter, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<ArWorkbenchAgentRequestResolveResult> ResolveAgentRequestsAsync(int labId, IReadOnlyList<long> requestIds, string note, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<List<ArWorkbenchAgentRequestRow>> GetClaimAgentRequestsAsync(int labId, long claimKey, CancellationToken ct);
+
     // Recovery & Financial Analytics (SqlArWorkbenchRepository.Analytics.cs)
     Task<ArWorkbenchAnalytics> GetAnalyticsAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
     // Reports (SqlArWorkbenchRepository.Reports.cs); null for an unknown report id
@@ -91,6 +97,8 @@ public interface IArWorkbenchRepository
     Task<ArWorkbenchSaveResult> UpdateWorkbenchUserAsync(int labUserId, string email, int roleId, IReadOnlyList<int> requestedLabIds, bool isActive, string? passwordHash,
         ArWorkbenchUserProfile profile, int? callerLabUserId, bool allLabs, IReadOnlySet<int> manageableLabIds, string modifiedBy, CancellationToken ct);
     Task<IReadOnlyList<string>> GetScopeOptionsAsync(int labId, string level, CancellationToken ct);
+    /// <summary>Own password change: verifies the current password against dbo.LabUsers.PasswordHash, then stores the new hash.</summary>
+    Task<ArWorkbenchSaveResult> ChangeOwnPasswordAsync(int labUserId, string currentPassword, string newPassword, string userName, CancellationToken ct);
 
     // Saved Views (SqlArWorkbenchRepository.SavedViews.cs)
     Task<IReadOnlyList<ArWorkbenchSavedView>> GetSavedViewsAsync(int labId, string userName, string viewKey, CancellationToken ct);
@@ -101,6 +109,8 @@ public interface IArWorkbenchRepository
     // Follow-up notes, insights, timely-filing limits (SqlArWorkbenchRepository.FollowUp.cs)
     Task<(ArWorkbenchSaveStatus Status, string Message, ArWorkbenchFollowUpResult? Result)> LogFollowUpAsync(int labId, long claimKey, ArWorkbenchFollowUpRequest request, ArWorkbenchUserContext user, CancellationToken ct);
     Task<IReadOnlyList<ArWorkbenchInsightRow>> GetInsightsAsync(int labId, CancellationToken ct);
+    /// <summary>The team's uploaded Key Observations from LRN Metrics (dbo.DenialClaimLevelInsight), Current and Previous week.</summary>
+    Task<ArWorkbenchUploadedInsights> GetUploadedInsightsAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchTflSettings> GetTflSettingsAsync(int labId, CancellationToken ct);
     Task<ArWorkbenchSaveResult> SaveTflThresholdAsync(int labId, string? originalClass, string financialClass, int days, string user, CancellationToken ct);
     Task<ArWorkbenchSaveResult> DeleteTflThresholdAsync(int labId, string financialClass, CancellationToken ct);
@@ -141,7 +151,7 @@ public interface IArWorkbenchRepository
 /// </summary>
 public sealed partial class SqlArWorkbenchRepository : IArWorkbenchRepository
 {
-    private const int MaxPageSize = 500;
+    private const int MaxPageSize = 1000;
 
     private static readonly Dictionary<string, string> SortColumns = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -161,7 +171,16 @@ public sealed partial class SqlArWorkbenchRepository : IArWorkbenchRepository
         ["nextFollowUpDate"] = "w.NextFollowUpDate",
         ["daysSinceLastTouch"] = $"DATEDIFF(day, {UntouchedSinceSql()}, SYSUTCDATETIME())",
         ["workflowStatus"] = "w.WorkflowStatus",
-        ["denialCategory"] = "w.DenialCategory"
+        ["denialCategory"] = "w.DenialCategory",
+        ["labName"] = "w.LabName",
+        ["cpt"] = "CONVERT(nvarchar(400), w.CptSummary)",
+        ["denialCode"] = "w.PrimaryDenialCode",
+        ["denialReason"] = "w.DenialReason",
+        ["sourceClaimStatus"] = "w.SourceClaimStatus",
+        ["isTflRisk"] = "w.IsTflRisk",
+        ["assignedAgent"] = "w.AssignedAgentUser",
+        ["queue"] = "(SELECT q.SortOrder FROM dbo.ARWB_ArQueue q WHERE q.QueueId = ISNULL(w.ArSubQueueId, w.ArQueueId))",
+        ["fixResolution"] = "w.FixResolution"
     };
 
     /// <summary>
@@ -484,7 +503,10 @@ SELECT
     SUM(CASE WHEN w.ArQueueId = 'submittedqa' THEN 1 ELSE 0 END),
     SUM(CASE WHEN w.IsRefollowupDue = 1 AND w.WorkflowStatus IN ('Assigned', 'QA Rejected', 'Completed') AND w.IsOpenInsuranceAR = 1 THEN 1 ELSE 0 END)
 FROM dbo.ARWB_Claim w
-WHERE 1 = 1 {scope};";
+WHERE 1 = 1 {scope};
+
+SELECT COUNT(*) FROM dbo.ARWB_AgentRequest r INNER JOIN dbo.ARWB_Claim w ON w.ClaimKey = r.ClaimKey
+WHERE r.RequestStatus = 'Pending' {scope};";
 
         var nodes = new Dictionary<string, ArWorkbenchQueueNode>(StringComparer.OrdinalIgnoreCase);
         var summary = new ArWorkbenchQueueSummary();
@@ -532,6 +554,9 @@ WHERE 1 = 1 {scope};";
             summary.AwaitingQa = reader.IsDBNull(5) ? 0 : reader.GetInt32(5);
             summary.RefollowupDue = reader.IsDBNull(6) ? 0 : reader.GetInt32(6);
         }
+
+        await reader.NextResultAsync(ct);
+        if (await reader.ReadAsync(ct)) summary.AgentRequestsPending = reader.GetInt32(0);
 
         foreach (var node in nodes.Values.Where(n => n.ParentQueueId is not null))
         {
@@ -1047,6 +1072,22 @@ ORDER BY pg.Seq;";
             where.Add($"{UntouchedSinceSql()} <= DATEADD(day, -@MinUntouched, SYSUTCDATETIME())");
             cmd.Parameters.Add("@MinUntouched", SqlDbType.Int).Value = Math.Min(filter.MinDaysUntouched.Value, 36_500);
         }
+        var denialCodes = (filter.DenialCode ?? [])
+            .Select(ArWorkbenchMasterRules.NormalizeDenialCode).Where(c => c is not null).Select(c => c!)
+            .Distinct(StringComparer.OrdinalIgnoreCase).Take(ArWorkbenchClaimFilter.MaxValuesPerFilter).ToList();
+        if (denialCodes.Count > 0)
+        {
+            // Primary (normalized) or any line code: LineDenialCodesSearch is ',code1,code2,' so a
+            // LIKE '%,code,%' matches whole codes only ('97' never matches '197').
+            var any = new List<string>();
+            for (var i = 0; i < denialCodes.Count; i++)
+            {
+                cmd.Parameters.Add($"@Dc{i}", SqlDbType.NVarChar, 50).Value = denialCodes[i];
+                cmd.Parameters.Add($"@DcL{i}", SqlDbType.NVarChar, 60).Value = "%," + denialCodes[i].Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + ",%";
+                any.Add($"w.PrimaryDenialCode = @Dc{i} OR w.LineDenialCodesSearch LIKE @DcL{i}");
+            }
+            where.Add("(" + string.Join(" OR ", any) + ")");
+        }
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
             where.Add("(w.ClaimID LIKE @Search OR w.PatientID LIKE @Search OR w.PatientName LIKE @Search OR w.AccessionNumber LIKE @Search OR w.DenialCode LIKE @Search OR w.ReferringProvider LIKE @Search)");
@@ -1173,7 +1214,7 @@ WHERE c.ClaimKey = @ClaimKey AND @Allowed = 1
 ORDER BY s.StageOrder;
 
 SELECT LineNumber, CPTCode, Units, Modifier, ChargeAmount, AllowedAmount, InsurancePayment, InsuranceAdjustments,
-       InsuranceBalance, PatientBalance, LineClaimStatus, PayStatus, DenialCode, DenialDate, ICDCode
+       InsuranceBalance, PatientBalance, LineClaimStatus, PayStatus, DenialCode, DenialDate, ICDCode, SourceRecordId
 FROM dbo.ARWB_ClaimLine WHERE ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY LineNumber;
 
 SELECT ActivityId, ActivityOn, ActionType, Detail, UserName, RoleCode, IsSystem
@@ -1216,7 +1257,8 @@ FROM dbo.ARWB_ClaimFollowUp WHERE ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY
                 PayStatus = Str(reader, 11),
                 DenialCode = Str(reader, 12),
                 DenialDate = Date(reader, 13),
-                ICDCode = Str(reader, 14)
+                ICDCode = Str(reader, 14),
+                SourceRecordId = reader.IsDBNull(15) ? null : reader.GetInt32(15)
             });
         }
 
@@ -1258,7 +1300,126 @@ FROM dbo.ARWB_ClaimFollowUp WHERE ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY
         var names = await GetDisplayNamesAsync(new[] { agent }, ct);
         detail.Claim["AssignedAgentName"] = agent is not null && names.TryGetValue(agent, out var n) ? n : null;
 
+        detail.Patient = await GetClaimPatientAsync(connection, labId, claimKey, ct);
+        await FillLineCodesFromSourceAsync(connection, labId, detail.Lines, ct);
         return detail;
+    }
+
+    /// <summary>
+    /// The CPT breakdown's ICD Code, Units and Modifier straight from each line's dbo.LineLevelData row
+    /// (by RecordId, its primary key), so the claim page shows what the line file holds. A column the
+    /// lab's LineLevelData does not have, or a blank value, keeps the synced ARWB_ClaimLine value.
+    /// </summary>
+    private static async Task FillLineCodesFromSourceAsync(SqlConnection connection, int labId, List<ArWorkbenchClaimLine> lines, CancellationToken ct)
+    {
+        var ids = lines.Where(l => l.SourceRecordId is not null).Select(l => l.SourceRecordId!.Value).Distinct().Take(500).ToList();
+        if (ids.Count == 0) return;
+        if (!LineColumnsByLab.TryGetValue(labId, out var cached)) return;   // filled by GetClaimPatientAsync just before
+        var present = cached.Columns;
+        if (!present.Contains("RecordId") || !(present.Contains("ICDCode") || present.Contains("Units") || present.Contains("Modifier"))) return;
+
+        string Text(string name) => present.Contains(name) ? $"NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(1000), l.[{name}]))), N'')" : "CAST(NULL AS nvarchar(1000))";
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandTimeout = 30;
+        var idParams = new List<string>();
+        for (var i = 0; i < ids.Count; i++)
+        {
+            idParams.Add($"@R{i}");
+            cmd.Parameters.Add($"@R{i}", SqlDbType.Int).Value = ids[i];
+        }
+        cmd.CommandText = $@"
+SELECT l.RecordId, {Text("ICDCode")}, {Text("Units")}, {Text("Modifier")}
+FROM dbo.LineLevelData l
+WHERE l.RecordId IN ({string.Join(", ", idParams)});";
+
+        var byRecord = new Dictionary<int, (string? Icd, string? Units, string? Modifier)>();
+        await using (var r = await cmd.ExecuteReaderAsync(ct))
+            while (await r.ReadAsync(ct)) byRecord[Convert.ToInt32(r.GetValue(0))] = (Str(r, 1), Str(r, 2), Str(r, 3));
+
+        foreach (var line in lines)
+        {
+            if (line.SourceRecordId is not int id || !byRecord.TryGetValue(id, out var src)) continue;
+            if (src.Icd is not null) line.ICDCode = src.Icd;
+            if (src.Modifier is not null) line.Modifier = src.Modifier;
+            if (src.Units is not null && decimal.TryParse(src.Units, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var units))
+                line.Units = units;
+        }
+    }
+
+    /// <summary>The LineLevelData columns of the Patient &amp; Provider block, in display order.</summary>
+    private static readonly string[] PatientSourceColumns = ["PatientDOB", "PatientID", "PatientName", "SubscriberID", "ReferringProvider", "Facility"];
+
+    /// <summary>Per lab: the columns its dbo.LineLevelData has, and when that was read.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, (DateTime ReadOn, HashSet<string> Columns)> LineColumnsByLab = new();
+    private static readonly TimeSpan LineColumnsCacheFor = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// Patient &amp; Provider for the claim header, from dbo.LineLevelData (the line with the most
+    /// patient detail filled in). Only columns this lab's LineLevelData actually has are selected -
+    /// Facility exists in some labs only - and every blank falls back to the synced ARWB_Claim value.
+    /// Called only after the scope check, for a claim the caller may see.
+    ///
+    /// The lines are found through ARWB_ClaimLine.SourceRecordId = LineLevelData.RecordId (its
+    /// clustered primary key), never by ClaimID: ClaimID is only indexed where the optional script 08
+    /// ran, and without it every claim open scanned the whole line table.
+    /// </summary>
+    private static async Task<ArWorkbenchClaimPatient> GetClaimPatientAsync(SqlConnection connection, int labId, long claimKey, CancellationToken ct)
+    {
+        if (!LineColumnsByLab.TryGetValue(labId, out var cached) || DateTime.UtcNow - cached.ReadOn > LineColumnsCacheFor)
+        {
+            var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            await using (var cols = new SqlCommand("SELECT name FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.LineLevelData', N'U');", connection))
+            await using (var r = await cols.ExecuteReaderAsync(ct))
+                while (await r.ReadAsync(ct)) columns.Add(r.GetString(0));
+            LineColumnsByLab[labId] = cached = (DateTime.UtcNow, columns);
+        }
+        var present = cached.Columns;
+
+        // Fixed, whitelisted names only: a missing column comes back as NULL under the same alias.
+        // Style 23 (yyyy-mm-dd) only on the DOB: SQL Server rejects that style for a float / money
+        // column, and an ID may be stored as a number in some labs.
+        string Col(string name) => present.Contains(name)
+            ? $"NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(500), l.[{name}]{(name == "PatientDOB" ? ", 23" : string.Empty)}))), N'') AS [{name}]"
+            : $"CAST(NULL AS nvarchar(500)) AS [{name}]";
+        var lineSql = present.Contains("RecordId")
+            ? $@"
+SELECT TOP (1) {string.Join(", ", PatientSourceColumns.Select(Col))}
+FROM dbo.LineLevelData l
+WHERE l.RecordId IN (SELECT cl.SourceRecordId FROM dbo.ARWB_ClaimLine cl WHERE cl.ClaimKey = @ClaimKey AND cl.SourceRecordId IS NOT NULL)
+ORDER BY {string.Join(" + ", PatientSourceColumns.Where(present.Contains).Select(c => $"CASE WHEN NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(500), l.[{c}]))), N'') IS NULL THEN 0 ELSE 1 END").DefaultIfEmpty("0"))} DESC, l.RecordId;"
+            : "SELECT TOP (0) 1;";
+
+        await using var cmd = new SqlCommand($@"
+SELECT CONVERT(nvarchar(30), PatientDOB, 23), PatientID, PatientName, SubscriberId, ReferringProvider, CAST(NULL AS nvarchar(500))
+FROM dbo.ARWB_Claim WHERE ClaimKey = @ClaimKey;
+{lineSql}", connection) { CommandTimeout = 30 };
+        cmd.Parameters.Add("@ClaimKey", SqlDbType.BigInt).Value = claimKey;
+
+        var claim = new string?[6];
+        var line = new string?[6];
+        var fromLine = false;
+        await using (var r = await cmd.ExecuteReaderAsync(ct))
+        {
+            if (await r.ReadAsync(ct)) for (var i = 0; i < 6; i++) claim[i] = Str(r, i);
+            if (await r.NextResultAsync(ct) && r.FieldCount == 6 && await r.ReadAsync(ct))
+            {
+                fromLine = true;
+                for (var i = 0; i < 6; i++) line[i] = Str(r, i);
+            }
+        }
+
+        // Facility is not synced to ARWB_Claim, so it only ever comes from LineLevelData.
+        string? Pick(int i) => line[i] ?? claim[i];
+        return new ArWorkbenchClaimPatient
+        {
+            PatientDOB = Pick(0),
+            PatientID = Pick(1),
+            PatientName = Pick(2),
+            SubscriberID = Pick(3),
+            ReferringProvider = Pick(4),
+            Facility = line[5],
+            Source = fromLine ? "LineLevelData" : "Claim"
+        };
     }
 
     // ==========================================================================================

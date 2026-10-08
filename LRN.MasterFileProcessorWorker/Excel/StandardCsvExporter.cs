@@ -262,7 +262,7 @@ public static class StandardCsvExporter
 			{
 				if (extracted["ICDCode"] != null)
 				{
-					extracted["ICDCode"] = ExtractIcdCodes(extracted["ICDCode"].ToString());
+					extracted["ICDCode"] = ExtractIcdCodes(extracted["ICDCode"].ToString(), keepUnrecognizedCodes: IsAnalyzePathologyLab(labName));
 				}
 			}
 
@@ -633,30 +633,58 @@ public static class StandardCsvExporter
 		return -1;
 	}
 
-	public static string ExtractIcdCodes(string input)
+	// ICD-10-CM examples:
+	// D89.40, C85.90, C43.9, D72.829, Z3A.13
+	private static readonly Regex IcdCodePattern = new(
+		@"\b[A-Z][0-9][A-Z0-9](?:\.[A-Z0-9]{1,4})?\b",
+		RegexOptions.CultureInvariant);
+
+	/// <param name="keepUnrecognizedCodes">
+	/// Keep list entries that are not shaped like an ICD-10 code instead of dropping them. Analyze
+	/// Pathology bills placeholders such as "ZZZ12345" and "BQ"; filtering them out left ICDCode
+	/// blank on those claims although the client report shows the value.
+	/// </param>
+	public static string ExtractIcdCodes(string input, bool keepUnrecognizedCodes = false)
 	{
 		if (string.IsNullOrWhiteSpace(input))
 			return "";
 
-		// ICD-10-CM examples:
-		// D89.40, C85.90, C43.9, D72.829, Z3A.13
-		var matches = Regex.Matches(
-			input.ToUpperInvariant(),
-			@"\b[A-Z][0-9][A-Z0-9](?:\.[A-Z0-9]{1,4})?\b",
-			RegexOptions.CultureInvariant);
-
 		var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var codes = new List<string>();
 
-		foreach (Match match in matches)
+		void Add(string code)
 		{
-			var code = match.Value.Trim();
-			if (seen.Add(code))
+			code = code.Trim();
+			if (code.Length > 0 && seen.Add(code))
 				codes.Add(code);
+		}
+
+		var upper = input.ToUpperInvariant();
+
+		if (!keepUnrecognizedCodes)
+		{
+			foreach (Match match in IcdCodePattern.Matches(upper))
+				Add(match.Value);
+
+			return string.Join(",", codes);
+		}
+
+		foreach (var token in Regex.Split(upper, @"[\s,;]+"))
+		{
+			var matches = IcdCodePattern.Matches(token);
+
+			if (matches.Count == 0)
+				Add(token);
+			else
+				foreach (Match match in matches)
+					Add(match.Value);
 		}
 
 		return string.Join(",", codes);
 	}
+
+	private static bool IsAnalyzePathologyLab(string? labName)
+		=> NormKey(labName ?? "").Equals(NormKey("Analyze Pathology"), StringComparison.OrdinalIgnoreCase);
 	// ---------------- Lab schema overrides ----------------
 	// Lab schema is used to:
 	// 1) Prefer certain source headers when multiple COMMON aliases exist (e.g., CPT vs Procedure).
@@ -2285,20 +2313,28 @@ public static class StandardCsvExporter
 		var modifiers = new List<string>();
 
 		string baseCpt = cptCode;
+		string codeModifier = "";
 
 		if (TryExtractCptCodeAndModifier(cptCode, out var extractedCpt, out var extractedModifier))
 		{
 			baseCpt = extractedCpt;
-
-			if (!string.IsNullOrWhiteSpace(extractedModifier))
-				modifiers.Add(extractedModifier);
+			codeModifier = extractedModifier;
 		}
 
 		baseCpt = NormalizeCptCode(baseCpt);
 
+		var modifierSeparator = ",";
+
 		if (!string.IsNullOrWhiteSpace(modifier))
 		{
-			var splitMods = modifier.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries);
+			// Analyze Pathology lists several modifiers space-separated ("90 59"). Splitting only on
+			// ';'/',' kept the whole string as one value, which NormalizeModifierValue then cut down to
+			// its first token, so the claim summary lost every modifier after the first. Such a list
+			// keeps its space separator, matching the lab's own CPTs column ("87481*4(90 59)").
+			if (modifier.IndexOfAny(new[] { ';', ',' }) < 0 && Regex.IsMatch(modifier, @"\S\s+\S"))
+				modifierSeparator = " ";
+
+			var splitMods = Regex.Split(modifier, @"[;,\s]+").Where(m => !string.IsNullOrWhiteSpace(m));
 
 			foreach (var mod in splitMods)
 			{
@@ -2308,19 +2344,22 @@ public static class StandardCsvExporter
 			}
 		}
 
-		var finalModifiers = new List<string>();
-		var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		// The modifier list is kept exactly as billed: a repeated modifier is a real second modifier
+		// (Analyze Pathology "59 59" -> "87481*4(59 59)", "90 90" -> "G0480*1(90 90)"), and collapsing
+		// it dropped one from the claim summary. Only a modifier embedded in the CPT code itself
+		// ("87481-59") is skipped when the list already carries it, so it is not counted twice.
+		var finalModifiers = modifiers;
 
-		foreach (var mod in modifiers)
+		if (!string.IsNullOrWhiteSpace(codeModifier) &&
+			!modifiers.Contains(codeModifier, StringComparer.OrdinalIgnoreCase))
 		{
-			if (seen.Add(mod))
-				finalModifiers.Add(mod);
+			finalModifiers.Insert(0, codeModifier);
 		}
 
 		string finalUnits = NormalizeUnits(units);
 
 		string modPart = finalModifiers.Count > 0
-			? $"({string.Join(",", finalModifiers)})"
+			? $"({string.Join(modifierSeparator, finalModifiers)})"
 			: "";
 
 		if (!string.IsNullOrWhiteSpace(finalUnits))

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import useTableSort from '../components/useTableSort';
 import { Link, useSearchParams } from 'react-router';
 import Icon from '../components/Icon';
 import { Card } from '../components/Panel';
@@ -185,17 +186,26 @@ function RangePicker({ from, to, onApply }) {
 }
 
 function ReportTable({ report }) {
+  // A flat report sorts by any column with its Total row(s) kept last; a grouped one (indented
+  // detail rows, e.g. AR Collections Progress) keeps its order, or the rows would leave their group.
+  const grouped = report.rows.some((r) => r.level > 0);
+  const details = useMemo(() => report.rows.filter((r) => !r.isTotal), [report]);
+  const totals = useMemo(() => report.rows.filter((r) => r.isTotal), [report]);
+  const getters = useMemo(() => (grouped ? {} : Object.fromEntries(report.columns.map((c, i) => [c.key, (r) => r.values[i]]))), [report, grouped]);
+  const { rows: sorted, th } = useTableSort(details, getters);
+  const rows = grouped ? report.rows : [...sorted, ...totals];
+
   if (!report.rows.length) return <div className="arwb-empty-state">No data in the current scope{report.from ? ' for this period' : ''}.</div>;
   return (
     <div className="arwb-table-wrap">
       <table className="arwb-data-table arwb-report-table">
         <thead>
           <tr>
-            {report.columns.map((c, i) => <th key={c.key} scope="col" className={i > 0 && !['text', 'date'].includes(c.format) ? 'num' : undefined}>{c.label}</th>)}
+            {report.columns.map((c, i) => th(c.key, c.label, { className: i > 0 && !['text', 'date'].includes(c.format) ? 'num' : '' }))}
           </tr>
         </thead>
         <tbody>
-          {report.rows.map((row, ri) => (
+          {rows.map((row, ri) => (
             <tr key={ri} className={row.isTotal ? 'arwb-report-total' : undefined}>
               {report.columns.map((c, i) => {
                 const value = row.values[i];

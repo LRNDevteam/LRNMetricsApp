@@ -38,6 +38,36 @@ public static partial class ArWorkbenchUserRules
         return $"{HashIterations}:{Convert.ToBase64String(salt)}:{Convert.ToBase64String(hash)}";
     }
 
+    /// <summary>LabMetricsDashboard PasswordHasher.Verify: "iterations:salt:hash", fixed-time compare. A malformed hash never matches.</summary>
+    public static bool VerifyPassword(string? stored, string? password)
+    {
+        if (string.IsNullOrEmpty(stored) || string.IsNullOrEmpty(password)) return false;
+        var parts = stored.Split(':');
+        if (parts.Length != 3 || !int.TryParse(parts[0], out var iterations) || iterations <= 0) return false;
+        try
+        {
+            var salt = Convert.FromBase64String(parts[1]);
+            var expected = Convert.FromBase64String(parts[2]);
+            if (expected.Length == 0) return false;
+            var actual = Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, expected.Length);
+            return CryptographicOperations.FixedTimeEquals(actual, expected);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Change-your-own-password checks that need no database: current given, new valid and different.</summary>
+    public static string? ValidatePasswordChange(string? currentPassword, string? newPassword)
+    {
+        if (string.IsNullOrEmpty(currentPassword)) return "Enter your current password.";
+        var error = ValidatePassword(newPassword);
+        if (error is not null) return error.Replace("Password", "New password", StringComparison.Ordinal);
+        if (string.Equals(currentPassword, newPassword, StringComparison.Ordinal)) return "The new password must be different from the current one.";
+        return null;
+    }
+
     [GeneratedRegex("^[A-Za-z0-9._@-]+$")]
     private static partial Regex UserNamePattern();
 
