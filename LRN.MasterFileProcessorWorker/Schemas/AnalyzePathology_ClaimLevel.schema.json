@@ -8,8 +8,9 @@
 		"column it feeds - a lab-only alias group, so ClaimLevel.schema.json is unchanged for other labs.",
 		"'Deposit Date' is declared on its own so it is the ONLY source of CheckDate: the COMMON CheckDate",
 		"aliases also include 'Posted Date', which would otherwise fill CheckDate on denial-only postings.",
-		"Consequence: 'Posted Date' is consumed by the CheckDate alias scan and does not reach the claim CSV.",
-		"The same value is loaded at line level as PostingDate / PaymentPostedDate.",
+		"'Posted Date' is deliberately NOT declared here either (it would rejoin the CheckDate group and fill a",
+		"blank Deposit Date). It reaches the COMMON 'Payment Posted Date' column through that column's alias and",
+		"is loaded as PostingDate / PaymentPostedDate, the same as at line level.",
 		"'Charge Last Bill Date' deliberately has NO 'Last Billed Date' alias: the COMMON FirstBilledDate",
 		"aliases include 'Last billed date', so that alias made FirstBilledDate read the LAST bill date.",
 		"It reaches 'Last Billed Date' through the COMMON alias instead."

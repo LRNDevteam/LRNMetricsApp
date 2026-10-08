@@ -2073,17 +2073,22 @@ public static class SelfTests
             }
 
             var claimOut = Run(
-                "Charge Claim ID,Charge From Date,Charge First Bill Date,Charge Last Bill Date,CPTs,Claim ICD List\r\n" +
-                "C-1,08/05/2026,08/11/2026,09/15/2026,87481*4(90 59),ZZZ12345\r\n" +
-                "C-2,08/05/2026,08/12/2026,09/16/2026,G0483*1(59 90),BQ\r\n" +
-                "C-3,08/05/2026,08/13/2026,09/17/2026,G0482*1(90),F10.21 F11.21\r\n",
+                "Charge Claim ID,Charge From Date,Charge First Bill Date,Charge Last Bill Date,CPTs,Claim ICD List,Deposit Date,Posted Date\r\n" +
+                "C-1,08/05/2026,08/11/2026,09/15/2026,87481*4(90 59),ZZZ12345,08/20/2026,08/21/2026\r\n" +
+                "C-2,08/05/2026,08/12/2026,09/16/2026,G0483*1(59 90),BQ,,08/22/2026\r\n" +
+                "C-3,08/05/2026,08/13/2026,09/17/2026,G0482*1(90),F10.21 F11.21,,\r\n" +
+                "C-4,08/05/2026,08/13/2026,09/17/2026,87481*4(59 59),F10.21,,\r\n" +
+                "C-5,08/05/2026,08/13/2026,09/17/2026,G0480*1(90 90),F10.21,,\r\n",
                 paths[0], paths[1], "claim");
 
             var lineOut = Run(
                 "Charge Claim ID,Charge From Date,Charge First Bill Date,Charge Last Bill Date,Charge CPT Code,Charge Units,Charge Modifier List,Claim ICD List\r\n" +
                 "C-1,08/05/2026,08/11/2026,09/15/2026,87481,4,90 59,ZZZ12345\r\n" +
                 "C-1,08/05/2026,08/11/2026,09/15/2026,87500,1,90,ZZZ12345\r\n" +
-                "C-2,08/05/2026,08/12/2026,09/16/2026,G0483,1,59 90,BQ\r\n",
+                "C-2,08/05/2026,08/12/2026,09/16/2026,G0483,1,59 90,BQ\r\n" +
+                "C-4,08/05/2026,08/13/2026,09/17/2026,87481,4,59 59,F10.21\r\n" +
+                "C-4,08/05/2026,08/13/2026,09/17/2026,87653,1,90,F10.21\r\n" +
+                "C-5,08/05/2026,08/13/2026,09/17/2026,G0480,1,90 90,F10.21\r\n",
                 paths[2], paths[3], "line");
 
             StandardCsvExporter.EnrichClaimLevelWithLineLevelCptSummary(claimOut, lineOut, "CPT Code X Units X Modifier");
@@ -2108,6 +2113,27 @@ public static class SelfTests
                 Val(claimOut, 0, "CPT Code X Units X Modifier") == "87481*4(90 59),87500*1(90)", Val(claimOut, 0, "CPT Code X Units X Modifier"));
             Check("Analyze Pathology claim: modifier order follows the source",
                 Val(claimOut, 1, "CPT Code X Units X Modifier") == "G0483*1(59 90)", Val(claimOut, 1, "CPT Code X Units X Modifier"));
+            Check("Analyze Pathology claim: a repeated modifier is kept (59 59)",
+                Val(claimOut, 3, "CPT Code X Units X Modifier") == "87481*4(59 59),87653*1(90)", Val(claimOut, 3, "CPT Code X Units X Modifier"));
+            Check("Analyze Pathology claim: a repeated modifier is kept (90 90)",
+                Val(claimOut, 4, "CPT Code X Units X Modifier") == "G0480*1(90 90)", Val(claimOut, 4, "CPT Code X Units X Modifier"));
+
+            Check("Analyze Pathology claim: Posted Date reaches Payment Posted Date", Val(claimOut, 0, "Payment Posted Date") == "08/21/2026", Val(claimOut, 0, "Payment Posted Date"));
+            Check("Analyze Pathology claim: CheckDate is still the Deposit Date", Val(claimOut, 0, "CheckDate") == "08/20/2026", Val(claimOut, 0, "CheckDate"));
+            Check("Analyze Pathology claim: a blank Deposit Date does not fall back to Posted Date",
+                Val(claimOut, 1, "CheckDate") == "" && Val(claimOut, 1, "Payment Posted Date") == "08/22/2026",
+                $"CheckDate='{Val(claimOut, 1, "CheckDate")}', Payment Posted Date='{Val(claimOut, 1, "Payment Posted Date")}'");
+
+            using (var mapping = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(schemas, "LabMappings", "AnalyzePathologyFieldMappings.json"))))
+            {
+                var claimHeaders = Header(claimOut);
+                var missing = mapping.RootElement.GetProperty("ClaimLevel").GetProperty("Fields").EnumerateArray()
+                    .Select(f => f.GetProperty("CsvHeader").GetString()!)
+                    .Where(h => !h.Equals("LabID", StringComparison.OrdinalIgnoreCase) && !claimHeaders.Contains(h, StringComparer.OrdinalIgnoreCase))
+                    .ToList();
+                Check("Analyze Pathology claim: Payment Posted Date is a claim CSV column the mapping can load",
+                    !missing.Contains("Payment Posted Date"), string.Join(",", missing));
+            }
 
             Check("Analyze Pathology claim: placeholder ICD ZZZ12345 is kept", Val(claimOut, 0, "ICDCode") == "ZZZ12345", Val(claimOut, 0, "ICDCode"));
             Check("Analyze Pathology claim: placeholder ICD BQ is kept", Val(claimOut, 1, "ICDCode") == "BQ", Val(claimOut, 1, "ICDCode"));

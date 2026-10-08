@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import DataTable from '../components/DataTable';
+import DataTable, { withSortKeys } from '../components/DataTable';
+import { CIP_SORT_KEYS } from '../config/sortKeys';
 import Icon from '../components/Icon';
 import Modal from '../components/Modal';
 import { Badge, ErrorBox, Notice } from '../components/Status';
@@ -120,7 +121,7 @@ export default function ClientCipPage() {
   const [tab, setTab] = useState('awaiting');
   const [searchText, setSearchText] = useState('');
   const [search, setSearch] = useState('');
-  const [query, setQuery] = useState({ page: 1, pageSize: 25, sortBy: 'requestedOn', sortDesc: false });
+  const [query, setQuery] = useState({ page: 1, pageSize: 50, sortBy: 'requestedOn', sortDesc: false });
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -242,7 +243,7 @@ export default function ClientCipPage() {
         <DataTable
           tableId="client-cip-v2"
           exportName="escalation-requests"
-          columns={columns}
+          columns={withSortKeys(columns, CIP_SORT_KEYS)}
           rows={rows}
           totalCount={data?.rows?.totalCount || 0}
           page={query.page}

@@ -436,6 +436,9 @@ table.arwb-data-table td.wrap { white-space: normal; min-width: 12rem; }
 table.arwb-data-table th.sortable { cursor: pointer; user-select: none; }
 table.arwb-data-table th .arwb-sort-arrow { opacity: .4; font-size: 9px; margin-left: 3px; }
 table.arwb-data-table th.sorted .arwb-sort-arrow { opacity: .9; }
+table.arwb-data-table th.sortable:hover { color: var(--ink); }
+table.arwb-data-table th.sortable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.arwb-pagination { flex-wrap: wrap; }
 table.arwb-data-table tbody tr.clickable { cursor: pointer; }
 table.arwb-data-table tbody tr.row-selected { background: var(--accent-softer); }
 .arwb-table-card .arwb-table-wrap { border-top: 1px solid var(--border-soft); }
@@ -641,8 +644,18 @@ table.arwb-data-table tbody tr.row-selected { background: var(--accent-softer); 
   table.arwb-data-table { min-width: 720px; }
 }
 @media (max-width: 620px) {
-  .arwb-client-scope, .arwb-user-chip { display: none; }
+  /* The account chip shrinks to its avatar (it opens Change password), rather than disappearing. */
+  .arwb-client-scope, .arwb-user-chip-text { display: none; }
 }
+
+/* Account menu on the user chip: Change password, Sign out. */
+.arwb-user-menu { position: relative; }
+.arwb-user-chip-btn { font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.arwb-user-chip-btn:hover { border-color: var(--accent); }
+.arwb-user-dropdown { min-width: 220px; padding: 6px; }
+.arwb-user-dropdown-head { display: flex; flex-direction: column; padding: 6px 8px 8px; border-bottom: 1px solid var(--border-soft); margin-bottom: 4px; }
+.arwb-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 0; background: none; border-radius: 6px; font: inherit; font-size: 13px; color: var(--ink); text-align: left; cursor: pointer; }
+.arwb-menu-item:hover, .arwb-menu-item:focus-visible { background: var(--surface-2); }
 
 /* Saved Views control in a filter bar: select, star / delete, Save View. */
 .arwb-saved-views { display: flex; align-items: center; gap: 6px; }
@@ -661,11 +674,35 @@ table.arwb-data-table tbody tr.row-selected { background: var(--accent-softer); 
 .arwb-chip-row .arwb-chip-muted { background: transparent; border: 1px dashed var(--border); color: var(--ink-muted); }
 /* Status + Non-Collectible badge in list cells; Denial Code Master block on the claim's Denial tab. */
 .arwb-status-stack { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.arwb-code-info { padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
+/* KPI tile that filters the page below it (Escalation & Reassignment Requests). */
+.arwb-kpi-tile-btn { font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.arwb-kpi-tile-btn:hover, .arwb-kpi-tile-btn:focus-visible { border-color: var(--accent); }
+
+/* Data Processing > Denial Analysis Report */
+.arwb-insight-source { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 16px; font-size: 12.5px; color: var(--ink-2); border-bottom: 1px solid var(--border-soft); background: var(--surface-2); }
+.arwb-code-link { border: 0; background: none; padding: 0; font: inherit; font-family: var(--font-mono); font-weight: 700; font-size: 13px; color: var(--accent-strong); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; white-space: nowrap; }
+.arwb-code-link:hover, .arwb-code-link:focus-visible { color: var(--accent); }
+.arwb-pre-line { white-space: pre-line; min-width: 220px; }
+.arwb-uploaded-insights td { vertical-align: top; }
+
+/* Claim header: Patient & Provider strip (from LineLevelData). */
+.arwb-patient-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px 18px; margin-top: 14px; padding: 12px 14px; background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: var(--radius-md); }
+.arwb-patient-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.arwb-patient-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--ink-muted); }
+.arwb-patient-value { font-size: 13.5px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; user-select: all; }
+@media (max-width: 620px) { .arwb-patient-strip { grid-template-columns: 1fr 1fr; } }
+
+/* Denial Code Master card: same 16px gutter and label column as the .arwb-dl-row cards beside it. */
+.arwb-code-info { padding: 12px 16px; border-bottom: 1px solid var(--border-soft); }
 .arwb-code-info:last-child { border-bottom: 0; }
-.arwb-code-info-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
-.arwb-code-info-grid { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; font-size: 13px; color: var(--ink-2); }
-.arwb-code-info-grid > span { color: var(--ink-muted); }
+.arwb-code-info-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; font-size: 13.5px; color: var(--ink); font-weight: 600; }
+.arwb-code-info-head .arwb-code-chip { margin: 0; }
+.arwb-code-info-head .arwb-hint { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+.arwb-code-info-grid { display: grid; grid-template-columns: minmax(150px, 38%) 1fr; gap: 8px 12px; align-items: baseline; }
+.arwb-code-info-grid > span { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--ink-muted); }
+.arwb-code-info-grid > b { font-size: 13.5px; font-weight: 600; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.arwb-detail-section > .arwb-dl-rows > .arwb-hint { display: block; padding: 12px 16px; }
+@media (max-width: 620px) { .arwb-code-info-grid { grid-template-columns: 1fr; gap: 2px; } .arwb-code-info-grid > b { margin-bottom: 6px; } }
 
 /* Bulk Update (Excel) dialog: numbered steps. */
 .arwb-bulk-step { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border-soft); }

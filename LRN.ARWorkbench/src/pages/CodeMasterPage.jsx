@@ -187,7 +187,7 @@ export default function CodeMasterPage() {
       render: (r) => (r.isNonCollectible ? <Badge className="arwb-badge-critical">Yes</Badge> : <span className="text-muted-ink">No</span>) },
     { key: 'isActive', label: 'Status', sortKey: 'isActive', csv: (r) => (r.isActive ? 'Active' : 'Inactive'),
       render: (r) => (r.isActive ? <Badge className="arwb-badge-good">Active</Badge> : <Badge>Inactive</Badge>) },
-    { key: 'updatedOn', label: 'Last changed', defaultHidden: true, render: (r) => fmt.dateTime(r.updatedOn || r.createdOn), csv: (r) => r.updatedOn || r.createdOn || '' },
+    { key: 'updatedOn', label: 'Last changed', sortKey: 'updatedOn', defaultHidden: true, render: (r) => fmt.dateTime(r.updatedOn || r.createdOn), csv: (r) => r.updatedOn || r.createdOn || '' },
     { key: 'actions', label: 'Actions', csv: () => '',
       render: (r) => (
         <div className="arwb-row-actions">

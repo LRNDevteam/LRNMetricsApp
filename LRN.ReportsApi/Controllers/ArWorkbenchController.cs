@@ -74,6 +74,24 @@ public sealed class ArWorkbenchController : ControllerBase
         return denied ?? Ok(user);
     }
 
+    /// <summary>
+    /// User menu > Change password: any signed-in workbench user changes their OWN password (the LRN
+    /// Metrics login, dbo.LabUsers). The current password is required; the user comes from the token.
+    /// </summary>
+    [HttpPost("me/password")]
+    public async Task<ActionResult> ChangeOwnPassword([FromQuery] int labId, [FromBody] ArWorkbenchChangePasswordRequest? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (user!.LabUserId is not int labUserId) return BadRequest(new { message = "Your user account was not found." });
+        var error = ArWorkbenchUserRules.ValidatePasswordChange(request?.CurrentPassword, request?.NewPassword);
+        if (error is not null) return BadRequest(new { message = error });
+
+        var result = await _repository.ChangeOwnPasswordAsync(labUserId, request!.CurrentPassword!, request.NewPassword!, user.UserName, ct);
+        _logger.LogInformation("AR Workbench own password change by {User}: {Status}", user.UserName, result.Status);
+        return ToResult(result);
+    }
+
     [HttpGet("queues")]
     public async Task<ActionResult<ArWorkbenchQueueSummary>> Queues([FromQuery] int labId, CancellationToken ct)
     {
@@ -207,8 +225,59 @@ public sealed class ArWorkbenchController : ControllerBase
         detail.DenialCodeInfo = (await CodeMasterInfoForClaimAsync(detail, ct)).ToList();
         detail.QaReview = await _repository.GetCurrentQaReviewAsync(labId, claimKey, ct);
         // Client users never see Awaiting QA / Pending Approval cases or internal history.
-        if (user!.RoleCode != "viewer") detail.CipCases = await _repository.GetClaimCipCasesAsync(labId, claimKey, ct);
+        if (user!.RoleCode != "viewer")
+        {
+            detail.CipCases = await _repository.GetClaimCipCasesAsync(labId, claimKey, ct);
+            detail.AgentRequests = await _repository.GetClaimAgentRequestsAsync(labId, claimKey, ct);
+        }
         return Ok(detail);
+    }
+
+    // ---- Escalation & Reassignment Requests ----------------------------------------------------
+    // Raised by an AR agent on a claim in their caseload (ARWorkbench.EditClaim); answered by a Team
+    // Lead, RCM Manager or System Administrator (ARWorkbench.Assign), who can also reassign.
+
+    [HttpPost("claims/{claimKey:long}/agent-requests")]
+    public async Task<ActionResult> CreateAgentRequest([FromRoute] long claimKey, [FromQuery] int labId, [FromBody] ArWorkbenchAgentRequestCreate? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!user!.Permissions.EditClaim) return Forbidden("Your role cannot raise escalation or reassignment requests.");
+        var (type, reason, note, error) = ArWorkbenchAgentRequestRules.ValidateCreate(request);
+        if (error is not null) return BadRequest(new { message = error });
+
+        var (status, message, id) = await _repository.CreateAgentRequestAsync(labId, claimKey, type!, reason!, note!, user, ct);
+        return status switch
+        {
+            ArWorkbenchSaveStatus.Ok => Ok(new { message, agentRequestId = id }),
+            ArWorkbenchSaveStatus.NotFound => NotFound(new { message }),
+            ArWorkbenchSaveStatus.Invalid => BadRequest(new { message }),
+            _ => Conflict(new { message })
+        };
+    }
+
+    [HttpGet("agent-requests")]
+    public async Task<ActionResult<ArWorkbenchAgentRequestQueue>> AgentRequests([FromQuery] ArWorkbenchAgentRequestFilter filter, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
+        if (denied is not null) return denied;
+        if (!user!.Permissions.Assign) return Forbidden("Only a Team Lead, RCM Manager or Administrator can view escalation and reassignment requests.");
+        if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+        return Ok(await _repository.GetAgentRequestsAsync(filter, user, ct));
+    }
+
+    /// <summary>Resolve one or many pending requests with one shared response note.</summary>
+    [HttpPost("agent-requests/resolve")]
+    public async Task<ActionResult<ArWorkbenchAgentRequestResolveResult>> ResolveAgentRequests([FromQuery] int labId, [FromBody] ArWorkbenchAgentRequestResolve? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!user!.Permissions.Assign) return Forbidden("Only a Team Lead, RCM Manager or Administrator can respond to requests.");
+        var (ids, note, error) = ArWorkbenchAgentRequestRules.ValidateResolve(request);
+        if (error is not null) return BadRequest(new { message = error });
+        var result = await _repository.ResolveAgentRequestsAsync(labId, ids!, note!, user, ct);
+        _logger.LogInformation("AR Workbench agent requests resolved in lab {LabId} by {User}: {Resolved} resolved, {Skipped} skipped", labId, user.UserName, result.Resolved, result.Skipped);
+        return Ok(result);
     }
 
     [HttpGet("master-data")]
@@ -464,7 +533,7 @@ public sealed class ArWorkbenchController : ControllerBase
         if (denied is not null) return denied;
         if (!user!.Permissions.ViewAudit) return Forbidden("Only a System Administrator or RCM Manager can view the audit log.");
         if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
-        filter.PageSize = Math.Clamp(filter.PageSize, 5, 200);
+        filter.PageSize = Math.Clamp(filter.PageSize, 5, 1000);
         return Ok(await _repository.GetAuditLogAsync(filter, user, options, ct));
     }
 
@@ -1364,6 +1433,19 @@ public sealed class ArWorkbenchController : ControllerBase
         return Ok(await _repository.GetInsightsAsync(labId, ct));
     }
 
+    /// <summary>
+    /// The team's uploaded Key Observations (LRN Metrics > Denial Claim Report) for the Denial Analysis
+    /// Report; the page falls back to the system insights above for a week with none.
+    /// </summary>
+    [HttpGet("data-processing/uploaded-insights")]
+    public async Task<ActionResult<ArWorkbenchUploadedInsights>> UploadedInsights([FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!IsAdminOrManager(user!)) return Forbidden("Only an Administrator or RCM Manager can view data processing.");
+        return Ok(await _repository.GetUploadedInsightsAsync(labId, user!, ct));
+    }
+
     // ---- Timely-filing limits (Master Values) - ARWorkbench.ManageSettings ----------------------
 
     [HttpGet("settings/tfl")]
@@ -1718,14 +1800,14 @@ public sealed class ArWorkbenchController : ControllerBase
 
     [HttpGet("super-master")]
     public async Task<ActionResult<PagedResult<DenialMapperRecord>>> SuperMaster([FromQuery] int labId, [FromQuery] string? search, [FromQuery] string? classification,
-        [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default)
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 50, [FromQuery] string? sortBy = null, [FromQuery] bool sortDesc = false, CancellationToken ct = default)
     {
         var (_, denied) = await ResolveMapperAdminAsync(labId, ct);
         if (denied is not null) return denied;
         if ((search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
         // The Denial Mapper's search is a LIKE pattern; an empty search is "no filter".
         var pattern = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
-        return Ok(await _mapper.SuperMasterAsync(pattern, string.IsNullOrWhiteSpace(classification) ? null : classification, page, pageSize, ct));
+        return Ok(await _mapper.SuperMasterAsync(pattern, string.IsNullOrWhiteSpace(classification) ? null : classification, page, pageSize, ct, sortBy, sortDesc));
     }
 
     [HttpGet("super-master/options")]

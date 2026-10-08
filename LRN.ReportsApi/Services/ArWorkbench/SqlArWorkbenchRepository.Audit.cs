@@ -13,7 +13,8 @@ public sealed partial class SqlArWorkbenchRepository
 {
     private static readonly Dictionary<string, string> AuditSortColumns = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["activityOn"] = "a.ActivityOn", ["claimId"] = "w.ClaimID", ["userName"] = "a.UserName", ["actionType"] = "a.ActionType", ["labName"] = "w.LabName"
+        ["activityOn"] = "a.ActivityOn", ["claimId"] = "w.ClaimID", ["userName"] = "a.UserName", ["actionType"] = "a.ActionType", ["labName"] = "w.LabName",
+        ["roleCode"] = "a.RoleCode", ["previousValue"] = "a.PreviousValue", ["newValue"] = "a.NewValue", ["detail"] = "a.Detail"
     };
 
     public async Task<ArWorkbenchAuditPage> GetAuditLogAsync(ArWorkbenchAuditFilter filter, ArWorkbenchUserContext user, bool withOptions, CancellationToken ct)

@@ -68,6 +68,50 @@ public sealed class ArWorkbenchInsightRow
     public string? Observation { get; set; }
 }
 
+/// <summary>
+/// Data Processing > Denial Analysis Report: the team's own Key Observations, uploaded in LRN Metrics
+/// (Denial Claim Report > Key Observations &amp; Highlights, lab table dbo.DenialClaimLevelInsight).
+/// When a week has none, the page shows the system-generated insights instead.
+/// </summary>
+public sealed class ArWorkbenchUploadedInsights
+{
+    /// <summary>False when the lab has no dbo.DenialClaimLevelInsight table (nothing ever uploaded).</summary>
+    public bool TableInstalled { get; set; }
+    public List<ArWorkbenchUploadedInsight> Current { get; set; } = new();
+    public List<ArWorkbenchUploadedInsight> Previous { get; set; } = new();
+}
+
+public sealed class ArWorkbenchUploadedInsight
+{
+    public long Id { get; set; }
+    public DateTime WeekStart { get; set; }
+    public int SortOrder { get; set; }
+    /// <summary>As uploaded ('CO-242', 'M127').</summary>
+    public string DenialCode { get; set; } = string.Empty;
+    /// <summary>The claim sync's normalized form ('242'), what the Work Queue denial-code filter matches.</summary>
+    public string? NormalizedCode { get; set; }
+    public string? Description { get; set; }
+    public string? PayerName { get; set; }
+    public int NoOfDenials { get; set; }
+    public decimal TotalBalance { get; set; }
+    public int InsuranceNoOfDenials { get; set; }
+    public decimal InsuranceBalance { get; set; }
+    /// <summary>"$ Impact (%)" as the workbook showed it; an impossible (&gt; 100%) figure is recomputed from the balances.</summary>
+    public string? Impact { get; set; }
+    /// <summary>Plain text (the stored rich text with bullets kept as "• " lines).</summary>
+    public string? Observation { get; set; }
+    public string? ActionCategory { get; set; }
+    public string? Action { get; set; }
+    public string? Responsibility { get; set; }
+    public string? Status { get; set; }
+    public DateTime? Eta { get; set; }
+    public DateTime? UpdatedOn { get; set; }
+    public string? UpdatedBy { get; set; }
+    /// <summary>Live: claims whose primary denial is this code, still unassigned with an open insurance balance.</summary>
+    public int OpenClaims { get; set; }
+    public decimal OpenBalance { get; set; }
+}
+
 /// <summary>Timely-filing limit for one financial class (dbo.ARWB_TflThreshold).</summary>
 public sealed class ArWorkbenchTflThreshold
 {

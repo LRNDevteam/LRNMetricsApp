@@ -2313,13 +2313,12 @@ public static class StandardCsvExporter
 		var modifiers = new List<string>();
 
 		string baseCpt = cptCode;
+		string codeModifier = "";
 
 		if (TryExtractCptCodeAndModifier(cptCode, out var extractedCpt, out var extractedModifier))
 		{
 			baseCpt = extractedCpt;
-
-			if (!string.IsNullOrWhiteSpace(extractedModifier))
-				modifiers.Add(extractedModifier);
+			codeModifier = extractedModifier;
 		}
 
 		baseCpt = NormalizeCptCode(baseCpt);
@@ -2345,13 +2344,16 @@ public static class StandardCsvExporter
 			}
 		}
 
-		var finalModifiers = new List<string>();
-		var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		// The modifier list is kept exactly as billed: a repeated modifier is a real second modifier
+		// (Analyze Pathology "59 59" -> "87481*4(59 59)", "90 90" -> "G0480*1(90 90)"), and collapsing
+		// it dropped one from the claim summary. Only a modifier embedded in the CPT code itself
+		// ("87481-59") is skipped when the list already carries it, so it is not counted twice.
+		var finalModifiers = modifiers;
 
-		foreach (var mod in modifiers)
+		if (!string.IsNullOrWhiteSpace(codeModifier) &&
+			!modifiers.Contains(codeModifier, StringComparer.OrdinalIgnoreCase))
 		{
-			if (seen.Add(mod))
-				finalModifiers.Add(mod);
+			finalModifiers.Insert(0, codeModifier);
 		}
 
 		string finalUnits = NormalizeUnits(units);

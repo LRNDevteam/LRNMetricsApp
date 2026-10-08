@@ -95,3 +95,10 @@ public sealed class ArWorkbenchUpdateUserRequest
     /// <summary>Optional password reset; blank keeps the current password.</summary>
     public string? Password { get; set; }
 }
+
+/// <summary>POST me/password: the signed-in user changes their own password (user menu).</summary>
+public sealed class ArWorkbenchChangePasswordRequest
+{
+    public string? CurrentPassword { get; set; }
+    public string? NewPassword { get; set; }
+}

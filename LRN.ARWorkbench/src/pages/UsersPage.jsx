@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Icon from '../components/Icon';
 import Modal from '../components/Modal';
 import { Badge, ErrorBox, Loading, Notice } from '../components/Status';
+import useTableSort from '../components/useTableSort';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
 
@@ -219,6 +220,10 @@ export default function UsersPage() {
       && (!q || u.userName.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q)
         || u.roles.some((r) => r.label.toLowerCase().includes(q)) || u.labs.some((l) => l.labName.toLowerCase().includes(q))));
   }, [data, term, showInactive]);
+  const { rows: sortedRows, th } = useTableSort(rows, {
+    user: (u) => u.userName, email: (u) => u.email, role: (u) => u.roles.map((r) => r.label).join(', '), labs: (u) => u.labs.map((l) => l.labName).join(', '),
+    manager: (u) => u.managerName || u.teamName, status: (u) => (u.isActive ? 0 : 1), createdBy: (u) => u.createdBy
+  });
 
   if (!data && !error) return <Loading text="Loading users…" />;
 
@@ -246,9 +251,14 @@ export default function UsersPage() {
           </div>
           <div className="arwb-table-wrap">
             <table className="arwb-data-table">
-              <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Labs</th><th>Manager / Team</th><th>Status</th><th>Created By</th><th /></tr></thead>
+              <thead>
+                <tr>
+                  {th('user', 'Username')}{th('email', 'Email')}{th('role', 'Role')}{th('labs', 'Labs')}{th('manager', 'Manager / Team')}
+                  {th('status', 'Status')}{th('createdBy', 'Created By')}<th />
+                </tr>
+              </thead>
               <tbody>
-                {rows.map((u) => (
+                {sortedRows.map((u) => (
                   <tr key={u.labUserId}>
                     <td className="mono">{u.userName}</td>
                     <td>{u.email || '—'}</td>

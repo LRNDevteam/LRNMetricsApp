@@ -384,6 +384,38 @@ SELECT 1;";
         return ArWorkbenchSaveResult.Ok($"User '{userName}' updated.");
     }
 
+    /// <summary>
+    /// The signed-in user changes their own password. The current password is checked against the
+    /// stored hash first; the row is updated only if the hash is still the one that was checked, so a
+    /// concurrent reset by an administrator is not silently overwritten.
+    /// </summary>
+    public async Task<ArWorkbenchSaveResult> ChangeOwnPasswordAsync(int labUserId, string currentPassword, string newPassword, string userName, CancellationToken ct)
+    {
+        await using var master = new SqlConnection(_masterConnectionString);
+        await master.OpenAsync(ct);
+
+        string? stored;
+        await using (var read = new SqlCommand("SELECT PasswordHash FROM dbo.LabUsers WHERE LabUserID = @Id AND ISNULL(IsActive, 0) = 1;", master))
+        {
+            read.Parameters.Add("@Id", SqlDbType.Int).Value = labUserId;
+            stored = await read.ExecuteScalarAsync(ct) as string;
+        }
+        if (stored is null) return ArWorkbenchSaveResult.NotFound("Your user account was not found or is inactive.");
+        if (!ArWorkbenchUserRules.VerifyPassword(stored, currentPassword)) return ArWorkbenchSaveResult.Invalid("The current password is incorrect.");
+
+        await using var cmd = new SqlCommand(@"
+UPDATE dbo.LabUsers
+SET PasswordHash = @NewHash, ModifiedBy = @ModifiedBy, ModifiedDate = SYSUTCDATETIME()
+WHERE LabUserID = @Id AND PasswordHash = @OldHash;", master);
+        cmd.Parameters.Add("@Id", SqlDbType.Int).Value = labUserId;
+        cmd.Parameters.Add("@NewHash", SqlDbType.NVarChar, 512).Value = ArWorkbenchUserRules.HashPassword(newPassword);
+        cmd.Parameters.Add("@OldHash", SqlDbType.NVarChar, 512).Value = stored;
+        cmd.Parameters.Add("@ModifiedBy", SqlDbType.NVarChar, 100).Value = Truncate(userName, 100);
+        return await cmd.ExecuteNonQueryAsync(ct) == 1
+            ? ArWorkbenchSaveResult.Ok("Your password has been changed. Use the new password the next time you sign in.")
+            : ArWorkbenchSaveResult.Conflict("Your password was changed elsewhere just now. Reload and try again.");
+    }
+
     /// <summary>Adds @Prefix0..n int parameters and returns them comma-separated for an IN list.</summary>
     private static string AddIntList(SqlCommand cmd, string prefix, IReadOnlyList<int> values)
     {

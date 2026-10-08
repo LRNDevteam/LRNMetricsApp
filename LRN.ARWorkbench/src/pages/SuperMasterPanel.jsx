@@ -41,7 +41,7 @@ function importText(r) {
 }
 
 export default function SuperMasterPanel({ labId, setNotice, setError, onTotal }) {
-  const [query, setQuery] = useState({ search: '', classification: '', page: 1, pageSize: 25 });
+  const [query, setQuery] = useState({ search: '', classification: '', page: 1, pageSize: 50, sortBy: 'denialCode', sortDesc: false });
   const [searchText, setSearchText] = useState('');
   const [data, setData] = useState({ items: [], totalCount: 0 });
   const [loading, setLoading] = useState(true);
@@ -162,21 +162,21 @@ export default function SuperMasterPanel({ labId, setNotice, setError, onTotal }
 
   // ---- table -----------------------------------------------------------------------------------
 
-  const text = (key, wrap = false, hidden = false) => ({ key, wrap, defaultHidden: hidden, render: (r) => read(r, key) || <span className="text-muted-ink">—</span>, csv: (r) => read(r, key) });
+  const text = (key, wrap = false, hidden = false) => ({ key, sortKey: key, wrap, defaultHidden: hidden, render: (r) => read(r, key) || <span className="text-muted-ink">—</span>, csv: (r) => read(r, key) });
   const columns = [
-    { key: 'denialCode', label: 'Denial Code', render: (r) => <span className="arwb-code-chip">{read(r, 'denialCode')}</span>, csv: (r) => read(r, 'denialCode') },
+    { key: 'denialCode', label: 'Denial Code', sortKey: 'denialCode', render: (r) => <span className="arwb-code-chip">{read(r, 'denialCode')}</span>, csv: (r) => read(r, 'denialCode') },
     { ...text('denialDescription', true), label: 'Description' },
     { ...text('denialClassification'), label: 'Classification' },
     { ...text('coverageStatus'), label: 'Coverage' },
     { ...text('icdComplianceStatus'), label: 'ICD Compliance' },
     { ...text('denialValidity'), label: 'Validity' },
-    { key: 'actionCode', label: 'Action Code', render: (r) => (read(r, 'actionCode') ? <span className="arwb-code-chip">{read(r, 'actionCode')}</span> : '—'), csv: (r) => read(r, 'actionCode') },
+    { key: 'actionCode', label: 'Action Code', sortKey: 'actionCode', render: (r) => (read(r, 'actionCode') ? <span className="arwb-code-chip">{read(r, 'actionCode')}</span> : '—'), csv: (r) => read(r, 'actionCode') },
     { ...text('actionCategory'), label: 'Action Category' },
     { ...text('task', true), label: 'Task' },
     { ...text('recommendedAction', true), label: 'Recommended Action' },
     { ...text('sla'), label: 'SLA' },
     { ...text('priority'), label: 'Priority' },
-    { key: 'modifiedOn', label: 'Last changed', defaultHidden: true, render: (r) => fmt.dateTime(read(r, 'modifiedOn')), csv: (r) => read(r, 'modifiedOn') },
+    { key: 'modifiedOn', label: 'Last changed', sortKey: 'modifiedOn', defaultHidden: true, render: (r) => fmt.dateTime(read(r, 'modifiedOn')), csv: (r) => read(r, 'modifiedOn') },
     { key: 'actions', label: 'Actions', csv: () => '',
       render: (r) => (
         <div className="arwb-row-actions">
@@ -218,7 +218,9 @@ export default function SuperMasterPanel({ labId, setNotice, setError, onTotal }
         exportName="denial_super_master_page"
         emptyText={query.search || query.classification ? 'No mappings match the filters.' : 'The Super Master has no mappings yet.'}
         rowKey={(r) => read(r, 'id')}
-        onSort={() => {}}
+        sortBy={query.sortBy}
+        sortDesc={query.sortDesc}
+        onSort={(sortBy, sortDesc) => setQuery((q) => ({ ...q, sortBy, sortDesc, page: 1 }))}
         onPage={(page) => setQuery((q) => ({ ...q, page }))}
         onPageSize={(pageSize) => setQuery((q) => ({ ...q, pageSize, page: 1 }))}
         toolbar={(

@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
+import AgentRequestModal from '../components/AgentRequestModal';
 import AssignModal from '../components/AssignModal';
 import AutoAdjustModal from '../components/AutoAdjustModal';
 import { Attachments } from '../components/CipShared';
 import FollowUpModal from '../components/FollowUpModal';
 import QaDecisionModal, { QA_CRITERIA } from '../components/QaDecisionModal';
 import Icon from '../components/Icon';
+import useTableSort from '../components/useTableSort';
 import { AgentName, Badge, ErrorBox, Loading, Notice, QueueBadge, StatusBadge } from '../components/Status';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
@@ -103,8 +105,15 @@ export default function ClaimDetailPage() {
     ['followups', `Follow-Ups (${detail.followUps.length})`],
     ['activity', 'Activity Timeline'],
     ...(detail.qaReview ? [['qa', 'QA Review']] : []),
-    ...(detail.cipCases?.length ? [['cip', `CIP Case${detail.cipCases.length > 1 ? `s (${detail.cipCases.length})` : ''}`]] : [])
+    ...(detail.cipCases?.length ? [['cip', `CIP Case${detail.cipCases.length > 1 ? `s (${detail.cipCases.length})` : ''}`]] : []),
+    ...(detail.agentRequests?.length ? [['requests', `Requests (${detail.agentRequests.length})`]] : [])
   ];
+
+  // Escalate to Supervisor / Request Reassignment are the AR agent's way to ask a lead for help (as
+  // the mockup: agent-only - leads and managers can assign themselves). One open request per kind.
+  const isAgent = user?.roleCode === 'agent' && !user?.siteAdmin;
+  const pendingOf = (type) => (detail.agentRequests || []).some((r) => r.requestType === type && r.requestStatus === 'Pending');
+  const canRequest = isAgent && can('editClaim') && !c.IsFinanciallyClosed;
 
   // As the mockup: no note while one waits for QA, or on a closed claim unless it was handed to an
   // agent ad hoc. The API enforces the same rules.
@@ -131,12 +140,7 @@ export default function ClaimDetailPage() {
               )}
               {c.PendingAgentRequests > 0 && <Badge className="arwb-badge-warning" dot>Request — Pending</Badge>}
               {!c.IsInCurrentSource && <Badge>Not in latest source file</Badge>}
-              <span className="text-muted-ink">{c.LabName}</span>·<span className="text-muted-ink">{c.PayerName || '—'}</span>·<span className="text-muted-ink">{c.PanelName || '—'}</span>· DOS {fmt.date(c.DateOfService)}
-            </div>
-            <div className="arwb-meta-row arwb-hint">
-              Patient Acct <b className="mono">{c.PatientID || '—'}</b>
-              {c.ReferringProvider && <> · Rendering: {c.ReferringProvider}</>}
-              {c.ClinicName && <> · Ordering: {c.ClinicName}</>}
+              <span className="text-muted-ink">{c.LabName}</span>
             </div>
           </div>
           <div className="arwb-claim-actions">
@@ -149,12 +153,27 @@ export default function ClaimDetailPage() {
                 title="The adjustment / write-off has been posted in the PMS">{posting ? 'Saving…' : 'Mark as Posted'}</button>
             )}
             {can('assign') && <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => setDialog('assign')}>{agent ? 'Reassign' : 'Assign'}</button>}
+            {canRequest && (
+              <>
+                <button type="button" className="arwb-btn arwb-btn-sm" disabled={pendingOf('Escalation to Supervisor')}
+                  title={pendingOf('Escalation to Supervisor') ? 'An escalation on this claim is already waiting for a supervisor.' : 'Ask a Team Lead / RCM Manager for help'}
+                  onClick={() => setDialog('escalate')}>
+                  <Icon name="flag" size={15} /> Escalate to Supervisor
+                </button>
+                <button type="button" className="arwb-btn arwb-btn-sm" disabled={pendingOf('Reassignment Request')}
+                  title={pendingOf('Reassignment Request') ? 'A reassignment request on this claim is already waiting.' : 'Ask a lead to give this claim to another agent'}
+                  onClick={() => setDialog('reassignment')}>
+                  <Icon name="users" size={15} /> Request Reassignment
+                </button>
+              </>
+            )}
             {can('editClaim') && (
               <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" disabled={!canLog} title={canLog ? undefined : logBlockedReason}
                 onClick={() => setDialog('followup')}>Log Follow-Up Note</button>
             )}
           </div>
         </div>
+        <PatientStrip patient={detail.patient} claim={c} />
         <hr className="arwb-divider" />
         <div className="arwb-wf-stepper">
           {PHASES.map((p, i) => (
@@ -186,6 +205,7 @@ export default function ClaimDetailPage() {
           {tab === 'denial' && <Denial c={c} followUps={detail.followUps} codes={detail.denialCodeInfo || []} />}
           {tab === 'followups' && <FollowUps c={c} rows={detail.followUps} />}
           {tab === 'activity' && <Activity rows={detail.activity} />}
+          {tab === 'requests' && <AgentRequests rows={detail.agentRequests || []} />}
           {tab === 'cip' && <CipCases cases={detail.cipCases || []} canManage={can('approve')} labId={labId} />}
           {tab === 'qa' && detail.qaReview && (
             <QaTab review={detail.qaReview} c={c} latest={detail.followUps[0]} canDecide={can('qaDecide')} userName={user?.userName}
@@ -194,6 +214,10 @@ export default function ClaimDetailPage() {
         </div>
       </div>
 
+      {(dialog === 'escalate' || dialog === 'reassignment') && (
+        <AgentRequestModal claim={c} kind={dialog === 'escalate' ? 'escalation' : 'reassignment'} onClose={() => setDialog(null)}
+          onDone={(message) => done(message, 'requests')} />
+      )}
       {dialog === 'followup' && (
         <FollowUpModal claim={c} lastFollowUp={detail.followUps[0]} onClose={() => setDialog(null)}
           suggestedRootCause={(detail.denialCodeInfo || []).find((r) => r.denialCode === c.PrimaryDenialCode)?.actionCategory}
@@ -288,27 +312,36 @@ function Overview({ c }) {
   );
 }
 
-// Mockup renderCpt: the CPT table, with the line's denial shown on a "↳" row beneath it.
+// Mockup renderCpt: the CPT table, with the line's denial shown on a "↳" row beneath it. ICD Code,
+// Units and Modifier come from the line's dbo.LineLevelData row (the API reads them live).
 function Cpt({ lines }) {
+  const { rows, th } = useTableSort(lines, {
+    line: (l) => l.lineNumber, cpt: (l) => l.cptCode, icd: (l) => l.icdCode, units: (l) => (l.units == null ? null : Number(l.units)),
+    modifier: (l) => l.modifier, billed: (l) => l.chargeAmount, allowed: (l) => l.allowedAmount, paid: (l) => l.insurancePayment,
+    adjusted: (l) => l.insuranceAdjustments, balance: (l) => l.insuranceBalance, status: (l) => l.payStatus || l.lineClaimStatus,
+    denial: (l) => l.denialCode
+  }, { key: 'line', desc: false });
   if (!lines.length) return <div className="arwb-empty-state"><Icon name="search" /><div>No line-level rows were found for this claim.</div></div>;
   return (
     <div className="arwb-table-wrap">
       <table className="arwb-data-table">
         <thead>
           <tr>
-            <th>CPT</th><th>Modifier</th><th>Diagnosis</th><th className="num">Units</th><th className="num">Billed</th>
-            <th className="num">Allowed</th><th className="num">Paid</th><th className="num">Adjusted</th><th className="num">Balance</th><th>Status</th>
+            {th('line', '#', { className: 'num' })}{th('cpt', 'CPT')}{th('icd', 'ICD Code')}{th('units', 'Units', { className: 'num' })}{th('modifier', 'Modifier')}
+            {th('billed', 'Billed', { className: 'num' })}{th('allowed', 'Allowed', { className: 'num' })}{th('paid', 'Paid', { className: 'num' })}
+            {th('adjusted', 'Adjusted', { className: 'num' })}{th('balance', 'Balance', { className: 'num' })}{th('status', 'Status')}
           </tr>
         </thead>
         <tbody>
-          {lines.map((l) => {
+          {rows.map((l) => {
             const status = l.payStatus || l.lineClaimStatus;
             return [
               <tr key={l.lineNumber}>
+                <td className="num arwb-hint">{l.lineNumber}</td>
                 <td className="mono">{l.cptCode || '—'}</td>
-                <td>{l.modifier || '—'}</td>
-                <td className="wrap arwb-hint">{l.icdCode || '—'}</td>
+                <td className="wrap mono">{l.icdCode || '—'}</td>
                 <td className="num">{l.units ?? '—'}</td>
+                <td className="mono">{l.modifier || '—'}</td>
                 <td className="num mono">{fmt.money(l.chargeAmount)}</td>
                 <td className="num mono">{fmt.money(l.allowedAmount)}</td>
                 <td className="num mono">{fmt.money(l.insurancePayment)}</td>
@@ -319,13 +352,74 @@ function Cpt({ lines }) {
               l.denialCode && (
                 <tr key={`${l.lineNumber}-d`} className="arwb-cpt-sub">
                   <td />
-                  <td colSpan={9} className="arwb-hint wrap">↳ Denial <span className="mono">{l.denialCode}</span>{l.denialDate ? ` · ${fmt.date(l.denialDate)}` : ''}</td>
+                  <td colSpan={10} className="arwb-hint wrap">↳ Denial <span className="mono">{l.denialCode}</span>{l.denialDate ? ` · ${fmt.date(l.denialDate)}` : ''}</td>
                 </tr>
               )
             ];
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// The claim's escalation & reassignment requests, newest first, with the lead's response.
+function AgentRequests({ rows: all }) {
+  const { rows, th } = useTableSort(all, {
+    requested: (r) => r.requestedOn, type: (r) => r.requestType, reason: (r) => r.reasonCategory, by: (r) => r.requestedByName,
+    status: (r) => r.requestStatus, response: (r) => r.resolvedOn
+  });
+  return (
+    <div className="arwb-table-wrap">
+      <table className="arwb-data-table">
+        <thead>
+          <tr>{th('requested', 'Requested')}{th('type', 'Type')}{th('reason', 'Reason / Note')}{th('by', 'Requested By')}{th('status', 'Status')}{th('response', 'Response')}</tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.agentRequestId}>
+              <td>{fmt.dateTime(r.requestedOn)}</td>
+              <td><Badge className={r.requestType === 'Escalation to Supervisor' ? 'arwb-badge-critical' : 'arwb-badge-info'} dot>{r.requestType}</Badge></td>
+              <td className="wrap"><b>{r.reasonCategory}</b><div className="arwb-pre-line" style={{ minWidth: 0 }}>{r.requestNote}</div></td>
+              <td>{r.requestedByName}</td>
+              <td><Badge className={r.requestStatus === 'Pending' ? 'arwb-badge-warning' : 'arwb-badge-good'}>{r.requestStatus}</Badge></td>
+              <td className="wrap">
+                {r.requestStatus === 'Resolved'
+                  ? <><div className="arwb-pre-line" style={{ minWidth: 0 }}>{r.resolutionNote || '—'}</div><div className="arwb-hint">{r.resolvedByName} · {fmt.dateTime(r.resolvedOn)}</div></>
+                  : <span className="text-muted-ink">Awaiting response</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// The fields an AR caller reads out to the payer, from dbo.LineLevelData (the API falls back to the
+// synced claim values). Shown in the header so they are on screen whichever tab is open.
+function PatientStrip({ patient, claim }) {
+  const p = patient || {};
+  const fields = [
+    ['Payer', claim.PayerName],
+    ['Panel', claim.PanelName],
+    ['DOS', claim.DateOfService ? fmt.date(claim.DateOfService) : null],
+    ['Patient Name', p.patientName ?? claim.PatientName],
+    ['Patient DOB', p.patientDOB ? fmt.date(p.patientDOB) : null],
+    ['Patient ID', p.patientID ?? claim.PatientID, true],
+    ['Subscriber ID', p.subscriberID, true],
+    ['Referring Provider', p.referringProvider ?? claim.ReferringProvider],
+    ['Facility', p.facility],
+    ['Ordering Clinic', claim.ClinicName]
+  ];
+  return (
+    <div className="arwb-patient-strip" aria-label="Patient and provider">
+      {fields.map(([label, value, mono]) => (
+        <div key={label} className="arwb-patient-field">
+          <span className="arwb-patient-label">{label}</span>
+          <span className={`arwb-patient-value${mono ? ' mono' : ''}`}>{value || '—'}</span>
+        </div>
+      ))}
     </div>
   );
 }

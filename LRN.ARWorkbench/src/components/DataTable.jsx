@@ -10,7 +10,17 @@ function writeHidden(storageKey, hidden) {
   try { localStorage.setItem(storageKey, JSON.stringify([...hidden])); } catch { /* per-session only */ }
 }
 
-const PAGE_SIZES = [10, 25, 50, 100];
+/**
+ * Gives every column listed in sortKeys ({ columnKey: apiSortKey }) a sort key, leaving columns that
+ * already have one alone. The API sorts by that key across every page - never just the rows on screen.
+ */
+export function withSortKeys(columns, sortKeys) {
+  return columns.map((c) => (c.sortKey || !sortKeys[c.key] ? c : { ...c, sortKey: sortKeys[c.key] }));
+}
+
+// Every table offers the same page sizes; screens default to 50.
+export const PAGE_SIZES = [50, 100, 500, 1000];
+export const DEFAULT_PAGE_SIZE = 50;
 
 /**
  * The one table component every queue uses (server-side paging and sorting), in the mockup's
@@ -115,7 +125,7 @@ export default function DataTable({
             </div>
           )}
         </div>
-        <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-ghost" onClick={exportCsv} disabled={!rows.length} title="Export the rows on this page">
+        <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-ghost" onClick={exportCsv} disabled={!rows.length} title="Export the rows on this page (CSV)">
           <Icon name="doc" size={15} /> Export
         </button>
       </div>
@@ -172,15 +182,17 @@ export default function DataTable({
       </div>
 
       <div className="arwb-pagination">
+        <button type="button" className="arwb-btn arwb-btn-sm" disabled={page <= 1 || loading} onClick={() => onPage(1)} title="First page" aria-label="First page">« First</button>
+        <button type="button" className="arwb-btn arwb-btn-sm" disabled={page <= 1 || loading} onClick={() => onPage(page - 1)} aria-label="Previous page">‹ Prev</button>
         <span>Page {fmt.count(page)} of {fmt.count(pageCount)}</span>
-        <button type="button" className="arwb-btn arwb-btn-sm" disabled={page <= 1 || loading} onClick={() => onPage(page - 1)}>‹ Prev</button>
-        <button type="button" className="arwb-btn arwb-btn-sm" disabled={page >= pageCount || loading} onClick={() => onPage(page + 1)}>Next ›</button>
+        <button type="button" className="arwb-btn arwb-btn-sm" disabled={page >= pageCount || loading} onClick={() => onPage(page + 1)} aria-label="Next page">Next ›</button>
+        <button type="button" className="arwb-btn arwb-btn-sm" disabled={page >= pageCount || loading} onClick={() => onPage(pageCount)} title="Last page" aria-label="Last page">Last »</button>
         <span className="grow" />
         {onPageSize && (
           <span className="arwb-hint">
             <label htmlFor={`ps-${tableId}`}>Rows per page</label>
             <select id={`ps-${tableId}`} className="arwb-select arwb-select-inline" value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))}>
-              {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
+              {(PAGE_SIZES.includes(pageSize) ? PAGE_SIZES : [...PAGE_SIZES, pageSize].sort((a, b) => a - b)).map((n) => <option key={n} value={n}>{fmt.count(n)}</option>)}
             </select>
           </span>
         )}

@@ -3,7 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router';
 import AssignModal from '../components/AssignModal';
 import AutoAdjustModal from '../components/AutoAdjustModal';
 import BulkUpdateModal from '../components/BulkUpdateModal';
-import DataTable from '../components/DataTable';
+import DataTable, { withSortKeys } from '../components/DataTable';
+import { CLAIM_SORT_KEYS } from '../config/sortKeys';
 import Icon from '../components/Icon';
 import MultiSelect from '../components/MultiSelect';
 import SavedViews from '../components/SavedViews';
@@ -12,7 +13,7 @@ import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
 import { fmt } from '../utils/format';
 
-const DEFAULT_PAGE_SIZE = 25;
+const DEFAULT_PAGE_SIZE = 50;
 
 // Multi-select filters: URL key -> API filter key, label, filter-options list. Each value is its
 // own URL entry (?payer=A&payer=B), so a filtered view can be bookmarked or shared.
@@ -37,7 +38,7 @@ function NextFollowUp({ date }) {
 
 // The mockup's Work Queue columns (handoff FR-WQ-05); * = hidden by default.
 function buildColumns(openClaim) {
-  return [
+  return withSortKeys([
     { key: 'claimID', label: 'Claim ID', sortKey: 'claimId',
       render: (r) => <button type="button" className="arwb-claim-link" onClick={(e) => { e.stopPropagation(); openClaim(r); }}>{r.claimID}</button> },
     { key: 'labName', label: 'Client', render: (r) => r.labName || '—' },
@@ -74,7 +75,7 @@ function buildColumns(openClaim) {
       csv: (r) => fmt.date(r.nextFollowUpDate) },
     { key: 'action', label: 'Action', align: 'end', csv: () => '',
       render: (r) => <button type="button" className="arwb-btn arwb-btn-sm" onClick={(e) => { e.stopPropagation(); openClaim(r); }}>Open</button> }
-  ];
+  ], CLAIM_SORT_KEYS);
 }
 
 export default function WorkQueuePage() {
@@ -138,7 +139,9 @@ export default function WorkQueuePage() {
       sortBy: params.get('sort') || 'remainingAR',
       sortDesc: params.get('dir') !== 'asc',
       page: Number(params.get('page')) || 1,
-      pageSize
+      pageSize,
+      // ?code= from the Denial Analysis Report: primary or line denial code, any spelling.
+      denialCode: params.getAll('code')
     };
     LIST_FILTERS.forEach((lf) => { f[lf.api] = params.getAll(lf.param); });
     return f;
@@ -208,10 +211,15 @@ export default function WorkQueuePage() {
   const openClaim = (row) => navigate(`/claims/${row.claimKey}`, { state: { from: `/work-queue?${params}` } });
   const columns = useMemo(() => buildColumns(openClaim), [params]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const activeChips = LIST_FILTERS.flatMap((lf) => params.getAll(lf.param).map((v) => {
-    const label = options?.[lf.options]?.find((o) => o.value === v)?.label ?? v;
-    return { key: `${lf.param}:${v}`, text: `${lf.label}: ${label}`, remove: () => update({ [lf.param]: params.getAll(lf.param).filter((x) => x !== v) }) };
-  }));
+  const activeChips = [
+    ...params.getAll('code').map((v) => ({
+      key: `code:${v}`, text: `Denial Code: ${v}`, remove: () => update({ code: params.getAll('code').filter((x) => x !== v) })
+    })),
+    ...LIST_FILTERS.flatMap((lf) => params.getAll(lf.param).map((v) => {
+      const label = options?.[lf.options]?.find((o) => o.value === v)?.label ?? v;
+      return { key: `${lf.param}:${v}`, text: `${lf.label}: ${label}`, remove: () => update({ [lf.param]: params.getAll(lf.param).filter((x) => x !== v) }) };
+    }))
+  ];
 
   return (
     <>

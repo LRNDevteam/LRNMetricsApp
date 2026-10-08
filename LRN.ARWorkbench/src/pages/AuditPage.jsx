@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import DataTable from '../components/DataTable';
+import DataTable, { withSortKeys } from '../components/DataTable';
+import { AUDIT_SORT_KEYS } from '../config/sortKeys';
 import Icon from '../components/Icon';
 import MultiSelect from '../components/MultiSelect';
 import { Badge, ErrorBox } from '../components/Status';
@@ -121,7 +122,7 @@ export default function AuditPage() {
         <DataTable
           tableId="audit-v1"
           exportName="audit-log"
-          columns={columns}
+          columns={withSortKeys(columns, AUDIT_SORT_KEYS)}
           rows={data?.rows?.items || []}
           totalCount={data?.rows?.totalCount || 0}
           page={query.page}

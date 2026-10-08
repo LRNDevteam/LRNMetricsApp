@@ -26,7 +26,7 @@ import SuperMasterPanel from './SuperMasterPanel';
 // on the Denial Categories list); the checks below only save a round trip.
 
 const blankForm = { denialCode: '', denialCategory: '', denialReason: '', isActive: true };
-const blankQuery = { search: '', status: 'all', category: '', sortBy: 'denialCode', sortDesc: false, page: 1, pageSize: 25 };
+const blankQuery = { search: '', status: 'all', category: '', sortBy: 'denialCode', sortDesc: false, page: 1, pageSize: 50 };
 
 // Mirrors ArWorkbenchMasterRules.NormalizeDenialCode: 'CO-197', 'PR 197' and '197' are one code.
 function normalizeCode(value) {

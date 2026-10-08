@@ -7,7 +7,6 @@ const PLANS = {
   mywork: 'The signed-in agent\'s own assigned caseload.',
   followup: 'Claims due or overdue for re-follow-up: 45+ days since the last follow-up, or the next follow-up date has passed.',
   qa: 'QA review queue with bulk approve, row eligibility, and the self-approval guard.',
-  'agent-requests': 'Escalate-to-Supervisor and reassignment requests from agents, with bulk resolve and one shared note.',
   cip: 'CIP case lifecycle: Pending Approval, Sent to Client, Client Responded, send back (round + 1), Returned to Agent, with bulk approve or send back.',
   'client-cip': 'Read-only CIP requests for your client, clinic or provider, with a text reply, up to three attachments, or a CSV response template.',
   audit: 'Activity trail across every claim in scope, filterable by user, action and client.',

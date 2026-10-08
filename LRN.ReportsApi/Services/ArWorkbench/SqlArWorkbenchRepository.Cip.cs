@@ -23,7 +23,9 @@ public sealed partial class SqlArWorkbenchRepository
     {
         ["claimId"] = "w.ClaimID", ["payerName"] = "w.PayerName", ["caseStatus"] = "StatusOrder", ["roundNumber"] = "c.RoundNumber",
         ["cipCategory"] = "c.CipCategory", ["insuranceBalance"] = "w.InsuranceBalance", ["requestedOn"] = "c.RequestedOn",
-        ["clientRespondedOn"] = "c.ClientRespondedOn", ["requestedBy"] = "c.RequestedBy"
+        ["clientRespondedOn"] = "c.ClientRespondedOn", ["requestedBy"] = "c.RequestedBy",
+        ["caseNumber"] = "c.CipCaseId", ["patientId"] = "w.PatientID", ["dateOfService"] = "w.DateOfService", ["labName"] = "w.LabName",
+        ["requiredInfo"] = "c.RequiredInfo", ["arQueue"] = "q.QueueLabel", ["cipComment"] = "c.CipComment", ["feedback"] = "c.LastReviewNote"
     };
 
     private const string CipRowColumns = @"c.CipCaseId, c.CaseNumber, w.ClaimKey, w.ClaimID, w.LabName, w.PayerName, w.PatientID, w.DateOfService, w.ClinicName,
@@ -73,7 +75,7 @@ public sealed partial class SqlArWorkbenchRepository
         }
 
         var page = Math.Max(1, filter.Page);
-        var pageSize = Math.Clamp(filter.PageSize, 5, 200);
+        var pageSize = Math.Clamp(filter.PageSize, 5, 1000);
         var order = CipSortColumns.TryGetValue(filter.SortBy ?? string.Empty, out var col) ? col : "StatusOrder";
         var dir = filter.SortDesc ? "DESC" : "ASC";
         cmd.Parameters.Add("@Offset", SqlDbType.Int).Value = (page - 1) * pageSize;

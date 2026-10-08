@@ -9,7 +9,8 @@ public interface IDenialMapperRepository
 {
     Task<DenialMapperDashboard> DashboardAsync(int? labId, CancellationToken ct);
     Task<DenialMapperMasterData> MasterDataAsync(CancellationToken ct);
-    Task<PagedResult<DenialMapperRecord>> SuperMasterAsync(string? search, string? classification, int page, int pageSize, CancellationToken ct);
+    /// <param name="sortBy">One of <see cref="DenialMapperService.SuperMasterSortColumns"/>; anything else sorts by denial code.</param>
+    Task<PagedResult<DenialMapperRecord>> SuperMasterAsync(string? search, string? classification, int page, int pageSize, CancellationToken ct, string? sortBy = null, bool sortDesc = false);
     Task<long> SaveSuperMasterAsync(long? id, DenialMapperSaveRequest request, string user, string role, CancellationToken ct);
     Task DeleteSuperMasterAsync(long id, string user, string role, CancellationToken ct);
     Task<IReadOnlyList<DenialMapperLabStatus>> LabsAsync(CancellationToken ct);
@@ -90,13 +91,23 @@ public sealed class SqlDenialMapperRepository : IDenialMapperRepository
         return new() { TotalDenialCodes=labId.HasValue?scoped.FirstOrDefault()?.MappingCount??0:total, ActiveLabs=labs.Count(x=>x.IsActive), PendingPushLabs=labs.Count(x=>!x.IsActive), TotalOverrides=scoped.Sum(x=>x.OverrideCount), LastModifiedOn=scoped.Count==0?null:scoped.Max(x=>x.LastPushedOn) };
     }
 
-    public async Task<PagedResult<DenialMapperRecord>> SuperMasterAsync(string? search,string? classification,int page,int pageSize,CancellationToken ct)
+    /// <summary>Sortable Super Master columns (whitelist: the value goes into ORDER BY).</summary>
+    public static readonly IReadOnlyDictionary<string,string> SuperMasterSortColumns = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase)
     {
-        page=Math.Max(1,page); pageSize=Math.Clamp(pageSize,10,200); var result=new PagedResult<DenialMapperRecord>{Page=page,PageSize=pageSize};
+        ["denialCode"]="DenialCode",["denialDescription"]="DenialDescription",["denialClassification"]="DenialClassification",
+        ["coverageStatus"]="CoverageStatus",["icdComplianceStatus"]="ICDComplianceStatus",["denialValidity"]="DenialValidity",
+        ["actionCode"]="ActionCode",["actionCategory"]="ActionCategory",["task"]="Task",["recommendedAction"]="RecommendedAction",
+        ["sla"]="SLA",["priority"]="Priority",["modifiedOn"]="ModifiedOn"
+    };
+
+    public async Task<PagedResult<DenialMapperRecord>> SuperMasterAsync(string? search,string? classification,int page,int pageSize,CancellationToken ct,string? sortBy=null,bool sortDesc=false)
+    {
+        var order=SuperMasterSortColumns.TryGetValue(sortBy??string.Empty,out var sortCol)?$"{sortCol} {(sortDesc?"DESC":"ASC")}, DenialCode":"DenialCode";
+        page=Math.Max(1,page); pageSize=Math.Clamp(pageSize,10,1000); var result=new PagedResult<DenialMapperRecord>{Page=page,PageSize=pageSize};
         const string where="IsActive=1 AND (@Search IS NULL OR DenialCode LIKE @Search ESCAPE '\\' OR DenialDescription LIKE @Search ESCAPE '\\') AND (@Class IS NULL OR UPPER(LTRIM(RTRIM(DenialClassification)))=UPPER(LTRIM(RTRIM(@Class))))";
         await using var c=Open(); await c.OpenAsync(ct);
         await using(var count=new SqlCommand($"SELECT COUNT(*) FROM dbo.DenialMapperSuperMaster WHERE {where}",c)){ AddFilters(count,search,classification); result.TotalCount=Convert.ToInt32(await count.ExecuteScalarAsync(ct)); }
-        await using var cmd=new SqlCommand($"SELECT Id,DenialCode,DenialDescription,DenialClassification,CoverageStatus,ICDComplianceStatus,DenialValidity,ActionCode,ActionCategory,Task,RecommendedAction,SLA,Priority,ModifiedOn FROM dbo.DenialMapperSuperMaster WHERE {where} ORDER BY DenialCode OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY",c);
+        await using var cmd=new SqlCommand($"SELECT Id,DenialCode,DenialDescription,DenialClassification,CoverageStatus,ICDComplianceStatus,DenialValidity,ActionCode,ActionCategory,Task,RecommendedAction,SLA,Priority,ModifiedOn FROM dbo.DenialMapperSuperMaster WHERE {where} ORDER BY {order} OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY",c);
         AddFilters(cmd,search,classification); cmd.Parameters.AddWithValue("@Skip",(page-1)*pageSize);cmd.Parameters.AddWithValue("@Take",pageSize);
         await using var r=await cmd.ExecuteReaderAsync(ct); while(await r.ReadAsync(ct)) result.Items.Add(Map(r,false)); return result;
     }
@@ -591,7 +602,7 @@ public sealed class SqlDenialMapperRepository : IDenialMapperRepository
 
     public async Task<PagedResult<DenialMapperRecord>> LabMasterAsync(int labId,string? search,string? classification,int page,int pageSize,CancellationToken ct)
     {
-        page=Math.Max(1,page);pageSize=Math.Clamp(pageSize,10,200);var result=new PagedResult<DenialMapperRecord>{Page=page,PageSize=pageSize};await using var c=OpenLab(labId);await c.OpenAsync(ct);await EnsureLabTables(c,ct);if(!await LabTablesExist(c,ct))return result;
+        page=Math.Max(1,page);pageSize=Math.Clamp(pageSize,10,1000);var result=new PagedResult<DenialMapperRecord>{Page=page,PageSize=pageSize};await using var c=OpenLab(labId);await c.OpenAsync(ct);await EnsureLabTables(c,ct);if(!await LabTablesExist(c,ct))return result;
         const string where="m.IsActive=1 AND (@Search IS NULL OR m.DenialCode LIKE @Search ESCAPE '\\' OR m.DenialDescription LIKE @Search ESCAPE '\\') AND (@Class IS NULL OR UPPER(LTRIM(RTRIM(m.DenialClassification)))=UPPER(LTRIM(RTRIM(@Class))))";
         await using(var count=new SqlCommand($"SELECT COUNT(*) FROM dbo.DenialMapperLabMaster m WHERE {where}",c)){AddFilters(count,search,classification);result.TotalCount=Convert.ToInt32(await count.ExecuteScalarAsync(ct));}
         var sql=$"SELECT m.SuperMasterId,m.DenialCode,m.DenialDescription,m.DenialClassification,m.CoverageStatus,m.ICDComplianceStatus,m.DenialValidity,COALESCE(o.ActionCode,m.ActionCode),COALESCE(o.ActionCategory,m.ActionCategory),COALESCE(o.Task,m.Task),COALESCE(o.RecommendedAction,m.RecommendedAction),m.SLA,m.Priority,COALESCE(o.ModifiedOn,m.ModifiedOn),CASE WHEN o.Id IS NULL THEN CAST(0 AS bit) ELSE CAST(1 AS bit) END,m.ActionCode,m.ActionCategory,m.Task,m.RecommendedAction FROM dbo.DenialMapperLabMaster m LEFT JOIN dbo.DenialMapperLabOverride o ON o.SuperMasterId=m.SuperMasterId AND o.LabId=@LabId AND o.IsActive=1 WHERE {where} ORDER BY m.DenialCode OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY";

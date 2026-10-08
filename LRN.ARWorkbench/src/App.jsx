@@ -3,6 +3,7 @@ import AppShell from './components/AppShell';
 import { ErrorBox, Loading } from './components/Status';
 import { allows, REDIRECTS, ROUTES } from './config/navigation';
 import { useWorkbench, WorkbenchProvider } from './context/WorkbenchContext';
+import AgentRequestsPage from './pages/AgentRequestsPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import AssignmentPage from './pages/AssignmentPage';
 import AuditPage from './pages/AuditPage';
@@ -34,6 +35,7 @@ const SCREENS = {
   qa: QaPage,
   audit: AuditPage,
   analytics: AnalyticsPage,
+  'agent-requests': AgentRequestsPage,
   reports: ReportsPage,
   clients: ClientsPage,
   cip: CipPage,

@@ -242,6 +242,89 @@ ORDER BY IsCurrentWeek DESC, OutstandingBalance DESC, DenialCode;", connection) 
         return rows;
     }
 
+    /// <summary>
+    /// The team's uploaded Key Observations (LRN Metrics > Denial Claim Report, dbo.DenialClaimLevelInsight
+    /// in this lab database): the latest week of the Current and of the Previous bucket, in the team's
+    /// own order. Each row carries a live count of the claims whose primary denial is that code and
+    /// that are still unassigned with an open insurance balance - the same measure as the system
+    /// insights. Columns added to that table over time are read only when this lab has them.
+    /// </summary>
+    public async Task<ArWorkbenchUploadedInsights> GetUploadedInsightsAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct)
+    {
+        var result = new ArWorkbenchUploadedInsights();
+        await using var connection = await OpenLabAsync(labId, ct);
+
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var probe = new SqlCommand("SELECT name FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.DenialClaimLevelInsight', N'U');", connection))
+        await using (var r = await probe.ExecuteReaderAsync(ct))
+            while (await r.ReadAsync(ct)) columns.Add(r.GetString(0));
+        if (!columns.Contains("DenialCode") || !columns.Contains("Bucket") || !columns.Contains("WeekStart")) return result;
+        result.TableInstalled = true;
+
+        // Whitelisted column names only; a column this lab's table lacks reads as NULL.
+        string Opt(string name, string type) => columns.Contains(name) ? $"i.[{name}]" : $"CAST(NULL AS {type})";
+        var impact = columns.Contains("ImpactPercentageText")
+            ? $"COALESCE(i.ImpactPercentageText, {(columns.Contains("ImpactPercentage") ? "CONVERT(nvarchar(30), i.ImpactPercentage)" : "NULL")})"
+            : columns.Contains("ImpactPercentage") ? "CONVERT(nvarchar(30), i.ImpactPercentage)" : "CAST(NULL AS nvarchar(30))";
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandTimeout = 120;
+        var scope = AppendScope(cmd, user);
+        cmd.CommandText = $@"
+SELECT i.Id, i.Bucket, i.WeekStart, {Opt("SortOrder", "int")}, i.DenialCode, n.DenialCode, {Opt("DenialDescription", "nvarchar(1000)")},
+       {Opt("PayerName", "nvarchar(255)")}, {Opt("NoOfDenials", "int")}, {Opt("TotalBalance", "decimal(18,2)")}, {Opt("InsuranceNoOfDenials", "int")},
+       {Opt("InsuranceBalance", "decimal(18,2)")}, {impact}, {Opt("Observation", "nvarchar(max)")}, {Opt("ActionCategory", "nvarchar(500)")},
+       {Opt("Action", "nvarchar(max)")}, {Opt("Responsibility", "nvarchar(255)")}, {Opt("Status", "nvarchar(50)")}, {Opt("ETA", "date")},
+       {Opt("UpdatedOn", "datetime2(3)")}, {Opt("UpdatedBy", "nvarchar(200)")},
+       ISNULL(o.OpenClaims, 0), ISNULL(o.OpenBalance, 0)
+FROM dbo.DenialClaimLevelInsight i
+INNER JOIN (SELECT Bucket, MAX(WeekStart) AS WeekStart FROM dbo.DenialClaimLevelInsight
+            WHERE Bucket IN (N'Current', N'Previous') GROUP BY Bucket) lw
+        ON lw.Bucket = i.Bucket AND lw.WeekStart = i.WeekStart
+OUTER APPLY dbo.ARWB_tvf_NormalizeDenialCode(i.DenialCode) n
+OUTER APPLY (SELECT COUNT(*) AS OpenClaims, SUM(w.RemainingAR) AS OpenBalance
+             FROM dbo.ARWB_Claim w
+             WHERE w.PrimaryDenialCode = n.DenialCode AND w.IsOpenInsuranceAR = 1 AND w.WorkflowStatus = 'Unassigned' {scope}) o
+ORDER BY i.Bucket, {(columns.Contains("SortOrder") ? "i.SortOrder, " : string.Empty)}{(columns.Contains("InsuranceBalance") ? "i.InsuranceBalance DESC, " : string.Empty)}i.DenialCode;";
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            static int I(SqlDataReader r, int i) => r.IsDBNull(i) ? 0 : Convert.ToInt32(r.GetValue(i));
+            static decimal D(SqlDataReader r, int i) => r.IsDBNull(i) ? 0m : Convert.ToDecimal(r.GetValue(i));
+            static DateTime? Dt(SqlDataReader r, int i) => r.IsDBNull(i) ? null : Convert.ToDateTime(r.GetValue(i));
+            var insurance = D(reader, 11);
+            var total = D(reader, 9);
+            var row = new ArWorkbenchUploadedInsight
+            {
+                Id = Convert.ToInt64(reader.GetValue(0)),
+                WeekStart = Convert.ToDateTime(reader.GetValue(2)),
+                SortOrder = I(reader, 3),
+                DenialCode = reader.GetString(4).Trim(),
+                NormalizedCode = Str(reader, 5),
+                Description = Str(reader, 6),
+                PayerName = Str(reader, 7),
+                NoOfDenials = I(reader, 8),
+                TotalBalance = total,
+                InsuranceNoOfDenials = I(reader, 10),
+                InsuranceBalance = insurance,
+                Impact = ArWorkbenchUploadedInsightRules.ImpactText(Str(reader, 12), insurance, total),
+                Observation = ArWorkbenchUploadedInsightRules.ToPlainText(Str(reader, 13)),
+                ActionCategory = Str(reader, 14),
+                Action = ArWorkbenchUploadedInsightRules.ToPlainText(Str(reader, 15)),
+                Responsibility = Str(reader, 16),
+                Status = Str(reader, 17),
+                Eta = Dt(reader, 18),
+                UpdatedOn = Dt(reader, 19),
+                UpdatedBy = Str(reader, 20),
+                OpenClaims = I(reader, 21),
+                OpenBalance = D(reader, 22)
+            };
+            (string.Equals(reader.GetString(1), "Previous", StringComparison.OrdinalIgnoreCase) ? result.Previous : result.Current).Add(row);
+        }
+        return result;
+    }
+
     // ==========================================================================================
     // Timely-filing limits (dbo.ARWB_TflThreshold + AppSetting TflDefaultDays / TflRiskWindowDays)
     // A change re-derives every claim's TFL deadline and risk flag through the one implementation

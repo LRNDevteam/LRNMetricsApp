@@ -346,6 +346,14 @@
 			]
 		},
 		{
+			"Name": "Payment Posted Date",
+			"DataType": "date",
+			"Aliases": [
+				"Posted Date",
+				"PostedDate"
+			]
+		},
+		{
 			"Name": "ClaimStatus",
 			"DataType": "string",
 			"Aliases": [
