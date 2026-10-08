@@ -1,0 +1,38 @@
+{
+	"SchemaName": "LIMSMaster",
+	"SheetName": "LIMS Master",
+	"HeaderRow": 1,
+	"//": [
+		"Well Health LIMS sheet (shipped as 'LIMS Mater'; the importer picks the sheet by header match).",
+		"SQL column names follow AnalyzePathology_LIMS_Schema.json where the field is the same.",
+		"The sheet carries 'Sub Status' twice (columns S and V). The importer keeps the FIRST one; the",
+		"second ('Ready to Bill' / 'Entered Not Billed' values) is not loaded until the lab renames it."
+	],
+	"Columns": [
+		{ "ExcelColName": "Accession", "Required": true, "DataType": "string", "SQLColName": "Accession" },
+		{ "ExcelColName": "T/F", "Required": false, "DataType": "string", "SQLColName": "TrueFalse" },
+		{ "ExcelColName": "Requisition", "Required": false, "DataType": "string", "SQLColName": "Requisition" },
+		{ "ExcelColName": "Test Category", "Required": false, "DataType": "string", "SQLColName": "TestCategory" },
+		{ "ExcelColName": "Collection Date", "Required": true, "DataType": "date", "SQLColName": "RequestCollectDate" },
+		{ "ExcelColName": "Received", "Required": false, "DataType": "date", "SQLColName": "ReqReceivedDate" },
+		{ "ExcelColName": "Process Date", "Required": false, "DataType": "date", "SQLColName": "ProcessDate" },
+		{ "ExcelColName": "Patient", "Required": false, "DataType": "string", "SQLColName": "PatientFullName" },
+		{ "ExcelColName": "DOB", "Required": false, "DataType": "date", "SQLColName": "PatientDateofBirth" },
+		{ "ExcelColName": "Physician", "Required": false, "DataType": "string", "SQLColName": "DoctorFullName" },
+		{ "ExcelColName": "Bill Type", "Required": false, "DataType": "string", "SQLColName": "BillType" },
+		{ "ExcelColName": "Location", "Required": false, "DataType": "string", "SQLColName": "ClinicName" },
+		{ "ExcelColName": "Tests", "Required": false, "DataType": "string", "SQLColName": "Tests" },
+		{ "ExcelColName": "Specimens", "Required": false, "DataType": "string", "SQLColName": "Samples" },
+		{ "ExcelColName": "Released Date", "Required": false, "DataType": "date", "SQLColName": "ReqReportedDate" },
+		{ "ExcelColName": "Physician Signature", "Required": false, "DataType": "string", "SQLColName": "PhysicianSignature" },
+		{ "ExcelColName": "Status", "Required": false, "DataType": "string", "SQLColName": "Status" },
+		{ "ExcelColName": "Result Status", "Required": true, "DataType": "string", "SQLColName": "ResultStatus" },
+		{ "ExcelColName": "Sub Status", "Required": false, "DataType": "string", "SQLColName": "SubStatus" },
+		{ "ExcelColName": "New Status", "Required": false, "DataType": "string", "SQLColName": "NewStatus" },
+		{ "ExcelColName": "Bill Category", "Required": true, "DataType": "string", "SQLColName": "BillCategory" },
+		{ "ExcelColName": "Billed date", "Required": false, "DataType": "date", "SQLColName": "BilledDate" },
+		{ "ExcelColName": "Time to result", "Required": false, "DataType": "string", "SQLColName": "TimetoResult" },
+		{ "ExcelColName": "Time to Bill", "Required": false, "DataType": "string", "SQLColName": "TimetoBill" },
+		{ "ExcelColName": "State", "Required": false, "DataType": "string", "SQLColName": "State" }
+	]
+}

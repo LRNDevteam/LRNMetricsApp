@@ -249,6 +249,7 @@
 /* ── Inputs ───────────────────────────────────────────────────────────── */
 .dcr-page .insight-table input[type="text"],
 .dcr-page .insight-table input[type="date"],
+.dcr-page .insight-table select,
 .dcr-page .insight-table textarea {
     width: 100%;
     border: 1px solid var(--ins-border);
@@ -262,11 +263,33 @@
 .dcr-page .insight-table textarea { resize: vertical; min-height: 2.6rem; }
 
 .dcr-page .insight-table input:focus,
+.dcr-page .insight-table select:focus,
 .dcr-page .insight-table textarea:focus {
     outline: 2px solid #9ec5f0;
     outline-offset: -1px;
     border-color: var(--ins-link);
 }
+
+/* Non-editable columns (Denial Codes, Highest Impact - Insurance) keep their value on screen
+   while the row is in edit, muted, so it is clear they are not part of the edit. */
+.dcr-page .insight-table .cell-locked { color: var(--ins-muted); font-style: italic; cursor: not-allowed; }
+
+/* ── Status banding (docs/DenialSummary_EditableColumns.xlsx; see DenialInsightStatus) ── */
+.dcr-page .status-pill {
+    display: inline-block;
+    padding: .2rem .5rem;
+    border-radius: .35rem;
+    font-size: .72rem;
+    font-weight: 700;
+    line-height: 1.3;
+    white-space: nowrap;
+    background: var(--cat-grey-bg);
+    color: var(--cat-grey-fg);
+}
+.dcr-page .status-pill.status-yet,      .dcr-page .status-input.status-yet      { background: #FCE4D6 !important; color: #833C0C !important; }
+.dcr-page .status-pill.status-closed,   .dcr-page .status-input.status-closed   { background: #E2EFDA !important; color: #375623 !important; }
+.dcr-page .status-pill.status-deferred, .dcr-page .status-input.status-deferred { background: #FFFFCC !important; color: #7F6000 !important; }
+.dcr-page .status-input { font-weight: 700; }
 
 /* ── Category banding ─────────────────────────────────────────────────── */
 .dcr-page .cat-pill {
@@ -374,6 +397,7 @@
     .dcr-page .rich-editor,
     .dcr-page .insight-table input[type="text"],
     .dcr-page .insight-table input[type="date"],
+    .dcr-page .insight-table select,
     .dcr-page .insight-table textarea {
         background: #1b2531;
         color: var(--ins-text);

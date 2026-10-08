@@ -326,6 +326,8 @@ public sealed class DenialClaimReportController : Controller
             model.Insight.Rows = await _repo.GetInsightsAsync(connectionString, model.Insight.Bucket, ct);
             model.Insight.BucketCounts = new Dictionary<string, int>(
                 await _repo.GetInsightCountsAsync(connectionString, ct), StringComparer.Ordinal);
+            if (model.Insight.IsEditableTab)
+                model.Insight.Categories = await LoadCategoriesAsync(connectionString, ct);
         }
         catch (Exception ex)
         {
@@ -469,6 +471,8 @@ public sealed class DenialClaimReportController : Controller
             panel.Rows = await _repo.GetInsightsAsync(connectionString, panel.Bucket, ct);
             panel.BucketCounts = new Dictionary<string, int>(
                 await _repo.GetInsightCountsAsync(connectionString, ct), StringComparer.Ordinal);
+            if (panel.IsEditableTab)
+                panel.Categories = await LoadCategoriesAsync(connectionString, ct);
         }
         catch (Exception ex)
         {
@@ -689,20 +693,30 @@ public sealed class DenialClaimReportController : Controller
         }
     }
 
+    /// <summary>The Category dropdown: the lab's stored categories, or the standard set when it has none.</summary>
+    private async Task<IReadOnlyList<string>> LoadCategoriesAsync(string connectionString, CancellationToken ct)
+    {
+        var stored = await _repo.GetInsightCategoriesAsync(connectionString, ct);
+        return stored.Count > 0 ? stored : DenialInsightPanelViewModel.DefaultCategories;
+    }
+
     /// <summary>
-    /// Saves one row from the grid's row-level Edit. Every column on the grid is editable; Data is
-    /// not on the grid, so it keeps whatever the import stored. Only Current Week is editable.
+    /// Saves one row from the grid's row-level Edit. Only Current Week is editable.
     /// </summary>
+    /// <remarks>
+    /// Editable / non-editable follows docs/DenialSummary_EditableColumns.xlsx. Denial Codes and
+    /// Highest Impact - Insurance are not editable: they are the row's identity (and the claim
+    /// drill-through), so they are taken from the stored row and anything posted for them is
+    /// ignored. Data is marked Remove - it is not on the grid and keeps what the import stored.
+    /// </remarks>
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> SaveInsightRow(
         string? lab,
         [FromForm] long id,
-        [FromForm] string? denialCode,
         [FromForm] string? denialDescription,
         [FromForm] string? noOfDenials,
         [FromForm] string? totalBalance,
-        [FromForm] string? payerName,
         [FromForm] string? insuranceNoOfDenials,
         [FromForm] string? insuranceBalance,
         [FromForm] string? impactPercentage,
@@ -730,9 +744,7 @@ public sealed class DenialClaimReportController : Controller
         if (prior is null)
             return Redirect(InsightError("That insight row no longer exists on Current Week.", labName));
 
-        var code = denialCode?.Trim();
-        if (string.IsNullOrWhiteSpace(code))
-            return Redirect(InsightError("Denial Code cannot be blank. Nothing was saved.", labName));
+        var code = prior.DenialCode;
 
         var row = new DenialInsightRow
         {
@@ -740,12 +752,13 @@ public sealed class DenialClaimReportController : Controller
             Bucket = prior.Bucket,
             WeekStart = prior.WeekStart,
             SortOrder = prior.SortOrder,
-            DenialCode = code,
-            DenialCodeNormalized = DenialCodeKey.Normalize(code),
+            // Not editable: from the stored row, never from the post.
+            DenialCode = prior.DenialCode,
+            DenialCodeNormalized = prior.DenialCodeNormalized,
+            PayerName = prior.PayerName,
             DenialDescription = denialDescription?.Trim() ?? string.Empty,
             NoOfDenials = (int)ParseNumber(noOfDenials),
             TotalBalance = ParseNumber(totalBalance),
-            PayerName = payerName?.Trim() ?? string.Empty,
             InsuranceNoOfDenials = (int)ParseNumber(insuranceNoOfDenials),
             InsuranceBalance = ParseNumber(insuranceBalance),
             ImpactPercentage = impactPercentage?.Trim() ?? string.Empty,
@@ -765,7 +778,7 @@ public sealed class DenialClaimReportController : Controller
         var result = await _repo.SaveInsightsAsync(connectionString, [row], CurrentUser, ct);
 
         return Redirect(result.Errors.Count > 0
-            ? InsightError($"Row {code} could not be saved - another row may already use that denial code and insurance for this week.", labName)
+            ? InsightError($"Row {code} could not be saved.", labName)
             : InsightOk($"Saved denial insight row {code}.", labName));
     }
 

@@ -70,6 +70,12 @@ public interface IDenialClaimReportRepository
     /// <summary>Row counts per tab, without loading the rows.</summary>
     Task<IReadOnlyDictionary<string, int>> GetInsightCountsAsync(string connectionString, CancellationToken ct);
 
+    /// <summary>
+    /// Every Category value already stored for the lab, across all tabs and Archive, for the edit
+    /// dropdown. Distinct ignoring case, blanks excluded, sorted.
+    /// </summary>
+    Task<IReadOnlyList<string>> GetInsightCategoriesAsync(string connectionString, CancellationToken ct);
+
     /// <summary>Upsert by (Bucket, WeekStart, DenialCode, PayerName) - a template row's identity.</summary>
     Task<DenialInsightUploadResult> SaveInsightsAsync(string connectionString, IReadOnlyList<DenialInsightRow> rows, string userName, CancellationToken ct);
 
@@ -806,6 +812,30 @@ ORDER BY WeekStart DESC, SortOrder, InsuranceBalance DESC, DenialCode;";
         }
 
         return rows;
+    }
+
+    public async Task<IReadOnlyList<string>> GetInsightCategoriesAsync(string connectionString, CancellationToken ct)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await EnsureInsightTableAsync(conn, ct);
+
+        var sql = $@"
+SELECT DISTINCT LTRIM(RTRIM(ActionCategory))
+FROM   {InsightTable}
+WHERE  NULLIF(LTRIM(RTRIM(ActionCategory)), '') IS NOT NULL;";
+
+        var values = new List<string>();
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 60 };
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) values.Add(reader.GetString(0));
+
+        // DISTINCT follows the column collation; collapse case variants here as well so the
+        // dropdown never offers "Review" twice.
+        return values
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     public async Task<IReadOnlyDictionary<string, int>> GetInsightCountsAsync(string connectionString, CancellationToken ct)

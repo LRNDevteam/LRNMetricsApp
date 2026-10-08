@@ -215,11 +215,10 @@
                                                href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = row.DenialCode })"
                                                title="Open Claim Level filtered to denial code @row.DenialCode">@row.DenialCode</a>
                                         </span>
+                                        @* Not editable (docs/DenialSummary_EditableColumns.xlsx): stays as text while the row is in edit. *@
                                         @if (editable)
                                         {
-                                            <span class="cell-edit">
-                                                <input type="text" form="@formId" name="denialCode" value="@row.DenialCode" maxlength="100" required />
-                                            </span>
+                                            <span class="cell-edit cell-locked" title="Denial Codes cannot be edited">@row.DenialCode</span>
                                         }
                                     </td>
                                     <td class="col-desc">
@@ -253,11 +252,10 @@
                                     </td>
                                     <td class="cell-impact">
                                         <span class="cell-view">@row.PayerName</span>
+                                        @* Not editable: the insurance is part of the row's identity. *@
                                         @if (editable)
                                         {
-                                            <span class="cell-edit">
-                                                <input type="text" form="@formId" name="payerName" value="@row.PayerName" maxlength="255" />
-                                            </span>
+                                            <span class="cell-edit cell-locked" title="Highest Impact - Insurance cannot be edited">@row.PayerName</span>
                                         }
                                     </td>
                                     <td class="cell-impact num">
@@ -334,8 +332,21 @@
                                         @if (editable)
                                         {
                                             <span class="cell-edit">
-                                                <input type="text" form="@formId" name="actionCategory" class="cat-input @catClass"
-                                                       value="@row.ActionCategory" list="insightCategories" maxlength="120" />
+                                                @* The lab's own categories. A stored value that is not in the list
+                                                   (e.g. typed in before) is kept as an option so editing the row
+                                                   never silently changes it. *@
+                                                <select form="@formId" name="actionCategory" class="cat-input @catClass">
+                                                    <option value="" selected="@string.IsNullOrWhiteSpace(row.ActionCategory)">&mdash;</option>
+                                                    @foreach (var cat in Model.Categories)
+                                                    {
+                                                        <option value="@cat" selected="@string.Equals(cat, row.ActionCategory?.Trim(), StringComparison.OrdinalIgnoreCase)">@cat</option>
+                                                    }
+                                                    @if (!string.IsNullOrWhiteSpace(row.ActionCategory)
+                                                         && !Model.Categories.Contains(row.ActionCategory.Trim(), StringComparer.OrdinalIgnoreCase))
+                                                    {
+                                                        <option value="@row.ActionCategory" selected>@row.ActionCategory</option>
+                                                    }
+                                                </select>
                                             </span>
                                         }
                                     </td>
@@ -406,11 +417,31 @@
                                         }
                                     </td>
                                     <td class="col-status">
-                                        <span class="cell-view">@(string.IsNullOrWhiteSpace(row.Status) ? "—" : row.Status)</span>
+                                        <span class="cell-view">
+                                            @if (string.IsNullOrWhiteSpace(row.Status))
+                                            {
+                                                <span class="text-muted">&mdash;</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="status-pill @DenialInsightStatus.CssClass(row.Status)">@row.Status</span>
+                                            }
+                                        </span>
                                         @if (editable)
                                         {
                                             <span class="cell-edit">
-                                                <input type="text" form="@formId" name="status" value="@row.Status" list="insightStatuses" maxlength="50" />
+                                                <select form="@formId" name="status" class="status-input @DenialInsightStatus.CssClass(row.Status)">
+                                                    <option value="" selected="@string.IsNullOrWhiteSpace(row.Status)">&mdash;</option>
+                                                    @foreach (var st in DenialInsightStatus.Options)
+                                                    {
+                                                        <option value="@st" selected="@string.Equals(st, row.Status?.Trim(), StringComparison.OrdinalIgnoreCase)">@st</option>
+                                                    }
+                                                    @if (!string.IsNullOrWhiteSpace(row.Status)
+                                                         && !DenialInsightStatus.Options.Contains(row.Status.Trim(), StringComparer.OrdinalIgnoreCase))
+                                                    {
+                                                        <option value="@row.Status" selected>@row.Status</option>
+                                                    }
+                                                </select>
                                             </span>
                                         }
                                     </td>
@@ -475,21 +506,6 @@
             }
         }
 
-        <datalist id="insightCategories">
-            <option value="Appeal / MR"></option>
-            <option value="Appeal / Review"></option>
-            <option value="Review"></option>
-            <option value="Review &amp; Write Off"></option>
-            <option value="Review / Rebill"></option>
-            <option value="Review / Reprocess"></option>
-        </datalist>
-
-        <datalist id="insightStatuses">
-            <option value="Open"></option>
-            <option value="In Progress"></option>
-            <option value="Closed"></option>
-        </datalist>
-
         @if (Model.Rows.Count > 0)
         {
             <div class="insight-legend">
@@ -498,6 +514,11 @@
                 <span class="cat-pill cat-appeal">Appeal / Review</span>
                 <span class="cat-pill cat-review">Review &amp; Write Off</span>
                 <span class="cat-pill cat-rebill">Review / Rebill</span>
+                <span class="legend-label ms-2">Status</span>
+                @foreach (var st in DenialInsightStatus.Options)
+                {
+                    <span class="status-pill @DenialInsightStatus.CssClass(st)">@st</span>
+                }
                 <span class="legend-hint">
                     Denial Codes and Ins. Balance ($) are links &mdash; they open the claims behind the number.
                 </span>

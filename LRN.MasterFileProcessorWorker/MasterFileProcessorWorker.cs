@@ -2611,7 +2611,9 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			|| labName.Contains("Certus", StringComparison.OrdinalIgnoreCase)
 			// Analyze Pathology's Line Level sheet has no Claim Status; it is on the claim sheet only.
 			// Configured as "Analyze_Pathology" (the name becomes file and folder names), so match either spelling.
-			|| labName.Replace('_', ' ').Contains("Analyze Pathology", StringComparison.OrdinalIgnoreCase);
+			|| labName.Replace('_', ' ').Contains("Analyze Pathology", StringComparison.OrdinalIgnoreCase)
+			// Well Health's Line Level sheet has no Claim Status either. Configured as "WellHealth".
+			|| labName.Replace(" ", "").Contains("WellHealth", StringComparison.OrdinalIgnoreCase);
 	}
 
 	/// <summary>
