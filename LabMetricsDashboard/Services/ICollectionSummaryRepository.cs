@@ -247,6 +247,7 @@ public interface ICollectionSummaryRepository
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -261,6 +262,7 @@ public interface ICollectionSummaryRepository
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>

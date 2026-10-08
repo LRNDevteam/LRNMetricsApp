@@ -2976,6 +2976,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
@@ -2983,7 +2984,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         var parameters   = new List<SqlParameter>();
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName))", "@cntcpn", filterPayerNames);
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PanelName))", "@cntcpl", filterPanelNames);
-        AddAllDateFilters(whereClauses, parameters, "cntc", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo);
+        AddAllDateFilters(whereClauses, parameters, "cntc", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo,
+            LabCollectionPrefix.CollectionPostedDateColumn(labName));
         var whereStr = whereClauses.Count > 0 ? "WHERE " + string.Join(" AND ", whereClauses) : "";
         var sql = $"SELECT COUNT(1) FROM dbo.ClaimLevelData {whereStr}";
         return await ExecuteScalarCountAsync(connectionString, sql, parameters, ct);
@@ -2997,6 +2999,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
@@ -3004,7 +3007,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         var parameters   = new List<SqlParameter>();
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName))", "@cntlpn", filterPayerNames);
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PanelName))", "@cntlpl", filterPanelNames);
-        AddAllDateFilters(whereClauses, parameters, "cntl", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo);
+        AddAllDateFilters(whereClauses, parameters, "cntl", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo,
+            LabCollectionPrefix.CollectionPostedDateColumn(labName));
         var whereStr = whereClauses.Count > 0 ? "WHERE " + string.Join(" AND ", whereClauses) : "";
         var sql = $"SELECT COUNT(1) FROM dbo.LineLevelData {whereStr}";
         return await ExecuteScalarCountAsync(connectionString, sql, parameters, ct);
@@ -3043,7 +3047,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
 
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName))", "@expn", filterPayerNames);
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PanelName))", "@expl", filterPanelNames);
-        AddAllDateFilters(whereClauses, parameters, "ex", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo);
+        AddAllDateFilters(whereClauses, parameters, "ex", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo,
+            LabCollectionPrefix.CollectionPostedDateColumn(labName));
 
         var whereStr = whereClauses.Count > 0 ? "WHERE " + string.Join(" AND ", whereClauses) : "";
 
@@ -3089,7 +3094,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
 
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName))", "@lxpn", filterPayerNames);
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PanelName))", "@lxpl", filterPanelNames);
-        AddAllDateFilters(whereClauses, parameters, "lx", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo);
+        AddAllDateFilters(whereClauses, parameters, "lx", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo,
+            LabCollectionPrefix.CollectionPostedDateColumn(labName));
 
         var whereStr = whereClauses.Count > 0 ? "WHERE " + string.Join(" AND ", whereClauses) : "";
 
@@ -3196,11 +3202,12 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         string prefix,
         DateOnly? filterFirstBillFrom, DateOnly? filterFirstBillTo,
         DateOnly? filterDosFrom, DateOnly? filterDosTo,
-        DateOnly? filterCheckDateFrom, DateOnly? filterCheckDateTo)
+        DateOnly? filterCheckDateFrom, DateOnly? filterCheckDateTo,
+        string checkDateColumn = "CheckDate")
     {
         AddDateRangeClause(whereClauses, parameters, "FirstBilledDate", $"@{prefix}fbFrom", $"@{prefix}fbTo", filterFirstBillFrom, filterFirstBillTo);
         AddDateRangeClause(whereClauses, parameters, "DateOfService", $"@{prefix}dosFrom", $"@{prefix}dosTo", filterDosFrom, filterDosTo);
-        AddDateRangeClause(whereClauses, parameters, "CheckDate", $"@{prefix}cdFrom", $"@{prefix}cdTo", filterCheckDateFrom, filterCheckDateTo);
+        AddDateRangeClause(whereClauses, parameters, checkDateColumn, $"@{prefix}cdFrom", $"@{prefix}cdTo", filterCheckDateFrom, filterCheckDateTo);
     }
 
     // â”€â”€ Status Summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

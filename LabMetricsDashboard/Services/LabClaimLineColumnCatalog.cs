@@ -39,6 +39,7 @@ public static class LabClaimLineColumnCatalog
         ["VariantX_LRN"] = "VariantX",
         ["AnalyzePathology"] = "AnalyzePathology",
         ["Analyze_Pathology"] = "AnalyzePathology",
+        ["Analyze Pathology"] = "AnalyzePathology",
     };
 
     private static readonly string[] DefaultClaim =
@@ -76,7 +77,7 @@ public static class LabClaimLineColumnCatalog
                 "ModifierList", "CptWithUnits", "POS", "TOS", "ChargeAmount", "AllowedAmount",
                 "InsurancePayment", "PatientPayment", "TotalPayments", "ChargeTotalPayments", "InsuranceAdjustments", "PatientAdjustments",
                 "TotalAdjustments", "ChargeTotalAdjustments", "InsuranceBalance", "PatientBalance", "TotalBalance", "TotalInsuranceBalance",
-                "OtherBalance", "CheckDate", "PostedWeek", "ClaimStatus", "DenialCode", "DenialCodeNormalized",
+                "OtherBalance", "CheckDate", "PaymentPostedDate", "PostedWeek", "ClaimStatus", "DenialCode", "DenialCodeNormalized",
                 "DenialDescription", "DenialDate", "ICDCode", "ICDPointer", "DaystoDOS", "RollingDays",
                 "DaystoBill", "DaystoPost", "AgingDOS", "PaymentPercent", "FullyPaidCount", "FullyPaidAmount",
                 "Adjudicated", "AdjudicatedAmount", "Bucket30", "Bucket30Amount", "Bucket60", "Bucket60Amount",
@@ -317,7 +318,7 @@ public static class LabClaimLineColumnCatalog
                 "UnitsList", "ModifierList", "CptWithUnits", "Modifier", "POS", "ChargeAmount",
                 "InsurancePayment", "PatientPayment", "TotalPayments", "InsuranceAdjustments", "PatientAdjustments", "TotalAdjustments",
                 "InsuranceBalance", "PatientBalance", "TotalBalance", "TotalInsuranceBalance", "OtherBalance", "ChargeToDate",
-                "ChargeTotalPayments", "ChargeTotalAdjustments", "CheckDate", "PostedWeek", "ClaimStatus", "DenialCode",
+                "ChargeTotalPayments", "ChargeTotalAdjustments", "CheckDate", "PaymentPostedDate", "PostedWeek", "ClaimStatus", "DenialCode",
                 "DenialCodeNormalized", "DenialDescription", "DenialDate", "ICDCode", "ICDPointer", "AgingDOS",
                 "PaymentPercent", "FullyPaidCount", "FullyPaidAmount", "Adjudicated", "AdjudicatedAmount", "Bucket30",
                 "Bucket30Amount", "Bucket60", "Bucket60Amount", "Facility", "OrderingProviderID", "ClaimUID",

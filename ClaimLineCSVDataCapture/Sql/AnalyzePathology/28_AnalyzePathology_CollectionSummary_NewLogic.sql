@@ -10,9 +10,12 @@
    usp_RefreshAnP_CS_<Tab> keeps its name, so the ingest refresh list and
    99_AnalyzePathology_ExecuteAllAggregates.sql need no change.
 
+   Posted Date = PaymentPostedDate (claim file "Posted Date"). It drives the month / week
+   columns and the page's Check Date filter (@CheckDateFrom / @CheckDateTo) for every section.
+
    Client logic (Sort By = Claim Count for every section):
      Monthly            ClaimStatus IN (Fully Paid, Partially Paid); Panel -> Top 3 payers
-                        by claim count; columns = Posted Date (CheckDate) month;
+                        by claim count; columns = Posted Date month;
                         Count of unique ClaimID, Sum of InsurancePayment.
      Weekly             Same as Monthly; Posted Date weeks Monday-Sunday, last 4 completed.
      Top 5 Reimb. %     Fully/Partially Paid; Top 5 payers by Insurance Payment;
@@ -23,8 +26,8 @@
      Ins vs Payment     InsurancePayment > 0; payer; Count ClaimID, Sum InsurancePayment.
      Ins vs Aging       TotalInsuranceBalance > 0; payer x AgingDOS; Count ClaimID,
                         Sum InsuranceBalance.
-     Panel vs Payment   InsurancePayment > 0 AND CheckDate in the current year;
-                        panel x CheckDate month; Count ClaimID, Sum InsurancePayment.
+     Panel vs Payment   InsurancePayment > 0 AND Posted Date in the current year;
+                        panel x Posted Date month; Count ClaimID, Sum InsurancePayment.
      CPT vs Payment %   All claims; Panel -> CPTCodeList; Count ClaimID, Average PaymentPercent.
      Panel Average      BilledStatus IN (Billed, Billed - Self Pay); Panel -> Top 3 payers by
                         claim count. Five column groups (Count ClaimID, Sum, Average):
@@ -41,7 +44,10 @@ SET NOCOUNT ON;
 GO
 
 IF DB_NAME() <> N'AnalyzePathology'
-    THROW 50000, 'Run 28_AnalyzePathology_CollectionSummary_NewLogic.sql on the AnalyzePathology database.', 1;
+BEGIN
+    RAISERROR('Run 28_AnalyzePathology_CollectionSummary_NewLogic.sql on the AnalyzePathology database.', 16, 1);
+    SET NOEXEC ON;
+END
 GO
 
 /* -----------------------------------------------------------------------------
@@ -82,7 +88,7 @@ RETURN
     CROSS APPLY (SELECT
         PayerName = ISNULL(NULLIF(LTRIM(RTRIM(c.PayerName_Raw)), N''), N'Unknown'),
         PanelName = ISNULL(NULLIF(LTRIM(RTRIM(c.Panelname)),     N''), N'Unknown'),
-        CheckDt   = COALESCE(TRY_CONVERT(DATE, c.CheckDate, 101), TRY_CAST(c.CheckDate AS DATE)),
+        CheckDt   = COALESCE(TRY_CONVERT(DATE, c.PaymentPostedDate, 101), TRY_CAST(c.PaymentPostedDate AS DATE)),
         Dos       = TRY_CAST(c.DateOfService   AS DATE),
         FirstBill = TRY_CAST(c.FirstBilledDate AS DATE)) n
     WHERE (NULLIF(LTRIM(RTRIM(@PayerNames)), N'') IS NULL
@@ -363,8 +369,8 @@ END
 GO
 
 /* =============================================================================
-   2. Weekly Claim Volume (Posted Date = CheckDate, Monday-Sunday weeks,
-      last 4 completed weeks up to the latest CheckDate on or before today)
+   2. Weekly Claim Volume (Posted Date, Monday-Sunday weeks,
+      last 4 completed weeks up to the latest Posted Date on or before today)
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_AnP_CS_WeeklyClaimVolume_Compute
     @PayerNames NVARCHAR(MAX) = NULL, @PanelNames NVARCHAR(MAX) = NULL,
@@ -873,8 +879,8 @@ END
 GO
 
 /* =============================================================================
-   9. Panel vs Payment (InsurancePayment > 0 AND CheckDate in the current year;
-      panel x CheckDate month)
+   9. Panel vs Payment (InsurancePayment > 0 AND Posted Date in the current year;
+      panel x Posted Date month)
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_AnP_CS_PanelVsPayment_Compute
     @PayerNames NVARCHAR(MAX) = NULL, @PanelNames NVARCHAR(MAX) = NULL,

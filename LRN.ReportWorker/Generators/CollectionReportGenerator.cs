@@ -80,9 +80,9 @@ public sealed class CollectionReportGenerator : IReportGenerator
 
         // Row counts up front — drives accurate progress %.
         var claimCount = await _repo.GetClaimLevelDataCountAsync(
-            connStr, payerFilter, panelFilter, fbFrom, fbTo, dosFrom, dosTo, cdFrom, cdTo, ct);
+            connStr, payerFilter, panelFilter, fbFrom, fbTo, dosFrom, dosTo, cdFrom, cdTo, job.LabName, ct);
         var lineCount = await _repo.GetLineLevelDataCountAsync(
-            connStr, payerFilter, panelFilter, fbFrom, fbTo, dosFrom, dosTo, cdFrom, cdTo, ct);
+            connStr, payerFilter, panelFilter, fbFrom, fbTo, dosFrom, dosTo, cdFrom, cdTo, job.LabName, ct);
         await Progress(5);
 
         var showTotalPayments = !labConfig.DisableShowTop5TotalPayments;
@@ -133,7 +133,7 @@ public sealed class CollectionReportGenerator : IReportGenerator
         // Summary sheets via ClosedXML (small). Raw Claim/Line sheets streamed with
         // OpenXml and merged in — ClosedXML SaveAs OOMs when those sheets are huge.
         using (var wb = LabMetricsDashboard.Services.CollectionSummaryExcelExportBuilder.CreateWorkbook(
-            vm, [], [], job.LabName, f.ToActiveFilterList()))
+            vm, [], [], job.LabName, f.ToActiveFilterList(LabCollectionPrefix.CollectionPostedDateLabel(job.LabName))))
         {
             foreach (var placeholder in wb.Worksheets
                          .Where(ws => ws.Name is "ClaimLevelData" or "LineLevelData")
@@ -160,7 +160,7 @@ public sealed class CollectionReportGenerator : IReportGenerator
         // Filter mapping into AppendSpExportSheetsToFileAsync:
         //   Collection "First Bill" (fb*) -> FirstBilledDate  => filterFirstBilled*
         //   Collection DOS (dos*)         -> DateOfService     => filterDos*
-        //   Collection CheckDate (cd*)    -> CheckDate         => filterCheckDate*
+        //   Collection CheckDate (cd*)    -> CheckDate (Analyze Pathology SPs: PaymentPostedDate) => filterCheckDate*
         //   (ChargeEnteredDate / filterFirstBill* is unused by Collection -> left null)
         var sqlRepo = _prodRepo as SqlProductionReportRepository
             ?? throw new InvalidOperationException(

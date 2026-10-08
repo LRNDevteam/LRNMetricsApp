@@ -198,8 +198,8 @@ else
     @if (isSpLogic)
     {
         <span><strong>Source:</strong> Claim Level Data &bull;
-        <strong>Filter:</strong> InsurancePayment &gt; 0, CheckDate in @DateTime.Today.Year &bull;
-        <strong>Rows:</strong> Panel name &bull; <strong>Columns:</strong> CheckDate month &bull;
+        <strong>Filter:</strong> InsurancePayment &gt; 0, PaymentPostedDate in @DateTime.Today.Year &bull;
+        <strong>Rows:</strong> Panel name &bull; <strong>Columns:</strong> PaymentPostedDate month &bull;
         <strong>Sorted by:</strong> Claim Count DESC &bull;
         <strong>Values:</strong> Count of unique ClaimID, Sum of InsurancePayment</span>
     }

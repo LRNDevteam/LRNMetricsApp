@@ -17,11 +17,13 @@
      *      Billed Via CMD          Billable AND Bill Category = Billed
      2    Not Billed                Billable AND Bill Category = Unbilled
      *      Ready to bill           ... AND Sub Status = Ready to Bill
-     *      Entered Not Submitted   ... AND Sub Status = Entered Not Submitted
+     *      Entered Not Submitted   ... AND Sub Status = Entered Not Submitted OR Entered Not Billed
      E  System Test                 New Status = System Test
-        Duplicate                   New Status = Duplicate(s)
-        Other Samples               New Status = Other Sample(s)
-        Yet to Be Validate          New Status = Yet to Be Validate AND Sub Status <> Entered Not Submitted
+     *    Billed / Unbilled         ... AND Bill Category = Billed / Unbilled
+     F  Duplicate                   New Status = Duplicate(s) OR Duplicate - Sample Resulted in Spector
+     *    Billed / Unbilled         ... AND Bill Category = Billed / Unbilled
+     G  Yet to Be Validate          New Status = Yet to Be Validate AND Sub Status <> Entered Not Submitted
+     *    Billed / Unbilled         ... AND Bill Category = Billed / Unbilled
         Total Samples               all samples (returned as the grand-total row)
 
    Objects:
@@ -30,6 +32,13 @@
      dbo.usp_GetAnP_LISSummary      read SP (result set 1 = rows, 2 = KPI cards)
    ============================================================================= */
 SET NOCOUNT ON;
+GO
+
+IF DB_NAME() <> N'AnalyzePathology'
+BEGIN
+	RAISERROR('Run 26_AnalyzePathology_LISSummary_SP.sql on the AnalyzePathology database.', 16, 1);
+	SET NOEXEC ON;
+END
 GO
 
 IF OBJECT_ID(N'dbo.AnP_LIS_StatusSummary', N'U') IS NULL
@@ -150,15 +159,24 @@ BEGIN
 		ISNULL(SUM(CASE WHEN NewStatus = N'Billable' AND BillCategory IN (N'Unbilled', N'Not Billed')
 						 AND SubStatus = N'Ready to Bill' THEN Cnt END), 0) AS ReadyToBill,
 		ISNULL(SUM(CASE WHEN NewStatus = N'Billable' AND BillCategory IN (N'Unbilled', N'Not Billed')
-						 AND SubStatus = N'Entered Not Submitted' THEN Cnt END), 0) AS EnteredNotSubmitted,
+						 AND SubStatus IN (N'Entered Not Submitted', N'Entered Not Billed') THEN Cnt END), 0) AS EnteredNotSubmitted,
 		ISNULL(SUM(CASE WHEN NewStatus = N'System Test' THEN Cnt END), 0) AS SystemTest,
-		ISNULL(SUM(CASE WHEN NewStatus IN (N'Duplicate', N'Duplicates') THEN Cnt END), 0) AS Duplicate,
-		ISNULL(SUM(CASE WHEN NewStatus IN (N'Other Sample', N'Other Samples') THEN Cnt END), 0) AS OtherSamples,
-		ISNULL(SUM(CASE WHEN NewStatus IN (N'Yet to Be Validate', N'Yet to be validated', N'Yet be validated')
-						 AND SubStatus <> N'Entered Not Submitted' THEN Cnt END), 0) AS YetToBeValidate,
+		ISNULL(SUM(CASE WHEN NewStatus = N'System Test' AND BillCategory = N'Billed' THEN Cnt END), 0) AS SystemTestBilled,
+		ISNULL(SUM(CASE WHEN NewStatus = N'System Test' AND BillCategory IN (N'Unbilled', N'Not Billed') THEN Cnt END), 0) AS SystemTestUnbilled,
+		ISNULL(SUM(CASE WHEN IsDuplicate = 1 THEN Cnt END), 0) AS Duplicate,
+		ISNULL(SUM(CASE WHEN IsDuplicate = 1 AND BillCategory = N'Billed' THEN Cnt END), 0) AS DuplicateBilled,
+		ISNULL(SUM(CASE WHEN IsDuplicate = 1 AND BillCategory IN (N'Unbilled', N'Not Billed') THEN Cnt END), 0) AS DuplicateUnbilled,
+		ISNULL(SUM(CASE WHEN IsYetToBeValidate = 1 THEN Cnt END), 0) AS YetToBeValidate,
+		ISNULL(SUM(CASE WHEN IsYetToBeValidate = 1 AND BillCategory = N'Billed' THEN Cnt END), 0) AS YetToBeValidateBilled,
+		ISNULL(SUM(CASE WHEN IsYetToBeValidate = 1 AND BillCategory IN (N'Unbilled', N'Not Billed') THEN Cnt END), 0) AS YetToBeValidateUnbilled,
 		ISNULL(SUM(Cnt), 0) AS TotalSamples
 	INTO #M
 	FROM #F
+	CROSS APPLY (SELECT
+		IsDuplicate = CASE WHEN NewStatus IN (N'Duplicate', N'Duplicates', N'Duplicate - Sample Resulted in Spector')
+						   THEN 1 ELSE 0 END,
+		IsYetToBeValidate = CASE WHEN NewStatus IN (N'Yet to Be Validate', N'Yet to be validated', N'Yet be validated')
+								  AND SubStatus <> N'Entered Not Submitted' THEN 1 ELSE 0 END) s
 	GROUP BY GROUPING SETS ((Y, M), (Y), ());
 
 	-- Result set 1: ordered rows. IsGrandTotal = 1 is the table's closing total row.
@@ -171,11 +189,16 @@ BEGIN
 		( 30, NCHAR(8226), N'Billed Via CMD',        2, N'Billable AND Bill Category = Billed', 0, m.Billed),
 		( 40, N'2', N'Not Billed',            1, N'Billable AND Bill Category = Unbilled', 0, m.NotBilled),
 		( 50, NCHAR(8226), N'Ready to bill',         2, N'Billable AND Bill Category = Unbilled AND Sub Status = Ready to Bill', 0, m.ReadyToBill),
-		( 60, NCHAR(8226), N'Entered Not Submitted', 2, N'Billable AND Bill Category = Unbilled AND Sub Status = Entered Not Submitted', 0, m.EnteredNotSubmitted),
+		( 60, NCHAR(8226), N'Entered Not Submitted', 2, N'New Status = Billable AND Bill Category = Unbilled AND Sub Status = Entered Not Submitted OR Entered Not Billed', 0, m.EnteredNotSubmitted),
 		( 70, N'E', N'System Test',           0, N'New Status = System Test', 0, m.SystemTest),
-		( 80, N'',  N'Duplicate',             0, N'New Status = Duplicates', 0, m.Duplicate),
-		( 90, N'',  N'Other Samples',         0, N'New Status = Other Samples', 0, m.OtherSamples),
-		(100, N'',  N'Yet to Be Validate',    0, N'New Status = Yet to Be Validate AND Sub Status <> Entered Not Submitted', 0, m.YetToBeValidate),
+		( 72, NCHAR(8226), N'Billed',                1, N'New Status = System Test AND Bill Category = Billed', 0, m.SystemTestBilled),
+		( 74, NCHAR(8226), N'Unbilled',              1, N'New Status = System Test AND Bill Category = Unbilled', 0, m.SystemTestUnbilled),
+		( 80, N'F', N'Duplicate',             0, N'New Status = Duplicates & Duplicate - Sample Resulted in Spector', 0, m.Duplicate),
+		( 82, NCHAR(8226), N'Billed',                1, N'New Status = Duplicates & Duplicate - Sample Resulted in Spector AND Bill Category = Billed', 0, m.DuplicateBilled),
+		( 84, NCHAR(8226), N'Unbilled',              1, N'New Status = Duplicates & Duplicate - Sample Resulted in Spector AND Bill Category = Unbilled', 0, m.DuplicateUnbilled),
+		(100, N'G', N'Yet to Be Validate',    0, N'New Status = Yet to be validated AND Sub Status = Not Equal to Entered Not Submitted', 0, m.YetToBeValidate),
+		(102, NCHAR(8226), N'Billed',                1, N'New Status = Yet to be validated AND Sub Status = Not Equal to Entered Not Submitted AND Bill Category = Billed', 0, m.YetToBeValidateBilled),
+		(104, NCHAR(8226), N'Unbilled',              1, N'New Status = Yet to be validated AND Sub Status = Not Equal to Entered Not Submitted AND Bill Category = Unbilled', 0, m.YetToBeValidateUnbilled),
 		(999, N'',  N'Total Samples',         0, N'Total Samples', 1, m.TotalSamples)
 	) r(SortOrder, Code, Description, RowLevel, Logic, IsGrandTotal, SampleCount)
 	ORDER BY r.SortOrder, m.RowYear, m.RowMonth;

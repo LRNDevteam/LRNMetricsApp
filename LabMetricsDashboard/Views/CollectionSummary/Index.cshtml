@@ -924,11 +924,11 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
 
                     <!-- Check Date -->
                     <div class="col-sm-6 col-md-2">
-                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">CHECK DATE FROM</label>
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">@Model.PostedDateLabel.ToUpperInvariant() FROM</label>
                         <input type="date" name="filterCheckDateFrom" class="form-control form-control-sm" value="@Model.FilterCheckDateFrom" />
                     </div>
                     <div class="col-sm-6 col-md-2">
-                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">CHECK DATE TO</label>
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">@Model.PostedDateLabel.ToUpperInvariant() TO</label>
                         <input type="date" name="filterCheckDateTo" class="form-control form-control-sm" value="@Model.FilterCheckDateTo" />
                     </div>
                 </div>
@@ -1469,11 +1469,11 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
 
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> ClaimLevelData (all rows) &bull;
-                    <strong>Filter (base):</strong> @(Model.UsesSpCollectionLogic ? "ClaimStatus IN (Fully Paid, Partially Paid)" : "InsurancePayment > 0") &nbsp;·&nbsp; CheckDate not blank/invalid &bull;
-                    <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) – @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &nbsp;|&nbsp; DOS: @(string.IsNullOrWhiteSpace(Model.FilterDosFrom) ? "-" : Model.FilterDosFrom) – @(string.IsNullOrWhiteSpace(Model.FilterDosTo) ? "-" : Model.FilterDosTo) &nbsp;|&nbsp; CheckDate: @(string.IsNullOrWhiteSpace(Model.FilterCheckDateFrom) ? "-" : Model.FilterCheckDateFrom) – @(string.IsNullOrWhiteSpace(Model.FilterCheckDateTo) ? "-" : Model.FilterCheckDateTo) &bull;
+                    <strong>Filter (base):</strong> @(Model.UsesSpCollectionLogic ? "ClaimStatus IN (Fully Paid, Partially Paid)" : "InsurancePayment > 0") &nbsp;·&nbsp; @(Model.UsesSpCollectionLogic ? "PaymentPostedDate" : "CheckDate") not blank/invalid &bull;
+                    <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) – @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &nbsp;|&nbsp; DOS: @(string.IsNullOrWhiteSpace(Model.FilterDosFrom) ? "-" : Model.FilterDosFrom) – @(string.IsNullOrWhiteSpace(Model.FilterDosTo) ? "-" : Model.FilterDosTo) &nbsp;|&nbsp; @Model.PostedDateLabel: @(string.IsNullOrWhiteSpace(Model.FilterCheckDateFrom) ? "-" : Model.FilterCheckDateFrom) – @(string.IsNullOrWhiteSpace(Model.FilterCheckDateTo) ? "-" : Model.FilterCheckDateTo) &bull;
                     <strong>Rows:</strong> PanelName &bull;
                     <strong>Drill-down:</strong> Top 3 PayerName_Raw by Unique ClaimID count &bull;
-                    <strong>Columns:</strong> CheckDate (Year, Month) — No. of Claims + Insurance Paid Amount &bull;
+                    <strong>Columns:</strong> @(Model.UsesSpCollectionLogic ? "PaymentPostedDate" : "CheckDate") (Year, Month) — No. of Claims + Insurance Paid Amount &bull;
                     <strong>Sorted by:</strong> Grand Total (Unique ClaimID count) DESC
                 </div>
             }

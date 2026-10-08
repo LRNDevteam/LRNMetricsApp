@@ -107,6 +107,9 @@ public sealed class CollectionSummaryViewModel
     /// </summary>
     public bool UsesSpCollectionLogic => LabCollectionPrefix.UsesSpCollectionLogic(SelectedLab);
 
+    /// <summary>"Posted Date" (Analyze Pathology, PaymentPostedDate) or "Check Date".</summary>
+    public string PostedDateLabel => LabCollectionPrefix.CollectionPostedDateLabel(SelectedLab);
+
     // ?? CPT vs Payment % ???????????????????????????????????????
     public List<CptPaymentPctRow> CptPaymentPct { get; set; } = [];
 
