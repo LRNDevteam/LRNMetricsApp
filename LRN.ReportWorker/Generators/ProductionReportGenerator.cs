@@ -159,8 +159,8 @@ public sealed class ProductionReportGenerator : IReportGenerator
             _labSummaryRepos.TryGetValue("Cove", out labSummaryRepo);
 
         var isInHealthDtr = job.LabName.Equals("Inhealth_DTR", StringComparison.OrdinalIgnoreCase);
-        var isAnalyzePathology = job.LabName.Equals("AnalyzePathology", StringComparison.OrdinalIgnoreCase)
-                              || job.LabName.Equals("Analyze_Pathology", StringComparison.OrdinalIgnoreCase);
+        var isAnalyzePathology = job.LabName.Replace("_", "").Replace(" ", "")
+                                    .Equals("AnalyzePathology", StringComparison.OrdinalIgnoreCase);
 
         // Beech Tree, InHealth DTR and Analyze Pathology must match the Production Summary page,
         // so every tab reads the lab's usp_Get{Prefix}* SPs (usp_GetBT_* / usp_GetInH_* / usp_GetAnP_*).

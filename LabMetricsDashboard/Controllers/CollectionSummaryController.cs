@@ -855,10 +855,10 @@ public class CollectionSummaryController : Controller
             const int RawDataRowLimit = 200_000;
             var claimCountTask = _repo.GetClaimLevelDataCountAsync(
                 connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
             var lineCountTask = _repo.GetLineLevelDataCountAsync(
                 connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
 
             var vm = await BuildCollectionExportViewModelAsync(
                 selectedLab, connStr, useLineEncounters, showTotalPayments,
@@ -898,10 +898,11 @@ public class CollectionSummaryController : Controller
                 activeFilters.Add(("Date of Service From", filterDosFrom));
             if (!string.IsNullOrWhiteSpace(filterDosTo))
                 activeFilters.Add(("Date of Service To", filterDosTo));
+            var postedDateLabel = LabCollectionPrefix.CollectionPostedDateLabel(selectedLab);
             if (!string.IsNullOrWhiteSpace(filterCheckDateFrom))
-                activeFilters.Add(("Check Date From", filterCheckDateFrom));
+                activeFilters.Add(($"{postedDateLabel} From", filterCheckDateFrom));
             if (!string.IsNullOrWhiteSpace(filterCheckDateTo))
-                activeFilters.Add(("Check Date To", filterCheckDateTo));
+                activeFilters.Add(($"{postedDateLabel} To", filterCheckDateTo));
 
             using var workbook = CollectionSummaryExcelExportBuilder.CreateWorkbook(
                 vm, claimRows, lineRows, selectedLab, activeFilters,

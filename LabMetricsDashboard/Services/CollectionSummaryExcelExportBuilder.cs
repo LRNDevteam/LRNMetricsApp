@@ -163,7 +163,7 @@ public static partial class CollectionSummaryExcelExportBuilder
             var months = periodsByYear.GetValueOrDefault(year, []);
             int span = months.Count * 2 + 2;
             WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + span - 1,
-                $"Data based on Check Date \u2014 {year}", ColHeader);
+                $"Data based on {LabCollectionPrefix.CollectionPostedDateLabel(labName)} \u2014 {year}", ColHeader);
             hCol += span;
         }
         WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1, "Grand Total", ColHeader);

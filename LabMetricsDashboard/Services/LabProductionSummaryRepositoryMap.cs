@@ -18,17 +18,22 @@ public static class LabProductionSummaryRepositoryMap
 {
     public static IReadOnlyDictionary<string, ILabProductionSummaryRepository> Create(
         ILogger<SqlLabProductionSummaryRepository> logger)
-        => new Dictionary<string, ILabProductionSummaryRepository>(StringComparer.OrdinalIgnoreCase)
+    {
+        var analyzePathology = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.AnalyzePathology);
+        return new Dictionary<string, ILabProductionSummaryRepository>(StringComparer.OrdinalIgnoreCase)
         {
             ["Certus"]           = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Certus),
             ["Cove"]             = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Cove),
             ["Elixir"]           = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Elixir),
             ["VariantX"]         = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.VariantX),
-            ["AnalyzePathology"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.AnalyzePathology),
+            ["AnalyzePathology"] = analyzePathology,
+            ["Analyze_Pathology"] = analyzePathology,
+            ["Analyze Pathology"] = analyzePathology,
             ["PCRLabsofAmerica"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PCRLabsofAmerica),
             ["Beech_Tree"]       = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.BeechTree),
             ["Rising_Tides"]     = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.RisingTides),
             ["Phi_Life"]         = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PhiLife),
             ["Inhealth_DTR"]     = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.InHealthDTR),
         };
+    }
 }

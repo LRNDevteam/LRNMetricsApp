@@ -54,6 +54,8 @@ public sealed class ExecutiveSummaryController : Controller
             ["VariantX"]         = "VarX",
             ["VariantX_LRN"]     = "VarX",
             ["AnalyzePathology"] = "AnP",
+            ["Analyze_Pathology"] = "AnP",
+            ["Analyze Pathology"] = "AnP",
             ["NorthWest"]        = "NW",
             ["NWL"]              = "NW",
             ["PCRLabsofAmerica"] = "PCR",

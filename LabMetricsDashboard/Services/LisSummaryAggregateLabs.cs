@@ -13,6 +13,7 @@ public static class LisSummaryAggregateLabs
     {
         ["AnalyzePathology"] = "AnP_",
         ["Analyze_Pathology"] = "AnP_",
+        ["Analyze Pathology"] = "AnP_",
         ["AnalyzePathology_LRN"] = "AnP_",
     };
 

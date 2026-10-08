@@ -125,7 +125,7 @@ public sealed record CollectionReportFilters(
             : JsonSerializer.Deserialize<CollectionReportFilters>(json, JsonOpts)
               ?? new CollectionReportFilters();
 
-    public List<(string Label, string? Value)> ToActiveFilterList()
+    public List<(string Label, string? Value)> ToActiveFilterList(string checkDateLabel = "Check Date")
     {
         var list = new List<(string, string?)>();
         if (PayerNames is { Count: > 0 }) list.Add(("Payer Names", string.Join(", ", PayerNames)));
@@ -134,8 +134,8 @@ public sealed record CollectionReportFilters(
         Add("First Bill To", FirstBillTo);
         Add("Date of Service From", DosFrom);
         Add("Date of Service To", DosTo);
-        Add("Check Date From", CheckDateFrom);
-        Add("Check Date To", CheckDateTo);
+        Add($"{checkDateLabel} From", CheckDateFrom);
+        Add($"{checkDateLabel} To", CheckDateTo);
         return list;
 
         void Add(string label, string? value)

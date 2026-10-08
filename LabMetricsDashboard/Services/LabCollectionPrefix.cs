@@ -125,6 +125,17 @@ public static class LabCollectionPrefix
         GetPrefix(labName) is "AnP";
 
     /// <summary>
+    /// Claim / line column behind the Collection Summary "Posted Date" and its Check Date filter.
+    /// Analyze Pathology uses PaymentPostedDate (claim file "Posted Date"); other labs use CheckDate.
+    /// </summary>
+    public static string CollectionPostedDateColumn(string? labName) =>
+        GetPrefix(labName) is "AnP" ? "PaymentPostedDate" : "CheckDate";
+
+    /// <summary>Label for the Collection Summary Check Date filter and Posted Date notes.</summary>
+    public static string CollectionPostedDateLabel(string? labName) =>
+        GetPrefix(labName) is "AnP" ? "Posted Date" : "Check Date";
+
+    /// <summary>
     /// Labs with the Denial Summary page: <c>usp_Get{prefix}_Denial*</c> read SPs over the
     /// <c>{prefix}_Denial*</c> aggregate tables refreshed at claim-file ingest.
     /// </summary>

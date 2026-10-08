@@ -253,8 +253,8 @@ public sealed class AllLabsCollectionExcelBuilder
             : _repo.GetInsuranceVsPaymentAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
 
         // Count raw rows before fetching to enforce the 200K limit
-        var claimCountTask = _repo.GetClaimLevelDataCountAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
-        var lineCountTask  = _repo.GetLineLevelDataCountAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
+        var claimCountTask = _repo.GetClaimLevelDataCountAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
+        var lineCountTask  = _repo.GetLineLevelDataCountAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
 
         await Task.WhenAll(
             monthlyTask, weeklyTask, reimbTask, totPayTask,
