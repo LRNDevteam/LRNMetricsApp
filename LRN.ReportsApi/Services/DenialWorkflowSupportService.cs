@@ -60,7 +60,9 @@ public sealed class DenialWorkflowSupportService : IDenialWorkflowSupportService
             $"Denial Workflow Support: {subject}",
             body,
             string.IsNullOrWhiteSpace(contactEmail) ? null : contactEmail,
-            ct);
+            ct,
+            LRN.ReportsApi.Services.UserMail.EmailTypes.DenialWorkflowSupport,
+            userName);
 
         return new DenialWorkflowSupportRequestResult
         {

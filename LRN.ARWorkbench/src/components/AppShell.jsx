@@ -28,6 +28,7 @@ function initials(name) {
 // Topbar title / subtitle for the current route (the mockup's VIEW_META).
 function viewMeta(pathname) {
   if (pathname.startsWith('/claims/')) return { title: 'Claim Workspace', subtitle: 'Recovery, CPT lines, denial detail, follow-ups and activity' };
+  if (pathname === '/users/new') return { title: 'User Management · Add User', subtitle: 'The user receives an email with a one-time password to create their own password' };
   const item = ROUTES.find((n) => n.path === pathname);
   if (!item) return { title: '', subtitle: '' };
   return { title: item.groupLabel ? `${item.groupLabel} · ${item.label}` : item.label, subtitle: item.subtitle };

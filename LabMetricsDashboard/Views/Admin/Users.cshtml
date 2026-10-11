@@ -18,15 +18,8 @@
                     <input class="form-control" asp-for="NewUser.UserName" autocomplete="off" />
                     <span asp-validation-for="NewUser.UserName" class="text-danger"></span>
                 </div>
-                <div class="col-md-2">
-                    <label class="form-label">Password</label>
-                    <input class="form-control" asp-for="NewUserPassword" type="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
-                    <span asp-validation-for="NewUserPassword" class="text-danger"></span>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">Confirm</label>
-                    <input class="form-control" asp-for="NewUserConfirmPassword" type="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
-                    <span asp-validation-for="NewUserConfirmPassword" class="text-danger"></span>
+                <div class="col-md-4 d-flex align-items-end">
+                    <small class="text-muted"><i class="bi bi-envelope-check me-1"></i>No password here: the user is emailed a one-time password and a link to set their own.</small>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label">First Name</label>
@@ -45,8 +38,9 @@
 
             <div class="row g-2">
                 <div class="col-md-3">
-                    <label class="form-label">Email</label>
-                    <input class="form-control" asp-for="NewUser.Email" />
+                    <label class="form-label">Email <span class="text-danger">*</span></label>
+                    <input class="form-control" asp-for="NewUser.Email" type="email" required maxlength="256" />
+                    <span asp-validation-for="NewUser.Email" class="text-danger"></span>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label">Mobile</label>

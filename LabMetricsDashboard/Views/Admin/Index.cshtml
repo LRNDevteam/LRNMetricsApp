@@ -43,24 +43,8 @@
                                             <input class="form-control" asp-for="NewUser.UserName" autocomplete="off" />
                                             <span asp-validation-for="NewUser.UserName" class="text-danger"></span>
                                         </div>
-                                        <div class="mb-2">
-                                            <label class="form-label">Password</label>
-                                            <div class="input-group">
-                                                <input id="pwd" class="form-control" asp-for="NewUserPassword" type="password" minlength="8" required autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
-                                                <button class="btn btn-outline-secondary" type="button" id="pwdToggle" title="Show/Hide">
-                                                    <i class="bi bi-eye"></i>
-                                                </button>
-                                            </div>
-                                            <div class="progress mt-2" style="height:8px">
-                                                <div id="pwdStrength" class="progress-bar" role="progressbar" style="width:0%"></div>
-                                            </div>
-                                            <small id="pwdStrengthText" class="form-text text-muted"></small>
-                                            <span asp-validation-for="NewUserPassword" class="text-danger"></span>
-                                        </div>
-                                        <div class="mb-2">
-                                            <label class="form-label">Confirm Password</label>
-                                            <input id="pwdConfirm" class="form-control" asp-for="NewUserConfirmPassword" type="password" minlength="8" required autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
-                                            <span asp-validation-for="NewUserConfirmPassword" class="text-danger"></span>
+                                        <div class="alert alert-info py-2 small mb-2">
+                                            <i class="bi bi-envelope-check me-1"></i>No password here: the user is emailed a one-time password and a link to set their own.
                                         </div>
                                         <div class="mb-2">
                                             <label class="form-label">First Name</label>
@@ -71,8 +55,8 @@
                                             <input class="form-control" asp-for="NewUser.LastName" />
                                         </div>
                                         <div class="mb-2">
-                                            <label class="form-label">Email</label>
-                                            <input class="form-control" asp-for="NewUser.Email" type="email" />
+                                            <label class="form-label">Email <span class="text-danger">*</span></label>
+                                            <input class="form-control" asp-for="NewUser.Email" type="email" required maxlength="256" />
                                         </div>
                                         <div class="mb-2">
                                             <label class="form-label">Mobile</label>
@@ -353,11 +337,13 @@
                         release();
                         return;
                     }
-                    // success - refresh users list
+                    // success - refresh users list and say whether the invitation email went out
+                    const created = await r.json().catch(()=>null);
                     refreshUsers();
                     frmUser.reset();
                     release();
                     if (errEl) { errEl.classList.add('d-none'); errEl.textContent = ''; }
+                    if (created && created.message) alert(created.message);
                 })
                 .catch(err=>{ release(); console.error(err); alert('Network error'); });
             });

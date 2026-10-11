@@ -49,17 +49,20 @@ public sealed class PayerMasterWorkflowService : IPayerMasterWorkflowService
     private readonly IMasterValuesRepository _repository;
     private readonly IConfiguration _configuration;
     private readonly IOptions<DenialWorkflowSupportOptions> _supportOptions;
+    private readonly LRN.ReportsApi.Services.UserMail.IUserMailRepository _emailLog;
     private readonly ILogger<PayerMasterWorkflowService> _logger;
 
     public PayerMasterWorkflowService(
         IMasterValuesRepository repository,
         IConfiguration configuration,
         IOptions<DenialWorkflowSupportOptions> supportOptions,
+        LRN.ReportsApi.Services.UserMail.IUserMailRepository emailLog,
         ILogger<PayerMasterWorkflowService> logger)
     {
         _repository = repository;
         _configuration = configuration;
         _supportOptions = supportOptions;
+        _emailLog = emailLog;
         _logger = logger;
         _connectionString = configuration.GetConnectionString("DefaultConnection")
             ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is missing. It must point to LRNMaster.");
@@ -628,21 +631,29 @@ public sealed class PayerMasterWorkflowService : IPayerMasterWorkflowService
             .ToList();
         if (recipients.Count == 0) return;
 
-        _ = Task.Run(() =>
+        var subject = $"[LRN Payer Master] {title}";
+        var body = message ?? title;
+        _ = Task.Run(async () =>
         {
+            string? error = null;
             try
             {
                 using var client = new SmtpClient(options.SmtpHost, options.SmtpPort) { EnableSsl = options.SmtpEnableSsl };
                 if (!string.IsNullOrWhiteSpace(options.SmtpUserName))
                     client.Credentials = new System.Net.NetworkCredential(options.SmtpUserName, options.SmtpPassword);
-                using var mail = new MailMessage { From = new MailAddress(options.SmtpFromEmail), Subject = $"[LRN Payer Master] {title}", Body = message ?? title };
+                using var mail = new MailMessage { From = new MailAddress(options.SmtpFromEmail), Subject = subject, Body = body };
                 foreach (var to in recipients) mail.To.Add(to);
                 client.Send(mail);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Payer Master notification email failed for '{Title}'.", title);
+                error = ex.Message;
             }
+            // Admin > Email Log. The repository is a singleton, so it is safe to use after the request ends.
+            await LRN.ReportsApi.Services.UserMail.EmailLogWriter.TryWriteAsync(_emailLog, _logger, "Payer Master",
+                LRN.ReportsApi.Services.UserMail.EmailTypes.PayerMasterNotification, recipients, options.SmtpFromEmail, subject,
+                LRN.ReportsApi.Services.UserMail.EmailLogWriter.PlainTextBody(body), error, "system");
         });
     }
 

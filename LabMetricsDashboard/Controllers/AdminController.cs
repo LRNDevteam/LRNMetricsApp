@@ -14,14 +14,112 @@ public class AdminController : Controller
     private readonly IPasswordHasher _hasher;
     private readonly IMenuApiClient _menuApi;
     private readonly IMenuService _menuService;
+    private readonly IUserMailApiClient _userMail;
 
     public AdminController(IUserManagementRepository repo, IPasswordHasher hasher,
-        IMenuApiClient menuApi, IMenuService menuService)
+        IMenuApiClient menuApi, IMenuService menuService, IUserMailApiClient userMail)
     {
         _repo = repo;
         _hasher = hasher;
         _menuApi = menuApi;
         _menuService = menuService;
+        _userMail = userMail;
+    }
+
+    // Same rule as LRN.ReportsApi ArWorkbenchUserRules.ValidateEmail. Several users may share an address.
+    private static string? ValidateInviteEmail(string? email)
+    {
+        var value = email?.Trim() ?? string.Empty;
+        if (value.Length == 0) return "Email is required - the invitation with the first-login link is sent there.";
+        if (value.Length > 256) return "Email is too long.";
+        try
+        {
+            var parsed = new System.Net.Mail.MailAddress(value);
+            if (!string.Equals(parsed.Address, value, StringComparison.OrdinalIgnoreCase) || !value.Contains('.')) return "Enter a valid email address.";
+        }
+        catch (FormatException) { return "Enter a valid email address."; }
+        return null;
+    }
+
+    private static string InviteMessage(string userName, string email, UserInvitationResult invite) => invite.EmailSent
+        ? $"User '{userName}' created. An invitation with a one-time password was emailed to {email}."
+        : $"User '{userName}' created, but the invitation email could not be sent ({invite.Message}). Use Send invite on the user list once mail is working.";
+
+    // ── Invitation email + sent-mail log (shared with the AR Workbench) ─────────────────────
+
+    /// <summary>Resend the first-login invitation: new link and one-time password; earlier ones stop working.</summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SendInvitationAjax([FromForm] int userId, CancellationToken ct)
+    {
+        if (userId <= 0) return BadRequest(new { success = false, errors = new[] { "Invalid user" } });
+        var user = await _repo.GetUserByIdAsync(userId);
+        if (user == null) return NotFound(new { success = false, errors = new[] { "That user no longer exists." } });
+        if (!user.IsActive) return Conflict(new { success = false, errors = new[] { "Activate the user before sending an invitation." } });
+        if (ValidateInviteEmail(user.Email) is { } emailError) return BadRequest(new { success = false, errors = new[] { emailError + " Edit the user first." } });
+
+        var invite = await _userMail.SendInvitationAsync(userId, isResend: true, ct);
+        return invite.EmailSent
+            ? Json(new { success = true, emailSent = true, message = $"Invitation sent to {user.Email}. Any earlier link no longer works." })
+            : Conflict(new { success = false, emailSent = false, errors = new[] { $"The invitation could not be sent: {invite.Message}" } });
+    }
+
+    /// <summary>
+    /// Admin > Email Log: every email the system sends (invitations, Denial Workflow support, Payer
+    /// Master notifications ...), from the shared dbo.EmailLog in LRN.ReportsApi.
+    /// </summary>
+    [HttpGet]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
+    public async Task<IActionResult> EmailLog()
+    {
+        ViewData["Title"] = "Admin - Email Log";
+        return View(await _repo.GetAllRolesAsync());
+    }
+
+    [HttpGet]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
+    public async Task<IActionResult> GetEmailTypesJson(CancellationToken ct)
+    {
+        var (code, json) = await _userMail.GetEmailTypesAsync(ct);
+        return new ContentResult { StatusCode = code, Content = json, ContentType = "application/json" };
+    }
+
+    /// <summary>
+    /// Sent emails, newest first by default. Filters: emailType (repeatable), roleId, status, application,
+    /// from / to (dates), search. Sort: sortBy = sent | type | application | to | user | subject | status | sentBy, sortDesc.
+    /// </summary>
+    [HttpGet]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
+    public async Task<IActionResult> GetUserEmailsJson(int? roleId, string? status, string? application, string? search, int? labUserId,
+        [FromQuery] string[]? emailType, DateTime? from, DateTime? to, string? sortBy, bool? sortDesc,
+        bool oldestFirst = false, int page = 1, int pageSize = 50, CancellationToken ct = default)
+    {
+        var query = new List<KeyValuePair<string, string?>>
+        {
+            new("roleId", roleId?.ToString()),
+            new("status", status),
+            new("application", application),
+            new("search", search),
+            new("labUserId", labUserId?.ToString()),
+            new("from", from?.ToString("yyyy-MM-dd")),
+            new("to", to?.ToString("yyyy-MM-dd")),
+            new("sortBy", sortBy),
+            new("sortDesc", sortDesc?.ToString().ToLowerInvariant()),
+            new("oldestFirst", oldestFirst ? "true" : null),
+            new("page", page.ToString()),
+            new("pageSize", pageSize.ToString())
+        };
+        query.AddRange((emailType ?? []).Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => new KeyValuePair<string, string?>("emailType", t)));
+        var (code, json) = await _userMail.GetEmailsAsync(query, ct);
+        return new ContentResult { StatusCode = code, Content = json, ContentType = "application/json" };
+    }
+
+    [HttpGet]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
+    public async Task<IActionResult> GetUserEmailJson(long id, CancellationToken ct)
+    {
+        var (code, json) = await _userMail.GetEmailAsync(id, ct);
+        return new ContentResult { StatusCode = code, Content = json, ContentType = "application/json" };
     }
 
     [HttpGet]
@@ -216,11 +314,8 @@ public class AdminController : Controller
         var user = vm.NewUser;
         if (user == null || string.IsNullOrWhiteSpace(user.UserName))
             errors.Add("UserName is required");
-
-        if (string.IsNullOrEmpty(vm.NewUserPassword))
-            errors.Add("Password is required");
-        else if (!string.Equals(vm.NewUserPassword, vm.NewUserConfirmPassword, StringComparison.Ordinal))
-            errors.Add("Passwords do not match");
+        if (ValidateInviteEmail(user?.Email) is { } emailError)
+            errors.Add(emailError);
 
         if (errors.Count > 0) return BadRequest(new { success = false, errors });
 
@@ -232,7 +327,9 @@ public class AdminController : Controller
             if (await _repo.GetUserByUserNameAsync(user.UserName) != null)
                 return Conflict(new { success = false, errors = new[] { $"UserName '{user.UserName}' already exists" } });
 
-            user.PasswordHash = _hasher.Hash(vm.NewUserPassword!);
+            user.Email = user.Email.Trim();
+            user.PasswordHash = string.Empty;   // stored as NULL; the user sets it from the invitation
+            user.CreatedBy = User?.Identity?.Name ?? string.Empty;
             var id = await _repo.CreateUserAsync(user);
 
             if (vm.NewUserRoleId.HasValue && vm.NewUserRoleId.Value > 0)
@@ -241,7 +338,9 @@ public class AdminController : Controller
             foreach (var labId in GetSelectedLabIds(vm))
                 await _repo.AssignUserLabAsync(new UserLab { LabUserID = id, LabId = labId });
 
-            return Json(new { success = true, id });
+            // After the role and labs exist, so the email lists them.
+            var invite = await _userMail.SendInvitationAsync(id, isResend: false, HttpContext.RequestAborted);
+            return Json(new { success = true, id, emailSent = invite.EmailSent, message = InviteMessage(user.UserName, user.Email, invite) });
         }
         finally
         {
@@ -328,16 +427,21 @@ public class AdminController : Controller
         {
             var user = vm.NewUser;
             user.UserName = user.UserName.Trim();
+            var emailError = ValidateInviteEmail(user.Email);
+            if (emailError != null) ModelState.AddModelError("NewUser.Email", emailError);
             if (await _repo.GetUserByUserNameAsync(user.UserName) != null)
-            {
                 ModelState.AddModelError("NewUser.UserName", $"UserName '{user.UserName}' already exists");
+            if (!ModelState.IsValid)
+            {
                 vm.Users = await _repo.GetAllUsersAsync();
                 vm.Roles = await _repo.GetAllRolesAsync();
                 vm.Labs = await _repo.GetAllLabsAsync();
                 ViewData["OpenCreateUserModal"] = true;
                 return View("ListUsers", vm);
             }
-            user.PasswordHash = _hasher.Hash(vm.NewUserPassword ?? string.Empty);
+            user.Email = user.Email.Trim();
+            user.PasswordHash = string.Empty;   // stored as NULL; the user sets it from the invitation
+            user.CreatedBy = User?.Identity?.Name ?? string.Empty;
             var id = await _repo.CreateUserAsync(user);
 
             if (vm.NewUserRoleId.HasValue && vm.NewUserRoleId.Value > 0)
@@ -346,6 +450,9 @@ public class AdminController : Controller
             foreach (var labId in GetSelectedLabIds(vm))
                 await _repo.AssignUserLabAsync(new UserLab { LabUserID = id, LabId = labId });
 
+            var invite = await _userMail.SendInvitationAsync(id, isResend: false, HttpContext.RequestAborted);
+            TempData["AdminNotice"] = InviteMessage(user.UserName, user.Email, invite);
+            TempData["AdminNoticeKind"] = invite.EmailSent ? "success" : "warning";
             return RedirectToAction("ListUsers");
         }
         finally

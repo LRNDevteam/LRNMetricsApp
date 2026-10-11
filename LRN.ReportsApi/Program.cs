@@ -102,6 +102,12 @@ builder.Services.AddSingleton<LRN.ReportsApi.Services.ArWorkbench.IArWorkbenchDo
 // AR Workbench nightly queue snapshot (T038): recalculate + snapshot each lab once a day.
 builder.Services.Configure<LRN.ReportsApi.Services.ArWorkbench.ArWorkbenchSnapshotOptions>(builder.Configuration.GetSection("ArWorkbenchSnapshots"));
 builder.Services.AddHostedService<LRN.ReportsApi.Services.ArWorkbench.ArWorkbenchSnapshotScheduler>();
+// User invitation email, shared by LRN Metrics Admin > Users (/api/user-mail) and AR Workbench User
+// Management: Graph sendMail + dbo.UserInvitation / dbo.UserEmailLog (Sql/UserMail_Setup.sql).
+builder.Services.Configure<LRN.ReportsApi.Services.UserMail.UserMailOptions>(builder.Configuration.GetSection("UserMail"));
+builder.Services.AddSingleton<LRN.ReportsApi.Services.UserMail.IUserMailSender, LRN.ReportsApi.Services.UserMail.GraphUserMailSender>();
+builder.Services.AddSingleton<LRN.ReportsApi.Services.UserMail.IUserMailRepository, LRN.ReportsApi.Services.UserMail.SqlUserMailRepository>();
+builder.Services.AddScoped<LRN.ReportsApi.Services.UserMail.IUserInvitationService, LRN.ReportsApi.Services.UserMail.UserInvitationService>();
 builder.Services.AddScoped<IPayerMasterWorkflowService, PayerMasterWorkflowService>();
 builder.Services.AddHostedService<PayerMasterSlaEscalationService>();
 // Denial Summary observations and weekly/monthly Excel snapshots (Denial Workflow v1.1, 4a-4i).
@@ -236,7 +242,9 @@ app.Use(async (context, next) =>
         // with no authentication at all, and this endpoint exposes every lab's run status.
         || path.StartsWithSegments("/api/report-board")
         // AR Workbench. Returns claim and patient data, so it must stay behind the JWT gate.
-        || path.StartsWithSegments("/api/ar-workbench");
+        || path.StartsWithSegments("/api/ar-workbench")
+        // User invitation email + sent-mail log (LRN Metrics Admin > Users). Holds user email data.
+        || path.StartsWithSegments("/api/user-mail");
 
     // client-logs exists to capture client-side errors, including ones caused by auth being
     // broken or expired. Requiring a valid JWT here creates a chicken-and-egg failure: exactly

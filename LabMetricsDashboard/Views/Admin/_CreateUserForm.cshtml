@@ -81,7 +81,7 @@
       @* Server-side fallback validation (in case JS is blocked/disabled) *@
       @Html.ValidationSummary(excludePropertyErrors: false, message: "", htmlAttributes: new { @class = "text-danger mb-2" })
 
-      <h6 class="text-muted mb-3">Account Credentials</h6>
+      <h6 class="text-muted mb-3">Account</h6>
       <div class="row g-3 mb-3">
         <div class="col-12">
           <label class="form-label">UserName <span class="text-danger">*</span></label>
@@ -93,29 +93,9 @@
         </div>
       </div>
 
-      <div class="row g-3 mb-3">
-        <div class="col-md-6">
-          <label class="form-label">Password <span class="text-danger">*</span></label>
-          <div class="input-group">
-            <input id="createUserPassword" class="form-control smooth" name="NewUserPassword" type="password" placeholder="Min 8 characters" minlength="8" required autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
-            <button class="btn btn-outline-secondary" type="button" id="createUserPwdToggle" title="Show or hide password" aria-label="Show or hide password" tabindex="-1"><i class="bi bi-eye"></i></button>
-            <div class="invalid-feedback" id="createUserPasswordFeedback"></div>
-          </div>
-          @Html.ValidationMessageFor(m => m.NewUserPassword, "", new { @class = "text-danger small" })
-          <div class="progress mt-2" style="height:8px">
-            <div id="createUserPwdStrength" class="progress-bar" role="progressbar" style="width:0%"></div>
-          </div>
-          <small id="createUserPwdStrengthText" class="form-text text-muted"></small>
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">Confirm Password <span class="text-danger">*</span></label>
-          <div class="input-group">
-            <input id="createUserConfirm" class="form-control smooth" name="NewUserConfirmPassword" type="password" placeholder="Re-enter password" minlength="8" required autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
-            <button class="btn btn-outline-secondary" type="button" id="createUserConfirmToggle" title="Show or hide password" aria-label="Show or hide password" tabindex="-1"><i class="bi bi-eye"></i></button>
-          </div>
-          <div class="invalid-feedback" id="createUserConfirmFeedback"></div>
-          @Html.ValidationMessageFor(m => m.NewUserConfirmPassword, "", new { @class = "text-danger small" })
-        </div>
+      <div class="alert alert-info py-2 small mb-3">
+        <i class="bi bi-envelope-check me-1"></i>
+        No password is set here. The user is emailed a one-time password and a link to create their own password.
       </div>
 
       <div class="row g-3 mb-3">
@@ -128,13 +108,14 @@
           <input class="form-control smooth" name="NewUser.LastName" placeholder="Last name" />
         </div>
         <div class="col-md-3">
-          <label class="form-label">Email Address</label>
+          <label class="form-label">Email Address <span class="text-danger">*</span></label>
           <div class="input-group">
-            <input id="createUserEmail" class="form-control smooth" name="NewUser.Email" placeholder="user@example.com" type="email" />
+            <input id="createUserEmail" class="form-control smooth" name="NewUser.Email" placeholder="user@example.com" type="email" required maxlength="256" />
             <span class="input-group-text bg-transparent"><i class="bi bi-envelope"></i></span>
             <div class="invalid-feedback" id="createUserEmailFeedback"></div>
           </div>
-          <small class="text-muted">Notifications and login recovery will be sent here</small>
+          @Html.ValidationMessageFor(m => m.NewUser.Email, "", new { @class = "text-danger small" })
+          <small class="text-muted">The invitation with the first-login link is sent here</small>
         </div>
         <div class="col-md-3">
           <label class="form-label">Mobile Number</label>
@@ -175,7 +156,7 @@
         <button type="reset" class="btn btn-outline-secondary">Reset</button>
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
         <div class="ms-auto">
-          <button type="submit" class="btn btn-primary" data-create-user-submit data-default-text="Create User"><i class="bi bi-person-plus me-2"></i> <span>Create User</span></button>
+          <button type="submit" class="btn btn-primary" data-create-user-submit data-default-text="Create User &amp; Send Invitation"><i class="bi bi-envelope-paper me-2"></i> <span>Create User &amp; Send Invitation</span></button>
         </div>
       </div>
 

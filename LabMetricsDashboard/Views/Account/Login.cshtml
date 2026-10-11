@@ -278,6 +278,13 @@
             <h2>Sign in</h2>
             <div class="subtitle">Use your account to access the workspace.</div>
 
+            @if (TempData["LoginInfo"] is string loginInfo && !string.IsNullOrWhiteSpace(loginInfo))
+            {
+                <div class="alert-login success mb-3">
+                    <i class="bi bi-check-circle-fill"></i>
+                    <div>@loginInfo</div>
+                </div>
+            }
             @if (TempData["LoginError"] is string loginError && !string.IsNullOrWhiteSpace(loginError))
             {
                 <div class="alert-login mb-3">

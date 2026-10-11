@@ -92,13 +92,18 @@ public interface IArWorkbenchRepository
     Task<IReadOnlySet<int>> GetUserLabIdsAsync(int labUserId, CancellationToken ct);
     Task<IReadOnlyList<ArWorkbenchRoleOption>> GetAssignableRolesAsync(CancellationToken ct);
     Task<IReadOnlyList<ArWorkbenchManagedUser>> GetManagedUsersAsync(int? callerLabUserId, bool allLabs, IReadOnlyList<ArWorkbenchLabOption> manageableLabs, CancellationToken ct);
-    Task<(ArWorkbenchSaveResult Result, int? LabUserId)> CreateWorkbenchUserAsync(string userName, string passwordHash, string email, int roleId, IReadOnlyList<int> labIds,
+    Task<(ArWorkbenchSaveResult Result, int? LabUserId)> CreateWorkbenchUserAsync(string userName, string? passwordHash, string email, int roleId, IReadOnlyList<int> labIds,
         ArWorkbenchUserProfile profile, IReadOnlyCollection<int> manageableLabIds, string createdBy, CancellationToken ct);
     Task<ArWorkbenchSaveResult> UpdateWorkbenchUserAsync(int labUserId, string email, int roleId, IReadOnlyList<int> requestedLabIds, bool isActive, string? passwordHash,
         ArWorkbenchUserProfile profile, int? callerLabUserId, bool allLabs, IReadOnlySet<int> manageableLabIds, string modifiedBy, CancellationToken ct);
     Task<IReadOnlyList<string>> GetScopeOptionsAsync(int labId, string level, CancellationToken ct);
     /// <summary>Own password change: verifies the current password against dbo.LabUsers.PasswordHash, then stores the new hash.</summary>
     Task<ArWorkbenchSaveResult> ChangeOwnPasswordAsync(int labUserId, string currentPassword, string newPassword, string userName, CancellationToken ct);
+
+    // Deactivate / delete (SqlArWorkbenchRepository.Invitations.cs); invitations + email log: Services/UserMail
+    Task<ArWorkbenchManageTarget?> GetManageTargetAsync(int labUserId, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> SetWorkbenchUserActiveAsync(int labUserId, bool isActive, string modifiedBy, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> DeleteWorkbenchUserAsync(int labUserId, CancellationToken ct);
 
     // Saved Views (SqlArWorkbenchRepository.SavedViews.cs)
     Task<IReadOnlyList<ArWorkbenchSavedView>> GetSavedViewsAsync(int labId, string userName, string viewKey, CancellationToken ct);

@@ -1,0 +1,417 @@
+@model IEnumerable<LabMetricsDashboard.Models.Role>
+@{
+    ViewData["Title"] = "Admin - Email Log";
+    var roleOptions = Model
+        .Where(role => !string.IsNullOrWhiteSpace(role.RoleName))
+        .GroupBy(role => role.RoleName.Trim(), StringComparer.OrdinalIgnoreCase)
+        .Select(group => group.First())
+        .OrderBy(role => role.RoleName)
+        .ToList();
+}
+
+<style>
+    .elog-shell { background:#f8fafc; border:1px solid #e2e8f0; border-radius:14px; padding:18px; box-shadow:0 10px 30px rgba(15,23,42,.06); }
+    .elog-title { font-weight:700; }
+    .elog-filters { background:#fff; border:1px solid #dbe4ef; border-radius:12px; padding:14px; }
+    .elog-filters .form-label { color:#475569; font-size:.82rem; font-weight:600; margin-bottom:.3rem; }
+    .elog-filters .form-control, .elog-filters .form-select { border-color:#cbd5e1; border-radius:10px; min-height:40px; }
+    .elog-type-menu { max-height:320px; overflow-y:auto; min-width:300px; }
+    .elog-type-menu label { display:flex; align-items:center; gap:.5rem; padding:.3rem .75rem; cursor:pointer; margin:0; }
+    .elog-type-menu label:hover { background:#eef6ff; }
+    .elog-type-menu .count { margin-left:auto; color:#64748b; font-size:.8rem; font-variant-numeric:tabular-nums; }
+    .elog-chips { display:flex; flex-wrap:wrap; gap:8px; }
+    .elog-chip { border:1px solid #cbd5e1; background:#fff; border-radius:999px; padding:.3rem .75rem; font-size:.82rem; font-weight:600; color:#334155; cursor:pointer; }
+    .elog-chip.active { background:#0f2942; border-color:#0f2942; color:#fff; }
+    .elog-chip .n { opacity:.75; margin-left:.35rem; font-variant-numeric:tabular-nums; }
+    .elog-chip .f { color:#dc2626; margin-left:.35rem; }
+    .elog-chip.active .f { color:#fecaca; }
+    .elog-table-wrap { background:#fff; border:1px solid #cbd5e1; border-radius:12px; overflow:auto; }
+    .elog-table { margin-bottom:0; }
+    .elog-table thead th { background:#0f2942; color:#fff; border:1px solid #27445f; font-size:.8rem; text-transform:uppercase; letter-spacing:.02em; white-space:nowrap; padding:.5rem .6rem; position:sticky; top:0; z-index:1; }
+    .elog-table thead th button { border:0; background:transparent; color:inherit; font:inherit; text-transform:inherit; letter-spacing:inherit; padding:0; display:inline-flex; align-items:center; gap:6px; }
+    .elog-table thead th .si { opacity:.45; font-size:.75rem; }
+    .elog-table thead th.sorted .si { opacity:1; }
+    .elog-table tbody td { vertical-align:middle; border:1px solid #d7dee8; padding:.45rem .6rem; font-size:.88rem; }
+    .elog-table tbody tr:hover { background:#eef6ff; }
+    .elog-type { border-radius:999px; font-weight:700; padding:.3rem .6rem; background:#e0f2fe; color:#075985; white-space:nowrap; }
+    .elog-status { border-radius:999px; font-weight:700; padding:.3rem .55rem; }
+    .elog-error { color:#b91c1c; font-size:.76rem; max-width:300px; }
+    .elog-to { max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .elog-subject { max-width:320px; }
+    #elogPreview { width:100%; height:70vh; border:1px solid #d7dee8; border-radius:8px; background:#fff; }
+</style>
+
+<div class="elog-shell">
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+        <div>
+            <h2 class="m-0 elog-title"><i class="bi bi-envelope-paper me-2"></i>Email Log</h2>
+            <small class="text-muted">Every email the system sends: user invitations from LRN Metrics and the AR Workbench, Denial Workflow support requests, Payer Master notifications.</small>
+        </div>
+        <button class="btn btn-outline-secondary" type="button" id="elogRefresh"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
+    </div>
+
+    <div class="elog-chips mb-3" id="elogChips" aria-label="Mail types"></div>
+
+    <div class="row g-3 align-items-end mb-3 elog-filters">
+        <div class="col-lg-3 col-md-6">
+            <label class="form-label" for="elogSearch">Search</label>
+            <input class="form-control" id="elogSearch" type="search" placeholder="Recipient, subject, username, sent by" autocomplete="off" />
+        </div>
+        <div class="col-lg-2 col-md-6">
+            <span class="form-label d-block">Mail type</span>
+            <div class="dropdown">
+                <button class="form-select text-start" type="button" id="elogTypeBtn" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">All types</button>
+                <div class="dropdown-menu elog-type-menu p-1" id="elogTypeMenu" aria-labelledby="elogTypeBtn"></div>
+            </div>
+        </div>
+        <div class="col-lg-2 col-md-4">
+            <label class="form-label" for="elogApp">Application</label>
+            <select class="form-select" id="elogApp">
+                <option value="">All</option>
+                <option>LRN Metrics</option>
+                <option>AR Workbench</option>
+                <option>Denial Workflow</option>
+                <option>Payer Master</option>
+            </select>
+        </div>
+        <div class="col-lg-1 col-md-4">
+            <label class="form-label" for="elogStatus">Status</label>
+            <select class="form-select" id="elogStatus">
+                <option value="">All</option>
+                <option value="Sent">Sent</option>
+                <option value="Failed">Failed</option>
+            </select>
+        </div>
+        <div class="col-lg-2 col-md-4">
+            <label class="form-label" for="elogRole">User role</label>
+            <select class="form-select" id="elogRole">
+                <option value="">All roles</option>
+                @foreach (var role in roleOptions)
+                {
+                    <option value="@role.RoleID">@role.RoleName</option>
+                }
+            </select>
+        </div>
+        <div class="col-lg-1 col-md-3 col-6">
+            <label class="form-label" for="elogFrom">From</label>
+            <input class="form-control" id="elogFrom" type="date" />
+        </div>
+        <div class="col-lg-1 col-md-3 col-6">
+            <label class="form-label" for="elogTo">To</label>
+            <input class="form-control" id="elogTo" type="date" />
+        </div>
+        <div class="col-12 d-flex flex-wrap gap-2 align-items-center">
+            <button class="btn btn-sm btn-outline-secondary" type="button" id="elogClear"><i class="bi bi-x-circle me-1"></i>Clear filters</button>
+            <small class="text-muted ms-auto" id="elogSortNote"></small>
+        </div>
+    </div>
+
+    <div id="elogError" class="alert alert-danger d-none"></div>
+
+    <div class="elog-table-wrap" style="max-height:65vh">
+        <table class="table table-sm table-striped elog-table">
+            <thead>
+                <tr>
+                    <th data-sort="sent"><button type="button">Sent <i class="bi si"></i></button></th>
+                    <th data-sort="type"><button type="button">Mail Type <i class="bi si"></i></button></th>
+                    <th data-sort="application"><button type="button">Application <i class="bi si"></i></button></th>
+                    <th data-sort="to"><button type="button">To <i class="bi si"></i></button></th>
+                    <th data-sort="subject"><button type="button">Subject <i class="bi si"></i></button></th>
+                    <th data-sort="user"><button type="button">User <i class="bi si"></i></button></th>
+                    <th data-sort="status"><button type="button">Status <i class="bi si"></i></button></th>
+                    <th data-sort="sentBy"><button type="button">Sent By <i class="bi si"></i></button></th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="elogRows">
+                <tr><td colspan="9" class="text-muted text-center py-4">Loading…</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+        <small class="text-muted" id="elogSummary"></small>
+        <div class="ms-auto d-flex align-items-center gap-2">
+            <label class="small text-muted" for="elogPageSize">Rows</label>
+            <select class="form-select form-select-sm" id="elogPageSize" style="width:auto">
+                <option>25</option>
+                <option selected>50</option>
+                <option>100</option>
+                <option>200</option>
+            </select>
+            <div class="btn-group">
+                <button class="btn btn-sm btn-outline-secondary" type="button" id="elogFirst" title="First page"><i class="bi bi-chevron-double-left"></i></button>
+                <button class="btn btn-sm btn-outline-secondary" type="button" id="elogPrev" title="Previous page"><i class="bi bi-chevron-left"></i></button>
+                <span class="btn btn-sm btn-light disabled" id="elogPageNo">1</span>
+                <button class="btn btn-sm btn-outline-secondary" type="button" id="elogNext" title="Next page"><i class="bi bi-chevron-right"></i></button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Email preview: the message as sent, with secrets (one-time password, first-login link) removed -->
+<div class="modal fade" id="elogModal" tabindex="-1" aria-hidden="true" aria-labelledby="elogModalTitle">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title" id="elogModalTitle">Email</h5>
+          <small class="text-muted" id="elogModalMeta"></small>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="elogModalError" class="alert alert-danger d-none"></div>
+        <iframe id="elogPreview" sandbox="" title="Email preview" referrerpolicy="no-referrer"></iframe>
+        <small class="text-muted d-block mt-2">One-time passwords and first-login links are removed from stored copies.</small>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script nonce='@Context.Items["CspNonce"]'>
+document.addEventListener('DOMContentLoaded', function () {
+    const BASE = '@Url.Content("~/Admin")';
+    const el = (id) => document.getElementById(id);
+    const TYPE_LABELS = {
+        UserInvitation: 'User invitation',
+        UserInvitationResend: 'User invitation (resent)',
+        DenialWorkflowSupport: 'Denial Workflow support',
+        DenialWorkflowNotification: 'Denial Workflow notification',
+        PayerMasterNotification: 'Payer Master notification'
+    };
+    const SORT_LABELS = { sent: 'sent time', type: 'mail type', application: 'application', to: 'recipient', subject: 'subject', user: 'user', status: 'status', sentBy: 'sent by' };
+    const typeLabel = (t) => TYPE_LABELS[t] || String(t || '').replace(/([a-z])([A-Z])/g, '$1 $2');
+
+    // State lives in the address bar so a refresh or a shared link keeps the filters and sort.
+    const url = new URLSearchParams(location.search);
+    const state = {
+        page: Math.max(1, Number(url.get('page')) || 1),
+        pageSize: Number(url.get('pageSize')) || 50,
+        sortBy: url.get('sortBy') || 'sent',
+        sortDesc: url.has('sortDesc') ? url.get('sortDesc') === 'true' : true,
+        types: url.getAll('emailType'),
+        total: 0,
+        timer: null,
+        typeSummary: []
+    };
+    el('elogSearch').value = url.get('search') || '';
+    el('elogApp').value = url.get('application') || '';
+    el('elogStatus').value = url.get('status') || '';
+    el('elogRole').value = url.get('roleId') || '';
+    el('elogFrom').value = url.get('from') || '';
+    el('elogTo').value = url.get('to') || '';
+    el('elogPageSize').value = String(state.pageSize);
+
+    function esc(v) {
+        return (v == null ? '' : String(v)).replace(/[&<>"']/g, function (ch) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+        });
+    }
+    function when(utc) {
+        if (!utc) return '';
+        const d = new Date(/Z$|[+-]\d\d:\d\d$/.test(utc) ? utc : utc + 'Z');
+        return isNaN(d) ? utc : d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function params() {
+        const qs = new URLSearchParams();
+        const add = (k, v) => { if (v) qs.set(k, v); };
+        add('search', el('elogSearch').value.trim());
+        add('application', el('elogApp').value);
+        add('status', el('elogStatus').value);
+        add('roleId', el('elogRole').value);
+        add('from', el('elogFrom').value);
+        add('to', el('elogTo').value);
+        state.types.forEach(function (t) { qs.append('emailType', t); });
+        if (state.sortBy !== 'sent') qs.set('sortBy', state.sortBy);
+        if (!state.sortDesc) qs.set('sortDesc', 'false');
+        if (state.page > 1) qs.set('page', state.page);
+        if (state.pageSize !== 50) qs.set('pageSize', state.pageSize);
+        return qs;
+    }
+
+    // ---- Mail types: chips (one click = only that type) and a multi-select dropdown ----
+    function renderTypes() {
+        const all = state.typeSummary;
+        const selected = new Set(state.types);
+        const total = all.reduce(function (s, t) { return s + t.total; }, 0);
+        el('elogChips').innerHTML =
+            '<button type="button" class="elog-chip' + (selected.size === 0 ? ' active' : '') + '" data-chip="">All mail<span class="n">' + total.toLocaleString() + '</span></button>' +
+            all.map(function (t) {
+                return '<button type="button" class="elog-chip' + (selected.size === 1 && selected.has(t.emailType) ? ' active' : '') + '" data-chip="' + esc(t.emailType) + '" title="Last sent ' + esc(when(t.lastSentUtc)) + '">'
+                    + esc(typeLabel(t.emailType)) + '<span class="n">' + t.total.toLocaleString() + '</span>'
+                    + (t.failed ? '<span class="f" title="Failed">' + t.failed.toLocaleString() + ' failed</span>' : '') + '</button>';
+            }).join('');
+        // Keep a selected type that has no rows yet (e.g. from a shared link) in the list.
+        const names = all.map(function (t) { return t.emailType; });
+        state.types.forEach(function (t) { if (names.indexOf(t) < 0) names.push(t); });
+        el('elogTypeMenu').innerHTML = names.length === 0
+            ? '<span class="dropdown-item-text text-muted small">No emails logged yet.</span>'
+            : names.map(function (n) {
+                const s = all.find(function (t) { return t.emailType === n; });
+                return '<label><input type="checkbox" class="form-check-input m-0" value="' + esc(n) + '"' + (selected.has(n) ? ' checked' : '') + '> '
+                    + esc(typeLabel(n)) + '<span class="count">' + (s ? s.total.toLocaleString() : 0) + '</span></label>';
+            }).join('') + '<div class="dropdown-divider"></div><button type="button" class="dropdown-item small" data-types-clear>Show all types</button>';
+        el('elogTypeBtn').textContent = selected.size === 0 ? 'All types'
+            : selected.size === 1 ? typeLabel(state.types[0]) : selected.size + ' types';
+    }
+
+    async function loadTypes() {
+        try {
+            const r = await fetch(BASE + '/GetEmailTypesJson', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+            if (!r.ok) return;
+            state.typeSummary = (await r.json()) || [];
+        } catch (e) { /* the table still loads; the chips just stay empty */ }
+        renderTypes();
+    }
+
+    el('elogChips').addEventListener('click', function (e) {
+        const chip = e.target.closest('[data-chip]');
+        if (!chip) return;
+        const t = chip.getAttribute('data-chip');
+        state.types = t ? [t] : [];
+        renderTypes();
+        reload();
+    });
+    el('elogTypeMenu').addEventListener('change', function () {
+        state.types = Array.from(el('elogTypeMenu').querySelectorAll('input:checked')).map(function (i) { return i.value; });
+        renderTypes();
+        reload();
+    });
+    el('elogTypeMenu').addEventListener('click', function (e) {
+        if (!e.target.closest('[data-types-clear]')) return;
+        state.types = [];
+        renderTypes();
+        reload();
+    });
+
+    // ---- Sorting: click a header; same header again flips the direction ----
+    function renderSortHeaders() {
+        document.querySelectorAll('.elog-table th[data-sort]').forEach(function (th) {
+            const on = th.getAttribute('data-sort') === state.sortBy;
+            th.classList.toggle('sorted', on);
+            th.setAttribute('aria-sort', on ? (state.sortDesc ? 'descending' : 'ascending') : 'none');
+            th.querySelector('.si').className = 'bi si ' + (on ? (state.sortDesc ? 'bi-sort-down' : 'bi-sort-up') : 'bi-arrow-down-up');
+        });
+        el('elogSortNote').textContent = 'Sorted by ' + SORT_LABELS[state.sortBy] + ', ' + (state.sortDesc ? (state.sortBy === 'sent' ? 'newest first' : 'Z → A') : (state.sortBy === 'sent' ? 'oldest first' : 'A → Z'));
+    }
+    document.querySelectorAll('.elog-table th[data-sort] button').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const key = btn.closest('th').getAttribute('data-sort');
+            if (state.sortBy === key) state.sortDesc = !state.sortDesc;
+            else { state.sortBy = key; state.sortDesc = key === 'sent'; }   // dates newest first, text A → Z
+            reload();
+        });
+    });
+
+    // ---- Table ----
+    async function load() {
+        const qs = params();
+        history.replaceState(null, '', location.pathname + (qs.toString() ? '?' + qs.toString() : ''));
+        renderSortHeaders();
+        el('elogError').classList.add('d-none');
+        el('elogRows').innerHTML = '<tr><td colspan="9" class="text-muted text-center py-4"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</td></tr>';
+        qs.set('page', state.page);
+        qs.set('pageSize', state.pageSize);
+        try {
+            const r = await fetch(BASE + '/GetUserEmailsJson?' + qs.toString(), { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+            const data = await r.json().catch(() => null);
+            if (!r.ok) throw new Error((data && data.message) || 'Could not load the email log.');
+            if (data.installed === false) {
+                el('elogRows').innerHTML = '<tr><td colspan="9" class="text-muted text-center py-4">The email log is not set up yet. Run LRN.ReportsApi/Sql/UserMail_Setup.sql on LRNMaster.</td></tr>';
+                el('elogSummary').textContent = '';
+                return;
+            }
+            state.total = data.total || 0;
+            render(data.rows || []);
+        } catch (e) {
+            el('elogRows').innerHTML = '';
+            el('elogError').textContent = e.message;
+            el('elogError').classList.remove('d-none');
+        }
+    }
+
+    function render(list) {
+        el('elogRows').innerHTML = list.length === 0
+            ? '<tr><td colspan="9" class="text-muted text-center py-4">No emails match these filters.</td></tr>'
+            : list.map(function (m) {
+                const status = m.status === 'Sent'
+                    ? '<span class="badge elog-status bg-success">Sent</span>'
+                    : '<span class="badge elog-status bg-danger">Failed</span>' + (m.errorMessage ? '<div class="elog-error">' + esc(m.errorMessage) + '</div>' : '');
+                const user = m.userName
+                    ? esc(m.userName) + (m.fullName ? '<div class="small text-muted">' + esc(m.fullName) + '</div>' : '')
+                      + (m.userExists === false && m.labUserId ? '<div class="small text-muted fst-italic">user deleted</div>' : '')
+                    : '<span class="text-muted">—</span>';
+                return '<tr>'
+                    + '<td class="text-nowrap">' + esc(when(m.createdUtc)) + '</td>'
+                    + '<td><span class="badge elog-type">' + esc(typeLabel(m.emailType)) + '</span></td>'
+                    + '<td class="text-nowrap">' + esc(m.application) + '</td>'
+                    + '<td><div class="elog-to" title="' + esc(m.toAddress) + '">' + esc(m.toAddress) + '</div></td>'
+                    + '<td class="elog-subject">' + esc(m.subject) + '</td>'
+                    + '<td>' + user + '</td>'
+                    + '<td>' + status + '</td>'
+                    + '<td class="small">' + esc(m.sentBy || '') + '</td>'
+                    + '<td><button type="button" class="btn btn-sm btn-outline-secondary" data-email-id="' + m.emailLogId + '" title="View email"><i class="bi bi-eye"></i> View</button></td>'
+                    + '</tr>';
+            }).join('');
+        const from = state.total === 0 ? 0 : (state.page - 1) * state.pageSize + 1;
+        const to = Math.min(state.page * state.pageSize, state.total);
+        const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
+        el('elogSummary').textContent = state.total === 0 ? '0 emails' : from + '–' + to + ' of ' + state.total.toLocaleString() + ' emails';
+        el('elogPageNo').textContent = 'Page ' + state.page + ' of ' + pages;
+        el('elogFirst').disabled = el('elogPrev').disabled = state.page <= 1;
+        el('elogNext').disabled = state.page >= pages;
+    }
+
+    function reload() { state.page = 1; load(); }
+
+    ['elogApp', 'elogStatus', 'elogRole', 'elogFrom', 'elogTo'].forEach(function (id) { el(id).addEventListener('change', reload); });
+    el('elogSearch').addEventListener('input', function () { clearTimeout(state.timer); state.timer = setTimeout(reload, 350); });
+    el('elogPageSize').addEventListener('change', function () { state.pageSize = Number(el('elogPageSize').value) || 50; reload(); });
+    el('elogFirst').addEventListener('click', function () { state.page = 1; load(); });
+    el('elogPrev').addEventListener('click', function () { if (state.page > 1) { state.page--; load(); } });
+    el('elogNext').addEventListener('click', function () { state.page++; load(); });
+    el('elogRefresh').addEventListener('click', function () { loadTypes(); load(); });
+    el('elogClear').addEventListener('click', function () {
+        ['elogSearch', 'elogApp', 'elogStatus', 'elogRole', 'elogFrom', 'elogTo'].forEach(function (id) { el(id).value = ''; });
+        state.types = [];
+        state.sortBy = 'sent';
+        state.sortDesc = true;
+        renderTypes();
+        reload();
+    });
+
+    // ---- Preview ----
+    el('elogRows').addEventListener('click', async function (e) {
+        const btn = e.target.closest('[data-email-id]');
+        if (!btn) return;
+        const frame = el('elogPreview');
+        const err = el('elogModalError');
+        err.classList.add('d-none');
+        frame.srcdoc = '<p style="font-family:Segoe UI,Arial;padding:16px;color:#64748b">Loading…</p>';
+        el('elogModalTitle').textContent = 'Email';
+        el('elogModalMeta').textContent = '';
+        const modalEl = el('elogModal');
+        (bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl)).show();
+        try {
+            const r = await fetch(BASE + '/GetUserEmailJson?id=' + encodeURIComponent(btn.getAttribute('data-email-id')), { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+            const d = await r.json().catch(() => null);
+            if (!r.ok || !d) throw new Error((d && d.message) || 'Could not load the email.');
+            const m = d.email || {};
+            el('elogModalTitle').textContent = m.subject || 'Email';
+            el('elogModalMeta').textContent = [when(m.createdUtc), typeLabel(m.emailType), 'To ' + (m.toAddress || ''), m.status].filter(Boolean).join(' · ');
+            // sandbox="": scripts, forms and navigation inside the stored HTML are disabled.
+            frame.srcdoc = d.bodyHtml || '<p style="font-family:Segoe UI,Arial;padding:16px;color:#64748b">No message body was stored.' + (m.errorMessage ? '<br><br>' + esc(m.errorMessage) : '') + '</p>';
+        } catch (ex) {
+            err.textContent = ex.message;
+            err.classList.remove('d-none');
+            frame.srcdoc = '';
+        }
+    });
+
+    renderTypes();
+    loadTypes();
+    load();
+});
+</script>
