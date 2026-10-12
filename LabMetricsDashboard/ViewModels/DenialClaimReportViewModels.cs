@@ -75,6 +75,17 @@ public sealed class DenialInsightPanelViewModel
 
     public IReadOnlyList<DenialInsightRow> Rows { get; set; } = Array.Empty<DenialInsightRow>();
 
+    /// <summary>
+    /// The Category edit dropdown: every category already stored for the lab. When the lab has none
+    /// yet, the client's standard categories, so the first edit is not an empty list.
+    /// </summary>
+    public IReadOnlyList<string> Categories { get; set; } = DefaultCategories;
+
+    public static readonly IReadOnlyList<string> DefaultCategories =
+    [
+        "Appeal / MR", "Appeal / Review", "Review", "Review & Write Off", "Review / Rebill", "Review / Reprocess"
+    ];
+
     /// <summary>Row counts per sub-tab, so each shows what it holds before being opened.</summary>
     public Dictionary<string, int> BucketCounts { get; set; } = new(StringComparer.Ordinal);
 

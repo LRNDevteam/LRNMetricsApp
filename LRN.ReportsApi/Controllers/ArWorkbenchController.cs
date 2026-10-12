@@ -3,7 +3,9 @@ using LRN.ReportsApi.Models;
 using LRN.ReportsApi.Security;
 using LRN.ReportsApi.Services;
 using LRN.ReportsApi.Services.ArWorkbench;
+using LRN.ReportsApi.Services.UserMail;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 
 namespace LRN.ReportsApi.Controllers;
 
@@ -33,17 +35,21 @@ public sealed class ArWorkbenchController : ControllerBase
     private readonly IDenialMapperRepository _mapper;
     private readonly IDenialMapperExcelService _mapperExcel;
     private readonly IWorkflowMasterValuesRepository _mapperMasters;
+    private readonly IUserInvitationService _invitations;
+    private readonly IUserMailRepository _userMail;
     private readonly ILogger<ArWorkbenchController> _logger;
 
     public ArWorkbenchController(IArWorkbenchRepository repository, IDenialWorkflowService workflowService,
         IDenialMapperRepository mapper, IDenialMapperExcelService mapperExcel, IWorkflowMasterValuesRepository mapperMasters,
-        ILogger<ArWorkbenchController> logger)
+        IUserInvitationService invitations, IUserMailRepository userMail, ILogger<ArWorkbenchController> logger)
     {
         _repository = repository;
         _workflowService = workflowService;
         _mapper = mapper;
         _mapperExcel = mapperExcel;
         _mapperMasters = mapperMasters;
+        _invitations = invitations;
+        _userMail = userMail;
         _logger = logger;
     }
 
@@ -1191,6 +1197,8 @@ public sealed class ArWorkbenchController : ControllerBase
         var (manager, denied) = await ResolveUserManagerAsync(labId, ct);
         if (denied is not null) return denied;
         var users = (await _repository.GetManagedUsersAsync(manager!.User.LabUserId, manager.AllLabs, manager.Labs, ct)).ToList();
+        var invites = await _userMail.GetInviteStatusesAsync(users.Select(u => u.LabUserId).ToList(), ct);
+        foreach (var u in users) u.Invite = invites.GetValueOrDefault(u.LabUserId);
         return Ok(new ArWorkbenchUserManagement
         {
             Users = users,
@@ -1253,8 +1261,7 @@ public sealed class ArWorkbenchController : ControllerBase
 
         var (userName, nameError) = ArWorkbenchUserRules.ValidateUserName(request.UserName);
         if (userName is null) return BadRequest(new { message = nameError });
-        var passwordError = ArWorkbenchUserRules.ValidatePassword(request.Password);
-        if (passwordError is not null) return BadRequest(new { message = passwordError });
+        // No password: the user sets one from the invitation email. Email may repeat across users.
         var (email, emailError) = ArWorkbenchUserRules.ValidateEmail(request.Email);
         if (email is null) return BadRequest(new { message = emailError });
         var roleError = await ValidateAssignableRoleAsync(request.RoleId, ct);
@@ -1264,11 +1271,111 @@ public sealed class ArWorkbenchController : ControllerBase
         var (profile, profileError) = await ValidateUserProfileAsync(manager, request.RoleId!.Value, labIds, request.Scopes, request.ManagerUserId, request.TeamName, null, ct);
         if (profile is null) return BadRequest(new { message = profileError });
 
-        var (result, id) = await _repository.CreateWorkbenchUserAsync(userName, ArWorkbenchUserRules.HashPassword(request.Password!), email,
+        var (result, id) = await _repository.CreateWorkbenchUserAsync(userName, null, email,
             request.RoleId!.Value, labIds, profile, manager.LabIds, manager.User.UserName, ct);
+        if (result.Status != ArWorkbenchSaveStatus.Ok || id is null) return ToResult(result);
+        _logger.LogInformation("AR Workbench user {NewUser} (LabUserID {Id}) created by {Admin} for labs {Labs}", userName, id, manager.User.UserName, string.Join(",", labIds));
+
+        var (sent, mailError) = await SendInviteAsync(manager, id.Value, userName, isResend: false, ct);
+        return Ok(new
+        {
+            message = sent
+                ? $"User '{userName}' created. An invitation with a one-time password was emailed to {email}."
+                : $"User '{userName}' created, but the invitation email could not be sent ({mailError}). Use Resend invitation once mail is working.",
+            labUserId = id,
+            emailSent = sent
+        });
+    }
+
+    // The shared LRN Metrics / AR Workbench invitation (Services/UserMail).
+    private async Task<(bool Sent, string? Error)> SendInviteAsync(UserManager manager, int labUserId, string userName, bool isResend, CancellationToken ct)
+    {
+        try
+        {
+            return await _invitations.SendInvitationAsync(labUserId, UserMailApplications.ArWorkbench, manager.User.UserName, isResend, ct);
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogError(ex, "AR Workbench invitation for {User} failed in SQL.", userName);
+            return (false, "the invitation tables are missing - run LRN.ReportsApi/Sql/UserMail_Setup.sql");
+        }
+    }
+
+    // ---- Sent emails for the users this admin manages (most recent first) ------------------------
+
+    [HttpGet("users/emails")]
+    public async Task<ActionResult<UserEmailLogPage>> UserEmails([FromQuery] int labId, [FromQuery] UserEmailLogQuery query, CancellationToken ct)
+    {
+        var (manager, denied) = await ResolveUserManagerAsync(labId, ct);
+        if (denied is not null) return denied;
+        // A Super Admin sees every email; a lab-scoped admin only those of users in their labs.
+        return Ok(await _userMail.GetEmailLogAsync(query, manager!.AllLabs ? null : manager.LabIds, ct));
+    }
+
+    [HttpGet("users/emails/{emailLogId:long}")]
+    public async Task<ActionResult<UserEmailDetail>> UserEmail([FromRoute] long emailLogId, [FromQuery] int labId, CancellationToken ct)
+    {
+        var (manager, denied) = await ResolveUserManagerAsync(labId, ct);
+        if (denied is not null) return denied;
+        var email = await _userMail.GetEmailAsync(emailLogId, manager!.AllLabs ? null : manager.LabIds, ct);
+        return email is null ? NotFound(new { message = "That email was not found." }) : Ok(email);
+    }
+
+    /// <summary>Loads a user the caller is about to act on and applies the same CanManage rule as Edit.</summary>
+    private async Task<(ArWorkbenchManageTarget? Target, ActionResult? Denied)> ResolveManageTargetAsync(UserManager manager, int labUserId, CancellationToken ct)
+    {
+        var target = await _repository.GetManageTargetAsync(labUserId, ct);
+        if (target is null || !target.RoleNames.Any(ArWorkbenchUserRules.IsWorkbenchRole))
+            return (null, NotFound(new { message = "That AR Workbench user no longer exists." }));
+        var (allowed, reason) = ArWorkbenchUserRules.CanManage(labUserId, target.RoleNames, target.LabIds, manager.User.LabUserId, manager.AllLabs, manager.LabIds);
+        return allowed ? (target, null) : (null, Conflict(new { message = reason }));
+    }
+
+    /// <summary>Resend the first-login invitation: new link and one-time password; earlier ones stop working.</summary>
+    [HttpPost("users/{labUserId:int}/invite")]
+    public async Task<ActionResult> ResendInvite([FromRoute] int labUserId, [FromQuery] int labId, CancellationToken ct)
+    {
+        var (manager, denied) = await ResolveUserManagerAsync(labId, ct);
+        if (denied is not null) return denied;
+        var (target, refused) = await ResolveManageTargetAsync(manager!, labUserId, ct);
+        if (refused is not null) return refused;
+        if (!target!.IsActive) return Conflict(new { message = "Activate the user before sending an invitation." });
+        var (email, emailError) = ArWorkbenchUserRules.ValidateEmail(target.Email);
+        if (email is null) return BadRequest(new { message = $"This user has no valid email address ({emailError}). Edit the user first." });
+
+        var (sent, mailError) = await SendInviteAsync(manager!, labUserId, target.UserName, isResend: true, ct);
+        return sent
+            ? Ok(new { message = $"Invitation resent to {email}. Any earlier link no longer works.", emailSent = true })
+            // 409, not 5xx: the client replaces 5xx messages with a generic one, and the admin needs this reason.
+            : Conflict(new { message = $"The invitation could not be sent: {mailError}", emailSent = false });
+    }
+
+    [HttpPost("users/{labUserId:int}/active")]
+    public async Task<ActionResult> SetUserActive([FromRoute] int labUserId, [FromQuery] int labId, [FromBody] ArWorkbenchSetUserActiveRequest? request, CancellationToken ct)
+    {
+        var (manager, denied) = await ResolveUserManagerAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (request is null) return BadRequest(new { message = "Send isActive." });
+        var (target, refused) = await ResolveManageTargetAsync(manager!, labUserId, ct);
+        if (refused is not null) return refused;
+
+        var result = await _repository.SetWorkbenchUserActiveAsync(labUserId, request.IsActive, manager!.User.UserName, ct);
+        _logger.LogInformation("AR Workbench user {User} (LabUserID {Id}) {State} by {Admin}", target!.UserName, labUserId, request.IsActive ? "activated" : "deactivated", manager.User.UserName);
+        return ToResult(result);
+    }
+
+    [HttpDelete("users/{labUserId:int}")]
+    public async Task<ActionResult> DeleteUser([FromRoute] int labUserId, [FromQuery] int labId, CancellationToken ct)
+    {
+        var (manager, denied) = await ResolveUserManagerAsync(labId, ct);
+        if (denied is not null) return denied;
+        var (target, refused) = await ResolveManageTargetAsync(manager!, labUserId, ct);
+        if (refused is not null) return refused;
+
+        var result = await _repository.DeleteWorkbenchUserAsync(labUserId, ct);
         if (result.Status == ArWorkbenchSaveStatus.Ok)
-            _logger.LogInformation("AR Workbench user {NewUser} (LabUserID {Id}) created by {Admin} for labs {Labs}", userName, id, manager.User.UserName, string.Join(",", labIds));
-        return result.Status == ArWorkbenchSaveStatus.Ok ? Ok(new { message = result.Message, labUserId = id }) : ToResult(result);
+            _logger.LogWarning("AR Workbench user {User} (LabUserID {Id}) DELETED by {Admin}", target!.UserName, labUserId, manager!.User.UserName);
+        return ToResult(result);
     }
 
     [HttpPut("users/{labUserId:int}")]

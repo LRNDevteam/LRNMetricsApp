@@ -21,6 +21,7 @@ import QaPage from './pages/QaPage';
 import ReportsPage from './pages/ReportsPage';
 import SlaSettingsPage from './pages/SlaSettingsPage';
 import TflSettingsPage from './pages/TflSettingsPage';
+import UserCreatePage from './pages/UserCreatePage';
 import UsersPage from './pages/UsersPage';
 import WorkQueuePage from './pages/WorkQueuePage';
 import { FollowUpPage, MyWorkPage } from './pages/WorklistPage';
@@ -32,6 +33,7 @@ const SCREENS = {
   mywork: MyWorkPage,
   followup: FollowUpPage,
   users: UsersPage,
+  'user-new': UserCreatePage,
   qa: QaPage,
   audit: AuditPage,
   analytics: AnalyticsPage,
@@ -91,6 +93,10 @@ function Gate() {
         <Route path="/masters" element={<Navigate to={ROUTES.find((r) => r.group === 'masters')?.path || '/'} replace />} />
         {Object.entries(REDIRECTS).map(([from, to]) => <Route key={from} path={from} element={<Navigate to={to} replace />} />)}
         <Route path="/claims/:claimKey" element={<ClaimDetailPage />} />
+        {/* Add User: its own page, guarded by the User Management menu item's roles. */}
+        {ROUTES.filter((r) => r.id === 'users').map((item) => (
+          <Route key="user-new" path="/users/new" element={<Guard item={{ ...item, id: 'user-new', screen: 'user-new' }} />} />
+        ))}
         <Route path="*" element={<ErrorBox message="Page not found." />} />
       </Route>
     </Routes>

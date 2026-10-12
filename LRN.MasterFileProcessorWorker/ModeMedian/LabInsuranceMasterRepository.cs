@@ -61,6 +61,7 @@ public sealed class LabInsuranceMasterRepository
 			("NorthWest",           "NWL"),
 			("Prism",               "Prism"),
 			("Analyze_Pathology",   "Analyze Pathology"),
+			("WellHealth",          "Well Health"),
 		};
 
 		var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

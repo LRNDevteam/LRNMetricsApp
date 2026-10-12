@@ -96,6 +96,49 @@
     wireLabChipPickers(document);
     window.wireLabChipPickers = wireLabChipPickers;
 
+    // Outcome banner (#adminNotice on the users page); falls back to alert() on pages without one.
+    function showAdminNotice(kind, text){
+        const box = document.getElementById('adminNotice');
+        if (!box) { alert(text); return; }
+        box.className = 'alert alert-' + (kind === 'warning' ? 'warning' : kind === 'danger' ? 'danger' : 'success') + ' alert-dismissible fade show';
+        box.innerHTML = '';
+        const msg = document.createElement('span'); msg.textContent = text; box.appendChild(msg);
+        const close = document.createElement('button'); close.type = 'button'; close.className = 'btn-close'; close.setAttribute('data-bs-dismiss', 'alert'); close.setAttribute('aria-label', 'Close');
+        box.appendChild(close);
+        box.classList.remove('d-none');
+        try { box.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch(e) {}
+    }
+    window.showAdminNotice = showAdminNotice;
+
+    function antiforgeryToken(){
+        const el = document.querySelector('input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+    window.adminAntiforgeryToken = antiforgeryToken;
+
+    // Send / resend the first-login invitation email (shared invitation service in LRN.ReportsApi).
+    document.addEventListener('click', function(e){
+        const btn = e.target.closest('[data-invite-userid]');
+        if (!btn) return;
+        const id = btn.getAttribute('data-invite-userid');
+        const row = btn.closest('tr');
+        const name = row ? (row.children[0]?.textContent || 'this user').trim() : 'this user';
+        if (!confirm('Send a new invitation email to ' + name + '?\n\nIt contains a one-time password and a link to set a password. Any earlier link stops working.')) return;
+        btn.disabled = true;
+        fetch(ADMIN_BASE + '/SendInvitationAjax', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': antiforgeryToken() },
+            body: 'userId=' + encodeURIComponent(id),
+            credentials: 'same-origin'
+        }).then(async r=>{
+            const d = await r.json().catch(()=>null);
+            if (!r.ok) showAdminNotice('danger', d && d.errors ? d.errors.join('; ') : 'The invitation could not be sent.');
+            else showAdminNotice('success', (d && d.message) || 'Invitation sent.');
+            btn.disabled = false;
+            if (window.reloadUserEmails) window.reloadUserEmails();
+        }).catch(err=>{ console.error(err); showAdminNotice('danger', 'The invitation could not be sent.'); btn.disabled = false; });
+    });
+
     // Generic helper to POST FormData and handle JSON errors
     async function postForm(url, fd){
         const resp = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
@@ -177,27 +220,14 @@
             clearCreateUserValidation();
             let ok = true;
             const user = document.getElementById('createUserUserName');
-            const pwd = document.getElementById('createUserPassword');
-            const conf = document.getElementById('createUserConfirm');
+            const email = document.getElementById('createUserEmail');
             const role = document.getElementById('createUserRole');
             const lab = document.getElementById('createUserLab');
 
+            // No password on create: the invitation email (one-time password + link) goes to this address.
             if (!user || !user.value.trim()) { if(user){ user.classList.add('is-invalid'); } const fb = document.getElementById('createUserUserNameFeedback'); if(fb) fb.textContent = 'UserName is required'; ok = false; }
-            if (!pwd || pwd.value.length < 8) { if(pwd){ pwd.classList.add('is-invalid'); } const fb = document.getElementById('createUserPasswordFeedback'); if(fb) fb.textContent = 'Password must be at least 8 characters'; ok = false; }
-            if (!conf || conf.value !== (pwd ? pwd.value : '')) {
-                if(conf){
-                    conf.classList.add('is-invalid');
-                    try { conf.setCustomValidity('Passwords do not match'); } catch(e){}
-                }
-                const fb = document.getElementById('createUserConfirmFeedback');
-                if(fb) {
-                    fb.textContent = 'Passwords do not match';
-                    try { fb.style.display = 'block'; } catch(e) {}
-                }
-                ok = false;
-            } else {
-                try { conf.setCustomValidity(''); } catch(e){}
-            }
+            if (email && !email.value.trim()) { email.classList.add('is-invalid'); const fb = document.getElementById('createUserEmailFeedback'); if(fb) fb.textContent = 'Email is required - the invitation is sent there'; ok = false; }
+            else if (email && !validateEmailLive()) ok = false;
             if (role && (!role.value || role.value === '')) { role.classList.add('is-invalid'); const fb = document.getElementById('createUserRoleFeedback'); if(fb) fb.textContent = 'Role is required'; ok = false; }
             const selectedLabs = frmCreateUser.querySelectorAll('[data-hidden-labs] input[name="NewUserLabIds"]');
             if (lab && selectedLabs.length === 0) { lab.classList.add('is-invalid'); const fb = document.getElementById('createUserLabFeedback'); if(fb) fb.textContent = 'Lab is required'; ok = false; }
@@ -343,11 +373,14 @@
                     else alert(msg);
                     releaseCreateUserSubmit();
                     return; }
+                const created = await r.json().catch(()=>null);
                 await refreshUsers();
                 frmCreateUser.reset();
                 releaseCreateUserSubmit();
                 const modalEl = document.getElementById('createUserModal');
                 if (modalEl) { const m = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl); m.hide(); }
+                if (created && created.message) showAdminNotice(created.emailSent === false ? 'warning' : 'success', created.message);
+                if (window.reloadUserEmails) window.reloadUserEmails();
             }).catch(err=>{ releaseCreateUserSubmit(); console.error(err); alert(err.message||'Error'); });
         });
     }
@@ -412,7 +445,7 @@
         });
     }
 
-    window.refreshUsers = async function(){ try{ const r = await fetch(ADMIN_BASE + '/GetUsersJson', {credentials:'same-origin'}); const data = await r.json(); const tbody = document.getElementById('tblUsersBody'); if(tbody){ tbody.innerHTML=''; data.forEach(u=>{ const tr = document.createElement('tr'); tr.setAttribute('data-userid', u.labUserID); const labs = [...new Set((u.labs||[]).map(x=>x.labName||x.labId).filter(Boolean))]; const roles = [...new Set((u.roles||[]).map(x=>x.roleName||x.RoleName||x.roleID||x.roleId).filter(Boolean))]; const name = `${u.firstName||''} ${u.lastName||''}`.trim(); const searchText = [u.userName, name, u.email, u.mobile, roles.join(' '), labs.join(' ')].filter(Boolean).join(' '); tr.setAttribute('data-search', searchText); tr.setAttribute('data-roles', roles.join(' ')); tr.setAttribute('data-labs', labs.join(' ')); const roleBadges = roles.map(x=>`<span class="badge user-badge user-badge-role me-1">${escapeHtml(x)}</span>`).join(''); const labBadges = labs.map(x=>`<span class="badge user-badge user-badge-lab me-1">${escapeHtml(x)}</span>`).join(''); tr.innerHTML = `<td>${escapeHtml(u.userName)}</td><td>${escapeHtml(name)}</td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.mobile)}</td><td>${roleBadges}</td><td>${labBadges}</td><td>${u.isActive? 'Yes':'No'}</td><td><div class="btn-group" role="group"><a class="btn btn-sm btn-primary user-action-btn" href="${ADMIN_BASE}/Edit/${u.labUserID}" title="Edit user" aria-label="Edit ${escapeHtml(u.userName)}"><i class="bi bi-pencil-square"></i></a><button class="btn btn-sm btn-outline-danger user-action-btn" data-remove-userid="${u.labUserID}" title="Remove user" aria-label="Remove ${escapeHtml(u.userName)}"><i class="bi bi-trash3"></i></button></div></td>`; tbody.appendChild(tr); }); populateUserSelects(data); if (window.applyUserFilters) window.applyUserFilters(); }}catch(e){console.error(e);} };
+    window.refreshUsers = async function(){ try{ const r = await fetch(ADMIN_BASE + '/GetUsersJson', {credentials:'same-origin'}); const data = await r.json(); const tbody = document.getElementById('tblUsersBody'); if(tbody){ tbody.innerHTML=''; data.forEach(u=>{ const tr = document.createElement('tr'); tr.setAttribute('data-userid', u.labUserID); const labs = [...new Set((u.labs||[]).map(x=>x.labName||x.labId).filter(Boolean))]; const roles = [...new Set((u.roles||[]).map(x=>x.roleName||x.RoleName||x.roleID||x.roleId).filter(Boolean))]; const name = `${u.firstName||''} ${u.lastName||''}`.trim(); const searchText = [u.userName, name, u.email, u.mobile, roles.join(' '), labs.join(' ')].filter(Boolean).join(' '); tr.setAttribute('data-search', searchText); tr.setAttribute('data-roles', roles.join(' ')); tr.setAttribute('data-labs', labs.join(' ')); const roleBadges = roles.map(x=>`<span class="badge user-badge user-badge-role me-1">${escapeHtml(x)}</span>`).join(''); const labBadges = labs.map(x=>`<span class="badge user-badge user-badge-lab me-1">${escapeHtml(x)}</span>`).join(''); tr.innerHTML = `<td>${escapeHtml(u.userName)}</td><td>${escapeHtml(name)}</td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.mobile)}</td><td>${roleBadges}</td><td>${labBadges}</td><td>${u.isActive? 'Yes':'No'}</td><td><div class="btn-group" role="group"><a class="btn btn-sm btn-primary user-action-btn" href="${ADMIN_BASE}/Edit/${u.labUserID}" title="Edit user" aria-label="Edit ${escapeHtml(u.userName)}"><i class="bi bi-pencil-square"></i></a>${u.isActive && u.email ? `<button class="btn btn-sm btn-outline-primary user-action-btn" data-invite-userid="${u.labUserID}" title="Send invitation email" aria-label="Send invitation to ${escapeHtml(u.userName)}"><i class="bi bi-envelope"></i></button>` : ''}<button class="btn btn-sm btn-outline-danger user-action-btn" data-remove-userid="${u.labUserID}" title="Remove user" aria-label="Remove ${escapeHtml(u.userName)}"><i class="bi bi-trash3"></i></button></div></td>`; tbody.appendChild(tr); }); populateUserSelects(data); if (window.applyUserFilters) window.applyUserFilters(); }}catch(e){console.error(e);} };
     window.refreshRoles = async function(){ try{ const r = await fetch(ADMIN_BASE + '/GetRolesJson', {credentials:'same-origin'}); const data = await r.json(); document.querySelectorAll('#mapRoleSelect, #mapRoleSelectPage').forEach(sel=>{ if(!sel) return; sel.innerHTML = '<option value="">-- select role --</option>'; data.forEach(r=>{ const id = r.roleID||r.RoleID||r.roleId||r.RoleId; const name = r.roleName||r.RoleName||r.name||r.role; const opt = document.createElement('option'); opt.value = id; opt.textContent = name; sel.appendChild(opt); }); }); // labs
         const lr = await fetch(ADMIN_BASE + '/GetLabsJson', {credentials:'same-origin'}); const labs = await lr.json(); const labSel = document.getElementById('mapLabSelect')||document.getElementById('mapLabSelectPage'); if(labSel){ labSel.innerHTML = '<option value="">-- select lab --</option>'; labs.forEach(l=>{ const id = l.labId||l.LabId||l.labID||l.LabID; const name = l.labName||l.LabName||l.name; const o = document.createElement('option'); o.value = id; o.textContent = name; labSel.appendChild(o); }); }
     }catch(e){console.error(e);} };

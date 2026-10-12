@@ -117,6 +117,11 @@
         opacity: .7;
         font-size: .8rem;
     }
+    .users-tabs .nav-link { font-weight: 600; color: #475569; }
+    .users-tabs .nav-link.active { color: #0f2942; }
+    .email-status { border-radius: 999px; font-weight: 700; padding: .3rem .55rem; }
+    .email-error { color: #b91c1c; font-size: .78rem; max-width: 280px; }
+    #emailPreview { width: 100%; height: 70vh; border: 1px solid #d7dee8; border-radius: 8px; background: #fff; }
 </style>
 
 <div class="users-page-shell">
@@ -126,6 +131,34 @@
         <i class="bi bi-person-plus-fill me-2"></i>Create User
     </button>
 </div>
+
+@{
+    var adminNotice = TempData["AdminNotice"] as string;
+    var adminNoticeKind = TempData["AdminNoticeKind"] as string ?? "success";
+}
+<div id="adminNotice" class="@(string.IsNullOrEmpty(adminNotice) ? "d-none" : $"alert alert-{adminNoticeKind} alert-dismissible fade show")" role="status">
+    @if (!string.IsNullOrEmpty(adminNotice))
+    {
+        <span>@adminNotice</span>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    }
+</div>
+
+<ul class="nav nav-tabs users-tabs mb-3" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="tab-users" data-bs-toggle="tab" data-bs-target="#pane-users" type="button" role="tab" aria-controls="pane-users" aria-selected="true">
+            <i class="bi bi-people me-1"></i>Users
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-emails" data-bs-toggle="tab" data-bs-target="#pane-emails" type="button" role="tab" aria-controls="pane-emails" aria-selected="false">
+            <i class="bi bi-envelope me-1"></i>Sent Emails
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content">
+<div class="tab-pane fade show active" id="pane-users" role="tabpanel" aria-labelledby="tab-users">
 
 @if (ViewData["OpenCreateUserModal"] as bool? == true)
 {
@@ -238,6 +271,10 @@
                     <td>
                         <div class="btn-group" role="group">
                             <a class="btn btn-sm btn-primary user-action-btn" asp-action="Edit" asp-route-id="@u.LabUserID" title="Edit user" aria-label="Edit @u.UserName"><i class="bi bi-pencil-square"></i></a>
+                            @if (u.IsActive && !string.IsNullOrWhiteSpace(u.Email))
+                            {
+                                <button class="btn btn-sm btn-outline-primary user-action-btn" data-invite-userid="@u.LabUserID" title="Send invitation email" aria-label="Send invitation to @u.UserName"><i class="bi bi-envelope"></i></button>
+                            }
                             <button class="btn btn-sm btn-outline-danger user-action-btn" data-remove-userid="@u.LabUserID" title="Remove user" aria-label="Remove @u.UserName"><i class="bi bi-trash3"></i></button>
                         </div>
                     </td>
@@ -246,6 +283,96 @@
         </tbody>
     </table>
 </div>
+</div>
+
+@* Sent Emails: invitation emails from LRN Metrics and the AR Workbench (one shared log). *@
+<div class="tab-pane fade" id="pane-emails" role="tabpanel" aria-labelledby="tab-emails">
+    <div class="row g-3 align-items-end mb-3 users-filter-panel" id="emailFilters">
+        <div class="col-md-4 col-lg-3">
+            <label class="form-label" for="emailSearch">Search</label>
+            <input class="form-control" id="emailSearch" type="search" placeholder="Username, email, subject, sent by" autocomplete="off" />
+        </div>
+        <div class="col-md-3 col-lg-2">
+            <label class="form-label" for="emailRole">Role</label>
+            <select class="form-select" id="emailRole">
+                <option value="">All roles</option>
+                @foreach (var role in roleOptions)
+                {
+                    <option value="@role.RoleID">@role.RoleName</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-2 col-lg-2">
+            <label class="form-label" for="emailStatus">Status</label>
+            <select class="form-select" id="emailStatus">
+                <option value="">All</option>
+                <option value="Sent">Sent</option>
+                <option value="Failed">Failed</option>
+            </select>
+        </div>
+        <div class="col-md-3 col-lg-2">
+            <label class="form-label" for="emailApp">Application</label>
+            <select class="form-select" id="emailApp">
+                <option value="">Both</option>
+                <option value="LRN Metrics">LRN Metrics</option>
+                <option value="AR Workbench">AR Workbench</option>
+            </select>
+        </div>
+        <div class="col-md-3 col-lg-2">
+            <label class="form-label" for="emailOrder">Order</label>
+            <select class="form-select" id="emailOrder">
+                <option value="recent">Most recent first</option>
+                <option value="oldest">Oldest first</option>
+            </select>
+        </div>
+        <div class="col-md-2 col-lg-1">
+            <button class="btn btn-outline-secondary w-100" type="button" id="emailRefresh" title="Refresh"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+    </div>
+
+    <div id="emailError" class="alert alert-danger d-none"></div>
+    <div class="users-table-wrap table-responsive">
+        <table class="table table-sm table-striped users-table">
+            <thead>
+                <tr>
+                    <th>Sent</th><th>User</th><th>Roles</th><th>To</th><th>Application</th><th>Type</th><th>Status</th><th>Sent By</th><th></th>
+                </tr>
+            </thead>
+            <tbody id="emailRows">
+                <tr><td colspan="9" class="text-muted text-center py-4">Open this tab to load sent emails.</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="d-flex align-items-center gap-2 mt-2">
+        <small class="text-muted" id="emailSummary"></small>
+        <a class="small ms-2" asp-action="EmailLog"><i class="bi bi-box-arrow-up-right me-1"></i>Open the full Email Log (all mail types)</a>
+        <div class="ms-auto btn-group">
+            <button class="btn btn-sm btn-outline-secondary" type="button" id="emailPrev"><i class="bi bi-chevron-left"></i> Newer</button>
+            <button class="btn btn-sm btn-outline-secondary" type="button" id="emailNext">Older <i class="bi bi-chevron-right"></i></button>
+        </div>
+    </div>
+</div>
+</div>
+</div>
+
+<!-- Email preview (the message as sent; one-time password and link removed) -->
+<div class="modal fade" id="emailModal" tabindex="-1" aria-hidden="true" aria-labelledby="emailModalTitle">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title" id="emailModalTitle">Email</h5>
+          <small class="text-muted" id="emailModalMeta"></small>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="emailModalError" class="alert alert-danger d-none"></div>
+        <iframe id="emailPreview" sandbox="" title="Email preview" referrerpolicy="no-referrer"></iframe>
+        <small class="text-muted d-block mt-2">The one-time password and the first-login link are removed from stored copies.</small>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script nonce='@Context.Items["CspNonce"]'>
@@ -304,6 +431,142 @@ document.addEventListener('DOMContentLoaded', function () {
             });
             rows.forEach(function (row) { tbody.appendChild(row); });
         });
+    });
+});
+</script>
+
+<script nonce='@Context.Items["CspNonce"]'>
+// Sent Emails tab: the shared invitation log (LRN Metrics + AR Workbench) through Admin/GetUserEmailsJson.
+document.addEventListener('DOMContentLoaded', function () {
+    // Modals declared inside a tab pane cannot open while that pane is hidden.
+    ['createUserModal', 'emailModal'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el && el.parentElement !== document.body) document.body.appendChild(el);
+    });
+
+    const BASE = '@Url.Content("~/Admin")';
+    const PAGE_SIZE = 50;
+    const state = { page: 1, total: 0, loaded: false, timer: null };
+    const el = (id) => document.getElementById(id);
+    const rows = el('emailRows');
+
+    function esc(v) {
+        return (v == null ? '' : String(v)).replace(/[&<>"']/g, function (ch) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+        });
+    }
+    function when(utc) {
+        if (!utc) return '';
+        const d = new Date(/Z$|[+-]\d\d:\d\d$/.test(utc) ? utc : utc + 'Z');
+        return isNaN(d) ? utc : d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    }
+    function showError(msg) {
+        const box = el('emailError');
+        box.textContent = msg || '';
+        box.classList.toggle('d-none', !msg);
+    }
+
+    async function load() {
+        showError('');
+        rows.innerHTML = '<tr><td colspan="9" class="text-muted text-center py-4"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</td></tr>';
+        const qs = new URLSearchParams({ page: state.page, pageSize: PAGE_SIZE });
+        // User emails only here; Admin > Email Log shows every mail type.
+        qs.append('emailType', 'UserInvitation');
+        qs.append('emailType', 'UserInvitationResend');
+        const add = (k, v) => { if (v) qs.set(k, v); };
+        add('search', el('emailSearch').value.trim());
+        add('roleId', el('emailRole').value);
+        add('status', el('emailStatus').value);
+        add('application', el('emailApp').value);
+        if (el('emailOrder').value === 'oldest') qs.set('oldestFirst', 'true');
+        try {
+            const r = await fetch(BASE + '/GetUserEmailsJson?' + qs.toString(), { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+            const data = await r.json().catch(() => null);
+            if (!r.ok) throw new Error((data && data.message) || 'Could not load sent emails.');
+            state.loaded = true;
+            state.total = data.total || 0;
+            if (data.installed === false) {
+                rows.innerHTML = '<tr><td colspan="9" class="text-muted text-center py-4">The email log is not set up yet. Run LRN.ReportsApi/Sql/UserMail_Setup.sql on LRNMaster.</td></tr>';
+                el('emailSummary').textContent = '';
+                return;
+            }
+            render(data.rows || []);
+        } catch (e) {
+            rows.innerHTML = '';
+            showError(e.message);
+        }
+    }
+
+    function render(list) {
+        if (list.length === 0) {
+            rows.innerHTML = '<tr><td colspan="9" class="text-muted text-center py-4">No emails match.</td></tr>';
+        } else {
+            rows.innerHTML = list.map(function (m) {
+                const status = m.status === 'Sent'
+                    ? '<span class="badge email-status bg-success">Sent</span>'
+                    : '<span class="badge email-status bg-danger">Failed</span>' + (m.errorMessage ? '<div class="email-error">' + esc(m.errorMessage) + '</div>' : '');
+                const user = esc(m.userName || '—') + (m.fullName ? '<div class="small text-muted">' + esc(m.fullName) + '</div>' : '')
+                    + (m.userExists === false ? '<div class="small text-muted fst-italic">user deleted</div>' : '');
+                const TYPES = { UserInvitation: 'Invitation', UserInvitationResend: 'Invitation (resent)', DenialWorkflowSupport: 'Denial Workflow support', DenialWorkflowNotification: 'Denial Workflow notification', PayerMasterNotification: 'Payer Master notification' };
+                const type = TYPES[m.emailType] || esc(m.emailType);
+                return '<tr>'
+                    + '<td class="text-nowrap">' + esc(when(m.createdUtc)) + '</td>'
+                    + '<td>' + user + '</td>'
+                    + '<td>' + (m.roles ? m.roles.split(', ').map(function (r) { return '<span class="badge user-badge user-badge-role me-1">' + esc(r) + '</span>'; }).join('') : '—') + '</td>'
+                    + '<td class="text-truncate" style="max-width:200px" title="' + esc(m.toAddress) + '">' + esc(m.toAddress) + '</td>'
+                    + '<td class="text-nowrap">' + esc(m.application) + '</td>'
+                    + '<td class="text-nowrap">' + type + '</td>'
+                    + '<td>' + status + '</td>'
+                    + '<td class="small">' + esc(m.sentBy || '') + '</td>'
+                    + '<td><button type="button" class="btn btn-sm btn-outline-secondary user-action-btn" data-email-id="' + m.emailLogId + '" title="View email" aria-label="View email"><i class="bi bi-eye"></i></button></td>'
+                    + '</tr>';
+            }).join('');
+        }
+        const from = state.total === 0 ? 0 : (state.page - 1) * PAGE_SIZE + 1;
+        const to = Math.min(state.page * PAGE_SIZE, state.total);
+        el('emailSummary').textContent = state.total === 0 ? '' : from + '–' + to + ' of ' + state.total.toLocaleString() + ' emails';
+        el('emailPrev').disabled = state.page <= 1;
+        el('emailNext').disabled = to >= state.total;
+        const oldest = el('emailOrder').value === 'oldest';
+        el('emailPrev').innerHTML = '<i class="bi bi-chevron-left"></i> ' + (oldest ? 'Older' : 'Newer');
+        el('emailNext').innerHTML = (oldest ? 'Newer' : 'Older') + ' <i class="bi bi-chevron-right"></i>';
+    }
+
+    function reload() { state.page = 1; load(); }
+    window.reloadUserEmails = function () { if (state.loaded) reload(); };
+
+    el('tab-emails').addEventListener('shown.bs.tab', function () { if (!state.loaded) load(); });
+    ['emailRole', 'emailStatus', 'emailApp', 'emailOrder'].forEach(function (id) { el(id).addEventListener('change', reload); });
+    el('emailSearch').addEventListener('input', function () { clearTimeout(state.timer); state.timer = setTimeout(reload, 350); });
+    el('emailRefresh').addEventListener('click', load);
+    el('emailPrev').addEventListener('click', function () { if (state.page > 1) { state.page--; load(); } });
+    el('emailNext').addEventListener('click', function () { state.page++; load(); });
+
+    rows.addEventListener('click', async function (e) {
+        const btn = e.target.closest('[data-email-id]');
+        if (!btn) return;
+        const modalEl = el('emailModal');
+        const frame = el('emailPreview');
+        const err = el('emailModalError');
+        err.classList.add('d-none');
+        frame.srcdoc = '<p style="font-family:Segoe UI,Arial;padding:16px;color:#64748b">Loading…</p>';
+        el('emailModalTitle').textContent = 'Email';
+        el('emailModalMeta').textContent = '';
+        (bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl)).show();
+        try {
+            const r = await fetch(BASE + '/GetUserEmailJson?id=' + encodeURIComponent(btn.getAttribute('data-email-id')), { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+            const d = await r.json().catch(() => null);
+            if (!r.ok || !d) throw new Error((d && d.message) || 'Could not load the email.');
+            const m = d.email || {};
+            el('emailModalTitle').textContent = m.subject || 'Email';
+            el('emailModalMeta').textContent = [when(m.createdUtc), 'To ' + (m.toAddress || ''), m.application, m.status].filter(Boolean).join(' · ');
+            // sandbox="" : the stored HTML is shown with scripts, forms and navigation disabled.
+            frame.srcdoc = d.bodyHtml || '<p style="font-family:Segoe UI,Arial;padding:16px;color:#64748b">No message body was stored (the email was not built).' + (m.errorMessage ? '<br><br>' + esc(m.errorMessage) : '') + '</p>';
+        } catch (ex) {
+            err.textContent = ex.message;
+            err.classList.remove('d-none');
+            frame.srcdoc = '';
+        }
     });
 });
 </script>

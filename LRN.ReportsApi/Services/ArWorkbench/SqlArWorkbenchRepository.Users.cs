@@ -238,9 +238,11 @@ SELECT 1;";
         ArWorkbenchSaveResult.Invalid("Clinic / Provider access needs dbo.ARWB_UserScope in LRNMaster. Run LRN.ReportsApi/Sql/ArWorkbench/LRNMaster_01_ARWB_Roles_Access.sql.");
 
     public async Task<(ArWorkbenchSaveResult Result, int? LabUserId)> CreateWorkbenchUserAsync(
-        string userName, string passwordHash, string email, int roleId, IReadOnlyList<int> labIds, ArWorkbenchUserProfile profile,
+        string userName, string? passwordHash, string email, int roleId, IReadOnlyList<int> labIds, ArWorkbenchUserProfile profile,
         IReadOnlyCollection<int> manageableLabIds, string createdBy, CancellationToken ct)
     {
+        // passwordHash is null for an invited user: LRN Metrics refuses a blank hash at sign-in, so the
+        // account cannot be used until the user sets a password from the invitation link.
         await using var master = new SqlConnection(_masterConnectionString);
         await master.OpenAsync(ct);
         await using var tx = (SqlTransaction)await master.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
@@ -269,7 +271,7 @@ SELECT l.LabId, @Id FROM dbo.Labs l WHERE l.LabId IN ({labParams});
 
 SELECT @Id;";
         cmd.Parameters.Add("@UserName", SqlDbType.NVarChar, 256).Value = userName;
-        cmd.Parameters.Add("@PasswordHash", SqlDbType.NVarChar, 512).Value = passwordHash;
+        cmd.Parameters.Add("@PasswordHash", SqlDbType.NVarChar, 512).Value = (object?)passwordHash ?? DBNull.Value;
         cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 256).Value = email;
         cmd.Parameters.Add("@RoleId", SqlDbType.Int).Value = roleId;
         cmd.Parameters.Add("@RolePrefix", SqlDbType.NVarChar, 100).Value = ArWorkbenchFeatures.RolePrefix;

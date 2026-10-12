@@ -102,7 +102,8 @@ public sealed class SqlDenialMapperRepository : IDenialMapperRepository
 
     public async Task<PagedResult<DenialMapperRecord>> SuperMasterAsync(string? search,string? classification,int page,int pageSize,CancellationToken ct,string? sortBy=null,bool sortDesc=false)
     {
-        var order=SuperMasterSortColumns.TryGetValue(sortBy??string.Empty,out var sortCol)?$"{sortCol} {(sortDesc?"DESC":"ASC")}, DenialCode":"DenialCode";
+        // Id breaks ties so paging is stable; it is never the sort column, so ORDER BY never lists a column twice (SQL error 169).
+        var order=SuperMasterSortColumns.TryGetValue(sortBy??string.Empty,out var sortCol)?$"{sortCol} {(sortDesc?"DESC":"ASC")}, Id":"DenialCode, Id";
         page=Math.Max(1,page); pageSize=Math.Clamp(pageSize,10,1000); var result=new PagedResult<DenialMapperRecord>{Page=page,PageSize=pageSize};
         const string where="IsActive=1 AND (@Search IS NULL OR DenialCode LIKE @Search ESCAPE '\\' OR DenialDescription LIKE @Search ESCAPE '\\') AND (@Class IS NULL OR UPPER(LTRIM(RTRIM(DenialClassification)))=UPPER(LTRIM(RTRIM(@Class))))";
         await using var c=Open(); await c.OpenAsync(ct);

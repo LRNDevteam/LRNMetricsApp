@@ -20,6 +20,7 @@ public class AccountController : Controller
     private readonly ILogger<AccountController> _logger;
     private readonly IConfiguration _configuration;
     private readonly IMemoryCache _cache;
+    private readonly IUserInvitationRepository _invitations;
 
     public AccountController(
         IUserManagementRepository repo,
@@ -28,7 +29,8 @@ public class AccountController : Controller
         LabSettings labSettings,
         ILogger<AccountController> logger,
         IConfiguration configuration,
-        IMemoryCache cache)
+        IMemoryCache cache,
+        IUserInvitationRepository invitations)
     {
         _repo = repo;
         _hasher = hasher;
@@ -37,6 +39,69 @@ public class AccountController : Controller
         _logger = logger;
         _configuration = configuration;
         _cache = cache;
+        _invitations = invitations;
+    }
+
+    // ── First login: set a password from the invitation email ───────────────────────────
+    // The link carries ?token=; the email also carries a one-time password. Both must match an open
+    // dbo.UserInvitation row (see SqlUserInvitationRepository). Users invited from LRN Metrics Admin and
+    // from AR Workbench User Management both land here. Five wrong one-time passwords
+    // revoke the invitation and the administrator must resend it.
+
+    [HttpGet]
+    public async Task<IActionResult> SetPassword(string? token)
+    {
+        var invite = string.IsNullOrWhiteSpace(token) ? null : await _invitations.FindOpenAsync(token);
+        return View(new SetPasswordViewModel { Token = token ?? string.Empty, UserName = invite?.UserName, LinkValid = invite is not null });
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [EnableRateLimiting("login")]
+    public async Task<IActionResult> SetPassword(SetPasswordViewModel model)
+    {
+        var invite = await _invitations.FindOpenAsync(model.Token);
+        model.UserName = invite?.UserName;
+        model.LinkValid = invite is not null;
+        if (invite is null) return View(model);
+
+        var policyError = ValidateNewPassword(model.NewPassword);
+        if (string.IsNullOrWhiteSpace(model.OneTimePassword))
+            ModelState.AddModelError(nameof(model.OneTimePassword), "Enter the one-time password from your email.");
+        if (policyError is not null)
+            ModelState.AddModelError(nameof(model.NewPassword), policyError);
+        else if (!string.Equals(model.NewPassword, model.ConfirmPassword, StringComparison.Ordinal))
+            ModelState.AddModelError(nameof(model.ConfirmPassword), "The passwords do not match.");
+        if (!ModelState.IsValid) return View(model);
+
+        var outcome = await _invitations.CompleteAsync(model.Token, model.OneTimePassword, _hasher.Hash(model.NewPassword), _hasher);
+        switch (outcome)
+        {
+            case SetPasswordOutcome.Ok:
+                _logger.LogInformation("First-login password set for {UserName} (LabUserID {Id}).", invite.UserName, invite.LabUserId);
+                TempData["LoginInfo"] = $"Your password has been created. Sign in as {invite.UserName} with your new password.";
+                return RedirectToAction(nameof(Login));
+            case SetPasswordOutcome.WrongOtp:
+                ModelState.AddModelError(nameof(model.OneTimePassword), "The one-time password is incorrect. Check the email and try again.");
+                return View(model);
+            case SetPasswordOutcome.TooManyAttempts:
+                _logger.LogWarning("Invitation for {UserName} revoked after too many wrong one-time passwords.", invite.UserName);
+                model.LinkValid = false;
+                model.Message = "Too many incorrect one-time passwords. This link no longer works; ask your administrator to resend the invitation.";
+                return View(model);
+            default:
+                model.LinkValid = false;
+                return View(model);
+        }
+    }
+
+    // Same rule as LRN.ReportsApi ArWorkbenchUserRules.ValidatePassword.
+    private static string? ValidateNewPassword(string? password)
+    {
+        if (string.IsNullOrEmpty(password)) return "Enter a new password.";
+        if (password.Length < 8 || password.Length > 128) return "Password must be 8 to 128 characters.";
+        if (!password.Any(char.IsLetter) || !password.Any(char.IsDigit)) return "Password must contain at least one letter and one number.";
+        return null;
     }
 
     [HttpGet]
@@ -345,4 +410,21 @@ public sealed class LoginViewModel
     public string Password { get; set; } = string.Empty;
 
     public bool RememberMe { get; set; }
+}
+
+public sealed class SetPasswordViewModel
+{
+    public string Token { get; set; } = string.Empty;
+    public string OneTimePassword { get; set; } = string.Empty;
+
+    [System.ComponentModel.DataAnnotations.DataType(System.ComponentModel.DataAnnotations.DataType.Password)]
+    public string NewPassword { get; set; } = string.Empty;
+
+    [System.ComponentModel.DataAnnotations.DataType(System.ComponentModel.DataAnnotations.DataType.Password)]
+    public string ConfirmPassword { get; set; } = string.Empty;
+
+    // Display only; never bound from the form.
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever] public string? UserName { get; set; }
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever] public bool LinkValid { get; set; }
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever] public string? Message { get; set; }
 }

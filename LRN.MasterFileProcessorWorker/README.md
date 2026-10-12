@@ -97,6 +97,7 @@ entry:
 | 23 NorthWest | `NWLConnection` | `NWL_LRN` |
 | 24 Augustus Labs | `AugustusConnStr` | `Augustus_LRN` |
 | 26 Analyze Pathology | `AnalyzePathologyConnStr` | `AnalyzePathology_LRN` (tables: `sql/AnalyzePathology/`) |
+| 27 WellHealth | `WellHealthConnStr` | `WellHealth_LRN` |
 
 A lab may instead carry a literal `LabDbConnectionString`, which takes precedence - use that only
 for a throwaway local override, never in a committed file.

@@ -80,6 +80,12 @@ export const arWorkbenchService = {
   createUser: (labId, body) => api(`users${qs({ labId })}`, json('POST', body)),
   userScopeOptions: (labId, targetLabId, level) => api(`users/scope-options${qs({ labId, targetLabId, level })}`),
   updateUser: (labId, id, body) => api(`users/${id}${qs({ labId })}`, json('PUT', body)),
+  resendInvite: (labId, id) => api(`users/${id}/invite${qs({ labId })}`, { method: 'POST' }),
+  setUserActive: (labId, id, isActive) => api(`users/${id}/active${qs({ labId })}`, json('POST', { isActive })),
+  deleteUser: (labId, id) => api(`users/${id}${qs({ labId })}`, { method: 'DELETE' }),
+  // Sent emails (shared LRN Metrics / AR Workbench log), most recent first unless oldestFirst
+  userEmails: (labId, query, signal) => api(`users/emails${qs({ labId, ...query })}`, { signal }),
+  userEmail: (labId, emailLogId) => api(`users/emails/${emailLogId}${qs({ labId })}`),
 
   // Saved Views (each user's own, per screen)
   savedViews: (labId, viewKey) => api(`saved-views${qs({ labId, viewKey })}`),

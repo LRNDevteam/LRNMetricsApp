@@ -1,106 +1,55 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import Icon from '../components/Icon';
 import Modal from '../components/Modal';
 import { Badge, ErrorBox, Loading, Notice } from '../components/Status';
+import UserEmailsPanel from '../components/UserEmailsPanel';
+import { LabPicker, ScopePicker, scopesBody } from '../components/UserFormParts';
 import useTableSort from '../components/useTableSort';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
+import { fmt } from '../utils/format';
 
 // The mockup's User Management (App.views.users), on the real LRNMaster user tables. A Super Admin
 // manages every lab; an AR Workbench System Administrator (or Lab Admin) manages the labs assigned
-// to them. A user is created with a username, password, email, one AR Workbench role and one or
-// more labs, and signs in with those LRN Metrics credentials. The API enforces every rule; rows the
-// caller may not change come back read-only with the reason.
+// to them. Add User is its own page (UserCreatePage): no password is set by the admin - the user is
+// emailed a one-time password and a link to create their own. The API enforces every rule; rows
+// the caller may not change come back read-only with the reason.
 
-function LabPicker({ labs, selected, onChange }) {
-  const [term, setTerm] = useState('');
-  const sel = new Set(selected);
-  const shown = labs.filter((l) => l.labName.toLowerCase().includes(term.trim().toLowerCase()));
-  const toggle = (id) => onChange(sel.has(id) ? selected.filter((x) => x !== id) : [...selected, id]);
-  const allShown = shown.length > 0 && shown.every((l) => sel.has(l.labId));
-  const toggleAll = () => onChange(allShown
-    ? selected.filter((id) => !shown.some((l) => l.labId === id))
-    : [...new Set([...selected, ...shown.map((l) => l.labId)])]);
-
-  return (
-    <div className="arwb-check-list">
-      {labs.length > 8 && (
-        <input type="search" className="arwb-input" placeholder="Find a lab…" value={term} onChange={(e) => setTerm(e.target.value)} aria-label="Find a lab" />
-      )}
-      <label className="arwb-check-item arwb-check-all">
-        <input type="checkbox" checked={allShown} onChange={toggleAll} /> {term ? 'All matching' : 'All labs'}
-      </label>
-      <div className="arwb-check-items">
-        {shown.map((l) => (
-          <label key={l.labId} className="arwb-check-item">
-            <input type="checkbox" checked={sel.has(l.labId)} onChange={() => toggle(l.labId)} /> {l.labName}
-          </label>
-        ))}
-        {shown.length === 0 && <span className="arwb-hint">No lab matches.</span>}
-      </div>
-      <small className="arwb-hint">{selected.length} selected</small>
-    </div>
-  );
-}
-
-function UserModal({ data, user, onClose, onSaved }) {
+function EditUserModal({ data, user, onClose, onSaved }) {
   const { labId } = useWorkbench();
-  const isNew = !user;
-  const currentRole = user?.roles?.find((r) => data.roles.some((x) => x.roleId === r.roleId))?.roleId;
+  const currentRole = user.roles?.find((r) => data.roles.some((x) => x.roleId === r.roleId))?.roleId;
   const [form, setForm] = useState(() => ({
-    userName: user?.userName || '',
-    email: user?.email || '',
-    password: '',
+    email: user.email || '',
     roleId: currentRole || '',
-    labIds: user ? user.labs.map((l) => l.labId) : (data.labs.length === 1 ? [data.labs[0].labId] : []),
-    isActive: user ? user.isActive : true,
-    managerUserId: user?.managerUserId || '',
-    teamName: user?.teamName || '',
+    labIds: user.labs.map((l) => l.labId),
+    isActive: user.isActive,
+    managerUserId: user.managerUserId || '',
+    teamName: user.teamName || '',
     // { [labId]: clinic or provider } for a Clinic / Provider Viewer
-    scopes: Object.fromEntries((user?.scopes || []).map((s) => [s.labId, s.clinicName || s.providerName || '']))
+    scopes: Object.fromEntries((user.scopes || []).map((s) => [s.labId, s.clinicName || s.providerName || '']))
   }));
-  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-  // T054 cascading access picker: a Clinic / Provider Viewer picks, per selected lab, a value from that lab's claims.
   const roleScope = data.roles.find((r) => String(r.roleId) === String(form.roleId))?.scope || null;
-  const [scopeChoices, setScopeChoices] = useState({});   // `${level}|${labId}` -> string[] | { error }
-  useEffect(() => {
-    if (!roleScope) return;
-    form.labIds.forEach((id) => {
-      const key = `${roleScope}|${id}`;
-      if (scopeChoices[key]) return;
-      setScopeChoices((c) => ({ ...c, [key]: { loading: true } }));
-      arWorkbenchService.userScopeOptions(labId, id, roleScope)
-        .then((list) => setScopeChoices((c) => ({ ...c, [key]: list })))
-        .catch((e) => setScopeChoices((c) => ({ ...c, [key]: { error: e.message } })));
-    });
-  }, [roleScope, form.labIds]); // eslint-disable-line react-hooks/exhaustive-deps
-  const managers = data.managers.filter((m) => !user || m.labUserId !== user.labUserId);
+  const managers = data.managers.filter((m) => m.labUserId !== user.labUserId);
 
   async function save() {
-    if (isNew && !form.userName.trim()) { setError('Enter a username.'); return; }
     if (!form.email.trim()) { setError('Enter an email address.'); return; }
-    if (isNew && !form.password) { setError('Enter a password.'); return; }
     if (!form.roleId) { setError('Choose a role.'); return; }
     if (form.labIds.length === 0) { setError('Choose at least one lab.'); return; }
     if (roleScope && form.labIds.some((id) => !form.scopes[id])) { setError(`Choose the ${roleScope === 'clinic' ? 'clinic' : 'referring provider'} for every selected lab.`); return; }
     setBusy(true);
     setError('');
     try {
-      const scopes = roleScope
-        ? form.labIds.map((id) => (roleScope === 'clinic' ? { labId: id, clinicName: form.scopes[id] } : { labId: id, providerName: form.scopes[id] }))
-        : [];
-      const body = {
-        email: form.email.trim(), roleId: Number(form.roleId), labIds: form.labIds,
-        managerUserId: form.managerUserId ? Number(form.managerUserId) : null, teamName: form.teamName.trim() || null, scopes
-      };
-      const result = isNew
-        ? await arWorkbenchService.createUser(labId, { ...body, userName: form.userName.trim(), password: form.password })
-        : await arWorkbenchService.updateUser(labId, user.labUserId, { ...body, isActive: form.isActive, password: form.password || null });
-      onSaved(result?.message || 'Saved.');
+      const result = await arWorkbenchService.updateUser(labId, user.labUserId, {
+        email: form.email.trim(), roleId: Number(form.roleId), labIds: form.labIds, isActive: form.isActive,
+        managerUserId: form.managerUserId ? Number(form.managerUserId) : null, teamName: form.teamName.trim() || null,
+        scopes: scopesBody(roleScope, form.labIds, form.scopes)
+      });
+      onSaved({ kind: 'good', text: result?.message || 'Saved.' });
     } catch (e) {
       setError(e.message);
       setBusy(false);
@@ -108,29 +57,18 @@ function UserModal({ data, user, onClose, onSaved }) {
   }
 
   return (
-    <Modal title={isNew ? 'Add User' : `Edit ${user.userName}`} wide busy={busy} onClose={onClose} onSubmit={save}
-      submitLabel={isNew ? 'Create User' : 'Save Changes'}
-      subtitle={isNew ? 'The user signs in to LRN Metrics and the AR Workbench with this username and password.' : null}>
+    <Modal title={`Edit ${user.userName}`} wide busy={busy} onClose={onClose} onSubmit={save} submitLabel="Save Changes"
+      subtitle="Passwords are never set here. Use Send password link on the user list to let the user choose a new one.">
       <ErrorBox message={error} />
       <div className="arwb-form-grid">
         <div className="arwb-field">
           <label htmlFor="u-name">Username</label>
-          <input id="u-name" className="arwb-input" maxLength={100} autoComplete="off" value={form.userName} readOnly={!isNew}
-            onChange={(e) => set('userName', e.target.value)} />
+          <input id="u-name" className="arwb-input" value={user.userName} readOnly />
         </div>
         <div className="arwb-field">
           <label htmlFor="u-email">Email</label>
           <input id="u-email" type="email" className="arwb-input" maxLength={256} autoComplete="off" value={form.email}
             onChange={(e) => set('email', e.target.value)} />
-        </div>
-        <div className="arwb-field">
-          <label htmlFor="u-password">{isNew ? 'Password' : 'New password (leave blank to keep)'}</label>
-          <div className="arwb-input-row">
-            <input id="u-password" type={showPassword ? 'text' : 'password'} className="arwb-input" maxLength={128} autoComplete="new-password"
-              value={form.password} onChange={(e) => set('password', e.target.value)} />
-            <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-ghost" onClick={() => setShowPassword((v) => !v)}>{showPassword ? 'Hide' : 'Show'}</button>
-          </div>
-          <small className="arwb-hint">At least 8 characters, with a letter and a number.</small>
         </div>
         <div className="arwb-field">
           <label htmlFor="u-role">Role</label>
@@ -151,61 +89,103 @@ function UserModal({ data, user, onClose, onSaved }) {
           <input id="u-team" className="arwb-input" list="u-team-list" maxLength={100} value={form.teamName} onChange={(e) => set('teamName', e.target.value)} />
           <datalist id="u-team-list">{data.teams.map((t) => <option key={t} value={t} />)}</datalist>
         </div>
-        {!isNew && (
-          <div className="arwb-checkbox-row">
-            <input id="u-active" type="checkbox" checked={form.isActive} onChange={(e) => set('isActive', e.target.checked)} />
-            <label htmlFor="u-active">Active (can sign in)</label>
-          </div>
-        )}
+        <div className="arwb-checkbox-row">
+          <input id="u-active" type="checkbox" checked={form.isActive} onChange={(e) => set('isActive', e.target.checked)} />
+          <label htmlFor="u-active">Active (can sign in)</label>
+        </div>
       </div>
       <div className="arwb-field" style={{ marginTop: 12 }}>
         <span className="arwb-field-label">Labs</span>
         <LabPicker labs={data.labs} selected={form.labIds} onChange={(v) => set('labIds', v)} />
-        {!isNew && user.otherLabCount > 0 && (
+        {user.otherLabCount > 0 && (
           <small className="arwb-hint">Also has {user.otherLabCount} lab{user.otherLabCount === 1 ? '' : 's'} outside yours; those stay as they are.</small>
         )}
       </div>
       {roleScope && form.labIds.length > 0 && (
-        <div className="arwb-field" style={{ marginTop: 12 }}>
-          <span className="arwb-field-label">Access — {roleScope === 'clinic' ? 'Clinic' : 'Referring Provider'} per lab</span>
-          <small className="arwb-hint">This user sees only the claims of the {roleScope === 'clinic' ? 'clinic' : 'referring provider'} chosen for each lab (drawn from that lab&rsquo;s claims).</small>
-          <div className="arwb-scope-grid">
-            {form.labIds.map((id) => {
-              const lab = data.labs.find((l) => l.labId === id);
-              const choices = scopeChoices[`${roleScope}|${id}`];
-              const list = Array.isArray(choices) ? choices : [];
-              const current = form.scopes[id] || '';
-              return (
-                <div key={id} className="arwb-field">
-                  <label htmlFor={`u-scope-${id}`}>{lab?.labName || `Lab ${id}`}</label>
-                  {choices?.error
-                    ? <small className="text-critical">{choices.error}</small>
-                    : (
-                      <select id={`u-scope-${id}`} className="arwb-select" value={current} disabled={!Array.isArray(choices)}
-                        onChange={(e) => set('scopes', { ...form.scopes, [id]: e.target.value })}>
-                        <option value="">{Array.isArray(choices) ? `Choose a ${roleScope === 'clinic' ? 'clinic' : 'provider'}…` : 'Loading…'}</option>
-                        {current && !list.includes(current) && <option value={current}>{current}</option>}
-                        {list.map((v) => <option key={v} value={v}>{v}</option>)}
-                      </select>
-                    )}
-                </div>
-              );
-            })}
-          </div>
+        <div style={{ marginTop: 12 }}>
+          <ScopePicker labId={labId} roleScope={roleScope} labs={data.labs} labIds={form.labIds} scopes={form.scopes} onChange={(v) => set('scopes', v)} />
         </div>
       )}
     </Modal>
   );
 }
 
+// Confirmation for the row actions that change access: deactivate, activate, delete, (re)send invitation.
+const ACTIONS = {
+  invite: { title: 'Send invitation', label: 'Send Email', cls: 'arwb-btn-primary' },
+  deactivate: { title: 'Deactivate user', label: 'Deactivate', cls: 'arwb-btn-danger' },
+  activate: { title: 'Activate user', label: 'Activate', cls: 'arwb-btn-primary' },
+  delete: { title: 'Delete user', label: 'Delete Permanently', cls: 'arwb-btn-danger' }
+};
+
+function ConfirmActionModal({ action, user, onClose, onDone }) {
+  const { labId } = useWorkbench();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const meta = ACTIONS[action];
+
+  async function run() {
+    setBusy(true);
+    setError('');
+    try {
+      const result = action === 'invite' ? await arWorkbenchService.resendInvite(labId, user.labUserId)
+        : action === 'delete' ? await arWorkbenchService.deleteUser(labId, user.labUserId)
+          : await arWorkbenchService.setUserActive(labId, user.labUserId, action === 'activate');
+      onDone({ kind: 'good', text: result?.message || 'Done.' });
+    } catch (e) {
+      setError(e.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title={`${meta.title} — ${user.userName}`} busy={busy} busyLabel="Working…" onClose={onClose} onSubmit={run}
+      submitLabel={meta.label} submitClass={meta.cls}>
+      <ErrorBox message={error} />
+      {action === 'invite' && (
+        <p>A new email with a one-time password and a single-use link will be sent to <b>{user.email || '(no email)'}</b>.
+          {' '}Any earlier invitation link stops working. {user.invite?.hasPassword && 'The current password keeps working until the user sets a new one.'}</p>
+      )}
+      {action === 'deactivate' && (
+        <p><b>{user.userName}</b> will no longer be able to sign in to LRN Metrics or the AR Workbench, and any open invitation link is cancelled.
+          {' '}Their roles, labs and history are kept, so you can activate the account again later.</p>
+      )}
+      {action === 'activate' && <p><b>{user.userName}</b> will be able to sign in again with their existing password.</p>}
+      {action === 'delete' && (
+        <>
+          <p>This permanently removes <b>{user.userName}</b>, their roles, labs, clinic / provider access and invitations. It cannot be undone.</p>
+          <p className="arwb-hint">Claims still assigned to this username keep the name. Users who report to them lose their manager.
+            {' '}If the account has history elsewhere, the delete is refused — deactivate it instead.</p>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+function InviteBadge({ invite }) {
+  if (!invite || invite.hasPassword) return null;
+  if (invite.lastEmailStatus === 'Failed') return <Badge className="arwb-badge-critical" title="The last invitation email could not be sent">Invite failed</Badge>;
+  if (invite.lastEmailStatus === 'Sent') return <Badge className="arwb-badge-info" title={invite.lastEmailUtc ? `Sent ${fmt.date(invite.lastEmailUtc)}` : ''}>Invite sent</Badge>;
+  return <Badge className="arwb-badge-warning" title="No password set and no invitation sent">No password</Badge>;
+}
+
 export default function UsersPage() {
   const { labId } = useWorkbench();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState(null);
-  const [editing, setEditing] = useState(null);   // null | 'new' | user
+  const [notice, setNotice] = useState(location.state?.notice || null);
+  const [editing, setEditing] = useState(null);   // user
+  const [confirm, setConfirm] = useState(null);   // { action, user }
   const [term, setTerm] = useState('');
   const [showInactive, setShowInactive] = useState(false);
+  const [tab, setTab] = useState('users');   // users | emails
+
+  // The Add User page hands its result back in history state; drop it so a refresh does not repeat it.
+  useEffect(() => {
+    if (location.state?.notice) navigate(location.pathname, { replace: true, state: null });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(() => {
     setError('');
@@ -218,7 +198,8 @@ export default function UsersPage() {
     const q = term.trim().toLowerCase();
     return (data?.users || []).filter((u) => (showInactive || u.isActive)
       && (!q || u.userName.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q)
-        || u.roles.some((r) => r.label.toLowerCase().includes(q)) || u.labs.some((l) => l.labName.toLowerCase().includes(q))));
+        || u.roles.some((r) => r.label.toLowerCase().includes(q)) || u.labs.some((l) => l.labName.toLowerCase().includes(q))
+        || (u.scopes || []).some((s) => (s.clinicName || s.providerName || '').toLowerCase().includes(q))));
   }, [data, term, showInactive]);
   const { rows: sortedRows, th } = useTableSort(rows, {
     user: (u) => u.userName, email: (u) => u.email, role: (u) => u.roles.map((r) => r.label).join(', '), labs: (u) => u.labs.map((l) => l.labName).join(', '),
@@ -227,24 +208,39 @@ export default function UsersPage() {
 
   if (!data && !error) return <Loading text="Loading users…" />;
 
+  const done = (n) => { setEditing(null); setConfirm(null); setNotice(n); load(); };
+
   return (
     <>
       <Notice notice={notice} onClose={() => setNotice(null)} />
       <ErrorBox message={error} onRetry={load} />
 
       {data && (
+        <div className="arwb-tabs" role="tablist" style={{ padding: 0 }}>
+          <button type="button" role="tab" aria-selected={tab === 'users'} className={`arwb-tab-btn${tab === 'users' ? ' active' : ''}`} onClick={() => setTab('users')}>
+            Users
+          </button>
+          <button type="button" role="tab" aria-selected={tab === 'emails'} className={`arwb-tab-btn${tab === 'emails' ? ' active' : ''}`} onClick={() => setTab('emails')}>
+            Sent Emails
+          </button>
+        </div>
+      )}
+
+      {data && tab === 'emails' && <UserEmailsPanel roles={data.roles} />}
+
+      {data && tab === 'users' && (
         <div className="arwb-card arwb-card-flush">
           <div className="arwb-card-head">
             <h3>Users</h3>
             <span className="arwb-card-sub">{rows.length} of {data.users.length}</span>
             <div className="arwb-card-head-actions">
-              <input type="search" className="arwb-input" style={{ width: 220 }} placeholder="Find user, email, role, lab…" value={term}
+              <input type="search" className="arwb-input" style={{ width: 240 }} placeholder="Find user, email, role, lab, clinic…" value={term}
                 onChange={(e) => setTerm(e.target.value)} aria-label="Find a user" />
               <label className="arwb-checkbox-row" style={{ margin: 0 }}>
                 <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> Show inactive
               </label>
               <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" disabled={!data.labs.length || !data.roles.length}
-                onClick={() => setEditing('new')}>
+                onClick={() => navigate('/users/new')}>
                 <Icon name="plus" size={15} /> Add User
               </button>
             </div>
@@ -253,7 +249,7 @@ export default function UsersPage() {
             <table className="arwb-data-table">
               <thead>
                 <tr>
-                  {th('user', 'Username')}{th('email', 'Email')}{th('role', 'Role')}{th('labs', 'Labs')}{th('manager', 'Manager / Team')}
+                  {th('user', 'Username')}{th('email', 'Email')}{th('role', 'Role / Access')}{th('labs', 'Labs')}{th('manager', 'Manager / Team')}
                   {th('status', 'Status')}{th('createdBy', 'Created By')}<th />
                 </tr>
               </thead>
@@ -263,7 +259,14 @@ export default function UsersPage() {
                     <td className="mono">{u.userName}</td>
                     <td>{u.email || '—'}</td>
                     <td>{u.roles.map((r) => r.label).join(', ') || '—'}{u.isSiteAdmin && <> <Badge className="arwb-badge-purple">Site admin</Badge></>}
-                      {u.scopes?.length > 0 && <div className="arwb-hint">{u.scopes.map((s) => s.clinicName || s.providerName).join(', ')}</div>}</td>
+                      {u.scopes?.length > 0 && (
+                        <div className="arwb-hint">
+                          {u.scopes.map((s) => {
+                            const lab = data.labs.find((l) => l.labId === s.labId)?.labName;
+                            return `${lab ? `${lab}: ` : ''}${s.clinicName || s.providerName}`;
+                          }).join(' · ')}
+                        </div>
+                      )}</td>
                     <td>
                       <div className="arwb-chip-row">
                         {u.labs.map((l) => <span key={l.labId} className="arwb-chip">{l.labName}</span>)}
@@ -271,11 +274,33 @@ export default function UsersPage() {
                       </div>
                     </td>
                     <td>{u.managerName || <span className="text-muted-ink">—</span>}{u.teamName && <div className="arwb-hint">{u.teamName}</div>}</td>
-                    <td>{u.isActive ? <Badge className="arwb-badge-good">Active</Badge> : <Badge className="arwb-badge-neutral">Inactive</Badge>}</td>
+                    <td>
+                      <div className="arwb-status-stack">
+                        {u.isActive ? <Badge className="arwb-badge-good">Active</Badge> : <Badge className="arwb-badge-neutral">Inactive</Badge>}
+                        {u.isActive && <InviteBadge invite={u.invite} />}
+                      </div>
+                    </td>
                     <td className="arwb-hint">{u.createdBy || '—'}</td>
                     <td className="num">
                       {u.canEdit
-                        ? <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => setEditing(u)}><Icon name="edit" size={14} /> Edit</button>
+                        ? (
+                          <div className="arwb-row-actions">
+                            <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => setEditing(u)}><Icon name="edit" size={14} /> Edit</button>
+                            {u.isActive && (
+                              <button type="button" className="arwb-btn arwb-btn-sm" disabled={!u.email} title={u.email ? '' : 'Add an email address first'}
+                                onClick={() => setConfirm({ action: 'invite', user: u })}>
+                                <Icon name="mail" size={14} /> {u.invite?.hasPassword ? 'Send password link' : 'Resend invitation'}
+                              </button>
+                            )}
+                            <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => setConfirm({ action: u.isActive ? 'deactivate' : 'activate', user: u })}>
+                              {u.isActive ? 'Deactivate' : 'Activate'}
+                            </button>
+                            <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-danger" onClick={() => setConfirm({ action: 'delete', user: u })}
+                              aria-label={`Delete ${u.userName}`}>
+                              <Icon name="trash" size={14} />
+                            </button>
+                          </div>
+                        )
                         : <span className="arwb-hint" title={u.readOnlyReason || ''}>Read-only</span>}
                     </td>
                   </tr>
@@ -287,19 +312,17 @@ export default function UsersPage() {
         </div>
       )}
 
-      {data && (
+      {data && tab === 'users' && (
         <div className="arwb-section-note" style={{ marginTop: 12 }}>
           {data.allLabs
             ? <>As a <b>Super Admin</b> you can create AR Workbench users for <b>every lab</b>.</>
             : <>You can create AR Workbench users for <b>your assigned labs</b> ({data.labs.map((l) => l.labName).join(', ') || 'none'}). Users who also have other labs or LRN Metrics roles are changed by a Super Admin.</>}
-          {' '}Clinic and Provider Viewers pick the clinic or referring provider per lab from that lab&rsquo;s claims. Manager and Team feed the team hierarchy used by AR reports.
+          {' '}New users get an email with a one-time password to create their own password. Clinic and Provider Viewers see only the claims of the clinic or referring provider chosen for each lab.
         </div>
       )}
 
-      {editing && (
-        <UserModal data={data} user={editing === 'new' ? null : editing} onClose={() => setEditing(null)}
-          onSaved={(message) => { setEditing(null); setNotice({ kind: 'good', text: message }); load(); }} />
-      )}
+      {editing && <EditUserModal data={data} user={editing} onClose={() => setEditing(null)} onSaved={done} />}
+      {confirm && <ConfirmActionModal action={confirm.action} user={confirm.user} onClose={() => setConfirm(null)} onDone={done} />}
     </>
   );
 }

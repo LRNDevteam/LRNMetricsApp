@@ -78,6 +78,9 @@ public sealed partial class SqlArWorkbenchRepository
         var pageSize = Math.Clamp(filter.PageSize, 5, 1000);
         var order = CipSortColumns.TryGetValue(filter.SortBy ?? string.Empty, out var col) ? col : "StatusOrder";
         var dir = filter.SortDesc ? "DESC" : "ASC";
+        // Tie-breakers for a stable page order, minus the sort column itself: SQL Server rejects a
+        // column listed twice in one ORDER BY (error 169) - e.g. sorting by requestedOn or caseNumber.
+        var tieBreak = string.Join("", new[] { "c.RequestedOn", "c.CipCaseId" }.Where(t => t != order).Select(t => ", " + t));
         cmd.Parameters.Add("@Offset", SqlDbType.Int).Value = (page - 1) * pageSize;
         cmd.Parameters.Add("@PageSize", SqlDbType.Int).Value = pageSize;
         var whereSql = string.Join(" AND ", where);
@@ -100,7 +103,7 @@ FROM (SELECT c0.*, StatusOrder = CASE c0.CaseStatus WHEN 'Client Responded' THEN
 INNER JOIN dbo.ARWB_Claim w ON w.ClaimKey = c.ClaimKey
 LEFT JOIN dbo.ARWB_ArQueue q ON q.QueueId = w.ArQueueId
 WHERE {whereSql} {scope}
-ORDER BY {order} {dir}, c.RequestedOn, c.CipCaseId
+ORDER BY {order} {dir}{tieBreak}
 OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
 
         var queue = new ArWorkbenchCipQueue { Rows = new ArWorkbenchPagedResult<ArWorkbenchCipCaseRow> { Page = page, PageSize = pageSize } };

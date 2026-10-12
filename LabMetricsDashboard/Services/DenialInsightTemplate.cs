@@ -128,6 +128,14 @@ public static class DenialInsightTemplate
         if (r.ClosedDate.HasValue) ws.Cell(row, ColClosedDate).Value = r.ClosedDate.Value;
         ws.Cell(row, ColStatus).Value = r.Status;
 
+        // Status carries the same colour as on the page (DenialInsightStatus).
+        if (DenialInsightStatus.Colours(r.Status) is { } statusColours)
+        {
+            var status = ws.Cell(row, ColStatus);
+            status.Style.Fill.SetBackgroundColor(XLColor.FromHtml(statusColours.Fill));
+            status.Style.Font.SetFontColor(XLColor.FromHtml(statusColours.Text)).Font.SetBold();
+        }
+
         ws.Cell(row, ColNoOfDenials).Style.NumberFormat.SetFormat(Whole);
         ws.Cell(row, ColInsuranceNoOfDenials).Style.NumberFormat.SetFormat(Whole);
         ws.Cell(row, ColTotalBalance).Style.NumberFormat.SetFormat(Money);

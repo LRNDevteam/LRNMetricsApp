@@ -26,6 +26,25 @@ public sealed class ArWorkbenchManagedUser
     /// <summary>Why the caller cannot edit this user, when CanEdit is false.</summary>
     public string? ReadOnlyReason { get; set; }
     public string? CreatedBy { get; set; }
+    /// <summary>Invitation email / first-login state; null when the invitation tables are not installed.</summary>
+    public ArWorkbenchInviteStatus? Invite { get; set; }
+}
+
+/// <summary>Latest invitation email and whether the user has set a password yet.</summary>
+public sealed class ArWorkbenchInviteStatus
+{
+    /// <summary>Sent | Failed for the most recent email, null when none was sent.</summary>
+    public string? LastEmailStatus { get; set; }
+    public DateTime? LastEmailUtc { get; set; }
+    /// <summary>When the user completed the first-login password page.</summary>
+    public DateTime? AcceptedUtc { get; set; }
+    public bool HasPassword { get; set; }
+}
+
+/// <summary>POST users/{id}/active.</summary>
+public sealed class ArWorkbenchSetUserActiveRequest
+{
+    public bool IsActive { get; set; }
 }
 
 public sealed class ArWorkbenchRoleOption
@@ -73,7 +92,7 @@ public sealed class ArWorkbenchUserManagement
 public sealed class ArWorkbenchCreateUserRequest
 {
     public string? UserName { get; set; }
-    public string? Password { get; set; }
+    /// <summary>Email the invitation goes to. Several users may share one address.</summary>
     public string? Email { get; set; }
     public int? RoleId { get; set; }
     public List<int>? LabIds { get; set; }

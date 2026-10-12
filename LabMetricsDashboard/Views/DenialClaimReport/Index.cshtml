@@ -619,7 +619,13 @@
                 var resetRow = function (tr) {
                     tr.querySelectorAll('.cell-edit input:not([type="hidden"]), .cell-edit textarea').forEach(function (el) {
                         el.value = el.defaultValue;
-                        if (el.classList.contains('cat-input')) el.dispatchEvent(new Event('input'));
+                    });
+                    // Dropdowns go back to the option the server rendered as selected.
+                    tr.querySelectorAll('.cell-edit select').forEach(function (sel) {
+                        Array.prototype.forEach.call(sel.options, function (o) { o.selected = o.defaultSelected; });
+                    });
+                    tr.querySelectorAll('.cat-input, .status-input').forEach(function (el) {
+                        el.dispatchEvent(new Event('input'));
                     });
                     tr.querySelectorAll('.rich-editor').forEach(function (editor) {
                         if (editor.dataset.original !== undefined) editor.innerHTML = editor.dataset.original;
@@ -638,7 +644,7 @@
                             editor.dataset.original = editor.innerHTML;
                         });
                         tr.classList.add('is-editing');
-                        var first = tr.querySelector('.cell-edit input:not([type="hidden"])');
+                        var first = tr.querySelector('.cell-edit input:not([type="hidden"]), .cell-edit textarea, .cell-edit select');
                         if (first) first.focus();
                     } else {
                         resetRow(tr);
@@ -694,6 +700,17 @@
                     var cell = input.closest('td');
                     allBands.forEach(function (b) { input.classList.remove(b); if (cell) cell.classList.remove(b); });
                     if (text.length) { input.classList.add(cls); if (cell) cell.classList.add(cls); }
+                });
+            });
+
+            // Same for Status: the dropdown takes the status colour (DenialInsightStatus) as it changes.
+            var statusBands = { 'yettodiscuss': 'status-yet', 'closed': 'status-closed', 'deferred': 'status-deferred' };
+            document.querySelectorAll('.status-input:not([data-bound])').forEach(function (sel) {
+                sel.dataset.bound = '1';
+                sel.addEventListener('input', function () {
+                    var key = (sel.value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                    ['status-yet', 'status-closed', 'status-deferred'].forEach(function (c) { sel.classList.remove(c); });
+                    if (statusBands[key]) sel.classList.add(statusBands[key]);
                 });
             });
 

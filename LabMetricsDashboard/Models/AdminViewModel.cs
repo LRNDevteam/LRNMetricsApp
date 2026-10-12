@@ -6,13 +6,9 @@ namespace LabMetricsDashboard.Models;
 
 public sealed class AdminViewModel
 {
+    // No password on create: the new user is emailed a one-time password and a link to set their own
+    // (LRN.ReportsApi /api/user-mail, shared with the AR Workbench).
     public LabUser NewUser { get; set; } = new LabUser();
-    [Required]
-    [MinLength(8)]
-    public string? NewUserPassword { get; set; }
-    [Required]
-    [Compare("NewUserPassword", ErrorMessage = "Passwords do not match")]
-    public string? NewUserConfirmPassword { get; set; }
 
     public Role NewRole { get; set; } = new Role();
 

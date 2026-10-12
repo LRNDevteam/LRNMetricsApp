@@ -557,6 +557,12 @@ builder.Services.AddScoped<ExecutiveSummaryExcelBuilder>();
 // User management repository (uses DefaultConnection from appsettings.json)
 builder.Services.AddScoped<IUserManagementRepository, SqlUserManagementRepository>();
 builder.Services.AddScoped<WorkflowJwtIssuer>();
+// First-login password page for users invited from AR Workbench User Management.
+builder.Services.AddScoped<IUserInvitationRepository, SqlUserInvitationRepository>();
+// Invitation email + sent-mail log, shared with the AR Workbench (LRN.ReportsApi /api/user-mail).
+builder.Services
+    .AddHttpClient<IUserMailApiClient, UserMailApiClient>()
+    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(60));
 // Password hasher
 builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();
 

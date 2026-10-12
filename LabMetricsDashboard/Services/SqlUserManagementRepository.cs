@@ -310,7 +310,8 @@ ORDER BY FullName, UserName;";
         await conn.OpenAsync();
         await using var cmd = new SqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("@UserName", user.UserName);
-        cmd.Parameters.AddWithValue("@PasswordHash", (object)user.PasswordHash ?? DBNull.Value);
+        // NULL for an invited user: they set the password from the invitation email (Account/SetPassword).
+        cmd.Parameters.AddWithValue("@PasswordHash", string.IsNullOrEmpty(user.PasswordHash) ? DBNull.Value : user.PasswordHash);
         cmd.Parameters.AddWithValue("@FirstName", (object)user.FirstName ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@LastName", (object)user.LastName ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@MiddleName", (object)user.MiddleName ?? DBNull.Value);
