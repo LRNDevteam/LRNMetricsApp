@@ -27,8 +27,15 @@
 }
 
 <div class="dcr-pr-caption">
-    Top @Model.TopPayerCount.ToString("N0") insurances by @Model.TopPayerRankBasis, each with its top denials
-    &middot; covering @Model.CoveragePercentage.ToString("0", CultureInfo.InvariantCulture)% of the AR
+    @if (Model.CoveragePercentage >= 100m)
+    {
+        @:All @Model.TopPayerCount.ToString("N0") insurances by @Model.TopPayerRankBasis, each with its top denials
+    }
+    else
+    {
+        @:Top @Model.TopPayerCount.ToString("N0") insurances by @Model.TopPayerRankBasis, each with its top denials
+        @:&middot; covering @Model.CoveragePercentage.ToString("0", CultureInfo.InvariantCulture)% of the AR
+    }
     &middot; click an insurance to open its denials
 </div>
 

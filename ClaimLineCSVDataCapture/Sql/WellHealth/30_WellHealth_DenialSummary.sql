@@ -10,12 +10,12 @@
                     claim's denied lines in LineLevelData
           Columns : every Denial Month up to the end of the newest ClaimLevelData
                     WeekFolder, a "yyyy | Total" column per year, Grand Total
-          Rows    : Top 10 insurances (PayerName_Raw, case / punctuation ignored)
+          Rows    : every insurance (PayerName_Raw, case / punctuation ignored)
                     by Total Insurance Balance, each drilled down to its Top 3
                     Denial Codes by Total Insurance Balance
           Values  : No. of Claims = COUNT(DISTINCT ClaimID),
                     Total Insurance Balance = SUM(TotalInsuranceBalance)
-          Totals  : every insurance in the shown months (not only the Top 10)
+          Totals  : every insurance in the shown months
      2. Weekly Summary - as Monthly, columns = the 4 Monday-Sunday weeks ending with
                          the week of the newest WeekFolder end date, no year columns
      Monthly / Weekly / tiles are computed at claim-file ingest into
@@ -66,9 +66,9 @@
      ClaimCount, TotalInsuranceBalance
      SortOrder    row position (P, its C rows, ..., T last)
      PeriodOrder  column position (months, year total per year, grand total last)
-     IndexLabel   'A'..'J' on P rows, 1..n down the table on C rows
+     IndexLabel   'A'..'Z', 'AA'.. on P rows, 1..n down the table on C rows
      RowLabel     insurance name / "code - description"
-     CoveragePct  share of the balance the Top 10 insurances hold (whole %)
+     CoveragePct  share of the balance the listed insurances hold (whole %; 100 = all)
    ============================================================================= */
 SET NOCOUNT ON;
 GO
@@ -313,7 +313,7 @@ BEGIN
         RETURN;
     END;
 
-    DECLARE @TopPayers INT = 10, @TopCodes INT = 3, @Weeks INT = 4;
+    DECLARE @TopPayers INT = 2147483647, @TopCodes INT = 3, @Weeks INT = 4;
 
     -- End date of the newest WeekFolder ("09.21.2026 - 09.27.2026" -> 2026-09-27).
     DECLARE @LoadedThrough DATE =
@@ -424,10 +424,11 @@ BEGIN
 
     DELETE FROM #cr WHERE CodeRank > @TopCodes;
 
-    /* Rows: insurance A..J, its codes numbered down the whole table, Grand Total last */
+    /* Rows: insurance A..Z, AA.., its codes numbered down the whole table, Grand Total last */
     SELECT 'P' AS RowType, p.PayerKey, CAST(N'' AS NVARCHAR(400)) AS DenialCode, p.PayerRank, 0 AS CodeRank,
            p.PayerRank * 10 AS RowSeq,
-           CAST(CHAR(64 + p.PayerRank) AS VARCHAR(10)) AS IndexLabel,
+           CASE WHEN p.PayerRank <= 26 THEN CAST(CHAR(64 + p.PayerRank) AS VARCHAR(10))
+                ELSE CAST(CHAR(64 + (p.PayerRank - 1) / 26) AS VARCHAR(10)) + CHAR(65 + (p.PayerRank - 1) % 26) END AS IndexLabel,
            CAST(p.PayerLabel AS NVARCHAR(4000)) AS RowLabel,
            p.PayerLabel
     INTO   #r
@@ -627,10 +628,13 @@ GO
 /* ---------------------------------------------------------------------------
    Read SP - Denial List
    RowType 'D' denial code, 'I' insurance under DenialCode, 'T' grand total.
+   A claim's Denial Code ("CO-96, CO-11") is split into individual codes and the
+   claim is counted under each of them, so 'D' / 'I' rows overlap; 'T' counts each
+   claim and balance once.
    @DenialCodeSearch : optional; the Denial List tab search box. Matches whole codes:
-                       a row's Denial Code is split on commas / spaces and is kept when
-                       every searched code equals one of its codes. Totals cover the
-                       matching rows.
+                       claims are kept when every searched code equals one of their
+                       codes, and only the searched codes are listed. Totals cover the
+                       matching claims.
    --------------------------------------------------------------------------- */
 CREATE OR ALTER PROCEDURE dbo.usp_GetWH_DenialList
     @PayerNames       NVARCHAR(MAX) = NULL,
@@ -674,26 +678,40 @@ BEGIN
                            FROM   STRING_SPLIT(REPLACE(@DenialCodeSearch, N',', N' '), N' ') s
                            WHERE  s.value <> N''
                              AND  NOT EXISTS (SELECT 1
-                                              FROM   STRING_SPLIT(REPLACE(d.DenialCode, N',', N' '), N' ') t
+                                              FROM   STRING_SPLIT(REPLACE(REPLACE(d.DenialCode, N';', N' '), N',', N' '), N' ') t
                                               WHERE  t.value = s.value)));
+
+    SELECT DISTINCT b.ClaimID, c.Code AS DenialCode, b.PayerName, b.Bal
+    INTO   #bc
+    FROM   #b b
+    CROSS  APPLY (SELECT UPPER(LTRIM(RTRIM(t.value))) AS Code
+                  FROM   STRING_SPLIT(REPLACE(REPLACE(b.DenialCode, N';', N' '), N',', N' '), N' ') t) c
+    WHERE  c.Code <> N''
+      AND  (@DenialCodeSearch IS NULL
+            OR c.Code IN (SELECT UPPER(LTRIM(RTRIM(s.value)))
+                          FROM   STRING_SPLIT(REPLACE(@DenialCodeSearch, N',', N' '), N' ') s));
 
     SELECT DenialCode,
            ROW_NUMBER() OVER (ORDER BY SUM(Bal) DESC, COUNT(DISTINCT ClaimID) DESC, DenialCode) AS CodeRank
     INTO   #dr
-    FROM   #b
+    FROM   #bc
     GROUP  BY DenialCode;
 
     ;WITH g AS
     (
-        SELECT CASE WHEN GROUPING(b.DenialCode) = 1 THEN 'T'
-                    WHEN GROUPING(b.PayerName)  = 1 THEN 'D'
-                    ELSE 'I' END                               AS RowType,
-               ISNULL(b.DenialCode, N'Grand Total')            AS DenialCode,
+        SELECT CASE WHEN GROUPING(b.PayerName) = 1 THEN 'D' ELSE 'I' END AS RowType,
+               b.DenialCode,
                ISNULL(b.PayerName, N'')                        AS PayerName,
                COUNT(DISTINCT b.ClaimID)                       AS ClaimCount,
                CAST(ISNULL(SUM(b.Bal), 0) AS DECIMAL(18,2))    AS TotalInsuranceBalance
+        FROM   #bc b
+        GROUP  BY GROUPING SETS ((b.DenialCode, b.PayerName), (b.DenialCode))
+        UNION  ALL
+        SELECT 'T', N'Grand Total', N'',
+               COUNT(DISTINCT b.ClaimID),
+               CAST(ISNULL(SUM(b.Bal), 0) AS DECIMAL(18,2))
         FROM   #b b
-        GROUP  BY GROUPING SETS ((b.DenialCode, b.PayerName), (b.DenialCode), ())
+        WHERE  EXISTS (SELECT 1 FROM #bc x WHERE x.ClaimID = b.ClaimID)
     ),
     ranked AS
     (
@@ -947,7 +965,7 @@ BEGIN
 END
 GO
 
-/* Rebuild snapshots so Monthly / Weekly / tiles pick up Total Insurance Balance > 0. */
+/* Rebuild snapshots so Monthly / Weekly / tiles / lists pick up the current logic. */
 EXEC dbo.usp_RefreshWH_DenialMonthly;
 EXEC dbo.usp_RefreshWH_DenialWeekly;
 EXEC dbo.usp_RefreshWH_DenialList;

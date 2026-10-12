@@ -68,7 +68,10 @@ public static class DenialSummarySpPivot
         model.GrandTotalClaimCount = grand?.ClaimCount ?? 0;
         model.GrandTotalBalance = grand?.TotalInsuranceBalance ?? 0m;
         model.CoveragePercentage = grand?.CoveragePct ?? 0m;
-        model.HeaderTitle = $"Top Payors & Denials | Covering {model.CoveragePercentage:0}% of the AR | Denial Posted Date";
+        model.TopPayerCount = listed.Count(r => r.RowType == "P");
+        model.HeaderTitle = model.CoveragePercentage >= 100m
+            ? "All Payors & Denials | Denial Posted Date"
+            : $"Top Payors & Denials | Covering {model.CoveragePercentage:0}% of the AR | Denial Posted Date";
 
         return model;
     }
