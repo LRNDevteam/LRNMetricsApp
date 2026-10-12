@@ -20,6 +20,7 @@ public static class LabProductionSummaryRepositoryMap
         ILogger<SqlLabProductionSummaryRepository> logger)
     {
         var analyzePathology = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.AnalyzePathology);
+        var wellHealth = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.WellHealth);
         return new Dictionary<string, ILabProductionSummaryRepository>(StringComparer.OrdinalIgnoreCase)
         {
             ["Certus"]           = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Certus),
@@ -29,6 +30,9 @@ public static class LabProductionSummaryRepositoryMap
             ["AnalyzePathology"] = analyzePathology,
             ["Analyze_Pathology"] = analyzePathology,
             ["Analyze Pathology"] = analyzePathology,
+            ["WellHealth"]       = wellHealth,
+            ["Well_Health"]      = wellHealth,
+            ["Well Health"]      = wellHealth,
             ["PCRLabsofAmerica"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PCRLabsofAmerica),
             ["Beech_Tree"]       = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.BeechTree),
             ["Rising_Tides"]     = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.RisingTides),

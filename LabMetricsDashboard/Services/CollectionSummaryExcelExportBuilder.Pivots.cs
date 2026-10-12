@@ -111,6 +111,38 @@ public static partial class CollectionSummaryExcelExportBuilder
             || labName.Contains("Cove", StringComparison.OrdinalIgnoreCase);
         var isInHealth = LabCollectionPrefix.IsInHealthDtr(labName);
 
+        if (LabCollectionPrefix.IsWellHealth(labName))
+        {
+            // WellHealth "Total Insurance Payment": rows in SP order (Total Payment DESC).
+            var wsWh = wb.AddWorksheet("Total Insurance Payment");
+            wsWh.TabColor = ExcelTheme.Collection.TabYellow;
+            ExcelTheme.ApplyDefaults(wsWh);
+            string[] whHeaders = ["Row Labels", "Count of ClaimID", "Sum of Total Payment", "Average of Payment %"];
+            int whRow = 1;
+            ExcelTheme.Collection.WriteTitleBar(wsWh, whRow, whHeaders.Length, $"Total Insurance Payment — {labName}");
+            whRow++;
+            ExcelTheme.WriteHeaderRow(wsWh, whRow, 1, whHeaders, ExcelTheme.Collection.HeaderBg);
+            whRow++;
+            foreach (var r in rows)
+            {
+                WriteCell(wsWh, whRow, 1, r.PayerName, XLColor.White, isText: true);
+                WriteCell(wsWh, whRow, 2, r.NoOfPaidClaims, XLColor.White);
+                WriteCell(wsWh, whRow, 3, r.InsurancePayment, XLColor.White, isCurrency: true);
+                WriteCell(wsWh, whRow, 4, r.PaymentPct, XLColor.White, isPct: true);
+                whRow++;
+            }
+            if (rows.Count > 0)
+            {
+                WriteCell(wsWh, whRow, 1, "Grand Total", ColTotal, isText: true, bold: true);
+                WriteCell(wsWh, whRow, 2, rows.Sum(r => r.NoOfPaidClaims), ColTotal, bold: true);
+                WriteCell(wsWh, whRow, 3, rows.Sum(r => r.InsurancePayment), ColTotal, isCurrency: true, bold: true);
+                WriteCell(wsWh, whRow, 4, rows[0].TotalPaymentPctFromSp ?? 0m, ColTotal, isPct: true, bold: true);
+            }
+            AutoFitColumns(wsWh);
+            wsWh.SheetView.FreezeRows(2);
+            return;
+        }
+
         if (isInHealth)
         {
             // InHealth DTR client report: Row Labels | Sum of Insurance Payment (payer totals).

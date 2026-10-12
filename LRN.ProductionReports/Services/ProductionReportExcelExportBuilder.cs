@@ -722,8 +722,10 @@ public static partial class ProductionReportExcelExportBuilder
 
         int row = 1;
         var pbTitle = IsAnalyzePathologyLab(vm)
-            ? "Payer Breakdown (Date of Service | Bill Status not Unbilled)"
-            : "Payer Breakdown (Charge Entered Date)";
+            ? "Payer Breakdown (First Billed Date in 2026 | Bill Status not Unbilled)"
+            : IsWellHealthLab(vm)
+                ? "Payer Breakdown (First Billed Date | First Billed Date not blank)"
+                : "Payer Breakdown (Charge Entered Date)";
         ExcelTheme.WriteTitleBar(ws, row, colCount, pbTitle, ExcelTheme.InsightsHeaderBg);
         row++;
 
@@ -1172,6 +1174,9 @@ public static partial class ProductionReportExcelExportBuilder
 
     private static bool IsAnalyzePathologyLab(ProductionReportViewModel vm) =>
         vm.SelectedLab.Replace("_", "").Contains("AnalyzePathology", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsWellHealthLab(ProductionReportViewModel vm) =>
+        vm.SelectedLab.Replace("_", "").Replace(" ", "").Contains("WellHealth", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>InHealth CPT Breakdown: one row per CPT code, no month/year columns.</summary>
     private static void BuildCptFlatSheet(XLWorkbook wb, ProductionReportViewModel vm)

@@ -2212,9 +2212,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private static string? ResolveConfiguredDateColumn(string logicSheet, string dateType)
 		=> (logicSheet, dateType) switch
 		{
-			("PhiLife", "Collected") or ("Beech Tree", "Collected") or ("Rising Tides", "Collected") or ("PCRLOA", "Collected") => "RequestCollectDate",
-			("PhiLife", "Received") or ("Beech Tree", "Received") or ("Rising Tides", "Received") or ("PCRLOA", "Received") => "ReqReceivedDate",
-			("PhiLife", "Resulted") or ("Beech Tree", "Resulted") or ("Rising Tides", "Resulted") => "ReqReportedDate",
+			("PhiLife", "Collected") or ("Beech Tree", "Collected") or ("Rising Tides", "Collected") or ("PCRLOA", "Collected") or ("WellHealth", "Collected") => "RequestCollectDate",
+			("PhiLife", "Received") or ("Beech Tree", "Received") or ("Rising Tides", "Received") or ("PCRLOA", "Received") or ("WellHealth", "Received") => "ReqReceivedDate",
+			("PhiLife", "Resulted") or ("Beech Tree", "Resulted") or ("Rising Tides", "Resulted") or ("WellHealth", "Resulted") => "ReqReportedDate",
 			("PCRLOA", "Resulted") => "ReqResultedDate",
 			("Cove", "Collected") or ("Elixir", "Collected") => "DateOfCollection",
 			("Cove", "Received") or ("Elixir", "Received") => "ReceivedDate",
@@ -2257,6 +2257,12 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			"PCRLOA" => new FilterColumnProfile(
 				ExpressionForColumn(FirstExisting(columns, "PanelCategory")),
 				null, null, null, null),
+			// Must match the dimensions stored by dbo.usp_RefreshWH_LISSummary.
+			"WellHealth" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "TestCategory")),
+				ExpressionForColumn(FirstExisting(columns, "ClinicName")),
+				ExpressionForColumn(FirstExisting(columns, "DoctorFullName")),
+				null, null),
 			"Cove" => new FilterColumnProfile(
 				ExpressionForColumn(FirstExisting(columns, "PanelType", "PanelName")),
 				ExpressionForColumn(FirstExisting(columns, "FacilityName", "Facility")),
@@ -3730,6 +3736,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				// Analyze Pathology follows VariantX until its own LIS logic arrives: NewStatus / BillCategory /
 				// SubStatus fill Cove's Final Status / Billed-Not / Sub Status ("Unbilled" matches "Not Billed").
 				26 => "Cove",
+				27 => "WellHealth",
 				// LRNLabDemo: its LIMSMaster is Cove's (RunIds read R...COV..., and Cove's DateOfCollection /
 				// NewStatus shape - PCRLOA's RequestCollectDate is absent), so it reports on Cove's sheet.
 				// Unmapped, it fell to "Dynamic", whose rows all repeated the Total.
@@ -3755,6 +3762,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		// Kept beside Cove because it is Cove's template: see the LabId 25 note above.
 		if (n.Contains("VARIANTX") || n.Contains("VARIANT")) return "Cove";
 		if (n.Contains("ANALYZEPATHOLOGY")) return "Cove";
+		// WellHealth: rows come from dbo.usp_GetWH_LISSummary; this sheet only maps dates and filters.
+		if (n.Contains("WELLHEALTH")) return "WellHealth";
 		if (n.Contains("COVE")) return "Cove";
 		if (n.Contains("ELIXIR")) return "Elixir";
 		if (n.Contains("INHEALTH")) return "InHealth";

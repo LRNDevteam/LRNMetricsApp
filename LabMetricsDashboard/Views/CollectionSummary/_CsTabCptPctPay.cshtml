@@ -60,7 +60,11 @@
                 // When the aggregate snapshot stores 0/0 for PaidInsurancePayment/PaidChargeAmount
                 // fall back to a units-weighted average of each row's PaymentPct.
                 decimal cptGrandPct;
-                if (cptGrandPaidChg != 0)
+                if (Model.CptPaymentPct[0].TotalPaymentPctFromSp is { } spCptGrandPct)
+                {
+                    cptGrandPct = spCptGrandPct;
+                }
+                else if (cptGrandPaidChg != 0)
                 {
                     cptGrandPct = Math.Round(cptGrandPaidIns / cptGrandPaidChg * 100m, 2);
                 }
@@ -70,7 +74,7 @@
                     cptGrandPct = cptGrandUnits == 0 ? 0m : Math.Round(weightedSum / cptGrandUnits, 2);
                 }
                 var cptMaxPct = Model.CptPaymentPct.Max(r => r.PaymentPct);
-                var isInHealthCpt = Model.IsInHealthDtrLab;
+                var isInHealthCpt = Model.IsInHealthDtrLab || Model.IsWellHealthLab;
                 <div class="cs-rpt-wrap">
                     <div class="cs-rpt-scroll">
                         <table class="cs-rpt-table">

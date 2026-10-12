@@ -5,7 +5,8 @@
    Client logic (sheet "Production Summary"):
      Report 6 - Payer Breakdown  -> AnP_PayerBreakdown / usp_GetAnP_PayerBreakdown
        Rows    : Payer Name (PayerName_Raw)
-       Columns : Date of Service month (yyyy-MM)
+       Columns : First Billed Date month (yyyy-MM)
+       Filter  : also First Billed Date in @FirstBilledYear (2026)
      Report 3 - Panel X Payer    -> AnP_PayerByPanel / usp_GetAnP_PayerByPanel
        Rows    : Payer Name (PayerName_Raw)
        Columns : Panel Name
@@ -14,8 +15,10 @@
        Filter  : Bill Status not in (Unbilled, Unbilled - Self Pay)
        Values  : COUNT(DISTINCT ClaimID), SUM(ChargeAmount); sorted by claim count
 
-   BilledYearMonth keeps the column name the dashboard reads; for Analyze
-   Pathology it holds the Date of Service month.
+   BilledYearMonth keeps the column name the dashboard reads.
+   Payer Breakdown rows come back in display order (payer claim count DESC, then
+   payer charges DESC); the dashboard's stable claim-count sort keeps that order
+   for payers with the same claim count.
    ============================================================================= */
 SET NOCOUNT ON;
 GO
@@ -25,7 +28,7 @@ CREATE TABLE dbo.AnP_PayerBreakdown
 (
     SummaryId       INT             NOT NULL IDENTITY(1,1) PRIMARY KEY,
     PayerName       NVARCHAR(500)   NOT NULL,
-    BilledYearMonth NVARCHAR(7)     NOT NULL,   -- yyyy-MM of DateofService
+    BilledYearMonth NVARCHAR(7)     NOT NULL,   -- yyyy-MM of FirstBilledDate
     ClaimCount      INT             NOT NULL DEFAULT 0,
     TotalCharges    DECIMAL(18,2)   NOT NULL DEFAULT 0,
     RefreshedAt     DATETIME        NOT NULL DEFAULT GETDATE()
@@ -45,7 +48,7 @@ CREATE TABLE dbo.AnP_PayerByPanel
 GO
 
 -- ============================================================
--- Payer Breakdown (Payer x Date of Service month)
+-- Payer Breakdown (Payer x First Billed Date month)
 -- ============================================================
 CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_PayerBreakdown
     @PayerNames      NVARCHAR(MAX) = NULL,
@@ -56,7 +59,8 @@ CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_PayerBreakdown
     @FirstBillTo     DATE          = NULL,
     @FirstBilledFrom DATE          = NULL,
     @FirstBilledTo   DATE          = NULL,
-    @ForceLive       BIT           = 0
+    @ForceLive       BIT           = 0,
+    @FirstBilledYear INT           = 2026
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -68,20 +72,25 @@ BEGIN
     BEGIN
         SELECT PayerName, BilledYearMonth, ClaimCount, TotalCharges
         FROM   dbo.AnP_PayerBreakdown
-        ORDER  BY PayerName, BilledYearMonth;
+        ORDER  BY SUM(ClaimCount)   OVER (PARTITION BY PayerName) DESC,
+                  SUM(TotalCharges) OVER (PARTITION BY PayerName) DESC,
+                  PayerName, BilledYearMonth;
         RETURN;
     END;
 
     SELECT PayerName,
-           FORMAT(DateOfService, 'yyyy-MM') AS BilledYearMonth,
-           COUNT(DISTINCT ClaimID)          AS ClaimCount,
-           SUM(ChargeAmount)                AS TotalCharges
+           FORMAT(FirstBilledDate, 'yyyy-MM') AS BilledYearMonth,
+           COUNT(DISTINCT ClaimID)            AS ClaimCount,
+           SUM(ChargeAmount)                  AS TotalCharges
     FROM   dbo.fn_AnP_ProductionClaims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                                        @FirstBillFrom, @FirstBillTo, @FirstBilledFrom, @FirstBilledTo)
     WHERE  IsBilled = 1
-      AND  DateOfService IS NOT NULL
-    GROUP  BY PayerName, FORMAT(DateOfService, 'yyyy-MM')
-    ORDER  BY PayerName, BilledYearMonth;
+      AND  FirstBilledDate >= DATEFROMPARTS(@FirstBilledYear, 1, 1)
+      AND  FirstBilledDate <  DATEFROMPARTS(@FirstBilledYear + 1, 1, 1)
+    GROUP  BY PayerName, FORMAT(FirstBilledDate, 'yyyy-MM')
+    ORDER  BY SUM(COUNT(DISTINCT ClaimID)) OVER (PARTITION BY PayerName) DESC,
+              SUM(SUM(ChargeAmount))       OVER (PARTITION BY PayerName) DESC,
+              PayerName, BilledYearMonth;
 END
 GO
 

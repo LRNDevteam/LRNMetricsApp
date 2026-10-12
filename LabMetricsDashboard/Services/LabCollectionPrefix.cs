@@ -39,6 +39,9 @@ public static class LabCollectionPrefix
         // Analyze Pathology: VariantX clone; Production Summary follows the client sheet. Prefix AnP_*.
         ["AnalyzePathology"]   = "AnP",
         ["Analyze_Pathology"]  = "AnP",
+        // WellHealth: Analyze Pathology SP-only Collection Summary pattern. Prefix WH_*.
+        ["WellHealth"]         = "WH",
+        ["Well_Health"]        = "WH",
         ["PhiLife"]            = "Phi",
         ["Phi_Life"]           = "Phi",
         ["PCRLabsofAmerica"]   = "PCR",
@@ -107,7 +110,7 @@ public static class LabCollectionPrefix
     /// <c>usp_Get{prefix}_CS_AvgPayments_ClientLogic</c>, with "Last 3 Months" hidden.
     /// </summary>
     public static bool UsesAvgPaymentsByDateBasis(string? labName) =>
-        GetPrefix(labName) is "RT" or "BT" or "IHD";
+        GetPrefix(labName) is "RT" or "BT" or "IHD" or "WH";
 
     /// <summary>
     /// InHealth DTR: Collection Summary payment-percent tabs show Average of PaymentPercent
@@ -122,25 +125,39 @@ public static class LabCollectionPrefix
     /// and Excel never read the <c>{prefix}_CS_*</c> tables directly and keep the SP row order.
     /// </summary>
     public static bool UsesSpCollectionLogic(string? labName) =>
-        GetPrefix(labName) is "AnP";
+        GetPrefix(labName) is "AnP" or "WH";
+
+    /// <summary>
+    /// WellHealth: SP-only Collection Summary with its own filters (InsurancePayment &lt;&gt; 0,
+    /// TotalPayments for Top 5 Payments / Total Insurance Payment / Panel Vs Payment, line-level CPT).
+    /// </summary>
+    public static bool IsWellHealth(string? labName) =>
+        GetPrefix(labName) is "WH";
 
     /// <summary>
     /// Claim / line column behind the Collection Summary "Posted Date" and its Check Date filter.
-    /// Analyze Pathology uses PaymentPostedDate (claim file "Posted Date"); other labs use CheckDate.
+    /// Analyze Pathology and WellHealth use PaymentPostedDate (claim file "Posted Date"); other labs use CheckDate.
     /// </summary>
     public static string CollectionPostedDateColumn(string? labName) =>
-        GetPrefix(labName) is "AnP" ? "PaymentPostedDate" : "CheckDate";
+        GetPrefix(labName) is "AnP" or "WH" ? "PaymentPostedDate" : "CheckDate";
 
     /// <summary>Label for the Collection Summary Check Date filter and Posted Date notes.</summary>
     public static string CollectionPostedDateLabel(string? labName) =>
-        GetPrefix(labName) is "AnP" ? "Posted Date" : "Check Date";
+        GetPrefix(labName) is "AnP" or "WH" ? "Posted Date" : "Check Date";
 
     /// <summary>
     /// Labs with the Denial Summary page: <c>usp_Get{prefix}_Denial*</c> read SPs over the
     /// <c>{prefix}_Denial*</c> aggregate tables refreshed at claim-file ingest.
     /// </summary>
     public static bool HasDenialSummary(string? labName) =>
-        GetPrefix(labName) is "AnP";
+        GetPrefix(labName) is "AnP" or "WH";
+
+    /// <summary>
+    /// What the Denial Summary Monthly / Weekly SPs rank insurances and their top denials by
+    /// (shown in the grid caption).
+    /// </summary>
+    public static string DenialSummaryRankBasis(string? labName) =>
+        GetPrefix(labName) is "WH" ? "Total Insurance Balance" : "claim count";
 
     /// <summary>
     /// Labs whose Clinic Panel Status, Clinic $ Analysis and Count by DOS Month pivots only

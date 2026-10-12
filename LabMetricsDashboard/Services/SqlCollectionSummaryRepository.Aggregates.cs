@@ -955,6 +955,7 @@ public sealed partial class SqlCollectionSummaryRepository
             filterDosFrom, filterDosTo,
             filterCheckDateFrom, filterCheckDateTo));
         await using var r = await cmd.ExecuteReaderAsync(ct);
+        var hasTotalPct = HasColumn(r, "TotalPaymentPct");
         while (await r.ReadAsync(ct))
         {
             rows.Add(new InsuranceVsPaymentRow(
@@ -963,7 +964,10 @@ public sealed partial class SqlCollectionSummaryRepository
                 BillMonth:        Convert.ToInt32(r.GetValue(r.GetOrdinal("BillMonth"))),
                 NoOfPaidClaims:   Convert.ToInt32(r.GetValue(r.GetOrdinal("NoOfPaidClaims"))),
                 InsurancePayment: r.GetDecimal(r.GetOrdinal("InsurancePayment")),
-                PaymentPct:       r.GetDecimal(r.GetOrdinal("PaymentPct"))));
+                PaymentPct:       r.GetDecimal(r.GetOrdinal("PaymentPct")),
+                TotalPaymentPctFromSp: hasTotalPct && !r.IsDBNull(r.GetOrdinal("TotalPaymentPct"))
+                    ? r.GetDecimal(r.GetOrdinal("TotalPaymentPct"))
+                    : null));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
         return rows;
@@ -1277,7 +1281,8 @@ public sealed partial class SqlCollectionSummaryRepository
     /// but expects the rows to already be pre-filtered to top-3 payers per panel
     /// (which is what the snapshot table stores).
     /// </summary>
-    private static CollectionMonthlyVolumeResult BuildMonthlyVolumePivot(List<CollectionRawPivotRow> rawRows)
+    private static CollectionMonthlyVolumeResult BuildMonthlyVolumePivot(
+        List<CollectionRawPivotRow> rawRows, bool keepSourceOrder = false)
     {
         if (rawRows.Count == 0)
         {
@@ -1349,8 +1354,10 @@ public sealed partial class SqlCollectionSummaryRepository
             bool hasDbRank = payerAgg.Keys.Any(k =>
                 rawRows.Any(r => r.PanelName == pg.Key && r.PayerName == k && r.PayerRank > 0));
 
-            var topPayers = payerAgg
-                .OrderByDescending(kv => kv.Value.totalEnc)
+            var orderedPayers = keepSourceOrder && hasDbRank
+                ? payerAgg.OrderBy(kv => rawRows.First(r => r.PanelName == pg.Key && r.PayerName == kv.Key).PayerRank)
+                : payerAgg.OrderByDescending(kv => kv.Value.totalEnc);
+            var topPayers = orderedPayers
                 .Where(kv => !hasDbRank ||
                     rawRows.Any(r => r.PanelName == pg.Key && r.PayerName == kv.Key && r.PayerRank > 0 && r.PayerRank <= 3))
                 .Select(kv => new CollectionPayerDrillDown
@@ -1377,7 +1384,8 @@ public sealed partial class SqlCollectionSummaryRepository
             });
         }
 
-        panelRows.Sort((a, b) => b.TotalEncounters.CompareTo(a.TotalEncounters));
+        if (!keepSourceOrder)
+            panelRows.Sort((a, b) => b.TotalEncounters.CompareTo(a.TotalEncounters));
 
         return new CollectionMonthlyVolumeResult(
             periods, years, panelRows,
@@ -1391,7 +1399,8 @@ public sealed partial class SqlCollectionSummaryRepository
     /// only the top-3 payers per panel.
     /// </summary>
     private static CollectionWeeklyVolumeResult BuildWeeklyVolumePivotFromAggregate(
-        List<(string Panel, string Payer, byte PayerRank, byte Week, DateTime Start, DateTime End, int Claims, decimal Paid)> rows)
+        List<(string Panel, string Payer, byte PayerRank, byte Week, DateTime Start, DateTime End, int Claims, decimal Paid)> rows,
+        bool keepSourceOrder = false)
     {
         if (rows.Count == 0)
         {
@@ -1451,8 +1460,10 @@ public sealed partial class SqlCollectionSummaryRepository
             // Display only top-3 payers (PayerRank 1-3 from DB).
             // The panel-level totals above already include every payer.
             bool hasDbRank = pg.Any(r => r.PayerRank > 0);
-            var topPayers = payerAgg
-                .OrderByDescending(kv => kv.Value.totalEnc)
+            var orderedPayers = keepSourceOrder && hasDbRank
+                ? payerAgg.OrderBy(kv => pg.First(r => r.Payer == kv.Key).PayerRank)
+                : payerAgg.OrderByDescending(kv => kv.Value.totalEnc);
+            var topPayers = orderedPayers
                 .Where(kv => !hasDbRank ||
                     pg.Any(r => r.Payer == kv.Key && r.PayerRank > 0 && r.PayerRank <= 3))
                 .Select(kv => new CollectionWeeklyPayerDrillDown
@@ -1477,7 +1488,8 @@ public sealed partial class SqlCollectionSummaryRepository
             });
         }
 
-        panelRows.Sort((a, b) => b.TotalEncounters.CompareTo(a.TotalEncounters));
+        if (!keepSourceOrder)
+            panelRows.Sort((a, b) => b.TotalEncounters.CompareTo(a.TotalEncounters));
 
         return new CollectionWeeklyVolumeResult(weeks, panelRows, grandByWeek, grandEnc, grandPaid);
     }

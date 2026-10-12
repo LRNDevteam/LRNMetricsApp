@@ -161,10 +161,13 @@ public sealed class ProductionReportGenerator : IReportGenerator
         var isInHealthDtr = job.LabName.Equals("Inhealth_DTR", StringComparison.OrdinalIgnoreCase);
         var isAnalyzePathology = job.LabName.Replace("_", "").Replace(" ", "")
                                     .Equals("AnalyzePathology", StringComparison.OrdinalIgnoreCase);
+        var isWellHealth = job.LabName.Replace("_", "").Replace(" ", "")
+                              .Equals("WellHealth", StringComparison.OrdinalIgnoreCase);
 
-        // Beech Tree, InHealth DTR and Analyze Pathology must match the Production Summary page,
-        // so every tab reads the lab's usp_Get{Prefix}* SPs (usp_GetBT_* / usp_GetInH_* / usp_GetAnP_*).
-        var useLabSps = (isBeechTree || isInHealthDtr || isAnalyzePathology) && labSummaryRepo is not null;
+        // Beech Tree, InHealth DTR, Analyze Pathology and WellHealth must match the Production Summary
+        // page, so every tab reads the lab's usp_Get{Prefix}* SPs (usp_GetBT_* / usp_GetInH_* /
+        // usp_GetAnP_* / usp_GetWH_*).
+        var useLabSps = (isBeechTree || isInHealthDtr || isAnalyzePathology || isWellHealth) && labSummaryRepo is not null;
 
         // Rising Tides Monthly/Weekly are sorted by Total Charges on the page
         // (usp_GetRT_*BilledProductionSummary), so the Excel reads the same SPs.

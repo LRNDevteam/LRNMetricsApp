@@ -161,7 +161,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "Cert", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(prefix, "AnP", StringComparison.OrdinalIgnoreCase);
+        string.Equals(prefix, "AnP", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "WH", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Labs whose live/filter Top5 Payments path prefers
@@ -174,7 +175,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(prefix, "AnP", StringComparison.OrdinalIgnoreCase);
+        string.Equals(prefix, "AnP", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "WH", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Augustus Collection Report client fixes live in *_v2 SPs so LIVE usp_GetAug_CS_* stay.
@@ -260,6 +262,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             filterCheckDateFrom, filterCheckDateTo));
 
         await using var r = await cmd.ExecuteReaderAsync(ct);
+        // SPs that return SortOrder own the panel / payer order (e.g. WellHealth: Insurance Payment).
+        var spOrdered = HasColumn(r, "SortOrder");
         while (await r.ReadAsync(ct))
         {
             var panel = GetStringOrEmpty(r, "PanelName");
@@ -279,7 +283,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
 
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms",
             spName, raw.Count, sw.ElapsedMilliseconds);
-        return BuildMonthlyVolumePivot(raw);
+        return BuildMonthlyVolumePivot(raw, keepSourceOrder: spOrdered);
     }
 
     private async Task<CollectionWeeklyVolumeResult> GetCollectionWeeklyVolumeViaSpAsync(
@@ -310,6 +314,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             filterCheckDateFrom, filterCheckDateTo));
 
         await using var r = await cmd.ExecuteReaderAsync(ct);
+        var spOrdered = HasColumn(r, "SortOrder");
         while (await r.ReadAsync(ct))
         {
             // WeekStart/WeekEnd may be NULL on empty-schema / partial snapshot rows.
@@ -348,7 +353,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 spName, lastRow.Week, lastRow.Start, lastRow.End, lastRow.Panel, lastRow.Payer);
         }
 
-        return BuildWeeklyVolumePivotFromAggregate(rows);
+        return BuildWeeklyVolumePivotFromAggregate(rows, keepSourceOrder: spOrdered);
     }
 
     // ── NW SP helpers for the remaining 9 tabs ─────────────────────────────

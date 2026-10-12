@@ -5,6 +5,8 @@
    Client logic (sheet "Production Summary", report 1):
      Source  : Claim Level
      Filter  : Bill Status not in (Unbilled, Unbilled - Self Pay)
+               AND Claim Status <> 0 Billed Amount
+               AND First Billed Date in @FirstBilledYear (2026)
      Rows    : Panel Name, then Top 3 Insurance by claim count within the panel
      Columns : First Billed Date month (yyyy-MM)
      Values  : COUNT(DISTINCT ClaimID), SUM(ChargeAmount); sorted by claim count
@@ -12,6 +14,9 @@
    Result contract (SqlLabProductionSummaryRepository.GetMonthlyAsync):
      PanelName, PayerName, PayerRank, BilledYearMonth, ClaimCount, TotalCharges
      PayerRank 0 = panel total across all payers, 1-3 = top payers.
+     Rows come back in display order: panel claim count DESC, then panel charges
+     DESC, then PayerRank. The dashboard's sort by claim count is stable, so panels
+     with the same claim count keep the higher-charge panel first.
    ============================================================================= */
 SET NOCOUNT ON;
 GO
@@ -39,7 +44,8 @@ CREATE OR ALTER PROCEDURE dbo.usp_GetAnP_MonthlyBilledProductionSummary
     @FirstBillTo     DATE          = NULL,
     @FirstBilledFrom DATE          = NULL,
     @FirstBilledTo   DATE          = NULL,
-    @ForceLive       BIT           = 0      -- 1 = ignore the snapshot (used by the refresh SP)
+    @ForceLive       BIT           = 0,     -- 1 = ignore the snapshot (used by the refresh SP)
+    @FirstBilledYear INT           = 2026
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -49,9 +55,17 @@ BEGIN
        AND NULLIF(LTRIM(RTRIM(@PanelNames)), N'') IS NULL
        AND COALESCE(@DosFrom, @DosTo, @FirstBillFrom, @FirstBillTo, @FirstBilledFrom, @FirstBilledTo) IS NULL
     BEGIN
-        SELECT PanelType AS PanelName, PayerName, PayerRank, BilledYearMonth, ClaimCount, TotalCharges
-        FROM   dbo.AnP_MonthlyBilledProductionSummary
-        ORDER  BY PanelName, BilledYearMonth, PayerRank;
+        ;WITH s AS
+        (
+            SELECT CAST(PanelType AS NVARCHAR(1000)) AS PanelName, PayerName, PayerRank,
+                   BilledYearMonth, ClaimCount, TotalCharges
+            FROM   dbo.AnP_MonthlyBilledProductionSummary
+        )
+        SELECT PanelName, PayerName, PayerRank, BilledYearMonth, ClaimCount, TotalCharges
+        FROM   s
+        ORDER  BY SUM(CASE WHEN PayerRank = 0 THEN ClaimCount   ELSE 0 END) OVER (PARTITION BY PanelName) DESC,
+                  SUM(CASE WHEN PayerRank = 0 THEN TotalCharges ELSE 0 END) OVER (PARTITION BY PanelName) DESC,
+                  PanelName, PayerRank, BilledYearMonth;
         RETURN;
     END;
 
@@ -62,7 +76,9 @@ BEGIN
         FROM   dbo.fn_AnP_ProductionClaims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                                            @FirstBillFrom, @FirstBillTo, @FirstBilledFrom, @FirstBilledTo)
         WHERE  IsBilled = 1
-          AND  FirstBilledDate IS NOT NULL
+          AND  ClaimStatus <> N'0 Billed Amount'
+          AND  FirstBilledDate >= DATEFROMPARTS(@FirstBilledYear, 1, 1)
+          AND  FirstBilledDate <  DATEFROMPARTS(@FirstBilledYear + 1, 1, 1)
     ),
     PayerRanks AS
     (
@@ -85,17 +101,29 @@ BEGIN
                COUNT(DISTINCT ClaimID) AS ClaimCount, SUM(ChargeAmount) AS TotalCharges
         FROM   Base
         GROUP  BY PanelName, PayerName, BilledYearMonth
+    ),
+    PanelTotals AS
+    (
+        SELECT PanelName, COUNT(DISTINCT ClaimID) AS PanelClaims, SUM(ChargeAmount) AS PanelCharges
+        FROM   Base
+        GROUP  BY PanelName
+    ),
+    OutRows AS
+    (
+        SELECT PanelName, CAST(N'' AS NVARCHAR(500)) AS PayerName, CAST(0 AS TINYINT) AS PayerRank,
+               BilledYearMonth, ClaimCount, TotalCharges
+        FROM   PanelMonth
+        UNION ALL
+        SELECT pm.PanelName, pm.PayerName, CAST(r.PayerRank AS TINYINT),
+               pm.BilledYearMonth, pm.ClaimCount, pm.TotalCharges
+        FROM   PayerMonth pm
+        JOIN   PayerRanks r ON r.PanelName = pm.PanelName AND r.PayerName = pm.PayerName
+        WHERE  r.PayerRank <= 3
     )
-    SELECT PanelName, CAST(N'' AS NVARCHAR(500)) AS PayerName, CAST(0 AS TINYINT) AS PayerRank,
-           BilledYearMonth, ClaimCount, TotalCharges
-    FROM   PanelMonth
-    UNION ALL
-    SELECT pm.PanelName, pm.PayerName, CAST(r.PayerRank AS TINYINT),
-           pm.BilledYearMonth, pm.ClaimCount, pm.TotalCharges
-    FROM   PayerMonth pm
-    JOIN   PayerRanks r ON r.PanelName = pm.PanelName AND r.PayerName = pm.PayerName
-    WHERE  r.PayerRank <= 3
-    ORDER  BY PanelName, BilledYearMonth, PayerRank;
+    SELECT x.PanelName, x.PayerName, x.PayerRank, x.BilledYearMonth, x.ClaimCount, x.TotalCharges
+    FROM   OutRows x
+    JOIN   PanelTotals t ON t.PanelName = x.PanelName
+    ORDER  BY t.PanelClaims DESC, t.PanelCharges DESC, x.PanelName, x.PayerRank, x.BilledYearMonth;
 END
 GO
 

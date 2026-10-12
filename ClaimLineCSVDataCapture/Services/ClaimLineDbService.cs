@@ -500,6 +500,28 @@ public sealed class ClaimLineDbService
     }
 
     /// <summary>
+    /// Runs all WellHealth production report stored procedures after ingestion.
+    /// Prefix WH_. Same shape as Analyze Pathology, but billed = First Billed Date not blank
+    /// and unbilled = First Billed Date blank (Mon–Sun weeks).
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshWellHealthProductionReports()
+    {
+        string[] procedures =
+        [
+            "dbo.usp_RefreshWH_MonthlyBilledProductionSummary",
+            "dbo.usp_RefreshWH_WeeklyBilledProductionSummary",
+            "dbo.usp_RefreshWH_PayerBreakdown",
+            "dbo.usp_RefreshWH_PayerByPanel",
+            "dbo.usp_RefreshWH_PanelBreakdownWithPayers",
+            "dbo.usp_RefreshWH_UnbilledAging",
+            "dbo.usp_RefreshWH_CPTBreakdown",
+            "dbo.usp_RefreshWH_CodingBreakdown_Unbilled",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>
     /// Runs all PCRLabsofAmerica-specific production report stored procedures after ingestion.
     /// Each SP is executed independently so a failure in one does not block the others.
     /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging.
@@ -730,6 +752,9 @@ public sealed class ClaimLineDbService
             ["Inhealth_DTR"]     = "InH",
             ["InHealthDTR"]      = "InH",
             ["InHealthDTRLRN"]   = "InH",
+            ["WellHealth"]       = "WH",
+            ["Well_Health"]      = "WH",
+            ["Well Health"]      = "WH",
         };
 
     /// <summary>
@@ -990,6 +1015,16 @@ public sealed class ClaimLineDbService
         => RunProductionReportSPs(BuildCollectionSummarySpList("AnP"));
 
     /// <summary>
+    /// Refreshes the WellHealth Collection Summary snapshots (Sql\WellHealth\12_WellHealth_CollectionSummary.sql).
+    /// Panel Averages by DOS / Check Date are computed live, so there is no AvgPayments snapshot.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshWellHealthCollectionReports()
+        => RunProductionReportSPs([
+            ..BuildCollectionSummarySpList("WH").Where(sp => !sp.EndsWith("_CS_AvgPayments", StringComparison.Ordinal)),
+            "dbo.usp_RefreshWH_CS_InsuranceVsPayment",
+        ]);
+
+    /// <summary>
     /// Refreshes the Analyze Pathology Denial Summary aggregates (Monthly / Weekly Denial
     /// Analysis, Denial List, Denial List - Plan Type) from dbo.ClaimLevelData.
     /// </summary>
@@ -999,6 +1034,18 @@ public sealed class ClaimLineDbService
             "dbo.usp_RefreshAnP_DenialWeekly",
             "dbo.usp_RefreshAnP_DenialList",
             "dbo.usp_RefreshAnP_DenialPlanType",
+        ]);
+
+    /// <summary>
+    /// Refreshes the WellHealth Denial Summary aggregates (Monthly / Weekly Denial Analysis,
+    /// Denial List, Denial List - Plan Type) from dbo.ClaimLevelData.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshWellHealthDenialReports()
+        => RunProductionReportSPs([
+            "dbo.usp_RefreshWH_DenialMonthly",
+            "dbo.usp_RefreshWH_DenialWeekly",
+            "dbo.usp_RefreshWH_DenialList",
+            "dbo.usp_RefreshWH_DenialPlanType",
         ]);
 
     /// <summary>Refreshes the NorthWest Collection Summary aggregates.</summary>

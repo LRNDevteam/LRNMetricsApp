@@ -7,6 +7,7 @@ public sealed class BreakdownPivotViewModel
     public string GrandTotalTitle { get; set; } = "Grand Total";
     public decimal CoveragePercentage { get; set; }
     public int TopPayerCount { get; set; }
+    public string TopPayerRankBasis { get; set; } = "claim count";
     public List<BreakdownPivotColumnGroup> ColumnGroups { get; set; } = new();
     public List<BreakdownPivotPeriod> Periods { get; set; } = new();
     public List<BreakdownPivotRow> Rows { get; set; } = new();

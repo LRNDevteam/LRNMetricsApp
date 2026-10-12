@@ -23,16 +23,16 @@
      C1     Billed via CMD            same as C
      D    Unbilled                    Billable AND Bill Category = Unbilled
      D1     Ready to bill             D AND Sub Status = Ready to Bill
-     D2     Entered Not Submitted     D AND Sub Status = Entered Not Submitted
-     E  Other Samples                 New Status = Other Sample(s)
-     F  Duplicates                    New Status = Duplicate(s)
-     G  System Test                   New Status = System Test
-     H  Yet to be validated           New Status = Yet to Be Validate AND Sub Status <> Entered Not Submitted
+     D2     Entered Not Submitted     D AND Sub Status IN (Entered Not Submitted, Entered Not Billed)
+     E  Other Samples                 New Status <> Billable
+     F    Duplicates                  New Status IN (Duplicate(s), Duplicate - Sample Resulted in Spector)
+     G    System Test                 New Status = System Test
+     H    Yet to be validated         New Status = Yet to Be Validate AND Sub Status <> Entered Not Submitted
    PMS Breakdown
-     F  No. of Billed Claims          Billed
+     F  No. of Billed Claims          Billed AND Claim Status <> 0 Billed Amount
      F1   Claim Submitted in Collaborate MD   same as F
      G  No. of Unbilled Claims        Unbilled
-     G1   Unbilled                    Bill Status = Unbilled
+     G1   Unbilled                    Bill Status = Unbilled AND Claim Status <> 0 Billed Amount
      G2   Unbilled - Self Pay         Bill Status = Unbilled - Self Pay
      G3   Billed amount 0             Bill Status = Billed AND Claim Status = 0 Billed Amount
      H  Billed Mismatches             PMS F - LIS C
@@ -64,6 +64,13 @@
      Z  (R + U) / (I + M + J + K + L + N + O1 + O2)
    ============================================================================= */
 SET NOCOUNT ON;
+GO
+
+IF DB_NAME() <> N'AnalyzePathology'
+BEGIN
+    RAISERROR('Run 27_AnalyzePathology_ExecutiveSummary_NewLogic.sql on the AnalyzePathology database.', 16, 1);
+    SET NOEXEC ON;
+END
 GO
 
 IF COL_LENGTH('dbo.AnP_ES_LIS',  'SortOrder') IS NULL ALTER TABLE dbo.AnP_ES_LIS  ADD SortOrder INT NULL;
@@ -99,9 +106,9 @@ BEGIN
 		ISNULL(SUM(CASE WHEN NewStatus = N'Billable' AND BillCategory IN (N'Unbilled', N'Not Billed')
 						 AND SubStatus = N'Ready to Bill' THEN Cnt END), 0) AS L_D1,
 		ISNULL(SUM(CASE WHEN NewStatus = N'Billable' AND BillCategory IN (N'Unbilled', N'Not Billed')
-						 AND SubStatus = N'Entered Not Submitted' THEN Cnt END), 0) AS L_D2,
-		ISNULL(SUM(CASE WHEN NewStatus IN (N'Other Sample', N'Other Samples') THEN Cnt END), 0) AS L_E,
-		ISNULL(SUM(CASE WHEN NewStatus IN (N'Duplicate', N'Duplicates') THEN Cnt END), 0) AS L_F,
+						 AND SubStatus IN (N'Entered Not Submitted', N'Entered Not Billed') THEN Cnt END), 0) AS L_D2,
+		ISNULL(SUM(CASE WHEN NewStatus <> N'Billable' THEN Cnt END), 0) AS L_E,
+		ISNULL(SUM(CASE WHEN NewStatus IN (N'Duplicate', N'Duplicates', N'Duplicate - Sample Resulted in Spector') THEN Cnt END), 0) AS L_F,
 		ISNULL(SUM(CASE WHEN NewStatus = N'System Test' THEN Cnt END), 0) AS L_G,
 		ISNULL(SUM(CASE WHEN NewStatus IN (N'Yet to Be Validate', N'Yet to be validated', N'Yet be validated')
 						 AND SubStatus <> N'Entered Not Submitted' THEN Cnt END), 0) AS L_H
@@ -113,9 +120,10 @@ BEGIN
 	SELECT
 		ISNULL(ESYear, 0) AS Y,
 		CASE WHEN GROUPING(ESMonth) = 1 THEN 0 ELSE ESMonth END AS M,
-		ISNULL(SUM(CASE WHEN BillStatus IN (N'Billed', N'Billed - Self Pay') THEN ClaimCnt END), 0) AS P_F,
+		ISNULL(SUM(CASE WHEN BillStatus IN (N'Billed', N'Billed - Self Pay')
+						 AND ClaimStatus <> N'0 Billed Amount' THEN ClaimCnt END), 0) AS P_F,
 		ISNULL(SUM(CASE WHEN BillStatus IN (N'Unbilled', N'Unbilled - Self Pay') THEN ClaimCnt END), 0) AS P_G,
-		ISNULL(SUM(CASE WHEN BillStatus = N'Unbilled' THEN ClaimCnt END), 0) AS P_G1,
+		ISNULL(SUM(CASE WHEN BillStatus = N'Unbilled' AND ClaimStatus <> N'0 Billed Amount' THEN ClaimCnt END), 0) AS P_G1,
 		ISNULL(SUM(CASE WHEN BillStatus = N'Unbilled - Self Pay' THEN ClaimCnt END), 0) AS P_G2,
 		ISNULL(SUM(CASE WHEN BillStatus = N'Billed' AND ClaimStatus = N'0 Billed Amount' THEN ClaimCnt END), 0) AS P_G3,
 		ISNULL(SUM(CASE WHEN BillStatus IN (N'Billed', N'Billed - Self Pay') AND ClaimStatus = N'Fully Paid' THEN ClaimCnt END), 0) AS P_I,
@@ -187,9 +195,9 @@ BEGIN
 		('LIS', 'D1', N'    Ready to bill',                 60, p.L_D1, p.L_D1),
 		('LIS', 'D2', N'    Entered Not Submitted',         70, p.L_D2, p.L_D2),
 		('LIS', 'E',  N'Other Samples',                     80, p.L_E,  p.L_E),
-		('LIS', 'F',  N'Duplicates',                        90, p.L_F,  p.L_F),
-		('LIS', 'G',  N'System Test',                      100, p.L_G,  p.L_G),
-		('LIS', 'H',  N'Yet to be validated',              110, p.L_H,  p.L_H),
+		('LIS', 'F',  N'  Duplicates',                      90, p.L_F,  p.L_F),
+		('LIS', 'G',  N'  System Test',                    100, p.L_G,  p.L_G),
+		('LIS', 'H',  N'  Yet to be validated',            110, p.L_H,  p.L_H),
 		-- PMS Breakdown
 		('PMS', 'F',  N'No. of Billed Claims',                                           210, p.P_F,  p.P_F),
 		('PMS', 'F1', N'  Claim Submitted in Collaborate MD',                            220, p.P_F,  p.P_F),
@@ -550,15 +558,15 @@ BEGIN
 	(N'AnP', N'B',  N'Billable Samples',      N'RequestCollectDate', N'LIS', NULL, N'NewStatus', N'=', N'Billable', NULL, NULL, NULL, NULL, NULL, NULL),
 	(N'AnP', N'C',  N'Billed',                N'RequestCollectDate', N'LIS', NULL, N'NewStatus', N'=', N'Billable', N'BillCategory', N'=', N'Billed', NULL, NULL, NULL),
 	(N'AnP', N'D',  N'Unbilled',              N'RequestCollectDate', N'LIS', NULL, N'NewStatus', N'=', N'Billable', N'BillCategory', N'=', N'Unbilled', NULL, NULL, NULL),
-	(N'AnP', N'E',  N'Other Samples',         N'RequestCollectDate', N'LIS', NULL, N'NewStatus', N'IN', N'Other Sample,Other Samples', NULL, NULL, NULL, NULL, NULL, NULL),
-	(N'AnP', N'F',  N'Duplicates',            N'RequestCollectDate', N'LIS', NULL, N'NewStatus', N'IN', N'Duplicate,Duplicates', NULL, NULL, NULL, NULL, NULL, NULL),
+	(N'AnP', N'E',  N'Other Samples',         N'RequestCollectDate', N'LIS', NULL, N'NewStatus', N'<>', N'Billable', NULL, NULL, NULL, NULL, NULL, NULL),
+	(N'AnP', N'F',  N'Duplicates',            N'RequestCollectDate', N'LIS', NULL, N'NewStatus', N'IN', N'Duplicate,Duplicates,Duplicate - Sample Resulted in Spector', NULL, NULL, NULL, NULL, NULL, NULL),
 	(N'AnP', N'G',  N'System Test',           N'RequestCollectDate', N'LIS', NULL, N'NewStatus', N'=', N'System Test', NULL, NULL, NULL, NULL, NULL, NULL),
-	(N'AnP', N'H',  N'Yet to be validated',   N'RequestCollectDate', N'LIS', NULL, N'NewStatus', N'IN', N'Yet to Be Validate,Yet to be validated', N'SubStatus', N'<>', N'Entered Not Submitted', NULL, NULL, NULL),
+	(N'AnP', N'H',  N'Yet to be validated',   N'RequestCollectDate', N'LIS', NULL, N'NewStatus', N'IN', N'Yet to Be Validate,Yet to be validated,Yet be validated', N'SubStatus', N'<>', N'Entered Not Submitted', NULL, NULL, NULL),
 	-- PMS (ClaimLevelData, DateofService)
-	(N'AnP', N'F',  N'No. of Billed Claims',                         N'DateofService', N'PMS', NULL, N'BilledStatus', N'IN', N'Billed,Billed - Self Pay', NULL, NULL, NULL, NULL, NULL, NULL),
-	(N'AnP', N'F1', N'Claim Submitted in Collaborate MD',            N'DateofService', N'PMS', NULL, N'BilledStatus', N'IN', N'Billed,Billed - Self Pay', NULL, NULL, NULL, NULL, NULL, NULL),
+	(N'AnP', N'F',  N'No. of Billed Claims',                         N'DateofService', N'PMS', NULL, N'BilledStatus', N'IN', N'Billed,Billed - Self Pay', N'ClaimStatus', N'<>', N'0 Billed Amount', NULL, NULL, NULL),
+	(N'AnP', N'F1', N'Claim Submitted in Collaborate MD',            N'DateofService', N'PMS', NULL, N'BilledStatus', N'IN', N'Billed,Billed - Self Pay', N'ClaimStatus', N'<>', N'0 Billed Amount', NULL, NULL, NULL),
 	(N'AnP', N'G',  N'No. of Unbilled Claims',                       N'DateofService', N'PMS', NULL, N'BilledStatus', N'IN', N'Unbilled,Unbilled - Self Pay,Unbilled -  Self Pay', NULL, NULL, NULL, NULL, NULL, NULL),
-	(N'AnP', N'G1', N'Unbilled',                                     N'DateofService', N'PMS', NULL, N'BilledStatus', N'=', N'Unbilled', NULL, NULL, NULL, NULL, NULL, NULL),
+	(N'AnP', N'G1', N'Unbilled',                                     N'DateofService', N'PMS', NULL, N'BilledStatus', N'=', N'Unbilled', N'ClaimStatus', N'<>', N'0 Billed Amount', NULL, NULL, NULL),
 	(N'AnP', N'G2', N'Unbilled - Self Pay',                          N'DateofService', N'PMS', NULL, N'BilledStatus', N'IN', N'Unbilled - Self Pay,Unbilled -  Self Pay', NULL, NULL, NULL, NULL, NULL, NULL),
 	(N'AnP', N'G3', N'Billed amount 0',                              N'DateofService', N'PMS', NULL, N'BilledStatus', N'=', N'Billed', N'ClaimStatus', N'=', N'0 Billed Amount', NULL, NULL, NULL),
 	(N'AnP', N'I',  N'No. of Fully Paid Claims',                     N'DateofService', N'PMS', NULL, N'BilledStatus', N'IN', N'Billed,Billed - Self Pay', N'ClaimStatus', N'=', N'Fully Paid', NULL, NULL, NULL),
@@ -593,4 +601,7 @@ EXEC dbo.usp_RefreshAnP_ExecutiveSummary;
 GO
 
 PRINT '27_AnalyzePathology_ExecutiveSummary_NewLogic.sql completed.';
+GO
+
+SET NOEXEC OFF;
 GO

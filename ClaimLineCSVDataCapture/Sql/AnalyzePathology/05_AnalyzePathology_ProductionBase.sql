@@ -38,7 +38,8 @@ SELECT
     ISNULL(NULLIF(LTRIM(RTRIM(c.AgingDOS)), ''), 'Unknown')                 AS AgingDOS,
     LTRIM(RTRIM(ISNULL(c.CPTCodeXUnitsXModifier, '')))                      AS CPTCodeXUnitsXModifier,
     CAST(CASE WHEN NULLIF(LTRIM(RTRIM(c.LastBilledDate)), '') IS NULL
-              THEN 0 ELSE 1 END AS BIT)                                     AS HasLastBilledDate
+              THEN 0 ELSE 1 END AS BIT)                                     AS HasLastBilledDate,
+    LTRIM(RTRIM(ISNULL(c.ClaimStatus, '')))                                 AS ClaimStatus
 FROM dbo.ClaimLevelData c;
 GO
 

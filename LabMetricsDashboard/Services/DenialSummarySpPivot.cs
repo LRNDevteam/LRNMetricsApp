@@ -96,6 +96,8 @@ public static class DenialSummarySpPivot
 
         model.Monthly = ToPivot(monthlyTask.Result, weekly: false);
         model.Weekly = ToPivot(weeklyTask.Result, weekly: true);
+        model.Monthly.TopPayerRankBasis = model.Weekly.TopPayerRankBasis =
+            LabCollectionPrefix.DenialSummaryRankBasis(model.CurrentLab);
     }
 
     private static BreakdownPivotCell Cell(DenialPeriodRow? row) => new()

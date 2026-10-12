@@ -11,23 +11,26 @@
    99_AnalyzePathology_ExecuteAllAggregates.sql need no change.
 
    Posted Date = PaymentPostedDate (claim file "Posted Date"). It drives the month / week
-   columns and the page's Check Date filter (@CheckDateFrom / @CheckDateTo) for every section.
+   columns and the page's Check Date filter (@CheckDateFrom / @CheckDateTo) for every section,
+   except the Panel vs Payment columns and year, which use CheckDate (ClaimCheckDt).
 
    Client logic (Sort By = Claim Count for every section):
      Monthly            ClaimStatus IN (Fully Paid, Partially Paid); Panel -> Top 3 payers
                         by claim count; columns = Posted Date month;
                         Count of unique ClaimID, Sum of InsurancePayment.
      Weekly             Same as Monthly; Posted Date weeks Monday-Sunday, last 4 completed.
-     Top 5 Reimb. %     Fully/Partially Paid; Top 5 payers by Insurance Payment;
+     Top 5 Reimb. %     Fully/Partially Paid; Top 5 payers by claim count;
                         Payment % = Average(PaymentPercent).
-     Top 5 Payments     Fully/Partially Paid; Top 5 payers by Sum(Insurance Payment).
+     Top 5 Payments     Fully/Partially Paid; Top 5 payers by claim count; Sum(Insurance Payment).
      Ins vs Payment %   InsurancePayment > 0; payer; Count ClaimID, Sum InsurancePayment,
                         Average PaymentPercent.
      Ins vs Payment     InsurancePayment > 0; payer; Count ClaimID, Sum InsurancePayment.
-     Ins vs Aging       TotalInsuranceBalance > 0; payer x AgingDOS; Count ClaimID,
-                        Sum InsuranceBalance.
-     Panel vs Payment   InsurancePayment > 0 AND Posted Date in the current year;
-                        panel x Posted Date month; Count ClaimID, Sum InsurancePayment.
+     Ins vs Aging       InsuranceBalance > 0 AND ClaimStatus = No Response; payer x AgingDOS;
+                        Count ClaimID, Sum InsuranceBalance.
+     Panel vs Payment   InsurancePayment > 0 AND CheckDate in the current year;
+                        LIS panel x CheckDate month; Count ClaimID, Sum InsurancePayment.
+                        LIS panel = LIMSMaster.PanelName where Accession = claim "Refer No"
+                        (AdditionalFields); no LIS panel -> claim Panelname in LIS naming.
      CPT vs Payment %   All claims; Panel -> CPTCodeList; Count ClaimID, Average PaymentPercent.
      Panel Average      BilledStatus IN (Billed, Billed - Self Pay); Panel -> Top 3 payers by
                         claim count. Five column groups (Count ClaimID, Sum, Average):
@@ -77,6 +80,8 @@ RETURN
         Bucket30        = LTRIM(RTRIM(c.Bucket30)),
         Bucket60        = LTRIM(RTRIM(c.Bucket60)),
         CheckDt         = n.CheckDt,
+        ClaimCheckDt    = n.ClaimCheckDt,
+        ReferNo         = NULLIF(LTRIM(RTRIM(JSON_VALUE(c.AdditionalFields, N'$."Refer No"'))), N''),
         InsPay          = ISNULL(TRY_CAST(c.InsurancePayment      AS DECIMAL(18,2)), 0),
         ChargeAmt       = ISNULL(TRY_CAST(c.ChargeAmount          AS DECIMAL(18,2)), 0),
         PaymentPct      = TRY_CAST(c.PaymentPercent AS DECIMAL(18,6)) * 100,
@@ -89,6 +94,7 @@ RETURN
         PayerName = ISNULL(NULLIF(LTRIM(RTRIM(c.PayerName_Raw)), N''), N'Unknown'),
         PanelName = ISNULL(NULLIF(LTRIM(RTRIM(c.Panelname)),     N''), N'Unknown'),
         CheckDt   = COALESCE(TRY_CONVERT(DATE, c.PaymentPostedDate, 101), TRY_CAST(c.PaymentPostedDate AS DATE)),
+        ClaimCheckDt = COALESCE(TRY_CONVERT(DATE, c.CheckDate, 101), TRY_CAST(c.CheckDate AS DATE)),
         Dos       = TRY_CAST(c.DateOfService   AS DATE),
         FirstBill = TRY_CAST(c.FirstBilledDate AS DATE)) n
     WHERE (NULLIF(LTRIM(RTRIM(@PayerNames)), N'') IS NULL
@@ -487,7 +493,7 @@ GO
 
 /* =============================================================================
    3. Top 5 Insurance Reimbursement %
-      Top 5 payers by Sum(InsurancePayment), listed by claim count.
+      Top 5 payers by claim count (ties: Sum(InsurancePayment)).
       AvgPaymentPct = Average(PaymentPercent) per payer;
       TotalPaymentPct = Average(PaymentPercent) over all claims of the 5 payers.
    ============================================================================= */
@@ -516,7 +522,7 @@ BEGIN
     top5 AS (
         SELECT TOP 5 *
         FROM p
-        ORDER BY InsPay DESC, Claims DESC, PayerName
+        ORDER BY Claims DESC, InsPay DESC, PayerName
     )
     SELECT CAST(ROW_NUMBER() OVER (ORDER BY Claims DESC, InsPay DESC, PayerName) AS INT) AS PayerRank,
            PayerName,
@@ -572,7 +578,7 @@ END
 GO
 
 /* =============================================================================
-   4. Top 5 Insurance Total Payments (Top 5 by Sum(InsurancePayment), listed by claim count)
+   4. Top 5 Insurance Total Payments (Top 5 payers by claim count; Sum(InsurancePayment))
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_AnP_CS_Top5ReimbursementPay_Compute
     @PayerNames NVARCHAR(MAX) = NULL, @PanelNames NVARCHAR(MAX) = NULL,
@@ -595,7 +601,7 @@ BEGIN
     top5 AS (
         SELECT TOP 5 *
         FROM p
-        ORDER BY InsPay DESC, Claims DESC, PayerName
+        ORDER BY Claims DESC, InsPay DESC, PayerName
     )
     SELECT CAST(ROW_NUMBER() OVER (ORDER BY Claims DESC, InsPay DESC, PayerName) AS INT) AS PayerRank,
            PayerName,
@@ -797,7 +803,7 @@ END
 GO
 
 /* =============================================================================
-   8. Insurance vs Aging (TotalInsuranceBalance > 0; buckets from AgingDOS;
+   8. Insurance vs Aging (InsuranceBalance > 0 AND ClaimStatus = No Response; buckets from AgingDOS;
       balance = Sum(InsuranceBalance))
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_AnP_CS_InsuranceVsAging_Compute
@@ -816,7 +822,8 @@ BEGIN
                SUM(InsBalance)              AS InsuranceBalance
         FROM dbo.fn_AnP_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                                   @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
-        WHERE TotalInsBalance > 0
+        WHERE InsBalance > 0
+          AND ClaimStatus = N'No Response'
         GROUP BY PayerName, ISNULL(AgingDOS, N'(blank)')
     ),
     payer AS (
@@ -879,8 +886,13 @@ END
 GO
 
 /* =============================================================================
-   9. Panel vs Payment (InsurancePayment > 0 AND Posted Date in the current year;
-      panel x Posted Date month)
+   9. Panel vs Payment (InsurancePayment > 0 AND CheckDate in the current year;
+      LIS panel x CheckDate month)
+      LIS panel: LIMSMaster.PanelName for Accession = claim "Refer No"; for an
+      accession with several LIMS rows the first row (in load order) of the latest
+      load with a panel wins, as a lookup on the LIS file does. 'UnabletoLocate',
+      blank or no LIMS row -> claim Panelname mapped to the LIS names.
+      LIS 'GIPanel' is shown as 'GI Panel'.
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_AnP_CS_PanelVsPayment_Compute
     @PayerNames NVARCHAR(MAX) = NULL, @PanelNames NVARCHAR(MAX) = NULL,
@@ -893,17 +905,47 @@ BEGIN
 
     DECLARE @Year INT = YEAR(GETDATE());
 
-    WITH agg AS (
+    WITH lis AS (
+        SELECT Accession, LisPanel
+        FROM (
+            SELECT Accession = LTRIM(RTRIM(l.Accession)),
+                   LisPanel  = p.LisPanel,
+                   rn        = ROW_NUMBER() OVER (PARTITION BY LTRIM(RTRIM(l.Accession))
+                                                  ORDER BY CASE WHEN p.LisPanel IS NULL THEN 1 ELSE 0 END,
+                                                           l.CreatedOn DESC, l.%%physloc%%)
+            FROM dbo.LIMSMaster l
+            CROSS APPLY (SELECT LisPanel = NULLIF(NULLIF(REPLACE(LTRIM(RTRIM(l.PanelName)), N'GIPanel', N'GI Panel'),
+                                                         N''), N'UnabletoLocate')) p
+            WHERE NULLIF(LTRIM(RTRIM(l.Accession)), N'') IS NOT NULL
+        ) z
+        WHERE rn = 1
+    ),
+    src AS (
+        SELECT f.ClaimKey, f.ClaimCheckDt, f.InsPay,
+               PanelName = COALESCE(lis.LisPanel,
+                                    CASE f.PanelName
+                                        WHEN N'WH Panel/Male STI Panel' THEN N'STI'
+                                        WHEN N'STI Panel'               THEN N'STI'
+                                        WHEN N'UTI Panel'               THEN N'UTI'
+                                        WHEN N'RPP Panel'               THEN N'RespiratoryPanel'
+                                        WHEN N'Infectious Disease'      THEN N'InfectiousDisease'
+                                        WHEN N'Blood + ID'              THEN N'Blood'
+                                        ELSE f.PanelName
+                                    END)
+        FROM dbo.fn_AnP_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
+                                  @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo) f
+        LEFT JOIN lis ON lis.Accession = f.ReferNo
+        WHERE f.InsPay > 0
+          AND YEAR(f.ClaimCheckDt) = @Year
+    ),
+    agg AS (
         SELECT PanelName,
-               YEAR(CheckDt)            AS BillYear,
-               MONTH(CheckDt)           AS BillMonth,
+               YEAR(ClaimCheckDt)       AS BillYear,
+               MONTH(ClaimCheckDt)      AS BillMonth,
                COUNT(DISTINCT ClaimKey) AS NoOfClaims,
                SUM(InsPay)              AS InsurancePayments
-        FROM dbo.fn_AnP_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
-                                  @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
-        WHERE InsPay > 0
-          AND YEAR(CheckDt) = @Year
-        GROUP BY PanelName, YEAR(CheckDt), MONTH(CheckDt)
+        FROM src
+        GROUP BY PanelName, YEAR(ClaimCheckDt), MONTH(ClaimCheckDt)
     ),
     panel AS (
         SELECT PanelName,

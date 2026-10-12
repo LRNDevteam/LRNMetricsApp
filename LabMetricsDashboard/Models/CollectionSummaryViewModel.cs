@@ -107,6 +107,9 @@ public sealed class CollectionSummaryViewModel
     /// </summary>
     public bool UsesSpCollectionLogic => LabCollectionPrefix.UsesSpCollectionLogic(SelectedLab);
 
+    /// <summary>WellHealth: SP-only logic with its own filters, sorts and labels.</summary>
+    public bool IsWellHealthLab => LabCollectionPrefix.IsWellHealth(SelectedLab);
+
     /// <summary>"Posted Date" (Analyze Pathology, PaymentPostedDate) or "Check Date".</summary>
     public string PostedDateLabel => LabCollectionPrefix.CollectionPostedDateLabel(SelectedLab);
 
@@ -387,7 +390,8 @@ public sealed record InsuranceVsPaymentRow(
     int BillMonth,
     int NoOfPaidClaims,
     decimal InsurancePayment,
-    decimal PaymentPct);
+    decimal PaymentPct,
+    decimal? TotalPaymentPctFromSp = null);
 
 /// <summary>
 /// One row in the "CPT vs Payment %" table.

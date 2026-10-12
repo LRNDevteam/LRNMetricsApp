@@ -748,10 +748,11 @@ public static partial class CollectionSummaryExcelExportBuilder
         // metric sub-headers on a third row for clarity
         int hRow3 = hRow2 + 1;
         hCol = 2;
+        var paymentHeader = LabCollectionPrefix.IsWellHealth(labName) ? "Total Payments" : "Insurance Payments";
         void WriteMetricPair()
         {
             WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ColHeader);
-            WriteHeaderCell(ws, hRow3, hCol++, "Insurance Payments", ColHeader);
+            WriteHeaderCell(ws, hRow3, hCol++, paymentHeader, ColHeader);
         }
         foreach (var year in years)
         {

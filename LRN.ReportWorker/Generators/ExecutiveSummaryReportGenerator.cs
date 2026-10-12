@@ -11,7 +11,8 @@ namespace LRN.ReportWorker.Generators;
 /// (dbo.usp_Get{prefix}_ExecutiveSummary) and ExecutiveSummaryExcelBuilder the
 /// ExecutiveSummary page uses for its synchronous "export=excel" download.
 /// Lab → SP prefix resolution reuses ExecutiveSummaryController.LabPrefixMap so
-/// the two paths can never drift.
+/// the two paths can never drift. Well Health is prefix WH
+/// (dbo.usp_GetWH_ExecutiveSummary).
 /// </summary>
 public sealed class ExecutiveSummaryReportGenerator : IReportGenerator
 {

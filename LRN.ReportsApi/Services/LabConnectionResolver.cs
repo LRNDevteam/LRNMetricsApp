@@ -27,6 +27,7 @@ internal static class LabConnectionResolver
             "ELIXIR" => "ElixirConnection",
             "VARIANTX" => "VariantXConnection",
             "ANALYZEPATHOLOGY" => "AnalyzePathologyConnStr",
+            "WELLHEALTH" => "WellHealthConnStr",
             "CERTUS" or "CERTUSLABORATORIES" => "CertusConnection",
             "BEECHTREE" => "BeechTreeConnStr",
             "AUGUSTUSLABS" or "AUGUSTUS" => "AugustusConnStr",

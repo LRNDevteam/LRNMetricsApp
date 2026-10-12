@@ -45,6 +45,9 @@ public class PhiExecutiveSummaryController : Controller
             ["LRNLabDemo"]        = "PCR",
             ["Beech_Tree"]        = "BT",
             ["RisingTides"]       = "RT",
+            ["WellHealth"]        = "WH",
+            ["Well_Health"]       = "WH",
+            ["Well Health"]       = "WH",
         };
 
     public PhiExecutiveSummaryController(

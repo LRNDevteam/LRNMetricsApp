@@ -24,6 +24,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
     private const string ElixirPrefix = "Elix_";
     private const string VariantXPrefix = "VarX_";
     private const string AnalyzePathologyPrefix = "AnP_";
+    private const string WellHealthPrefix = "WH_";
     private const string AugustusPrefix = "Aug_";
     private const string NorthWestPrefix = "NW_";
     private const string PcrPrefix = "PCR_";
@@ -4372,6 +4373,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             "VariantX_LRN" => VariantXPrefix,
             "AnalyzePathology" => AnalyzePathologyPrefix,
             "AnalyzePathology_LRN" => AnalyzePathologyPrefix,
+            "WellHealth" => WellHealthPrefix,
+            "WellHealth_LRN" => WellHealthPrefix,
             "Certus_LRN" => CertusPrefix,
             "Augustus_LRN" => AugustusPrefix,
             "NWL" => NorthWestPrefix,

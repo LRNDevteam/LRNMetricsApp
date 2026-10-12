@@ -40,6 +40,9 @@ public static class LabClaimLineColumnCatalog
         ["AnalyzePathology"] = "AnalyzePathology",
         ["Analyze_Pathology"] = "AnalyzePathology",
         ["Analyze Pathology"] = "AnalyzePathology",
+        ["WellHealth"] = "WellHealth",
+        ["Well_Health"] = "WellHealth",
+        ["Well Health"] = "WellHealth",
     };
 
     private static readonly string[] DefaultClaim =
@@ -324,6 +327,23 @@ public static class LabClaimLineColumnCatalog
                 "Bucket30Amount", "Bucket60", "Bucket60Amount", "Facility", "OrderingProviderID", "ClaimUID",
                 "DaystoDOS", "RollingDays", "DaystoBill", "DaystoPost", "InsertedDateTime"
             ],
+        // Matches Sql/ClaimLineDetails_SPs/WellHealth_Details.sql.
+        ["WellHealth"] =
+            [
+                "LabID", "LabName", "ClaimID", "AccessionNumber", "PayerName_Raw", "PayerName",
+                "PayerType", "ReferringProvider", "BillingProvider", "ClaimBillingProviderID", "ClinicName", "SalesRepname",
+                "PatientID", "PatientName", "PatientDOB", "SubscriberId", "DateofService", "ChargeEnteredDate",
+                "FirstBilledDate", "LastBilledDate", "BilledWeek", "BilledStatus", "Panelname", "ChargePanelID",
+                "CPTCodeXUnitsXModifier", "CPTCodeList", "UnitsList", "ModifierList", "CptWithUnits", "Modifier",
+                "POS", "ChargeAmount", "InsurancePayment", "PatientPayment", "TotalPayments", "InsuranceAdjustments",
+                "PatientAdjustments", "TotalAdjustments", "InsuranceBalance", "PatientBalance", "TotalBalance", "TotalInsuranceBalance",
+                "OtherBalance", "BalanceAtCollections", "ChargeToDate", "ChargeTotalPayments", "ChargeTotalAdjustments", "CheckDate",
+                "PostingDate", "PaymentPostedDate", "PostedWeek", "DepositWeek", "ClaimStatus", "DenialCode",
+                "DenialCodeNormalized", "DenialDescription", "DenialDate", "ICDCode", "ICDPointer", "AgingDOS",
+                "PaymentPercent", "FullyPaidCount", "FullyPaidAmount", "Adjudicated", "AdjudicatedAmount", "Bucket30",
+                "Bucket30Amount", "Bucket60", "Bucket60Amount", "Facility", "ClaimUID", "DaystoDOS",
+                "RollingDays", "DaystoBill", "DaystoPost", "InsertedDateTime"
+            ],
     };
 
     private static readonly Dictionary<string, string[]> LineByLab = new(StringComparer.OrdinalIgnoreCase)
@@ -573,6 +593,24 @@ public static class LabClaimLineColumnCatalog
                 "PostedWeek", "ClaimStatus", "PayStatus", "DenialCode", "DenialCodeNormalized", "DenialDescription",
                 "DenialDate", "ICDCode", "ICDPointer", "Facility", "OrderingProviderID", "TF",
                 "DaystoDOS", "RollingDays", "DaystoBill", "DaystoPost", "InsertedDateTime"
+            ],
+        // Matches Sql/ClaimLineDetails_SPs/WellHealth_Details.sql.
+        ["WellHealth"] =
+            [
+                "LabID", "LabName", "ClaimID", "AccessionNumber", "SourceFileID", "IngestedOn",
+                "CsvRowHash", "PayerName_Raw", "PayerName", "Payer_Code", "Payer_Common_Code", "Payer_Group_Code",
+                "Global_Payer_ID", "PayerType", "ReferringProvider", "BillingProvider", "ClaimBillingProviderID", "ClinicName",
+                "Facility", "SalesRepname", "PatientID", "PatientName", "PatientDOB", "SubscriberId",
+                "DateofService", "ChargeToDate", "ChargeEnteredDate", "FirstBilledDate", "LastBilledDate", "Panelname",
+                "ChargePanelID", "CPTCode", "Units", "Modifier", "CPTUnits", "CPTMOD",
+                "CPTs", "ClaimCPTs", "CptWithUnits", "CPTModifier", "POS", "TOS",
+                "ChargeAmount", "ChargeAmountPerUnit", "AllowedAmount", "AllowedAmountPerUnit", "InsurancePayment", "InsurancePaymentPerUnit",
+                "PatientPayment", "PatientPaymentPerUnit", "TotalPayments", "ChargeTotalPayments", "InsuranceAdjustments", "PatientAdjustments",
+                "TotalAdjustments", "ChargeTotalAdjustments", "InsuranceBalance", "PatientBalance", "PatientBalancePerUnit", "TotalBalance",
+                "TotalInsuranceBalance", "OtherBalance", "BalanceAtCollections", "CheckDate", "PostingDate", "PaymentPostedDate",
+                "PostedWeek", "ClaimStatus", "PayStatus", "DenialCode", "DenialCodeNormalized", "DenialDescription",
+                "DenialDate", "ICDCode", "ICDPointer", "DaystoDOS", "RollingDays", "DaystoBill",
+                "DaystoPost", "UID", "LineLevelUID", "InsertedDateTime"
             ],
     };
 

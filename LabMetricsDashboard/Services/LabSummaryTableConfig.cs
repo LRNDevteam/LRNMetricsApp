@@ -91,6 +91,11 @@ public record LabSummaryTableConfig(
         new("AnP_",  "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
         { SupportsFilteredMonthlyWeeklySp = true, CptTotalsOnly = true };
 
+    /// <summary>WellHealth — prefix <c>WH_</c> (Analyze Pathology clone; billed = First Billed Date not blank, Mon–Sun weeks).</summary>
+    public static readonly LabSummaryTableConfig WellHealth =
+        new("WH_",   "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
+        { SupportsFilteredMonthlyWeeklySp = true, CptTotalsOnly = true };
+
     /// <summary>PCR Labs of America � prefix <c>PCR_</c>. Monthly/Weekly read SPs accept filter parameters.</summary>
     public static readonly LabSummaryTableConfig PCRLabsofAmerica =
         new("PCR_",  "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)

@@ -68,6 +68,9 @@ public sealed class ExecutiveSummaryController : Controller
             // (docs/demo-lab/DemoLab_Setup.md). Same mapping as LabCollectionPrefix.
             ["LRNLabDemo"]       = "PCR",
             ["Beech_Tree"]       = "BT",
+            ["WellHealth"]       = "WH",
+            ["Well_Health"]      = "WH",
+            ["Well Health"]      = "WH",
         };
 
     public ExecutiveSummaryController(
@@ -282,6 +285,9 @@ public sealed class ExecutiveSummaryController : Controller
         var repsStr      = reps      is { Length: > 0 } ? string.Join(",", reps)      : null;
 
         var availableYears = await _repo.GetAvailableYearsAsync(connStr, ct);
+        // Well Health Executive Summary excludes Date of Service after 2026.
+        if (string.Equals(prefix, "WH", StringComparison.OrdinalIgnoreCase))
+            availableYears = availableYears.Where(y => y <= 2026).ToList();
 
         var vm = await _repo.GetExecutiveSummaryAsync(
             connStr, spName, availableLabs, labName,

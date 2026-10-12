@@ -729,7 +729,7 @@ foreach (var lab in labConfigs)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // STEP 13b — LIS Summary aggregate (Analyze Pathology)
+    // STEP 13b — LIS Summary aggregate (Analyze Pathology, WellHealth)
     //
     // Runs regardless of the STEP 8 outcome: LIMS files arrive independently of
     // Claim/Line runs. The refresh compares dbo.LIMSMaster's signature with the
@@ -1119,6 +1119,60 @@ foreach (var lab in labConfigs)
             catch (Exception ex)
             {
                 log.Error($"  [AnP Denial] Unexpected error running Analyze Pathology Denial Summary SPs: {ex.Message}");
+            }
+        }
+
+        // ── WellHealth production report aggregates ───────────────────────────
+        // Production Summary per client requirement (billed = First Billed Date not blank). Prefix WH_.
+        if (lab.LabName.Equals("WellHealth", StringComparison.OrdinalIgnoreCase))
+        {
+            log.Info($"  [WH Reports] Running WellHealth production report SPs…");
+            try
+            {
+                var whResults = db.RefreshWellHealthProductionReports();
+                prodSummaryResults = whResults;
+                foreach (var (spName, elapsedMs, error) in whResults)
+                {
+                    if (error is null)
+                        log.Info($"  [WH Reports] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [WH Reports] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+
+                var failed = whResults.Count(r => r.Error is not null);
+                var passed = whResults.Count(r => r.Error is null);
+                log.Info($"  [WH Reports] {passed}/{whResults.Count} SP(s) succeeded.");
+                if (failed > 0)
+                    log.Warn($"  [WH Reports] {failed} SP(s) failed — see errors above.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [WH Reports] Unexpected error running WellHealth production report SPs: {ex.Message}");
+            }
+
+            collSummaryResults = RunCollectionSummary(log, db, "WH CS", db.RefreshWellHealthCollectionReports);
+
+            log.Info($"  [WH Denial] Running WellHealth Denial Summary SPs…");
+            try
+            {
+                var denialResults = db.RefreshWellHealthDenialReports();
+                foreach (var (spName, elapsedMs, error) in denialResults)
+                {
+                    if (error is null)
+                        log.Info($"  [WH Denial] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [WH Denial] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+
+                var failed = denialResults.Count(r => r.Error is not null);
+                var passed = denialResults.Count(r => r.Error is null);
+                log.Info($"  [WH Denial] {passed}/{denialResults.Count} SP(s) succeeded.");
+                if (failed > 0)
+                    log.Warn($"  [WH Denial] {failed} SP(s) failed — see errors above.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [WH Denial] Unexpected error running WellHealth Denial Summary SPs: {ex.Message}");
             }
         }
 
@@ -2106,6 +2160,7 @@ static (string? Rule, string? WeekRule, string? WeekRange) ResolveProductionSumm
                 => ("Rule5", "Rule5", "Wed to Tue"),
 
         var name when name.Equals("AnalyzePathology", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("WellHealth", StringComparison.OrdinalIgnoreCase)
                 => ("Rule5", "Rule5", "Mon to Sun"),
 
         var name when name.Equals("PCRLabsofAmerica", StringComparison.OrdinalIgnoreCase)
@@ -2183,6 +2238,8 @@ static string? GetCollectionSummarySpPrefix(ClaimLineCSVDataCapture.Models.LabCo
     if (name.Equals("Elixir",           StringComparison.OrdinalIgnoreCase)) return "Elix";
     if (name.Equals("VariantX",         StringComparison.OrdinalIgnoreCase)) return "VarX";
     if (name.Equals("AnalyzePathology", StringComparison.OrdinalIgnoreCase)) return "AnP";
+    if (name.Equals("WellHealth",       StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("Well_Health",       StringComparison.OrdinalIgnoreCase)) return "WH";
     if (name.Equals("PCRLabsofAmerica", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("PCR_Labs_of_America", StringComparison.OrdinalIgnoreCase)) return "PCR";
     if (name.Equals("PhiLife",          StringComparison.OrdinalIgnoreCase) ||
