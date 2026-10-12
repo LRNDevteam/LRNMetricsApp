@@ -198,7 +198,7 @@ else
     @if (Model.IsWellHealthLab)
     {
         <span><strong>Source:</strong> Claim Level Data &bull;
-        <strong>Filter:</strong> TotalPayments &ne; 0, CheckDate not blank &bull;
+        <strong>Filter:</strong> InsurancePayment &gt; 0, CheckDate not blank &bull;
         <strong>Rows:</strong> Panel name &bull; <strong>Columns:</strong> CheckDate month &bull;
         <strong>Sorted by:</strong> Insurance Payment DESC &bull;
         <strong>Values:</strong> Count of unique ClaimID, Sum of TotalPayments</span>
@@ -206,8 +206,8 @@ else
     else if (isSpLogic)
     {
         <span><strong>Source:</strong> Claim Level Data &bull;
-        <strong>Filter:</strong> InsurancePayment &gt; 0, CheckDate in @DateTime.Today.Year &bull;
-        <strong>Rows:</strong> Panel name &bull; <strong>Columns:</strong> CheckDate month &bull;
+        <strong>Filter:</strong> InsurancePayment &gt; 0, PaymentPostedDate not blank &bull;
+        <strong>Rows:</strong> Panel name &bull; <strong>Columns:</strong> PaymentPostedDate month &bull;
         <strong>Sorted by:</strong> Claim Count DESC &bull;
         <strong>Values:</strong> Count of unique ClaimID, Sum of InsurancePayment</span>
     }

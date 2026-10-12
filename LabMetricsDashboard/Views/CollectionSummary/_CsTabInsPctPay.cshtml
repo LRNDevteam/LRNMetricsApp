@@ -201,7 +201,7 @@
                     <strong>Sorted by:</strong> @(Model.IsWellHealthLab ? "SUM(InsurancePayment) DESC" : Model.IsAugustusLab || isSpLogicPct ? "Count of ClaimID DESC" : "SUM(InsurancePayment) DESC") &bull;
                     @if (Model.IsWellHealthLab)
                     {
-                        <span><strong>Filter:</strong> InsurancePayment &ne; 0 &bull; <strong>Payment %:</strong> Average of PaymentPercent</span>
+                        <span><strong>Filter:</strong> InsurancePayment &gt; 0 &bull; <strong>Payment %:</strong> Average of PaymentPercent</span>
                     }
                     else if (isInHealthPct)
                     {

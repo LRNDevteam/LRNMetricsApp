@@ -110,7 +110,7 @@
     <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
         @if (isWellHealth)
         {
-            <span><strong>Source:</strong> Claim Level Data &bull; <strong>Filter:</strong> TotalPayments &ne; 0 &bull;
+            <span><strong>Source:</strong> Claim Level Data &bull; <strong>Filter:</strong> InsurancePayment &gt; 0 &bull;
             <strong>Rows:</strong> PayerName_Raw &bull; <strong>Sorted by:</strong> Sum of Total Payment DESC &bull;
             <strong>Values:</strong> Count of unique ClaimID, Sum of TotalPayments, Average of Payment %.</span>
         }

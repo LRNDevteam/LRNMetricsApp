@@ -1060,12 +1060,12 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     @if (Model.IsWellHealthLab)
                     {
                         <span>Top 5 by <span class="top5-hl-blue">Claim Count</span> &bull; sorted by Insurance Payment &bull;
-                        InsurancePayment &ne; 0 &bull; Payment % = Average(PaymentPercent)</span>
+                        InsurancePayment &gt; 0 &bull; Payment % = Average(PaymentPercent)</span>
                     }
                     else if (Model.UsesSpCollectionLogic)
                     {
                         <span>Top 5 by <span class="top5-hl-blue">Claim Count</span> &bull;
-                        ClaimStatus: Fully Paid, Partially Paid &bull; Payment % = Average(PaymentPercent)</span>
+                        InsurancePayment &gt; 0 &bull; Payment % = Average(PaymentPercent)</span>
                     }
                     else
                     {
@@ -1155,7 +1155,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 </div>
 
                 <div class="top5-card-footer">
-                    @(Model.UsesSpCollectionLogic ? "Sorted by" : "Ranked by") <span class="top5-hl-green">@(Model.IsWellHealthLab ? "total payment (TotalPayments ≠ 0)" : Model.UsesSpCollectionLogic ? "claim count" : "unique visit count")</span> &bull;
+                    @(Model.UsesSpCollectionLogic ? "Sorted by" : "Ranked by") <span class="top5-hl-green">@(Model.IsWellHealthLab ? "total payment (InsurancePayment > 0)" : Model.UsesSpCollectionLogic ? "claim count" : "unique visit count")</span> &bull;
                     Top payer accounts for <span class="top5-hl-green">@topPayerPct.ToString("F0")%</span> of total payments
                 </div>
             }
@@ -1229,7 +1229,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 </button>
             </li>
         }
-        @if (Model.UsesSpCollectionLogic)
+        @if (Model.ShowPanelAverage)
         {
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="panelavg-tab" data-bs-toggle="pill"
@@ -1474,7 +1474,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
 
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> ClaimLevelData (all rows) &bull;
-                    <strong>Filter (base):</strong> @(Model.IsWellHealthLab ? "InsurancePayment ≠ 0" : Model.UsesSpCollectionLogic ? "ClaimStatus IN (Fully Paid, Partially Paid)" : "InsurancePayment > 0") &nbsp;·&nbsp; @(Model.UsesSpCollectionLogic ? "PaymentPostedDate" : "CheckDate") not blank/invalid &bull;
+                    <strong>Filter (base):</strong> @(Model.UsesSpCollectionLogic ? "InsurancePayment ≠ 0" : "InsurancePayment > 0") &nbsp;·&nbsp; @(Model.UsesSpCollectionLogic ? "PaymentPostedDate" : "CheckDate") not blank/invalid &bull;
                     <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) – @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &nbsp;|&nbsp; DOS: @(string.IsNullOrWhiteSpace(Model.FilterDosFrom) ? "-" : Model.FilterDosFrom) – @(string.IsNullOrWhiteSpace(Model.FilterDosTo) ? "-" : Model.FilterDosTo) &nbsp;|&nbsp; @Model.PostedDateLabel: @(string.IsNullOrWhiteSpace(Model.FilterCheckDateFrom) ? "-" : Model.FilterCheckDateFrom) – @(string.IsNullOrWhiteSpace(Model.FilterCheckDateTo) ? "-" : Model.FilterCheckDateTo) &bull;
                     <strong>Rows:</strong> PanelName &bull;
                     <strong>Drill-down:</strong> Top 3 PayerName_Raw by Unique ClaimID count &bull;
@@ -1502,7 +1502,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         {
         <!-- Weekly Claim Volume tab -->
         <div class="tab-pane fade" id="wcv-pane"           role="tabpanel" aria-labelledby="wcv-tab"           data-cs-tab="wcv">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabWcv",          Model) } else { <div class="cs-lazy-pane" data-lazy-tab="wcv"></div> }</div>
-        @if (Model.UsesSpCollectionLogic)
+        @if (Model.ShowPanelAverage)
         {
             <div class="tab-pane fade" id="panelavg-pane" role="tabpanel" aria-labelledby="panelavg-tab" data-cs-tab="panelavg">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabPanelAvg", Model) } else { <div class="cs-lazy-pane" data-lazy-tab="panelavg"></div> }</div>
         }

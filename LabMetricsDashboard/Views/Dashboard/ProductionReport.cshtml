@@ -321,6 +321,12 @@ th.pr-month-data, td.pr-month-data {
 .pr-payer-row:hover td { background: #f8fafc; }
 .pr-payer-row:hover td:first-child { background: #f8fafc; }
 
+/* Coding: CPT x Units x Modifier lists have no spaces, so break anywhere. */
+.pr-table td.pr-cpt-wrap {
+    white-space: normal; overflow-wrap: anywhere;
+    text-overflow: clip; max-width: 320px;
+}
+
 /* Panel / payer open-close — same pattern as Collection .cs-ag-*.
    Specificity must beat any later tbody striping / sticky-cell rules. */
 .pr-table tbody tr.pr-hp-toggle { cursor: pointer; user-select: none; }
@@ -1296,7 +1302,7 @@ th.pr-month-data, td.pr-month-data {
                                     {
                                         cptIdx++;
                                         <tr class="pr-payer-row pr-hp-child" data-hp-parent="@codingGroupId">
-                                            <td>@cptIdx &nbsp; @cpt.CptCodeUnitsModifier</td>
+                                            <td class="pr-cpt-wrap">@cptIdx &nbsp; @cpt.CptCodeUnitsModifier</td>
                                             <td>@cpt.ClaimCount.N0OrDash()</td>
                                             <td>@Acct(cpt.TotalCharges)</td>
                                         </tr>
