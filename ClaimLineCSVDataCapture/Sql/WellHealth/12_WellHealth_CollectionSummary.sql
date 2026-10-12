@@ -14,14 +14,15 @@
      1  Monthly Summary        InsurancePayment <> 0; Panel + top 3 insurance by claim count;
                                Posted Date month; sorted by Insurance Payment
      2  Weekly Summary         same as Monthly; Posted Date Mon-Sun weeks
-     3  Top 5 Reimbursement %  InsurancePayment <> 0; top 5 insurance by claim count;
+     3  Top 5 Reimbursement %  InsurancePayment > 0; top 5 insurance by claim count;
                                Average(Payment %); sorted by Insurance Payment
-     4  Top 5 Insurance by Payments  TotalPayments <> 0; top 5 by Total Payment
-     5  Panel Averages         Bill Status = Billed; also by DOS / by Check Date (last 6 months)
-     6  Insurance vs Payment % InsurancePayment <> 0; sorted by Insurance Payment
-     7  Total Insurance Payment TotalPayments <> 0; sorted by Total Payment
+     4  Top 5 Insurance by Payments  InsurancePayment > 0; top 5 by Total Payment
+     5  Panel Averages         by DOS / by Check Date: FirstBilledDate not blank; 6 months ending at
+                               the billed week-range end date. The Panel Average tab is not shown.
+     6  Insurance vs Payment % InsurancePayment > 0; sorted by Insurance Payment
+     7  Total Insurance Payment InsurancePayment > 0; sorted by Total Payment
      8  Insurance vs Aging     Charge Balance Due Ins (InsuranceBalance) > 0; Aging DOS
-     9  Panel Vs Payment       TotalPayments <> 0 AND CheckDate not blank; CheckDate month
+     9  Panel Vs Payment       InsurancePayment > 0 AND CheckDate not blank; CheckDate month
     10  CPT vs Payment %       Line Level Data; no filter; sorted by claim count
 
    "Posted Date" = PaymentPostedDate (dashboard Check Date filter applies to it);
@@ -78,6 +79,7 @@ RETURN
         PanelName         = n.PanelName,
         ClaimStatus       = LTRIM(RTRIM(c.ClaimStatus)),
         BilledStatus      = LTRIM(RTRIM(c.BilledStatus)),
+        FirstBilledDate   = NULLIF(LTRIM(RTRIM(c.FirstBilledDate)), N''),
         Adjudicated       = LTRIM(RTRIM(c.Adjudicated)),
         Bucket30          = LTRIM(RTRIM(c.Bucket30)),
         Bucket60          = LTRIM(RTRIM(c.Bucket60)),
@@ -329,7 +331,7 @@ GO
 
 /* =============================================================================
    3. Top 5 Reimbursement % vs Billed Charges
-      Top 5 insurance by claim count (InsurancePayment <> 0), listed by Insurance Payment.
+      Top 5 insurance by claim count (InsurancePayment > 0), listed by Insurance Payment.
       TotalPaymentPct = Average(Payment %) over every claim of the 5 payers.
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_WH_CS_Top5ReimbursementPct_Compute
@@ -351,7 +353,7 @@ BEGIN
                COUNT(PaymentPct)        AS PctCnt
         FROM dbo.fn_WH_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                                  @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
-        WHERE InsPay <> 0
+        WHERE InsPay > 0
         GROUP BY PayerName
     ),
     top5 AS (
@@ -373,7 +375,7 @@ END
 GO
 
 /* =============================================================================
-   4. Top 5 Insurance by Payments (TotalPayments <> 0; top 5 by Total Payment)
+   4. Top 5 Insurance by Payments (InsurancePayment > 0; top 5 by Total Payment)
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_WH_CS_Top5ReimbursementPay_Compute
     @PayerNames NVARCHAR(MAX) = NULL, @PanelNames NVARCHAR(MAX) = NULL,
@@ -390,7 +392,7 @@ BEGIN
                SUM(TotalPay)            AS TotalPay
         FROM dbo.fn_WH_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                                  @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
-        WHERE TotalPay <> 0
+        WHERE InsPay > 0
         GROUP BY PayerName
     ),
     top5 AS (
@@ -492,9 +494,10 @@ GO
 
 /* =============================================================================
    5b. Panel Averages - by DOS / by Check Date (Average Payments tabs)
-       Same measures as Panel Averages over the last @LastMonths calendar months of
-       DateofService or CheckDate, ending at the latest date in that column on or
-       before the billed week-range end (latest LineClaimFileLogs.WeekFolder).
+       FirstBilledDate not blank (no Bill Status filter).
+       Same measures as Panel Averages over @LastMonths months of DateofService or
+       CheckDate ending at the billed week-range end date (latest
+       LineClaimFileLogs.WeekFolder); latest date in that column when no week folder.
        Returns every payer; the page shows panel totals plus the top 3 payers.
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_GetWH_CS_AvgPayments_ClientLogic
@@ -531,9 +534,9 @@ BEGIN
     INTO #b
     FROM dbo.fn_WH_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                              @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
-    WHERE BilledStatus IN (N'Billed', N'Billed - Self Pay');
+    WHERE FirstBilledDate IS NOT NULL;
 
-    DECLARE @WindowTo DATE = (SELECT MAX(BasisDt) FROM #b WHERE @WeekEnd IS NULL OR BasisDt <= @WeekEnd);
+    DECLARE @WindowTo DATE = ISNULL(@WeekEnd, (SELECT MAX(BasisDt) FROM #b));
     DECLARE @WindowFrom DATE = DATEADD(DAY, 1, DATEADD(MONTH, -@LastMonths, @WindowTo));
 
     SELECT PanelName,
@@ -559,7 +562,7 @@ END
 GO
 
 /* =============================================================================
-   6. Insurance vs Payment % (InsurancePayment <> 0; sorted by Insurance Payment)
+   6. Insurance vs Payment % (InsurancePayment > 0; sorted by Insurance Payment)
       TotalPaymentPct = Average(Payment %) over every claim in the result.
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_WH_CS_InsuranceVsPaymentPct_Compute
@@ -580,7 +583,7 @@ BEGIN
                COUNT(PaymentPct)        AS PctCnt
         FROM dbo.fn_WH_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                                  @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
-        WHERE InsPay <> 0
+        WHERE InsPay > 0
         GROUP BY PayerName
     )
     SELECT PayerName,
@@ -596,7 +599,7 @@ END
 GO
 
 /* =============================================================================
-   7. Total Insurance Payment (TotalPayments <> 0; sorted by Total Payment)
+   7. Total Insurance Payment (InsurancePayment > 0; sorted by Total Payment)
       InsurancePayment carries Sum(TotalPayments); PaymentPct = Average(Payment %).
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_WH_CS_InsuranceVsPayment_Compute
@@ -617,7 +620,7 @@ BEGIN
                COUNT(PaymentPct)        AS PctCnt
         FROM dbo.fn_WH_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                                  @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
-        WHERE TotalPay <> 0
+        WHERE InsPay > 0
         GROUP BY PayerName
     )
     SELECT PayerName,
@@ -678,7 +681,7 @@ END
 GO
 
 /* =============================================================================
-   9. Panel Vs Payment (TotalPayments <> 0 AND CheckDate not blank; CheckDate month)
+   9. Panel Vs Payment (InsurancePayment > 0 AND CheckDate not blank; CheckDate month)
       InsurancePayments carries Sum(TotalPayments); panels sorted by Insurance Payment.
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_WH_CS_PanelVsPayment_Compute
@@ -699,7 +702,7 @@ BEGIN
                SUM(InsPay)              AS InsurancePayment
         FROM dbo.fn_WH_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                                  @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
-        WHERE TotalPay <> 0
+        WHERE InsPay > 0
           AND CheckDt IS NOT NULL
         GROUP BY PanelName, YEAR(CheckDt), MONTH(CheckDt)
     ),

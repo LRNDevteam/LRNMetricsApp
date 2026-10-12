@@ -110,6 +110,9 @@ public sealed class CollectionSummaryViewModel
     /// <summary>WellHealth: SP-only logic with its own filters, sorts and labels.</summary>
     public bool IsWellHealthLab => LabCollectionPrefix.IsWellHealth(SelectedLab);
 
+    /// <summary>Panel Average tab (Analyze Pathology only).</summary>
+    public bool ShowPanelAverage => LabCollectionPrefix.ShowsPanelAverage(SelectedLab);
+
     /// <summary>"Posted Date" (Analyze Pathology, PaymentPostedDate) or "Check Date".</summary>
     public string PostedDateLabel => LabCollectionPrefix.CollectionPostedDateLabel(SelectedLab);
 

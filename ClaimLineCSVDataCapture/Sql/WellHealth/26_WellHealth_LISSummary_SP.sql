@@ -19,8 +19,10 @@
      1    Billed                  Billable AND Bill Category = Billed
      *      Billed Via CMD        Billable AND Bill Category = Billed
      2    Not Billed              Billable AND Bill Category = Unbilled
-     *      Ready to bill         ... AND Sub Status = Ready to Bill
-     *      Entered not billed    ... AND Sub Status = Entered Not Submitted OR Entered Not Billed
+     *      Ready to bill         ... AND the accession has no claim in ClaimLevelData
+     *      Entered not billed    ... AND the accession has a claim in ClaimLevelData
+          (Same as the Executive Summary D1 / D2. LIMSMaster.SubStatus never carries
+           Ready to Bill / Entered Not Billed for Well Health; Ready + Entered = Not Billed.)
      B  Cancelled/Rejected        New Status = Cancelled/Rejected (+ Billed / Unbilled)
      C  Client Bill               New Status = Client Bill        (+ Billed / Unbilled)
      D  Billing Hold              New Status = Billing Hold       (+ Billed / Unbilled)
@@ -58,9 +60,15 @@ CREATE TABLE dbo.WH_LIS_StatusSummary
 	NewStatus    NVARCHAR(100)  NOT NULL,
 	BillCategory NVARCHAR(100)  NOT NULL,
 	SubStatus    NVARCHAR(100)  NOT NULL,
+	InPms        BIT            NOT NULL CONSTRAINT DF_WH_LIS_StatusSummary_InPms DEFAULT (0),
 	SampleCount  INT            NOT NULL,
 	RefreshedAt  DATETIME       NOT NULL CONSTRAINT DF_WH_LIS_StatusSummary_RefreshedAt DEFAULT (GETDATE())
 );
+GO
+
+IF COL_LENGTH('dbo.WH_LIS_StatusSummary', 'InPms') IS NULL
+	ALTER TABLE dbo.WH_LIS_StatusSummary
+		ADD InPms BIT NOT NULL CONSTRAINT DF_WH_LIS_StatusSummary_InPms DEFAULT (0);
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_WH_LIS_StatusSummary_Date'
@@ -74,11 +82,19 @@ AS
 BEGIN
 	SET NOCOUNT ON;
 
+	-- Every accession with a claim in PMS (any date, any status) - same set as the Executive Summary.
+	DROP TABLE IF EXISTS #PmsAcc;
+	CREATE TABLE #PmsAcc (Acc NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL PRIMARY KEY);
+	INSERT INTO #PmsAcc (Acc)
+	SELECT DISTINCT UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(200), c.AccessionNumber))))
+	FROM dbo.ClaimLevelData c
+	WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(200), c.AccessionNumber))), N'') IS NOT NULL;
+
 	TRUNCATE TABLE dbo.WH_LIS_StatusSummary;
 
 	INSERT INTO dbo.WH_LIS_StatusSummary
 		(DateType, GroupDate, Panel, Clinic, RefPhy, SalesRep, Collector,
-		 NewStatus, BillCategory, SubStatus, SampleCount, RefreshedAt)
+		 NewStatus, BillCategory, SubStatus, InPms, SampleCount, RefreshedAt)
 	SELECT d.DateType, d.GroupDate,
 		   ISNULL(LTRIM(RTRIM(l.TestCategory)), N''),
 		   ISNULL(LTRIM(RTRIM(l.ClinicName)), N''),
@@ -88,9 +104,13 @@ BEGIN
 		   ISNULL(LTRIM(RTRIM(l.NewStatus)), N''),
 		   ISNULL(LTRIM(RTRIM(l.BillCategory)), N''),
 		   ISNULL(LTRIM(RTRIM(l.SubStatus)), N''),
+		   p.InPms,
 		   COUNT(NULLIF(LTRIM(RTRIM(l.Accession)), N'')),
 		   GETDATE()
 	FROM dbo.LIMSMaster l
+	CROSS APPLY (SELECT InPms = CAST(CASE WHEN EXISTS (
+			SELECT 1 FROM #PmsAcc a
+			WHERE a.Acc = UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(200), l.Accession))))) THEN 1 ELSE 0 END AS BIT)) p
 	CROSS APPLY (VALUES
 		('Collected', TRY_CAST(l.RequestCollectDate AS DATE)),
 		('Received',  TRY_CAST(l.ReqReceivedDate    AS DATE)),
@@ -104,7 +124,8 @@ BEGIN
 			 ISNULL(LTRIM(RTRIM(l.DoctorFullName)), N''),
 			 ISNULL(LTRIM(RTRIM(l.NewStatus)), N''),
 			 ISNULL(LTRIM(RTRIM(l.BillCategory)), N''),
-			 ISNULL(LTRIM(RTRIM(l.SubStatus)), N'');
+			 ISNULL(LTRIM(RTRIM(l.SubStatus)), N''),
+			 p.InPms;
 
 	PRINT 'usp_RefreshWH_LISSummary completed: ' + CONVERT(VARCHAR(20), @@ROWCOUNT) + ' aggregate row(s).';
 END;
@@ -138,7 +159,7 @@ BEGIN
 
 	DROP TABLE IF EXISTS #F;
 	SELECT YEAR(a.GroupDate) AS Y, MONTH(a.GroupDate) AS M,
-		   a.NewStatus, a.BillCategory, a.SubStatus, SUM(a.SampleCount) AS Cnt
+		   a.NewStatus, a.BillCategory, a.InPms, SUM(a.SampleCount) AS Cnt
 	INTO #F
 	FROM dbo.WH_LIS_StatusSummary a
 	WHERE a.DateType = @DateType
@@ -149,7 +170,7 @@ BEGIN
 	  AND (NOT EXISTS (SELECT 1 FROM @Filters WHERE Dim = 'RefPhy')    OR a.RefPhy    IN (SELECT Val FROM @Filters WHERE Dim = 'RefPhy'))
 	  AND (NOT EXISTS (SELECT 1 FROM @Filters WHERE Dim = 'SalesRep')  OR a.SalesRep  IN (SELECT Val FROM @Filters WHERE Dim = 'SalesRep'))
 	  AND (NOT EXISTS (SELECT 1 FROM @Filters WHERE Dim = 'Collector') OR a.Collector IN (SELECT Val FROM @Filters WHERE Dim = 'Collector'))
-	GROUP BY YEAR(a.GroupDate), MONTH(a.GroupDate), a.NewStatus, a.BillCategory, a.SubStatus;
+	GROUP BY YEAR(a.GroupDate), MONTH(a.GroupDate), a.NewStatus, a.BillCategory, a.InPms;
 
 	-- Month rows, year rows (RowMonth = 0) and the grand total (0, 0).
 	DROP TABLE IF EXISTS #M;
@@ -159,9 +180,8 @@ BEGIN
 		ISNULL(SUM(CASE WHEN s.St = 'BILLABLE' THEN Cnt END), 0) AS Billable,
 		ISNULL(SUM(CASE WHEN s.St = 'BILLABLE' AND s.Cat = 'B' THEN Cnt END), 0) AS Billed,
 		ISNULL(SUM(CASE WHEN s.St = 'BILLABLE' AND s.Cat = 'U' THEN Cnt END), 0) AS NotBilled,
-		ISNULL(SUM(CASE WHEN s.St = 'BILLABLE' AND s.Cat = 'U' AND SubStatus = N'Ready to Bill' THEN Cnt END), 0) AS ReadyToBill,
-		ISNULL(SUM(CASE WHEN s.St = 'BILLABLE' AND s.Cat = 'U'
-						 AND SubStatus IN (N'Entered Not Submitted', N'Entered Not Billed') THEN Cnt END), 0) AS EnteredNotBilled,
+		ISNULL(SUM(CASE WHEN s.St = 'BILLABLE' AND s.Cat = 'U' AND InPms = 0 THEN Cnt END), 0) AS ReadyToBill,
+		ISNULL(SUM(CASE WHEN s.St = 'BILLABLE' AND s.Cat = 'U' AND InPms = 1 THEN Cnt END), 0) AS EnteredNotBilled,
 		ISNULL(SUM(CASE WHEN s.St = 'CANCELLED' THEN Cnt END), 0) AS Cancelled,
 		ISNULL(SUM(CASE WHEN s.St = 'CANCELLED' AND s.Cat = 'B' THEN Cnt END), 0) AS CancelledBilled,
 		ISNULL(SUM(CASE WHEN s.St = 'CANCELLED' AND s.Cat = 'U' THEN Cnt END), 0) AS CancelledUnbilled,
@@ -208,8 +228,8 @@ BEGIN
 		( 20, N'1',        N'Billed',              1, N'New Status = Billable AND Bill Category = Billed', 0, m.Billed),
 		( 30, NCHAR(8226), N'Billed Via CMD',      2, N'New Status = Billable AND Bill Category = Billed', 0, m.Billed),
 		( 40, N'2',        N'Not Billed',          1, N'New Status = Billable AND Bill Category = Unbilled', 0, m.NotBilled),
-		( 50, NCHAR(8226), N'Ready to bill',       2, N'New Status = Billable AND Bill Category = Unbilled AND Sub Status = Ready to Bill', 0, m.ReadyToBill),
-		( 60, NCHAR(8226), N'Entered not billed',  2, N'New Status = Billable AND Bill Category = Unbilled AND Sub Status = Entered Not Submitted OR Entered Not Billed', 0, m.EnteredNotBilled),
+		( 50, NCHAR(8226), N'Ready to bill',       2, N'New Status = Billable AND Bill Category = Unbilled AND Accession not in ClaimLevelData', 0, m.ReadyToBill),
+		( 60, NCHAR(8226), N'Entered not billed',  2, N'New Status = Billable AND Bill Category = Unbilled AND Accession in ClaimLevelData', 0, m.EnteredNotBilled),
 		( 70, N'B',        N'Cancelled/Rejected',  0, N'New Status = Cancelled/Rejected', 0, m.Cancelled),
 		( 72, N'1',        N'Billed',              1, N'New Status = Cancelled/Rejected AND Bill Category = Billed', 0, m.CancelledBilled),
 		( 74, N'2',        N'Unbilled',            1, N'New Status = Cancelled/Rejected AND Bill Category = Unbilled', 0, m.CancelledUnbilled),

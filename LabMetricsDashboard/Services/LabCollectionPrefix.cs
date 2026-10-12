@@ -127,9 +127,15 @@ public static class LabCollectionPrefix
     public static bool UsesSpCollectionLogic(string? labName) =>
         GetPrefix(labName) is "AnP" or "WH";
 
+    /// <summary>Labs with the Collection Summary "Panel Average" tab and Excel sheet.</summary>
+    public static bool ShowsPanelAverage(string? labName) =>
+        GetPrefix(labName) is "AnP";
+
     /// <summary>
-    /// WellHealth: SP-only Collection Summary with its own filters (InsurancePayment &lt;&gt; 0,
-    /// TotalPayments for Top 5 Payments / Total Insurance Payment / Panel Vs Payment, line-level CPT).
+    /// WellHealth: SP-only Collection Summary with its own filters (InsurancePayment &gt; 0 on the
+    /// Top 5 / Insurance vs Payment % / Total Insurance Payment / Panel Vs Payment summaries,
+    /// TotalPayments as the measure for Top 5 Payments / Total Insurance Payment / Panel Vs Payment,
+    /// line-level CPT).
     /// </summary>
     public static bool IsWellHealth(string? labName) =>
         GetPrefix(labName) is "WH";

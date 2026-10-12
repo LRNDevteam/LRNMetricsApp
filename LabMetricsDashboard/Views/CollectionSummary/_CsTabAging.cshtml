@@ -215,7 +215,7 @@
                 else if (Model.UsesSpCollectionLogic)
                 {
                     <span><strong>Data:</strong> Claim Level Data &bull;
-                    <strong>Filter:</strong> InsuranceBalance &gt; 0, ClaimStatus = No Response &bull;
+                    <strong>Filter:</strong> TotalInsuranceBalance &gt; 0 &bull;
                     <strong>Aging Buckets:</strong> AgingDOS (Current, 30+, 60+, 90+, 120+) &bull;
                     <strong>Sorted by:</strong> Claim Count DESC &bull;
                     <strong>Metric:</strong> Count of unique ClaimID, SUM(InsuranceBalance)</span>
@@ -235,6 +235,6 @@
                 <div class="text-center py-5 text-muted">
                     <div style="font-size:2rem;opacity:.4">&#9203;</div>
                     <div class="fw-semibold mt-2">No aging data available</div>
-                    <div class="small mt-1">No claims with "No Response" status found. Try adjusting your filters.</div>
+                    <div class="small mt-1">@(Model.UsesSpCollectionLogic ? "No claims with an insurance balance found." : "No claims with \"No Response\" status found.") Try adjusting your filters.</div>
                 </div>
             }

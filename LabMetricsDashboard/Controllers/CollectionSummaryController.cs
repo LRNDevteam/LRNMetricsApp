@@ -446,7 +446,7 @@ public class CollectionSummaryController : Controller
                     return PartialView("_CsTabWcv", vm);
 
                 case "panelavg":
-                    if (!LabCollectionPrefix.UsesSpCollectionLogic(selectedLab))
+                    if (!LabCollectionPrefix.ShowsPanelAverage(selectedLab))
                         return Content(string.Empty);
                 {
                     var panelAvg = await _repo.GetPanelAveragesAsync(connStr, payerFilter, panelFilter,
@@ -613,8 +613,7 @@ public class CollectionSummaryController : Controller
         var cptPaymentPctTask = _repo.GetCptPaymentPctAsync(
             connStr, payerFilter, panelFilter,
             fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-        // Panel Average is only shown for labs on the SP client logic (AnalyzePathology).
-        var showPanelAverage = LabCollectionPrefix.UsesSpCollectionLogic(selectedLab);
+        var showPanelAverage = LabCollectionPrefix.ShowsPanelAverage(selectedLab);
         var panelAveragesTask = showPanelAverage
             ? _repo.GetPanelAveragesAsync(connStr, payerFilter, panelFilter,
                 fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
