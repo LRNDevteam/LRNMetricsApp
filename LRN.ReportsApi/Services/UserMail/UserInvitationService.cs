@@ -56,22 +56,52 @@ public sealed class UserInvitationService : IUserInvitationService
         _logger = logger;
     }
 
+    /// <summary>
+    /// Never throws. A user is created whatever happens to the email: every failure - mail not
+    /// configured, wrong tenant / client / secret, Graph down, invitation tables missing - comes back
+    /// as (false, reason) and is recorded in the email log as a failed send where the log is reachable.
+    /// </summary>
     public async Task<(bool Sent, string? Error)> SendInvitationAsync(int labUserId, string application, string sentBy, bool isResend, CancellationToken ct)
     {
+        var emailType = isResend ? EmailTypes.UserInvitationResend : EmailTypes.UserInvitation;
+        var subject = $"Your {(application == UserMailApplications.ArWorkbench ? "LRN AR Workbench" : "LRN Metrics")} account is ready";
+        UserMailTarget? target = null;
+        try
+        {
+            target = await _repository.GetTargetAsync(labUserId, ct);
+            return await SendCoreAsync(target, labUserId, application, sentBy, emailType, subject, ct);
+        }
+        catch (Exception ex)
+        {
+            var error = ex is Microsoft.Data.SqlClient.SqlException
+                ? "the invitation tables are missing or unreachable - run LRN.ReportsApi/Sql/UserMail_Setup.sql"
+                : $"the invitation could not be sent: {ex.Message}";
+            _logger.LogError(ex, "{App} invitation for LabUserID {Id} failed; the user is kept.", application, labUserId);
+            // Best effort: the log itself may be what failed.
+            await EmailLogWriter.TryWriteAsync(_repository, _logger, application, emailType, [target?.Email ?? "(unknown)"], SafeSender(),
+                subject, null, error, sentBy, labUserId, target?.UserName);
+            return (false, error);
+        }
+    }
+
+    private string? SafeSender()
+    {
+        try { return _mail.SenderAddress; } catch { return null; }
+    }
+
+    private async Task<(bool Sent, string? Error)> SendCoreAsync(UserMailTarget? target, int labUserId, string application, string sentBy,
+        string emailType, string subject, CancellationToken ct)
+    {
         var o = _options.CurrentValue;
-        var target = await _repository.GetTargetAsync(labUserId, ct);
         if (target is null) return (false, "That user no longer exists.");
         if (!target.IsActive) return (false, "The user is inactive. Activate the account before sending an invitation.");
         var email = target.Email?.Trim();
         if (string.IsNullOrWhiteSpace(email)) return (false, "The user has no email address. Add one first.");
 
-        var emailType = isResend ? EmailTypes.UserInvitationResend : EmailTypes.UserInvitation;
-        var subject = $"Your {(application == UserMailApplications.ArWorkbench ? "LRN AR Workbench" : "LRN Metrics")} account is ready";
-
         if (string.IsNullOrWhiteSpace(o.FirstLoginUrl))
         {
             const string error = "UserMail:FirstLoginUrl is not configured, so no invitation link can be built.";
-            await _repository.WriteEmailLogAsync(labUserId, target.UserName, application, emailType, email, _mail.SenderAddress, subject, null, false, error, sentBy, ct);
+            await EmailLogWriter.TryWriteAsync(_repository, _logger, application, emailType, [email], SafeSender(), subject, null, error, sentBy, labUserId, target.UserName);
             return (false, error);
         }
 
@@ -85,14 +115,15 @@ public sealed class UserInvitationService : IUserInvitationService
         var roleLabels = target.RoleNames.Select(ArWorkbenchUserRules.RoleLabel).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var hasWorkbench = target.RoleNames.Any(ArWorkbenchUserRules.IsWorkbenchRole);
         var html = BuildHtml(application, target.UserName, roleLabels, target.LabNames, otp, link, hours,
-            o.SignInUrl, hasWorkbench ? o.ArWorkbenchUrl : null, o.SupportEmail);
+            o.SignInUrl, hasWorkbench ? o.ArWorkbenchUrl : null, o.AllSupportEmails());
         var (sent, sendError) = await _mail.SendAsync(email, subject, html, ct);
 
-        // The log keeps the message as sent, minus the secrets.
+        // The log keeps the message as sent, minus the secrets; a failed send is logged as failed.
         var redacted = html.Replace(otp, "••••••••", StringComparison.Ordinal)
                            .Replace(WebUtility.HtmlEncode(link), "[one-time link removed]", StringComparison.Ordinal)
                            .Replace(link, "[one-time link removed]", StringComparison.Ordinal);
-        await _repository.WriteEmailLogAsync(labUserId, target.UserName, application, emailType, email, _mail.SenderAddress, subject, redacted, sent, sendError, sentBy, ct);
+        await EmailLogWriter.TryWriteAsync(_repository, _logger, application, emailType, [email], SafeSender(), subject, redacted,
+            sent ? null : sendError ?? "Email could not be sent.", sentBy, labUserId, target.UserName);
 
         if (sent) _logger.LogInformation("{App} invitation emailed to {Email} for {User} by {By}", application, email, target.UserName, sentBy);
         else _logger.LogWarning("{App} invitation for {User} not sent: {Error}", application, target.UserName, sendError);
@@ -104,8 +135,8 @@ public sealed class UserInvitationService : IUserInvitationService
 
     private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
-    private static string BuildHtml(string application, string userName, IReadOnlyList<string> roles, IReadOnlyList<string> labNames,
-        string otp, string link, int expiryHours, string? signInUrl, string? workbenchUrl, string? supportEmail)
+    internal static string BuildHtml(string application, string userName, IReadOnlyList<string> roles, IReadOnlyList<string> labNames,
+        string otp, string link, int expiryHours, string? signInUrl, string? workbenchUrl, IReadOnlyList<string> supportEmails)
     {
         static string E(string? s) => WebUtility.HtmlEncode(s ?? string.Empty);
         static string Row(string label, string valueHtml, bool first = false)
@@ -116,9 +147,16 @@ public sealed class UserInvitationService : IUserInvitationService
 
         var product = application == UserMailApplications.ArWorkbench ? "LRN AR Workbench" : "LRN Metrics";
         var expiry = expiryHours % 24 == 0 ? $"{expiryHours / 24} day{(expiryHours == 24 ? "" : "s")}" : $"{expiryHours} hours";
-        var support = string.IsNullOrWhiteSpace(supportEmail)
-            ? "your LRN administrator"
-            : $"<a href=\"mailto:{E(supportEmail)}\" style=\"color:#1f4e79;\">{E(supportEmail)}</a>";
+        // "a@x.com", "a@x.com or b@x.com", "a@x.com, b@x.com or c@x.com" - each a mailto link.
+        var links = supportEmails.Select(s => $"<a href=\"mailto:{E(s)}\" style=\"color:#1f4e79;\">{E(s)}</a>").ToList();
+        var support = links.Count switch
+        {
+            0 => "your LRN administrator",
+            1 => links[0],
+            _ => string.Join(", ", links.Take(links.Count - 1)) + " or " + links[^1]
+        };
+        var helpHtml = links.Count == 0 ? string.Empty
+            : $@"<p style=""margin:0 0 16px;"">Need help signing in? Contact LRN Support at {support}.</p>";
 
         var after = new List<string>();
         if (!string.IsNullOrWhiteSpace(signInUrl))
@@ -155,6 +193,7 @@ public sealed class UserInvitationService : IUserInvitationService
   <p style=""margin:0 0 16px;font-size:13px;color:#52606d;"">If the button does not work, copy this link into your browser:<br><span style=""word-break:break-all;color:#1f4e79;"">{E(link)}</span></p>
   <p style=""margin:0 0 16px;"">This link and one-time password can be used once and expire in <b>{E(expiry)}</b>. If they expire, please ask your administrator to resend the invitation.</p>
   {afterHtml}
+  {helpHtml}
   <p style=""margin:0 0 16px;"">If you did not expect this email, please contact {support} and do not use the link.</p>
   <p style=""margin:0 0 4px;"">Kind regards,</p>
   <p style=""margin:0 0 20px;font-weight:600;"">LRN Administration</p>

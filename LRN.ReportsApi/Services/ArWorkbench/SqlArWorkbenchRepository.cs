@@ -207,6 +207,8 @@ public sealed partial class SqlArWorkbenchRepository : IArWorkbenchRepository
         ["Pending Payer Adjudication", "Resubmitted - E", "Resubmitted - F", "Resubmitted - P", "Reconsideration Submitted", "Appealed"];
 
     private readonly IReadOnlyDictionary<int, string> _labConnectionsById;
+    // Which setting chose each lab's connection, named in the "not installed" error.
+    private readonly IReadOnlyDictionary<int, string> _labConnectionSourceById;
     private readonly string _masterConnectionString;
 
     public SqlArWorkbenchRepository(IConfiguration configuration)
@@ -215,10 +217,16 @@ public sealed partial class SqlArWorkbenchRepository : IArWorkbenchRepository
             ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is missing. It must point to LRNMaster.");
 
         var labItems = configuration.GetSection("LabConfig:LabsID").Get<List<LabConfigItem>>() ?? [];
-        _labConnectionsById = labItems
+        var resolved = labItems
             .Where(x => x.Id > 0 && x.IsActive)
             .GroupBy(x => x.Id)
-            .ToDictionary(g => g.Key, g => LabConnectionResolver.Resolve(configuration, g.First().Id, g.First().Name, g.First().ConnectionKey));
+            .ToDictionary(g => g.Key, g =>
+            {
+                var cs = LabConnectionResolver.Resolve(configuration, g.First().Id, g.First().Name, g.First().ConnectionKey, out var source);
+                return (cs, source);
+            });
+        _labConnectionsById = resolved.ToDictionary(x => x.Key, x => x.Value.cs);
+        _labConnectionSourceById = resolved.ToDictionary(x => x.Key, x => x.Value.source);
     }
 
     private sealed class LabConfigItem
@@ -241,9 +249,12 @@ public sealed partial class SqlArWorkbenchRepository : IArWorkbenchRepository
         await using var probe = new SqlCommand("SELECT OBJECT_ID(N'dbo.ARWB_Claim', N'U');", connection);
         if (await probe.ExecuteScalarAsync(ct) is null or DBNull)
         {
+            var database = connection.Database;
             await connection.DisposeAsync();
+            _labConnectionSourceById.TryGetValue(labId, out var source);
             throw new InvalidOperationException(
-                $"AR Workbench tables are not installed for LabId {labId}. Run LRN.ReportsApi/Sql/ArWorkbench scripts 01-07 (or ARWB_Lab_Database_Setup_Merged.sql) in that lab database.");
+                $"AR Workbench tables are not installed for LabId {labId} in database '{database}' (connection from {source}). " +
+                "Run LRN.ReportsApi/Sql/ArWorkbench scripts 01-07 (or ARWB_Lab_Database_Setup_Merged.sql) in that lab database, or point that setting at the right database.");
         }
         return connection;
     }

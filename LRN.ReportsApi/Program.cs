@@ -208,6 +208,20 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// Which database each lab and LRNMaster resolve to, and the setting that chose it (no credentials),
+// so an environment that reaches the wrong database shows it in the log at startup.
+app.Logger.LogInformation("KeyVault: {Vault}. LRNMaster: {Master}.",
+    string.IsNullOrWhiteSpace(app.Configuration["KeyVault:Uri"]) ? "(none)" : app.Configuration["KeyVault:Uri"],
+    LRN.ReportsApi.Services.LabConnectionResolver.Describe(app.Configuration.GetConnectionString("DefaultConnection")));
+foreach (var lab in app.Configuration.GetSection("LabConfig:LabsID").GetChildren())
+{
+    if (!int.TryParse(lab["Id"], out var labId) || labId <= 0) continue;
+    var cs = LRN.ReportsApi.Services.LabConnectionResolver.Resolve(app.Configuration, labId, lab["Name"] ?? string.Empty, lab["ConnectionKey"], out var source);
+    app.Logger.LogInformation("Lab {LabId} ({LabName}): {Database}, from {Source}.",
+        labId, lab["Name"], LRN.ReportsApi.Services.LabConnectionResolver.Describe(cs), source);
+}
+
 app.Use(async (context, next) =>
 {
     ApplySecurityHeaders(context, app.Environment.IsDevelopment());

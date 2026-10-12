@@ -2442,6 +2442,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			? BeechTreeLineDataColumns(columns)
 			: logicSheetName.Equals("PhiLife", StringComparison.OrdinalIgnoreCase) || logicSheetName.Equals("Rising Tides", StringComparison.OrdinalIgnoreCase)
 			? StandardOrderLineDataColumns(columns)
+			: logicSheetName.Equals("WellHealth", StringComparison.OrdinalIgnoreCase)
+			? WellHealthLineDataColumns(columns)
 			: GenericLineDataColumns(columns);
 
 		return AvailableLineDataColumns(specs);
@@ -2812,6 +2814,42 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			TextColumn(columns, "ICD10Codes", "ICD-10 Codes", "ICD10Codes"),
 			TextColumn(columns, "Tests", "Tests", "Tests"),
 			TextColumn(columns, "PanelCategory", "PanelCategory", "PanelCategory")
+		};
+
+	/// <summary>
+	/// WellHealth's LIMS sheet, in sheet order with the sheet's headers (Schemas/WellHealth_LIMS_Schema.json
+	/// in the worker). Its LIMSMaster also carries the shared OrderID / PanelCategory / RessultedStatus
+	/// columns, which the sheet never fills, so the generic list picked those blanks over the real
+	/// Requisition / Test Category / Result Status and dropped the WellHealth-only columns.
+	/// </summary>
+	private static List<LineDataColumnSpec> WellHealthLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "Accession", "Accession", "Accession"),
+			TextColumn(columns, "TrueFalse", "T/F", "TrueFalse"),
+			TextColumn(columns, "Requisition", "Requisition", "Requisition", "OrderID"),
+			TextColumn(columns, "TestCategory", "Test Category", "TestCategory", "PanelCategory"),
+			DateColumn(columns, "RequestCollectDate", "Collection Date", "RequestCollectDate"),
+			DateColumn(columns, "ReqReceivedDate", "Received", "ReqReceivedDate"),
+			DateColumn(columns, "ProcessDate", "Process Date", "ProcessDate"),
+			TextColumn(columns, "PatientFullName", "Patient", "PatientFullName"),
+			DateColumn(columns, "PatientDateofBirth", "DOB", "PatientDateofBirth", "PatientDateOfBirth"),
+			TextColumn(columns, "DoctorFullName", "Physician", "DoctorFullName", "Provider"),
+			TextColumn(columns, "BillType", "Bill Type", "BillType"),
+			TextColumn(columns, "ClinicName", "Location", "ClinicName", "Facility"),
+			TextColumn(columns, "Tests", "Tests", "Tests"),
+			TextColumn(columns, "Samples", "Specimens", "Samples", "Specimen"),
+			DateColumn(columns, "ReqReportedDate", "Released Date", "ReqReportedDate"),
+			TextColumn(columns, "PhysicianSignature", "Physician Signature", "PhysicianSignature"),
+			TextColumn(columns, "Status", "Status", "Status"),
+			TextColumn(columns, "ResultStatus", "Result Status", "ResultStatus", "RessultedStatus"),
+			TextColumn(columns, "SubStatus", "Sub Status", "SubStatus"),
+			TextColumn(columns, "NewStatus", "New Status", "NewStatus"),
+			TextColumn(columns, "BillCategory", "Bill Category", "BillCategory"),
+			DateColumn(columns, "BilledDate", "Billed date", "BilledDate"),
+			TextColumn(columns, "TimetoResult", "Time to result", "TimetoResult", "TimeToResult"),
+			TextColumn(columns, "TimetoBill", "Time to Bill", "TimetoBill", "TimeToBill"),
+			TextColumn(columns, "State", "State", "State")
 		};
 
 	private static List<LineDataColumnSpec> InHealthLineDataColumns(HashSet<string> columns)

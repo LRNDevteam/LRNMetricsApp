@@ -67,6 +67,13 @@ public sealed class UserMailApiClient : IUserMailApiClient
             _logger.LogError(ex, "Invitation for LabUserID {Id} could not reach the Reports API.", labUserId);
             return new UserInvitationResult(false, "The Reports API could not be reached.");
         }
+        catch (Exception ex)
+        {
+            // Any other failure (an unreadable reply ...) is still only a mail failure: the user is
+            // already created and the admin can resend, so it is reported, never thrown.
+            _logger.LogError(ex, "Invitation for LabUserID {Id} failed.", labUserId);
+            return new UserInvitationResult(false, "The invitation email could not be sent.");
+        }
     }
 
     public Task<(int Status, string Json)> GetEmailTypesAsync(CancellationToken ct)

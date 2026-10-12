@@ -13,7 +13,10 @@ public static class PayerMasterRoles
             .Where(c => c.Type == ClaimTypes.Role || c.Type is "role" or "roles")
             .Any(c => roles.Any(r => string.Equals(c.Value, r, StringComparison.OrdinalIgnoreCase)));
 
-    public static bool IsLrnAdmin(ClaimsPrincipal u) => HasAnyRole(u, "Admin", "LRN Admin", "LRNAdmin");
+    // The same admin set LabMetricsDashboard uses (MenuAccessFilter.IsFullAdmin): Admin, Super Admin,
+    // LRN Admin. "Super Admin" was missing, so a Super Admin could open Menu Master / Role Menu
+    // Mapping in LRN Metrics but every api/menu call behind them came back 403.
+    public static bool IsLrnAdmin(ClaimsPrincipal u) => HasAnyRole(u, "Admin", "Super Admin", "SuperAdmin", "LRN Admin", "LRNAdmin");
     public static bool IsPayerPolicyAdmin(ClaimsPrincipal u) => HasAnyRole(u, "Payer Policy Admin", "PayerPolicyAdmin");
     public static bool IsReportsAnalyst(ClaimsPrincipal u) => HasAnyRole(u, "Reports Analyst", "ReportsAnalyst");
     public static bool IsReportsManager(ClaimsPrincipal u) => HasAnyRole(u, "Reports Manager", "ReportsManager");

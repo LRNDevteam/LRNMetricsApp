@@ -37,28 +37,30 @@ public sealed class SmtpDenialWorkflowEmailSender : IDenialWorkflowEmailSender
         if (!options.EnableSmtpEmail || string.IsNullOrWhiteSpace(options.SmtpHost) || string.IsNullOrWhiteSpace(options.SmtpFromEmail) || to.Count == 0)
             return false;
 
-        using var message = new MailMessage
-        {
-            From = new MailAddress(options.SmtpFromEmail),
-            Subject = subject,
-            Body = body,
-            IsBodyHtml = false
-        };
-
-        foreach (var email in to) message.To.Add(email);
-        if (!string.IsNullOrWhiteSpace(replyTo)) message.ReplyToList.Add(replyTo);
-
-        using var client = new SmtpClient(options.SmtpHost, options.SmtpPort)
-        {
-            EnableSsl = options.SmtpEnableSsl
-        };
-
-        if (!string.IsNullOrWhiteSpace(options.SmtpUserName))
-            client.Credentials = new NetworkCredential(options.SmtpUserName, options.SmtpPassword);
-
+        // Built inside the try: a malformed From / To / Reply-To address throws FormatException, which
+        // must end up as a failed entry in the email log, not as an exception in the caller.
         string? error = null;
         try
         {
+            using var message = new MailMessage
+            {
+                From = new MailAddress(options.SmtpFromEmail),
+                Subject = subject,
+                Body = body,
+                IsBodyHtml = false
+            };
+
+            foreach (var email in to) message.To.Add(email);
+            if (!string.IsNullOrWhiteSpace(replyTo)) message.ReplyToList.Add(replyTo);
+
+            using var client = new SmtpClient(options.SmtpHost, options.SmtpPort)
+            {
+                EnableSsl = options.SmtpEnableSsl
+            };
+
+            if (!string.IsNullOrWhiteSpace(options.SmtpUserName))
+                client.Credentials = new NetworkCredential(options.SmtpUserName, options.SmtpPassword);
+
             using var registration = ct.Register(client.SendAsyncCancel);
             await client.SendMailAsync(message, ct);
         }
