@@ -44,7 +44,7 @@ public static partial class CollectionSummaryExcelExportBuilder
 
         var insightsWs = BuildMonthlyClaimVolumeSheet(wb, vm, labName);
         BuildWeeklyClaimVolumeSheet(wb, vm, labName, insightsWs);
-        if (!vm.ShowAvgPaymentsByDateBasis)
+        if (vm.ShowAvgPaymentsLast3Months)
             BuildAvgPaymentsSheet(wb, vm.AvgPaymentsLast3Months, lastMonths: 3);
         BuildTop5ReimbursementSheet(wb, vm.Top5Reimbursement, labName);
         if (vm.ShowTop5TotalPayments)

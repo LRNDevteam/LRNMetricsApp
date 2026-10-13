@@ -318,46 +318,50 @@ public static class ClinicSummaryExcelExportBuilder
         ws.TabColor = ExcelTheme.TabGreen;
         ExcelTheme.ApplyDefaults(ws);
 
-        ExcelTheme.WriteHeaderRow(ws, 1, 1,
-            ["Clinic Name", "Claim Status", "No. of Claims", "Total Charge", "Insurance Payments"]);
+        var headers = new List<string> { "Clinic Name" };
+        if (vm.ShowStatusDrillDown) headers.Add("Claim Status");
+        headers.AddRange(["No. of Claims", "Total Charge", "Insurance Payments"]);
+        if (vm.ShowInsuranceBalance) headers.Add("Total Insurance Balance");
+        ExcelTheme.WriteHeaderRow(ws, 1, 1, [.. headers]);
         ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
+
+        int countCol = vm.ShowStatusDrillDown ? 3 : 2;
+        int lastCol = headers.Count;
+
+        void WriteValues(int row, int count, decimal charge, decimal payment, decimal balance, XLColor bg, bool bold)
+        {
+            ws.Cell(row, countCol).Value = count;
+            ws.Cell(row, countCol + 1).Value = charge;
+            ws.Cell(row, countCol + 2).Value = payment;
+            if (vm.ShowInsuranceBalance)
+                ws.Cell(row, countCol + 3).Value = balance;
+            for (int c = 1; c <= lastCol; c++)
+            {
+                ExcelTheme.StyleDataCell(ws.Cell(row, c), bg);
+                if (bold) ws.Cell(row, c).Style.Font.SetBold(true);
+            }
+            ws.Cell(row, countCol).Style.NumberFormat.Format = "#,##0";
+            for (int c = countCol + 1; c <= lastCol; c++)
+                ws.Cell(row, c).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
+        }
 
         int rowNum = 2;
         int idx = 0;
         foreach (var clinic in vm.Clinics)
         {
             // Clinic-level row (bold)
-            var clinicBg = ExcelTheme.GetRowBg(idx++);
             ws.Cell(rowNum, 1).Value = clinic.ClinicName;
-            ws.Cell(rowNum, 2).Value = "";
-            ws.Cell(rowNum, 3).Value = clinic.ClaimCount;
-            ws.Cell(rowNum, 4).Value = clinic.TotalCharge;
-            ws.Cell(rowNum, 5).Value = clinic.InsurancePayment;
-            for (int c = 1; c <= 5; c++)
-            {
-                ExcelTheme.StyleDataCell(ws.Cell(rowNum, c), clinicBg);
-                ws.Cell(rowNum, c).Style.Font.SetBold(true);
-            }
-            ws.Cell(rowNum, 3).Style.NumberFormat.Format = "#,##0";
-            ws.Cell(rowNum, 4).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
-            ws.Cell(rowNum, 5).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
+            WriteValues(rowNum, clinic.ClaimCount, clinic.TotalCharge, clinic.InsurancePayment, clinic.InsuranceBalance,
+                ExcelTheme.GetRowBg(idx++), bold: true);
             rowNum++;
 
             // Status drill-down rows
             int firstStatusRow = rowNum;
             foreach (var status in clinic.Statuses)
             {
-                var statusBg = ExcelTheme.GetRowBg(idx++);
-                ws.Cell(rowNum, 1).Value = "";
                 ws.Cell(rowNum, 2).Value = status.ClaimStatus;
-                ws.Cell(rowNum, 3).Value = status.ClaimCount;
-                ws.Cell(rowNum, 4).Value = status.TotalCharge;
-                ws.Cell(rowNum, 5).Value = status.InsurancePayment;
-                for (int c = 1; c <= 5; c++)
-                    ExcelTheme.StyleDataCell(ws.Cell(rowNum, c), statusBg);
-                ws.Cell(rowNum, 3).Style.NumberFormat.Format = "#,##0";
-                ws.Cell(rowNum, 4).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
-                ws.Cell(rowNum, 5).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
+                WriteValues(rowNum, status.ClaimCount, status.TotalCharge, status.InsurancePayment, status.InsuranceBalance,
+                    ExcelTheme.GetRowBg(idx++), bold: false);
                 rowNum++;
             }
 
@@ -370,20 +374,11 @@ public static class ClinicSummaryExcelExportBuilder
 
         // Grand Total
         ws.Cell(rowNum, 1).Value = "Grand Total";
-        ws.Cell(rowNum, 3).Value = vm.GrandTotalClaims;
-        ws.Cell(rowNum, 4).Value = vm.GrandTotalCharge;
-        ws.Cell(rowNum, 5).Value = vm.GrandTotalInsurancePayment;
-        for (int c = 1; c <= 5; c++)
-        {
-            ExcelTheme.StyleDataCell(ws.Cell(rowNum, c), ExcelTheme.TotalRowBg);
-            ws.Cell(rowNum, c).Style.Font.SetBold(true);
-        }
-        ws.Cell(rowNum, 3).Style.NumberFormat.Format = "#,##0";
-        ws.Cell(rowNum, 4).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
-        ws.Cell(rowNum, 5).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
+        WriteValues(rowNum, vm.GrandTotalClaims, vm.GrandTotalCharge, vm.GrandTotalInsurancePayment, vm.GrandTotalInsuranceBalance,
+            ExcelTheme.TotalRowBg, bold: true);
 
         ws.SheetView.FreezeRows(1);
-        ExcelTheme.AutoFitColumns(ws, 5, minWidth: 16, firstColMinWidth: 30);
+        ExcelTheme.AutoFitColumns(ws, lastCol, minWidth: 16, firstColMinWidth: 30);
     }
 
     // ?? Clinic Count by DOS Month sheet ??????????????????????????????

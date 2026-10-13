@@ -481,6 +481,8 @@ public class CollectionSummaryController : Controller
                     return PartialView("_CsTabAvgPayments", vm);
 
                 case "avgpay3":
+                    if (!LabCollectionPrefix.ShowsAvgPaymentsLast3Months(selectedLab))
+                        return Content(string.Empty);
                     var ap3 = await _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter,
                         fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct, lastMonths: 3);
                     vm.AvgPaymentsLast3Months = ap3;
@@ -625,11 +627,11 @@ public class CollectionSummaryController : Controller
             : _repo.GetAvgPaymentsAsync(
                 connStr, payerFilter, panelFilter,
                 fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-        var avgPayments3Task = avgPayByDateBasis
-            ? Task.FromResult(new PanelAveragesResult([]))
-            : _repo.GetAvgPaymentsAsync(
+        var avgPayments3Task = LabCollectionPrefix.ShowsAvgPaymentsLast3Months(selectedLab)
+            ? _repo.GetAvgPaymentsAsync(
                 connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct, lastMonths: 3);
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct, lastMonths: 3)
+            : Task.FromResult(new PanelAveragesResult([]));
         var avgPaymentsDosTask = avgPayByDateBasis
             ? _repo.GetAvgPaymentsByDateBasisAsync(connStr, AvgPaymentsDateBasis.DateOfService,
                 payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)

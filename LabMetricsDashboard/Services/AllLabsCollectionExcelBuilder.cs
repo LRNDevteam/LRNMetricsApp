@@ -233,9 +233,9 @@ public sealed class AllLabsCollectionExcelBuilder
         var avgPayTask      = avgPayByDateBasis
             ? _repo.GetAvgPaymentsByDateBasisAsync(connStr, AvgPaymentsDateBasis.CheckDate, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct)
             : _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct, lastMonths: 6);
-        var avgPay3Task     = avgPayByDateBasis
-            ? Task.FromResult(new PanelAveragesResult([]))
-            : _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct, lastMonths: 3);
+        var avgPay3Task     = LabCollectionPrefix.ShowsAvgPaymentsLast3Months(labName)
+            ? _repo.GetAvgPaymentsAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct, lastMonths: 3)
+            : Task.FromResult(new PanelAveragesResult([]));
         var avgPayDosTask   = avgPayByDateBasis
             ? _repo.GetAvgPaymentsByDateBasisAsync(connStr, AvgPaymentsDateBasis.DateOfService, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct)
             : Task.FromResult(new PanelAveragesResult([]));

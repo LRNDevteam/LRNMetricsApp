@@ -94,6 +94,10 @@
                 <th><i class="bi bi-file-earmark-text me-1"></i>No. of Claims</th>
                 <th><i class="bi bi-currency-dollar me-1"></i>Total Charge</th>
                 <th><i class="bi bi-cash-coin me-1"></i>Insurance Payments</th>
+                @if (Model.ShowInsuranceBalance)
+                {
+                    <th><i class="bi bi-hourglass-split me-1"></i>Total Insurance Balance</th>
+                }
             </tr>
         </thead>
         <tbody>
@@ -101,13 +105,21 @@
             @foreach (var clinic in Model.Clinics)
             {
                 var clinicId = $"cda-clinic-{cdaIdx++}";
-                <tr class="cda-clinic-row" data-cda-toggle="@clinicId">
+                <tr class="@(Model.ShowStatusDrillDown ? "cda-clinic-row" : null)"
+                    data-cda-toggle="@(Model.ShowStatusDrillDown ? clinicId : null)">
                     <td>
-                        <i class="bi bi-chevron-right cs-drill-chevron" aria-hidden="true"></i>@clinic.ClinicName
+                        @if (Model.ShowStatusDrillDown)
+                        {
+                            <i class="bi bi-chevron-right cs-drill-chevron" aria-hidden="true"></i>
+                        }@clinic.ClinicName
                     </td>
                     <td>@clinic.ClaimCount.ToString("N0")</td>
                     <td>@Acct2(clinic.TotalCharge)</td>
                     <td>@Acct2(clinic.InsurancePayment)</td>
+                    @if (Model.ShowInsuranceBalance)
+                    {
+                        <td>@Acct2(clinic.InsuranceBalance)</td>
+                    }
                 </tr>
                 @foreach (var status in clinic.Statuses)
                 {
@@ -116,6 +128,10 @@
                         <td>@status.ClaimCount.ToString("N0")</td>
                         <td>@Acct2(status.TotalCharge)</td>
                         <td>@Acct2(status.InsurancePayment)</td>
+                        @if (Model.ShowInsuranceBalance)
+                        {
+                            <td>@Acct2(status.InsuranceBalance)</td>
+                        }
                     </tr>
                 }
             }
@@ -126,6 +142,10 @@
                 <td>@Model.GrandTotalClaims.ToString("N0")</td>
                 <td>@Acct2(Model.GrandTotalCharge)</td>
                 <td>@Acct2(Model.GrandTotalInsurancePayment)</td>
+                @if (Model.ShowInsuranceBalance)
+                {
+                    <td>@Acct2(Model.GrandTotalInsuranceBalance)</td>
+                }
             </tr>
         </tfoot>
     </table>

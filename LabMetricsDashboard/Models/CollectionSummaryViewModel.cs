@@ -110,7 +110,7 @@ public sealed class CollectionSummaryViewModel
     /// <summary>WellHealth: SP-only logic with its own filters, sorts and labels.</summary>
     public bool IsWellHealthLab => LabCollectionPrefix.IsWellHealth(SelectedLab);
 
-    /// <summary>Panel Average tab (Analyze Pathology only).</summary>
+    /// <summary>Panel Average tab (see <see cref="LabCollectionPrefix.ShowsPanelAverage"/>).</summary>
     public bool ShowPanelAverage => LabCollectionPrefix.ShowsPanelAverage(SelectedLab);
 
     /// <summary>"Posted Date" (Analyze Pathology, PaymentPostedDate) or "Check Date".</summary>
@@ -139,6 +139,10 @@ public sealed class CollectionSummaryViewModel
     /// Avg Payments split into DOS and CheckDate tabs / sheets, with "Last 3 Months" hidden (Rising Tides).
     /// </summary>
     public bool ShowAvgPaymentsByDateBasis { get; set; }
+
+    /// <summary>"Avg Payments Last 3 Months" tab / sheet (hidden for date-basis labs and Analyze Pathology).</summary>
+    public bool ShowAvgPaymentsLast3Months =>
+        !ShowAvgPaymentsByDateBasis && LabCollectionPrefix.ShowsAvgPaymentsLast3Months(SelectedLab);
 
     public RepPaymentResult RepPayments { get; set; } = new([]);
 

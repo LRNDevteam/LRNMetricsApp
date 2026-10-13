@@ -4,8 +4,11 @@
    Source   : dbo.ClaimLevelData (Claim Level)
 
    Client logic (WellHealth Denial Summary - Requirements):
+     Denial Code = ClaimLevelData.DenialCodeNormalized (CO/PR/PI prefix stripped,
+     CO45 / PR45 / PI45 and the other excluded codes dropped; "10; 189" for
+     multi-code claims) on every tab, filter and dropdown below.
      1. Monthly Summary (Denial Summary page, Monthly tab)
-          Filter  : Denial Code is not blank AND Total Insurance Balance > 0
+          Filter  : DenialCodeNormalized is not blank AND Total Insurance Balance > 0
           Date    : ClaimLevelData.DenialDate, else the latest DenialDate of the
                     claim's denied lines in LineLevelData
           Columns : every Denial Month up to the end of the newest ClaimLevelData
@@ -21,13 +24,13 @@
      Monthly / Weekly / tiles are computed at claim-file ingest into
      WH_DenialMonthlySummary, WH_DenialWeeklySummary and WH_DenialSummaryTiles.
      3. Denial List
-          Filter  : Total Insurance Balance > 0 and Denial Code is not blank;
+          Filter  : Total Insurance Balance > 0 and DenialCodeNormalized is not blank;
                     optional Denial Code search (whole codes)
           Rows    : Denial Code, drill down to Insurance (PayerName_Raw)
                     by Total Insurance Balance
           Values  : No. of Claims, Total Insurance Balance; sort balance DESC
      4. Denial List - Plan Type
-          Filter  : Total Insurance Balance > 0 and Denial Code is not blank
+          Filter  : Total Insurance Balance > 0 and DenialCodeNormalized is not blank
           Rows    : PayerType; values / sort as Denial List
 
    Every calculation, ranking, total and sort order is produced here. The UI and
@@ -82,7 +85,7 @@ SELECT
     CAST(NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(255), c.ClaimID))), '') AS NVARCHAR(200))            AS ClaimID,
     CAST(ISNULL(NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(500), c.PayerName_Raw))), ''), 'Unknown') AS NVARCHAR(500)) AS PayerName,
     CAST(ISNULL(NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(200), c.PayerType))), ''), 'Unknown') AS NVARCHAR(200))     AS PayerType,
-    CAST(NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.DenialCode))), '') AS NVARCHAR(400))         AS DenialCode,
+    CAST(NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.DenialCodeNormalized))), '') AS NVARCHAR(400)) AS DenialCode,
     TRY_CONVERT(DATE, c.DenialDate)                                                               AS DenialDate,
     ISNULL(TRY_CONVERT(DECIMAL(18,2),
                        REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.TotalInsuranceBalance))), '$', ''), ',', '')), 0)
@@ -115,7 +118,7 @@ RETURN
 GO
 
 /* ---------------------------------------------------------------------------
-   Monthly / Weekly / tiles claim rows: one row per claim with a Denial Code
+   Monthly / Weekly / tiles claim rows: one row per claim with a DenialCodeNormalized
    and Total Insurance Balance > 0. DenialDate falls back to the latest
    DenialDate of the claim's denied lines.
    --------------------------------------------------------------------------- */
@@ -135,7 +138,7 @@ RETURN
     SELECT NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(255), c.ClaimID))), N'')                AS ClaimKey,
            CAST(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(500), c.PayerName_Raw), N''))) AS NVARCHAR(500)) AS PayerName,
            CAST(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), c.PayerType), N''))) AS NVARCHAR(200))     AS PayerType,
-           CAST(LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.DenialCode))) AS NVARCHAR(400))   AS DenialCode,
+           CAST(LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.DenialCodeNormalized))) AS NVARCHAR(400)) AS DenialCode,
            LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(4000), c.DenialDescription), N'')))     AS DenialDescription,
            COALESCE(TRY_CONVERT(DATE, c.DenialDate), ld.LineDenialDate)                 AS DenialDate,
            ISNULL(b.Bal, 0)                                                             AS Bal
@@ -143,7 +146,7 @@ RETURN
     CROSS  APPLY (SELECT TRY_CONVERT(DECIMAL(18,2),
                          REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.TotalInsuranceBalance))), N'$', N''), N',', N'')) AS Bal) b
     LEFT   JOIN ld ON ld.ClaimKey = LTRIM(RTRIM(CONVERT(NVARCHAR(255), c.ClaimID)))
-    WHERE  LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(400), c.DenialCode), N''))) <> N''
+    WHERE  LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(400), c.DenialCodeNormalized), N''))) <> N''
       AND  ISNULL(b.Bal, 0) > 0;
 GO
 
@@ -162,6 +165,26 @@ BEGIN
         SET @i += 1;
     END;
     RETURN @r;
+END
+GO
+
+/* A searched code in DenialCodeNormalized form: "CO97", "PR-97", "pi97" -> "97",
+   "COA97" -> "OA97"; anything else is upper-cased only
+   (DenialCodeNormalizer.Normalize in LRN.MasterFileProcessorWorker). */
+CREATE OR ALTER FUNCTION dbo.fn_WH_DenialSearchCode (@Code NVARCHAR(200))
+RETURNS NVARCHAR(200)
+WITH SCHEMABINDING
+AS
+BEGIN
+    DECLARE @c NVARCHAR(200) = UPPER(LTRIM(RTRIM(ISNULL(@Code, N''))));
+    IF @c LIKE N'COA[0-9]%' RETURN SUBSTRING(@c, 2, 200);
+    IF LEFT(@c, 2) IN (N'CO', N'PR', N'PI')
+    BEGIN
+        DECLARE @rest NVARCHAR(200) = SUBSTRING(@c, 3, 200);
+        IF LEFT(@rest, 1) = N'-' SET @rest = SUBSTRING(@rest, 2, 200);
+        IF @rest LIKE N'%[0-9]%' AND @rest NOT LIKE N'%[^0-9A-Z]%' RETURN @rest;
+    END;
+    RETURN @c;
 END
 GO
 
@@ -631,7 +654,8 @@ GO
    A claim's Denial Code ("CO-96, CO-11") is split into individual codes and the
    claim is counted under each of them, so 'D' / 'I' rows overlap; 'T' counts each
    claim and balance once.
-   @DenialCodeSearch : optional; the Denial List tab search box. Matches whole codes:
+   @DenialCodeSearch : optional; the Denial List tab search box, in DenialCodeNormalized
+                       form (CO97 / PR97 search as 97). Matches whole codes:
                        claims are kept when every searched code equals one of their
                        codes, and only the searched codes are listed. Totals cover the
                        matching claims.
@@ -679,7 +703,7 @@ BEGIN
                            WHERE  s.value <> N''
                              AND  NOT EXISTS (SELECT 1
                                               FROM   STRING_SPLIT(REPLACE(REPLACE(d.DenialCode, N';', N' '), N',', N' '), N' ') t
-                                              WHERE  t.value = s.value)));
+                                              WHERE  t.value = dbo.fn_WH_DenialSearchCode(s.value))));
 
     SELECT DISTINCT b.ClaimID, c.Code AS DenialCode, b.PayerName, b.Bal
     INTO   #bc
@@ -688,7 +712,7 @@ BEGIN
                   FROM   STRING_SPLIT(REPLACE(REPLACE(b.DenialCode, N';', N' '), N',', N' '), N' ') t) c
     WHERE  c.Code <> N''
       AND  (@DenialCodeSearch IS NULL
-            OR c.Code IN (SELECT UPPER(LTRIM(RTRIM(s.value)))
+            OR c.Code IN (SELECT dbo.fn_WH_DenialSearchCode(s.value)
                           FROM   STRING_SPLIT(REPLACE(@DenialCodeSearch, N',', N' '), N' ') s));
 
     SELECT DenialCode,

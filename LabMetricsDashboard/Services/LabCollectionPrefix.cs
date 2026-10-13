@@ -113,6 +113,13 @@ public static class LabCollectionPrefix
         GetPrefix(labName) is "RT" or "BT" or "IHD" or "WH";
 
     /// <summary>
+    /// Labs with the Collection Summary "Avg Payments Last 3 Months" tab and Excel sheet.
+    /// Hidden for date-basis labs (<see cref="UsesAvgPaymentsByDateBasis"/>) and Analyze Pathology.
+    /// </summary>
+    public static bool ShowsAvgPaymentsLast3Months(string? labName) =>
+        !UsesAvgPaymentsByDateBasis(labName) && GetPrefix(labName) is not "AnP";
+
+    /// <summary>
     /// InHealth DTR: Collection Summary payment-percent tabs show Average of PaymentPercent
     /// and Insurance Vs Payments shows payer totals (no CheckDate month columns).
     /// </summary>
@@ -127,9 +134,11 @@ public static class LabCollectionPrefix
     public static bool UsesSpCollectionLogic(string? labName) =>
         GetPrefix(labName) is "AnP" or "WH";
 
-    /// <summary>Labs with the Collection Summary "Panel Average" tab and Excel sheet.</summary>
-    public static bool ShowsPanelAverage(string? labName) =>
-        GetPrefix(labName) is "AnP";
+    /// <summary>
+    /// Labs with the Collection Summary "Panel Average" tab and Excel sheet.
+    /// None at present (Analyze Pathology, the only lab with the SP, has it hidden).
+    /// </summary>
+    public static bool ShowsPanelAverage(string? labName) => false;
 
     /// <summary>
     /// WellHealth: SP-only Collection Summary with its own filters (InsurancePayment &gt; 0 on the
@@ -171,6 +180,13 @@ public static class LabCollectionPrefix
     /// </summary>
     public static bool ClinicPivotsBilledOnly(string? labName) =>
         GetPrefix(labName) is "RT" or "BT";
+
+    /// <summary>
+    /// WellHealth Clinic $ Analysis: only <c>BilledStatus = 'Billed'</c> claims, one row per clinic
+    /// (no Claim Status drill-down), plus a Sum of TotalInsuranceBalance column.
+    /// </summary>
+    public static bool ClinicDollarAnalysisBilledStatusOnly(string? labName) =>
+        GetPrefix(labName) is "WH";
 
     /// <summary>
     /// Labs whose Clinic Panel Status columns are ordered by total claim count (largest first),

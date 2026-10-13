@@ -855,22 +855,30 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
         AddDateRangeClause(whereClauses, parameters, "DateOfService", "@dosFrom", "@dosTo", filterDosFrom, filterDosTo);
         AddDateRangeClause(whereClauses, parameters, "FirstBilledDate", "@fbFrom", "@fbTo", filterFirstBillFrom, filterFirstBillTo);
         AddBilledOnlyClause(whereClauses, labName);
+        var clinicOnly = LabCollectionPrefix.ClinicDollarAnalysisBilledStatusOnly(labName);
+        if (clinicOnly)
+            whereClauses.Add("LTRIM(RTRIM(BilledStatus)) = 'Billed'");
         var whereClause = string.Join(" AND ", whereClauses);
+
+        var statusSelect = clinicOnly ? "CAST(N'' AS NVARCHAR(100))" : "ISNULL(ClaimStatus, '(Unknown)')";
+        var groupBy = clinicOnly ? "ClinicName" : "ClinicName, ClaimStatus";
 
         var sql = $"""
             SELECT
                 ISNULL(ClinicName, '(Unknown)')   AS ClinicName,
-                ISNULL(ClaimStatus, '(Unknown)')  AS ClaimStatus,
+                {statusSelect}                     AS ClaimStatus,
                 COUNT(DISTINCT ClaimID)            AS ClaimCount,
                 ISNULL(SUM(TRY_CAST(ChargeAmount     AS DECIMAL(18,2))), 0) AS TotalCharge,
-                ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0) AS InsurancePayment
+                ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0) AS InsurancePayment,
+                ISNULL(SUM(TRY_CONVERT(DECIMAL(18,2), REPLACE(REPLACE(LTRIM(RTRIM(
+                    CONVERT(NVARCHAR(100), TotalInsuranceBalance))), N'$', N''), N',', N''))), 0) AS TotalInsuranceBalance
             FROM dbo.ClaimLevelData
             WHERE {whereClause}
-            GROUP BY ClinicName, ClaimStatus
-            ORDER BY ClinicName, ClaimStatus
+            GROUP BY {groupBy}
+            ORDER BY {groupBy}
             """;
 
-        var rawRows = new List<(string Clinic, string Status, int Count, decimal Charge, decimal Payment)>();
+        var rawRows = new List<(string Clinic, string Status, int Count, decimal Charge, decimal Payment, decimal Balance)>();
 
         try
         {
@@ -888,7 +896,8 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
                     reader.GetString(1),
                     reader.GetInt32(2),
                     GetDecimalSafe(reader, "TotalCharge"),
-                    GetDecimalSafe(reader, "InsurancePayment")
+                    GetDecimalSafe(reader, "InsurancePayment"),
+                    GetDecimalSafe(reader, "TotalInsuranceBalance")
                 ));
             }
         }
@@ -899,25 +908,29 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
         }
 
         // Build pivot structure grouped by ClinicName
-        var clinicMap = new Dictionary<string, (int Count, decimal Charge, decimal Payment, List<ClinicDollarAnalysisStatusRow> Statuses)>(StringComparer.OrdinalIgnoreCase);
+        var clinicMap = new Dictionary<string, (int Count, decimal Charge, decimal Payment, decimal Balance, List<ClinicDollarAnalysisStatusRow> Statuses)>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var (clinic, status, count, charge, payment) in rawRows)
+        foreach (var (clinic, status, count, charge, payment, balance) in rawRows)
         {
             if (!clinicMap.TryGetValue(clinic, out var entry))
             {
-                entry = (0, 0m, 0m, []);
+                entry = (0, 0m, 0m, 0m, []);
                 clinicMap[clinic] = entry;
             }
 
-            entry.Statuses.Add(new ClinicDollarAnalysisStatusRow
+            if (!clinicOnly)
             {
-                ClaimStatus = status,
-                ClaimCount = count,
-                TotalCharge = charge,
-                InsurancePayment = payment,
-            });
+                entry.Statuses.Add(new ClinicDollarAnalysisStatusRow
+                {
+                    ClaimStatus = status,
+                    ClaimCount = count,
+                    TotalCharge = charge,
+                    InsurancePayment = payment,
+                    InsuranceBalance = balance,
+                });
+            }
 
-            clinicMap[clinic] = (entry.Count + count, entry.Charge + charge, entry.Payment + payment, entry.Statuses);
+            clinicMap[clinic] = (entry.Count + count, entry.Charge + charge, entry.Payment + payment, entry.Balance + balance, entry.Statuses);
         }
 
         var clinics = clinicMap
@@ -927,6 +940,7 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
                 ClaimCount = kvp.Value.Count,
                 TotalCharge = kvp.Value.Charge,
                 InsurancePayment = kvp.Value.Payment,
+                InsuranceBalance = kvp.Value.Balance,
                 Statuses = kvp.Value.Statuses
                     .OrderByDescending(s => s.ClaimCount)
                     .ToList(),
@@ -938,9 +952,12 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
         {
             SelectedLab = labName,
             Clinics = clinics,
+            ShowStatusDrillDown = !clinicOnly,
+            ShowInsuranceBalance = clinicOnly,
             GrandTotalClaims = clinics.Sum(c => c.ClaimCount),
             GrandTotalCharge = clinics.Sum(c => c.TotalCharge),
             GrandTotalInsurancePayment = clinics.Sum(c => c.InsurancePayment),
+            GrandTotalInsuranceBalance = clinics.Sum(c => c.InsuranceBalance),
         };
     }
 

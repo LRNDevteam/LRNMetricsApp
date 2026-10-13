@@ -1006,7 +1006,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <div class="top5-card-hdr reimb-hdr">
                     <div>
                         <div class="top5-card-hdr-title">Reimbursement Rate</div>
-                        <div class="top5-card-hdr-sub">@(Model.UsesSpCollectionLogic ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
+                        <div class="top5-card-hdr-sub">@(Model.IsWellHealthLab ? "Top 5 payers by insurance payment" : Model.UsesSpCollectionLogic ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
                     </div>
                     <span class="top5-card-badge reimb-badge">
                         <i class="bi bi-percent"></i> Reimbursement
@@ -1059,7 +1059,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <div class="top5-card-footer">
                     @if (Model.IsWellHealthLab)
                     {
-                        <span>Top 5 by <span class="top5-hl-blue">Claim Count</span> &bull; sorted by Insurance Payment &bull;
+                        <span>Top 5 by <span class="top5-hl-blue">Insurance Payment</span> &bull;
                         InsurancePayment &gt; 0 &bull; Payment % = Average(PaymentPercent)</span>
                     }
                     else if (Model.UsesSpCollectionLogic)
@@ -1219,7 +1219,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <i class="bi bi-cash-coin"></i> @(Model.IsWellHealthLab ? "Panel Averages - by Check Date" : Model.ShowAvgPaymentsByDateBasis ? "Avg Payments - Check Date" : "Avg Payments")
             </button>
         </li>
-        @if (!Model.ShowAvgPaymentsByDateBasis)
+        @if (Model.ShowAvgPaymentsLast3Months)
         {
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="avgpay3-tab" data-bs-toggle="pill"
@@ -1512,7 +1512,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         {
             <div class="tab-pane fade" id="avgpaydos-pane" role="tabpanel" aria-labelledby="avgpaydos-tab"     data-cs-tab="avgpaydos"><div class="cs-lazy-pane" data-lazy-tab="avgpaydos"></div></div>
         }
-        else
+        else if (Model.ShowAvgPaymentsLast3Months)
         {
             <div class="tab-pane fade" id="avgpay3-pane"       role="tabpanel" aria-labelledby="avgpay3-tab"       data-cs-tab="avgpay3">@if (!Model.LazyLoadTabs) { ViewData["AvgPayMonths"] = 3; @await Html.PartialAsync("_CsTabAvgPayments", Model) } else { <div class="cs-lazy-pane" data-lazy-tab="avgpay3"></div> }</div>
         }

@@ -14,7 +14,7 @@
      1  Monthly Summary        InsurancePayment <> 0; Panel + top 3 insurance by claim count;
                                Posted Date month; sorted by Insurance Payment
      2  Weekly Summary         same as Monthly; Posted Date Mon-Sun weeks
-     3  Top 5 Reimbursement %  InsurancePayment > 0; top 5 insurance by claim count;
+     3  Top 5 Reimbursement %  InsurancePayment > 0; top 5 insurance by Insurance Payment;
                                Average(Payment %); sorted by Insurance Payment
      4  Top 5 Insurance by Payments  InsurancePayment > 0; top 5 by Total Payment
      5  Panel Averages         by DOS / by Check Date: FirstBilledDate not blank; 6 months ending at
@@ -331,7 +331,7 @@ GO
 
 /* =============================================================================
    3. Top 5 Reimbursement % vs Billed Charges
-      Top 5 insurance by claim count (InsurancePayment > 0), listed by Insurance Payment.
+      Top 5 insurance by Insurance Payment (InsurancePayment > 0), listed by Insurance Payment.
       TotalPaymentPct = Average(Payment %) over every claim of the 5 payers.
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_WH_CS_Top5ReimbursementPct_Compute
@@ -359,7 +359,7 @@ BEGIN
     top5 AS (
         SELECT TOP 5 *
         FROM p
-        ORDER BY Claims DESC, InsPay DESC, PayerName
+        ORDER BY InsPay DESC, Claims DESC, PayerName
     )
     SELECT CAST(ROW_NUMBER() OVER (ORDER BY InsPay DESC, Claims DESC, PayerName) AS INT) AS PayerRank,
            PayerName,
