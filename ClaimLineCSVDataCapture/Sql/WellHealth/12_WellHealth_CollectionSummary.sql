@@ -21,8 +21,8 @@
                                the billed week-range end date. The Panel Average tab is not shown.
      6  Insurance vs Payment % InsurancePayment > 0; sorted by Insurance Payment
      7  Total Insurance Payment InsurancePayment > 0; sorted by Total Payment
-     8  Insurance vs Aging     Charge Balance Due Ins (InsuranceBalance) > 0; Aging DOS
-     9  Panel Vs Payment       InsurancePayment > 0 AND CheckDate not blank; CheckDate month
+     8  Insurance vs Aging     TotalInsuranceBalance > 0; Sum(TotalInsuranceBalance); Aging DOS
+     9  Panel Vs Payment       InsurancePayment > 0 AND Posted Date not blank; Posted Date month
     10  CPT vs Payment %       Line Level Data; no filter; sorted by claim count
 
    "Posted Date" = PaymentPostedDate (dashboard Check Date filter applies to it);
@@ -91,6 +91,8 @@ RETURN
         ChargeAmt         = ISNULL(TRY_CAST(c.ChargeAmount     AS DECIMAL(18,2)), 0),
         PaymentPct        = TRY_CAST(c.PaymentPercent AS DECIMAL(18,6)) * 100,
         InsBalance        = ISNULL(TRY_CAST(c.InsuranceBalance AS DECIMAL(18,2)), 0),
+        TotalInsBalance   = ISNULL(TRY_CONVERT(DECIMAL(18,2), REPLACE(REPLACE(LTRIM(RTRIM(
+                                CONVERT(NVARCHAR(100), c.TotalInsuranceBalance))), N'$', N''), N',', N'')), 0),
         PatientBalance    = ISNULL(TRY_CAST(c.PatientBalance   AS DECIMAL(18,2)), 0),
         AgingDOS          = NULLIF(LTRIM(RTRIM(c.AgingDOS)), N''),
         CptCode           = ISNULL(NULLIF(LTRIM(RTRIM(c.CPTCodeXUnitsXModifier)), N''), N'(blank)'),
@@ -638,8 +640,8 @@ END
 GO
 
 /* =============================================================================
-   8. Insurance vs Aging (Charge Balance Due Ins = InsuranceBalance > 0; Aging DOS)
-      Payers sorted by Insurance Balance, buckets Current -> 120+.
+   8. Insurance vs Aging (TotalInsuranceBalance > 0; Aging DOS)
+      Value = Sum(TotalInsuranceBalance); payers sorted by it, buckets Current -> 120+.
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_WH_CS_InsuranceVsAging_Compute
     @PayerNames NVARCHAR(MAX) = NULL, @PanelNames NVARCHAR(MAX) = NULL,
@@ -654,10 +656,10 @@ BEGIN
         SELECT PayerName,
                ISNULL(AgingDOS, N'(blank)') AS AgingBucket,
                COUNT(DISTINCT ClaimKey)     AS VisitCount,
-               SUM(InsBalance)              AS InsuranceBalance
+               SUM(TotalInsBalance)         AS InsuranceBalance
         FROM dbo.fn_WH_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                                  @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
-        WHERE InsBalance > 0
+        WHERE TotalInsBalance > 0
         GROUP BY PayerName, ISNULL(AgingDOS, N'(blank)')
     ),
     payer AS (
@@ -681,7 +683,7 @@ END
 GO
 
 /* =============================================================================
-   9. Panel Vs Payment (InsurancePayment > 0 AND CheckDate not blank; CheckDate month)
+   9. Panel Vs Payment (InsurancePayment > 0 AND PaymentPostedDate not blank; Posted Date month)
       InsurancePayments carries Sum(TotalPayments); panels sorted by Insurance Payment.
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_WH_CS_PanelVsPayment_Compute
@@ -695,16 +697,16 @@ BEGIN
 
     WITH agg AS (
         SELECT PanelName,
-               YEAR(CheckDt)            AS BillYear,
-               MONTH(CheckDt)           AS BillMonth,
+               YEAR(PostedDt)           AS BillYear,
+               MONTH(PostedDt)          AS BillMonth,
                COUNT(DISTINCT ClaimKey) AS NoOfClaims,
                SUM(TotalPay)            AS TotalPayments,
                SUM(InsPay)              AS InsurancePayment
         FROM dbo.fn_WH_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                                  @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
         WHERE InsPay > 0
-          AND CheckDt IS NOT NULL
-        GROUP BY PanelName, YEAR(CheckDt), MONTH(CheckDt)
+          AND PostedDt IS NOT NULL
+        GROUP BY PanelName, YEAR(PostedDt), MONTH(PostedDt)
     ),
     panel AS (
         SELECT PanelName,

@@ -207,10 +207,10 @@
                 @if (Model.IsWellHealthLab)
                 {
                     <span><strong>Data:</strong> Claim Level Data &bull;
-                    <strong>Filter:</strong> Charge Balance Due Ins (InsuranceBalance) &gt; 0 &bull;
+                    <strong>Filter:</strong> TotalInsuranceBalance &gt; 0 &bull;
                     <strong>Aging Buckets:</strong> AgingDOS (Current, 30+, 60+, 90+, 120+) &bull;
-                    <strong>Sorted by:</strong> Sum of InsuranceBalance DESC &bull;
-                    <strong>Metric:</strong> Count of unique ClaimID, SUM(InsuranceBalance)</span>
+                    <strong>Sorted by:</strong> Sum of TotalInsuranceBalance DESC &bull;
+                    <strong>Metric:</strong> Count of unique ClaimID, SUM(TotalInsuranceBalance)</span>
                 }
                 else if (Model.UsesSpCollectionLogic)
                 {
