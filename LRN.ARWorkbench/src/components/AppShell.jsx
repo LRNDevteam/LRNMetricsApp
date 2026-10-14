@@ -9,6 +9,7 @@ import { arWorkbenchService } from '../services/arWorkbenchService';
 import { clearJwt } from '../services/auth';
 import { fmt } from '../utils/format';
 import Icon from './Icon';
+import NotificationBell from './NotificationBell';
 
 function ScopeBadge({ access, roleCode, labName }) {
   if (!access) return null;
@@ -95,7 +96,7 @@ export default function AppShell() {
     if (!labId || !user) return undefined;
     const controller = new AbortController();
     arWorkbenchService.queues(labId, controller.signal)
-      .then((s) => setCounts({ unassignedOpen: s.unassignedOpen, awaitingQa: s.awaitingQa, refollowupDue: s.refollowupDue, agentRequestsPending: s.agentRequestsPending }))
+      .then((s) => setCounts({ unassignedOpen: s.unassignedOpen, awaitingQa: s.awaitingQa, refollowupDue: s.refollowupDue, agentRequestsPending: s.agentRequestsPending, statusVerificationPending: s.statusVerificationPending }))
       .catch(() => { /* badges are optional; the page itself reports errors */ });
     return () => controller.abort();
   }, [labId, user, location.pathname]);
@@ -176,6 +177,7 @@ export default function AppShell() {
               ) : labName && <span className="arwb-badge arwb-badge-accent">{labName}</span>}
             </div>
             <ScopeBadge access={user?.access} roleCode={user?.roleCode} labName={labName} />
+            <NotificationBell labId={labId} user={user} />
             <div className="arwb-user-menu" ref={userMenuRef}>
               <button type="button" className="arwb-user-chip arwb-user-chip-btn" onClick={() => setUserMenuOpen((v) => !v)}
                 aria-haspopup="menu" aria-expanded={userMenuOpen} title="Account">

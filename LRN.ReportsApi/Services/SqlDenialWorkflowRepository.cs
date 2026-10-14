@@ -214,7 +214,7 @@ BEGIN
     -- DDL batch to blow past its timeout, and because that failure prevented the schema-ready flag
     -- from ever being set, every subsequent request kept retrying the same expensive batch, taking
     -- every page down with it. It ships instead in
-    -- Sql/DenialWorkflow_Performance_Indexes_And_Backfill_20260701.sql for a DBA to run once in a
+    -- Database/LRN.ReportsApi/DenialWorkflow_Performance_Indexes_And_Backfill_20260701.sql for a DBA to run once in a
     -- maintenance window. The C# query builders check COL_LENGTH/HasColumnAsync and only use the
     -- fast plain-column comparison once that column actually exists; until then they fall back to
     -- the older (slower but always-correct) LOWER/LTRIM/RTRIM comparison.
@@ -5090,7 +5090,7 @@ ORDER BY CreatedOn DESC, NoteId DESC;";
         await con.OpenAsync(ct);
 
         // RPT-01 required detail columns. These are added by the AR-report schema pass
-        // (Sql/ArReports/RPT01_ActivityDetail_Setup.sql), which labs receive one at a time, so each
+        // (Database/LRN.ReportsApi/ArReports/RPT01_ActivityDetail_Setup.sql), which labs receive one at a time, so each
         // one is written only where it exists - a lab that has not migrated keeps saving notes
         // exactly as before instead of failing on an unknown column.
         var noteColumns = await GetColumnSetAsync(con, "dbo.DenialClaimNotes", ct);

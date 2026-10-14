@@ -606,7 +606,7 @@ are what make it fast.
 
 > **Superseded in part.** Items 11.1, 11.2, 11.5, 11.6 and the `LabId` half of 11.7 were fixed
 > when the Rev 3.1 architecture spec was implemented; see
-> [Sql_Spec_R31_Migration.sql](../../LRN.ReportsApi/Sql/DenialChanges/01_Denial_Spec_R31_Migration.sql) and §12 below for what remains. 11.3,
+> [Sql_Spec_R31_Migration.sql](../../Database/LRN.ReportsApi/DenialChanges/01_Denial_Spec_R31_Migration.sql) and §12 below for what remains. 11.3,
 > 11.4, 11.8 and 11.9 still stand. The findings are kept here because they record why the code
 > looks the way it does.
 

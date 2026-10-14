@@ -2,7 +2,7 @@ namespace LRN.ReportsApi.Models;
 
 // ============================================================================================
 // AR Workbench - DTOs for /api/ar-workbench. Backed by the [arwb] schema in each lab database
-// (LRN.ReportsApi/Sql/ArWorkbench).
+// (Database/LRN.ReportsApi/ArWorkbench).
 // ============================================================================================
 
 public sealed class ArWorkbenchPermissions
@@ -75,6 +75,8 @@ public sealed class ArWorkbenchQueueSummary
     public int RefollowupDue { get; set; }
     /// <summary>Escalation &amp; reassignment requests waiting for a lead's answer (nav badge).</summary>
     public int AgentRequestsPending { get; set; }
+    /// <summary>Claims held for RCM Manager status change verification (nav badge).</summary>
+    public int StatusVerificationPending { get; set; }
     public List<ArWorkbenchQueueNode> Queues { get; set; } = new();
 }
 
@@ -340,6 +342,23 @@ public sealed class ArWorkbenchClaimLine
     /// <summary>dbo.LineLevelData.RecordId of the line: ICD Code, Units and Modifier are read from it live.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public int? SourceRecordId { get; set; }
+    /// <summary>The line's denial codes (dbo.ARWB_ClaimLineDenial), one per code, in the order received.</summary>
+    public List<ArWorkbenchLineDenial> Denials { get; set; } = new();
+}
+
+public sealed class ArWorkbenchLineDenial
+{
+    public int Ordinal { get; set; }
+    /// <summary>As received, group prefix kept (e.g. CO-16).</summary>
+    public string? DenialCodeRaw { get; set; }
+    /// <summary>Normalized (16), the key of the denial masters.</summary>
+    public string? DenialCode { get; set; }
+    public string? GroupCode { get; set; }
+    /// <summary>Workbench category (Workbench Category Map).</summary>
+    public string? DenialCategory { get; set; }
+    /// <summary>The lab's Denial Code Master description, else the category map's reason.</summary>
+    public string? DenialDescription { get; set; }
+    public bool IsNonCollectible { get; set; }
 }
 
 public sealed class ArWorkbenchActivity

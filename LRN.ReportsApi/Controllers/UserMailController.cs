@@ -49,7 +49,7 @@ public sealed class UserMailController : ControllerBase
         catch (SqlException ex)
         {
             _logger.LogError(ex, "Invitation for LabUserID {Id} failed in SQL.", labUserId);
-            return Ok(new { emailSent = false, message = "The invitation tables are missing - run LRN.ReportsApi/Sql/UserMail_Setup.sql." });
+            return Ok(new { emailSent = false, message = "The invitation tables are missing - run Database/LRN.ReportsApi/UserMail_Setup.sql." });
         }
     }
 

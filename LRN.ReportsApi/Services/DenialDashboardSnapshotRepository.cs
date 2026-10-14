@@ -197,7 +197,7 @@ public sealed class SqlDenialDashboardSnapshotRepository : IDenialDashboardSnaps
         }
     }
 
-    /// <summary>Keep in step with Sql/DenialDashboardSnapshot_Setup.sql.</summary>
+    /// <summary>Keep in step with Database/LRN.ReportsApi/DenialDashboardSnapshot_Setup.sql.</summary>
     internal static readonly string[] SchemaStatements =
     [
         """

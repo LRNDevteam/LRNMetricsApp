@@ -6,7 +6,7 @@ namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// Reads Coding Validation summary data via the stored procedures created in
-/// CaptureDataApp/Sql/04_CodingAggregates.sql.
+/// Database/CaptureDataApp/04_CodingAggregates.sql.
 ///
 /// The YTD/WTD Insights and Summary datasets come from pre-computed aggregate
 /// tables (CodingAgg_*) that CaptureDataApp refreshes after each weekly load

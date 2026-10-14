@@ -44,7 +44,7 @@ public sealed record DenialEnrichmentResult(
 ///
 /// <para>The columns are created if the lab database has not got them yet, in the same lazily
 /// -created, re-runnable style the rest of this repo uses for schema that has to keep step with a
-/// deployed script (<c>sql/Labs/_Common/04_DenialNormalization.sql</c>).</para>
+/// deployed script (<c>Database/LRN.MasterFileProcessorWorker/Labs/_Common/04_DenialNormalization.sql</c>).</para>
 ///
 /// <para>Enrichment never fails the import. The rows are already committed when it runs; a master
 /// lookup outage or a permissions gap costs descriptions, not the load, so every failure is

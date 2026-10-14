@@ -54,7 +54,7 @@ public sealed class DenialCategoryMasterController : Controller
             {
                 CanImport = CanImport,
                 ActiveTab = activeTab,
-                SetupError = "The Denial Category Master tables are not installed. Run LabMetricsDashboard/SqlScripts/DenialCategoryMaster_Setup.sql on LRNMaster."
+                SetupError = "The Denial Category Master tables are not installed. Run Database/LabMetricsDashboard/DenialCategoryMaster_Setup.sql on LRNMaster."
             });
         }
     }
@@ -113,7 +113,7 @@ public sealed class DenialCategoryMasterController : Controller
         {
             _logger.LogError(ex, "Denial Category Master import failed.");
             TempData["Error"] = ex.Number == 208
-                ? "The Denial Category Master tables are not installed. Run SqlScripts/DenialCategoryMaster_Setup.sql on LRNMaster."
+                ? "The Denial Category Master tables are not installed. Run Database/LabMetricsDashboard/DenialCategoryMaster_Setup.sql on LRNMaster."
                 : "The import could not be saved. Nothing was changed.";
             return RedirectToAction(nameof(Index));
         }
@@ -124,6 +124,85 @@ public sealed class DenialCategoryMasterController : Controller
         TempData["Success"] = Summary(parsed);
         return RedirectToAction(nameof(Index));
     }
+
+    /// <summary>
+    /// Adds (id empty) or edits one code in either master. Same permission as Import: these are the
+    /// masters the import replaces.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> Save(string? master, int? id, string? denialCode, string? description, string? actionCategory, CancellationToken ct)
+    {
+        if (!CanImport) return Forbid();
+        var kind = ParseKind(master);
+        var tab = TabOf(kind);
+
+        var code = (denialCode ?? string.Empty).Trim();
+        var desc = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
+        var category = kind == DenialMasterKind.Category && !string.IsNullOrWhiteSpace(actionCategory) ? actionCategory.Trim() : null;
+
+        string? error = code.Length == 0 ? "Denial Code is required."
+            : code.Length > MaxCodeLength ? $"Denial Code must be {MaxCodeLength} characters or fewer."
+            : desc is { Length: > 1000 } ? "Description must be 1,000 characters or fewer."
+            : category is { Length: > 300 } ? "Action Category must be 300 characters or fewer."
+            : null;
+        if (error is not null)
+        {
+            TempData["Error"] = error;
+            return RedirectToAction(nameof(Index), new { tab });
+        }
+
+        string outcome;
+        try
+        {
+            outcome = await _repo.SaveAsync(kind, id, new DenialCodeImportRow(code, desc, category), User.Identity?.Name, ct);
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogError(ex, "Denial master save failed ({Master}, id {Id}, code {Code}).", kind, id, code);
+            TempData["Error"] = "The change could not be saved.";
+            return RedirectToAction(nameof(Index), new { tab });
+        }
+
+        var label = kind == DenialMasterKind.Category ? "Denial Category Master" : "Non-Collectible Denials";
+        switch (outcome)
+        {
+            case "duplicate":
+                TempData["Error"] = $"Denial code {code} is already in the {label}. Edit that row instead.";
+                break;
+            case "notfound":
+                TempData["Error"] = "That row no longer exists. Reload and try again.";
+                break;
+            default:
+                TempData["Success"] = id is null ? $"Denial code {code} added to the {label}." : $"Denial code {code} updated.";
+                _logger.LogInformation("Denial master {Master} {Action} {Code} by {User}.", kind, id is null ? "add" : "edit", code, User.Identity?.Name);
+                break;
+        }
+        return RedirectToAction(nameof(Index), new { tab });
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> Delete(string? master, int id, string? denialCode, CancellationToken ct)
+    {
+        if (!CanImport) return Forbid();
+        var kind = ParseKind(master);
+
+        var deleted = await _repo.DeleteAsync(kind, id, ct);
+        if (deleted)
+        {
+            TempData["Success"] = $"Denial code {denialCode} deleted.";
+            _logger.LogInformation("Denial master {Master} delete {Code} (id {Id}) by {User}.", kind, denialCode, id, User.Identity?.Name);
+        }
+        else
+        {
+            TempData["Error"] = "That row no longer exists.";
+        }
+        return RedirectToAction(nameof(Index), new { tab = TabOf(kind) });
+    }
+
+    private static DenialMasterKind ParseKind(string? master) =>
+        string.Equals(master, "noncollectible", StringComparison.OrdinalIgnoreCase) ? DenialMasterKind.NonCollectible : DenialMasterKind.Category;
+
+    private static string TabOf(DenialMasterKind kind) => kind == DenialMasterKind.NonCollectible ? "noncollectible" : "categories";
 
     /// <summary>Both masters as a workbook in the import layout, so it can be edited and re-imported.</summary>
     [HttpGet]

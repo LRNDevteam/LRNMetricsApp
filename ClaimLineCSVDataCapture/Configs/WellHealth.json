@@ -9,8 +9,8 @@
   //   Without it the app falls back to the global FieldMappings.json (wrong field set).
   //
   // DATABASE (run before the first load):
-  //   LRN.MasterFileProcessorWorker\sql\WellHealth\01_WellHealth_CreateTables.sql   (lab database)
-  //   LRN.MasterFileProcessorWorker\sql\WellHealth\02_LRNMaster_Register_WellHealth.sql (LRNMaster)
+  //   Database\LRN.MasterFileProcessorWorker\WellHealth\01_WellHealth_CreateTables.sql   (lab database)
+  //   Database\LRN.MasterFileProcessorWorker\WellHealth\02_LRNMaster_Register_WellHealth.sql (LRNMaster)
   //   The mapping names dbo.ClaimLevelDataTVP_WellHealth / dbo.LineLevelDataTVP_WellHealth and
   //   dbo.usp_BulkInsertClaimLevelData / dbo.usp_BulkInsertLineLevelData - these must exist too.
   //

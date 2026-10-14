@@ -22,7 +22,7 @@ markers with inline REVERT instructions, so the whole change set is reversible.
 Run the updated script, then rebuild the aggregates:
 
 ```
-:r CaptureDataApp\Sql\04_CodingAggregates.sql        -- creates cols + CREATE OR ALTER procs
+:r Database\CaptureDataApp\04_CodingAggregates.sql        -- creates cols + CREATE OR ALTER procs
 EXEC dbo.usp_RefreshCodingAggregates @LabName = '<lab>';
 ```
 
@@ -47,7 +47,7 @@ Table altered (idempotent `ALTER TABLE ... ADD` guards in the script):
 ## Files changed
 | File | Layer |
 |------|-------|
-| `CaptureDataApp/Sql/04_CodingAggregates.sql` | DB (tables + procs) |
+| `Database/CaptureDataApp/04_CodingAggregates.sql` | DB (tables + procs) |
 | `LabMetricsDashboard/Models/CodingValidationModels.cs` | model |
 | `LabMetricsDashboard/Services/SqlCodingValidationRepository.cs` | data access |
 | `LabMetricsDashboard/Services/CodingExcelExportBuilder.cs` | Excel export |

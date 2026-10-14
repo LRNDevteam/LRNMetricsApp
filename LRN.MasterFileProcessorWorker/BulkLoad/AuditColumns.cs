@@ -37,7 +37,7 @@ public static class AuditColumns
     /// Not part of the stamped block and never hashed: it is built per row from whatever headers the
     /// file carried beyond the mapping, so a lab adding columns no longer needs an ALTER TABLE. Only
     /// written when the destination table actually has the column - see
-    /// <c>sql/Labs/_Common/03_AdditionalFields.sql</c>.
+    /// <c>Database/LRN.MasterFileProcessorWorker/Labs/_Common/03_AdditionalFields.sql</c>.
     /// </para>
     /// </summary>
     public const string AdditionalFields = "AdditionalFields";
@@ -69,7 +69,7 @@ public static class AuditColumns
     /// <para>
     /// TYPES ARE PROVISIONAL until <c>dbo.LineClaimFileLogs</c> can be read - see
     /// TypeReconciliation.md, item A1. <c>RunId</c> is sized to match
-    /// <c>dbo.LRN_Run_Log.RunID varchar(30)</c> from sql/Create_ProcessLogs.sql, which is the only
+    /// <c>dbo.LRN_Run_Log.RunID varchar(30)</c> from Database/LRN.MasterFileProcessorWorker/Create_ProcessLogs.sql, which is the only
     /// authoritative RunId type currently in the repo.
     /// </para>
     /// </summary>

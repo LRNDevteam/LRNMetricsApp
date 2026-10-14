@@ -235,7 +235,7 @@ SELECT 1;";
     }
 
     private static ArWorkbenchSaveResult ScopeTableMissing() =>
-        ArWorkbenchSaveResult.Invalid("Clinic / Provider access needs dbo.ARWB_UserScope in LRNMaster. Run LRN.ReportsApi/Sql/ArWorkbench/LRNMaster_01_ARWB_Roles_Access.sql.");
+        ArWorkbenchSaveResult.Invalid("Clinic / Provider access needs dbo.ARWB_UserScope in LRNMaster. Run Database/LRN.ReportsApi/ArWorkbench/LRNMaster/LRNMaster_01_ARWB_Roles_Access.sql.");
 
     public async Task<(ArWorkbenchSaveResult Result, int? LabUserId)> CreateWorkbenchUserAsync(
         string userName, string? passwordHash, string email, int roleId, IReadOnlyList<int> labIds, ArWorkbenchUserProfile profile,

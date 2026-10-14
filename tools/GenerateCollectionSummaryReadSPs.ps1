@@ -12,7 +12,7 @@
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$sqlRoot = Join-Path $root 'ClaimLineCSVDataCapture\Sql'
+$sqlRoot = Join-Path $root 'Database\ClaimLineCSVDataCapture'
 
 $labs = @(
     [pscustomobject]@{ Folder='Augustus';         File='15_Augustus_CollectionSummary_ReadSPs.sql';         Prefix='Aug';  PanelCol='PanelNew';  DateCol='CheckDate';   Source='ClaimLevelData' },

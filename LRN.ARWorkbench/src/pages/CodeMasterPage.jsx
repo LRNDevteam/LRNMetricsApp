@@ -219,7 +219,7 @@ export default function CodeMasterPage() {
       {data && !data.installed && (
         <div className="arwb-alert" role="alert">
           <Icon name="warn" size={16} />
-          <div className="grow">The central Denial Code master is not installed yet. Run <b>LRN.ReportsApi/Sql/ArWorkbench/LRNMaster_02_ARWB_DenialCodeMaster.sql</b> in LRNMaster (it also loads the business workbook&rsquo;s codes), then reload.</div>
+          <div className="grow">The central Denial Code master is not installed yet. Run <b>Database/LRN.ReportsApi/ArWorkbench/LRNMaster/LRNMaster_02_ARWB_DenialCodeMaster.sql</b> in LRNMaster (it also loads the business workbook&rsquo;s codes), then reload.</div>
         </div>
       )}
 

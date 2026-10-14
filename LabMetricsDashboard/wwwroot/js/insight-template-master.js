@@ -331,7 +331,7 @@
         try {
             const avail = await getJson(`${apiBase}/Notes/Available?${q({ lab: ctx.lab })}`);
             if (!avail || !avail.available) {
-                showAlert("Insights schema is not deployed on this lab database. Run SQL_Scripts/NotesInsights (01–08) on CoveLRN.", "error");
+                showAlert("Insights schema is not deployed on this lab database. Run Database/Shared/NotesInsights (01–08) on CoveLRN.", "error");
                 el.list.innerHTML = "";
                 return;
             }

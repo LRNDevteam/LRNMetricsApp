@@ -11,7 +11,7 @@ namespace LRN.ReportsApi.Services.ArReports;
 public interface IArActivityReportRepository
 {
     /// <summary>
-    /// Applies the additive schema RPT-01 needs (see Sql/ArReports/RPT01_ActivityDetail_Setup.sql)
+    /// Applies the additive schema RPT-01 needs (see Database/LRN.ReportsApi/ArReports/RPT01_ActivityDetail_Setup.sql)
     /// once per lab per process lifetime. Every statement is metadata-only or a small new table, so
     /// this is safe to run on first request; the checked-in script exists so a DBA can pre-apply it.
     /// </summary>

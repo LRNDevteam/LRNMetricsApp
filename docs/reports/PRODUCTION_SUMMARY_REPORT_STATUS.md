@@ -21,7 +21,7 @@ A fast, pre-aggregated view of monthly and weekly claim production with optional
 ## What Was Done (✅ Complete)
 
 ### 1. InHealthDTR SQL Files Created
-Two new SQL files in `ClaimLineCSVDataCapture/Sql/InHealthDTR/`:
+Two new SQL files in `Database/ClaimLineCSVDataCapture/InHealthDTR/`:
 
 | File | Creates | Purpose |
 |------|---------|---------|
@@ -185,7 +185,7 @@ These are defined in the SQL scripts via anchor dates:
 
 ### New SQL Files
 ```
-ClaimLineCSVDataCapture/Sql/InHealthDTR/
+Database/ClaimLineCSVDataCapture/InHealthDTR/
 ├─ 06_InHealthDTR_MonthlyBilledProductionSummary.sql (NEW)
 └─ 07_InHealthDTR_WeeklyBilledProductionSummary.sql (NEW)
 ```

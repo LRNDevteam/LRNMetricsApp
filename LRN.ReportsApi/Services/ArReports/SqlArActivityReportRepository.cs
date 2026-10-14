@@ -166,7 +166,7 @@ public sealed class SqlArActivityReportRepository : IArActivityReportRepository
     }
 
     /// <summary>
-    /// Mirrors Sql/ArReports/RPT01_ActivityDetail_Setup.sql sections 1-6. The script carries the
+    /// Mirrors Database/LRN.ReportsApi/ArReports/RPT01_ActivityDetail_Setup.sql sections 1-6. The script carries the
     /// full rationale for each object and is the DBA-runnable form; this copy exists so the report
     /// works on a lab where the script has not been applied yet.
     /// </summary>

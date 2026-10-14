@@ -2365,7 +2365,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 "NorthWest Claim/Line export stored procedures are missing. " +
                 "Deploy usp_GetNW_ClaimLevelExportBuckets, usp_GetNW_ClaimLevelExportByRange, " +
                 "usp_GetNW_LineLevelExportBuckets, and usp_GetNW_LineLevelExportByRange " +
-                "(ClaimLineCSVDataCapture/Sql/NorthWest/14_NorthWest_ReadSPs.sql).",
+                "(Database/ClaimLineCSVDataCapture/NorthWest/14_NorthWest_ReadSPs.sql).",
                 ex);
         }
     }

@@ -19,7 +19,7 @@ import { arQueueBadgeClass, fmt } from '../utils/format';
 const PHASES = ['Identified', 'Assigned', 'QA Verification', 'Completed'];
 const PHASE_OF_STATUS = { Unassigned: 0, Assigned: 1, 'Submitted for QA': 2, 'QA Rejected': 2, Completed: 3 };
 
-const BACK_LABELS = { '/my-work': 'My Work', '/qa': 'QA Verification Queue', '/audit': 'Audit Logs', '/cip': 'CIP Escalations', '/agent-requests': 'Escalation & Reassignment Requests' };
+const BACK_LABELS = { '/my-work': 'My Work', '/qa': 'QA Verification Queue', '/audit': 'Audit Logs', '/cip': 'CIP Escalations', '/agent-requests': 'Escalation & Reassignment Requests', '/status-verification': 'Status Change Verification' };
 
 // The mockup's CORRECTIVE_ACTION text per denial category.
 const CORRECTIVE_ACTION = {
@@ -202,7 +202,7 @@ export default function ClaimDetailPage() {
         <div className="arwb-tab-panel">
           {tab === 'overview' && <Overview c={c} />}
           {tab === 'cpt' && <Cpt lines={detail.lines} />}
-          {tab === 'denial' && <Denial c={c} followUps={detail.followUps} codes={detail.denialCodeInfo || []} />}
+          {tab === 'denial' && <Denial c={c} followUps={detail.followUps} codes={detail.denialCodeInfo || []} lines={detail.lines || []} />}
           {tab === 'followups' && <FollowUps c={c} rows={detail.followUps} />}
           {tab === 'activity' && <Activity rows={detail.activity} />}
           {tab === 'requests' && <AgentRequests rows={detail.agentRequests || []} />}
@@ -517,43 +517,59 @@ function QaTab({ review, c, latest, canDecide, userName, onDecide }) {
   );
 }
 
-// The central Denial Code Master (Master Values > Denial Code Descriptions) for every code on the
-// claim, primary first. Codes are without their group prefix (CO-4 and PR4 are both 4).
-function DenialCodeMaster({ codes, primary, lineCodes }) {
-  const order = [primary, ...lineCodes].filter(Boolean);
+// Line-level denials: one row per denial code on each CPT line, with its description and denial
+// category. The description is the lab's Denial Code Master text from the sync, else the central
+// Denial Code Descriptions master; codes are matched without their group prefix (CO-4 = PR4 = 4).
+function LineDenials({ lines, codes, primary }) {
   const byCode = Object.fromEntries(codes.map((r) => [r.denialCode, r]));
-  const listed = [...new Set(order)];
-  const missing = listed.filter((code) => !byCode[code]);
+  const items = lines.flatMap((l) => {
+    const denials = l.denials?.length ? l.denials : (l.denialCode ? [{ ordinal: 1, denialCodeRaw: l.denialCode }] : []);
+    return denials.map((d) => ({ line: l, d, master: d.denialCode ? byCode[d.denialCode] : null }));
+  });
+  const { rows, th } = useTableSort(items, {
+    line: (x) => x.line.lineNumber * 100 + (x.d.ordinal || 0), cpt: (x) => x.line.cptCode, code: (x) => x.d.denialCode || x.d.denialCodeRaw,
+    description: (x) => x.d.denialDescription || x.master?.denialDescription || '', category: (x) => x.d.denialCategory || '',
+    date: (x) => x.line.denialDate, balance: (x) => x.line.insuranceBalance
+  }, { key: 'line', desc: false });
+
+  if (!items.length) {
+    return <div className="arwb-empty-state"><Icon name="search" /><div>No line-level denial codes on this claim.</div></div>;
+  }
   return (
-    <DetailSection title="Denial Code Master" hint={listed.length ? null : 'No denial codes on this claim'}>
-      {listed.filter((code) => byCode[code]).map((code) => {
-        const r = byCode[code];
-        return (
-          <div key={code} className="arwb-code-info">
-            <div className="arwb-code-info-head">
-              <span className={`arwb-code-chip${code === primary ? ' primary' : ''}`}>{code}</span>
-              {code === primary && <span className="arwb-hint">primary</span>}
-              {r.isNonCollectible && <Badge className="arwb-badge-critical">Non-Collectible</Badge>}
-              <span className="grow">{r.denialDescription || <span className="text-muted-ink">No description</span>}</span>
-            </div>
-            <div className="arwb-code-info-grid">
-              <span>Action Category</span><b>{r.actionCategory || '—'}</b>
-              <span>Classification</span><b>{r.denialClassification || '—'}</b>
-              <span>Coverage Status</span><b>{r.coverageStatus || '—'}</b>
-              <span>ICD Compliance</span><b>{r.icdComplianceStatus || '—'}</b>
-              <span>Denial Validity</span><b>{r.denialValidity || '—'}</b>
-            </div>
-          </div>
-        );
-      })}
-      {missing.length > 0 && (
-        <div className="arwb-hint">Not in the Denial Code master: {missing.map((code) => <span key={code} className="arwb-code-chip">{code}</span>)}</div>
-      )}
-    </DetailSection>
+    <div className="arwb-table-wrap">
+      <table className="arwb-data-table">
+        <thead>
+          <tr>
+            {th('line', '#', { className: 'num' })}{th('cpt', 'CPT')}{th('code', 'Denial Code')}{th('description', 'Denial Description')}
+            {th('category', 'Denial Category')}{th('date', 'Denial Date')}{th('balance', 'Ins. Balance', { className: 'num' })}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ line: l, d, master }) => {
+            const description = d.denialDescription || master?.denialDescription;
+            const nonCollectible = d.isNonCollectible || master?.isNonCollectible;
+            return (
+              <tr key={`${l.lineNumber}-${d.ordinal}-${d.denialCodeRaw}`}>
+                <td className="num arwb-hint">{l.lineNumber}</td>
+                <td className="mono">{l.cptCode || '—'}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  <span className={`arwb-code-chip${d.denialCode && d.denialCode === primary ? ' primary' : ''}`}>{d.denialCodeRaw || d.denialCode}</span>
+                  {nonCollectible && <> <Badge className="arwb-badge-critical">Non-Collectible</Badge></>}
+                </td>
+                <td className="wrap">{description || <span className="text-muted-ink">No description</span>}</td>
+                <td>{d.denialCategory ? <Badge className="arwb-badge-accent">{d.denialCategory}</Badge> : <span className="text-muted-ink">Unmapped</span>}</td>
+                <td>{l.denialDate ? fmt.date(l.denialDate) : '—'}</td>
+                <td className="num mono">{fmt.money(l.insuranceBalance)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
-function Denial({ c, followUps, codes }) {
+function Denial({ c, followUps, codes, lines }) {
   const latest = followUps[0];
   const lineCodes = (c.LineDenialCodes || '').split(',').map((s) => s.trim()).filter(Boolean);
   const primary = c.PrimaryDenialCode;
@@ -589,9 +605,10 @@ function Denial({ c, followUps, codes }) {
         </Row>
       </DetailSection>
     </div>
-    <div style={{ marginTop: 16 }}>
-      <DenialCodeMaster codes={codes} primary={primary} lineCodes={lineCodes} />
-    </div>
+    <section className="arwb-detail-section" style={{ marginTop: 16 }}>
+      <div className="arwb-detail-section-head">Line-Level Denials</div>
+      <LineDenials lines={lines} codes={codes} primary={primary} />
+    </section>
     </>
   );
 }

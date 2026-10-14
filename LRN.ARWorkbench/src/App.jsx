@@ -20,6 +20,7 @@ import PlannedPage from './pages/PlannedPage';
 import QaPage from './pages/QaPage';
 import ReportsPage from './pages/ReportsPage';
 import SlaSettingsPage from './pages/SlaSettingsPage';
+import StatusVerificationPage from './pages/StatusVerificationPage';
 import TflSettingsPage from './pages/TflSettingsPage';
 import UserCreatePage from './pages/UserCreatePage';
 import UsersPage from './pages/UsersPage';
@@ -38,6 +39,7 @@ const SCREENS = {
   audit: AuditPage,
   analytics: AnalyticsPage,
   'agent-requests': AgentRequestsPage,
+  'status-verification': StatusVerificationPage,
   reports: ReportsPage,
   clients: ClientsPage,
   cip: CipPage,

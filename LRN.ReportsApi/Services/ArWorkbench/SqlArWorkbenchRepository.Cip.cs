@@ -262,7 +262,7 @@ SELECT 'ok', @CaseNumber, @To;";
         await using (var probe = new SqlCommand("SELECT OBJECT_ID(N'dbo.ARWB_usp_ConvertLegacyEscalations', N'P');", connection))
         {
             if (await probe.ExecuteScalarAsync(ct) is null or DBNull)
-                throw new InvalidOperationException("The legacy conversion is not installed for this lab. Run LRN.ReportsApi/Sql/ArWorkbench/09_ARWB_Legacy_Cip_Conversion.sql in the lab database.");
+                throw new InvalidOperationException("The legacy conversion is not installed for this lab. Run Database/LRN.ReportsApi/ArWorkbench/LabDatabase/09_ARWB_Legacy_Cip_Conversion.sql in the lab database.");
         }
         await using var cmd = new SqlCommand("dbo.ARWB_usp_ConvertLegacyEscalations", connection) { CommandType = CommandType.StoredProcedure, CommandTimeout = 600 };
         cmd.Parameters.Add("@RunBy", SqlDbType.NVarChar, 256).Value = Truncate(runBy, 256);

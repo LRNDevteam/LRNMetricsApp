@@ -20,7 +20,7 @@ These are committed; they ship with the next deploy.
 | Demo-lab hiding mechanism (now switched off — see below) | `LabConfig.DemoLabs` key + `LabConfigOptions.VisibleLabs()` |
 | No "report not generated" alerts | `ReportBoard.NoMissingReportWarning` |
 | Same reports offered as PCR | `ReportAvailability.Reports."Coding Validation"` |
-| Clone / de-identify / register scripts | `LabMetricsDashboard/SqlScripts/Demo_LRNLabDemo_0*.sql` |
+| Clone / de-identify / register scripts | `Database/LabMetricsDashboard/Demo_LRNLabDemo_0*.sql` |
 | Lab config template | `docs/demo-lab/LRNLabDemo.json.template` |
 
 ### About the "hidden" behaviour — off as of September 2026

@@ -71,9 +71,9 @@ here, not of a code problem.
    step is required. Run all three, in order, against LRNMaster — they are idempotent:
 
    ```
-   SQL_Scripts/UserReqReports/01_UserReqReports_Schema.sql
-   SQL_Scripts/UserReqReports/02_UserReqReports_Procs.sql
-   SQL_Scripts/UserReqReports/03_Add_ProgressPercent.sql
+   Database/Shared/UserReqReports/01_UserReqReports_Schema.sql
+   Database/Shared/UserReqReports/02_UserReqReports_Procs.sql
+   Database/Shared/UserReqReports/03_Add_ProgressPercent.sql
    ```
 
    Without them the queue call fails with SQL error 208 / 2812. `AnalyticsController.QueueExport`

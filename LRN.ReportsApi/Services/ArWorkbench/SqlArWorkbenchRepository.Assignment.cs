@@ -392,7 +392,7 @@ SET w.AssignedAgentUser     = @Agent,
     w.AssignedBy            = @User,
     w.AssignmentBatchId     = @BatchId,          -- a hand reassignment takes the claim out of its batch
     w.AssignmentDueDate     = @Due,
-    w.WorkflowStatus        = CASE WHEN w.WorkflowStatus IN ('Unassigned', 'Completed') THEN 'Assigned' ELSE w.WorkflowStatus END,
+    w.WorkflowStatus        = CASE WHEN w.WorkflowStatus IN ('Unassigned', 'Completed', 'Pending Verification') THEN 'Assigned' ELSE w.WorkflowStatus END,
     w.AdHocFollowUpAssigned = CASE WHEN t.IsOpenAR = 0 THEN 1 ELSE w.AdHocFollowUpAssigned END,
     w.UpdatedOn             = SYSUTCDATETIME(),
     w.UpdatedBy             = @User
@@ -412,7 +412,16 @@ FROM #t t;
 INSERT INTO dbo.ARWB_ClaimActivity (ClaimKey, ActionType, Detail, PreviousValue, NewValue, UserName, RoleCode, RelatedEntityType, RelatedEntityId)
 SELECT t.ClaimKey, N'Status Changed', N'Workflow status moved to Assigned.', t.PrevStatus, N'Assigned', @User, @Role,
        CASE WHEN @BatchId IS NULL THEN NULL ELSE 'AssignmentBatch' END, @BatchId
-FROM #t t WHERE t.PrevStatus IN ('Unassigned', 'Completed');
+FROM #t t WHERE t.PrevStatus IN ('Unassigned', 'Completed', 'Pending Verification');
+
+-- Reassigning a claim held for status change verification is the manager's decision on it.
+IF OBJECT_ID(N'dbo.ARWB_StatusVerification', N'U') IS NOT NULL
+    UPDATE v
+    SET v.VerificationStatus = 'Resolved', v.ResolvedAction = 'Reassigned', v.ResolvedBy = @User, v.ResolvedByRole = @Role,
+        v.ResolvedOn = SYSUTCDATETIME(), v.ResolutionNote = LEFT(N'Reassigned to ' + @AgentName + @Suffix + N'.', 2000)
+    FROM dbo.ARWB_StatusVerification v
+    INNER JOIN #t t ON t.ClaimKey = v.ClaimKey
+    WHERE v.VerificationStatus = 'Pending';
 
 INSERT INTO dbo.ARWB_ClaimActivity (ClaimKey, ActionType, Detail, UserName, RoleCode)
 SELECT t.ClaimKey, N'Ad-Hoc Assignment',

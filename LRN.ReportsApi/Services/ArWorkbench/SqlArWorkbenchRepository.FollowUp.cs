@@ -51,6 +51,8 @@ WHERE w.ClaimKey = @ClaimKey {scope};";
         // was handed to an agent ad hoc, which is exactly so it can be followed up).
         if (workflowStatus == "Submitted for QA")
             return (ArWorkbenchSaveStatus.Conflict, $"Claim {claimId} is already waiting for QA review of its last follow-up note.", null);
+        if (workflowStatus == "Pending Verification")
+            return (ArWorkbenchSaveStatus.Conflict, $"Claim {claimId}'s claim status changed in the master file; it is waiting for RCM Manager verification before more follow-up.", null);
         if (financiallyClosed && !adHoc)
             return (ArWorkbenchSaveStatus.Conflict, $"Claim {claimId} is financially closed, so there is nothing left to follow up.", null);
 

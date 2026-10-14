@@ -2,7 +2,7 @@
   "LabId": 7,
   "LabName": "PCRDx - CO",
   "DatabaseName": "PCRCO_LRN",
-  "_comment": "Generated from the production schema in sql/Existing_LineLevel_ClaimLevel_DATA.sql. Each CsvHeader is the value the other lab mappings already use for that SqlColumn, so it matches what StandardCsvExporter emits. BulkCopyToTable is false until a real run has been checked against a produced CSV - flip it once the --diagnose output and the first load look right.",
+  "_comment": "Generated from the production schema in Database/LRN.MasterFileProcessorWorker/Existing_LineLevel_ClaimLevel_DATA.sql. Each CsvHeader is the value the other lab mappings already use for that SqlColumn, so it matches what StandardCsvExporter emits. BulkCopyToTable is false until a real run has been checked against a produced CSV - flip it once the --diagnose output and the first load look right.",
   "LineLevel": {
     "Enabled": true,
     "CreateCsv": true,

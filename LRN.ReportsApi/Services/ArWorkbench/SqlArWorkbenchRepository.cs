@@ -60,6 +60,15 @@ public interface IArWorkbenchRepository
     Task<ArWorkbenchLegacyCipResult> ConvertLegacyEscalationsAsync(int labId, string runBy, bool previewOnly, CancellationToken ct);
     Task<Dictionary<long, string>> GetCipStatusesAsync(int labId, IReadOnlyCollection<long> caseIds, ArWorkbenchUserContext user, CancellationToken ct);
 
+    // Status Change Verification + notifications (SqlArWorkbenchRepository.StatusVerification.cs)
+    Task<IReadOnlyList<string>> GetRcmManagerUserNamesAsync(int labId, CancellationToken ct);
+    Task<ArWorkbenchStatusVerificationQueue> GetStatusVerificationQueueAsync(ArWorkbenchStatusVerificationFilter filter, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<ArWorkbenchStatusVerificationResolveResult> ResolveStatusVerificationAsync(int labId, IReadOnlyList<long> claimKeys, string action, string note, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<ArWorkbenchNotificationList> GetNotificationsAsync(int labId, ArWorkbenchUserContext user, bool unreadOnly, CancellationToken ct);
+    Task<int> MarkNotificationsReadAsync(int labId, IReadOnlyList<long> notificationIds, bool all, ArWorkbenchUserContext user, CancellationToken ct);
+    /// <summary>Claims export: assignment, latest follow-up note, QA review and status verification per claim (keys already scope-checked).</summary>
+    Task<Dictionary<long, ArWorkbenchClaimExportDetail>> GetClaimExportDetailsAsync(int labId, IReadOnlyList<long> claimKeys, CancellationToken ct);
+
     // QA Verification (SqlArWorkbenchRepository.Qa.cs)
     Task<ArWorkbenchQaQueue> GetQaQueueAsync(ArWorkbenchQaFilter filter, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchQaReview?> GetCurrentQaReviewAsync(int labId, long claimKey, CancellationToken ct);
@@ -254,7 +263,7 @@ public sealed partial class SqlArWorkbenchRepository : IArWorkbenchRepository
             _labConnectionSourceById.TryGetValue(labId, out var source);
             throw new InvalidOperationException(
                 $"AR Workbench tables are not installed for LabId {labId} in database '{database}' (connection from {source}). " +
-                "Run LRN.ReportsApi/Sql/ArWorkbench scripts 01-07 (or ARWB_Lab_Database_Setup_Merged.sql) in that lab database, or point that setting at the right database.");
+                "Run Database/LRN.ReportsApi/ArWorkbench scripts 01-07 (or 2_RUN_IN_EACH_LAB_DB_ARWB_Setup.sql) in that lab database, or point that setting at the right database.");
         }
         return connection;
     }
@@ -517,7 +526,8 @@ SELECT
     ISNULL(SUM(w.RemainingAR), 0),
     SUM(CASE WHEN w.WorkflowStatus = 'Unassigned' AND w.IsOpenInsuranceAR = 1 THEN 1 ELSE 0 END),
     SUM(CASE WHEN w.ArQueueId = 'submittedqa' THEN 1 ELSE 0 END),
-    SUM(CASE WHEN w.IsRefollowupDue = 1 AND w.WorkflowStatus IN ('Assigned', 'QA Rejected', 'Completed') AND w.IsOpenInsuranceAR = 1 THEN 1 ELSE 0 END)
+    SUM(CASE WHEN w.IsRefollowupDue = 1 AND w.WorkflowStatus IN ('Assigned', 'QA Rejected', 'Completed') AND w.IsOpenInsuranceAR = 1 THEN 1 ELSE 0 END),
+    SUM(CASE WHEN w.WorkflowStatus = 'Pending Verification' THEN 1 ELSE 0 END)
 FROM dbo.ARWB_Claim w
 WHERE 1 = 1 {scope};
 
@@ -569,6 +579,7 @@ WHERE r.RequestStatus = 'Pending' {scope};";
             summary.UnassignedOpen = reader.IsDBNull(4) ? 0 : reader.GetInt32(4);
             summary.AwaitingQa = reader.IsDBNull(5) ? 0 : reader.GetInt32(5);
             summary.RefollowupDue = reader.IsDBNull(6) ? 0 : reader.GetInt32(6);
+            summary.StatusVerificationPending = reader.IsDBNull(7) ? 0 : reader.GetInt32(7);
         }
 
         await reader.NextResultAsync(ct);
@@ -607,7 +618,7 @@ WHERE r.RequestStatus = 'Pending' {scope};";
         ["Other"] = ("Review", "Review payer remittance remarks and determine the appropriate corrective action.")
     };
 
-    private static readonly string[] WorkflowStatusOrder = ["Unassigned", "Assigned", "Submitted for QA", "QA Rejected", "Completed"];
+    private static readonly string[] WorkflowStatusOrder = ["Unassigned", "Assigned", "Pending Verification", "Submitted for QA", "QA Rejected", "Completed"];
 
     /// <summary>
     /// Every tile, chart and table of the mockup's System Administrator dashboard in one round trip.
@@ -1238,7 +1249,14 @@ FROM dbo.ARWB_ClaimActivity WHERE ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY
 
 SELECT FollowUpId, ClaimType, FollowUpType, FollowUpClaimStatus, DenialRootCause, FixResolution, FollowUpComment,
        NextFollowUpDate, CreatedBy, CreatedOn
-FROM dbo.ARWB_ClaimFollowUp WHERE ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY CreatedOn DESC;";
+FROM dbo.ARWB_ClaimFollowUp WHERE ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY CreatedOn DESC;
+
+-- Each line's denial codes, one row per code, with the workbench category and description.
+SELECT cl.LineNumber, ld.Ordinal, ld.DenialCodeRaw, ld.DenialCode, ld.GroupCode, ld.DenialCategory, ld.DenialReason, ld.IsNonCollectible
+FROM dbo.ARWB_ClaimLineDenial ld
+INNER JOIN dbo.ARWB_ClaimLine cl ON cl.ClaimLineKey = ld.ClaimLineKey
+WHERE ld.ClaimKey = @ClaimKey AND @Allowed = 1
+ORDER BY cl.LineNumber, ld.Ordinal;";
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) return null;
@@ -1308,6 +1326,23 @@ FROM dbo.ARWB_ClaimFollowUp WHERE ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY
                 NextFollowUpDate = Date(reader, 7),
                 CreatedBy = reader.GetString(8),
                 CreatedOn = reader.GetDateTime(9)
+            });
+        }
+
+        await reader.NextResultAsync(ct);
+        var linesByNumber = detail.Lines.GroupBy(l => l.LineNumber).ToDictionary(g => g.Key, g => g.First());
+        while (await reader.ReadAsync(ct))
+        {
+            if (!linesByNumber.TryGetValue(reader.GetInt32(0), out var line)) continue;
+            line.Denials.Add(new ArWorkbenchLineDenial
+            {
+                Ordinal = Convert.ToInt32(reader.GetValue(1)),
+                DenialCodeRaw = Str(reader, 2),
+                DenialCode = Str(reader, 3),
+                GroupCode = Str(reader, 4),
+                DenialCategory = Str(reader, 5),
+                DenialDescription = Str(reader, 6),
+                IsNonCollectible = !reader.IsDBNull(7) && reader.GetBoolean(7)
             });
         }
 
@@ -1486,7 +1521,18 @@ SELECT SettingKey, SettingValue FROM dbo.ARWB_AppSetting;";
 
     public async Task<ArWorkbenchRefreshRun?> RunRefreshAsync(int labId, string runBy, string? note, CancellationToken ct, bool reprocessAll = false)
     {
+        // Claims whose source status changed while assigned go to one of these RCM Managers (step 3g).
+        var managers = await GetRcmManagerUserNamesAsync(labId, ct);
+
         await using var connection = await OpenLabAsync(labId, ct);
+
+        // A lab whose procedure predates step 3g has no @VerificationManagers parameter.
+        bool takesManagers;
+        await using (var probe = new SqlCommand(
+            "SELECT COUNT(*) FROM sys.parameters WHERE object_id = OBJECT_ID(N'dbo.ARWB_usp_LoadClaimsFromSource') AND name = N'@VerificationManagers';", connection))
+        {
+            takesManagers = Convert.ToInt32(await probe.ExecuteScalarAsync(ct)) > 0;
+        }
 
         // The load can take minutes on a large lab. Run it to completion, then read the run row back.
         await using (var cmd = new SqlCommand("dbo.ARWB_usp_LoadClaimsFromSource", connection) { CommandType = CommandType.StoredProcedure, CommandTimeout = 1800 })
@@ -1494,6 +1540,8 @@ SELECT SettingKey, SettingValue FROM dbo.ARWB_AppSetting;";
             cmd.Parameters.Add("@RunBy", SqlDbType.NVarChar, 256).Value = runBy;
             cmd.Parameters.Add("@Note", SqlDbType.NVarChar, 1000).Value = (object?)note ?? DBNull.Value;
             cmd.Parameters.Add("@ReprocessAll", SqlDbType.Bit).Value = reprocessAll;
+            if (takesManagers)
+                cmd.Parameters.Add("@VerificationManagers", SqlDbType.NVarChar, -1).Value = managers.Count == 0 ? DBNull.Value : string.Join(",", managers);
             await cmd.ExecuteNonQueryAsync(ct);
         }
 

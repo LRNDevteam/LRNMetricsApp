@@ -66,7 +66,7 @@ SELECT 1;", master);
         cmd.Parameters.Add("@Note", SqlDbType.NVarChar, 500).Value = (object?)note ?? DBNull.Value;
         cmd.Parameters.Add("@User", SqlDbType.NVarChar, 256).Value = Truncate(user, 256);
         if (Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)) != 1)
-            return ArWorkbenchSaveResult.Invalid("Client activation is not installed. Run LRN.ReportsApi/Sql/ArWorkbench/LRNMaster_03_ARWB_ClientSetting.sql in LRNMaster.");
+            return ArWorkbenchSaveResult.Invalid("Client activation is not installed. Run Database/LRN.ReportsApi/ArWorkbench/LRNMaster/LRNMaster_03_ARWB_ClientSetting.sql in LRNMaster.");
         lock (InactiveCacheLock) _inactiveCache = null;
         return ArWorkbenchSaveResult.Ok(isActive ? "Client reactivated." : "Client deactivated.");
     }

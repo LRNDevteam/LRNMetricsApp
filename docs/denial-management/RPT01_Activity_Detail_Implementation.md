@@ -12,7 +12,7 @@ Companion documents: `Denial_Workflow_AR_Reporting_Requirements_v1.0.pdf` (the s
 
 | Layer | Artefact |
 | --- | --- |
-| Schema (per lab DB) | `LRN.ReportsApi/Sql/ArReports/RPT01_ActivityDetail_Setup.sql` |
+| Schema (per lab DB) | `Database/LRN.ReportsApi/ArReports/RPT01_ActivityDetail_Setup.sql` |
 | API | `Controllers/ArReportsController.cs` — routes under `api/denialworkflow/reports` |
 | Query | `Services/ArReports/SqlArActivityReportRepository.cs` |
 | Export | `Services/ArReports/ArActivityReportExcelBuilder.cs` |

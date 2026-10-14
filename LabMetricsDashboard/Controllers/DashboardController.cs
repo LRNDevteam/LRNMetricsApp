@@ -35,7 +35,7 @@ public class DashboardController : Controller
             && (sql.Number == 2812 || sql.Message.Contains("Could not find stored procedure", StringComparison.OrdinalIgnoreCase)))
         {
             return $"Claim/Line stored procedures are not deployed on {labName}. "
-                 + "Run Sql/ClaimLineDetails_SPs.sql, then Sql/ClaimLineDetails_SPs/{{Lab}}_Details.sql on that lab database.";
+                 + "Run Database/LabMetricsDashboard/ClaimLineDetails_SPs.sql, then Database/LabMetricsDashboard/ClaimLineDetails_SPs/{{Lab}}_Details.sql on that lab database.";
         }
 
         if (ex is TimeoutException or OperationCanceledException
@@ -3250,7 +3250,7 @@ public class DashboardController : Controller
 
             // Panel Breakdown: Augustus has its own SP; every other lab with
             // usp_Get{Prefix}PanelBreakdownWithPayers deployed goes through its generic
-            // repo (Sql/40_AllLabs_PanelBreakdownWithPayers.sql). Labs without the SP
+            // repo (Database/ClaimLineCSVDataCapture/40_AllLabs_PanelBreakdownWithPayers.sql). Labs without the SP
             // return an empty result and the sheet stays empty, as before.
             var panelBreakdownTask = isAugustusLab
                 ? _augSummaryRepo.GetPanelBreakdownAsync(

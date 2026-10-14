@@ -43,7 +43,7 @@ public static class RunLogType
 /// CPT averages while the panel aggregate fails), and the tracker holds one row per
 /// RunId + Lab + Report — a single shared name could not represent that split outcome.
 ///
-/// Both names must exist in dbo.ReportTypeMaster; see Database/05_ReportTypeMaster_Averages.sql.
+/// Both names must exist in dbo.ReportTypeMaster; see Database/LRN.AveragesImport/05_ReportTypeMaster_Averages.sql.
 /// </summary>
 public static class WorkflowReportNames
 {

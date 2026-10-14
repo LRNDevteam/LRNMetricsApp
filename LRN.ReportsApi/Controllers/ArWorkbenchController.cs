@@ -838,6 +838,64 @@ public sealed class ArWorkbenchController : ControllerBase
         return (user, null);
     }
 
+    // ==========================================================================================
+    // Status Change Verification. The claim sync moves an assigned, not-completed claim whose
+    // master-file claim status changed to 'Pending Verification' under an RCM Manager of the lab;
+    // an RCM Manager or System Administrator decides it here.
+    // ==========================================================================================
+
+    [HttpGet("status-verification")]
+    public async Task<ActionResult<ArWorkbenchStatusVerificationQueue>> StatusVerificationQueue([FromQuery] ArWorkbenchStatusVerificationFilter filter, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
+        if (denied is not null) return denied;
+        if (!IsAdminOrManager(user!)) return Forbidden("Only an RCM Manager or System Administrator can open Status Change Verification.");
+        if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+        return Ok(await _repository.GetStatusVerificationQueueAsync(filter, user!, ct));
+    }
+
+    [HttpPost("status-verification/resolve")]
+    public async Task<ActionResult<ArWorkbenchStatusVerificationResolveResult>> ResolveStatusVerification([FromQuery] int labId, [FromBody] ArWorkbenchStatusVerificationResolve? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!IsAdminOrManager(user!)) return Forbidden("Only an RCM Manager or System Administrator can decide status change verifications.");
+
+        var action = ArWorkbenchStatusVerificationActions.Normalize(request?.Action);
+        if (action is null) return BadRequest(new { message = "Choose Return to Agent, Release to Unassigned or Complete." });
+        var keys = (request!.ClaimKeys ?? []).Where(k => k > 0).Distinct().ToList();
+        if (keys.Count == 0) return BadRequest(new { message = "Select the claims to verify." });
+        if (keys.Count > 1000) return BadRequest(new { message = "Verify at most 1,000 claims at a time." });
+        var note = request.Note?.Trim();
+        if (string.IsNullOrEmpty(note)) return BadRequest(new { message = "Add a verification note: it is recorded on the claim and sent to the agent." });
+        if (note.Length > 2000) return BadRequest(new { message = "The note must be 2,000 characters or fewer." });
+
+        var result = await _repository.ResolveStatusVerificationAsync(labId, keys, action, note, user!, ct);
+        _logger.LogInformation("AR Workbench status verification lab {LabId} by {User}: {Action} {Message}", labId, user!.UserName, action, result.Message);
+        return Ok(result);
+    }
+
+    // ==========================================================================================
+    // Notifications (top bar bell): ARWB_Notification rows addressed to the caller or their role.
+    // ==========================================================================================
+
+    [HttpGet("notifications")]
+    public async Task<ActionResult<ArWorkbenchNotificationList>> Notifications([FromQuery] int labId, [FromQuery] bool unreadOnly, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        return Ok(await _repository.GetNotificationsAsync(labId, user!, unreadOnly, ct));
+    }
+
+    [HttpPost("notifications/read")]
+    public async Task<ActionResult> MarkNotificationsRead([FromQuery] int labId, [FromBody] ArWorkbenchNotificationReadRequest? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var marked = await _repository.MarkNotificationsReadAsync(labId, request?.NotificationIds ?? [], request?.All == true, user!, ct);
+        return Ok(new { marked });
+    }
+
     private async Task<IReadOnlyCollection<string>> QaErrorTypesAsync(int labId, CancellationToken ct)
     {
         var lists = (await _repository.GetMasterDataAsync(labId, ct)).Lists;
@@ -1009,7 +1067,7 @@ public sealed class ArWorkbenchController : ControllerBase
         if (parsed is null) return BadRequest(new { message = parseError });
 
         var (installed, rows) = await _repository.GetCodeMasterAsync(ct);
-        if (!installed) return BadRequest(new { message = "The Denial Code master is not installed. Run LRN.ReportsApi/Sql/ArWorkbench/LRNMaster_02_ARWB_DenialCodeMaster.sql in LRNMaster." });
+        if (!installed) return BadRequest(new { message = "The Denial Code master is not installed. Run Database/LRN.ReportsApi/ArWorkbench/LRNMaster/LRNMaster_02_ARWB_DenialCodeMaster.sql in LRNMaster." });
 
         var options = await CodeMasterOptionsAsync(labId, rows, ct);
         var merge = ArWorkbenchCodeMasterRules.Merge(rows.ToDictionary(r => r.DenialCode, StringComparer.OrdinalIgnoreCase), parsed, options);
@@ -1297,7 +1355,7 @@ public sealed class ArWorkbenchController : ControllerBase
         catch (SqlException ex)
         {
             _logger.LogError(ex, "AR Workbench invitation for {User} failed in SQL.", userName);
-            return (false, "the invitation tables are missing - run LRN.ReportsApi/Sql/UserMail_Setup.sql");
+            return (false, "the invitation tables are missing - run Database/LRN.ReportsApi/UserMail_Setup.sql");
         }
     }
 
@@ -1525,7 +1583,9 @@ public sealed class ArWorkbenchController : ControllerBase
         if (rows.Count > ArWorkbenchClaimExcel.MaxRows) rows.RemoveRange(ArWorkbenchClaimExcel.MaxRows, rows.Count - ArWorkbenchClaimExcel.MaxRows);
 
         var labName = (await _workflowService.GetLabsForUserAsync(CurrentUserName(), ct)).FirstOrDefault(l => l.LabId == filter.LabId)?.LabName ?? $"Lab {filter.LabId}";
-        var bytes = ArWorkbenchClaimExcel.Build(rows, $"AR Workbench claims — {labName} — {DateTime.Now:MM/dd/yyyy HH:mm}", total > rows.Count);
+        // Assignment, the latest follow-up note, its QA review and the status verification per claim.
+        var details = await _repository.GetClaimExportDetailsAsync(filter.LabId, rows.Select(r => r.ClaimKey).ToList(), ct);
+        var bytes = ArWorkbenchClaimExcel.Build(rows, details, $"AR Workbench claims — {labName} — {DateTime.Now:MM/dd/yyyy HH:mm}", total > rows.Count);
         _logger.LogInformation("AR Workbench claim export for lab {LabId} by {User}: {Rows} of {Total} rows", filter.LabId, user!.UserName, rows.Count, total);
         return File(bytes, XlsxContentType, $"ARWorkbench_Claims_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
     }

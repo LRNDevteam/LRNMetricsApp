@@ -187,7 +187,7 @@ WHERE ld.IsNonCollectible <> CASE WHEN nc.ItemValue IS NOT NULL THEN 1 ELSE 0 EN
     }
 
     private static ArWorkbenchSaveResult NotInstalled() =>
-        ArWorkbenchSaveResult.Invalid("The Denial Code master is not installed. Run LRN.ReportsApi/Sql/ArWorkbench/LRNMaster_02_ARWB_DenialCodeMaster.sql in LRNMaster.");
+        ArWorkbenchSaveResult.Invalid("The Denial Code master is not installed. Run Database/LRN.ReportsApi/ArWorkbench/LRNMaster/LRNMaster_02_ARWB_DenialCodeMaster.sql in LRNMaster.");
 
     private static void AddCodeMasterParameters(SqlCommand cmd, ArWorkbenchCodeMasterRow row, string user)
     {

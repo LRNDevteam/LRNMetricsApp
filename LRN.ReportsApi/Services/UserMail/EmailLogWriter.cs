@@ -22,7 +22,7 @@ public static class EmailLogWriter
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Could not record {Type} email in dbo.EmailLog (run Sql/UserMail_Setup.sql).", emailType);
+            logger.LogWarning(ex, "Could not record {Type} email in dbo.EmailLog (run Database/LRN.ReportsApi/UserMail_Setup.sql).", emailType);
         }
     }
 }

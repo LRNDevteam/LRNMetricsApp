@@ -91,7 +91,7 @@ public interface ILabProductionSummaryRepository
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 
-    /// <summary>Reads <c>{prefix}PayerBreakdown</c> ? payer × month pivot.</summary>
+    /// <summary>Reads <c>{prefix}PayerBreakdown</c> ? payer ï¿½ month pivot.</summary>
     /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
     Task<SharedPayerBreakdownResult> GetPayerBreakdownAsync(
         string connectionString,
@@ -105,7 +105,7 @@ public interface ILabProductionSummaryRepository
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 
-    /// <summary>Reads <c>{prefix}PayerByPanel</c> ? payer × panel pivot.</summary>
+    /// <summary>Reads <c>{prefix}PayerByPanel</c> ? payer ï¿½ panel pivot.</summary>
     /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
     Task<SharedPayerPanelResult> GetPayerByPanelAsync(
         string connectionString,
@@ -120,7 +120,7 @@ public interface ILabProductionSummaryRepository
         CancellationToken ct = default);
 
     /// <summary>
-    /// Reads <c>{prefix}UnbilledAging</c> ? panel/payer × aging-bucket pivot.
+    /// Reads <c>{prefix}UnbilledAging</c> ? panel/payer ï¿½ aging-bucket pivot.
     /// The row key column and bucket column vary per lab (see <see cref="LabSummaryTableConfig"/>).
     /// </summary>
     /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
@@ -136,13 +136,13 @@ public interface ILabProductionSummaryRepository
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 
-    /// <summary>Reads <c>{prefix}CPTBreakdown</c> ? CPT × month pivot.</summary>
+    /// <summary>Reads <c>{prefix}CPTBreakdown</c> ? CPT ï¿½ month pivot.</summary>
     /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
     /// <summary>
     /// Reads <c>usp_Get{prefix}PanelBreakdownWithPayers</c> - the Production Summary
     /// "Panel Breakdown" table: one parent row per panel with its payers as
     /// <see cref="PayerBreakdownRow.ChildRows"/>, pivoted by billed month.
-    /// Deployed by <c>Sql\40_AllLabs_PanelBreakdownWithPayers.sql</c>; returns an
+    /// Deployed by <c>Database\ClaimLineCSVDataCapture\40_AllLabs_PanelBreakdownWithPayers.sql</c>; returns an
     /// empty result (never throws) when that SP is not yet on the lab's database.
     /// </summary>
     /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>

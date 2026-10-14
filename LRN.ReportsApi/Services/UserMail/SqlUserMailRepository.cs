@@ -77,7 +77,7 @@ public sealed class UserEmailLogPage
     public int Total { get; set; }
     public int Page { get; set; }
     public int PageSize { get; set; }
-    /// <summary>False until Sql/UserMail_Setup.sql has been run.</summary>
+    /// <summary>False until Database/LRN.ReportsApi/UserMail_Setup.sql has been run.</summary>
     public bool Installed { get; set; } = true;
 }
 
@@ -102,7 +102,7 @@ public interface IUserMailRepository
     Task<IReadOnlyList<EmailTypeSummary>> GetEmailTypesAsync(IReadOnlyCollection<int>? labIds, CancellationToken ct);
 }
 
-/// <summary>dbo.UserInvitation / dbo.EmailLog in LRNMaster (Sql/UserMail_Setup.sql).</summary>
+/// <summary>dbo.UserInvitation / dbo.EmailLog in LRNMaster (Database/LRN.ReportsApi/UserMail_Setup.sql).</summary>
 public sealed class SqlUserMailRepository : IUserMailRepository
 {
     private readonly string _master;

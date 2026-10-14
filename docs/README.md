@@ -130,7 +130,7 @@ and are candidates for a merge.
 | Document | Version | Status | Covers |
 |---|---|---|---|
 | [DASHBOARD_DATA_FLOW.md](dashboard/DASHBOARD_DATA_FLOW.md) | — | Reference | End-to-end KPI data flow, CSV capture worker through to the displayed tile *(was at the repository root)* |
-| [ExecutiveSummary_Drillthrough_Logic.xlsx](dashboard/ExecutiveSummary_Drillthrough_Logic.xlsx) | — | Working data | Executive Summary drillthrough row definitions *(was at the repository root)*. The SQL is in [`SQL_Scripts/ExecutiveSummaryDrill/`](../SQL_Scripts/ExecutiveSummaryDrill/). |
+| [ExecutiveSummary_Drillthrough_Logic.xlsx](dashboard/ExecutiveSummary_Drillthrough_Logic.xlsx) | — | Working data | Executive Summary drillthrough row definitions *(was at the repository root)*. The SQL is in [`Database/Shared/ExecutiveSummaryDrill/`](../Database/Shared/ExecutiveSummaryDrill/). |
 
 ## Operations — [`operations/`](operations/)
 
@@ -168,7 +168,7 @@ the same commit.
 |---|---|
 | `reports/REPORT_CONTROL_BOARD.md` | `LabMetricsDashboard/Services/ReportCatalog.cs` |
 | `external-api/ExternalApiAccess_Guide.md` | `LRN.ReportsApi/Program.cs`, `LRN.ReportsApi/appsettings.json` |
-| `payer-master/Payer_Master_Reference_Tables_v1.1.md` | `LRN.ReportsApi/Sql/Payer_Matching_Reference_Tables_DDL_and_Seed.sql`, `LRN.ReportsApi/Sql/Payer_Policy_Mapper_Consolidated.sql` |
+| `payer-master/Payer_Master_Reference_Tables_v1.1.md` | `Database/LRN.ReportsApi/Payer_Matching_Reference_Tables_DDL_and_Seed.sql`, `Database/LRN.ReportsApi/Payer_Policy_Mapper_Consolidated.sql` |
 | `cpt-panel-lookup/LRNMaster.json` | `cpt-panel-lookup/CptPanelLookup_BackgroundExport.md` deployment steps |
 
 ## Where non-document files went
@@ -177,10 +177,10 @@ The 2026-08-27 cleanup emptied the repository root. Nothing was deleted.
 
 | Was at the root | Now |
 |---|---|
-| `usp_RefreshBT_ExecutiveSummary_*.sql`, `ExecSummary_*`, `*WriteOffReason_ExecSummary*` | `SQL_Scripts/BeechTree/ExecutiveSummary/` |
-| `usp_RefreshBT_WOSummary_v2…v6.sql`, `FullyAdjusted_WOSummary_Tally.sql`, `Diag_MissingClaim_18960958.sql` | `SQL_Scripts/BeechTree/WOSummary/` |
-| `usp_RefreshCove_ExecutiveSummary_LIS_Alt.sql` | `SQL_Scripts/Cove/` |
-| `_drill_verify/repro_*.sql` | `SQL_Scripts/ExecutiveSummaryDrill/` |
+| `usp_RefreshBT_ExecutiveSummary_*.sql`, `ExecSummary_*`, `*WriteOffReason_ExecSummary*` | `Database/Shared/BeechTree/ExecutiveSummary/` |
+| `usp_RefreshBT_WOSummary_v2…v6.sql`, `FullyAdjusted_WOSummary_Tally.sql`, `Diag_MissingClaim_18960958.sql` | `Database/Shared/BeechTree/WOSummary/` |
+| `usp_RefreshCove_ExecutiveSummary_LIS_Alt.sql` | `Database/Shared/Cove/` |
+| `_drill_verify/repro_*.sql` | `Database/Shared/ExecutiveSummaryDrill/` |
 | `Deploy-LoadingOverlayFix.ps1`, `xlcheck.py` | `scripts/` |
 | `meetingiq_spec.js`, `docs/_gen_threepillar_*.py` | `scripts/doc-gen/` |
 | `build-*.txt`, `_build_*.txt`, `_drill_deploy/`, `_drill_verify/`, `_extract_parts/` | `_artifacts/` — throwaway run output, now gitignored. Safe to delete. |

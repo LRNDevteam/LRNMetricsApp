@@ -509,7 +509,7 @@ public sealed class SqlReportRequestRepository : IReportRequestRepository
             if (!present)
             {
                 _logger.LogWarning(
-                    "dbo.UserReqReports is missing on {Db}. Deploy SQL_Scripts/UserReqReports before the Reports badge can load this lab.",
+                    "dbo.UserReqReports is missing on {Db}. Deploy Database/Shared/UserReqReports before the Reports badge can load this lab.",
                     key);
             }
             return present;
@@ -545,7 +545,7 @@ public sealed class SqlReportRequestRepository : IReportRequestRepository
             if (!present)
             {
                 _logger.LogWarning(
-                    "dbo.UserReqReports.ProgressPercent is missing on {Db}. Run SQL_Scripts/UserReqReports/03_Add_ProgressPercent.sql. Progress % will be hidden until then.",
+                    "dbo.UserReqReports.ProgressPercent is missing on {Db}. Run Database/Shared/UserReqReports/03_Add_ProgressPercent.sql. Progress % will be hidden until then.",
                     CacheKey(connectionString));
             }
             return present;

@@ -8,6 +8,9 @@ public sealed record DenialCategoryMasterRow(
 public sealed record NonCollectibleDenialRow(
     int Id, string DenialCode, string? Description, DateTime CreatedOn, string? CreatedBy);
 
+/// <summary>Which of the two masters a single add / edit / delete applies to.</summary>
+public enum DenialMasterKind { Category, NonCollectible }
+
 /// <summary>One denial code read from the workbook, before it is saved.</summary>
 public sealed record DenialCodeImportRow(string DenialCode, string? Description, string? ActionCategory);
 

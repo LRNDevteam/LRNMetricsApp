@@ -1015,7 +1015,7 @@ public sealed class ClaimLineDbService
         => RunProductionReportSPs(BuildCollectionSummarySpList("AnP"));
 
     /// <summary>
-    /// Refreshes the WellHealth Collection Summary snapshots (Sql\WellHealth\12_WellHealth_CollectionSummary.sql).
+    /// Refreshes the WellHealth Collection Summary snapshots (Database\ClaimLineCSVDataCapture\WellHealth\12_WellHealth_CollectionSummary.sql).
     /// Panel Averages by DOS / Check Date are computed live, so there is no AvgPayments snapshot.
     /// </summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshWellHealthCollectionReports()

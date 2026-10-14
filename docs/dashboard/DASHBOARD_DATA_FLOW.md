@@ -31,7 +31,7 @@ The Revenue Dashboard displays KPIs (Total Claims, Total Charges, Total Payments
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                STEP 2: SQL Stored Procedures (Bulk Insert)                       │
 │  Stored Procedure: dbo.usp_BulkInsertClaimLevelData                             │
-│  Location: ClaimLineCSVDataCapture/Sql/{LabName}/                               │
+│  Location: Database/ClaimLineCSVDataCapture/{LabName}/                               │
 │           04_{LabName}_Recreate_ClaimLevelDataTVP_And_UpdateSP.sql              │
 │                                                                                   │
 │  Process:                                                                        │
@@ -231,7 +231,7 @@ Calculation: (OutstandingNumerator / TotalCharges) * 100
 | `ClaimLineCSVDataCapture/Program.cs` | Worker service entry point |
 | `ClaimLineCSVDataCapture/Services/CsvFileWatcherService.cs` | Monitors for new CSV files |
 | `ClaimLineCSVDataCapture/Services/ClaimCsvProcessor.cs` | Parses claim CSV |
-| `ClaimLineCSVDataCapture/Sql/{Lab}/04_{Lab}_Recreate_ClaimLevelDataTVP_And_UpdateSP.sql` | Bulk insert SP |
+| `Database/ClaimLineCSVDataCapture/{Lab}/04_{Lab}_Recreate_ClaimLevelDataTVP_And_UpdateSP.sql` | Bulk insert SP |
 
 ### Dashboard Display
 | File | Purpose |

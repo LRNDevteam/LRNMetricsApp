@@ -44,6 +44,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 	private readonly ReportRunIdInfoLogger _runInfo;
 	private readonly ReportsWorkflowTrackerRepository _workflowTracker;
 	private readonly LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequestStore _rerunRequests;
+	private readonly LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncService _arWorkbenchSync;
 
 	private ColumnSchema? _commonLineSchema;
 	private ColumnSchema? _commonClaimSchema;
@@ -70,7 +71,8 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		LRN.MasterFileProcessorWorker.Database.LabSourceRunGate labRunGate,
 		ReportRunIdInfoLogger runInfo,
 		ReportsWorkflowTrackerRepository workflowTracker,
-		LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequestStore rerunRequests)
+		LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequestStore rerunRequests,
+		LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncService arWorkbenchSync)
 	{
 		_logger = logger;
 		_fileLog = fileLog;
@@ -92,6 +94,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		_runInfo = runInfo;
 		_workflowTracker = workflowTracker;
 		_rerunRequests = rerunRequests;
+		_arWorkbenchSync = arWorkbenchSync;
 
 	}
 
@@ -1100,6 +1103,61 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 					.ToList();
 
 				await TryMarkSourceRunIngestedAsync(lab, sourceRunId, runCtx.RunId, ingested, ct);
+
+				// STEP 87: AR Workbench (Denial Workbench) sync. With this week's line and claim level
+				// rows committed, the workbench copies the latest of both, and every assigned claim
+				// that is not completed or closed whose claim status changed (No Response -> Paid,
+				// Adjust -> Denied, ...) moves to Status Change Verification under one of the lab's
+				// RCM Managers, who is notified in the AR Workbench. Contained like step 85: a failure
+				// here is a warning on a run whose files and tables are already done.
+				if (_arWorkbenchSync.IsEnabledFor(lab.LabId))
+				{
+					stepSeq = 87;
+					var step87 = new StepLogRow
+					{
+						StepSeq = stepSeq,
+						StepName = "Sync AR Workbench (Denial Workbench)",
+						StepCategory = "Load",
+						SourceSystem = "SQL",
+						StartTimeIST = _processLog.NowIST(),
+						Status = "IN_PROGRESS"
+					};
+					activeStep = step87;
+					await _processLog.StepStartAsync(runCtx, step87, ct);
+
+					var arwb = await TrySyncArWorkbenchAsync(lab, runCtx.RunId, bulkOutcomes, ct);
+
+					step87.EndTimeIST = _processLog.NowIST();
+					step87.Status = arwb.Status switch
+					{
+						LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncStatus.Succeeded => "SUCCESS",
+						LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncStatus.Skipped => "SKIPPED",
+						_ => "WARNING"
+					};
+					step87.RecordsOut = arwb.ClaimRows;
+					step87.ErrorMessage = Truncate(arwb.Message, 780);
+					await _processLog.StepEndAsync(runCtx, step87, ct);
+					activeStep = null;
+
+					_fileLog.Info($"Lab {lab.LabId}: AR Workbench sync {arwb.Status}: {arwb.Message}");
+
+					if (arwb.Status == LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncStatus.Failed)
+					{
+						await _processLog.LogErrorAsync(runCtx, new ErrorLogRow
+						{
+							Severity = "WARNING",
+							StepName = step87.StepName,
+							ErrorCode = "ARWB_SYNC_FAILED",
+							ErrorSummary = Truncate(arwb.Message, 780),
+							FileName = selected.Name,
+							FilePath = selected.SharePointPath,
+							RecommendedAction = "Check the AR Workbench scripts in the lab database, then run Data Processing > Run in the AR Workbench.",
+							OwnerTeam = "LRN",
+							Status = "OPEN"
+						}, ct);
+						runRow.TotalWarnings += 1;
+					}
+				}
 
 				// The load has finished with the staged files, so the folder can go now rather than
 				// waiting for the finally - the rest of this run has no use for it.
@@ -2502,6 +2560,54 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 				new LineClaimImportOutcome(FileTypes.LineLevel, false, false, 0, ex.Message),
 				new LineClaimImportOutcome(FileTypes.ClaimLevel, false, false, 0, ex.Message)
 			};
+		}
+	}
+
+	/// <summary>
+	/// Step 87: the AR Workbench sync, against the SAME database the bulk copy just wrote to (resolved
+	/// the same way as <see cref="TryImportLineClaimLevelAsync"/>). Runs only when this run committed
+	/// the claim level and no level failed: syncing a half-loaded week would flag claims as dropped
+	/// out and raise verifications from stale statuses. Never throws.
+	/// </summary>
+	private async Task<LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncOutcome> TrySyncArWorkbenchAsync(
+		LabFileMap lab,
+		string runId,
+		IReadOnlyList<LineClaimImportOutcome> bulkOutcomes,
+		CancellationToken ct)
+	{
+		var claimLoaded = bulkOutcomes.Any(o =>
+			string.Equals(o.FileType, FileTypes.ClaimLevel, StringComparison.OrdinalIgnoreCase) && o.Succeeded && !o.Skipped);
+
+		if (!claimLoaded || bulkOutcomes.Any(o => !o.Succeeded))
+		{
+			return new(LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncStatus.Skipped,
+				"Line/claim level data did not fully load in this run; the AR Workbench keeps its previous sync.");
+		}
+
+		try
+		{
+			var labConnectionString = GetLabConfigValue(lab, "LabDbConnectionString")
+				?? _configuration.GetConnectionString(GetLabConfigValue(lab, "LabDbConnectionKey") ?? string.Empty);
+
+			var resolved = await _labRegistry.TryResolveLabAsync(
+				lab.LabId, labConnectionString, ResolvePath(_lineClaimOptions.LabMappingsFolder), ct);
+
+			if (resolved is null)
+			{
+				return new(LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncStatus.Skipped,
+					"The lab database connection could not be resolved.");
+			}
+
+			return await _arWorkbenchSync.SyncLabAsync(lab.LabId, resolved.ConnectionString, runId, ct);
+		}
+		catch (OperationCanceledException) when (ct.IsCancellationRequested)
+		{
+			throw;
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "Lab {LabId}: AR Workbench sync failed.", lab.LabId);
+			return new(LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncStatus.Failed, ex.Message);
 		}
 	}
 

@@ -486,7 +486,7 @@ document.addEventListener('DOMContentLoaded', function () {
             state.loaded = true;
             state.total = data.total || 0;
             if (data.installed === false) {
-                rows.innerHTML = '<tr><td colspan="9" class="text-muted text-center py-4">The email log is not set up yet. Run LRN.ReportsApi/Sql/UserMail_Setup.sql on LRNMaster.</td></tr>';
+                rows.innerHTML = '<tr><td colspan="9" class="text-muted text-center py-4">The email log is not set up yet. Run Database/LRN.ReportsApi/UserMail_Setup.sql on LRNMaster.</td></tr>';
                 el('emailSummary').textContent = '';
                 return;
             }

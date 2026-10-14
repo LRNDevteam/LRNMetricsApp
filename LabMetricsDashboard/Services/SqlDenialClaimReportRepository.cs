@@ -1183,7 +1183,7 @@ SELECT @@ROWCOUNT;";
             END
 
             -- Template v1.0 columns, for a table created before it. Same as
-            -- SqlScripts/Alter_DenialClaimLevelInsight_TemplateV1.sql, so the app works whether or
+            -- Database/LabMetricsDashboard/Alter_DenialClaimLevelInsight_TemplateV1.sql, so the app works whether or
             -- not that script has been run yet.
             IF COL_LENGTH('dbo.DenialClaimLevelInsight', 'InsuranceNoOfDenials') IS NULL
                 ALTER TABLE dbo.DenialClaimLevelInsight
@@ -1196,7 +1196,7 @@ SELECT @@ROWCOUNT;";
                 ALTER TABLE dbo.DenialClaimLevelInsight ADD Status NVARCHAR(50) NULL;
 
             -- "$ Impact (%)" as the text the workbook carried. See
-            -- SqlScripts/Alter_DenialClaimLevelInsight_ImpactText.sql.
+            -- Database/LabMetricsDashboard/Alter_DenialClaimLevelInsight_ImpactText.sql.
             IF COL_LENGTH('dbo.DenialClaimLevelInsight', 'ImpactPercentageText') IS NULL
                 ALTER TABLE dbo.DenialClaimLevelInsight ADD ImpactPercentageText NVARCHAR(100) NULL;
             """;

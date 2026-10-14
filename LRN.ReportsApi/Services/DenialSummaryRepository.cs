@@ -23,7 +23,7 @@ public interface IDenialSummaryRepository
 /// <summary>
 /// Observations and snapshots live in each lab's own database, beside the denial tables they
 /// describe - the same placement as dbo.DenialCodeMaster. Both tables are created on first use so a
-/// lab does not have to run a migration before the page works; Sql/DenialSummary_Setup.sql is the
+/// lab does not have to run a migration before the page works; Database/LRN.ReportsApi/DenialSummary_Setup.sql is the
 /// same DDL for DBAs who prefer to apply it ahead of the deploy.
 /// </summary>
 public sealed class SqlDenialSummaryRepository : IDenialSummaryRepository
@@ -340,7 +340,7 @@ public sealed class SqlDenialSummaryRepository : IDenialSummaryRepository
 
     private static object DbValue(string? value) => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
 
-    /// <summary>Keep in step with Sql/DenialSummary_Setup.sql.</summary>
+    /// <summary>Keep in step with Database/LRN.ReportsApi/DenialSummary_Setup.sql.</summary>
     internal static readonly string[] SchemaStatements =
     [
         """

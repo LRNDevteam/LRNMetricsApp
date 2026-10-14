@@ -3,13 +3,13 @@
 **Scope:** Payer Policy Validation Report (first implementation). Architecture is generic — ForecastingSummary, ExecutiveSummary, ProductionReport, CollectionReport, and LisSummary plug in later by adding one generator class each.
 **Stack:** ASP.NET Core (.NET 9) · SQL Server (per-lab DBs) · ClosedXML · Windows Server / IIS · LRN.ReportWorker Windows Service.
 **Version:** 1.0 · **Last reviewed:** 2026-08-16
-**Status:** Implemented — projects `LRN.ReportQueue.Shared`, `LRN.ReportWorker`, web changes in `LabMetricsDashboard`, SQL in `SQL_Scripts/UserReqReports/`.
+**Status:** Implemented — projects `LRN.ReportQueue.Shared`, `LRN.ReportWorker`, web changes in `LabMetricsDashboard`, SQL in `Database/Shared/UserReqReports/`.
 
 ---
 
 ## 1. Database Design
 
-The queue table `UserReqReports` is deployed to **each lab database** (decision: per-lab hosting; the web app's "My Reports" view fans out across labs in parallel). Scripts: `SQL_Scripts/UserReqReports/01_UserReqReports_Schema.sql`.
+The queue table `UserReqReports` is deployed to **each lab database** (decision: per-lab hosting; the web app's "My Reports" view fans out across labs in parallel). Scripts: `Database/Shared/UserReqReports/01_UserReqReports_Schema.sql`.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -200,8 +200,8 @@ Legal transitions are enforced by guarded `UPDATE … WHERE GenerationStatus = e
 
 ## 11. SQL Scripts
 
-`SQL_Scripts/UserReqReports/01_UserReqReports_Schema.sql` — status lookup (seeded via MERGE), `UserReqReports`, four indexes, audit table + trigger. Idempotent.
-`SQL_Scripts/UserReqReports/02_UserReqReports_Procs.sql` — `usp_ClaimNextUserReqReport`, `usp_CompleteUserReqReport`, `usp_FailUserReqReport`, `usp_ResetStuckUserReqReports`, `usp_ExpireUserReqReports`, `usp_PurgeUserReqReports`. Idempotent (`CREATE OR ALTER`).
+`Database/Shared/UserReqReports/01_UserReqReports_Schema.sql` — status lookup (seeded via MERGE), `UserReqReports`, four indexes, audit table + trigger. Idempotent.
+`Database/Shared/UserReqReports/02_UserReqReports_Procs.sql` — `usp_ClaimNextUserReqReport`, `usp_CompleteUserReqReport`, `usp_FailUserReqReport`, `usp_ResetStuckUserReqReports`, `usp_ExpireUserReqReports`, `usp_PurgeUserReqReports`. Idempotent (`CREATE OR ALTER`).
 Run both on every DB-enabled lab database.
 
 ## 12–13. C# Design & Solution Structure

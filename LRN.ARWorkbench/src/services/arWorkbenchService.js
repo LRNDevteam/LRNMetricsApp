@@ -40,6 +40,14 @@ export const arWorkbenchService = {
   agentRequests: (filter, signal) => api(`agent-requests${qs(filter)}`, { signal }),
   resolveAgentRequests: (labId, body) => api(`agent-requests/resolve${qs({ labId })}`, json('POST', body)),
 
+  // Status Change Verification (RCM Manager / admin): claims whose master-file claim status changed while assigned
+  statusVerification: (filter, signal) => api(`status-verification${qs(filter)}`, { signal }),
+  resolveStatusVerification: (labId, body) => api(`status-verification/resolve${qs({ labId })}`, json('POST', body)),
+
+  // Notification bell: addressed to the user or their role
+  notifications: (labId, signal) => api(`notifications${qs({ labId })}`, { signal }),
+  markNotificationsRead: (labId, body) => api(`notifications/read${qs({ labId })}`, json('POST', body)),
+
   // QA Verification Queue (ARWorkbench.QaDecide)
   qaQueue: (filter, signal) => api(`qa${qs(filter)}`, { signal }),
   qaDecision: (labId, claimKey, body) => api(`qa/${claimKey}/decision${qs({ labId })}`, json('POST', body)),

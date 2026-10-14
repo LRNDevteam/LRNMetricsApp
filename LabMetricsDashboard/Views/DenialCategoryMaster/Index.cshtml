@@ -6,6 +6,10 @@
     var lastImport = Model.Categories.Select(c => (DateTime?)c.CreatedOn).Concat(Model.NonCollectible.Select(c => (DateTime?)c.CreatedOn)).Max();
     var lastImportBy = Model.Categories.Select(c => new { c.CreatedOn, c.CreatedBy }).Concat(Model.NonCollectible.Select(c => new { c.CreatedOn, c.CreatedBy }))
         .OrderByDescending(x => x.CreatedOn).Select(x => x.CreatedBy).FirstOrDefault();
+    // Add / edit / delete: the same admins who can import (both replace master rows).
+    var canEdit = Model.CanImport && Model.SetupError is null;
+    var categoryOptions = Model.Categories.Select(c => c.ActionCategory).Where(c => !string.IsNullOrWhiteSpace(c))
+        .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(c => c, StringComparer.OrdinalIgnoreCase).ToList();
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -15,7 +19,7 @@
             Denial code descriptions and action categories, and the non-collectible denial codes.
             @if (lastImport is not null)
             {
-                <span>Last imported @lastImport.Value.ToLocalTime().ToString("MM/dd/yyyy hh:mm tt")@(string.IsNullOrWhiteSpace(lastImportBy) ? "" : $" by {lastImportBy}").</span>
+                <span>Last updated @lastImport.Value.ToLocalTime().ToString("MM/dd/yyyy hh:mm tt")@(string.IsNullOrWhiteSpace(lastImportBy) ? "" : $" by {lastImportBy}").</span>
             }
         </small>
     </div>
@@ -88,16 +92,25 @@
             <input type="search" class="form-control form-control-sm js-dcm-search" data-table="dcm-categories"
                    placeholder="Search code, description or category" style="max-width:320px" />
             <small class="text-muted">@Model.Categories.Count codes in @categoryCount categories</small>
+            @if (canEdit)
+            {
+                <button type="button" class="btn btn-primary btn-sm ms-auto js-dcm-add" data-master="categories">
+                    <i class="bi bi-plus-lg"></i> Add Denial Code
+                </button>
+            }
         </div>
         <div class="table-responsive" style="max-height:65vh">
             <table class="table table-sm table-hover table-bordered align-middle mb-0" id="dcm-categories">
                 <thead class="table-light sticky-top">
-                    <tr><th style="width:110px">Denial Code</th><th>Description</th><th>Action Category</th><th style="width:150px">Created On</th><th style="width:140px">Created By</th></tr>
+                    <tr>
+                        <th style="width:110px">Denial Code</th><th>Description</th><th>Action Category</th><th style="width:150px">Created On</th><th style="width:140px">Created By</th>
+                        @if (canEdit) { <th style="width:110px" class="text-center">Actions</th> }
+                    </tr>
                 </thead>
                 <tbody>
                     @if (Model.Categories.Count == 0)
                     {
-                        <tr><td colspan="5" class="text-center text-muted py-4">No denial categories yet. Import the denial codes workbook.</td></tr>
+                        <tr><td colspan="@(canEdit ? 6 : 5)" class="text-center text-muted py-4">No denial categories yet. Add a code or import the denial codes workbook.</td></tr>
                     }
                     @foreach (var r in Model.Categories)
                     {
@@ -107,6 +120,22 @@
                             <td>@(string.IsNullOrWhiteSpace(r.ActionCategory) ? "-" : r.ActionCategory)</td>
                             <td class="small">@r.CreatedOn.ToLocalTime().ToString("MM/dd/yyyy hh:mm tt")</td>
                             <td class="small">@r.CreatedBy</td>
+                            @if (canEdit)
+                            {
+                                <td class="text-center text-nowrap">
+                                    <button type="button" class="btn btn-outline-primary btn-sm js-dcm-edit" title="Edit" aria-label="Edit @r.DenialCode"
+                                            data-master="categories" data-id="@r.Id" data-code="@r.DenialCode" data-description="@r.Description" data-category="@r.ActionCategory">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <form asp-action="Delete" method="post" class="d-inline js-dcm-delete" data-code="@r.DenialCode">
+                                        @Html.AntiForgeryToken()
+                                        <input type="hidden" name="master" value="categories" />
+                                        <input type="hidden" name="id" value="@r.Id" />
+                                        <input type="hidden" name="denialCode" value="@r.DenialCode" />
+                                        <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete" aria-label="Delete @r.DenialCode"><i class="bi bi-trash"></i></button>
+                                    </form>
+                                </td>
+                            }
                         </tr>
                     }
                 </tbody>
@@ -118,16 +147,25 @@
         <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
             <input type="search" class="form-control form-control-sm js-dcm-search" data-table="dcm-noncollectible"
                    placeholder="Search code or description" style="max-width:320px" />
+            @if (canEdit)
+            {
+                <button type="button" class="btn btn-primary btn-sm ms-auto js-dcm-add" data-master="noncollectible">
+                    <i class="bi bi-plus-lg"></i> Add Non-Collectible Code
+                </button>
+            }
         </div>
         <div class="table-responsive" style="max-height:65vh">
             <table class="table table-sm table-hover table-bordered align-middle mb-0" id="dcm-noncollectible">
                 <thead class="table-light sticky-top">
-                    <tr><th style="width:110px">Denial Code</th><th>Description</th><th style="width:150px">Created On</th><th style="width:140px">Created By</th></tr>
+                    <tr>
+                        <th style="width:110px">Denial Code</th><th>Description</th><th style="width:150px">Created On</th><th style="width:140px">Created By</th>
+                        @if (canEdit) { <th style="width:110px" class="text-center">Actions</th> }
+                    </tr>
                 </thead>
                 <tbody>
                     @if (Model.NonCollectible.Count == 0)
                     {
-                        <tr><td colspan="4" class="text-center text-muted py-4">No non-collectible denials yet. Import the denial codes workbook.</td></tr>
+                        <tr><td colspan="@(canEdit ? 5 : 4)" class="text-center text-muted py-4">No non-collectible denials yet. Add a code or import the denial codes workbook.</td></tr>
                     }
                     @foreach (var r in Model.NonCollectible)
                     {
@@ -136,6 +174,22 @@
                             <td>@r.Description</td>
                             <td class="small">@r.CreatedOn.ToLocalTime().ToString("MM/dd/yyyy hh:mm tt")</td>
                             <td class="small">@r.CreatedBy</td>
+                            @if (canEdit)
+                            {
+                                <td class="text-center text-nowrap">
+                                    <button type="button" class="btn btn-outline-primary btn-sm js-dcm-edit" title="Edit" aria-label="Edit @r.DenialCode"
+                                            data-master="noncollectible" data-id="@r.Id" data-code="@r.DenialCode" data-description="@r.Description">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <form asp-action="Delete" method="post" class="d-inline js-dcm-delete" data-code="@r.DenialCode">
+                                        @Html.AntiForgeryToken()
+                                        <input type="hidden" name="master" value="noncollectible" />
+                                        <input type="hidden" name="id" value="@r.Id" />
+                                        <input type="hidden" name="denialCode" value="@r.DenialCode" />
+                                        <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete" aria-label="Delete @r.DenialCode"><i class="bi bi-trash"></i></button>
+                                    </form>
+                                </td>
+                            }
                         </tr>
                     }
                 </tbody>
@@ -144,7 +198,80 @@
     </div>
 </div>
 
+@if (canEdit)
+{
+    <div class="modal fade" id="dcm-edit-modal" tabindex="-1" aria-labelledby="dcm-edit-title" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <form asp-action="Save" method="post" class="modal-content" id="dcm-edit-form">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="master" id="dcm-edit-master" />
+                <input type="hidden" name="id" id="dcm-edit-id" />
+                <div class="modal-header">
+                    <h5 class="modal-title" id="dcm-edit-title">Add Denial Code</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="dcm-edit-code" class="form-label">Denial Code <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" name="denialCode" id="dcm-edit-code" maxlength="50" required autocomplete="off" />
+                        <div class="form-text">Without the group prefix, as in the rest of the master (e.g. 16, N290, M25).</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="dcm-edit-description" class="form-label">Description</label>
+                        <textarea class="form-control" name="description" id="dcm-edit-description" rows="3" maxlength="1000"></textarea>
+                    </div>
+                    <div class="mb-1" id="dcm-edit-category-group">
+                        <label for="dcm-edit-category" class="form-label">Action Category</label>
+                        <input type="text" class="form-control" name="actionCategory" id="dcm-edit-category" maxlength="300" list="dcm-category-options" autocomplete="off" />
+                        <datalist id="dcm-category-options">
+                            @foreach (var c in categoryOptions)
+                            {
+                                <option value="@c"></option>
+                            }
+                        </datalist>
+                        <div class="form-text">Pick an existing category or type a new one.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="dcm-edit-submit">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
 <script nonce='@Context.Items["CspNonce"]'>
+    var editModalEl = document.getElementById('dcm-edit-modal');
+    if (editModalEl) {
+        var labels = { categories: 'Denial Code', noncollectible: 'Non-Collectible Code' };
+
+        function openEditor(btn, isEdit) {
+            var master = btn.dataset.master;
+            document.getElementById('dcm-edit-master').value = master;
+            document.getElementById('dcm-edit-id').value = isEdit ? btn.dataset.id : '';
+            document.getElementById('dcm-edit-code').value = isEdit ? (btn.dataset.code || '') : '';
+            document.getElementById('dcm-edit-description').value = isEdit ? (btn.dataset.description || '') : '';
+            document.getElementById('dcm-edit-category').value = isEdit ? (btn.dataset.category || '') : '';
+            // Non-collectible codes have no action category.
+            document.getElementById('dcm-edit-category-group').style.display = master === 'categories' ? '' : 'none';
+            document.getElementById('dcm-edit-title').textContent = (isEdit ? 'Edit ' : 'Add ') + labels[master] + (isEdit ? ' ' + btn.dataset.code : '');
+            document.getElementById('dcm-edit-submit').textContent = isEdit ? 'Save Changes' : 'Add';
+            // The layout loads bootstrap.bundle after the page body, so the instance is made on click.
+            bootstrap.Modal.getOrCreateInstance(editModalEl).show();
+        }
+
+        editModalEl.addEventListener('shown.bs.modal', function () { document.getElementById('dcm-edit-code').focus(); });
+        document.querySelectorAll('.js-dcm-add').forEach(function (b) { b.addEventListener('click', function () { openEditor(b, false); }); });
+        document.querySelectorAll('.js-dcm-edit').forEach(function (b) { b.addEventListener('click', function () { openEditor(b, true); }); });
+    }
+
+    document.querySelectorAll('.js-dcm-delete').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+            if (!confirm('Delete denial code ' + form.dataset.code + '? This cannot be undone.')) e.preventDefault();
+        });
+    });
+
     var importForm = document.getElementById('dcm-import-form');
     if (importForm) {
         importForm.addEventListener('submit', function (e) {

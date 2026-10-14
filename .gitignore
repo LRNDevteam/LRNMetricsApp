@@ -8,7 +8,7 @@ obj/
 /scripts/Analyze-Biggest-Local.ps1
 
 # Throwaway run output: build logs, drill-deploy/verify logs, extraction parts.
-# Everything worth keeping was pulled out into SQL_Scripts/ and docs/ first.
+# Everything worth keeping was pulled out into SQL_Scripts/ (now Database/Shared/) and docs/ first.
 /_artifacts/
 /LRN.ReportWorker/Properties/PublishProfiles/FolderProfile.pubxml
 

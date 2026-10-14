@@ -103,7 +103,7 @@ builder.Services.AddSingleton<LRN.ReportsApi.Services.ArWorkbench.IArWorkbenchDo
 builder.Services.Configure<LRN.ReportsApi.Services.ArWorkbench.ArWorkbenchSnapshotOptions>(builder.Configuration.GetSection("ArWorkbenchSnapshots"));
 builder.Services.AddHostedService<LRN.ReportsApi.Services.ArWorkbench.ArWorkbenchSnapshotScheduler>();
 // User invitation email, shared by LRN Metrics Admin > Users (/api/user-mail) and AR Workbench User
-// Management: Graph sendMail + dbo.UserInvitation / dbo.UserEmailLog (Sql/UserMail_Setup.sql).
+// Management: Graph sendMail + dbo.UserInvitation / dbo.UserEmailLog (Database/LRN.ReportsApi/UserMail_Setup.sql).
 builder.Services.Configure<LRN.ReportsApi.Services.UserMail.UserMailOptions>(builder.Configuration.GetSection("UserMail"));
 builder.Services.AddSingleton<LRN.ReportsApi.Services.UserMail.IUserMailSender, LRN.ReportsApi.Services.UserMail.GraphUserMailSender>();
 builder.Services.AddSingleton<LRN.ReportsApi.Services.UserMail.IUserMailRepository, LRN.ReportsApi.Services.UserMail.SqlUserMailRepository>();
