@@ -1107,28 +1107,28 @@ BEGIN
         GROUP BY p.ESYear, p.ESMonth
         -- E.4  Self Pay
         UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'E.4', '  Self Pay',
+        SELECT p.ESYear, p.ESMonth, 'E.4', 'Self Pay',
                CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Self Pay' THEN l.OrderID END) AS DECIMAL(18,2))
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
         -- E.5  Deleted/Rejected
         UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'E.5', '  Deleted/Rejected',
+        SELECT p.ESYear, p.ESMonth, 'E.5', 'Deleted/Rejected',
                CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Deleted/Rejected' THEN l.OrderID END) AS DECIMAL(18,2))
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
         -- E.6  Duplicate
         UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'E.6', '  Duplicate',
+        SELECT p.ESYear, p.ESMonth, 'E.6', 'Duplicate',
                CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Duplicate' THEN l.OrderID END) AS DECIMAL(18,2))
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
         -- E.7  System Test
         UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'E.7', '  System Test',
+        SELECT p.ESYear, p.ESMonth, 'E.7', 'System Test',
                CAST(COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='System Test' THEN l.OrderID END) AS DECIMAL(18,2))
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
@@ -1698,7 +1698,7 @@ BEGIN
 
         -- E.4  Self Pay
         UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'E.4', '  Self Pay',
+        SELECT p.ESYear, p.ESMonth, 'E.4', 'Self Pay',
                COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Self Pay' THEN l.OrderID END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
@@ -1706,7 +1706,7 @@ BEGIN
 
         -- E.5  Deleted/Rejected
         UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'E.5', '  Deleted/Rejected',
+        SELECT p.ESYear, p.ESMonth, 'E.5', 'Deleted/Rejected',
                COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Deleted/Rejected' THEN l.OrderID END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
@@ -1714,7 +1714,7 @@ BEGIN
 
         -- E.6  Duplicate
         UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'E.6', '  Duplicate',
+        SELECT p.ESYear, p.ESMonth, 'E.6', 'Duplicate',
                COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='Duplicate' THEN l.OrderID END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
@@ -1722,7 +1722,7 @@ BEGIN
 
         -- E.7  System Test
         UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'E.7', '  System Test',
+        SELECT p.ESYear, p.ESMonth, 'E.7', 'System Test',
                COUNT(DISTINCT CASE WHEN ISNULL(l.NAFlag,'')='' AND l.SampleStatus='System Test' THEN l.OrderID END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))

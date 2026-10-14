@@ -182,6 +182,10 @@
         text-align: left; font-weight: 600; color: #1e293b;
         position: sticky; left: 0; z-index: 1; background: #fff;
         min-width: 240px; max-width: 320px;
+        /* Long descriptions wrap instead of being cut off with an ellipsis;
+           overflow-wrap also breaks underscore names such as Nexum_Claim_scrubber_*. */
+        white-space: normal; overflow-wrap: anywhere; text-overflow: clip;
+        line-height: 1.25;
     }
 
     tr.es-cat-row td { background: #f0fdf4; font-weight: 700; }

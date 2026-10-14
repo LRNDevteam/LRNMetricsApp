@@ -27,7 +27,8 @@ public static class ClinicSummaryExcelExportBuilder
         ClinicPanelStatusViewModel? panelStatus = null,
         ClinicDollarAnalysisViewModel? dollarAnalysis = null,
         ClinicDosCountViewModel? dosCount = null,
-        IReadOnlyList<(string Label, IReadOnlyList<string>? Values)>? activeFilters = null)
+        IReadOnlyList<(string Label, IReadOnlyList<string>? Values)>? activeFilters = null,
+        ClinicPaymentBilledViewModel? paymentBilled = null)
     {
         var wb = new XLWorkbook();
 
@@ -45,6 +46,9 @@ public static class ClinicSummaryExcelExportBuilder
 
         if (dosCount is { Clinics.Count: > 0 })
             BuildDosCountSheet(wb, dosCount);
+
+        if (paymentBilled is { Clinics.Count: > 0 })
+            BuildPaymentBilledSheet(wb, paymentBilled);
 
         if (activeFilters is { Count: > 0 })
         {
@@ -481,6 +485,106 @@ public static class ClinicSummaryExcelExportBuilder
         ws.SheetView.FreezeRows(2);
         ws.SheetView.FreezeColumns(1);
         ExcelTheme.AutoFitColumns(ws, grandCol, minWidth: 8, firstColMinWidth: 28);
+    }
+
+    // ?? Clinic vs Payment vs Billed sheet ????????????????????????????
+
+    private static void BuildPaymentBilledSheet(XLWorkbook wb, ClinicPaymentBilledViewModel vm)
+    {
+        var monthNames = new[] { "", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+        string[] metrics = ["Count of ClaimID", "Sum of ChargeAmount", "Sum of InsurancePayment"];
+
+        var ws = wb.AddWorksheet("Clinic vs Payment vs Billed");
+        ws.TabColor = ExcelTheme.TabGreen;
+        ExcelTheme.ApplyDefaults(ws);
+
+        // Each group (month, year total, grand total) is 3 columns: count, charge, payment.
+        void WriteGroupHeader(int firstRow, int lastRow, int col, string label)
+        {
+            ExcelTheme.WriteHeaderRow(ws, firstRow, col, [label]);
+            ws.Range(firstRow, col, lastRow, col + 2).Merge();
+        }
+
+        ExcelTheme.WriteHeaderRow(ws, 1, 1, ["Clinic Name"]);
+        ws.Range(1, 1, 3, 1).Merge();
+
+        int col = 2;
+        foreach (var year in vm.Years)
+        {
+            var monthsInYear = vm.Columns.Where(c => c.Year == year).ToList();
+            ExcelTheme.WriteHeaderRow(ws, 1, col, [year.ToString()]);
+            ws.Range(1, col, 1, col + monthsInYear.Count * 3 - 1).Merge();
+            foreach (var (_, month) in monthsInYear)
+            {
+                WriteGroupHeader(2, 2, col, monthNames[month]);
+                ExcelTheme.WriteHeaderRow(ws, 3, col, metrics);
+                col += 3;
+            }
+
+            WriteGroupHeader(1, 2, col, $"{year} Total");
+            ExcelTheme.WriteHeaderRow(ws, 3, col, metrics);
+            col += 3;
+        }
+
+        WriteGroupHeader(1, 2, col, "Grand Total");
+        ExcelTheme.WriteHeaderRow(ws, 3, col, metrics);
+        int lastCol = col + 2;
+
+        void WriteCells(int row, int startCol, ClinicPaymentBilledCell? cell, XLColor bg, bool bold)
+        {
+            ws.Cell(row, startCol).Value = cell?.ClaimCount ?? 0;
+            ws.Cell(row, startCol + 1).Value = cell?.ChargeAmount ?? 0m;
+            ws.Cell(row, startCol + 2).Value = cell?.InsurancePayment ?? 0m;
+            ws.Cell(row, startCol).Style.NumberFormat.Format = "#,##0";
+            ws.Cell(row, startCol + 1).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
+            ws.Cell(row, startCol + 2).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
+            for (int c = startCol; c <= startCol + 2; c++)
+            {
+                ExcelTheme.StyleDataCell(ws.Cell(row, c), bg);
+                if (bold) ws.Cell(row, c).Style.Font.SetBold(true);
+            }
+        }
+
+        void WriteRow(int row, string label,
+            Func<string, ClinicPaymentBilledCell?> month, Func<int, ClinicPaymentBilledCell?> yearTotal,
+            ClinicPaymentBilledCell total, XLColor bg, bool bold)
+        {
+            ws.Cell(row, 1).Value = label;
+            ExcelTheme.StyleDataCell(ws.Cell(row, 1), bg);
+            if (bold) ws.Cell(row, 1).Style.Font.SetBold(true);
+
+            int c = 2;
+            foreach (var year in vm.Years)
+            {
+                foreach (var (y, m) in vm.Columns.Where(x => x.Year == year))
+                {
+                    WriteCells(row, c, month(ClinicPaymentBilledViewModel.ColKey(y, m)), bg, bold);
+                    c += 3;
+                }
+                WriteCells(row, c, yearTotal(year), bg, bold: true);
+                c += 3;
+            }
+            WriteCells(row, c, total, bg, bold: true);
+        }
+
+        int rowNum = 4;
+        for (int i = 0; i < vm.Clinics.Count; i++)
+        {
+            var clinic = vm.Clinics[i];
+            WriteRow(rowNum++, clinic.ClinicName,
+                key => clinic.Months.GetValueOrDefault(key),
+                year => clinic.Years.GetValueOrDefault(year),
+                clinic.Total, ExcelTheme.GetRowBg(i), bold: false);
+        }
+
+        WriteRow(rowNum, "Grand Total",
+            key => vm.ColumnTotals.GetValueOrDefault(key),
+            year => vm.YearTotals.GetValueOrDefault(year),
+            vm.GrandTotal, ExcelTheme.TotalRowBg, bold: true);
+
+        ws.SheetView.FreezeRows(3);
+        ws.SheetView.FreezeColumns(1);
+        ExcelTheme.AutoFitColumns(ws, lastCol, minWidth: 12, firstColMinWidth: 30);
     }
 
     // ?? Clinic Panel Status sheet ?????????????????????????????????????

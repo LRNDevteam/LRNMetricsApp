@@ -12,9 +12,10 @@
    Monthly Summary      Billed, FirstBilledDate set (blank payer kept) Panel > top payers  x  CED month
    Weekly               Billed, BilledWeek set                         Panel > top payers  x  BilledWeek
    CPT Breakdown        All lines (LineLevelData)                      CPT code  x  Count of CPT, Charge
+                                                                       (rows sorted by Count of CPT DESC in the app)
    Payer Breakdown      Billed, PayerName_Raw set                      Payer  x  CED month
    Panel Breakdown      Billed                                         Panel > payers  x  CED month
-   Unbilled x Aging     Unbilled                                       Payer  x  AgingDOS
+   Unbilled x Aging     BillStatus = 'Unbilled'                        Payer  x  AgingDOS
    Payor x Panel        PayerName_Raw set                              Payer  x  Panel
    Coding Summary       Unbilled                                       Panel > CPTCodeXUnitsXModifier
 
@@ -338,7 +339,8 @@ BEGIN
 END
 GO
 
-/* ---- 6) Unbilled x Aging: (PayerName, AgingBucket, ClaimCount INT, TotalCharges) - buckets from AgingDOS ---- */
+/* ---- 6) Unbilled x Aging: (PayerName, AgingBucket, ClaimCount INT, TotalCharges) - buckets from AgingDOS ----
+   BillStatus = 'Unbilled' only (client pivot); a blank FirstBilledDate alone does not count here. */
 CREATE OR ALTER PROCEDURE dbo.usp_GetInH_UnbilledAging
     @PayerNames      NVARCHAR(MAX) = NULL,
     @PanelNames      NVARCHAR(MAX) = NULL,
@@ -357,7 +359,7 @@ BEGIN
            CAST(COUNT(ClaimID) AS INT)                          AS ClaimCount,
            CAST(SUM(ChargeAmount) AS DECIMAL(18,2))             AS TotalCharges
     FROM   dbo.fn_InH_ProductionClaims(@PayerNames, @PanelNames, @DosFrom, @DosTo, @FirstBillFrom, @FirstBillTo, @FirstBilledFrom, @FirstBilledTo)
-    WHERE  IsUnbilled = 1
+    WHERE  BillStatus = N'Unbilled'
     GROUP BY ISNULL(PayerName, N'(blank)'), AgingDOS
     ORDER BY PayerName, AgingBucket;
 END

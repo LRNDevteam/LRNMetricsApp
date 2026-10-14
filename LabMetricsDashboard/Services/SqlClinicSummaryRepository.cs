@@ -862,6 +862,13 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
 
         var statusSelect = clinicOnly ? "CAST(N'' AS NVARCHAR(100))" : "ISNULL(ClaimStatus, '(Unknown)')";
         var groupBy = clinicOnly ? "ClinicName" : "ClinicName, ClaimStatus";
+        // Only WellHealth shows the balance; other labs (e.g. InHealth) have no TotalInsuranceBalance column.
+        var balanceSelect = clinicOnly
+            ? """
+              ISNULL(SUM(TRY_CONVERT(DECIMAL(18,2), REPLACE(REPLACE(LTRIM(RTRIM(
+                  CONVERT(NVARCHAR(100), TotalInsuranceBalance))), N'$', N''), N',', N''))), 0)
+              """
+            : "CAST(0 AS DECIMAL(18,2))";
 
         var sql = $"""
             SELECT
@@ -870,8 +877,7 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
                 COUNT(DISTINCT ClaimID)            AS ClaimCount,
                 ISNULL(SUM(TRY_CAST(ChargeAmount     AS DECIMAL(18,2))), 0) AS TotalCharge,
                 ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0) AS InsurancePayment,
-                ISNULL(SUM(TRY_CONVERT(DECIMAL(18,2), REPLACE(REPLACE(LTRIM(RTRIM(
-                    CONVERT(NVARCHAR(100), TotalInsuranceBalance))), N'$', N''), N',', N''))), 0) AS TotalInsuranceBalance
+                {balanceSelect} AS TotalInsuranceBalance
             FROM dbo.ClaimLevelData
             WHERE {whereClause}
             GROUP BY {groupBy}
@@ -1103,6 +1109,142 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
             ColumnTotals = columnTotals,
             YearTotals = yearTotals,
             GrandTotal = clinics.Sum(c => c.GrandTotal),
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<ClinicPaymentBilledViewModel> GetClinicPaymentBilledAsync(
+        string connectionString,
+        string labName,
+        List<string>? filterClinicNames = null,
+        List<string>? filterSalesRepNames = null,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        var whereClauses = new List<string>
+        {
+            "ClinicName IS NOT NULL", "LTRIM(RTRIM(ClinicName)) <> ''",
+            "TRY_CAST(DateOfService AS DATE) IS NOT NULL"
+        };
+        var parameters = new List<SqlParameter>();
+        AddInClause(whereClauses, parameters, "ClinicName", "@cn", filterClinicNames);
+        AddInClause(whereClauses, parameters, "SalesRepName", "@sr", filterSalesRepNames);
+        AddInClause(whereClauses, parameters, "PayerName", "@pn", filterPayerNames);
+        AddInClause(whereClauses, parameters, "PanelName", "@pl", filterPanelNames);
+        AddDateRangeClause(whereClauses, parameters, "DateOfService", "@dosFrom", "@dosTo", filterDosFrom, filterDosTo);
+        AddDateRangeClause(whereClauses, parameters, "FirstBilledDate", "@fbFrom", "@fbTo", filterFirstBillFrom, filterFirstBillTo);
+        var whereClause = string.Join(" AND ", whereClauses);
+
+        var sql = $"""
+            SELECT
+                LTRIM(RTRIM(ClinicName))               AS ClinicName,
+                YEAR(TRY_CAST(DateOfService AS DATE))  AS DosYear,
+                MONTH(TRY_CAST(DateOfService AS DATE)) AS DosMonth,
+                COUNT(DISTINCT ClaimID)                AS ClaimCount,
+                ISNULL(SUM(TRY_CAST(ChargeAmount     AS DECIMAL(18,2))), 0) AS TotalCharge,
+                ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0) AS InsurancePayment
+            FROM dbo.ClaimLevelData
+            WHERE {whereClause}
+            GROUP BY LTRIM(RTRIM(ClinicName)),
+                     YEAR(TRY_CAST(DateOfService AS DATE)),
+                     MONTH(TRY_CAST(DateOfService AS DATE))
+            """;
+
+        var rawRows = new List<(string Clinic, int Year, int Month, ClinicPaymentBilledCell Cell)>();
+
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+
+            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+            cmd.Parameters.AddRange(parameters.ToArray());
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+            while (await reader.ReadAsync(ct))
+            {
+                rawRows.Add((
+                    reader.GetString(0),
+                    reader.GetInt32(1),
+                    reader.GetInt32(2),
+                    new ClinicPaymentBilledCell
+                    {
+                        ClaimCount = reader.GetInt32(3),
+                        ChargeAmount = reader.GetDecimal(4),
+                        InsurancePayment = reader.GetDecimal(5),
+                    }));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load Clinic vs Payment vs Billed for lab '{LabName}'.", labName);
+            throw;
+        }
+
+        var columnSet = rawRows
+            .Select(r => (r.Year, r.Month))
+            .Distinct()
+            .OrderBy(c => c.Year).ThenBy(c => c.Month)
+            .ToList();
+        var years = columnSet.Select(c => c.Year).Distinct().OrderBy(y => y).ToList();
+
+        var clinics = rawRows
+            .GroupBy(r => r.Clinic, StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var row = new ClinicPaymentBilledRow { ClinicName = g.Key };
+                foreach (var (_, year, month, cell) in g)
+                {
+                    var key = ClinicPaymentBilledViewModel.ColKey(year, month);
+                    if (!row.Months.TryGetValue(key, out var monthCell))
+                        row.Months[key] = monthCell = new ClinicPaymentBilledCell();
+                    monthCell.Add(cell);
+
+                    if (!row.Years.TryGetValue(year, out var yearCell))
+                        row.Years[year] = yearCell = new ClinicPaymentBilledCell();
+                    yearCell.Add(cell);
+
+                    row.Total.Add(cell);
+                }
+                return row;
+            })
+            .OrderByDescending(c => c.Total.InsurancePayment)
+            .ThenBy(c => c.ClinicName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var columnTotals = new Dictionary<string, ClinicPaymentBilledCell>();
+        var yearTotals = new Dictionary<int, ClinicPaymentBilledCell>();
+        var grandTotal = new ClinicPaymentBilledCell();
+        foreach (var (_, year, month, cell) in rawRows)
+        {
+            var key = ClinicPaymentBilledViewModel.ColKey(year, month);
+            if (!columnTotals.TryGetValue(key, out var colCell))
+                columnTotals[key] = colCell = new ClinicPaymentBilledCell();
+            colCell.Add(cell);
+
+            if (!yearTotals.TryGetValue(year, out var yearCell))
+                yearTotals[year] = yearCell = new ClinicPaymentBilledCell();
+            yearCell.Add(cell);
+
+            grandTotal.Add(cell);
+        }
+
+        return new ClinicPaymentBilledViewModel
+        {
+            SelectedLab = labName,
+            Years = years,
+            Columns = columnSet,
+            Clinics = clinics,
+            ColumnTotals = columnTotals,
+            YearTotals = yearTotals,
+            GrandTotal = grandTotal,
         };
     }
 }

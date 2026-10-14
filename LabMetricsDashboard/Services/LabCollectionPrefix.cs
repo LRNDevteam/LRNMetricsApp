@@ -196,6 +196,13 @@ public static class LabCollectionPrefix
         GetPrefix(labName) is "RT" or "BT";
 
     /// <summary>
+    /// Labs with the Clinic Summary "Clinic vs Payment vs Billed" tab and Excel sheet:
+    /// ClinicName x DOS Year/Month with Count of ClaimID, Sum of ChargeAmount, Sum of InsurancePayment.
+    /// </summary>
+    public static bool HasClinicPaymentBilledTab(string? labName) =>
+        GetPrefix(labName) is "IHD";
+
+    /// <summary>
     /// Returns the correct <c>ClaimLevelData</c> column to use for the Panel filter dropdown.
     /// <list type="bullet">
     ///   <item>NorthWest ? <c>PanelType</c> (NW field-mappings write to PanelType)</item>

@@ -74,6 +74,24 @@ public interface IClinicSummaryRepository
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns Clinic vs Payment vs Billed: pivot of COUNT(DISTINCT ClaimID), SUM(ChargeAmount)
+    /// and SUM(InsurancePayment) grouped by ClinicName × YEAR(DateOfService) × MONTH(DateOfService),
+    /// clinics sorted by total InsurancePayment descending.
+    /// </summary>
+    Task<ClinicPaymentBilledViewModel> GetClinicPaymentBilledAsync(
+        string connectionString,
+        string labName,
+        List<string>? filterClinicNames = null,
+        List<string>? filterSalesRepNames = null,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default);
 }
 
 /// <summary>Result container for clinic summary query including filter option lists.</summary>

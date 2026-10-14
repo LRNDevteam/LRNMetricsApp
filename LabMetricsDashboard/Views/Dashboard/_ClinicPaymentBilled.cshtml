@@ -1,0 +1,160 @@
+@model ClinicPaymentBilledViewModel
+
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="alert alert-warning" style="font-size:.85rem">
+        <i class="bi bi-exclamation-triangle"></i> @Model.ErrorMessage
+    </div>
+    return;
+}
+
+@if (Model.Clinics.Count == 0)
+{
+    <div class="text-center text-muted py-4" style="font-size:.85rem">No data available.</div>
+    return;
+}
+
+@{
+    var monthNames = new[] { "", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    var yearMonths = Model.Years.ToDictionary(y => y, y => Model.Columns.Where(c => c.Year == y).ToList());
+}
+
+<style>
+.cpb-scroll { max-height: 72vh; overflow: auto; }
+.cpb-table {
+    border-collapse: separate; border-spacing: 0;
+    font-size: .74rem;
+}
+.cpb-table thead th {
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+    color: rgba(255,255,255,.9); font-weight: 700; font-size: .62rem;
+    letter-spacing: .04em; text-transform: uppercase;
+    padding: .45rem .6rem; text-align: center;
+    white-space: nowrap; height: 28px; box-sizing: border-box;
+    position: sticky; z-index: 3;
+    border-bottom: 1px solid #0a2a4a;
+    border-right: 1px solid rgba(255,255,255,.08);
+}
+.cpb-table thead tr:nth-child(1) th { top: 0;    z-index: 4; }
+.cpb-table thead tr:nth-child(2) th { top: 28px; }
+.cpb-table thead tr:nth-child(3) th { top: 56px; font-size: .58rem; }
+.cpb-table thead tr:first-child th:first-child {
+    text-align: left; min-width: 240px;
+    left: 0; z-index: 5;
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 100%);
+}
+.cpb-table thead th.cpb-sep { border-left: 2px solid rgba(255,255,255,.25); }
+.cpb-table thead th.cpb-total-hdr { background: linear-gradient(135deg, #1a2e1a 0%, #2d5a2d 100%); }
+
+.cpb-table td {
+    padding: .4rem .6rem; vertical-align: middle;
+    text-align: right; white-space: nowrap;
+    border-right: 1px solid #e5e7eb;
+    border-bottom: 1px solid #e5e7eb;
+    font-variant-numeric: tabular-nums;
+}
+.cpb-table td:first-child {
+    text-align: left; font-weight: 600; color: #1e293b;
+    position: sticky; left: 0; z-index: 1;
+    background: #fff;
+}
+.cpb-table tbody tr:hover td { background: #f0f4ff; }
+.cpb-table td.cpb-sep { border-left: 2px solid #dde3ea; }
+.cpb-table td.cpb-total { font-weight: 700; color: #0e3460; background: #f4f8ee; }
+.cpb-zero { color: #c0c4cc; }
+
+.cpb-table tfoot td {
+    background: #f1f5f9; font-weight: 700; color: #0e3460;
+    padding: .5rem .6rem; border-top: 2px solid #0a2a4a;
+    position: sticky; bottom: 0; z-index: 2;
+}
+.cpb-table tfoot td:first-child { z-index: 3; background: #f1f5f9; }
+.cpb-table tfoot td.cpb-total { background: #e8f0dc; }
+</style>
+
+@functions {
+    private Microsoft.AspNetCore.Html.IHtmlContent Cells(ClinicPaymentBilledCell? cell, string cssClass)
+    {
+        var count = cell?.ClaimCount ?? 0;
+        var charge = cell?.ChargeAmount ?? 0m;
+        var payment = cell?.InsurancePayment ?? 0m;
+        var builder = new Microsoft.AspNetCore.Html.HtmlContentBuilder();
+        builder.AppendHtml($"<td class=\"cpb-sep {cssClass} {(count == 0 ? "cpb-zero" : "")}\">{count.N0OrDash()}</td>");
+        builder.AppendHtml($"<td class=\"{cssClass}\">");
+        builder.AppendHtml(Acct2(charge));
+        builder.AppendHtml("</td>");
+        builder.AppendHtml($"<td class=\"{cssClass}\">");
+        builder.AppendHtml(Acct2(payment));
+        builder.AppendHtml("</td>");
+        return builder;
+    }
+}
+
+<div class="cpb-scroll">
+    <table class="cpb-table">
+        <thead>
+            <tr>
+                <th rowspan="3"><i class="bi bi-building me-1"></i>Clinic Name</th>
+                @foreach (var y in Model.Years)
+                {
+                    <th class="cpb-sep" colspan="@(yearMonths[y].Count * 3)">@y</th>
+                    <th class="cpb-sep cpb-total-hdr" colspan="3" rowspan="2">@y Total</th>
+                }
+                <th class="cpb-sep cpb-total-hdr" colspan="3" rowspan="2">Grand Total</th>
+            </tr>
+            <tr>
+                @foreach (var y in Model.Years)
+                {
+                    foreach (var col in yearMonths[y])
+                    {
+                        <th class="cpb-sep" colspan="3">@monthNames[col.Month] @col.Year</th>
+                    }
+                }
+            </tr>
+            <tr>
+                @for (var g = 0; g < Model.Columns.Count + Model.Years.Count + 1; g++)
+                {
+                    <th class="cpb-sep">Claims</th>
+                    <th>Charges</th>
+                    <th>Ins Payment</th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var clinic in Model.Clinics)
+            {
+                <tr>
+                    <td>@clinic.ClinicName</td>
+                    @foreach (var y in Model.Years)
+                    {
+                        foreach (var col in yearMonths[y])
+                        {
+                            @Cells(clinic.Months.GetValueOrDefault(ClinicPaymentBilledViewModel.ColKey(col.Year, col.Month)), "")
+                        }
+                        @Cells(clinic.Years.GetValueOrDefault(y), "cpb-total")
+                    }
+                    @Cells(clinic.Total, "cpb-total")
+                </tr>
+            }
+        </tbody>
+        <tfoot>
+            <tr>
+                <td>Grand Total</td>
+                @foreach (var y in Model.Years)
+                {
+                    foreach (var col in yearMonths[y])
+                    {
+                        @Cells(Model.ColumnTotals.GetValueOrDefault(ClinicPaymentBilledViewModel.ColKey(col.Year, col.Month)), "")
+                    }
+                    @Cells(Model.YearTotals.GetValueOrDefault(y), "cpb-total")
+                }
+                @Cells(Model.GrandTotal, "cpb-total")
+            </tr>
+        </tfoot>
+    </table>
+</div>
+
+<div class="text-muted mt-2" style="font-size:.68rem">
+    ClinicName not blank &middot; Columns by DateOfService month &middot; Claims = distinct ClaimID &middot;
+    Sorted by total Insurance Payment (high to low) &middot; Source: dbo.ClaimLevelData &middot; Lab: @Model.SelectedLab
+</div>

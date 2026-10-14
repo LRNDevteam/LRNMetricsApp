@@ -1455,6 +1455,71 @@ public class DashboardController : Controller
     }
 
     /// <summary>
+    /// Returns the Clinic vs Payment vs Billed pivot as a partial view (loaded via AJAX tab).
+    /// ClinicName × YEAR/MONTH(DateOfService) with COUNT(DISTINCT ClaimID), SUM(ChargeAmount)
+    /// and SUM(InsurancePayment). Only for labs where
+    /// <see cref="LabCollectionPrefix.HasClinicPaymentBilledTab"/> is true.
+    /// </summary>
+    public async Task<IActionResult> ClinicPaymentBilled(
+        string? lab,
+        List<string>? filterClinicNames,
+        List<string>? filterSalesRepNames,
+        List<string>? filterPayerNames,
+        List<string>? filterPanelNames,
+        string? filterDosFrom,
+        string? filterDosTo,
+        string? filterFirstBillFrom,
+        string? filterFirstBillTo,
+        CancellationToken ct = default)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+
+        if (string.IsNullOrWhiteSpace(selectedLab)
+            || !_labSettings.Labs.TryGetValue(selectedLab, out var config)
+            || !config.LineClaimEnable
+            || !LabCollectionPrefix.HasClinicPaymentBilledTab(selectedLab))
+        {
+            return PartialView("_ClinicPaymentBilled", new ClinicPaymentBilledViewModel
+            {
+                SelectedLab  = selectedLab ?? string.Empty,
+                ErrorMessage = "Clinic vs Payment vs Billed is not available for this lab.",
+            });
+        }
+
+        var connStr = config.DbConnectionString;
+        if (string.IsNullOrWhiteSpace(connStr))
+        {
+            return PartialView("_ClinicPaymentBilled", new ClinicPaymentBilledViewModel
+            {
+                SelectedLab  = selectedLab,
+                ErrorMessage = "No connection string configured.",
+            });
+        }
+
+        var dbLabName = string.IsNullOrWhiteSpace(config.DbLabName) ? selectedLab : config.DbLabName;
+        var (cn, sr, pn, pl, dosF, dosT, fbF, fbT) = NormalizeFilters(
+            filterClinicNames, filterSalesRepNames, filterPayerNames, filterPanelNames,
+            filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo);
+
+        try
+        {
+            var vm = await _clinicSummaryRepo.GetClinicPaymentBilledAsync(
+                connStr, dbLabName, cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct);
+            return PartialView("_ClinicPaymentBilled", vm);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Clinic vs Payment vs Billed query failed for lab '{LabName}'.", selectedLab);
+            return PartialView("_ClinicPaymentBilled", new ClinicPaymentBilledViewModel
+            {
+                SelectedLab  = selectedLab,
+                ErrorMessage = $"Failed to load: {ex.Message}",
+            });
+        }
+    }
+
+    /// <summary>
     /// Downloads the current Clinic Summary filtered data as a formatted Excel file.
     /// Accepts the same filter parameters as <see cref="ClinicSummary"/>.
     /// </summary>
@@ -1541,6 +1606,11 @@ public class DashboardController : Controller
             var dosCountVm = await _clinicSummaryRepo.GetClinicDosCountAsync(
                 connStr, dbLabName, cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct);
 
+            var paymentBilledVm = LabCollectionPrefix.HasClinicPaymentBilledTab(selectedLab)
+                ? await _clinicSummaryRepo.GetClinicPaymentBilledAsync(
+                    connStr, dbLabName, cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct)
+                : null;
+
             using var workbook = ClinicSummaryExcelExportBuilder.CreateWorkbook(
                 rows, totals,
                 result.TopCollectedClinics, result.TopCollectedSalesReps,
@@ -1551,6 +1621,7 @@ public class DashboardController : Controller
                 panelStatus: panelStatusVm,
                 dollarAnalysis: dollarAnalysis,
                 dosCount: dosCountVm,
+                paymentBilled: paymentBilledVm,
                 activeFilters: new List<(string, IReadOnlyList<string>?)>
                 {
                     ("Clinic", filterClinicNames is { Count: > 0 } ? filterClinicNames : null),

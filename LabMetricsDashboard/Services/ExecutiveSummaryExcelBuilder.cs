@@ -42,7 +42,10 @@ public sealed class ExecutiveSummaryExcelBuilder
         string dateBasis = useBilled ? "Billed Date" : "DOS";
 
         int startRow = WriteInfoBlock(sheet, vm, grandCol);
-        BuildSheet(sheet, vm.Rows, vm.YearMonthColumns, startRow, dateBasis);
+        // InHealth pads every child description, so an unpadded dotted code
+        // (Self Pay E.4 … System Test E.7) is a top-level row, not a child of E.
+        bool indentFromDescription = LabCollectionPrefix.IsInHealthDtr(vm.SelectedLab);
+        BuildSheet(sheet, vm.Rows, vm.YearMonthColumns, startRow, dateBasis, indentFromDescription);
 
         using var stream = new MemoryStream();
         workbook.SaveAs(stream);
@@ -128,7 +131,8 @@ public sealed class ExecutiveSummaryExcelBuilder
     }
 
     private void BuildSheet(IXLWorksheet sheet, List<ExecSummaryRow> allRows,
-        List<(int Year, int Month)> columns, int startRow, string dateBasis = "DOS")
+        List<(int Year, int Month)> columns, int startRow, string dateBasis = "DOS",
+        bool indentFromDescription = false)
     {
         var years = columns.Where(c => c.Year != 0).Select(c => c.Year).Distinct().OrderBy(y => y).ToList();
         var monthsByYear = columns.Where(c => c.Year != 0)
@@ -225,7 +229,7 @@ public sealed class ExecutiveSummaryExcelBuilder
 
         foreach (var section in Sections)
         {
-            var rows = FilterRowsWithValues(allRows.Where(r => r.Category == section).ToList(), cpParentCode);
+            var rows = FilterRowsWithValues(allRows.Where(r => r.Category == section).ToList(), cpParentCode, indentFromDescription);
             if (rows.Count == 0) continue;
 
             int sectionStart = rowIdx;
@@ -237,13 +241,14 @@ public sealed class ExecutiveSummaryExcelBuilder
 
             foreach (var row in rows)
             {
-                int outlineLevel = RowOutlineLevel(row, cpParentCode);
+                int outlineLevel = RowOutlineLevel(row, cpParentCode, indentFromDescription);
                 bool cpFamily = IsCpExceptionFamily(row, cpParentCode);
 
                 if (outlineLevel == 0) childNum = 0;
                 sheet.Cell(rowIdx, 1).Value = HashLabel(row, outlineLevel, ref childNum, cpParentCode);
                 sheet.Cell(rowIdx, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
                 sheet.Cell(rowIdx, 3).Value = row.Description.TrimStart();
+                sheet.Cell(rowIdx, 3).Style.Alignment.WrapText = true;
                 colIdx = firstDataCol;
 
                 foreach (var year in years)
@@ -377,7 +382,7 @@ public sealed class ExecutiveSummaryExcelBuilder
         if (outlineLevel >= 2 || IsCpExceptionChild(row, cpParentCode))
             return "•";
         var code = row.RowCode ?? "";
-        if (outlineLevel == 0 && code.Length > 0 && !code.Contains('.'))
+        if (outlineLevel == 0 && code.Length > 0)
             return code;
         childNum++;
         return childNum.ToString();
@@ -413,11 +418,13 @@ public sealed class ExecutiveSummaryExcelBuilder
     /// rows under CP Exception stay children even when the description was
     /// stored without padding.
     /// </summary>
-    private static int RowOutlineLevel(ExecSummaryRow row, string? cpParentCode = null)
+    private static int RowOutlineLevel(ExecSummaryRow row, string? cpParentCode = null,
+        bool indentFromDescription = false)
     {
         if (row.IsSubSubRow) return 2;
         if (IsCpExceptionChild(row, cpParentCode)) return 2;
         if (row.IsSubRow) return 1;
+        if (indentFromDescription) return 0;
 
         var code = row.RowCode ?? "";
         var dots = 0;
@@ -436,7 +443,8 @@ public sealed class ExecutiveSummaryExcelBuilder
     /// kept only when they have values (DISTINCT PanelType from LIMSMaster
     /// where SubStatus = CP Exception).
     /// </summary>
-    private static List<ExecSummaryRow> FilterRowsWithValues(List<ExecSummaryRow> rows, string? cpParentCode)
+    private static List<ExecSummaryRow> FilterRowsWithValues(List<ExecSummaryRow> rows, string? cpParentCode,
+        bool indentFromDescription = false)
     {
         if (rows.Count == 0) return rows;
         // SP-ordered rows: the SP decides which rows are listed, same as the page.
@@ -445,7 +453,7 @@ public sealed class ExecutiveSummaryExcelBuilder
         var keep = new bool[rows.Count];
         var levels = new int[rows.Count];
         for (int i = 0; i < rows.Count; i++)
-            levels[i] = RowOutlineLevel(rows[i], cpParentCode);
+            levels[i] = RowOutlineLevel(rows[i], cpParentCode, indentFromDescription);
 
         for (int i = 0; i < rows.Count; i++)
         {

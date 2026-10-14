@@ -183,6 +183,68 @@ public sealed class SqlPhiExecutiveSummaryRepository
     }
 
     /// <summary>
+    /// Orders every group of sibling sub-rows by Grand Total, high to low.
+    /// Top-level rows keep their RowCode order and each sub-row moves with its
+    /// own children. Siblings are only reordered within a contiguous run of the
+    /// same indent, so e.g. the 4-space panel rows under Billable Samples are
+    /// never interleaved with its 2-space Billed / Unbilled rows.
+    /// </summary>
+    private static List<ExecSummaryRow> SortSubRowsByTotalDesc(List<ExecSummaryRow> rows)
+    {
+        static int Level(ExecSummaryRow r) => r.IsSubSubRow ? 2 : r.IsSubRow ? 1 : 0;
+
+        static decimal GrandTotal(ExecSummaryRow r) =>
+            r.ValuesByYearMonth.TryGetValue((0, 0), out var v)
+                ? v
+                : r.ValuesByYearMonth.Where(kv => kv.Key.Year != 0 && kv.Key.Month != 0).Sum(kv => kv.Value);
+
+        static List<(ExecSummaryRow Row, List<ExecSummaryRow> Block)> ReadChildren(
+            List<ExecSummaryRow> list, ref int i, int parentLevel)
+        {
+            var children = new List<(ExecSummaryRow, List<ExecSummaryRow>)>();
+            while (i < list.Count && Level(list[i]) > parentLevel)
+            {
+                var row = list[i++];
+                var block = new List<ExecSummaryRow> { row };
+                foreach (var child in SortRuns(ReadChildren(list, ref i, Level(row))))
+                    block.AddRange(child.Block);
+                children.Add((row, block));
+            }
+            return children;
+        }
+
+        static IEnumerable<(ExecSummaryRow Row, List<ExecSummaryRow> Block)> SortRuns(
+            List<(ExecSummaryRow Row, List<ExecSummaryRow> Block)> siblings)
+        {
+            var start = 0;
+            while (start < siblings.Count)
+            {
+                var level = Level(siblings[start].Row);
+                var end = start;
+                while (end < siblings.Count && Level(siblings[end].Row) == level) end++;
+                foreach (var s in siblings.Skip(start).Take(end - start).OrderByDescending(s => GrandTotal(s.Row)))
+                    yield return s;
+                start = end;
+            }
+        }
+
+        var result = new List<ExecSummaryRow>(rows.Count);
+        foreach (var category in rows.Select(r => r.Category).Distinct())
+        {
+            var catRows = rows.Where(r => r.Category == category).ToList();
+            var i = 0;
+            while (i < catRows.Count)
+            {
+                var top = catRows[i++];
+                result.Add(top);
+                foreach (var child in SortRuns(ReadChildren(catRows, ref i, Level(top))))
+                    result.AddRange(child.Block);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
     /// CP Exception children are PanelType groups from LIMSMaster where
     /// SubStatus = 'CP Exception'. The snapshot CROSS JOIN used every panel,
     /// which filled the UI/Excel with empty combo rows. Keep only children
@@ -403,6 +465,9 @@ public sealed class SqlPhiExecutiveSummaryRepository
                     .ToList();
 
             DropEmptyCpExceptionPanelRows(vm.Rows);
+
+            if (LabCollectionPrefix.IsInHealthDtr(selectedLab))
+                vm.Rows = SortSubRowsByTotalDesc(vm.Rows);
 
             if (spName.Contains("Cove", StringComparison.OrdinalIgnoreCase)
                 || selectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase))
