@@ -67,6 +67,9 @@ FROM (VALUES
     ('partial',      N'Partially Paid',                  'Active AR', 1, 0, 0,  70, 'info'),
     ('partialadj',   N'Partially Adjusted',              'Active AR', 1, 0, 1,  80, 'info'),
     ('nonresponded', N'Non-Responder',                   'Active AR', 1, 0, 1,  90, 'warning'),
+    -- Never billed to the payer (claim / bill status Unbilled): nothing to follow up yet, so not a
+    -- Non-Responder and not fed to the Work Queue.
+    ('unbilled',     N'Unbilled (Not Yet Billed)',       'Active AR', 0, 1, 0,  95, 'neutral'),
     ('patientar',    N'Patient AR',                      'Patient',   0, 1, 0, 100, 'neutral'),
     ('completed',    N'Completed Claims',                'Workflow',  1, 0, 0, 110, 'good'),
     ('closed',       N'Closed',                          'Closed',    0, 1, 0, 120, 'good')

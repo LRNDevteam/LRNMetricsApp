@@ -87,6 +87,8 @@ public sealed class ArWorkbenchUserManagement
     public List<ArWorkbenchManagerOption> Managers { get; set; } = new();
     public List<string> Teams { get; set; } = new();
     public bool AllLabs { get; set; }
+    /// <summary>The caller may set a user's password on Edit: a Super Admin, or an AR Workbench System Administrator.</summary>
+    public bool CanSetPasswords { get; set; }
 }
 
 public sealed class ArWorkbenchCreateUserRequest

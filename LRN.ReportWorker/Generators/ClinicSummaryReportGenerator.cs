@@ -92,6 +92,11 @@ public sealed class ClinicSummaryReportGenerator : IReportGenerator
             connStr, dbLabName, clinics, reps, payers, panels, dosFrom, dosTo, fbFrom, fbTo, ct);
         await Progress(75);
 
+        var paymentBilledVm = LabCollectionPrefix.HasClinicPaymentBilledTab(job.LabName)
+            ? await _repo.GetClinicPaymentBilledAsync(
+                connStr, dbLabName, clinics, reps, payers, panels, dosFrom, dosTo, fbFrom, fbTo, ct)
+            : null;
+
         using var workbook = ClinicSummaryExcelExportBuilder.CreateWorkbook(
             rows, totals,
             result.TopCollectedClinics, result.TopCollectedSalesReps,
@@ -102,6 +107,7 @@ public sealed class ClinicSummaryReportGenerator : IReportGenerator
             panelStatus: panelStatusVm,
             dollarAnalysis: dollarAnalysis,
             dosCount: dosCountVm,
+            paymentBilled: paymentBilledVm,
             activeFilters: new List<(string, IReadOnlyList<string>?)>
             {
                 ("Clinic", clinics),

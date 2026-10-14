@@ -64,6 +64,12 @@ public record LabSummaryTableConfig(
     /// </summary>
     public bool CptTotalsOnly { get; init; }
 
+    /// <summary>
+    /// <c>true</c> when CPT Breakdown rows are ordered by Count of CPT (largest first)
+    /// instead of CPT code. The web page and Download Excel both keep this row order.
+    /// </summary>
+    public bool CptSortByCount { get; init; }
+
     // ?? Static per-lab configs ????????????????????????????????????????????
 
     /// <summary>Certus Labs � prefix <c>Cert_</c>. Row key = PayerName. Supports coding tables/read SPs.</summary>
@@ -116,8 +122,8 @@ public record LabSummaryTableConfig(
         new("Phi_",  "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
         { SupportsFilteredMonthlyWeeklySp = true };
 
-    /// <summary>InHealth DTR – prefix <c>InH_</c>. Supports filtered monthly/weekly SPs.</summary>
+    /// <summary>InHealth DTR – prefix <c>InH_</c>. Supports filtered monthly/weekly SPs; CPT rows by Count of CPT.</summary>
     public static readonly LabSummaryTableConfig InHealthDTR =
         new("InH_",  "PanelName",  "Aging", UnbilledAgingHasCharges: true,  HasCodingTables: true)
-        { SupportsFilteredMonthlyWeeklySp = true };
+        { SupportsFilteredMonthlyWeeklySp = true, CptSortByCount = true };
 }

@@ -28,6 +28,15 @@ const CRITERIA_FIELDS = [
   ['panel', 'Panel Type', 'panels'],
   ['priority', 'Priority', 'priorities']
 ];
+// Unassigned Claims filters. Classification is the central Denial Code Master's classification of
+// the claim's primary denial code.
+const BLANK_UNASSIGNED = { payer: [], category: [], classification: [] };
+const UNASSIGNED_FIELDS = [
+  ['payer', 'Payer Name', 'payers'],
+  ['category', 'Denial Category', 'categories'],
+  ['classification', 'Denial Classification', 'classifications']
+];
+
 const BLANK_REASSIGN = { agent: [], category: [], panel: [], priority: [] };
 const REASSIGN_FIELDS = [
   ['agent', 'Current Agent', 'agents'],
@@ -173,19 +182,40 @@ export default function AssignmentPage() {
   const [uaData, setUaData] = useState({ items: [], totalCount: 0 });
   const [uaLoading, setUaLoading] = useState(true);
   const [uaSelected, setUaSelected] = useState(() => new Set());
+  const [uaFilter, setUaFilter] = useState(BLANK_UNASSIGNED);
+  const [uaOptions, setUaOptions] = useState(null);
+
+  // The section's fixed population plus the user's Payer / Denial Category / Classification picks.
+  const uaBase = useMemo(() => ({
+    labId, status: ['Unassigned'], agent: ['__unassigned'], openInsuranceArOnly: true, minDaysUntouched: untouchedDays,
+    payer: uaFilter.payer, category: uaFilter.category, classification: uaFilter.classification
+  }), [labId, untouchedDays, uaFilter]);
 
   useEffect(() => {
     if (!overview) return undefined;
     const controller = new AbortController();
     setUaLoading(true);
     arWorkbenchService.claims({
-      labId, status: ['Unassigned'], agent: ['__unassigned'], openInsuranceArOnly: true, minDaysUntouched: untouchedDays,
-      sortBy: uaQuery.sortBy, sortDesc: uaQuery.sortDesc, page: uaQuery.page, pageSize: uaQuery.pageSize
+      ...uaBase, sortBy: uaQuery.sortBy, sortDesc: uaQuery.sortDesc, page: uaQuery.page, pageSize: uaQuery.pageSize
     }, controller.signal)
       .then((r) => { setUaData(r); setUaLoading(false); })
       .catch((e) => { if (e.name !== 'AbortError') { setError(e.message); setUaLoading(false); } });
     return () => controller.abort();
-  }, [labId, uaQuery, untouchedDays, overview === null, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [uaBase, uaQuery, overview === null, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Options cascade over the section's own filters: picking a payer narrows the categories and
+  // classifications to what that payer's unassigned claims carry (and the reverse).
+  useEffect(() => {
+    if (!overview) return undefined;
+    const controller = new AbortController();
+    const t = setTimeout(() => {
+      arWorkbenchService.claimFilterOptions(labId, controller.signal, uaBase).then(setUaOptions).catch(() => {});
+    }, 250);
+    return () => { clearTimeout(t); controller.abort(); };
+  }, [uaBase, overview === null, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const setUa = (k, v) => { setUaFilter((f) => ({ ...f, [k]: v })); setUaQuery((q) => ({ ...q, page: 1 })); setUaSelected(new Set()); };
+  const uaFiltered = UNASSIGNED_FIELDS.some(([k]) => uaFilter[k].length > 0);
 
   // ---- Assigned Claims - Bulk Reassign ---------------------------------------------------------
   const [raFilter, setRaFilter] = useState(BLANK_REASSIGN);
@@ -350,7 +380,20 @@ export default function AssignmentPage() {
       <div className="arwb-card arwb-card-flush arwb-section">
         <div className="arwb-card-head">
           <h3>Unassigned Claims</h3>
-          <span className="arwb-card-sub">{fmt.count(uaData.totalCount)} claims with an open balance, untouched for {untouchedDays}+ days</span>
+          <span className="arwb-card-sub">{fmt.count(uaData.totalCount)} claims with an open balance, untouched for {untouchedDays}+ days{uaFiltered ? ' matching the filters' : ''}</span>
+        </div>
+        <div className="arwb-panel-pad">
+          <div className="arwb-filter-bar">
+            {UNASSIGNED_FIELDS.map(([k, label, optKey]) => (
+              <MultiSelect key={k} id={`ua-${k}`} label={label} options={uaOptions?.[optKey] || []} selected={uaFilter[k]} onChange={(v) => setUa(k, v)} />
+            ))}
+            {uaFiltered && (
+              <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-ghost"
+                onClick={() => { setUaFilter(BLANK_UNASSIGNED); setUaQuery((q) => ({ ...q, page: 1 })); setUaSelected(new Set()); }}>
+                Clear Filters
+              </button>
+            )}
+          </div>
         </div>
         <DataTable
           tableId="assignment-unassigned"
@@ -380,7 +423,7 @@ export default function AssignmentPage() {
               <button type="button" className="arwb-btn arwb-btn-sm" title="Assign or log follow-ups for many claims from an Excel file"
                 onClick={() => setBulk({
                   keys: uaSelected,
-                  filter: { status: ['Unassigned'], agent: ['__unassigned'], openInsuranceArOnly: true, minDaysUntouched: untouchedDays, sortBy: uaQuery.sortBy, sortDesc: uaQuery.sortDesc }
+                  filter: { ...uaBase, sortBy: uaQuery.sortBy, sortDesc: uaQuery.sortDesc }
                 })}>
                 <Icon name="upload" size={15} /> Bulk Update (Excel)
               </button>

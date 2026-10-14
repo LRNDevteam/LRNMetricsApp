@@ -91,6 +91,7 @@ export default function DataProcessingPage() {
 
       {last && (
         <div className="arwb-grid arwb-grid-kpi arwb-section">
+          <Stat label="Master file loaded" value={last.sourceLoadedOn ? fmt.dateTime(last.sourceLoadedOn) : '—'} />
           <Stat label="Last refresh" value={fmt.dateTime(last.completedOn)} />
           <Stat label="Source period" value={`${fmt.date(last.sourcePeriodStart)} – ${fmt.date(last.sourcePeriodEnd)}`} />
           <Stat label="Claims in source" value={fmt.count(last.sourceClaimRows)} />

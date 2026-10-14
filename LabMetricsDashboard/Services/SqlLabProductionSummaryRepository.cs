@@ -1101,6 +1101,15 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                 });
             }
 
+            if (_cfg.CptSortByCount)
+            {
+                cptRows = cptRows
+                    .OrderByDescending(r => r.GrandTotalClaims)
+                    .ThenByDescending(r => r.GrandTotalCharges)
+                    .ThenBy(r => r.CptCode, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
         return new SharedCptBreakdownResult(
                 months,
                 years,

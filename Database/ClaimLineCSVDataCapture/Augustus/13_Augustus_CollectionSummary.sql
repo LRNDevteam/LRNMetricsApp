@@ -452,6 +452,7 @@ BEGIN
     INTO #raw
     FROM dbo.CollectionClaimLevelData
     WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)),0) > 0
+      AND TRY_CAST(PostingDate AS DATE) IS NOT NULL   -- BillYear/BillMonth are NOT NULL
      GROUP BY
         LTRIM(RTRIM(ISNULL(PanelNew,     'Unknown'))),
         LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))),

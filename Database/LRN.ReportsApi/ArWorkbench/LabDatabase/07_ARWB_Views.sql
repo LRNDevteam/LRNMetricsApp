@@ -32,7 +32,12 @@ SELECT
     c.CheckDate,
     c.SourceClaimStatus,
     c.DenialCode,                                       -- curated source value as received
-    c.PrimaryDenialCode,                                -- normalized primary denial (drives category and queue)
+    c.DenialCodesNormalized,                            -- every code of DenialCode, CO/PR/PI/OA removed (shown as Denial Code)
+    c.Facility,
+    c.POS,
+    c.TOS,
+    c.BillStatus,
+    c.PrimaryDenialCode,                               -- normalized primary denial (drives category and queue)
     c.PrimaryDenialCodeRaw,
     c.HasDenial,
     c.PreviousPrimaryDenialCode,

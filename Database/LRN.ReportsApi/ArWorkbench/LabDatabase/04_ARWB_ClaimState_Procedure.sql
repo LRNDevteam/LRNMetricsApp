@@ -49,6 +49,7 @@
         RemainingAR <= eps, PatientBalance > eps                        -> patientar (denials ignored)
         RemainingAR <= eps, payments received                           -> closed / closed_paid
         RemainingAR <= eps, no payment                                  -> closed / closed_adjusted
+        claim or bill status Unbilled (never billed to the payer)       -> unbilled
         insurance payment > 0                                           -> partial / partial_(non)collectible
         no payment, denial present                                      -> denied / denied_(non)collectible
         no payment, no denial, adjustment > 0                           -> partialadj / partialadj_collectible
@@ -255,7 +256,10 @@ BEGIN
                                                     WHERE cc.ClaimKey = c.ClaimKey AND cc.CaseStatus = 'Returned to Agent'
                                                       AND cc.ClientRespondedOn IS NOT NULL)
                                        THEN 1 ELSE 0 END,
-            IsPendingPosting    = CASE WHEN f.IsNullified = 1 AND c.IsPmsPostedConfirmed = 0 AND c.InsuranceBalance > @Eps THEN 1 ELSE 0 END
+            IsPendingPosting    = CASE WHEN f.IsNullified = 1 AND c.IsPmsPostedConfirmed = 0 AND c.InsuranceBalance > @Eps THEN 1 ELSE 0 END,
+            -- Never billed to the payer (QC 10.12.2026): the master's claim or bill status says Unbilled.
+            IsUnbilled          = CASE WHEN LTRIM(ISNULL(c.SourceClaimStatus, N'')) LIKE N'Unbilled%'
+                                         OR LTRIM(ISNULL(c.BillStatus, N'')) LIKE N'Unbilled%' THEN 1 ELSE 0 END
     ) s
     -- Financial-state bucket (precedence step 8)
     CROSS APPLY
@@ -263,6 +267,7 @@ BEGIN
         SELECT
             FinQueue = CASE
                 WHEN f.RemainingAR <= @Eps              THEN CASE WHEN c.PatientBalance > @Eps THEN 'patientar' ELSE 'closed' END
+                WHEN s.IsUnbilled = 1                   THEN 'unbilled'
                 WHEN c.InsurancePayment > @Eps          THEN 'partial'
                 WHEN c.HasDenial = 1                    THEN 'denied'
                 WHEN c.InsuranceAdjustments > @Eps      THEN 'partialadj'
@@ -271,6 +276,7 @@ BEGIN
                 WHEN f.RemainingAR <= @Eps              THEN CASE WHEN c.PatientBalance > @Eps THEN NULL
                                                               WHEN c.InsurancePayment + c.PatientPayment > @Eps THEN 'closed_paid'
                                                               ELSE 'closed_adjusted' END
+                WHEN s.IsUnbilled = 1                   THEN NULL
                 WHEN c.InsurancePayment > @Eps          THEN CASE WHEN s.IsNonCollectible = 1 THEN 'partial_noncollectible' ELSE 'partial_collectible' END
                 WHEN c.HasDenial = 1                    THEN CASE WHEN s.IsNonCollectible = 1 THEN 'denied_noncollectible'  ELSE 'denied_collectible'  END
                 WHEN c.InsuranceAdjustments > @Eps      THEN 'partialadj_collectible'

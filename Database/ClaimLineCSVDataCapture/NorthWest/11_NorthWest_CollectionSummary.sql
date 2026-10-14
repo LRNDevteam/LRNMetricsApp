@@ -443,7 +443,7 @@ GO
         INTO #raw
         FROM dbo.ClaimLevelData
         WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
-         -- AND TRY_CAST(CheckDate AS DATE) IS NOT NULL
+          AND TRY_CAST(CheckDate AS DATE) IS NOT NULL   -- BillYear/BillMonth are NOT NULL
          -- AND YEAR(TRY_CAST(CheckDate AS DATE)) > 1900
         GROUP BY
             LTRIM(RTRIM(ISNULL(PanelType,        'Unknown'))),

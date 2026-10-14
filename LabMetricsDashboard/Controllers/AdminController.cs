@@ -468,8 +468,15 @@ public class AdminController : Controller
         if (user == null) return NotFound();
         ViewBag.Labs = (await _repo.GetAllLabsAsync()).Where(lab => lab.IsActive).ToList();
         ViewBag.SelectedLabIds = (await _repo.GetUserLabsAsync(id)).Select(lab => lab.LabId).Distinct().ToList();
+        ViewBag.CanSetPassword = CanSetPasswords;
         return View(user);
     }
+
+    // Setting another user's password is for Super Admin (Admin / LRN Admin) only - same rule as the
+    // AR Workbench, where an AR Workbench System Administrator may too. Others send a password link.
+    private bool CanSetPasswords => MenuAccessFilter.IsFullAdmin(User);
+    private const int MinPasswordLength = 8;
+    private const int MaxPasswordLength = 128;
 
     [HttpPost]
     [ValidateAntiForgeryToken]
@@ -489,8 +496,18 @@ public class AdminController : Controller
         existing.IsActive = user.IsActive;
 
         string? pwdHash = null;
-        if (!string.IsNullOrEmpty(Password))
+        if (!string.IsNullOrEmpty(Password) || !string.IsNullOrEmpty(ConfirmPassword))
         {
+            if (!CanSetPasswords)
+            {
+                TempData["AdminError"] = "Only a Super Admin can set a user's password. Use Send password link on the user list instead.";
+                return RedirectToAction("Edit", new { id = user.LabUserID });
+            }
+            if (Password is null || Password.Length < MinPasswordLength || Password.Length > MaxPasswordLength)
+            {
+                TempData["AdminError"] = $"The new password must be {MinPasswordLength} to {MaxPasswordLength} characters.";
+                return RedirectToAction("Edit", new { id = user.LabUserID });
+            }
             if (Password != ConfirmPassword)
             {
                 TempData["AdminError"] = "Password and confirmation do not match.";

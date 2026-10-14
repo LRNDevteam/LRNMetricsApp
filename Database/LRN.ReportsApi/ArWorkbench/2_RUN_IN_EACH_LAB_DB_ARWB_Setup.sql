@@ -450,6 +450,38 @@ IF COL_LENGTH(N'dbo.ARWB_RefreshRun', N'ClaimsStatusVerification') IS NULL
     ALTER TABLE dbo.ARWB_RefreshRun ADD ClaimsStatusVerification int NULL;
 GO
 
+-- QC 10.12.2026: claim-level columns the AR team needs in the claim export, and when the master
+-- file the sync read was loaded (so the workbench shows the same date as the reports application).
+IF COL_LENGTH(N'dbo.ARWB_Claim', N'Facility') IS NULL               ALTER TABLE dbo.ARWB_Claim ADD Facility nvarchar(500) NULL;
+IF COL_LENGTH(N'dbo.ARWB_Claim', N'POS') IS NULL                    ALTER TABLE dbo.ARWB_Claim ADD POS nvarchar(100) NULL;
+IF COL_LENGTH(N'dbo.ARWB_Claim', N'TOS') IS NULL                    ALTER TABLE dbo.ARWB_Claim ADD TOS nvarchar(100) NULL;
+IF COL_LENGTH(N'dbo.ARWB_Claim', N'BillStatus') IS NULL             ALTER TABLE dbo.ARWB_Claim ADD BillStatus nvarchar(200) NULL;
+-- Every code of the curated DenialCode column, normalized (CO/PR/PI/OA removed), comma separated.
+IF COL_LENGTH(N'dbo.ARWB_Claim', N'DenialCodesNormalized') IS NULL  ALTER TABLE dbo.ARWB_Claim ADD DenialCodesNormalized nvarchar(1000) NULL;
+IF COL_LENGTH(N'dbo.ARWB_RefreshRun', N'SourceLoadedOn') IS NULL    ALTER TABLE dbo.ARWB_RefreshRun ADD SourceLoadedOn datetime2(0) NULL;
+GO
+
+/* ============================================================================================
+   D2. REPORTING TEAM DENIAL MASTERS - copied in from LRNMaster before every sync by the caller
+       (the Master File Processor, or Data Processing > Run in the API):
+         Category        <- LRNMaster.dbo.DenialCategoryMaster       (code, description, categorization)
+         NonCollectible  <- LRNMaster.dbo.NonCollectibleDenialMaster (code, description)
+       Codes arrive as written; dbo.ARWB_usp_LoadClaimsFromSource normalizes them. When a master has
+       rows it is authoritative: the sync applies it to the category map, the Non-Collectible list
+       and every claim and line. Empty = that master is not used (the workbench lists stand).
+   ============================================================================================ */
+IF OBJECT_ID(N'dbo.ARWB_ReportingDenialMaster', N'U') IS NULL
+CREATE TABLE dbo.ARWB_ReportingDenialMaster
+(
+    MasterKind          varchar(20)    NOT NULL,      -- Category | NonCollectible
+    DenialCode          nvarchar(50)   NOT NULL,
+    Description         nvarchar(1000) NULL,
+    ActionCategory      nvarchar(300)  NULL,
+    LoadedOn            datetime2(0)   NOT NULL CONSTRAINT DF_ARWB_ReportingDenialMaster_LoadedOn DEFAULT (SYSUTCDATETIME()),
+    CONSTRAINT CK_ARWB_ReportingDenialMaster_Kind CHECK (MasterKind IN ('Category', 'NonCollectible'))
+);
+GO
+
 /* ============================================================================================
    E. CLAIM LINE - every CPT line from dbo.LineLevelData (denied or not)
    ============================================================================================ */
@@ -1269,6 +1301,9 @@ FROM (VALUES
     ('partial',      N'Partially Paid',                  'Active AR', 1, 0, 0,  70, 'info'),
     ('partialadj',   N'Partially Adjusted',              'Active AR', 1, 0, 1,  80, 'info'),
     ('nonresponded', N'Non-Responder',                   'Active AR', 1, 0, 1,  90, 'warning'),
+    -- Never billed to the payer (claim / bill status Unbilled): nothing to follow up yet, so not a
+    -- Non-Responder and not fed to the Work Queue.
+    ('unbilled',     N'Unbilled (Not Yet Billed)',       'Active AR', 0, 1, 0,  95, 'neutral'),
     ('patientar',    N'Patient AR',                      'Patient',   0, 1, 0, 100, 'neutral'),
     ('completed',    N'Completed Claims',                'Workflow',  1, 0, 0, 110, 'good'),
     ('closed',       N'Closed',                          'Closed',    0, 1, 0, 120, 'good')
@@ -1627,6 +1662,7 @@ GO
         RemainingAR <= eps, PatientBalance > eps                        -> patientar (denials ignored)
         RemainingAR <= eps, payments received                           -> closed / closed_paid
         RemainingAR <= eps, no payment                                  -> closed / closed_adjusted
+        claim or bill status Unbilled (never billed to the payer)       -> unbilled
         insurance payment > 0                                           -> partial / partial_(non)collectible
         no payment, denial present                                      -> denied / denied_(non)collectible
         no payment, no denial, adjustment > 0                           -> partialadj / partialadj_collectible
@@ -1833,7 +1869,10 @@ BEGIN
                                                     WHERE cc.ClaimKey = c.ClaimKey AND cc.CaseStatus = 'Returned to Agent'
                                                       AND cc.ClientRespondedOn IS NOT NULL)
                                        THEN 1 ELSE 0 END,
-            IsPendingPosting    = CASE WHEN f.IsNullified = 1 AND c.IsPmsPostedConfirmed = 0 AND c.InsuranceBalance > @Eps THEN 1 ELSE 0 END
+            IsPendingPosting    = CASE WHEN f.IsNullified = 1 AND c.IsPmsPostedConfirmed = 0 AND c.InsuranceBalance > @Eps THEN 1 ELSE 0 END,
+            -- Never billed to the payer (QC 10.12.2026): the master's claim or bill status says Unbilled.
+            IsUnbilled          = CASE WHEN LTRIM(ISNULL(c.SourceClaimStatus, N'')) LIKE N'Unbilled%'
+                                         OR LTRIM(ISNULL(c.BillStatus, N'')) LIKE N'Unbilled%' THEN 1 ELSE 0 END
     ) s
     -- Financial-state bucket (precedence step 8)
     CROSS APPLY
@@ -1841,6 +1880,7 @@ BEGIN
         SELECT
             FinQueue = CASE
                 WHEN f.RemainingAR <= @Eps              THEN CASE WHEN c.PatientBalance > @Eps THEN 'patientar' ELSE 'closed' END
+                WHEN s.IsUnbilled = 1                   THEN 'unbilled'
                 WHEN c.InsurancePayment > @Eps          THEN 'partial'
                 WHEN c.HasDenial = 1                    THEN 'denied'
                 WHEN c.InsuranceAdjustments > @Eps      THEN 'partialadj'
@@ -1849,6 +1889,7 @@ BEGIN
                 WHEN f.RemainingAR <= @Eps              THEN CASE WHEN c.PatientBalance > @Eps THEN NULL
                                                               WHEN c.InsurancePayment + c.PatientPayment > @Eps THEN 'closed_paid'
                                                               ELSE 'closed_adjusted' END
+                WHEN s.IsUnbilled = 1                   THEN NULL
                 WHEN c.InsurancePayment > @Eps          THEN CASE WHEN s.IsNonCollectible = 1 THEN 'partial_noncollectible' ELSE 'partial_collectible' END
                 WHEN c.HasDenial = 1                    THEN CASE WHEN s.IsNonCollectible = 1 THEN 'denied_noncollectible'  ELSE 'denied_collectible'  END
                 WHEN c.InsuranceAdjustments > @Eps      THEN 'partialadj_collectible'
@@ -1972,6 +2013,9 @@ GO
                -> WorkflowStatus 'Pending Verification' (queue statusverify), one
                   ARWB_StatusVerification row, routed to an RCM Manager of the lab
                   (@VerificationManagers, least pending first), manager + agent notified
+          3b2 reporting team masters (dbo.ARWB_ReportingDenialMaster, copied from LRNMaster by the
+             caller): their codes set the category map (category + description) and the
+             Non-Collectible list, and are re-applied to every claim and line on each sync
           3f Revenue Expectation for the reloaded lines (dbo.ARWB_usp_PriceClaimLines)
      4  dbo.ARWB_usp_RecalculateClaimState for every claim.
      5  Denial Analysis insights for the sync week (dbo.ARWB_usp_BuildDenialInsights).
@@ -2047,6 +2091,35 @@ WHERE dm.DenialDescription IS NOT NULL AND n.DenialCode IS NOT NULL
 GROUP BY n.DenialCode;';
 
         /* ------------------------------------------------------------------------------------
+           0b. The reporting team's denial masters (LRNMaster DenialCategoryMaster /
+               NonCollectibleDenialMaster), copied into dbo.ARWB_ReportingDenialMaster by the caller,
+               keyed by normalized code. A master with rows is authoritative (step 3b2); an empty
+               one leaves the workbench lists as they are.
+           ------------------------------------------------------------------------------------ */
+        CREATE TABLE #rdmCat (DenialCode nvarchar(50) NOT NULL PRIMARY KEY, Description nvarchar(1000) NULL, ActionCategory nvarchar(300) NULL);
+        CREATE TABLE #rdmNc  (DenialCode nvarchar(50) NOT NULL PRIMARY KEY);
+        IF OBJECT_ID(N'dbo.ARWB_ReportingDenialMaster', N'U') IS NOT NULL
+        BEGIN
+            -- A code written twice (e.g. CO-4 and PR4) keeps the first row's text.
+            INSERT INTO #rdmCat (DenialCode, Description, ActionCategory)
+            SELECT x.DenialCode, x.Description, x.ActionCategory
+            FROM (SELECT n.DenialCode, r.Description, r.ActionCategory,
+                         rn = ROW_NUMBER() OVER (PARTITION BY n.DenialCode ORDER BY r.LoadedOn, r.DenialCode)
+                  FROM dbo.ARWB_ReportingDenialMaster r
+                  CROSS APPLY dbo.ARWB_tvf_NormalizeDenialCode(r.DenialCode) n
+                  WHERE r.MasterKind = 'Category' AND n.DenialCode IS NOT NULL) x
+            WHERE x.rn = 1;
+
+            INSERT INTO #rdmNc (DenialCode)
+            SELECT DISTINCT n.DenialCode
+            FROM dbo.ARWB_ReportingDenialMaster r
+            CROSS APPLY dbo.ARWB_tvf_NormalizeDenialCode(r.DenialCode) n
+            WHERE r.MasterKind = 'NonCollectible' AND n.DenialCode IS NOT NULL;
+        END;
+        DECLARE @UseCatMaster bit = CASE WHEN EXISTS (SELECT 1 FROM #rdmCat) THEN 1 ELSE 0 END;
+        DECLARE @UseNcMaster  bit = CASE WHEN EXISTS (SELECT 1 FROM #rdmNc)  THEN 1 ELSE 0 END;
+
+        /* ------------------------------------------------------------------------------------
            1. Latest claim-level row per ClaimID, typed - EVERY claim, denied or not
            ------------------------------------------------------------------------------------ */
         CREATE TABLE #src
@@ -2083,6 +2156,11 @@ GROUP BY n.DenialCode;';
             SourceLastActivityDate  date           NULL,
             CptSummary              nvarchar(max)  NULL,
             ICDCode                 nvarchar(1000) NULL,
+            Facility                nvarchar(500)  NULL,
+            POS                     nvarchar(100)  NULL,
+            TOS                     nvarchar(100)  NULL,
+            BillStatus              nvarchar(200)  NULL,
+            SourceInsertedOn        nvarchar(100)  NULL,      -- InsertedDateTime as stored (datetime or an Excel serial)
             SourceClaimStatus       nvarchar(200)  NULL,
             DeniedStatus            nvarchar(200)  NULL,
             DenialCode              nvarchar(1000) NULL,
@@ -2104,7 +2182,7 @@ GROUP BY n.DenialCode;';
         );
 
         DECLARE @ClaimMap TABLE (Ord int IDENTITY(1,1), TargetCol sysname, SourceCol sysname, Kind char(1), MaxLen int);
-        -- Kind: T text (MaxLen, -1 = max) | M money | D date | I int
+        -- Kind: T text (MaxLen, -1 = max) | M money | D date | I int | S any type as text (dates ISO 8601)
         INSERT INTO @ClaimMap (TargetCol, SourceCol, Kind, MaxLen) VALUES
             (N'ClaimID', N'ClaimID', 'T', 200),
             (N'SourceRecordId', N'RecordId', 'I', 0),
@@ -2138,6 +2216,11 @@ GROUP BY n.DenialCode;';
             (N'SourceLastActivityDate', N'LastActivityDate', 'D', 0),
             (N'CptSummary', N'CPTCodeXUnitsXModifier', 'T', -1),
             (N'ICDCode', N'ICDCode', 'T', 1000),
+            (N'Facility', N'Facility', 'T', 500),
+            (N'POS', N'POS', 'T', 100),
+            (N'TOS', N'TOS', 'T', 100),
+            (N'BillStatus', N'BillStatus', 'T', 200),
+            (N'SourceInsertedOn', N'InsertedDateTime', 'S', 100),
             (N'SourceClaimStatus', N'ClaimStatus', 'T', 200),
             (N'DeniedStatus', N'DeniedStatus', 'T', 200),
             (N'DenialCode', N'DenialCode', 'T', 1000),
@@ -2165,6 +2248,7 @@ GROUP BY n.DenialCode;';
                         WHEN m.Kind = 'M' THEN N'ISNULL((SELECT x.Amount FROM dbo.ARWB_tvf_ParseMoney(r.' + QUOTENAME(m.SourceCol) + N') x), 0)'
                         WHEN m.Kind = 'D' THEN N'(SELECT x.DateValue FROM dbo.ARWB_tvf_ParseDate(r.' + QUOTENAME(m.SourceCol) + N') x)'
                         WHEN m.Kind = 'I' THEN N'TRY_CONVERT(int, r.' + QUOTENAME(m.SourceCol) + N')'
+                        WHEN m.Kind = 'S' THEN N'LEFT(CONVERT(nvarchar(100), r.' + QUOTENAME(m.SourceCol) + N', 126), ' + CONVERT(nvarchar(10), m.MaxLen) + N')'
                     END
                 FROM @ClaimMap m ORDER BY m.Ord
                 FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, N'');
@@ -2429,6 +2513,7 @@ WHERE NULLIF(LTRIM(RTRIM(r.ClaimID)), N'''') IS NOT NULL
             c.DateOfService = s.DateOfService, c.ChargeEnteredDate = s.ChargeEnteredDate, c.FirstBilledDate = s.FirstBilledDate,
             c.CheckDate = s.CheckDate, c.SourceLastActivityDate = s.SourceLastActivityDate,
             c.CptSummary = s.CptSummary, c.ICDCode = s.ICDCode,
+            c.Facility = s.Facility, c.POS = s.POS, c.TOS = s.TOS, c.BillStatus = s.BillStatus,
             c.SourceClaimStatus = s.SourceClaimStatus, c.DeniedStatus = s.DeniedStatus,
             c.DenialCode = s.DenialCode,          -- the curated column as received; a cleared value means "no longer denied"
             c.ChargeAmount = s.ChargeAmount, c.AllowedAmount = s.AllowedAmount,
@@ -2449,10 +2534,12 @@ WHERE NULLIF(LTRIM(RTRIM(r.ClaimID)), N'''') IS NOT NULL
         INNER JOIN #src s ON s.ClaimKey = c.ClaimKey
         WHERE s.ChangeKind = 'Changed';
 
-        -- Unchanged claims: just stamp the run
+        -- Unchanged claims: stamp the run. Facility / POS / TOS / Bill Status are outside the change
+        -- hash (adding them would have flagged every claim as changed once), so they refresh here too.
         UPDATE c
         SET c.IsInCurrentSource = 1, c.LastRefreshRunId = @RunId, c.LastRefreshedOn = @Now,
-            c.SourceRecordId = s.SourceRecordId, c.SourceRunId = s.SourceRunId
+            c.SourceRecordId = s.SourceRecordId, c.SourceRunId = s.SourceRunId,
+            c.Facility = s.Facility, c.POS = s.POS, c.TOS = s.TOS, c.BillStatus = s.BillStatus
         FROM dbo.ARWB_Claim c
         INNER JOIN #src s ON s.ClaimKey = c.ClaimKey
         WHERE s.ChangeKind = 'Same';
@@ -2464,6 +2551,7 @@ WHERE NULLIF(LTRIM(RTRIM(r.ClaimID)), N'''') IS NOT NULL
             PayerName, PayerNameRaw, PayerCode, PayerType, ClaimType,
             BillingProvider, ReferringProvider, ClinicName, SalesRepName, PanelName, PanelType,
             DateOfService, ChargeEnteredDate, FirstBilledDate, CheckDate, SourceLastActivityDate, CptSummary, ICDCode,
+            Facility, POS, TOS, BillStatus,
             SourceClaimStatus, DeniedStatus, DenialCode,
             ChargeAmount, AllowedAmount, InsurancePayment, PatientPayment, TotalPayments,
             InsuranceAdjustments, PatientAdjustments, TotalAdjustments, InsuranceBalance, PatientBalance, TotalBalance,
@@ -2478,6 +2566,7 @@ WHERE NULLIF(LTRIM(RTRIM(r.ClaimID)), N'''') IS NOT NULL
             s.PayerName, s.PayerNameRaw, s.PayerCode, s.PayerType, s.ClaimType,
             s.BillingProvider, s.ReferringProvider, s.ClinicName, s.SalesRepName, s.PanelName, s.PanelType,
             s.DateOfService, s.ChargeEnteredDate, s.FirstBilledDate, s.CheckDate, s.SourceLastActivityDate, s.CptSummary, s.ICDCode,
+            s.Facility, s.POS, s.TOS, s.BillStatus,
             s.SourceClaimStatus, s.DeniedStatus, s.DenialCode,
             s.ChargeAmount, s.AllowedAmount, s.InsurancePayment, s.PatientPayment, s.TotalPayments,
             s.InsuranceAdjustments, s.PatientAdjustments, s.TotalAdjustments, s.InsuranceBalance, s.PatientBalance, s.TotalBalance,
@@ -2541,6 +2630,46 @@ WHERE NULLIF(LTRIM(RTRIM(r.ClaimID)), N'''') IS NOT NULL
            OR x.OldInsurancePayment <> x.NewInsurancePayment
            OR x.OldPatientBalance   <> x.NewPatientBalance;
 
+        -- 3b2. The reporting team's masters drive the workbench masters: their codes set the category
+        --      map (category + description) and their Non-Collectible codes ARE the Non-Collectible
+        --      list. Everything below (lines, primary denial, queues) then reads the usual tables.
+        IF @UseCatMaster = 1
+        BEGIN
+            UPDATE mp
+            SET mp.DenialCategory = COALESCE(rc.ActionCategory, mp.DenialCategory),
+                mp.DenialReason   = COALESCE(rc.Description, mp.DenialReason),
+                mp.IsActive       = 1,
+                mp.UpdatedOn      = @Now,
+                mp.UpdatedBy      = N'Reporting master'
+            FROM dbo.ARWB_DenialCodeCategoryMap mp
+            INNER JOIN #rdmCat rc ON rc.DenialCode = mp.DenialCode
+            WHERE ISNULL(mp.DenialCategory, N'') <> COALESCE(rc.ActionCategory, mp.DenialCategory, N'')
+               OR ISNULL(mp.DenialReason, N'')   <> COALESCE(rc.Description, mp.DenialReason, N'')
+               OR mp.IsActive = 0;
+
+            INSERT INTO dbo.ARWB_DenialCodeCategoryMap (DenialCode, DenialCategory, DenialReason, IsActive, CreatedOn, CreatedBy)
+            SELECT rc.DenialCode, COALESCE(rc.ActionCategory, N'Other'), rc.Description, 1, @Now, N'Reporting master'
+            FROM #rdmCat rc
+            WHERE NOT EXISTS (SELECT 1 FROM dbo.ARWB_DenialCodeCategoryMap mp WHERE mp.DenialCode = rc.DenialCode);
+        END;
+
+        IF @UseNcMaster = 1
+        BEGIN
+            UPDATE li
+            SET li.IsActive  = CASE WHEN nc.DenialCode IS NULL THEN 0 ELSE 1 END,
+                li.UpdatedOn = @Now,
+                li.UpdatedBy = N'Reporting master'
+            FROM dbo.ARWB_MasterListItem li
+            LEFT JOIN #rdmNc nc ON nc.DenialCode = li.ItemValue
+            WHERE li.ListType = 'NON_COLLECTIBLE_CODE'
+              AND li.IsActive <> CASE WHEN nc.DenialCode IS NULL THEN 0 ELSE 1 END;
+
+            INSERT INTO dbo.ARWB_MasterListItem (ListType, ItemValue, SortOrder, IsActive, CreatedOn, CreatedBy)
+            SELECT 'NON_COLLECTIBLE_CODE', nc.DenialCode, 0, 1, @Now, N'Reporting master'
+            FROM #rdmNc nc
+            WHERE NOT EXISTS (SELECT 1 FROM dbo.ARWB_MasterListItem li WHERE li.ListType = 'NON_COLLECTIBLE_CODE' AND li.ItemValue = nc.DenialCode);
+        END;
+
         -- 3c. Lines: reload only claims whose line set changed
         INSERT INTO #reload (ClaimKey, ClaimID, LineChecksum)
         SELECT c.ClaimKey, c.ClaimID, ls.LineChecksum
@@ -2581,13 +2710,14 @@ WHERE NULLIF(LTRIM(RTRIM(r.ClaimID)), N'''') IS NOT NULL
             (ClaimLineKey, ClaimKey, Ordinal, DenialCodeRaw, GroupCode, DenialCode, CodeType, DenialCategory, DenialReason, IsNonCollectible)
         SELECT cl.ClaimLineKey, cl.ClaimKey, d.Ordinal, d.RawCode, d.GroupCode, d.DenialCode, d.CodeType,
                mp.DenialCategory,
-               COALESCE(dcm.DenialDescription, mp.DenialReason),
+               COALESCE(rc.Description, dcm.DenialDescription, mp.DenialReason),
                CASE WHEN nc.ItemValue IS NOT NULL THEN 1 ELSE 0 END
         FROM dbo.ARWB_ClaimLine cl
         INNER JOIN #reload r ON r.ClaimKey = cl.ClaimKey
         CROSS APPLY dbo.ARWB_tvf_SplitDenialCodes(LEFT(cl.DenialCode, 4000)) d
         LEFT JOIN dbo.ARWB_DenialCodeCategoryMap mp ON mp.DenialCode = d.DenialCode AND mp.IsActive = 1
         LEFT JOIN #dcm dcm ON dcm.DenialCode = d.DenialCode
+        LEFT JOIN #rdmCat rc ON rc.DenialCode = d.DenialCode
         LEFT JOIN dbo.ARWB_MasterListItem nc ON nc.ListType = 'NON_COLLECTIBLE_CODE' AND nc.IsActive = 1 AND nc.ItemValue = d.DenialCode
         WHERE cl.DenialCode IS NOT NULL;
 
@@ -2618,15 +2748,17 @@ WHERE NULLIF(LTRIM(RTRIM(r.ClaimID)), N'''') IS NOT NULL
             WHERE cl.ClaimKey = r.ClaimKey
         ) agg;
 
-        -- Master-data reprocess: refresh the line denial mappings for every line.
-        IF @ReprocessAll = 1
+        -- Master-data reprocess: refresh the line denial mappings for every line. Also every sync that
+        -- applies the reporting team's masters, so an edited master reaches lines the source did not change.
+        IF @ReprocessAll = 1 OR @UseCatMaster = 1 OR @UseNcMaster = 1
             UPDATE ld
             SET ld.DenialCategory   = mp.DenialCategory,
-                ld.DenialReason     = COALESCE(dcm.DenialDescription, mp.DenialReason),
+                ld.DenialReason     = COALESCE(rc.Description, dcm.DenialDescription, mp.DenialReason),
                 ld.IsNonCollectible = CASE WHEN nc.ItemValue IS NOT NULL THEN 1 ELSE 0 END
             FROM dbo.ARWB_ClaimLineDenial ld
             LEFT JOIN dbo.ARWB_DenialCodeCategoryMap mp ON mp.DenialCode = ld.DenialCode AND mp.IsActive = 1
             LEFT JOIN #dcm dcm ON dcm.DenialCode = ld.DenialCode
+            LEFT JOIN #rdmCat rc ON rc.DenialCode = ld.DenialCode
             LEFT JOIN dbo.ARWB_MasterListItem nc ON nc.ListType = 'NON_COLLECTIBLE_CODE' AND nc.IsActive = 1 AND nc.ItemValue = ld.DenialCode;
 
         -- 3d. Primary denial for new / changed claims, claims whose lines changed, or every claim on reprocess
@@ -2664,7 +2796,8 @@ WHERE NULLIF(LTRIM(RTRIM(r.ClaimID)), N'''') IS NOT NULL
                    RawCode    = CASE WHEN rnk.DenialCode IS NOT NULL THEN rnk.RawCode    WHEN cur.DenialCode IS NOT NULL THEN cur.RawCode    ELSE lnf.RawCode    END,
                    GroupCode  = CASE WHEN rnk.DenialCode IS NOT NULL THEN rnk.GroupCode  WHEN cur.DenialCode IS NOT NULL THEN cur.GroupCode  ELSE lnf.GroupCode  END
         ) pick
-        WHERE @ReprocessAll = 1
+        -- every claim on reprocess, or when the reporting masters apply (category / description may have changed)
+        WHERE @ReprocessAll = 1 OR @UseCatMaster = 1
            OR EXISTS (SELECT 1 FROM #src s WHERE s.ClaimKey = c.ClaimKey AND s.ChangeKind IN ('New', 'Changed'))
            OR EXISTS (SELECT 1 FROM #reload r WHERE r.ClaimKey = c.ClaimKey);
 
@@ -2673,7 +2806,7 @@ WHERE NULLIF(LTRIM(RTRIM(r.ClaimID)), N'''') IS NOT NULL
             d.NewTemplate = CASE WHEN d.NewPrimary IS NOT NULL THEN COALESCE(dt.TemplateKey, 'denied')
                                  WHEN c.InsurancePayment > @Eps THEN 'partial_payment'
                                  ELSE 'non_responded' END,
-            d.NewReason   = CASE WHEN d.NewPrimary IS NULL THEN NULL ELSE COALESCE(dcm.DenialDescription, mp.DenialReason) END,
+            d.NewReason   = CASE WHEN d.NewPrimary IS NULL THEN NULL ELSE COALESCE(rc.Description, dcm.DenialDescription, mp.DenialReason) END,
             d.IsNewNonCollectible = CASE WHEN nc.ItemValue IS NOT NULL THEN 1 ELSE 0 END,
             d.IsChanged   = CASE WHEN d.IsExisting = 1 AND ISNULL(d.OldPrimary, N'') <> ISNULL(d.NewPrimary, N'') THEN 1 ELSE 0 END
         FROM #den d
@@ -2681,6 +2814,7 @@ WHERE NULLIF(LTRIM(RTRIM(r.ClaimID)), N'''') IS NOT NULL
         LEFT JOIN dbo.ARWB_DenialCodeCategoryMap mp ON mp.DenialCode = d.NewPrimary AND mp.IsActive = 1
         LEFT JOIN dbo.ARWB_DenialCategoryTemplate dt ON dt.DenialCategory = COALESCE(mp.DenialCategory, N'Other')
         LEFT JOIN #dcm dcm ON dcm.DenialCode = d.NewPrimary
+        LEFT JOIN #rdmCat rc ON rc.DenialCode = d.NewPrimary
         LEFT JOIN dbo.ARWB_MasterListItem nc ON nc.ListType = 'NON_COLLECTIBLE_CODE' AND nc.IsActive = 1 AND nc.ItemValue = d.NewPrimary;
 
         SET @DenialChanged = (SELECT COUNT(*) FROM #den WHERE IsChanged = 1);
@@ -2715,6 +2849,24 @@ WHERE NULLIF(LTRIM(RTRIM(r.ClaimID)), N'''') IS NOT NULL
             c.UpdatedBy                 = CASE WHEN d.IsChanged = 1 THEN N'System' ELSE c.UpdatedBy END
         FROM dbo.ARWB_Claim c
         INNER JOIN #den d ON d.ClaimKey = c.ClaimKey;
+
+        -- Every code of the curated column, normalized (CO/PR/PI/OA removed), first-written order, no
+        -- repeats: what the claim list and export show as Denial Code. The raw value stays in DenialCode.
+        UPDATE c
+        SET c.DenialCodesNormalized = n.Codes
+        FROM dbo.ARWB_Claim c
+        CROSS APPLY
+        (
+            SELECT Codes = LEFT(STUFF((
+                       SELECT N', ' + x.DenialCode
+                       FROM (SELECT d.DenialCode, FirstOrdinal = MIN(d.Ordinal)
+                             FROM dbo.ARWB_tvf_SplitDenialCodes(LEFT(c.DenialCode, 4000)) d
+                             GROUP BY d.DenialCode) x
+                       ORDER BY x.FirstOrdinal
+                       FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, N''), 1000)
+        ) n
+        WHERE (c.DenialCode IS NOT NULL OR c.DenialCodesNormalized IS NOT NULL)
+          AND ISNULL(c.DenialCodesNormalized, N'') <> ISNULL(n.Codes, N'');
 
         SET @AutoUnassigned   = (SELECT COUNT(*) FROM #den WHERE ResyncRule = 'AutoUnassign');
         SET @NewDenialFlagged = (SELECT COUNT(*) FROM #den WHERE ResyncRule = 'NewDenialFlag');
@@ -2920,6 +3072,15 @@ WHERE NULLIF(LTRIM(RTRIM(r.ClaimID)), N'''') IS NOT NULL
             rr.ClaimsAdjustmentNotPosted = @AdjNotPosted,
             rr.ClaimsAdjustmentPosted    = @AdjPosted,
             rr.ClaimsStatusVerification  = @StatusVerification,
+            -- When the master file was loaded (ClaimLevelData.InsertedDateTime: a datetime, or an
+            -- Excel serial in labs that store the workbook value) - the date the reports app shows.
+            rr.SourceLoadedOn            = (SELECT MAX(COALESCE(
+                                                TRY_CONVERT(datetime2(0), s.SourceInsertedOn, 126),
+                                                TRY_CONVERT(datetime2(0), s.SourceInsertedOn),
+                                                CASE WHEN TRY_CONVERT(float, s.SourceInsertedOn) BETWEEN 20000 AND 80000
+                                                     THEN DATEADD(second, CONVERT(int, (TRY_CONVERT(float, s.SourceInsertedOn) - FLOOR(TRY_CONVERT(float, s.SourceInsertedOn))) * 86400),
+                                                                  DATEADD(day, CONVERT(int, FLOOR(TRY_CONVERT(float, s.SourceInsertedOn))), CONVERT(datetime2(0), '18991230'))) END))
+                                            FROM #src s),
             rr.InsightsBuilt             = (SELECT TOP (1) InsightsBuilt FROM #ins)
         FROM dbo.ARWB_RefreshRun rr
         WHERE rr.RefreshRunId = @RunId;
@@ -3285,7 +3446,12 @@ SELECT
     c.CheckDate,
     c.SourceClaimStatus,
     c.DenialCode,                                       -- curated source value as received
-    c.PrimaryDenialCode,                                -- normalized primary denial (drives category and queue)
+    c.DenialCodesNormalized,                            -- every code of DenialCode, CO/PR/PI/OA removed (shown as Denial Code)
+    c.Facility,
+    c.POS,
+    c.TOS,
+    c.BillStatus,
+    c.PrimaryDenialCode,                               -- normalized primary denial (drives category and queue)
     c.PrimaryDenialCodeRaw,
     c.HasDenial,
     c.PreviousPrimaryDenialCode,

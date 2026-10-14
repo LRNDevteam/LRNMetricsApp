@@ -764,7 +764,7 @@ BEGIN
     BEGIN
         SELECT PanelName, BilledYear, BilledMonth, NoOfClaims, InsurancePayment
         FROM   dbo.IHD_CS_PanelVsPayment
-        ORDER  BY PanelName, BilledYear, BilledMonth;
+        ORDER  BY InsurancePayment DESC, PanelName;
         RETURN;
     END;
 
@@ -780,30 +780,25 @@ BEGIN
     DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
     DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
 
+    -- One row per panel: InsurancePayment > 0 only (no CheckDate filter), sorted by payment.
     SELECT
-        LTRIM(RTRIM(Panelname))                                        AS PanelName,
-        YEAR (TRY_CAST(CheckDate AS DATE))                             AS BilledYear,
-        CAST(MONTH(TRY_CAST(CheckDate AS DATE)) AS TINYINT)            AS BilledMonth,
+        LTRIM(RTRIM(ISNULL(PanelNameBasedOnCPT, 'Unknown')))           AS PanelName,
+        0                                                              AS BilledYear,
+        CAST(0 AS TINYINT)                                             AS BilledMonth,
         COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))              AS NoOfClaims,
         ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)    AS InsurancePayment
     FROM dbo.ClaimLevelData
-    WHERE Panelname IS NOT NULL AND LTRIM(RTRIM(Panelname)) <> ''
-      AND ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) <> 0
-      AND TRY_CAST(CheckDate AS DATE) IS NOT NULL
-      AND NOT (LTRIM(RTRIM(ClaimStatus)) = 'No Response' AND LTRIM(RTRIM(BilledUnbilled)) = 'Unbilled')
+    WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
       AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(PayerName_Raw)) IN (SELECT Value FROM @PayerList))
-      AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,'Unknown'))) IN (SELECT Value FROM @PanelList))
+      AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(PanelNameBasedOnCPT, 'Unknown'))) IN (SELECT Value FROM @PanelList))
       AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
       AND (@DosTo         IS NULL OR TRY_CAST(DateOfService   AS DATE) <= @DosTo)
       AND (@FirstBillFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @FirstBillFrom)
       AND (@FirstBillTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @FirstBillTo)
       AND (@CheckDateFrom IS NULL OR TRY_CAST(CheckDate       AS DATE) >= @CheckDateFrom)
       AND (@CheckDateTo   IS NULL OR TRY_CAST(CheckDate       AS DATE) <= @CheckDateTo)
-    GROUP BY
-        LTRIM(RTRIM(Panelname)),
-        YEAR (TRY_CAST(CheckDate AS DATE)),
-        MONTH(TRY_CAST(CheckDate AS DATE))
-    ORDER BY PanelName, BilledYear, BilledMonth;
+    GROUP BY LTRIM(RTRIM(ISNULL(PanelNameBasedOnCPT, 'Unknown')))
+    ORDER BY InsurancePayment DESC, PanelName;
 END
 GO
 

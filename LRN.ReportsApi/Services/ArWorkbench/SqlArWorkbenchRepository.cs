@@ -651,8 +651,8 @@ SELECT
 FROM dbo.ARWB_Claim w
 WHERE 1 = 1 {scope};
 
--- 1. Data refresh (latest successful load)
-SELECT TOP (1) CompletedOn, SourcePeriodStart, SourcePeriodEnd
+-- 1. Data refresh (latest successful load): when it ran, and when the master file it read was loaded
+SELECT TOP (1) CompletedOn, SourcePeriodStart, SourcePeriodEnd, SourceLoadedOn, SourceFileName
 FROM dbo.ARWB_RefreshRun
 WHERE RunStatus = 'Succeeded'
 ORDER BY RefreshRunId DESC;
@@ -743,6 +743,8 @@ ORDER BY SUM(w.RecoveredAmount) DESC;";
             d.DataRefreshedOn = reader.IsDBNull(0) ? null : reader.GetDateTime(0);
             d.SourcePeriodStart = reader.IsDBNull(1) ? null : reader.GetDateTime(1);
             d.SourcePeriodEnd = reader.IsDBNull(2) ? null : reader.GetDateTime(2);
+            d.DataLoadedOn = reader.IsDBNull(3) ? null : reader.GetDateTime(3);
+            d.DataSourceFile = reader.IsDBNull(4) ? null : reader.GetString(4);
         }
 
         await reader.NextResultAsync(ct);
@@ -887,6 +889,7 @@ ORDER BY SUM(w.RecoveredAmount) DESC;";
         var page = Math.Max(1, filter.Page);
         var pageSize = Math.Clamp(filter.PageSize <= 0 ? 50 : filter.PageSize, 1, MaxPageSize);
 
+        await ResolveClassificationAsync(filter, ct);
         await using var connection = await OpenLabAsync(filter.LabId, ct);
         await using var cmd = connection.CreateCommand();
 
@@ -913,7 +916,7 @@ WITH pg AS
 )
 SELECT
     v.ClaimKey, v.ClaimID, v.LabName, v.PatientID, v.PatientName, v.PayerName, v.PayerType, v.ClinicName, v.ReferringProvider, v.PanelName,
-    v.DateOfService, v.DenialCode, v.DenialCategory, v.DenialReason, v.SourceClaimStatus, v.ChargeAmount, v.InsuranceBalance, v.PatientBalance,
+    v.DateOfService, COALESCE(v.DenialCodesNormalized, v.DenialCode) AS DenialCode, v.DenialCategory, v.DenialReason, v.SourceClaimStatus, v.ChargeAmount, v.InsuranceBalance, v.PatientBalance,
     v.InitialInsuranceAR, v.RevenueExpectation, v.RecoveredAmount, v.RemainingAR, v.WorkflowStatus, v.Priority, v.AssignedAgentUser,
     v.LastFollowUpDate, v.NextFollowUpDate, v.FixResolution, v.AgingDays, v.AgingBucket,
     v.IsTflRisk, v.IsNonCollectible, tw.HasNonCollectibleDenial, v.ArQueueId, v.ArQueueLabel, v.ArQueueBadgeClass,
@@ -1115,6 +1118,23 @@ ORDER BY pg.Seq;";
             }
             where.Add("(" + string.Join(" OR ", any) + ")");
         }
+        // Denial classification -> its primary codes (resolved from LRNMaster by ResolveClassificationAsync).
+        // Codes are letters and digits only (normalized), so a comma list split as XML is safe.
+        if (filter.ClassificationCodes is { } classCodes)
+        {
+            var codes = classCodes.Where(c => c.Length > 0 && c.All(char.IsLetterOrDigit)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (codes.Count == 0)
+            {
+                where.Add("1 = 0");     // a classification no code carries matches nothing
+            }
+            else
+            {
+                cmd.Parameters.Add("@ClsCodes", SqlDbType.NVarChar, -1).Value = string.Join(",", codes);
+                where.Add(@"w.PrimaryDenialCode IN (SELECT c.v.value('.', 'nvarchar(50)')
+                          FROM (SELECT x = CAST(N'<c>' + REPLACE(@ClsCodes, N',', N'</c><c>') + N'</c>' AS xml)) t
+                          CROSS APPLY t.x.nodes('/c') c(v))");
+            }
+        }
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
             where.Add("(w.ClaimID LIKE @Search OR w.PatientID LIKE @Search OR w.PatientName LIKE @Search OR w.AccessionNumber LIKE @Search OR w.DenialCode LIKE @Search OR w.ReferringProvider LIKE @Search)");
@@ -1134,11 +1154,65 @@ ORDER BY pg.Seq;";
     /// selected values always stay visible to untick. A value with no claims left is dropped unless
     /// it is selected.
     /// </summary>
+    /// <summary>
+    /// Normalized denial code -> its denial classifications (LRNMaster), from the Denial Mapper Super
+    /// Master (Master Values > Denial Code Master; codes stored with their group prefix, several rows
+    /// per code for CPT-specific scenarios) and the central Denial Code Master. Empty when neither is
+    /// reachable: the classification filter then simply has no options.
+    /// </summary>
+    private async Task<Dictionary<string, HashSet<string>>> GetCodeClassificationsAsync(CancellationToken ct)
+    {
+        var map = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        void Add(string? rawCode, string? classification)
+        {
+            var code = ArWorkbenchMasterRules.NormalizeDenialCode(rawCode);
+            var cls = classification?.Trim();
+            if (code is null || string.IsNullOrEmpty(cls)) return;
+            if (!map.TryGetValue(code, out var set)) map[code] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            set.Add(cls);
+        }
+
+        try
+        {
+            await using var master = new SqlConnection(_masterConnectionString);
+            await master.OpenAsync(ct);
+            await using var cmd = new SqlCommand(@"
+IF OBJECT_ID(N'dbo.DenialMapperSuperMaster', N'U') IS NOT NULL
+    SELECT DenialCode, DenialClassification FROM dbo.DenialMapperSuperMaster
+    WHERE IsActive = 1 AND NULLIF(LTRIM(RTRIM(DenialClassification)), N'') IS NOT NULL;
+IF OBJECT_ID(N'dbo.ARWB_DenialCodeMaster', N'U') IS NOT NULL
+    SELECT DenialCode, DenialClassification FROM dbo.ARWB_DenialCodeMaster
+    WHERE IsActive = 1 AND NULLIF(LTRIM(RTRIM(DenialClassification)), N'') IS NOT NULL;", master) { CommandTimeout = 60 };
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            do
+            {
+                while (await r.ReadAsync(ct))
+                    Add(r.IsDBNull(0) ? null : r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1));
+            } while (await r.NextResultAsync(ct));
+        }
+        catch (SqlException)
+        {
+            // LRNMaster unreachable: no classification options, other filters unaffected.
+        }
+        return map;
+    }
+
+    /// <summary>Turns the filter's denial classifications into the primary codes BuildClaimFilter matches.</summary>
+    private async Task ResolveClassificationAsync(ArWorkbenchClaimFilter filter, CancellationToken ct)
+    {
+        var wanted = (filter.Classification ?? []).Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (wanted.Count == 0) { filter.ClassificationCodes = null; return; }
+        var classOf = await GetCodeClassificationsAsync(ct);
+        filter.ClassificationCodes = classOf.Where(kv => kv.Value.Overlaps(wanted)).Select(kv => kv.Key).ToList();
+    }
+
     public async Task<ArWorkbenchFilterOptions> GetFilterOptionsAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct, ArWorkbenchClaimFilter? context = null)
     {
         await using var connection = await OpenLabAsync(labId, ct);
         var cascading = context is not null;
         context ??= new ArWorkbenchClaimFilter { LabId = labId };
+        await ResolveClassificationAsync(context, ct);
 
         // One query per list: its WHERE is the context minus that list's own selection.
         async Task<List<ArWorkbenchFilterOption>> FacetAsync(Func<ArWorkbenchClaimFilter, ArWorkbenchClaimFilter> without, Func<string, string> sql,
@@ -1209,6 +1283,27 @@ WHERE m.ListType = 'AGING_BUCKET' AND m.IsActive = 1 ORDER BY m.SortOrder;", con
             FixResolutions = await FacetAsync(f => { f.FixResolution = new(); return f; }, w => Distinct("w.FixResolution", w), context.FixResolution, ArWorkbenchFilterValues.None, "(No follow-up yet)"),
             SourceStatuses = await FacetAsync(f => { f.SourceStatus = new(); return f; }, w => Distinct("w.SourceClaimStatus", w), context.SourceStatus, ArWorkbenchFilterValues.None, "(No status)")
         };
+
+        // Denial classification: claims counted by primary code (over every other filter), then summed
+        // per classification of the LRNMaster masters. A code with several classifications counts in each.
+        var classOf = await GetCodeClassificationsAsync(ct);
+        if (classOf.Count > 0)
+        {
+            var byCode = await FacetAsync(f => { f.Classification = new(); f.ClassificationCodes = null; return f; },
+                w => $"SELECT w.PrimaryDenialCode, COUNT(*) FROM dbo.ARWB_Claim w WHERE w.PrimaryDenialCode IS NOT NULL AND {w} GROUP BY w.PrimaryDenialCode;",
+                null);
+            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var o in byCode)
+                if (classOf.TryGetValue(o.Value, out var set))
+                    foreach (var cls in set) counts[cls] = counts.GetValueOrDefault(cls) + o.Count;
+            // A selected classification stays listed (to untick) even when nothing matches now.
+            foreach (var chosen in context.Classification ?? [])
+                if (!string.IsNullOrWhiteSpace(chosen) && !counts.ContainsKey(chosen.Trim())) counts[chosen.Trim()] = 0;
+            options.Classifications = counts
+                .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(kv => new ArWorkbenchFilterOption { Value = kv.Key, Label = kv.Key, Count = kv.Value })
+                .ToList();
+        }
 
         // Agent options show the person's name; the value stays the LabUsers.UserName.
         var names = await GetDisplayNamesAsync(options.Agents.Select(a => a.Value), ct);
@@ -1534,6 +1629,9 @@ SELECT SettingKey, SettingValue FROM dbo.ARWB_AppSetting;";
             takesManagers = Convert.ToInt32(await probe.ExecuteScalarAsync(ct)) > 0;
         }
 
+        // The reporting team's denial category / Non-Collectible masters drive this sync's categories.
+        await CopyReportingDenialMastersAsync(connection, ct);
+
         // The load can take minutes on a large lab. Run it to completion, then read the run row back.
         await using (var cmd = new SqlCommand("dbo.ARWB_usp_LoadClaimsFromSource", connection) { CommandType = CommandType.StoredProcedure, CommandTimeout = 1800 })
         {
@@ -1553,7 +1651,7 @@ SELECT SettingKey, SettingValue FROM dbo.ARWB_AppSetting;";
     private static string RefreshRunSelect(string top) => $@"
 SELECT {top} RefreshRunId, SourceRunId, SourceFileName, SourcePeriodStart, SourcePeriodEnd, RunStatus, StartedOn, CompletedOn,
        SourceClaimRows, SourceLineRows, ClaimsInserted, ClaimsUpdated, ClaimsUnchanged, ClaimsNoLongerInSource, ClaimsLinesReloaded,
-       RunBy, ErrorMessage
+       RunBy, ErrorMessage, SourceLoadedOn, ClaimsStatusVerification
 FROM dbo.ARWB_RefreshRun";
 
     private static ArWorkbenchRefreshRun ReadRefreshRun(SqlDataReader r) => new()
@@ -1574,7 +1672,9 @@ FROM dbo.ARWB_RefreshRun";
         ClaimsNoLongerInSource = Int(r, 13),
         ClaimsLinesReloaded = Int(r, 14),
         RunBy = Str(r, 15),
-        ErrorMessage = Str(r, 16)
+        ErrorMessage = Str(r, 16),
+        SourceLoadedOn = Date(r, 17),
+        ClaimsStatusVerification = Int(r, 18)
     };
 
     private static string? Str(SqlDataReader r, int i) => r.IsDBNull(i) ? null : r.GetString(i);

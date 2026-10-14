@@ -578,7 +578,12 @@ function Denial({ c, followUps, codes, lines }) {
     <div className="arwb-grid-2">
       <DetailSection title="Denial" hint={c.DenialCategory ? null : 'No denial on this claim'}>
         <Row label="Denial Category">{c.DenialCategory ? <Badge className="arwb-badge-accent">{c.DenialCategory}</Badge> : null}</Row>
-        <Row label="Primary Denial Code">{c.PrimaryDenialCodeRaw || c.DenialCode ? <span className="arwb-code-chip primary">{c.PrimaryDenialCodeRaw || c.DenialCode}</span> : null}</Row>
+        <Row label="Primary Denial Code">
+          {c.PrimaryDenialCode
+            ? <><span className="arwb-code-chip primary">{c.PrimaryDenialCode}</span>{c.PrimaryDenialCodeRaw && c.PrimaryDenialCodeRaw !== c.PrimaryDenialCode && <span className="arwb-hint"> as received: {c.PrimaryDenialCodeRaw}</span>}</>
+            : null}
+        </Row>
+        <Row label="All Denial Codes">{c.DenialCodesNormalized || null}</Row>
         <Row label="Denial Reason">{c.DenialReason}</Row>
         <Row label="Denial Date">{c.DenialDate ? fmt.date(c.DenialDate) : null}</Row>
         <Row label="Line-Level Codes">

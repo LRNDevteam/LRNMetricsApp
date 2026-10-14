@@ -437,6 +437,38 @@ IF COL_LENGTH(N'dbo.ARWB_RefreshRun', N'ClaimsStatusVerification') IS NULL
     ALTER TABLE dbo.ARWB_RefreshRun ADD ClaimsStatusVerification int NULL;
 GO
 
+-- QC 10.12.2026: claim-level columns the AR team needs in the claim export, and when the master
+-- file the sync read was loaded (so the workbench shows the same date as the reports application).
+IF COL_LENGTH(N'dbo.ARWB_Claim', N'Facility') IS NULL               ALTER TABLE dbo.ARWB_Claim ADD Facility nvarchar(500) NULL;
+IF COL_LENGTH(N'dbo.ARWB_Claim', N'POS') IS NULL                    ALTER TABLE dbo.ARWB_Claim ADD POS nvarchar(100) NULL;
+IF COL_LENGTH(N'dbo.ARWB_Claim', N'TOS') IS NULL                    ALTER TABLE dbo.ARWB_Claim ADD TOS nvarchar(100) NULL;
+IF COL_LENGTH(N'dbo.ARWB_Claim', N'BillStatus') IS NULL             ALTER TABLE dbo.ARWB_Claim ADD BillStatus nvarchar(200) NULL;
+-- Every code of the curated DenialCode column, normalized (CO/PR/PI/OA removed), comma separated.
+IF COL_LENGTH(N'dbo.ARWB_Claim', N'DenialCodesNormalized') IS NULL  ALTER TABLE dbo.ARWB_Claim ADD DenialCodesNormalized nvarchar(1000) NULL;
+IF COL_LENGTH(N'dbo.ARWB_RefreshRun', N'SourceLoadedOn') IS NULL    ALTER TABLE dbo.ARWB_RefreshRun ADD SourceLoadedOn datetime2(0) NULL;
+GO
+
+/* ============================================================================================
+   D2. REPORTING TEAM DENIAL MASTERS - copied in from LRNMaster before every sync by the caller
+       (the Master File Processor, or Data Processing > Run in the API):
+         Category        <- LRNMaster.dbo.DenialCategoryMaster       (code, description, categorization)
+         NonCollectible  <- LRNMaster.dbo.NonCollectibleDenialMaster (code, description)
+       Codes arrive as written; dbo.ARWB_usp_LoadClaimsFromSource normalizes them. When a master has
+       rows it is authoritative: the sync applies it to the category map, the Non-Collectible list
+       and every claim and line. Empty = that master is not used (the workbench lists stand).
+   ============================================================================================ */
+IF OBJECT_ID(N'dbo.ARWB_ReportingDenialMaster', N'U') IS NULL
+CREATE TABLE dbo.ARWB_ReportingDenialMaster
+(
+    MasterKind          varchar(20)    NOT NULL,      -- Category | NonCollectible
+    DenialCode          nvarchar(50)   NOT NULL,
+    Description         nvarchar(1000) NULL,
+    ActionCategory      nvarchar(300)  NULL,
+    LoadedOn            datetime2(0)   NOT NULL CONSTRAINT DF_ARWB_ReportingDenialMaster_LoadedOn DEFAULT (SYSUTCDATETIME()),
+    CONSTRAINT CK_ARWB_ReportingDenialMaster_Kind CHECK (MasterKind IN ('Category', 'NonCollectible'))
+);
+GO
+
 /* ============================================================================================
    E. CLAIM LINE - every CPT line from dbo.LineLevelData (denied or not)
    ============================================================================================ */

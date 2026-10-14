@@ -18,3 +18,10 @@ Put staging output, zips, overlays, SQL packs, and `DEPLOY.txt` under:
 Use subfolders such as `staging\`, `zips\`, and `backups\`.
 
 Deploy directly to `E:\LRN-Data\PayerPolicy_v2\2026\DeploymentChanges-2026\LabMetricsApplication\LrnMetric` only when the user requests a localhost application deployment. Preserve its `appsettings*.json` and `web.config`.
+
+# Server (Live) packages
+
+Live packages go to `C:\LRN-Files\Deployment\ToServer` (folder + matching zip).
+
+- Use a short name: `LRN-yyyyMMdd-HHmm` (e.g. `LRN-20261014-1519`). Do not put labs or change descriptions in the name; `DEPLOY.txt` describes the contents.
+- Before creating a new package, move every existing package (folder and zip) in `ToServer` into `ToServer\Archive`, so `ToServer` only holds the latest package.

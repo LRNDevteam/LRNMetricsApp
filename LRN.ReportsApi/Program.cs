@@ -214,6 +214,19 @@ var app = builder.Build();
 app.Logger.LogInformation("KeyVault: {Vault}. LRNMaster: {Master}.",
     string.IsNullOrWhiteSpace(app.Configuration["KeyVault:Uri"]) ? "(none)" : app.Configuration["KeyVault:Uri"],
     LRN.ReportsApi.Services.LabConnectionResolver.Describe(app.Configuration.GetConnectionString("DefaultConnection")));
+
+// Invitation / user mail (Graph): which of the three app-registration settings arrived, never the
+// values. Key Vault delivers SECRETS named MasterFileProcessor--SharePoint--*; vault TAGS are not read.
+{
+    static string Has(IConfiguration c, string key, string fallback) =>
+        !string.IsNullOrWhiteSpace(c[key]) ? "set" : !string.IsNullOrWhiteSpace(c[fallback]) ? "set (UserMail fallback)" : "MISSING";
+    app.Logger.LogInformation(
+        "User mail (Graph): TenantId {Tenant}, ClientId {Client}, ClientSecret {Secret}, SenderMailbox {Sender}.",
+        Has(app.Configuration, "MasterFileProcessor:SharePoint:TenantId", "UserMail:TenantId"),
+        Has(app.Configuration, "MasterFileProcessor:SharePoint:ClientId", "UserMail:ClientId"),
+        Has(app.Configuration, "MasterFileProcessor:SharePoint:ClientSecret", "UserMail:ClientSecret"),
+        string.IsNullOrWhiteSpace(app.Configuration["UserMail:SenderMailbox"]) ? "MISSING" : app.Configuration["UserMail:SenderMailbox"]);
+}
 foreach (var lab in app.Configuration.GetSection("LabConfig:LabsID").GetChildren())
 {
     if (!int.TryParse(lab["Id"], out var labId) || labId <= 0) continue;

@@ -524,6 +524,12 @@
     <div class="cs-tab" data-cs-tab="tabDosCounts">
         <i class="bi bi-calendar3"></i>Clinic Count by DOS Month
     </div>
+    @if (LabCollectionPrefix.HasClinicPaymentBilledTab(Model.SelectedLab))
+    {
+        <div class="cs-tab" data-cs-tab="tabPaymentBilled">
+            <i class="bi bi-cash-stack"></i>Clinic Vs Payment vs Billed
+        </div>
+    }
 </div>
 
 <!-- ── Tab: Clinic Summary (main data table) ─────────────────────── -->
@@ -888,6 +894,16 @@ else
     </div>
 </div>
 
+@if (LabCollectionPrefix.HasClinicPaymentBilledTab(Model.SelectedLab))
+{
+    <!-- ── Tab: Clinic Vs Payment vs Billed (AJAX-loaded) ─────────────── -->
+    <div class="cs-tab-panel" id="tabPaymentBilled">
+        <div id="cpbPanelContent" class="text-center py-4 text-muted" style="font-size:.85rem">
+            <i class="bi bi-arrow-clockwise spin-slow"></i> Loading Clinic Vs Payment vs Billed…
+        </div>
+    </div>
+}
+
 <!-- Ranking grids remain visible below every Clinic Summary analysis tab. -->
 <div id="topBreakdownHost"></div>
 
@@ -1050,6 +1066,7 @@ else
     var panelStatusLoaded = false;
     var dollarAnalysisLoaded = false;
     var dosCountLoaded = false;
+    var paymentBilledLoaded = false;
 
     // Store the current page's nonce for reuse in AJAX-loaded scripts
     var pageNonce = '@Context.Items["CspNonce"]';
@@ -1153,6 +1170,11 @@ else
             if (target === 'tabDosCounts' && !dosCountLoaded) {
                 dosCountLoaded = true;
                 loadAndInject('@Url.Action("ClinicDosCount", "Dashboard")' + '?' + getFilterParams(), 'cdcPanelContent', false);
+            }
+
+            if (target === 'tabPaymentBilled' && !paymentBilledLoaded) {
+                paymentBilledLoaded = true;
+                loadAndInject('@Url.Action("ClinicPaymentBilled", "Dashboard")' + '?' + getFilterParams(), 'cpbPanelContent', false);
             }
 
             if (target === 'tabDollar' && !dollarAnalysisLoaded) {

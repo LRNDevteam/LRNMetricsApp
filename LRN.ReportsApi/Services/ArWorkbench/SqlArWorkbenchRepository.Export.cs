@@ -38,7 +38,22 @@ SELECT c.ClaimKey, c.AssignedBy, c.AssignedOn,
        (SELECT COUNT(*) FROM dbo.ARWB_ClaimFollowUp x WHERE x.ClaimKey = c.ClaimKey AND x.IsSystem = 0),
        f.ClaimType, f.FollowUpType, f.FollowUpClaimStatus, f.DenialRootCause, f.FixResolution, f.FollowUpComment, f.NextFollowUpDate,
        f.CipCategory, f.CipRequiredInfo, f.CipComment, f.CreatedBy, f.CreatedByRole, f.CreatedOn,
-       q.ReviewStatus, q.ReviewedBy, q.ReviewedByRole, q.ReviewedOn, q.ErrorType, q.ReviewNote
+       q.ReviewStatus, q.ReviewedBy, q.ReviewedByRole, q.ReviewedOn, q.ErrorType, q.ReviewNote,
+       c.AccessionNumber, c.PatientDOB, c.SubscriberId, c.BillingProvider, c.ChargeEnteredDate, c.FirstBilledDate, c.CptSummary,
+       c.Facility,
+       -- Claim-level POS / TOS when the master has them, else the distinct values on the claim's lines
+       COALESCE(c.POS, STUFF((SELECT DISTINCT N', ' + l.POS FROM dbo.ARWB_ClaimLine l WHERE l.ClaimKey = c.ClaimKey AND l.POS IS NOT NULL
+                              FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, N'')),
+       COALESCE(c.TOS, STUFF((SELECT DISTINCT N', ' + l.TOS FROM dbo.ARWB_ClaimLine l WHERE l.ClaimKey = c.ClaimKey AND l.TOS IS NOT NULL
+                              FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, N'')),
+       c.ICDCode, c.AllowedAmount, c.InsurancePayment, c.PatientPayment, c.TotalPayments,
+       c.InsuranceAdjustments, c.PatientAdjustments, c.TotalAdjustments, c.TotalBalance, c.CheckDate, c.BillStatus,
+       -- Every follow-up note, newest first, one per line: date, who, status / fix, comment
+       STUFF((SELECT NCHAR(10) + CONVERT(nvarchar(10), x.CreatedOn, 101) + N' ' + x.CreatedBy + N': '
+                     + x.FollowUpClaimStatus + N' / ' + x.FixResolution + ISNULL(N' - ' + x.FollowUpComment, N'')
+              FROM dbo.ARWB_ClaimFollowUp x WHERE x.ClaimKey = c.ClaimKey AND x.IsSystem = 0
+              ORDER BY x.CreatedOn DESC, x.FollowUpId DESC
+              FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 1, N'')
 FROM #k k
 INNER JOIN dbo.ARWB_Claim c ON c.ClaimKey = k.ClaimKey
 OUTER APPLY (SELECT TOP (1) * FROM dbo.ARWB_ClaimFollowUp x WHERE x.ClaimKey = c.ClaimKey AND x.IsSystem = 0
@@ -63,7 +78,13 @@ DROP TABLE #k;";
                     CipCategory = Str(r, 11), CipRequiredInfo = Str(r, 12), CipComment = Str(r, 13),
                     FollowUpBy = Str(r, 14), FollowUpByRole = Str(r, 15), FollowUpOn = Date(r, 16),
                     QaStatus = Str(r, 17), QaReviewedBy = Str(r, 18), QaReviewedByRole = Str(r, 19), QaReviewedOn = Date(r, 20),
-                    QaErrorType = Str(r, 21), QaComment = Str(r, 22)
+                    QaErrorType = Str(r, 21), QaComment = Str(r, 22),
+                    AccessionNumber = Str(r, 23), PatientDOB = Date(r, 24), SubscriberId = Str(r, 25), BillingProvider = Str(r, 26),
+                    ChargeEnteredDate = Date(r, 27), FirstBilledDate = Date(r, 28), CptSummary = Str(r, 29), Facility = Str(r, 30),
+                    POS = Str(r, 31), TOS = Str(r, 32), ICDCode = Str(r, 33),
+                    AllowedAmount = r.GetDecimal(34), InsurancePayment = r.GetDecimal(35), PatientPayment = r.GetDecimal(36), TotalPayments = r.GetDecimal(37),
+                    InsuranceAdjustments = r.GetDecimal(38), PatientAdjustments = r.GetDecimal(39), TotalAdjustments = r.GetDecimal(40),
+                    TotalBalance = r.GetDecimal(41), CheckDate = Date(r, 42), BillStatus = Str(r, 43), Notes = Str(r, 44)
                 };
             }
 

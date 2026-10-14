@@ -105,6 +105,9 @@ SELECT CASE WHEN OBJECT_ID(N'dbo.ARWB_usp_LoadClaimsFromSource', N'P') IS NULL T
 
             var managers = takesManagers ? await GetRcmManagersAsync(labId, ct) : Array.Empty<string>();
 
+            // The reporting team's denial category / Non-Collectible masters drive this sync's categories.
+            await CopyReportingDenialMastersAsync(connection, labId, ct);
+
             await using var cmd = new SqlCommand("dbo.ARWB_usp_LoadClaimsFromSource", connection)
             {
                 CommandType = CommandType.StoredProcedure,
@@ -195,6 +198,67 @@ IF OBJECT_ID(N'dbo.UserLabs', N'U') IS NOT NULL AND OBJECT_ID(N'dbo.UserRoles', 
         {
             _logger.LogWarning(ex, "Lab {LabId}: could not read the RCM Managers from LRNMaster; verifications go to every manager of the lab.", labId);
             return Array.Empty<string>();
+        }
+    }
+
+    /// <summary>
+    /// LRNMaster.dbo.DenialCategoryMaster and dbo.NonCollectibleDenialMaster (the reporting team's
+    /// masters, maintained on the LRN Metrics Denial Category Master screen) -> the lab's
+    /// dbo.ARWB_ReportingDenialMaster, which the sync applies to every claim. Same copy as the API's
+    /// Data Processing > Run. A failure is logged and the sync continues with the previous copy.
+    /// </summary>
+    private async Task CopyReportingDenialMastersAsync(SqlConnection lab, int labId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(_masterConnectionString)) return;
+
+        try
+        {
+            await using (var probe = new SqlCommand("SELECT OBJECT_ID(N'dbo.ARWB_ReportingDenialMaster', N'U');", lab))
+                if (await probe.ExecuteScalarAsync(ct) is null or DBNull) return;   // lab scripts not updated yet
+
+            var rows = new DataTable();
+            rows.Columns.Add("MasterKind", typeof(string));
+            rows.Columns.Add("DenialCode", typeof(string));
+            rows.Columns.Add("Description", typeof(string));
+            rows.Columns.Add("ActionCategory", typeof(string));
+
+            const string sql = @"
+IF OBJECT_ID(N'dbo.DenialCategoryMaster', N'U') IS NOT NULL
+    SELECT 'Category', DenialCode, Description, ActionCategory FROM dbo.DenialCategoryMaster
+    WHERE NULLIF(LTRIM(RTRIM(DenialCode)), N'') IS NOT NULL;
+ELSE
+    SELECT CAST(NULL AS varchar(20)), CAST(NULL AS nvarchar(50)), CAST(NULL AS nvarchar(1000)), CAST(NULL AS nvarchar(300)) WHERE 1 = 0;
+IF OBJECT_ID(N'dbo.NonCollectibleDenialMaster', N'U') IS NOT NULL
+    SELECT 'NonCollectible', DenialCode, Description, CAST(NULL AS nvarchar(300)) FROM dbo.NonCollectibleDenialMaster
+    WHERE NULLIF(LTRIM(RTRIM(DenialCode)), N'') IS NOT NULL;";
+
+            await using (var master = new SqlConnection(_masterConnectionString))
+            {
+                await master.OpenAsync(ct);
+                await using var cmd = new SqlCommand(sql, master) { CommandTimeout = 120 };
+                await using var r = await cmd.ExecuteReaderAsync(ct);
+                do
+                {
+                    while (await r.ReadAsync(ct))
+                        rows.Rows.Add(r.GetString(0), r.GetString(1).Trim(), r.IsDBNull(2) ? null : r.GetString(2), r.IsDBNull(3) ? null : r.GetString(3));
+                } while (await r.NextResultAsync(ct));
+            }
+
+            await using var tx = (SqlTransaction)await lab.BeginTransactionAsync(ct);
+            await using (var clear = new SqlCommand("DELETE FROM dbo.ARWB_ReportingDenialMaster;", lab, tx))
+                await clear.ExecuteNonQueryAsync(ct);
+            if (rows.Rows.Count > 0)
+            {
+                using var bulk = new SqlBulkCopy(lab, SqlBulkCopyOptions.Default, tx) { DestinationTableName = "dbo.ARWB_ReportingDenialMaster", BulkCopyTimeout = 120 };
+                foreach (DataColumn c in rows.Columns) bulk.ColumnMappings.Add(c.ColumnName, c.ColumnName);
+                await bulk.WriteToServerAsync(rows, ct);
+            }
+            await tx.CommitAsync(ct);
+            _logger.LogInformation("Lab {LabId}: {Rows} reporting denial master row(s) copied for the AR Workbench sync.", labId, rows.Rows.Count);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Lab {LabId}: could not copy the reporting denial masters; the sync uses the previous copy.", labId);
         }
     }
 

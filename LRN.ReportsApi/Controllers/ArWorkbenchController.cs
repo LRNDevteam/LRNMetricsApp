@@ -1265,7 +1265,8 @@ public sealed class ArWorkbenchController : ControllerBase
             Managers = ManagerOptions(users),
             Teams = users.Select(u => u.TeamName).Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t!)
                 .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList(),
-            AllLabs = manager.AllLabs
+            AllLabs = manager.AllLabs,
+            CanSetPasswords = CanSetPasswords(manager)
         });
     }
 
@@ -1452,6 +1453,8 @@ public sealed class ArWorkbenchController : ControllerBase
         string? hash = null;
         if (!string.IsNullOrEmpty(request.Password))
         {
+            if (!CanSetPasswords(manager))
+                return Forbidden("Only a Super Admin or an AR Workbench System Administrator can set a user's password. Use Send password link instead.");
             var passwordError = ArWorkbenchUserRules.ValidatePassword(request.Password);
             if (passwordError is not null) return BadRequest(new { message = passwordError });
             hash = ArWorkbenchUserRules.HashPassword(request.Password);
@@ -1468,6 +1471,15 @@ public sealed class ArWorkbenchController : ControllerBase
     }
 
     private sealed record UserManager(ArWorkbenchUserContext User, bool AllLabs, IReadOnlyList<ArWorkbenchLabOption> Labs, IReadOnlySet<int> LabIds);
+
+    /// <summary>
+    /// Setting another user's password (for a user who cannot get the email link, or cannot change
+    /// their own) is for the top admins only: a Super Admin (Admin / LRN Admin - every lab), or a
+    /// holder of the "AR Workbench - System Administrator" role. A Lab Admin manages users but does not.
+    /// </summary>
+    private static bool CanSetPasswords(UserManager manager) =>
+        manager.AllLabs
+        || manager.User.RoleNames.Any(r => string.Equals(r, "System Administrator", StringComparison.OrdinalIgnoreCase));
 
     private async Task<(UserManager? Manager, ActionResult? Denied)> ResolveUserManagerAsync(int labId, CancellationToken ct)
     {

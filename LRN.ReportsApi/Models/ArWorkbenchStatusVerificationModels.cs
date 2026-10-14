@@ -117,6 +117,31 @@ public sealed class ArWorkbenchNotificationList
 /// </summary>
 public sealed class ArWorkbenchClaimExportDetail
 {
+    // Claim-level source columns (QC 10.12.2026 "Missing Columns")
+    public string? AccessionNumber { get; set; }
+    public DateTime? PatientDOB { get; set; }
+    public string? SubscriberId { get; set; }
+    public string? BillingProvider { get; set; }
+    public DateTime? ChargeEnteredDate { get; set; }
+    public DateTime? FirstBilledDate { get; set; }
+    public string? CptSummary { get; set; }
+    public string? Facility { get; set; }
+    public string? POS { get; set; }
+    public string? TOS { get; set; }
+    public string? ICDCode { get; set; }
+    public decimal AllowedAmount { get; set; }
+    public decimal InsurancePayment { get; set; }
+    public decimal PatientPayment { get; set; }
+    public decimal TotalPayments { get; set; }
+    public decimal InsuranceAdjustments { get; set; }
+    public decimal PatientAdjustments { get; set; }
+    public decimal TotalAdjustments { get; set; }
+    public decimal TotalBalance { get; set; }
+    public DateTime? CheckDate { get; set; }
+    public string? BillStatus { get; set; }
+    /// <summary>Every follow-up note on the claim, newest first, one per line.</summary>
+    public string? Notes { get; set; }
+
     public string? AssignedBy { get; set; }
     public DateTime? AssignedOn { get; set; }
     public int FollowUpCount { get; set; }

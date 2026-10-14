@@ -95,6 +95,9 @@ public sealed class ArWorkbenchDashboard
     public int IdentifiedLastWeek { get; set; }
     public decimal TotalOutstandingAR { get; set; }
     public DateTime? DataRefreshedOn { get; set; }
+    /// <summary>When the master file the last sync read was loaded (UTC) - the reports application's date.</summary>
+    public DateTime? DataLoadedOn { get; set; }
+    public string? DataSourceFile { get; set; }
     public DateTime? SourcePeriodStart { get; set; }
     public DateTime? SourcePeriodEnd { get; set; }
     public int Unassigned { get; set; }
@@ -184,6 +187,14 @@ public sealed class ArWorkbenchClaimFilter
     /// denial or any line denial is one of them, after the claim sync's normalization.
     /// </summary>
     public List<string> DenialCode { get; set; } = new();
+    /// <summary>
+    /// Denial classification from the central Denial Code Master (Master Values > Denial Code
+    /// Descriptions): a claim matches when its primary denial code carries one of them.
+    /// </summary>
+    public List<string> Classification { get; set; } = new();
+    /// <summary>The primary codes of <see cref="Classification"/>, resolved by the repository. Never read from the request.</summary>
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever, System.Text.Json.Serialization.JsonIgnore]
+    public List<string>? ClassificationCodes { get; set; }
     public string? Search { get; set; }
     public bool OpenInsuranceArOnly { get; set; }
     public bool TflRiskOnly { get; set; }
@@ -283,6 +294,8 @@ public sealed class ArWorkbenchFilterOptions
     public List<ArWorkbenchFilterOption> AgingBuckets { get; set; } = new();
     public List<ArWorkbenchFilterOption> FixResolutions { get; set; } = new();
     public List<ArWorkbenchFilterOption> SourceStatuses { get; set; } = new();
+    /// <summary>Denial classifications (central Denial Code Master) of the claims' primary denials.</summary>
+    public List<ArWorkbenchFilterOption> Classifications { get; set; } = new();
 }
 
 /// <summary>Tile counts for My Work and Follow-Up Management, over the caller's scope.</summary>
@@ -457,4 +470,7 @@ public sealed class ArWorkbenchRefreshRun
     public int? ClaimsLinesReloaded { get; set; }
     public string? RunBy { get; set; }
     public string? ErrorMessage { get; set; }
+    /// <summary>When the master file this run read was loaded (UTC).</summary>
+    public DateTime? SourceLoadedOn { get; set; }
+    public int? ClaimsStatusVerification { get; set; }
 }
