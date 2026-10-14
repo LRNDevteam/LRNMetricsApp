@@ -407,7 +407,8 @@ public sealed class LineClaimImportService
             await _runInfo.InfoAsync(request.RunId, fileType, sourceSystem,
                 $"Denial normalization completed. Distinct denial code cells={enrichment.DistinctCodes}, " +
                 $"rows with {DenialDescriptionEnricher.NormalizedColumn}={enrichment.RowsUpdated}, " +
-                $"rows with {DenialDescriptionEnricher.DescriptionColumn}={enrichment.RowsDescribed}.",
+                $"rows with {DenialDescriptionEnricher.DescriptionColumn}={enrichment.RowsDescribed}, " +
+                $"rows with {DenialDescriptionEnricher.ActionCategoryColumn}={enrichment.RowsCategorized}.",
                 ct, logSourceName).ConfigureAwait(false);
 
             if (enrichment.UnresolvedCodes.Count > 0)

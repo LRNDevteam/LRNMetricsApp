@@ -88,17 +88,24 @@ public sealed class LabConfigOptions
     /// </summary>
     public Dictionary<string, string> DenialSummaryBalanceColumn { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>The configured Denial Summary balance column for a lab, or null when not configured.</summary>
+    /// <summary>
+    /// The Denial Summary balance column for a lab: the configured one, else TotalInsuranceBalance
+    /// for the labs whose summaries come from SPs (Analyze Pathology, WellHealth - their SPs count
+    /// on it), else null (InsuranceBalance). The default keeps a deployment without the setting
+    /// from filtering the Claim Level tab and download on a different balance than the summaries -
+    /// WellHealth's sheet otherwise drops every denied claim with TotalInsuranceBalance but no
+    /// InsuranceBalance.
+    /// </summary>
     public string? GetDenialSummaryBalanceColumn(string? labName)
     {
-        if (string.IsNullOrWhiteSpace(labName) || DenialSummaryBalanceColumn is null) return null;
+        if (string.IsNullOrWhiteSpace(labName)) return null;
         static string Key(string v) => new(v.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
         var wanted = Key(labName);
-        foreach (var (lab, column) in DenialSummaryBalanceColumn)
+        foreach (var (lab, column) in DenialSummaryBalanceColumn ?? new())
         {
             if (Key(lab) == wanted && !string.IsNullOrWhiteSpace(column)) return column.Trim();
         }
-        return null;
+        return Services.LabCollectionPrefix.HasDenialSummary(labName) ? "TotalInsuranceBalance" : null;
     }
 
     /// <summary>

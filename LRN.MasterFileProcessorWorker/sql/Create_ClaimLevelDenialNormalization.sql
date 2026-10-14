@@ -2,29 +2,41 @@
     Derived denial columns on the claim-level table.
     Run against EACH LAB database (not LRNMaster).
 
-    DenialCodeNormalized  Denial code(s) with the CO / PR / PI prefix stripped, so
-                          CO10 / PR10 / PI10 all read as 10, COA97 reads as OA97, and a
-                          multi-code cell such as "CO10, CO189" reads as "10; 189".
-                          CO/PR/PI 1, 2, 3, 253 and 45 are left out of the column entirely.
+    DenialCodeNormalized  Denial code(s) with the CO / PR / PI / OA prefix stripped and every '-'
+                          and '.' removed, so CO10 / PR10 / PI10 / OA10 all read as 10, COA97 and
+                          OA-97 read as 97, N.130 reads as N130, and a multi-code cell such as
+                          "CO10, CO189" reads as "10; 189".
+                          CO/PR/PI 1, 2, 3, 253 and 45 are left out of the column entirely
+                          (OA45 is kept, as 45).
 
-    DenialDescription     Each normalized code paired with its description, e.g.
-                          "10 - <description>; 189 - <description>".
+                          Descriptions and categories are looked up on this normalized code first;
+                          a code that carried OA and has no row under the plain code is then looked
+                          up under its OA form (OA97), '-' and '.' removed on both sides.
 
-                          The description is resolved in four steps, in this order:
-                            1. dbo.DenialCodeMaster (this lab's Denial-Action master), raw code
-                            2. LRNMaster.dbo.DenialMapperSuperMaster, raw code
+    DenialDescription     The description of each normalized code, text only - no code in front:
+                          "<description of 10>; <description of 189>".
+    DenialActionCategory  The action category of each code, text only, "; " between codes.
+
+                          Both come from LRNMaster.dbo.DenialCategoryMaster, matched on the
+                          normalized code. A code that master lacks (or a blank category) falls
+                          back to the Denial-Action cascade below.
+
+    DenialActionCode,     From the Denial-Action cascade, in this order:
+    DenialSLA,              1. dbo.DenialCodeMaster (this lab's Denial-Action master), raw code
+    DenialPriority          2. LRNMaster.dbo.DenialMapperSuperMaster, raw code
                             3. dbo.DenialCodeMaster, normalized code
                             4. LRNMaster.dbo.DenialMapperSuperMaster, normalized code
 
-                          The masters hold only the prefixed codes (CO10, PR10, PI10) and all
-                          three share one description, which is why steps 3 and 4 match on the
-                          normalized code - a claim carrying CO10 still finds a description the
-                          master stores only under PR10.
+                          The Denial-Action masters hold only the prefixed codes (CO10, PR10, PI10)
+                          and all three share one row's values, which is why steps 3 and 4 match on
+                          the normalized code.
 
-    Both columns are populated by LRN.MasterFileProcessorWorker immediately after the claim-level
-    bulk copy commits (DenialDescriptionEnricher). The worker creates them itself if they are
-    absent, so this script is a convenience for deploying ahead of the run - not a prerequisite.
-    It is re-runnable and makes no change on a database that already has the columns.
+    A value repeated across a cell's codes is written once.
+
+    All columns are populated by LRN.MasterFileProcessorWorker immediately after the claim-level
+    and line-level bulk copies commit (DenialDescriptionEnricher). The worker creates them itself if
+    they are absent, so this script is a convenience for deploying ahead of the run - not a
+    prerequisite. It is re-runnable and makes no change on a database that already has the columns.
 */
 
 SET NOCOUNT ON;
@@ -152,5 +164,32 @@ BEGIN
     ALTER TABLE dbo.LineLevelData ADD [DenialDescription] nvarchar(max) NULL;
     PRINT 'Added dbo.LineLevelData.DenialDescription.';
 END
+GO
+
+/*
+    Action category, action code, SLA and priority on both levels (same widths the worker uses).
+*/
+DECLARE @t sysname, @c sysname, @type nvarchar(40), @sql nvarchar(400);
+DECLARE cols CURSOR LOCAL FAST_FORWARD FOR
+    SELECT t.name, c.name, c.type
+    FROM (VALUES (N'ClaimLevelData'), (N'LineLevelData')) AS t(name)
+    CROSS JOIN (VALUES (N'DenialActionCategory', N'nvarchar(2000)'),
+                       (N'DenialActionCode',     N'nvarchar(400)'),
+                       (N'DenialSLA',            N'nvarchar(200)'),
+                       (N'DenialPriority',       N'nvarchar(200)')) AS c(name, type);
+OPEN cols;
+FETCH NEXT FROM cols INTO @t, @c, @type;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    IF OBJECT_ID(N'dbo.' + @t, 'U') IS NOT NULL AND COL_LENGTH(N'dbo.' + @t, @c) IS NULL
+    BEGIN
+        SET @sql = N'ALTER TABLE dbo.' + QUOTENAME(@t) + N' ADD ' + QUOTENAME(@c) + N' ' + @type + N' NULL;';
+        EXEC sys.sp_executesql @sql;
+        PRINT 'Added dbo.' + @t + '.' + @c + '.';
+    END
+    FETCH NEXT FROM cols INTO @t, @c, @type;
+END
+CLOSE cols;
+DEALLOCATE cols;
 GO
 

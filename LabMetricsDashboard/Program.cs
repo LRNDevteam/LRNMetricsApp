@@ -614,6 +614,8 @@ builder.Services.AddSingleton<ILabNameResolver, LabNameResolver>();
 // the Reports API: the worker reads the same table, so the queue is the contract between
 // the two, and putting an HTTP hop in front of it would add a moving part without a reader.
 builder.Services.AddScoped<IMasterProcessorRerunRepository, SqlMasterProcessorRerunRepository>();
+// Denial Category Master + Non-Collectible Denial Master (LRNMaster), imported from the denial codes workbook.
+builder.Services.AddScoped<IDenialCategoryMasterRepository, SqlDenialCategoryMasterRepository>();
 builder.Services.AddScoped<IDenialDatabaseRerunRepository, SqlDenialDatabaseRerunRepository>();
 
 // ── Reimbursement Insights chat (Foundry agent via the ReimbursementAgentProxy App Service) ──

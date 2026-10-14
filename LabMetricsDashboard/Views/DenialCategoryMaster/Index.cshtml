@@ -1,0 +1,166 @@
+@model LabMetricsDashboard.Models.DenialCategoryMasterViewModel
+@{
+    ViewData["Title"] = "Denial Category Master";
+    var catActive = Model.ActiveTab != "noncollectible";
+    var categoryCount = Model.Categories.Select(c => c.ActionCategory).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+    var lastImport = Model.Categories.Select(c => (DateTime?)c.CreatedOn).Concat(Model.NonCollectible.Select(c => (DateTime?)c.CreatedOn)).Max();
+    var lastImportBy = Model.Categories.Select(c => new { c.CreatedOn, c.CreatedBy }).Concat(Model.NonCollectible.Select(c => new { c.CreatedOn, c.CreatedBy }))
+        .OrderByDescending(x => x.CreatedOn).Select(x => x.CreatedBy).FirstOrDefault();
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h4 class="mb-0"><i class="bi bi-tags"></i> Denial Category Master</h4>
+        <small class="text-muted">
+            Denial code descriptions and action categories, and the non-collectible denial codes.
+            @if (lastImport is not null)
+            {
+                <span>Last imported @lastImport.Value.ToLocalTime().ToString("MM/dd/yyyy hh:mm tt")@(string.IsNullOrWhiteSpace(lastImportBy) ? "" : $" by {lastImportBy}").</span>
+            }
+        </small>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        @if (Model.SetupError is null && (Model.Categories.Count > 0 || Model.NonCollectible.Count > 0))
+        {
+            <a asp-action="Export" class="btn btn-outline-success btn-sm"><i class="bi bi-download"></i> Download</a>
+        }
+    </div>
+</div>
+
+@if (TempData["Success"] is string successMsg)
+{
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        @successMsg <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+@if (TempData["Error"] is string errorMsg)
+{
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        @errorMsg <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+@if (Model.SetupError is not null)
+{
+    <div class="alert alert-warning">@Model.SetupError</div>
+}
+
+@if (Model.CanImport)
+{
+    <div class="card shadow-sm mb-3">
+        <div class="card-body py-2">
+            <form asp-action="Import" method="post" enctype="multipart/form-data" class="row g-2 align-items-center" id="dcm-import-form">
+                @Html.AntiForgeryToken()
+                <div class="col-auto fw-bold small"><i class="bi bi-upload"></i> Import workbook</div>
+                <div class="col">
+                    <input type="file" name="file" class="form-control form-control-sm" accept=".xlsx" required />
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-primary btn-sm">Import</button>
+                </div>
+                <div class="col-12">
+                    <small class="text-muted">
+                        Sheet <strong>Denial Category Clasification</strong> (Denial Code, Denial Code Description, Denial Categorization) and
+                        sheet <strong>Non-collectible Denials</strong> (Denial Code, Denial Code Description). Each sheet in the file replaces its master;
+                        a sheet left out of the file leaves its master unchanged. A code listed twice keeps its first row.
+                    </small>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
+<ul class="nav nav-tabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link @(catActive ? "active" : "")" data-bs-toggle="tab" data-bs-target="#tab-categories" type="button" role="tab">
+            Denial Categories <span class="badge bg-secondary">@Model.Categories.Count</span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link @(catActive ? "" : "active")" data-bs-toggle="tab" data-bs-target="#tab-noncollectible" type="button" role="tab">
+            Non-Collectible Denials <span class="badge bg-secondary">@Model.NonCollectible.Count</span>
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content border border-top-0 p-3 bg-white">
+    <div class="tab-pane fade @(catActive ? "show active" : "")" id="tab-categories" role="tabpanel">
+        <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
+            <input type="search" class="form-control form-control-sm js-dcm-search" data-table="dcm-categories"
+                   placeholder="Search code, description or category" style="max-width:320px" />
+            <small class="text-muted">@Model.Categories.Count codes in @categoryCount categories</small>
+        </div>
+        <div class="table-responsive" style="max-height:65vh">
+            <table class="table table-sm table-hover table-bordered align-middle mb-0" id="dcm-categories">
+                <thead class="table-light sticky-top">
+                    <tr><th style="width:110px">Denial Code</th><th>Description</th><th>Action Category</th><th style="width:150px">Created On</th><th style="width:140px">Created By</th></tr>
+                </thead>
+                <tbody>
+                    @if (Model.Categories.Count == 0)
+                    {
+                        <tr><td colspan="5" class="text-center text-muted py-4">No denial categories yet. Import the denial codes workbook.</td></tr>
+                    }
+                    @foreach (var r in Model.Categories)
+                    {
+                        <tr>
+                            <td class="fw-semibold">@r.DenialCode</td>
+                            <td>@r.Description</td>
+                            <td>@(string.IsNullOrWhiteSpace(r.ActionCategory) ? "-" : r.ActionCategory)</td>
+                            <td class="small">@r.CreatedOn.ToLocalTime().ToString("MM/dd/yyyy hh:mm tt")</td>
+                            <td class="small">@r.CreatedBy</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="tab-pane fade @(catActive ? "" : "show active")" id="tab-noncollectible" role="tabpanel">
+        <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
+            <input type="search" class="form-control form-control-sm js-dcm-search" data-table="dcm-noncollectible"
+                   placeholder="Search code or description" style="max-width:320px" />
+        </div>
+        <div class="table-responsive" style="max-height:65vh">
+            <table class="table table-sm table-hover table-bordered align-middle mb-0" id="dcm-noncollectible">
+                <thead class="table-light sticky-top">
+                    <tr><th style="width:110px">Denial Code</th><th>Description</th><th style="width:150px">Created On</th><th style="width:140px">Created By</th></tr>
+                </thead>
+                <tbody>
+                    @if (Model.NonCollectible.Count == 0)
+                    {
+                        <tr><td colspan="4" class="text-center text-muted py-4">No non-collectible denials yet. Import the denial codes workbook.</td></tr>
+                    }
+                    @foreach (var r in Model.NonCollectible)
+                    {
+                        <tr>
+                            <td class="fw-semibold">@r.DenialCode</td>
+                            <td>@r.Description</td>
+                            <td class="small">@r.CreatedOn.ToLocalTime().ToString("MM/dd/yyyy hh:mm tt")</td>
+                            <td class="small">@r.CreatedBy</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script nonce='@Context.Items["CspNonce"]'>
+    var importForm = document.getElementById('dcm-import-form');
+    if (importForm) {
+        importForm.addEventListener('submit', function (e) {
+            if (!confirm('Replace the Denial Category Master and the Non-Collectible Denials with this workbook?')) e.preventDefault();
+        });
+    }
+
+    document.querySelectorAll('.js-dcm-search').forEach(function (box) {
+        box.addEventListener('input', function () {
+            var term = box.value.trim().toLowerCase();
+            var table = document.getElementById(box.dataset.table);
+            if (!table) return;
+            table.querySelectorAll('tbody tr').forEach(function (row) {
+                if (row.cells.length < 2) return; // the "no rows" message
+                row.style.display = !term || row.textContent.toLowerCase().indexOf(term) >= 0 ? '' : 'none';
+            });
+        });
+    });
+</script>

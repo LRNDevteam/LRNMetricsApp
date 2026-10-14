@@ -1531,13 +1531,25 @@ public static class SelfTests
             DenialCodeNormalizer.Normalize("CO 45") == "45" &&
             DenialCodeNormalizer.Normalize(" co45 ") == "45");
 
-        Check("Denial: only CO/PR/PI are stripped - OA and CR are kept",
-            DenialCodeNormalizer.Normalize("OA23") == "OA23" &&
+        Check("Denial: OA is stripped like CO/PR/PI; CR is kept",
+            DenialCodeNormalizer.Normalize("OA23") == "23" &&
+            DenialCodeNormalizer.Normalize("OAB11") == "B11" &&
             DenialCodeNormalizer.Normalize("CR1") == "CR1");
 
-        Check("Denial: COA drops only the C",
-            DenialCodeNormalizer.Normalize("COA97") == "OA97" &&
-            DenialCodeNormalizer.Normalize("coa-23") == "OA23");
+        Check("Denial: COA strips like OA",
+            DenialCodeNormalizer.Normalize("COA97") == "97" &&
+            DenialCodeNormalizer.Normalize("coa-23") == "23");
+
+        Check("Denial: '-' and '.' are removed inside a code",
+            DenialCodeNormalizer.Normalize("N-130") == "N130" &&
+            DenialCodeNormalizer.Normalize("M.127") == "M127" &&
+            DenialCodeNormalizer.Normalize("OA-B.9") == "B9" &&
+            DenialCodeNormalizer.Normalize("CO-45.") == "45" &&
+            DenialCodeNormalizer.NormalizeAll("CO-16., N.130") == "16; N130");
+
+        Check("Denial: the OA form is kept for the master fallback",
+            DenialCodeNormalizer.OaForm("OA-97") == "OA97" && DenialCodeNormalizer.OaForm("COA97") == "OA97" &&
+            DenialCodeNormalizer.OaForm("CO97") is null && DenialCodeNormalizer.OaForm("B7") is null);
 
         Check("Denial: CO/PR/PI 1, 2, 3, 253, 45 are excluded",
             DenialCodeNormalizer.IsExcluded("CO1") && DenialCodeNormalizer.IsExcluded("CO2") &&
@@ -1552,7 +1564,7 @@ public static class SelfTests
 
         Check("Denial: excluded codes drop out of a multi-code cell",
             DenialCodeNormalizer.NormalizeAll("CO1;COB9") == "B9" &&
-            DenialCodeNormalizer.NormalizeAll("CO97; COA97; PR243;PR45") == "97; OA97; 243");
+            DenialCodeNormalizer.NormalizeAll("CO97; COA97; PR243;PR45") == "97; 243");
 
         Check("Denial: a cell of only excluded codes normalizes to null",
             DenialCodeNormalizer.NormalizeAll("CO45, PR1") is null);
@@ -1617,14 +1629,14 @@ public static class SelfTests
         lookup.AddSuper("OA97", "OA wording for 97.");
         lookup.AddSuper("CO45", "Charge exceeds fee schedule/maximum allowable.");
 
-        Check("Denial: one code is described with its code in front",
+        Check("Denial: one code is described by its description alone, no code in front",
             DenialCodeNormalizer.DescribeAll("CO10", lookup)
-                == "10 - The diagnosis is inconsistent with the patient's gender.");
+                == "The diagnosis is inconsistent with the patient's gender.");
 
         Check("Denial: every code in a multi-code cell gets its own description",
             DenialCodeNormalizer.DescribeAll("CO10, CO189", lookup)
-                == "10 - The diagnosis is inconsistent with the patient's gender."
-                 + "; 189 - This non-covered service was not deemed medically necessary.");
+                == "The diagnosis is inconsistent with the patient's gender."
+                 + "; This non-covered service was not deemed medically necessary.");
 
         // The case from the field: the claim carries COM127, the master holds only M127.
         var remark = new DenialDescriptionLookup();
@@ -1632,31 +1644,85 @@ public static class SelfTests
 
         Check("Denial: COM127 picks up M127's description",
             DenialCodeNormalizer.DescribeAll("COM127", remark)
-                == "M127 - Missing patient medical record for this service.");
+                == "Missing patient medical record for this service.");
 
         // The master has only PR97. CO97 and PI97 have to reach it through the normalized step.
         Check("Denial: CO97, PI97 and PR97 all resolve to the same description",
             DenialCodeNormalizer.DescribeAll("CO97", lookup)
-                == "97 - Payment is included in the allowance for another service." &&
+                == "Payment is included in the allowance for another service." &&
             DenialCodeNormalizer.DescribeAll("PI97", lookup)
                 == DenialCodeNormalizer.DescribeAll("CO97", lookup));
 
-        Check("Denial: COA97 is described as OA97",
-            DenialCodeNormalizer.DescribeAll("COA97", lookup) == "OA97 - OA wording for 97.");
+        // OA is removed first, so COA97 / OA97 find 97's wording; the OA row answers only when the
+        // plain code has none.
+        Check("Denial: COA97 and OA97 are described by 97 once OA is removed",
+            DenialCodeNormalizer.DescribeAll("COA97", lookup) == "Payment is included in the allowance for another service.");
+
+        var oaOnly = new DenialDescriptionLookup();
+        oaOnly.AddSuper("OA23", "OA wording for 23.");
+        Check("Denial: a code with no plain row falls back to the master's OA row",
+            DenialCodeNormalizer.DescribeAll("OA-23", oaOnly) == "OA wording for 23." &&
+            DenialCodeNormalizer.DescribeAll("CO23", oaOnly) is null);
 
         var excludedUnresolved = new List<string>();
 
         Check("Denial: excluded codes are neither described nor reported",
             DenialCodeNormalizer.DescribeAll("CO45; PR1; CO97", lookup, excludedUnresolved)
-                == "97 - Payment is included in the allowance for another service."
+                == "Payment is included in the allowance for another service."
             && excludedUnresolved.Count == 0);
 
         var unresolved = new List<string>();
 
         Check("Denial: a code no master has is reported, not invented",
             DenialCodeNormalizer.DescribeAll("CO10, MA130", lookup, unresolved)
-                == "10 - The diagnosis is inconsistent with the patient's gender."
+                == "The diagnosis is inconsistent with the patient's gender."
             && unresolved.Count == 1 && unresolved[0] == "MA130");
+
+        // Denial Category Master: description + action category by NORMALIZED code, ahead of the
+        // Denial-Action masters; action code / SLA / priority still from the Denial-Action masters.
+        var withCategory = new DenialDescriptionLookup();
+        withCategory.AddCategory("10", "Category wording for 10.", "ICD-10 Codes Related Issues");
+        withCategory.AddCategory("B7", "Provider not certified.", null);
+        withCategory.AddCategory("189", "Category wording for 189.", "Medical Necessity");
+        withCategory.AddSuper("CO10", new DenialCodeInfo("Super wording for 10.", "Super category", "RB", "15", "High"));
+        withCategory.AddSuper("CO189", new DenialCodeInfo("Super wording for 189.", "Super category", "AP", "30", "Medium"));
+        withCategory.AddSuper("B7", new DenialCodeInfo("Super wording for B7.", "Credentialing", "CR", "10", "Low"));
+        withCategory.AddSuper("CO16", new DenialCodeInfo("Super wording for 16.", "Missing Info", "RB", "15", "High"));
+
+        var ten = DenialCodeNormalizer.DeriveAll("CO10", withCategory);
+        Check("Category: CO10 takes the Category Master's description and action category (matched on 10)",
+            ten.Description == "Category wording for 10." && ten.ActionCategory == "ICD-10 Codes Related Issues");
+        Check("Category: action code, SLA and priority still come from the Super Master",
+            ten.ActionCode == "RB" && ten.Sla == "15" && ten.Priority == "High");
+
+        var b7 = DenialCodeNormalizer.DeriveAll("B7", withCategory);
+        Check("Category: a Category Master code without a category falls back to the Super Master's",
+            b7.Description == "Provider not certified." && b7.ActionCategory == "Credentialing");
+
+        var sixteen = DenialCodeNormalizer.DeriveAll("CO16", withCategory);
+        Check("Category: a code the Category Master lacks is described by the Super Master",
+            sixteen.Description == "Super wording for 16." && sixteen.ActionCategory == "Missing Info");
+
+        // The Category Master holds OA252 and OA231 under their OA codes (and a plain 252 for
+        // another denial): the plain code wins, the OA row answers only when there is no plain one.
+        var oaCategory = new DenialDescriptionLookup();
+        oaCategory.AddCategory("252", "Plain 252.", "Plain category");
+        oaCategory.AddCategory("OA252", "An attachment/other documentation is required.", "Additional Documentation");
+        oaCategory.AddCategory("OA231", "Mutually exclusive procedures.", "Bundling");
+        oaCategory.AddCategory("N.357", "Dotted master code.", "Other");
+
+        Check("Category: OA252 finds the plain 252 row first, once OA is removed",
+            DenialCodeNormalizer.DeriveAll("OA252", oaCategory).Description == "Plain 252.");
+        Check("Category: OA-231 has no plain 231 row, so the OA231 row answers",
+            DenialCodeNormalizer.DeriveAll("OA-231", oaCategory) is { Description: "Mutually exclusive procedures.", ActionCategory: "Bundling" });
+        Check("Category: '-' and '.' are ignored on both sides (N-357 finds master N.357)",
+            DenialCodeNormalizer.DeriveAll("N-357", oaCategory).Description == "Dotted master code.");
+
+        var both = DenialCodeNormalizer.DeriveAll("CO10, CO189, PR10", withCategory);
+        Check("Category: a multi-code cell joins each value with '; ', a repeated value written once",
+            both.Description == "Category wording for 10.; Category wording for 189."
+            && both.ActionCategory == "ICD-10 Codes Related Issues; Medical Necessity"
+            && both.ActionCode == "RB; AP" && both.Sla == "15; 30" && both.Priority == "High; Medium");
 
         Check("Denial: a cell with no described code yields null",
             DenialCodeNormalizer.DescribeAll("MA130", lookup) is null);
@@ -1712,7 +1778,7 @@ public static class SelfTests
 
         var blank = new DenialDescriptionLookup();
         blank.AddLab("CO10", "   ");
-        blank.AddSuper("CO10", null);
+        blank.AddSuper("CO10", (string?)null);
 
         Check("Cascade: a blank description is not stored as a match", blank.Resolve("CO10") is null);
     }
