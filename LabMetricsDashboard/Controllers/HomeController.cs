@@ -35,7 +35,8 @@ public class HomeController : Controller
     {
         // Non-admin users should never see the Home landing (lab tiles).
         // Send them straight to the Revenue Dashboard.
-        if (User?.Identity?.IsAuthenticated == true && !User.IsInRole("Admin"))
+        // Admin, Super Admin or LRN Admin (MenuAccessFilter's rule) - not only a role spelled "Admin".
+        if (User?.Identity?.IsAuthenticated == true && !LabMetricsDashboard.Filters.MenuAccessFilter.IsFullAdmin(User))
         {
             return RedirectToAction("Index", "Dashboard");
         }

@@ -37,12 +37,14 @@ public sealed class ArWorkbenchController : ControllerBase
     private readonly IWorkflowMasterValuesRepository _mapperMasters;
     private readonly IUserInvitationService _invitations;
     private readonly IUserMailRepository _userMail;
+    private readonly IArWorkbenchExportJobService _exports;
     private readonly ILogger<ArWorkbenchController> _logger;
 
     public ArWorkbenchController(IArWorkbenchRepository repository, IDenialWorkflowService workflowService,
         IDenialMapperRepository mapper, IDenialMapperExcelService mapperExcel, IWorkflowMasterValuesRepository mapperMasters,
-        IUserInvitationService invitations, IUserMailRepository userMail, ILogger<ArWorkbenchController> logger)
+        IUserInvitationService invitations, IUserMailRepository userMail, IArWorkbenchExportJobService exports, ILogger<ArWorkbenchController> logger)
     {
+        _exports = exports;
         _repository = repository;
         _workflowService = workflowService;
         _mapper = mapper;
@@ -550,9 +552,16 @@ public sealed class ArWorkbenchController : ControllerBase
         var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
         if (denied is not null) return denied;
         if (!user!.Permissions.ViewAudit) return Forbidden("Only a System Administrator or RCM Manager can view the audit log.");
+        var output = await BuildAuditExportAsync(_repository, filter, user, ct);
+        _logger.LogInformation("AR Workbench audit export lab {LabId} by {User}: {Rows} rows", filter.LabId, user.UserName, output.RowCount);
+        return File(output.Content, XlsxContentType, $"ARWorkbench_AuditLog_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+    }
+
+    private static async Task<ArWorkbenchExportOutput> BuildAuditExportAsync(IArWorkbenchRepository repository, ArWorkbenchAuditFilter filter, ArWorkbenchUserContext user, CancellationToken ct)
+    {
         filter.Page = 1;
         filter.PageSize = 50_000;
-        var page = await _repository.GetAuditLogAsync(filter, user, false, ct);
+        var page = await repository.GetAuditLogAsync(filter, user, false, ct);
 
         using var wb = new ClosedXML.Excel.XLWorkbook();
         var ws = wb.Worksheets.Add("Audit Log");
@@ -579,8 +588,7 @@ public sealed class ArWorkbenchController : ControllerBase
         ws.Column(9).Width = Math.Min(ws.Column(9).Width, 90);
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
-        _logger.LogInformation("AR Workbench audit export lab {LabId} by {User}: {Rows} rows", filter.LabId, user.UserName, page.Rows.Items.Count);
-        return File(ms.ToArray(), XlsxContentType, $"ARWorkbench_AuditLog_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+        return new ArWorkbenchExportOutput(ms.ToArray(), page.Rows.Items.Count);
     }
 
     // ---- Client portal (T064 / T065 / T066) ------------------------------------------------------
@@ -1582,24 +1590,141 @@ public sealed class ArWorkbenchController : ControllerBase
         if (denied is not null) return denied;
         if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
 
-        var rows = new List<ArWorkbenchClaimRow>();
-        filter.PageSize = 500;
-        var total = 0;
-        for (filter.Page = 1; rows.Count < ArWorkbenchClaimExcel.MaxRows; filter.Page++)
-        {
-            var page = await _repository.GetClaimsAsync(filter, user!, ct);
-            total = page.TotalCount;
-            rows.AddRange(page.Items);
-            if (page.Items.Count < filter.PageSize) break;
-        }
-        if (rows.Count > ArWorkbenchClaimExcel.MaxRows) rows.RemoveRange(ArWorkbenchClaimExcel.MaxRows, rows.Count - ArWorkbenchClaimExcel.MaxRows);
+        var output = await BuildClaimsExportAsync(_repository, filter, user!, await LabNameAsync(filter.LabId, ct), ct);
+        _logger.LogInformation("AR Workbench claim export for lab {LabId} by {User}: {Rows} rows", filter.LabId, user!.UserName, output.RowCount);
+        return File(output.Content, XlsxContentType, $"ARWorkbench_Claims_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+    }
 
-        var labName = (await _workflowService.GetLabsForUserAsync(CurrentUserName(), ct)).FirstOrDefault(l => l.LabId == filter.LabId)?.LabName ?? $"Lab {filter.LabId}";
+    private async Task<string> LabNameAsync(int labId, CancellationToken ct) =>
+        (await _workflowService.GetLabsForUserAsync(CurrentUserName(), ct)).FirstOrDefault(l => l.LabId == labId)?.LabName ?? $"Lab {labId}";
+
+    private static async Task<ArWorkbenchExportOutput> BuildClaimsExportAsync(IArWorkbenchRepository repository, ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, string labName, CancellationToken ct)
+    {
+        // One query for every row (up to MaxRows), not 500-row pages.
+        var result = await repository.GetClaimsForExportAsync(filter, user, ArWorkbenchClaimExcel.MaxRows, ct);
+        var rows = result.Items;
+        var total = result.TotalCount;
+
         // Assignment, the latest follow-up note, its QA review and the status verification per claim.
-        var details = await _repository.GetClaimExportDetailsAsync(filter.LabId, rows.Select(r => r.ClaimKey).ToList(), ct);
+        var details = await repository.GetClaimExportDetailsAsync(filter.LabId, rows.Select(r => r.ClaimKey).ToList(), ct);
         var bytes = ArWorkbenchClaimExcel.Build(rows, details, $"AR Workbench claims — {labName} — {DateTime.Now:MM/dd/yyyy HH:mm}", total > rows.Count);
-        _logger.LogInformation("AR Workbench claim export for lab {LabId} by {User}: {Rows} of {Total} rows", filter.LabId, user!.UserName, rows.Count, total);
-        return File(bytes, XlsxContentType, $"ARWorkbench_Claims_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+        return new ArWorkbenchExportOutput(bytes, rows.Count);
+    }
+
+    // ---- Background exports (Denial Workflow Overall Download pattern) --------------------------
+    // The Export buttons queue a job and return at once; the page polls the job, and the file is
+    // downloaded when it is ready. The direct GET exports above stay for older clients.
+
+    /// <param name="exportScope">The screen / button the export came from, e.g. "Work Queue - Filtered". Names the file.</param>
+    [HttpPost("exports/claims")]
+    public async Task<ActionResult<ArWorkbenchExportJob>> StartClaimsExport([FromQuery] ArWorkbenchClaimFilter filter, [FromQuery] string? exportScope, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
+        if (denied is not null) return denied;
+        if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+
+        var labName = await LabNameAsync(filter.LabId, ct);
+        var scope = ExportScope(exportScope, "Claims");
+        return StartExport("claims", scope, filter.LabId, user!, $"ARWorkbench_{FilePart(scope)}_{FilePart(labName)}_{DateTime.Now:yyyyMMdd_HHmm}.xlsx",
+            (services, token) => BuildClaimsExportAsync(services.GetRequiredService<IArWorkbenchRepository>(), filter, user!, labName, token));
+    }
+
+    [HttpPost("exports/audit")]
+    public async Task<ActionResult<ArWorkbenchExportJob>> StartAuditExport([FromQuery] ArWorkbenchAuditFilter filter, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
+        if (denied is not null) return denied;
+        if (!user!.Permissions.ViewAudit) return Forbidden("Only a System Administrator or RCM Manager can view the audit log.");
+        if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+
+        return StartExport("audit", "Audit Log", filter.LabId, user, $"ARWorkbench_AuditLog_{DateTime.Now:yyyyMMdd_HHmm}.xlsx",
+            (services, token) => BuildAuditExportAsync(services.GetRequiredService<IArWorkbenchRepository>(), filter, user, token));
+    }
+
+    [HttpPost("exports/reports/{reportId}")]
+    public async Task<ActionResult<ArWorkbenchExportJob>> StartReportExport([FromRoute] string reportId, [FromQuery] int labId, [FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var info = ArWorkbenchReportRules.Catalog.FirstOrDefault(r => string.Equals(r.Id, reportId, StringComparison.OrdinalIgnoreCase));
+        if (info is null) return NotFound(new { message = "Report not found." });
+        if (!CanOpenReport(user!, info.Id)) return Forbidden("This report is only available to the AR team.");
+        var (range, rangeError) = ArWorkbenchReportRules.ResolveRange(from, to, DateTime.UtcNow.Date);
+        if (rangeError is not null) return BadRequest(new { message = rangeError });
+
+        return StartExport("report", info.Title, labId, user!, $"ARWorkbench_{FilePart(info.Title)}_{DateTime.Now:yyyyMMdd_HHmm}.xlsx",
+            async (services, token) =>
+            {
+                var report = await services.GetRequiredService<IArWorkbenchRepository>().GetReportAsync(labId, info.Id, range!, user!, token)
+                    ?? throw new InvalidOperationException("Report not found.");
+                return new ArWorkbenchExportOutput(ArWorkbenchReportExcel.Build(report), report.Rows.Count);
+            });
+    }
+
+    /// <summary>The caller's export jobs (running and recent), newest first - the Downloads list.</summary>
+    [HttpGet("exports")]
+    public async Task<ActionResult<IReadOnlyList<ArWorkbenchExportJob>>> ListExports([FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        return Ok(_exports.List(user!.UserName));
+    }
+
+    [HttpGet("exports/{jobId}")]
+    public async Task<ActionResult<ArWorkbenchExportJob>> ExportStatus([FromRoute] string jobId, [FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var job = _exports.Get(jobId, user!.UserName);
+        return job is null ? NotFound(new { message = "Export job was not found. It may have expired - please start the export again." }) : Ok(job);
+    }
+
+    [HttpGet("exports/{jobId}/download")]
+    public async Task<ActionResult> DownloadExport([FromRoute] string jobId, [FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var file = _exports.GetFile(jobId, user!.UserName);
+        if (file is null) return NotFound(new { message = "The export file is not ready or is no longer available. Please start the export again." });
+        return PhysicalFile(file.FilePath, file.ContentType, file.FileName);
+    }
+
+    /// <summary>Cancels a running export, or removes a finished one (and its file) from the list.</summary>
+    [HttpDelete("exports/{jobId}")]
+    public async Task<ActionResult<ArWorkbenchExportJob>> CancelExport([FromRoute] string jobId, [FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var job = _exports.CancelOrRemove(jobId, user!.UserName);
+        return job is null ? NotFound(new { message = "Export job was not found." }) : Ok(job);
+    }
+
+    private ActionResult<ArWorkbenchExportJob> StartExport(string kind, string scope, int labId, ArWorkbenchUserContext user, string fileName, ArWorkbenchExportBuilder build)
+    {
+        try
+        {
+            var job = _exports.Start(new ArWorkbenchExportRequest(kind, scope, labId, user.UserName, fileName), build);
+            _logger.LogInformation("AR Workbench export {JobId} ({Scope}) queued for lab {LabId} by {User}", job.JobId, scope, labId, user.UserName);
+            return Accepted(job);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
+    }
+
+    private static string ExportScope(string? value, string fallback)
+    {
+        var text = new string((value ?? string.Empty).Where(ch => char.IsLetterOrDigit(ch) || ch is ' ' or '-' or '&' or '/').ToArray()).Trim();
+        return string.IsNullOrWhiteSpace(text) ? fallback : text[..Math.Min(text.Length, 60)];
+    }
+
+    private static string FilePart(string value)
+    {
+        var safe = new string((value ?? string.Empty).Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray());
+        while (safe.Contains("__")) safe = safe.Replace("__", "_");
+        safe = safe.Trim('_');
+        return string.IsNullOrWhiteSpace(safe) ? "Export" : safe[..Math.Min(safe.Length, 48)];
     }
 
     /// <summary>Denial Analysis Report on the Data Processing screen: current + previous sync week.</summary>

@@ -14,6 +14,7 @@ public interface IArWorkbenchRepository
     Task<ArWorkbenchQueueSummary> GetQueueSummaryAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchDashboard> GetDashboardAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchPagedResult<ArWorkbenchClaimRow>> GetClaimsAsync(ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<ArWorkbenchPagedResult<ArWorkbenchClaimRow>> GetClaimsForExportAsync(ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, int maxRows, CancellationToken ct);
     /// <param name="context">The page's current filters: lists cascade (each counted over the other filters). Null = lab-wide.</param>
     Task<ArWorkbenchFilterOptions> GetFilterOptionsAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct, ArWorkbenchClaimFilter? context = null);
     Task<ArWorkbenchClaimDetail?> GetClaimDetailAsync(int labId, long claimKey, ArWorkbenchUserContext user, CancellationToken ct);
@@ -884,14 +885,26 @@ ORDER BY SUM(w.RecoveredAmount) DESC;";
     // Claims
     // ==========================================================================================
 
-    public async Task<ArWorkbenchPagedResult<ArWorkbenchClaimRow>> GetClaimsAsync(ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, CancellationToken ct)
+    public Task<ArWorkbenchPagedResult<ArWorkbenchClaimRow>> GetClaimsAsync(ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, CancellationToken ct)
     {
         var page = Math.Max(1, filter.Page);
         var pageSize = Math.Clamp(filter.PageSize <= 0 ? 50 : filter.PageSize, 1, MaxPageSize);
+        return QueryClaimsAsync(filter, user, page, pageSize, 30, ct);
+    }
 
+    /// <summary>
+    /// Export: the first <paramref name="maxRows"/> matching claims in one query. Paging 500 at a time
+    /// re-ran the count and an ever-deeper OFFSET for every page (170 round trips for 84,000 claims).
+    /// </summary>
+    public Task<ArWorkbenchPagedResult<ArWorkbenchClaimRow>> GetClaimsForExportAsync(ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, int maxRows, CancellationToken ct)
+        => QueryClaimsAsync(filter, user, 1, Math.Max(1, maxRows), 600, ct);
+
+    private async Task<ArWorkbenchPagedResult<ArWorkbenchClaimRow>> QueryClaimsAsync(ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, int page, int pageSize, int timeoutSeconds, CancellationToken ct)
+    {
         await ResolveClassificationAsync(filter, ct);
         await using var connection = await OpenLabAsync(filter.LabId, ct);
         await using var cmd = connection.CreateCommand();
+        cmd.CommandTimeout = timeoutSeconds;
 
         var where = BuildClaimFilter(cmd, filter);
         var scope = AppendScope(cmd, user);

@@ -15,6 +15,7 @@ import CodeMasterPage from './pages/CodeMasterPage';
 import DashboardPage from './pages/DashboardPage';
 import DataProcessingPage from './pages/DataProcessingPage';
 import DenialCodeMasterPage from './pages/DenialCodeMasterPage';
+import DownloadsPage from './pages/DownloadsPage';
 import MasterDataPage from './pages/MasterDataPage';
 import PlannedPage from './pages/PlannedPage';
 import QaPage from './pages/QaPage';
@@ -41,6 +42,7 @@ const SCREENS = {
   'agent-requests': AgentRequestsPage,
   'status-verification': StatusVerificationPage,
   reports: ReportsPage,
+  downloads: DownloadsPage,
   clients: ClientsPage,
   cip: CipPage,
   'client-cip': ClientCipPage,

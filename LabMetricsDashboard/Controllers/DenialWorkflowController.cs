@@ -486,7 +486,11 @@ public sealed class DenialWorkflowController : Controller
         return "User";
     }
 
-    private bool HasAnyRole(params string[] roles) => roles.Any(role => User.IsInRole(role));
+    // "Admin" stands for every full admin (Admin, Super Admin, LRN Admin - MenuAccessFilter's rule), so
+    // a Super Admin is not refused pages a role spelled exactly "Admin" can open.
+    private bool HasAnyRole(params string[] roles) =>
+        roles.Any(role => User.IsInRole(role))
+        || (roles.Contains("Admin", StringComparer.OrdinalIgnoreCase) && LabMetricsDashboard.Filters.MenuAccessFilter.IsFullAdmin(User));
 
     /// <summary>
     /// Lab User: view-only access to the Denial Workflow React app. Matched on the normalised

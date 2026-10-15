@@ -866,6 +866,15 @@ builder.Services
                 // say why. Drop the ReturnUrl and flag it so the login page can explain instead.
                 if (ctx.HttpContext.User?.Identity?.IsAuthenticated == true)
                 {
+                    // Name the refused page: the login page's "Access denied" entry cannot, because
+                    // the ReturnUrl is dropped below.
+                    ctx.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("LabMetricsDashboard.AccessDenied")
+                        .LogWarning("Access denied: {User} (roles [{Roles}]) was refused {Path}.",
+                            ctx.HttpContext.User.Identity?.Name ?? "(unknown)",
+                            string.Join(", ", ctx.HttpContext.User.Claims
+                                .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role).Select(c => c.Value)),
+                            $"{ctx.Request.PathBase}{ctx.Request.Path}{ctx.Request.QueryString}");
                     ctx.Response.Redirect($"{loginUri}?denied=1");
                     return Task.CompletedTask;
                 }

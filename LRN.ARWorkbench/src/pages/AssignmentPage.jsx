@@ -4,6 +4,7 @@ import AssignModal from '../components/AssignModal';
 import BulkUpdateModal from '../components/BulkUpdateModal';
 import { BarList } from '../components/Charts';
 import DataTable, { withSortKeys } from '../components/DataTable';
+import { ExportButton } from '../components/ExportJobs';
 import { CLAIM_SORT_KEYS } from '../config/sortKeys';
 import Icon from '../components/Icon';
 import Modal from '../components/Modal';
@@ -427,6 +428,8 @@ export default function AssignmentPage() {
                 })}>
                 <Icon name="upload" size={15} /> Bulk Update (Excel)
               </button>
+              <ExportButton scope="Unassigned Claims" label="Export Excel" title="Every unassigned claim matching this section's filters - built in the background"
+                start={() => arWorkbenchService.startClaimsExport({ ...uaBase, sortBy: uaQuery.sortBy, sortDesc: uaQuery.sortDesc }, 'Unassigned Claims')} />
             </>
           )}
         />
@@ -479,6 +482,11 @@ export default function AssignmentPage() {
                 })}>
                 <Icon name="upload" size={15} /> Bulk Update (Excel)
               </button>
+              <ExportButton scope="Assigned Claims" label="Export Excel" title="Every assigned claim matching this section's filters - built in the background"
+                start={() => arWorkbenchService.startClaimsExport({
+                  labId, assignedOnly: true, openInsuranceArOnly: true, agent: raFilter.agent, category: raFilter.category,
+                  panel: raFilter.panel, priority: raFilter.priority, sortBy: raQuery.sortBy, sortDesc: raQuery.sortDesc
+                }, 'Assigned Claims')} />
             </>
           )}
         />

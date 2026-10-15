@@ -4,6 +4,7 @@ import AssignModal from '../components/AssignModal';
 import AutoAdjustModal from '../components/AutoAdjustModal';
 import BulkUpdateModal from '../components/BulkUpdateModal';
 import DataTable, { withSortKeys } from '../components/DataTable';
+import { ExportButton } from '../components/ExportJobs';
 import { CLAIM_SORT_KEYS } from '../config/sortKeys';
 import Icon from '../components/Icon';
 import MultiSelect from '../components/MultiSelect';
@@ -97,20 +98,13 @@ export default function WorkQueuePage() {
   const [posting, setPosting] = useState(false);
   const [notice, setNotice] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const [exporting, setExporting] = useState('');   // '' | 'filtered' | 'all'
 
-  // Server-side Excel of every matching claim (or every claim in scope), not just this page.
-  async function exportExcel(filtered) {
-    setExporting(filtered ? 'filtered' : 'all');
-    setError('');
-    try {
-      const { page, pageSize: _ps, ...rest } = filter; // eslint-disable-line no-unused-vars
-      await arWorkbenchService.exportClaims(filtered ? rest : { labId, sortBy: filter.sortBy, sortDesc: filter.sortDesc });
-    } catch (e) {
-      setError(e.message || 'The export failed.');
-    } finally {
-      setExporting('');
-    }
+  // Server-side Excel of every matching claim (or every claim in scope), not just this page - a
+  // background job; the Downloads tracker saves the file when it is ready.
+  function startExport(filtered) {
+    const { page, pageSize: _ps, ...rest } = filter; // eslint-disable-line no-unused-vars
+    return arWorkbenchService.startClaimsExport(filtered ? rest : { labId, sortBy: filter.sortBy, sortDesc: filter.sortDesc },
+      filtered ? 'Work Queue - Filtered' : 'Work Queue - All');
   }
   async function markPosted() {
     setPosting(true);
@@ -306,14 +300,10 @@ export default function WorkQueuePage() {
                 <Icon name="upload" size={15} /> Bulk Update (Excel)
               </button>
             )}
-            <button type="button" className="arwb-btn arwb-btn-sm" disabled={exporting !== ''} onClick={() => exportExcel(true)}
-              title="Every claim that matches the current filters, not just this page">
-              {exporting === 'filtered' ? <span className="arwb-spinner" /> : <Icon name="download" size={15} />} Export Filtered
-            </button>
-            <button type="button" className="arwb-btn arwb-btn-sm" disabled={exporting !== ''} onClick={() => exportExcel(false)}
-              title="Every claim you can see, ignoring the filters">
-              {exporting === 'all' ? <span className="arwb-spinner" /> : <Icon name="download" size={15} />} Export All
-            </button>
+            <ExportButton scope="Work Queue - Filtered" label="Export Filtered" start={() => startExport(true)}
+              title="Every claim that matches the current filters, not just this page (built in the background)" />
+            <ExportButton scope="Work Queue - All" label="Export All" start={() => startExport(false)}
+              title="Every claim you can see, ignoring the filters (built in the background)" />
           </>
         )}
       />

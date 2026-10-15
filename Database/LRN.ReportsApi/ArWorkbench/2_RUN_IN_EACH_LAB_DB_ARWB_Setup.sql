@@ -1217,15 +1217,17 @@ RETURN
 GO
 
 -- '101,102, 103' -> one row per ClaimKey (bulk actions pass the selected claims this way).
--- Non-numeric items are ignored.
+-- Non-numeric and blank items are ignored.
+-- OPENJSON (compatibility level 130+), not the earlier XML split: that one took ~77 s for 2,000 keys
+-- (it made the claims export run for over an hour); OPENJSON splits 20,000 in well under a second.
 CREATE OR ALTER FUNCTION dbo.ARWB_tvf_ParseKeyList (@List nvarchar(max))
 RETURNS TABLE
 AS
 RETURN
-    SELECT DISTINCT ClaimKey = TRY_CONVERT(bigint, LTRIM(RTRIM(k.n.value('.', 'nvarchar(40)'))))
-    FROM (SELECT x = CAST(N'<k>' + REPLACE((SELECT ISNULL(@List, N'') FOR XML PATH('')), N',', N'</k><k>') + N'</k>' AS xml)) s
-    CROSS APPLY s.x.nodes('/k') k (n)
-    WHERE TRY_CONVERT(bigint, LTRIM(RTRIM(k.n.value('.', 'nvarchar(40)')))) IS NOT NULL;
+    SELECT DISTINCT ClaimKey = TRY_CONVERT(bigint, LTRIM(RTRIM(j.value)))
+    FROM OPENJSON(N'["' + REPLACE(STRING_ESCAPE(ISNULL(@List, N''), 'json'), N',', N'","') + N'"]') j
+    WHERE LTRIM(RTRIM(j.value)) <> N''
+      AND TRY_CONVERT(bigint, LTRIM(RTRIM(j.value))) IS NOT NULL;
 GO
 
 PRINT 'AR Workbench 02: helper functions ready.';

@@ -104,6 +104,16 @@ export const arWorkbenchService = {
   // Follow-up notes, claim export, insights, timely-filing limits
   logFollowUp: (labId, claimKey, body) => api(`claims/${encodeURIComponent(claimKey)}/follow-ups${qs({ labId })}`, json('POST', body)),
   exportClaims: (filter) => downloadFile(`claims/export${qs(filter)}`, 'ARWorkbench_Claims.xlsx'),
+
+  // Background exports (the Denial Workflow Overall Download pattern): start returns a job, the
+  // Downloads tracker polls it and saves the file when it is Completed. See ExportJobsContext.
+  startClaimsExport: (filter, exportScope) => api(`exports/claims${qs({ ...filter, exportScope })}`, { method: 'POST' }),
+  startAuditExport: (filter) => api(`exports/audit${qs(filter)}`, { method: 'POST' }),
+  startReportExport: (labId, reportId, range) => api(`exports/reports/${encodeURIComponent(reportId)}${qs({ labId, ...range })}`, { method: 'POST' }),
+  exportJobs: (labId, signal) => api(`exports${qs({ labId })}`, { signal }),
+  exportJob: (labId, jobId, signal) => api(`exports/${encodeURIComponent(jobId)}${qs({ labId })}`, { signal }),
+  downloadExport: (labId, jobId, fileName) => downloadFile(`exports/${encodeURIComponent(jobId)}/download${qs({ labId })}`, fileName || 'ARWorkbench_Export.xlsx'),
+  cancelExport: (labId, jobId) => api(`exports/${encodeURIComponent(jobId)}${qs({ labId })}`, { method: 'DELETE' }),
   insights: (labId, signal) => api(`data-processing/insights${qs({ labId })}`, { signal }),
   uploadedInsights: (labId, signal) => api(`data-processing/uploaded-insights${qs({ labId })}`, { signal }),
   tflSettings: (labId) => api(`settings/tfl${qs({ labId })}`),

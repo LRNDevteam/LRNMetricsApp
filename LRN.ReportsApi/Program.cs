@@ -99,6 +99,8 @@ builder.Services.AddScoped<LRN.ReportsApi.Services.ArWorkbench.IArWorkbenchRepos
                            LRN.ReportsApi.Services.ArWorkbench.SqlArWorkbenchRepository>();
 // AR Workbench attachments (CIP responses): local-disk store until Azure Blob is provisioned.
 builder.Services.AddSingleton<LRN.ReportsApi.Services.ArWorkbench.IArWorkbenchDocumentStore, LRN.ReportsApi.Services.ArWorkbench.LocalArWorkbenchDocumentStore>();
+// AR Workbench Export buttons run as background jobs (the Denial Workflow Overall Download pattern).
+builder.Services.AddSingleton<LRN.ReportsApi.Services.ArWorkbench.IArWorkbenchExportJobService, LRN.ReportsApi.Services.ArWorkbench.ArWorkbenchExportJobService>();
 // AR Workbench nightly queue snapshot (T038): recalculate + snapshot each lab once a day.
 builder.Services.Configure<LRN.ReportsApi.Services.ArWorkbench.ArWorkbenchSnapshotOptions>(builder.Configuration.GetSection("ArWorkbenchSnapshots"));
 builder.Services.AddHostedService<LRN.ReportsApi.Services.ArWorkbench.ArWorkbenchSnapshotScheduler>();

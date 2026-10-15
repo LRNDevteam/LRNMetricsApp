@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import DataTable, { withSortKeys } from '../components/DataTable';
 import { CLAIM_SORT_KEYS } from '../config/sortKeys';
 import BulkUpdateModal from '../components/BulkUpdateModal';
+import { ExportButton } from '../components/ExportJobs';
 import FollowUpModal from '../components/FollowUpModal';
 import Icon from '../components/Icon';
 import MultiSelect from '../components/MultiSelect';
@@ -45,6 +46,7 @@ const CONFIG = {
     tiles: MY_WORK_TILES,
     title: 'Your Queue',
     exportName: 'my-work-queue',
+    exportScope: 'My Work',
     filters: [['payer', 'Payer', 'payers'], ['panel', 'Panel Type', 'panels'], ['category', 'Denial Category', 'categories'],
       ['priority', 'Priority', 'priorities'], ['status', 'Status', 'statuses']],
     more: [['sourceStatus', 'Claim Status', 'sourceStatuses'], ['fixResolution', 'Fix / Resolution', 'fixResolutions'], ['agent', 'Assigned Agent', 'agents']],
@@ -55,6 +57,7 @@ const CONFIG = {
     tiles: FOLLOW_UP_TILES,
     title: 'Follow-Up Schedule',
     exportName: 'followup-schedule',
+    exportScope: 'Follow-Up Schedule',
     filters: [['payer', 'Payer', 'payers'], ['panel', 'Panel Type', 'panels'], ['category', 'Denial Category', 'categories'],
       ['priority', 'Priority', 'priorities'], ['aging', 'AR Aging', 'agingBuckets']],
     more: [['agent', 'Assigned Agent', 'agents'], ['status', 'Workflow Status', 'statuses'], ['sourceStatus', 'Claim Status', 'sourceStatuses'],
@@ -134,6 +137,12 @@ export default function WorklistPage({ view = 'mywork' }) {
       .catch((e) => { if (e.name !== 'AbortError') { setError(e.message); setLoading(false); } });
     return () => controller.abort();
   }, [filter, reloadKey]);
+
+  // Every claim in the view (tile + filters) as Excel, built in the background.
+  function startExport() {
+    const { page, pageSize, ...rest } = filter; // eslint-disable-line no-unused-vars
+    return arWorkbenchService.startClaimsExport(rest, cfg.exportScope);
+  }
 
   const setList = (k, v) => { setLists((l) => ({ ...l, [k]: v })); setQuery((q) => ({ ...q, page: 1 })); };
   const clear = () => { setLists(BLANK); setTflOnly(false); setSearchText(''); setSearch(''); setQuick('all'); setQuery((q) => ({ ...q, page: 1 })); };
@@ -258,11 +267,18 @@ export default function WorklistPage({ view = 'mywork' }) {
           onPage={(page) => setQuery((q) => ({ ...q, page }))}
           onPageSize={(pageSize) => setQuery((q) => ({ ...q, pageSize, page: 1 }))}
           onRowClick={openClaim}
-          toolbar={(can('assign') || can('editClaim')) && (
-            <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => setBulkOpen(true)}
-              title="Log follow-ups (and assign) for many claims from an Excel file - the template lists this view's claims">
-              <Icon name="upload" size={15} /> Bulk Update (Excel)
-            </button>
+          toolbar={(
+            <>
+              {(can('assign') || can('editClaim')) && (
+                <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => setBulkOpen(true)}
+                  title="Log follow-ups (and assign) for many claims from an Excel file - the template lists this view's claims">
+                  <Icon name="upload" size={15} /> Bulk Update (Excel)
+                </button>
+              )}
+              <ExportButton scope={cfg.exportScope} label="Export Excel"
+                title="Every claim in this view (tile and filters), not just this page - built in the background"
+                start={startExport} />
+            </>
           )}
         />
       </div>

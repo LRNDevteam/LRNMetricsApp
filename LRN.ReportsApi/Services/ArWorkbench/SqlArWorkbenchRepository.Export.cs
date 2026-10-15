@@ -11,7 +11,7 @@ namespace LRN.ReportsApi.Services.ArWorkbench;
 /// </summary>
 public sealed partial class SqlArWorkbenchRepository
 {
-    private const int ExportDetailChunk = 2000;
+    private const int ExportDetailChunk = 5000;
 
     public async Task<Dictionary<long, ArWorkbenchClaimExportDetail>> GetClaimExportDetailsAsync(int labId, IReadOnlyList<long> claimKeys, CancellationToken ct)
     {
@@ -21,6 +21,18 @@ public sealed partial class SqlArWorkbenchRepository
 
         await using var connection = await OpenLabAsync(labId, ct);
         var hasVerification = await TableExistsAsync(connection, "dbo.ARWB_StatusVerification", ct);
+
+        // The keys go into #allk once by SqlBulkCopy, and each chunk reads its Seq range. Passing them
+        // as a comma list through dbo.ARWB_tvf_ParseKeyList cost ~77 s per 2,000 keys on the old XML
+        // splitter, which made an 84,000-claim export run for over an hour.
+        await using (var create = new SqlCommand("CREATE TABLE #allk (Seq int NOT NULL PRIMARY KEY, ClaimKey bigint NOT NULL);", connection))
+            await create.ExecuteNonQueryAsync(ct);
+        var table = new DataTable();
+        table.Columns.Add("Seq", typeof(int));
+        table.Columns.Add("ClaimKey", typeof(long));
+        for (var i = 0; i < keys.Count; i++) table.Rows.Add(i, keys[i]);
+        using (var bulk = new SqlBulkCopy(connection) { DestinationTableName = "#allk", BulkCopyTimeout = 300, BatchSize = 10_000 })
+            await bulk.WriteToServerAsync(table, ct);
 
         var verificationSql = hasVerification ? @"
 SELECT v.ClaimKey, v.VerificationStatus, v.PreviousSourceStatus, v.NewSourceStatus, v.ManagerUser,
@@ -32,7 +44,7 @@ CROSS APPLY (SELECT TOP (1) s.* FROM dbo.ARWB_StatusVerification s WHERE s.Claim
         var sql = $@"
 SET NOCOUNT ON;
 CREATE TABLE #k (ClaimKey bigint NOT NULL PRIMARY KEY);
-INSERT INTO #k (ClaimKey) SELECT DISTINCT k.ClaimKey FROM dbo.ARWB_tvf_ParseKeyList(@Keys) k;
+INSERT INTO #k (ClaimKey) SELECT a.ClaimKey FROM #allk a WHERE a.Seq >= @From AND a.Seq < @To;
 
 SELECT c.ClaimKey, c.AssignedBy, c.AssignedOn,
        (SELECT COUNT(*) FROM dbo.ARWB_ClaimFollowUp x WHERE x.ClaimKey = c.ClaimKey AND x.IsSystem = 0),
@@ -63,10 +75,11 @@ OUTER APPLY (SELECT TOP (1) * FROM dbo.ARWB_ClaimQaReview r WHERE r.ClaimKey = c
 {verificationSql}
 DROP TABLE #k;";
 
-        foreach (var chunk in keys.Chunk(ExportDetailChunk))
+        for (var from = 0; from < keys.Count; from += ExportDetailChunk)
         {
             await using var cmd = new SqlCommand(sql, connection) { CommandTimeout = 300 };
-            cmd.Parameters.Add("@Keys", SqlDbType.NVarChar, -1).Value = string.Join(",", chunk);
+            cmd.Parameters.Add("@From", SqlDbType.Int).Value = from;
+            cmd.Parameters.Add("@To", SqlDbType.Int).Value = from + ExportDetailChunk;
             await using var r = await cmd.ExecuteReaderAsync(ct);
             while (await r.ReadAsync(ct))
             {
