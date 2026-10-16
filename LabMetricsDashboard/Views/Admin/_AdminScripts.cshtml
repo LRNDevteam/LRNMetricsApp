@@ -6,6 +6,8 @@
     // when the app is hosted under a virtual path / sub-application (not just the site root).
     // Absolute paths from the domain root 404 under a path base; Url.Content resolves it correctly.
     const ADMIN_BASE = '@Url.Content("~/Admin")';
+    // Linking a Microsoft sign-in to an existing account is for full admins only (AdminController.LinkEntraUser).
+    const CAN_LINK_ACCOUNTS = @(LabMetricsDashboard.Filters.MenuAccessFilter.IsFullAdmin(User) ? "true" : "false");
 
     function wireLabChipPickers(root){
         (root || document).querySelectorAll('.lab-chip-picker').forEach(function(picker){
@@ -115,6 +117,42 @@
         return el ? el.value : '';
     }
     window.adminAntiforgeryToken = antiforgeryToken;
+
+    // Every Admin POST now validates the antiforgery token. FormData posts already carry the form's
+    // hidden field; the urlencoded ones (remove role / lab / user, link) did not. Rather than touch
+    // each call, POSTs to this controller get the RequestVerificationToken header added here.
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = function(input, init){
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        if (init && (init.method || '').toUpperCase() === 'POST' && url.indexOf(ADMIN_BASE + '/') === 0) {
+            const headers = new Headers(init.headers || {});
+            if (!headers.has('RequestVerificationToken')) headers.set('RequestVerificationToken', antiforgeryToken());
+            init = Object.assign({}, init, { headers: headers });
+        }
+        return nativeFetch(input, init);
+    };
+
+    // Link a pending "Sign in with Microsoft" user to the person's existing account (full admins).
+    document.addEventListener('click', function(e){
+        const btn = e.target.closest('[data-link-userid]');
+        if (!btn) return;
+        const id = btn.getAttribute('data-link-userid');
+        const msName = btn.getAttribute('data-link-username') || 'this Microsoft user';
+        const existing = prompt('Link ' + msName + ' to which existing account?\n\nEnter that account\'s UserName. It keeps its roles, labs and username, and from now on signs in with Microsoft only - its password stops working. The pending Microsoft row is removed.');
+        if (!existing || !existing.trim()) return;
+        btn.disabled = true;
+        fetch(ADMIN_BASE + '/LinkEntraUser', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'pendingUserId=' + encodeURIComponent(id) + '&existingUserName=' + encodeURIComponent(existing.trim()),
+            credentials: 'same-origin'
+        }).then(async r=>{
+            const d = await r.json().catch(()=>null);
+            if (!r.ok) { showAdminNotice('danger', d && d.errors ? d.errors.join('; ') : 'The accounts could not be linked.'); btn.disabled = false; return; }
+            showAdminNotice('success', (d && d.message) || 'Accounts linked.');
+            await refreshUsers();
+        }).catch(err=>{ console.error(err); showAdminNotice('danger', 'The accounts could not be linked.'); btn.disabled = false; });
+    });
 
     // Send / resend the first-login invitation email (shared invitation service in LRN.ReportsApi).
     document.addEventListener('click', function(e){
@@ -445,7 +483,7 @@
         });
     }
 
-    window.refreshUsers = async function(){ try{ const r = await fetch(ADMIN_BASE + '/GetUsersJson', {credentials:'same-origin'}); const data = await r.json(); const tbody = document.getElementById('tblUsersBody'); if(tbody){ tbody.innerHTML=''; data.forEach(u=>{ const tr = document.createElement('tr'); tr.setAttribute('data-userid', u.labUserID); const labs = [...new Set((u.labs||[]).map(x=>x.labName||x.labId).filter(Boolean))]; const roles = [...new Set((u.roles||[]).map(x=>x.roleName||x.RoleName||x.roleID||x.roleId).filter(Boolean))]; const name = `${u.firstName||''} ${u.lastName||''}`.trim(); const searchText = [u.userName, name, u.email, u.mobile, roles.join(' '), labs.join(' ')].filter(Boolean).join(' '); tr.setAttribute('data-search', searchText); tr.setAttribute('data-roles', roles.join(' ')); tr.setAttribute('data-labs', labs.join(' ')); const roleBadges = roles.map(x=>`<span class="badge user-badge user-badge-role me-1">${escapeHtml(x)}</span>`).join(''); const labBadges = labs.map(x=>`<span class="badge user-badge user-badge-lab me-1">${escapeHtml(x)}</span>`).join(''); tr.innerHTML = `<td>${escapeHtml(u.userName)}</td><td>${escapeHtml(name)}</td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.mobile)}</td><td>${roleBadges}</td><td>${labBadges}</td><td>${u.isActive? 'Yes':'No'}</td><td><div class="btn-group" role="group"><a class="btn btn-sm btn-primary user-action-btn" href="${ADMIN_BASE}/Edit/${u.labUserID}" title="Edit user" aria-label="Edit ${escapeHtml(u.userName)}"><i class="bi bi-pencil-square"></i></a>${u.isActive && u.email ? `<button class="btn btn-sm btn-outline-primary user-action-btn" data-invite-userid="${u.labUserID}" title="Send invitation email" aria-label="Send invitation to ${escapeHtml(u.userName)}"><i class="bi bi-envelope"></i></button>` : ''}<button class="btn btn-sm btn-outline-danger user-action-btn" data-remove-userid="${u.labUserID}" title="Remove user" aria-label="Remove ${escapeHtml(u.userName)}"><i class="bi bi-trash3"></i></button></div></td>`; tbody.appendChild(tr); }); populateUserSelects(data); if (window.applyUserFilters) window.applyUserFilters(); }}catch(e){console.error(e);} };
+    window.refreshUsers = async function(){ try{ const r = await fetch(ADMIN_BASE + '/GetUsersJson', {credentials:'same-origin'}); const data = await r.json(); const tbody = document.getElementById('tblUsersBody'); if(tbody){ tbody.innerHTML=''; data.forEach(u=>{ const tr = document.createElement('tr'); tr.setAttribute('data-userid', u.labUserID); const labs = [...new Set((u.labs||[]).map(x=>x.labName||x.labId).filter(Boolean))]; const roles = [...new Set((u.roles||[]).map(x=>x.roleName||x.RoleName||x.roleID||x.roleId).filter(Boolean))]; const name = `${u.firstName||''} ${u.lastName||''}`.trim(); const searchText = [u.userName, name, u.email, u.mobile, roles.join(' '), labs.join(' ')].filter(Boolean).join(' '); tr.setAttribute('data-search', searchText); tr.setAttribute('data-roles', roles.join(' ')); tr.setAttribute('data-labs', labs.join(' ')); const roleBadges = roles.map(x=>`<span class="badge user-badge user-badge-role me-1">${escapeHtml(x)}</span>`).join(''); const labBadges = labs.map(x=>`<span class="badge user-badge user-badge-lab me-1">${escapeHtml(x)}</span>`).join(''); const isMs = u.authProvider === 'Entra'; const isPending = roles.length === 0; const idBadges = (isMs ? `<span class="badge user-badge user-badge-ms ms-1" title="Signs in with Microsoft (MFA)">Microsoft</span>` : '') + (isPending && u.isActive ? `<span class="badge user-badge user-badge-pending ms-1" title="No role yet: sees Access pending">Pending</span>` : ''); tr.innerHTML = `<td>${escapeHtml(u.userName)}${idBadges}</td><td>${escapeHtml(name)}</td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.mobile)}</td><td>${roleBadges}</td><td>${labBadges}</td><td>${u.isActive? 'Yes':'No'}</td><td><div class="btn-group" role="group"><a class="btn btn-sm btn-primary user-action-btn" href="${ADMIN_BASE}/Edit/${u.labUserID}" title="Edit user" aria-label="Edit ${escapeHtml(u.userName)}"><i class="bi bi-pencil-square"></i></a>${u.isActive && !isMs && u.email ? `<button class="btn btn-sm btn-outline-primary user-action-btn" data-invite-userid="${u.labUserID}" title="Send invitation email" aria-label="Send invitation to ${escapeHtml(u.userName)}"><i class="bi bi-envelope"></i></button>` : ''}${isMs && isPending && CAN_LINK_ACCOUNTS ? `<button class="btn btn-sm btn-outline-success user-action-btn" data-link-userid="${u.labUserID}" data-link-username="${escapeHtml(u.userName)}" title="Link to an existing account" aria-label="Link ${escapeHtml(u.userName)} to an existing account"><i class="bi bi-link-45deg"></i></button>` : ''}<button class="btn btn-sm btn-outline-danger user-action-btn" data-remove-userid="${u.labUserID}" title="Remove user" aria-label="Remove ${escapeHtml(u.userName)}"><i class="bi bi-trash3"></i></button></div></td>`; tbody.appendChild(tr); }); populateUserSelects(data); if (window.applyUserFilters) window.applyUserFilters(); }}catch(e){console.error(e);} };
     window.refreshRoles = async function(){ try{ const r = await fetch(ADMIN_BASE + '/GetRolesJson', {credentials:'same-origin'}); const data = await r.json(); document.querySelectorAll('#mapRoleSelect, #mapRoleSelectPage').forEach(sel=>{ if(!sel) return; sel.innerHTML = '<option value="">-- select role --</option>'; data.forEach(r=>{ const id = r.roleID||r.RoleID||r.roleId||r.RoleId; const name = r.roleName||r.RoleName||r.name||r.role; const opt = document.createElement('option'); opt.value = id; opt.textContent = name; sel.appendChild(opt); }); }); // labs
         const lr = await fetch(ADMIN_BASE + '/GetLabsJson', {credentials:'same-origin'}); const labs = await lr.json(); const labSel = document.getElementById('mapLabSelect')||document.getElementById('mapLabSelectPage'); if(labSel){ labSel.innerHTML = '<option value="">-- select lab --</option>'; labs.forEach(l=>{ const id = l.labId||l.LabId||l.labID||l.LabID; const name = l.labName||l.LabName||l.name; const o = document.createElement('option'); o.value = id; o.textContent = name; labSel.appendChild(o); }); }
     }catch(e){console.error(e);} };

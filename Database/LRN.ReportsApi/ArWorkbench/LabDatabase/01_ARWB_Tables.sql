@@ -535,6 +535,32 @@ CREATE TABLE dbo.ARWB_ClaimLineDenial
 );
 GO
 
+-- Every CPT that has ever been denied on a claim. Revenue Expectation is priced on the claim's
+-- DENIED lines (fee schedule rate x units), and a sync reloads lines from the master file: once a
+-- denied line is paid its denial code is gone, so without this record the line would drop out of
+-- the expectation at the very moment it is recovered. Rows are added on each sync, never removed
+-- while the claim exists.
+IF OBJECT_ID(N'dbo.ARWB_ClaimDeniedCpt', N'U') IS NULL
+CREATE TABLE dbo.ARWB_ClaimDeniedCpt
+(
+    ClaimKey                bigint         NOT NULL CONSTRAINT FK_ARWB_ClaimDeniedCpt_Claim REFERENCES dbo.ARWB_Claim (ClaimKey),
+    CPTCode                 nvarchar(50)   NOT NULL,
+    FirstDeniedOn           datetime2(0)   NOT NULL CONSTRAINT DF_ARWB_ClaimDeniedCpt_FirstDeniedOn DEFAULT (SYSUTCDATETIME()),
+    FirstRefreshRunId       int            NULL,
+    CONSTRAINT PK_ARWB_ClaimDeniedCpt PRIMARY KEY (ClaimKey, CPTCode)
+);
+GO
+
+-- Existing installs: record the CPTs denied on the lines already loaded.
+INSERT INTO dbo.ARWB_ClaimDeniedCpt (ClaimKey, CPTCode, FirstRefreshRunId)
+SELECT x.ClaimKey, x.CPTCode, MIN(x.RefreshRunId)
+FROM (SELECT l.ClaimKey, CPTCode = LTRIM(RTRIM(l.CPTCode)), l.RefreshRunId
+      FROM dbo.ARWB_ClaimLine l
+      WHERE l.HasDenial = 1 AND NULLIF(LTRIM(RTRIM(l.CPTCode)), N'') IS NOT NULL) x
+WHERE NOT EXISTS (SELECT 1 FROM dbo.ARWB_ClaimDeniedCpt d WHERE d.ClaimKey = x.ClaimKey AND d.CPTCode = x.CPTCode)
+GROUP BY x.ClaimKey, x.CPTCode;
+GO
+
 /* ============================================================================================
    F. POINT-IN-TIME FINANCIAL HISTORY - one row per claim per sync in which it changed
    ============================================================================================ */
@@ -762,6 +788,11 @@ CREATE TABLE dbo.ARWB_Document
     CONSTRAINT CK_ARWB_Document_Size   CHECK (SizeBytes > 0),
     CONSTRAINT CK_ARWB_Document_Source CHECK (DocumentSource IN ('FollowUp', 'CipResponse', 'Other'))
 );
+GO
+
+-- What the uploader says the file is (each document on a follow-up note carries its own description).
+IF COL_LENGTH(N'dbo.ARWB_Document', N'Description') IS NULL
+    ALTER TABLE dbo.ARWB_Document ADD Description nvarchar(500) NULL;
 GO
 
 -- HIPAA: every view and download is logged.

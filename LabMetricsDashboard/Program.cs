@@ -10,6 +10,7 @@ using LabMetricsDashboard.Services.ReimbursementAgent;
 using LabMetricsDashboard.Services.Security;
 using LRN.ProductionReports.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -17,6 +18,7 @@ using Microsoft.AspNetCore.Mvc.Authorization;
 using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Primitives;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using System.Net;
 using System.Security.Cryptography;
 using System.Threading.RateLimiting;
@@ -130,6 +132,32 @@ else
         "Key Vault SKIPPED — KeyVault:Uri is empty or absent, so connection strings and the JWT " +
         "signing key must come from appsettings.Local.json or environment variables. This is " +
         "expected on a developer machine and a misconfiguration on a server.");
+}
+
+// ── Hybrid sign-in: Sign in with Microsoft (Entra ID) beside the password form ────────────
+// The Entra app registration's values come from the vault as MFAAzureAd--TenantId,
+// MFAAzureAd--ClientId and MFAAzureAd--ClientSecret (or appsettings.Local.json on a developer
+// machine). Missing any of them turns the Microsoft button off rather than failing startup:
+// password sign-in must keep working whatever state the Entra configuration is in.
+var hybridAuth = builder.Configuration.GetSection(HybridAuthOptions.Section).Get<HybridAuthOptions>() ?? new HybridAuthOptions();
+var entraConfig = builder.Configuration.GetSection("MFAAzureAd");
+if (hybridAuth.EnableMicrosoftLogin)
+{
+    var missingEntra = new[] { "TenantId", "ClientId", "ClientSecret" }
+        .Where(k => string.IsNullOrWhiteSpace(entraConfig[k]))
+        .Select(k => "MFAAzureAd--" + k)
+        .ToArray();
+    if (missingEntra.Length > 0)
+    {
+        hybridAuth.EnableMicrosoftLogin = false;
+        LogStartupWarning(
+            $"Sign in with Microsoft is OFF: HybridAuth:EnableMicrosoftLogin is true but {string.Join(", ", missingEntra)} " +
+            "is missing from Key Vault / configuration. Password sign-in is unaffected.");
+    }
+    else
+    {
+        LogStartupWarning($"Sign in with Microsoft is ON (tenant {entraConfig["TenantId"]}).");
+    }
 }
 
 // Bind the "LabConfig" section from appsettings.json.
@@ -557,6 +585,15 @@ builder.Services.AddScoped<ExecutiveSummaryExcelBuilder>();
 // User management repository (uses DefaultConnection from appsettings.json)
 builder.Services.AddScoped<IUserManagementRepository, SqlUserManagementRepository>();
 builder.Services.AddScoped<WorkflowJwtIssuer>();
+// Effective values: EnableMicrosoftLogin was forced off above when the Entra settings are incomplete.
+builder.Services.Configure<HybridAuthOptions>(o =>
+{
+    o.EnableMicrosoftLogin = hybridAuth.EnableMicrosoftLogin;
+    o.BlockOrganizationLocalLogin = hybridAuth.BlockOrganizationLocalLogin;
+    o.OrganizationDomains = hybridAuth.OrganizationDomains;
+    o.RevalidateMinutes = hybridAuth.RevalidateMinutes;
+});
+builder.Services.AddScoped<LrnSignInService>();
 // First-login password page for users invited from AR Workbench User Management.
 builder.Services.AddScoped<IUserInvitationRepository, SqlUserInvitationRepository>();
 // Invitation email + sent-mail log, shared with the AR Workbench (LRN.ReportsApi /api/user-mail).
@@ -616,6 +653,8 @@ builder.Services.AddSingleton<ILabNameResolver, LabNameResolver>();
 builder.Services.AddScoped<IMasterProcessorRerunRepository, SqlMasterProcessorRerunRepository>();
 // Denial Category Master + Non-Collectible Denial Master (LRNMaster), imported from the denial codes workbook.
 builder.Services.AddScoped<IDenialCategoryMasterRepository, SqlDenialCategoryMasterRepository>();
+// Master Values > Fees Schedule Import (LRNMaster.dbo.FeeSchedule): the AR Workbench's Revenue Expectation rates.
+builder.Services.AddScoped<IFeeScheduleRepository, SqlFeeScheduleRepository>();
 builder.Services.AddScoped<IDenialDatabaseRerunRepository, SqlDenialDatabaseRerunRepository>();
 
 // ── Reimbursement Insights chat (Foundry agent via the ReimbursementAgentProxy App Service) ──
@@ -763,13 +802,21 @@ builder.Services.AddControllersWithViews(options =>
 // spaces). [Authorize(Roles = "Admin")] matched the literal "Admin" only, so a Super Admin opening
 // Menu Master / Role Menu Mapping was bounced to Account/Login?denied=1.
 builder.Services.AddAuthorization(options =>
+{
     options.AddPolicy(MenuAccessFilter.FullAdminPolicy, p =>
-        p.RequireAuthenticatedUser().RequireAssertion(ctx => MenuAccessFilter.IsFullAdmin(ctx.User))));
+        p.RequireAuthenticatedUser().RequireAssertion(ctx => MenuAccessFilter.IsFullAdmin(ctx.User)));
+    // User management: full admins, plus Lab Admins within their own labs (AdminController checks
+    // the lab scope per request). Those POST endpoints are not menu items, so MenuAccessFilter
+    // never guarded them and any signed-in user could call them.
+    options.AddPolicy(MenuAccessFilter.UserAdminPolicy, p =>
+        p.RequireAuthenticatedUser().RequireAssertion(ctx =>
+            MenuAccessFilter.IsFullAdmin(ctx.User) || MenuAccessFilter.IsLabAdmin(ctx.User)));
+});
 
 builder.Services.AddRequestTimeouts();
 
 // ── Cookie authentication ─────────────────────────────────────────
-builder.Services
+var authBuilder = builder.Services
     //<<<<<<< HEAD
     //    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     //    .AddCookie(options =>
@@ -822,6 +869,9 @@ builder.Services
         // the redirect to the root site and returns 404.0 (file not found).
         options.Events = new CookieAuthenticationEvents
         {
+            // Rebuilds the claims from LabUsers every HybridAuth:RevalidateMinutes, for both providers.
+            OnValidatePrincipal = LrnCookieRevalidation.ValidateAsync,
+
             OnRedirectToLogin = ctx =>
             {
                 var returnUrl = ctx.Properties.RedirectUri ?? string.Empty;
@@ -900,6 +950,63 @@ builder.Services
 
 
     });
+
+// Holds the Microsoft result for the one redirect between /signin-oidc and Account/MicrosoftCallback.
+// The OpenID Connect handler signs in HERE, not into the auth cookie: LabUsers decides whether the
+// verified Microsoft user gets in at all (a user with no role stops at Access pending).
+authBuilder.AddCookie(LrnAuth.ExternalScheme, o =>
+{
+    o.Cookie.Name = LrnAuth.ExternalCookieName(builder.Configuration);
+    o.Cookie.HttpOnly = true;
+    o.Cookie.SameSite = SameSiteMode.Lax;
+    o.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    o.Cookie.Path = "/";
+    o.ExpireTimeSpan = TimeSpan.FromMinutes(5);
+    o.SlidingExpiration = false;
+});
+
+if (hybridAuth.EnableMicrosoftLogin)
+{
+    var tenantId = entraConfig["TenantId"]!.Trim();
+    var instance = (entraConfig["Instance"] ?? "https://login.microsoftonline.com/").Trim().TrimEnd('/');
+
+    authBuilder.AddOpenIdConnect(LrnAuth.EntraScheme, "Microsoft", o =>
+    {
+        o.Authority = $"{instance}/{tenantId}/v2.0";
+        o.ClientId = entraConfig["ClientId"]!.Trim();
+        o.ClientSecret = entraConfig["ClientSecret"];
+        // Built on the request's PathBase, so production registers .../lrnAnalytics/signin-oidc.
+        o.CallbackPath = ConfigText(entraConfig, "CallbackPath", "/signin-oidc");
+        o.SignedOutCallbackPath = ConfigText(entraConfig, "SignedOutCallbackPath", "/signout-callback-oidc");
+        o.SignInScheme = LrnAuth.ExternalScheme;
+        o.ResponseType = OpenIdConnectResponseType.Code;   // authorization code + PKCE: no implicit grant needed
+        o.UsePkce = true;
+        o.SaveTokens = false;
+        o.MapInboundClaims = false;                        // keep "oid", "tid", "preferred_username" as-is
+        o.GetClaimsFromUserInfoEndpoint = false;
+        o.Scope.Clear();
+        o.Scope.Add("openid");
+        o.Scope.Add("profile");
+        o.Scope.Add("email");
+        o.TokenValidationParameters.NameClaimType = "name";
+        o.TokenValidationParameters.ValidIssuer = $"https://login.microsoftonline.com/{tenantId}/v2.0";
+        o.Events = new OpenIdConnectEvents
+        {
+            // Cancelled at Microsoft, MFA not completed, or a correlation failure: back to the
+            // login page with a message rather than the developer exception page.
+            OnRemoteFailure = ctx =>
+            {
+                ctx.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("MicrosoftSignIn")
+                    .LogWarning(ctx.Failure, "Microsoft sign-in did not complete.");
+                var pathBase = ctx.Request.PathBase.HasValue ? ctx.Request.PathBase.Value : string.Empty;
+                ctx.Response.Redirect($"{pathBase}/Account/Login?msError=1");
+                ctx.HandleResponse();
+                return Task.CompletedTask;
+            }
+        };
+    });
+}
 
 var app = builder.Build();
 
@@ -1180,9 +1287,11 @@ static void ApplySecurityHeaders(HttpContext context)
     // fragile even when the initial POST target is present. form-action does not
     // fall back to default-src: omit it only in Development and keep Production
     // restricted to the origin that served the login page.
+    // login.microsoftonline.com: signing out a Microsoft user POSTs Account/Logout, which redirects
+    // to Microsoft's sign-out page - and browsers check form-action against that redirect too.
     var formActionDirective = environment.IsDevelopment()
         ? string.Empty
-        : "form-action 'self'; ";
+        : "form-action 'self' https://login.microsoftonline.com; ";
 
     var headers = context.Response.Headers;
     headers["X-Content-Type-Options"] = "nosniff";

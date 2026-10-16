@@ -24,4 +24,18 @@ public sealed class LabUser
     public DateTime? ModifiedDate { get; set; }
     public string CreatedBy { get; set; } = string.Empty;
     public string ModifiedBy { get; set; } = string.Empty;
+
+    // Hybrid authentication (Database/LabMetricsDashboard/HybridAuth_Setup.sql).
+    /// <summary>"Local" (username + password) or "Entra" (Sign in with Microsoft; no password).</summary>
+    public string AuthProvider { get; set; } = "Local";
+    /// <summary>The Entra object id (oid). Microsoft sign-in matches on this only - never on email.</summary>
+    public Guid? EntraObjectId { get; set; }
+    public Guid? EntraTenantId { get; set; }
+    public int FailedLoginCount { get; set; }
+    public DateTime? LockoutEndUtc { get; set; }
+    /// <summary>Copied into the sign-in cookie; when it changes, existing sessions end at their next re-validation.</summary>
+    public Guid SecurityStamp { get; set; }
+    public DateTime? LastLoginUtc { get; set; }
+
+    public bool IsEntra => string.Equals(AuthProvider, "Entra", StringComparison.OrdinalIgnoreCase);
 }

@@ -4,9 +4,14 @@ public static class FileUploadGuard
 {
     private static readonly HashSet<string> ExcelExtensions = new(StringComparer.OrdinalIgnoreCase) { ".xlsx" };
     private static readonly HashSet<string> CsvExtensions = new(StringComparer.OrdinalIgnoreCase) { ".csv" };
+    private static readonly HashSet<string> SpreadsheetExtensions = new(StringComparer.OrdinalIgnoreCase) { ".xls", ".xlsx", ".csv" };
 
     public static async Task<string?> ValidateExcelAsync(IFormFile? file, long maxBytes, CancellationToken ct)
         => await ValidateAsync(file, maxBytes, ExcelExtensions, ct);
+
+    /// <summary>.xls (legacy Excel), .xlsx or .csv - e.g. the CMS fee schedule, published as .xls.</summary>
+    public static async Task<string?> ValidateSpreadsheetAsync(IFormFile? file, long maxBytes, CancellationToken ct)
+        => await ValidateAsync(file, maxBytes, SpreadsheetExtensions, ct);
 
     public static async Task<string?> ValidateCsvAsync(IFormFile? file, long maxBytes, CancellationToken ct)
         => await ValidateAsync(file, maxBytes, CsvExtensions, ct);
@@ -36,6 +41,8 @@ public static class FileUploadGuard
         return extension.ToLowerInvariant() switch
         {
             ".xlsx" => StartsWith(header, 0x50, 0x4B, 0x03, 0x04) || StartsWith(header, 0x50, 0x4B, 0x05, 0x06) || StartsWith(header, 0x50, 0x4B, 0x07, 0x08),
+            // Compound File Binary (OLE2) header of a BIFF .xls workbook.
+            ".xls" => StartsWith(header, 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1),
             ".csv" => !header.Contains((byte)0),
             _ => false
         };

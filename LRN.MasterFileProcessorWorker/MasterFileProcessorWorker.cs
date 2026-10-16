@@ -1110,7 +1110,11 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				// Adjust -> Denied, ...) moves to Status Change Verification under one of the lab's
 				// RCM Managers, who is notified in the AR Workbench. Contained like step 85: a failure
 				// here is a warning on a run whose files and tables are already done.
-				if (_arWorkbenchSync.IsEnabledFor(lab.LabId))
+				//
+				// Per lab: only labs with "ArWorkbenchEnabled": true under MasterFileProcessor:Labs run
+				// it. Not every lab has the AR Workbench, and a lab without its tables must not have the
+				// denial copy / fee schedule / recovery steps attempted against its database at all.
+				if (IsArWorkbenchEnabledForLab(lab))
 				{
 					stepSeq = 87;
 					var step87 = new StepLogRow
@@ -1157,6 +1161,10 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 						}, ct);
 						runRow.TotalWarnings += 1;
 					}
+				}
+				else
+				{
+					_fileLog.Info($"Lab {lab.LabId}: AR Workbench sync not run - set \"ArWorkbenchEnabled\": true for this lab under MasterFileProcessor:Labs to enable it.");
 				}
 
 				// The load has finished with the staged files, so the folder can go now rather than
@@ -2143,16 +2151,19 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 	/// half the data was lost. Every sheet whose name ends with Line Level / LineLevel -- with or
 	/// without a system prefix -- is therefore taken from the workbook itself.
 	/// </para>
+	/// <para>
+	/// A line level split into period sheets ("Webpm Linelevel 2026" + "Webpm Linelevel 2025") is
+	/// loaded in full: every period sheet is taken (LineLevelSheetResolver). This applies to any lab -
+	/// a lab that normally sends one sheet switches to discovery as soon as its workbook carries a
+	/// dated line-level sheet.
+	/// </para>
 	/// Falls back to the static candidate list when nothing matches, so behavior is unchanged for
 	/// labs and files that do not use this naming.
 	/// </summary>
 	private string GetEffectiveLineSheetCandidates(LabFileMap lab, string workbookPath)
 	{
 		var configured = GetEffectiveLineSheetCandidates(lab);
-
-		// Only the multi-sheet labs need discovery; single-sheet labs keep the configured list.
-		if (!IsNorthWestLab(lab) && string.IsNullOrWhiteSpace(lab.LineLevelSheetNames))
-			return configured;
+		var multiSheetLab = IsNorthWestLab(lab) || !string.IsNullOrWhiteSpace(lab.LineLevelSheetNames);
 
 		List<string> workbookSheets;
 		try
@@ -2165,25 +2176,24 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			return configured;
 		}
 
-		var lineSheets = workbookSheets
-			.Where(IsLineLevelSheetName)
-			.ToList();
-
-		if (lineSheets.Count == 0)
+		// Single-sheet labs keep the configured list unless this workbook splits the line level by period.
+		if (!multiSheetLab && !workbookSheets.Any(LineLevelSheetResolver.HasPeriod))
 			return configured;
 
-		// When prefixed sheets identify both source systems, a bare "Line Level" sheet alongside
-		// them is ambiguous (likely a rollup) and is excluded rather than double-counted.
-		var prefixed = lineSheets.Where(s => !string.IsNullOrWhiteSpace(ExtractSourceLabel(s))).ToList();
-		var selected = prefixed.Count >= 2 ? prefixed : lineSheets;
+		var selected = LineLevelSheetResolver.Select(workbookSheets, out var ignored);
 
-		if (selected.Count != lineSheets.Count)
+		if (selected.Count == 0)
+			return configured;
+
+		// When prefixed sheets identify two or more source systems, a bare "Line Level" sheet alongside
+		// them is ambiguous (likely a rollup) and is excluded rather than double-counted.
+		if (ignored.Count > 0)
 		{
 			_logger.LogInformation(
 				"Lab {LabId}: ignoring unprefixed line-level sheet(s) [{Ignored}] because prefixed sheets [{Prefixed}] are present.",
 				lab.LabId,
-				string.Join(", ", lineSheets.Except(selected)),
-				string.Join(", ", prefixed));
+				string.Join(", ", ignored),
+				string.Join(", ", selected));
 		}
 
 		_logger.LogInformation(
@@ -2194,19 +2204,6 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		_fileLog.Info($"Lab {lab.LabId}: line-level sheets resolved from workbook -> [{string.Join(", ", selected)}]");
 
 		return string.Join(",", selected);
-	}
-
-	/// <summary>
-	/// True for sheet names that denote line-level data, with or without a system prefix:
-	/// "Line Level", "LineLevel", "Daq Line Level", "Webpm LineLevel", "Master Line Level", ...
-	/// </summary>
-	private static bool IsLineLevelSheetName(string? sheetName)
-	{
-		if (string.IsNullOrWhiteSpace(sheetName))
-			return false;
-
-		var normalized = new string(sheetName.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
-		return normalized.EndsWith("LINELEVEL", StringComparison.Ordinal);
 	}
 
 	/// <summary>
@@ -2660,15 +2657,19 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 		var missingSources = new Queue<string>(knownSources.Where(k => !present.Contains(k)));
 
+		// One system missing: every unprefixed sheet is that system's delivery, even when it is split
+		// by period ("Line Level 2025" + "Line Level 2026" beside "Daq Line Level" are both Webpm).
+		var onlyMissing = missingSources.Count == 1 ? missingSources.Peek() : null;
+
 		for (int i = 0; i < pairs.Length; i++)
 		{
 			if (!string.IsNullOrWhiteSpace(pairs[i].SourceValue))
 				continue;
 
-			if (missingSources.Count == 0)
+			if (onlyMissing is null && missingSources.Count == 0)
 				break;
 
-			var inferred = missingSources.Dequeue();
+			var inferred = onlyMissing ?? missingSources.Dequeue();
 
 			_logger.LogInformation(
 				"Lab {LabId}: sheet '{Sheet}' has no system prefix; tagging its rows Source='{Source}' (the configured system missing from this workbook).",
@@ -2684,26 +2685,11 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		return pairs;
 	}
 
-	private static string ExtractSourceLabel(string sheetName)
-	{
-		// "Webpm Line Level"/"Webpm LineLevel" -> "Webpm", "Daq Line Level" -> "Daq".
-		// An unprefixed sheet ("Line Level"/"LineLevel") carries no system name, so it yields
-		// "" and its rows get a blank Source rather than the literal sheet name.
-		var trimmed = (sheetName ?? string.Empty).Trim();
-
-		foreach (var suffix in new[] { "Line Level", "LineLevel" })
-		{
-			if (!trimmed.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
-				continue;
-
-			return trimmed.Substring(0, trimmed.Length - suffix.Length)
-				.Trim()
-				.Trim('-', '_')
-				.Trim();
-		}
-
-		return trimmed;
-	}
+	// "Webpm Line Level"/"Webpm Linelevel 2026" -> "Webpm", "Daq Line Level" -> "Daq".
+	// An unprefixed sheet ("Line Level"/"Line Level 2025") carries no system name, so it yields
+	// "" and its rows get a blank Source rather than the literal sheet name. The period is never
+	// part of the Source: both years of a split sheet load as the same system.
+	private static string ExtractSourceLabel(string sheetName) => LineLevelSheetResolver.SystemLabel(sheetName);
 
 	private static bool ShouldCopyClaimStatusToLineLevel(LabFileMap lab)
 	{
@@ -3370,6 +3356,15 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 		return _opt.PanelMasterFilePath;
 	}
+
+	/// <summary>
+	/// Step 87 runs only when the worker-wide ArWorkbenchSync switch allows the lab AND the lab's own
+	/// entry under MasterFileProcessor:Labs says "ArWorkbenchEnabled": true. Labs without the AR
+	/// Workbench (no ARWB_* tables) leave the key out and are never touched by the denial copy, the
+	/// fee schedule copy or the recovery calculation.
+	/// </summary>
+	private bool IsArWorkbenchEnabledForLab(LabFileMap lab)
+		=> _arWorkbenchSync.IsEnabledFor(lab.LabId) && ParseBool(GetLabConfigValue(lab, "ArWorkbenchEnabled"), false);
 
 	private string? GetLabConfigValue(LabFileMap lab, string key)
 	{

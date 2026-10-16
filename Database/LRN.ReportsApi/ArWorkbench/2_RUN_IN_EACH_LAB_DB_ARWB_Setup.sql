@@ -548,6 +548,32 @@ CREATE TABLE dbo.ARWB_ClaimLineDenial
 );
 GO
 
+-- Every CPT that has ever been denied on a claim. Revenue Expectation is priced on the claim's
+-- DENIED lines (fee schedule rate x units), and a sync reloads lines from the master file: once a
+-- denied line is paid its denial code is gone, so without this record the line would drop out of
+-- the expectation at the very moment it is recovered. Rows are added on each sync, never removed
+-- while the claim exists.
+IF OBJECT_ID(N'dbo.ARWB_ClaimDeniedCpt', N'U') IS NULL
+CREATE TABLE dbo.ARWB_ClaimDeniedCpt
+(
+    ClaimKey                bigint         NOT NULL CONSTRAINT FK_ARWB_ClaimDeniedCpt_Claim REFERENCES dbo.ARWB_Claim (ClaimKey),
+    CPTCode                 nvarchar(50)   NOT NULL,
+    FirstDeniedOn           datetime2(0)   NOT NULL CONSTRAINT DF_ARWB_ClaimDeniedCpt_FirstDeniedOn DEFAULT (SYSUTCDATETIME()),
+    FirstRefreshRunId       int            NULL,
+    CONSTRAINT PK_ARWB_ClaimDeniedCpt PRIMARY KEY (ClaimKey, CPTCode)
+);
+GO
+
+-- Existing installs: record the CPTs denied on the lines already loaded.
+INSERT INTO dbo.ARWB_ClaimDeniedCpt (ClaimKey, CPTCode, FirstRefreshRunId)
+SELECT x.ClaimKey, x.CPTCode, MIN(x.RefreshRunId)
+FROM (SELECT l.ClaimKey, CPTCode = LTRIM(RTRIM(l.CPTCode)), l.RefreshRunId
+      FROM dbo.ARWB_ClaimLine l
+      WHERE l.HasDenial = 1 AND NULLIF(LTRIM(RTRIM(l.CPTCode)), N'') IS NOT NULL) x
+WHERE NOT EXISTS (SELECT 1 FROM dbo.ARWB_ClaimDeniedCpt d WHERE d.ClaimKey = x.ClaimKey AND d.CPTCode = x.CPTCode)
+GROUP BY x.ClaimKey, x.CPTCode;
+GO
+
 /* ============================================================================================
    F. POINT-IN-TIME FINANCIAL HISTORY - one row per claim per sync in which it changed
    ============================================================================================ */
@@ -775,6 +801,11 @@ CREATE TABLE dbo.ARWB_Document
     CONSTRAINT CK_ARWB_Document_Size   CHECK (SizeBytes > 0),
     CONSTRAINT CK_ARWB_Document_Source CHECK (DocumentSource IN ('FollowUp', 'CipResponse', 'Other'))
 );
+GO
+
+-- What the uploader says the file is (each document on a follow-up note carries its own description).
+IF COL_LENGTH(N'dbo.ARWB_Document', N'Description') IS NULL
+    ALTER TABLE dbo.ARWB_Document ADD Description nvarchar(500) NULL;
 GO
 
 -- HIPAA: every view and download is logged.
@@ -1638,12 +1669,16 @@ GO
                           only; queues still follow IsNonCollectible
 
    Financial fields (section 7)
-     RevenueExpectation   sum of line RevenueExpectation (Medicare-rate allowable); 0 when no rate
+     RevenueExpectation   fee-schedule rate x units (dbo.ARWB_CptFeeSchedule, copied from the "Fees Schedule
+                          Import" master in LRN Metrics: HCPCS = CPT) summed over the claim's DENIED lines -
+                          every line whose CPT has ever been denied on the claim (dbo.ARWB_ClaimDeniedCpt),
+                          so a line keeps counting after the sync that shows it paid. A claim that has never
+                          had a denied line is priced on all its billed lines. 0 when no rate.
      PotentialRecovery    RevenueExpectation - (InsurancePayment + PatientPayment + PatientBalance), floor 0
      RecoveryStatus       No Recovery          financially closed with no insurance or patient payment (interim definition - open item)
-                          In Progress          insurance payment, patient payment and patient balance all 0
-                          Fully Recovered      their total >= RevenueExpectation
-                          Partially Recovered  otherwise
+                          In Progress          nothing paid yet (insurance payment + patient payment = 0)
+                          Fully Recovered      total paid (insurance + patient payment) >= RevenueExpectation (> 0)
+                          Partially Recovered  otherwise, including a paid claim with no fee-schedule rate
      RecoveredAmount      insurance payments on lines whose payment date is after the denial date
                           (claims with no denial: after the claim entered the workbench). Payments only.
 
@@ -1753,9 +1788,10 @@ BEGIN
         c.IsAppealRequired     = CASE WHEN p.UnderpaymentAmount > @Eps
                                         OR (q.SubQueueId = 'denied_collectible' AND c.WorkflowStatus <> 'Completed') THEN 1 ELSE 0 END,
         c.RecoveryStatus       = CASE
-                                     WHEN s.IsFinanciallyClosed = 1 AND c.InsurancePayment + c.PatientPayment <= @Eps THEN 'No Recovery'
-                                     WHEN f.Collected <= @Eps                     THEN 'In Progress'
-                                     WHEN f.Collected >= f.RevenueExpectation     THEN 'Fully Recovered'
+                                     WHEN s.IsFinanciallyClosed = 1 AND f.Paid <= @Eps THEN 'No Recovery'
+                                     WHEN f.Paid <= @Eps                          THEN 'In Progress'
+                                     WHEN f.RevenueExpectation > @Eps
+                                      AND f.Paid >= f.RevenueExpectation          THEN 'Fully Recovered'
                                      ELSE 'Partially Recovered'
                                  END,
         -- Lifecycle flags
@@ -1789,16 +1825,26 @@ BEGIN
     FROM dbo.ARWB_Claim c
     -- Recovery baseline: the denial date, else the day the claim entered the workbench
     CROSS APPLY (SELECT Baseline = COALESCE(c.DenialDate, CONVERT(date, c.FirstIdentifiedOn))) b
-    -- Line rollups: revenue expectation and payments after the baseline
+    -- Has the claim ever had a denied line? Then only those CPTs make up the Revenue Expectation.
+    CROSS APPLY
+    (
+        SELECT HasDeniedCpt = CASE WHEN EXISTS (SELECT 1 FROM dbo.ARWB_ClaimDeniedCpt d WHERE d.ClaimKey = c.ClaimKey) THEN 1 ELSE 0 END
+    ) dc
+    -- Line rollups: revenue expectation (denied lines) and payments after the baseline (all lines)
     OUTER APPLY
     (
         SELECT LineCount       = COUNT(*),
-               LineRevenue     = SUM(x.RevenueExpectation),
-               UnpricedLines   = SUM(x.IsUnpriced),
+               BasisLines      = SUM(x.InBasis),
+               LineRevenue     = SUM(CASE WHEN x.InBasis = 1 THEN x.RevenueExpectation ELSE 0 END),
+               UnpricedLines   = SUM(CASE WHEN x.InBasis = 1 THEN x.IsUnpriced ELSE 0 END),
                PaidAfterDenial = SUM(x.PaidAfterBaseline)
         FROM
         (
             SELECT l.RevenueExpectation,
+                   InBasis           = CASE WHEN dc.HasDeniedCpt = 0
+                                              OR EXISTS (SELECT 1 FROM dbo.ARWB_ClaimDeniedCpt d
+                                                         WHERE d.ClaimKey = c.ClaimKey AND d.CPTCode = LTRIM(RTRIM(l.CPTCode)))
+                                            THEN 1 ELSE 0 END,
                    IsUnpriced        = CASE WHEN l.ExpectedRate IS NULL THEN 1 ELSE 0 END,
                    PaidAfterBaseline = CASE WHEN COALESCE(l.CheckDate, l.PostingDate) > b.Baseline THEN l.InsurancePayment ELSE 0 END
             FROM dbo.ARWB_ClaimLine l
@@ -1823,8 +1869,10 @@ BEGIN
             AdjustmentAmount     = c.InsuranceAdjustments
                                    + CASE WHEN (c.IsAutoAdjusted = 1 OR c.IsWriteOffApproved = 1) AND c.InsuranceBalance > 0 THEN c.InsuranceBalance ELSE 0 END,
             RevenueExpectation   = CONVERT(decimal(18,2), ISNULL(la.LineRevenue, 0)),
-            IsRevenueRateMissing = CASE WHEN ISNULL(la.LineCount, 0) = 0 OR la.UnpricedLines > 0 THEN 1 ELSE 0 END,
-            Collected            = c.InsurancePayment + c.PatientPayment + c.PatientBalance
+            IsRevenueRateMissing = CASE WHEN ISNULL(la.BasisLines, 0) = 0 OR la.UnpricedLines > 0 THEN 1 ELSE 0 END,
+            Collected            = c.InsurancePayment + c.PatientPayment + c.PatientBalance,
+            -- Recovery Status compares what has actually been PAID with the expectation.
+            Paid                 = c.InsurancePayment + c.PatientPayment
     ) f
     -- Revenue expectation vs actual
     CROSS APPLY
@@ -2727,6 +2775,17 @@ WHERE NULLIF(LTRIM(RTRIM(r.ClaimID)), N'''') IS NOT NULL
         FROM dbo.ARWB_ClaimLine cl
         INNER JOIN #reload r ON r.ClaimKey = cl.ClaimKey
         WHERE EXISTS (SELECT 1 FROM dbo.ARWB_ClaimLineDenial ld WHERE ld.ClaimLineKey = cl.ClaimLineKey);
+
+        -- Remember every CPT denied on the claim. A later sync where the line is paid carries no
+        -- denial code, but the line still belongs to the Revenue Expectation (04, PriceClaimLines /
+        -- RecalculateClaimState), so a denied -> paid claim can reach Fully Recovered.
+        INSERT INTO dbo.ARWB_ClaimDeniedCpt (ClaimKey, CPTCode, FirstDeniedOn, FirstRefreshRunId)
+        SELECT x.ClaimKey, x.CPTCode, @Now, @RunId
+        FROM (SELECT DISTINCT cl.ClaimKey, CPTCode = LTRIM(RTRIM(cl.CPTCode))
+              FROM dbo.ARWB_ClaimLine cl
+              INNER JOIN #reload r ON r.ClaimKey = cl.ClaimKey
+              WHERE cl.HasDenial = 1 AND NULLIF(LTRIM(RTRIM(cl.CPTCode)), N'') IS NOT NULL) x
+        WHERE NOT EXISTS (SELECT 1 FROM dbo.ARWB_ClaimDeniedCpt d WHERE d.ClaimKey = x.ClaimKey AND d.CPTCode = x.CPTCode);
 
         -- Claim-level line rollup
         UPDATE c

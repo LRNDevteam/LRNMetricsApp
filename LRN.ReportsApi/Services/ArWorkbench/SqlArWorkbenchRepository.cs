@@ -54,6 +54,9 @@ public interface IArWorkbenchRepository
     Task<ArWorkbenchAuditPage> GetAuditLogAsync(ArWorkbenchAuditFilter filter, ArWorkbenchUserContext user, bool withOptions, CancellationToken ct);
 
     // Attachments (SqlArWorkbenchRepository.Documents.cs)
+    Task<IReadOnlyList<long>> AddClaimDocumentsAsync(int labId, long claimKey, long? followUpId,
+        IReadOnlyList<ArWorkbenchClaimUpload> files, ArWorkbenchUserContext user, string? clientIp, CancellationToken ct);
+    Task<ArWorkbenchPagedResult<ArWorkbenchDocumentRow>> SearchDocumentsAsync(ArWorkbenchDocumentFilter filter, ArWorkbenchUserContext user, CancellationToken ct);
     Task<IReadOnlyList<long>> AddCipResponseDocumentsAsync(int labId, long cipCaseId, IReadOnlyList<(string FileName, string? ContentType, StoredDocument Stored)> files, ArWorkbenchUserContext user, string? clientIp, CancellationToken ct);
     Task<Dictionary<long, List<ArWorkbenchDocumentInfo>>> GetCipDocumentsAsync(int labId, IReadOnlyCollection<long> caseIds, CancellationToken ct);
     Task<(ArWorkbenchDocumentInfo Info, string Container, string Path)?> GetDocumentForDownloadAsync(int labId, long documentId, ArWorkbenchUserContext user, string? clientIp, CancellationToken ct);
@@ -96,6 +99,7 @@ public interface IArWorkbenchRepository
     // Automatic Adjustment (SqlArWorkbenchRepository.AutoAdjust.cs)
     Task<ArWorkbenchAdjustmentResult> ProcessAutoAdjustmentsAsync(int labId, IReadOnlyList<long>? claimKeys, bool previewOnly, ArWorkbenchUserContext user, CancellationToken ct);
     Task<int> MarkAdjustmentsPostedAsync(int labId, IReadOnlyList<long> claimKeys, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<IReadOnlyList<long>> GetAgentPostableWriteOffsAsync(int labId, IReadOnlyList<long> claimKeys, string agentUser, CancellationToken ct);
 
     // User Management (SqlArWorkbenchRepository.Users.cs) - LRNMaster user tables
     Task<IReadOnlyList<ArWorkbenchLabOption>> GetAllLabsAsync(CancellationToken ct);
@@ -500,6 +504,22 @@ WHERE u.UserName IN ({string.Join(",", paramNames)});";
         return clauses.Count == 0 ? string.Empty : " AND " + string.Join(" AND ", clauses);
     }
 
+    /// <summary>
+    /// Handoff §3.2 / §10: the restricted (overall AR) queues - Closed, Non-Collectible, Patient AR -
+    /// are for Admin, Manager and Team Lead. A QA Reviewer works the QA queue, so the claim list, its
+    /// filters and the queue counts leave restricted claims out for them (test report DEF-16: the UI hid
+    /// the Work Queue but the API still returned every claim). <paramref name="allowQaReviewed"/> keeps a
+    /// claim the reviewer has a QA review on reachable from its QA history once it has closed.
+    /// The AR Agent is already limited to their own caseload by <see cref="AppendScope"/>.
+    /// </summary>
+    private static string RestrictedQueueScope(ArWorkbenchUserContext user, string alias = "w", bool allowQaReviewed = false)
+    {
+        if (user.SiteAdmin || !string.Equals(user.RoleCode, "qa", StringComparison.OrdinalIgnoreCase)) return string.Empty;
+        return allowQaReviewed
+            ? $" AND ({alias}.IsRestrictedQueue = 0 OR EXISTS (SELECT 1 FROM dbo.ARWB_ClaimQaReview qrs WHERE qrs.ClaimKey = {alias}.ClaimKey))"
+            : $" AND {alias}.IsRestrictedQueue = 0";
+    }
+
     // ==========================================================================================
     // Queues
     // ==========================================================================================
@@ -508,7 +528,7 @@ WHERE u.UserName IN ({string.Join(",", paramNames)});";
     {
         await using var connection = await OpenLabAsync(labId, ct);
         await using var cmd = connection.CreateCommand();
-        var scope = AppendScope(cmd, user);
+        var scope = AppendScope(cmd, user) + RestrictedQueueScope(user);
 
         cmd.CommandText = $@"
 SELECT QueueId, ParentQueueId, QueueLabel, IsPriority, SortOrder, BadgeClass
@@ -687,8 +707,9 @@ WHERE w.IsOpenInsuranceAR = 1 AND w.ArQueueId NOT IN ('closed', 'patientar') {sc
 GROUP BY w.ArQueueId, w.ArSubQueueId, t.QueueLabel, s.QueueLabel, t.SortOrder, s.SortOrder
 ORDER BY t.SortOrder, s.SortOrder;
 
--- 6. AR Collections Progress: revenue expectation (initial insurance AR) per top-level queue
-SELECT w.ArQueueId, t.QueueLabel, COUNT(*), ISNULL(SUM(w.InitialInsuranceAR), 0), ISNULL(SUM(w.RecoveredAmount), 0)
+-- 6. AR Collections Progress: Revenue Expectation (fee-schedule priced, handoff section 7 - DEF-11;
+--    it used to show the initial insurance AR under that name) per top-level queue
+SELECT w.ArQueueId, t.QueueLabel, COUNT(*), ISNULL(SUM(w.RevenueExpectation), 0), ISNULL(SUM(w.RecoveredAmount), 0)
 FROM dbo.ARWB_Claim w
 INNER JOIN dbo.ARWB_ArQueue t ON t.QueueId = w.ArQueueId
 WHERE 1 = 1 {scope}
@@ -907,7 +928,7 @@ ORDER BY SUM(w.RecoveredAmount) DESC;";
         cmd.CommandTimeout = timeoutSeconds;
 
         var where = BuildClaimFilter(cmd, filter);
-        var scope = AppendScope(cmd, user);
+        var scope = AppendScope(cmd, user) + RestrictedQueueScope(user);
         var orderColumn = SortColumns.TryGetValue(filter.SortBy ?? string.Empty, out var col) ? col : "w.RemainingAR";
         var direction = filter.SortDesc ? "DESC" : "ASC";
 
@@ -935,7 +956,8 @@ SELECT
     v.IsTflRisk, v.IsNonCollectible, tw.HasNonCollectibleDenial, v.ArQueueId, v.ArQueueLabel, v.ArQueueBadgeClass,
     v.ArSubQueueId, v.ArSubQueueLabel, DATEDIFF(day, {UntouchedSinceSql("tw")}, SYSUTCDATETIME()) AS DaysSinceLastTouch,
     v.QaStatus, v.OpenCipCases, v.PendingAgentRequests,
-    v.LineCount, cpt.CPTCode AS FirstCptCode
+    v.LineCount, cpt.CPTCode AS FirstCptCode,
+    v.RecoveryStatus, CAST(CASE WHEN v.IsAutoAdjusted = 1 OR v.IsWriteOffApproved = 1 THEN 1 ELSE 0 END AS bit) AS IsBalanceNullified
 FROM pg
 INNER JOIN dbo.ARWB_vw_ClaimWorklist v ON v.ClaimKey = pg.ClaimKey
 INNER JOIN dbo.ARWB_Claim tw ON tw.ClaimKey = pg.ClaimKey
@@ -999,7 +1021,9 @@ ORDER BY pg.Seq;";
                 OpenCipCases = N("OpenCipCases") ?? 0,
                 PendingAgentRequests = N("PendingAgentRequests") ?? 0,
                 LineCount = N("LineCount") ?? 0,
-                FirstCptCode = S("FirstCptCode")
+                FirstCptCode = S("FirstCptCode"),
+                RecoveryStatus = S("RecoveryStatus"),
+                IsBalanceNullified = B("IsBalanceNullified")
             });
         }
 
@@ -1008,8 +1032,10 @@ ORDER BY pg.Seq;";
         var names = await GetDisplayNamesAsync(result.Items.Select(i => i.AssignedAgentUser), ct);
         foreach (var item in result.Items)
         {
-            if (item.AssignedAgentUser is not null && names.TryGetValue(item.AssignedAgentUser, out var name))
-                item.AssignedAgentName = name;
+            // An agent with no first / last name on file (or no longer in LabUsers) shows their user
+            // name rather than nothing (test report OBS-07).
+            if (!string.IsNullOrWhiteSpace(item.AssignedAgentUser))
+                item.AssignedAgentName = names.TryGetValue(item.AssignedAgentUser, out var name) ? name : item.AssignedAgentUser;
         }
         return result;
     }
@@ -1127,7 +1153,9 @@ ORDER BY pg.Seq;";
             {
                 cmd.Parameters.Add($"@Dc{i}", SqlDbType.NVarChar, 50).Value = denialCodes[i];
                 cmd.Parameters.Add($"@DcL{i}", SqlDbType.NVarChar, 60).Value = "%," + denialCodes[i].Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + ",%";
-                any.Add($"w.PrimaryDenialCode = @Dc{i} OR w.LineDenialCodesSearch LIKE @DcL{i}");
+                any.Add(filter.PrimaryDenialOnly
+                    ? $"w.PrimaryDenialCode = @Dc{i}"
+                    : $"w.PrimaryDenialCode = @Dc{i} OR w.LineDenialCodesSearch LIKE @DcL{i}");
             }
             where.Add("(" + string.Join(" OR ", any) + ")");
         }
@@ -1233,7 +1261,7 @@ IF OBJECT_ID(N'dbo.ARWB_DenialCodeMaster', N'U') IS NOT NULL
         {
             await using var cmd = connection.CreateCommand();
             cmd.CommandTimeout = 120;
-            var where = BuildClaimFilter(cmd, without(context.Copy())) + AppendScope(cmd, user);
+            var where = BuildClaimFilter(cmd, without(context.Copy())) + AppendScope(cmd, user) + RestrictedQueueScope(user);
             cmd.CommandText = sql(where);
             var chosen = new HashSet<string>(selected ?? [], StringComparer.OrdinalIgnoreCase);
             var list = new List<ArWorkbenchFilterOption>();
@@ -1332,7 +1360,7 @@ WHERE m.ListType = 'AGING_BUCKET' AND m.IsActive = 1 ORDER BY m.SortOrder;", con
         await using var connection = await OpenLabAsync(labId, ct);
         await using var cmd = connection.CreateCommand();
         cmd.Parameters.Add("@ClaimKey", SqlDbType.BigInt).Value = claimKey;
-        var scope = AppendScope(cmd, user);
+        var scope = AppendScope(cmd, user) + RestrictedQueueScope(user, allowQaReviewed: true);
 
         // The scope check runs once, on the claim row; the child queries only run for a claim the
         // caller is allowed to see.
@@ -1348,9 +1376,15 @@ INNER JOIN dbo.ARWB_WorkflowTemplateStage s ON s.TemplateKey = t.TemplateKey
 WHERE c.ClaimKey = @ClaimKey AND @Allowed = 1
 ORDER BY s.StageOrder;
 
-SELECT LineNumber, CPTCode, Units, Modifier, ChargeAmount, AllowedAmount, InsurancePayment, InsuranceAdjustments,
-       InsuranceBalance, PatientBalance, LineClaimStatus, PayStatus, DenialCode, DenialDate, ICDCode, SourceRecordId
-FROM dbo.ARWB_ClaimLine WHERE ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY LineNumber;
+SELECT l.LineNumber, l.CPTCode, l.Units, l.Modifier, l.ChargeAmount, l.AllowedAmount, l.InsurancePayment, l.InsuranceAdjustments,
+       l.InsuranceBalance, l.PatientBalance, l.LineClaimStatus, l.PayStatus, l.DenialCode, l.DenialDate, l.ICDCode, l.SourceRecordId,
+       l.ExpectedRate, l.RevenueExpectation,
+       -- In the claim's Revenue Expectation: the CPT has been denied on this claim (or the claim never had a denied line).
+       CASE WHEN OBJECT_ID(N'dbo.ARWB_ClaimDeniedCpt', N'U') IS NULL THEN CAST(1 AS bit)
+            WHEN NOT EXISTS (SELECT 1 FROM dbo.ARWB_ClaimDeniedCpt d WHERE d.ClaimKey = l.ClaimKey) THEN CAST(1 AS bit)
+            WHEN EXISTS (SELECT 1 FROM dbo.ARWB_ClaimDeniedCpt d WHERE d.ClaimKey = l.ClaimKey AND d.CPTCode = LTRIM(RTRIM(l.CPTCode))) THEN CAST(1 AS bit)
+            ELSE CAST(0 AS bit) END
+FROM dbo.ARWB_ClaimLine l WHERE l.ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY l.LineNumber;
 
 SELECT ActivityId, ActivityOn, ActionType, Detail, UserName, RoleCode, IsSystem
 FROM dbo.ARWB_ClaimActivity WHERE ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY ActivityOn DESC, ActivityId DESC;
@@ -1400,7 +1434,10 @@ ORDER BY cl.LineNumber, ld.Ordinal;";
                 DenialCode = Str(reader, 12),
                 DenialDate = Date(reader, 13),
                 ICDCode = Str(reader, 14),
-                SourceRecordId = reader.IsDBNull(15) ? null : reader.GetInt32(15)
+                SourceRecordId = reader.IsDBNull(15) ? null : reader.GetInt32(15),
+                ExpectedRate = reader.IsDBNull(16) ? null : reader.GetDecimal(16),
+                RevenueExpectation = reader.GetDecimal(17),
+                InRevenueExpectation = reader.GetBoolean(18)
             });
         }
 
@@ -1644,6 +1681,9 @@ SELECT SettingKey, SettingValue FROM dbo.ARWB_AppSetting;";
 
         // The reporting team's denial category / Non-Collectible masters drive this sync's categories.
         await CopyReportingDenialMastersAsync(connection, ct);
+
+        // The fee schedule (LRN Metrics > Master Values > Fees Schedule Import) prices the denied lines.
+        await CopyFeeScheduleAsync(connection, ct);
 
         // The load can take minutes on a large lab. Run it to completion, then read the run row back.
         await using (var cmd = new SqlCommand("dbo.ARWB_usp_LoadClaimsFromSource", connection) { CommandType = CommandType.StoredProcedure, CommandTimeout = 1800 })

@@ -101,9 +101,12 @@ export default function DashboardPage() {
       </div>
 
       {!isViewer && (
-        <Card icon="layers" title="Latest Denial Analysis Report insights" sub="from the latest data load" flush
+        <Card icon="layers" title="Latest Denial Analysis Report insights" flush
+          sub={d.insightsSource === 'Uploaded'
+            ? `current week's Key Observations${d.insightsWeekStart ? ` (week of ${fmt.date(d.insightsWeekStart)})` : ''} · open, unassigned claims`
+            : 'top denial codes from the latest data load (no Key Observations uploaded for the current week)'}
           action={canOpen(user, 'data-processing') && <GoTo onClick={() => navigate('/data-processing')}>Open Data Processing</GoTo>}>
-          <DenialHighlights rows={d.denialHighlights} onRoute={canDrill ? (code) => openQueue({ code }) : null} />
+          <DenialHighlights rows={d.denialHighlights} onRoute={canDrill ? (code) => openQueue({ code, primary: '1', status: 'Unassigned', open: '1' }) : null} />
         </Card>
       )}
 

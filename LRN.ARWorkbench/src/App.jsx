@@ -15,6 +15,7 @@ import CodeMasterPage from './pages/CodeMasterPage';
 import DashboardPage from './pages/DashboardPage';
 import DataProcessingPage from './pages/DataProcessingPage';
 import DenialCodeMasterPage from './pages/DenialCodeMasterPage';
+import DocumentVaultPage from './pages/DocumentVaultPage';
 import DownloadsPage from './pages/DownloadsPage';
 import MasterDataPage from './pages/MasterDataPage';
 import PlannedPage from './pages/PlannedPage';
@@ -43,6 +44,7 @@ const SCREENS = {
   'status-verification': StatusVerificationPage,
   reports: ReportsPage,
   downloads: DownloadsPage,
+  documents: DocumentVaultPage,
   clients: ClientsPage,
   cip: CipPage,
   'client-cip': ClientCipPage,
@@ -54,6 +56,13 @@ const SCREENS = {
   'sla-targets': SlaSettingsPage,
   'code-master': CodeMasterPage
 };
+
+// /masters opens the first Master Values page this user may open (an RCM Manager only has Workbench Lists).
+function MastersHome() {
+  const { user } = useWorkbench();
+  const first = ROUTES.find((r) => r.group === 'masters' && allows(user, r));
+  return <Navigate to={first?.path || '/'} replace />;
+}
 
 // Route access is checked against the same NAV list that builds the sidebar. The API enforces
 // the same rules server-side; this guard only keeps the UI honest.
@@ -94,7 +103,7 @@ function Gate() {
         {ROUTES.map((item) => (
           <Route key={item.id} path={item.path === '/' ? undefined : item.path} index={item.path === '/'} element={<Guard item={item} />} />
         ))}
-        <Route path="/masters" element={<Navigate to={ROUTES.find((r) => r.group === 'masters')?.path || '/'} replace />} />
+        <Route path="/masters" element={<MastersHome />} />
         {Object.entries(REDIRECTS).map(([from, to]) => <Route key={from} path={from} element={<Navigate to={to} replace />} />)}
         <Route path="/claims/:claimKey" element={<ClaimDetailPage />} />
         {/* Add User: its own page, guarded by the User Management menu item's roles. */}

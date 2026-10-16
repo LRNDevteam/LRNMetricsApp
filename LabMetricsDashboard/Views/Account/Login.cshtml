@@ -214,6 +214,24 @@
             display:flex; align-items:flex-start; gap:.5rem;
         }
         .alert-login.success { background:#f0fdf4; color:#166534; border-color:#bbf7d0; }
+
+        /* Sign in with Microsoft (Microsoft's light button style) */
+        .btn-microsoft {
+            display:flex; align-items:center; justify-content:center; gap:.65rem;
+            width:100%; padding:.8rem 1rem;
+            border:1px solid #8c8c8c; border-radius:12px;
+            background:#fff; color:#262626;
+            font-weight:600; font-size:.95rem; text-decoration:none;
+            transition: background .15s ease;
+        }
+        .btn-microsoft:hover, .btn-microsoft:focus { background:#f3f3f3; color:#262626; }
+        .login-hint { font-size:.78rem; color:#64748b; text-align:center; margin:.45rem 0 1.1rem; }
+        .login-divider {
+            display:flex; align-items:center; gap:.75rem;
+            color:#94a3b8; font-size:.75rem; letter-spacing:.04em; text-transform:uppercase;
+            margin-bottom:1.1rem;
+        }
+        .login-divider::before, .login-divider::after { content:""; flex:1; border-top:1px solid #e2e8f0; }
     </style>
 </head>
 <body>
@@ -238,7 +256,7 @@
 
         <div class="hero-headline">
             <h1>Welcome back. <br/>Insights that move revenue forward.</h1>
-            <p>Sign in to access dashboards, denial analytics, predictive insights and coding intelligence — all in one secure workspace.</p>
+            <p>Sign in to access dashboards, denial analytics, predictive insights and coding intelligence â€” all in one secure workspace.</p>
 
             <div class="hero-features">
                 <div class="feature">
@@ -260,7 +278,7 @@
             </div>
         </div>
 
-        <div class="hero-footer">© 2026 Lab Revenue Intelligence · All rights reserved.</div>
+        <div class="hero-footer">Â© 2026 Lab Revenue Intelligence Â· All rights reserved.</div>
     </aside>
 
     <!-- Right login card pane -->
@@ -298,6 +316,22 @@
                     <i class="bi bi-exclamation-circle-fill"></i>
                     <div>@ViewData.ModelState[""]!.Errors.First().ErrorMessage</div>
                 </div>
+            }
+
+            @if (ViewData["EnableMicrosoftLogin"] is true)
+            {
+                @* A plain GET link, not a form: a POST would need login.microsoftonline.com in the
+                   CSP form-action list. asp-action carries the PathBase (/lrnAnalytics). *@
+                <a class="btn-microsoft" asp-controller="Account" asp-action="MicrosoftLogin"
+                   asp-route-returnUrl="@(ViewData["ReturnUrl"] as string)">
+                    <svg width="20" height="20" viewBox="0 0 21 21" aria-hidden="true">
+                        <rect x="1" y="1" width="9" height="9" fill="#f25022" /><rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+                        <rect x="1" y="11" width="9" height="9" fill="#00a4ef" /><rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+                    </svg>
+                    <span>Sign in with Microsoft</span>
+                </a>
+                <div class="login-hint">LRN staff: your organization account, with MFA</div>
+                <div class="login-divider"><span>or use your LRN username</span></div>
             }
 
             @* Keep the login POST on the exact origin that served this page. *@
@@ -341,7 +375,7 @@
                 <button type="submit" class="btn-signin" id="btnSignin">
                     <span id="signinLabel"><i class="bi bi-box-arrow-in-right me-1"></i> Sign In</span>
                     <span id="signinSpinner" class="d-none">
-                        <span class="spinner-border me-1" role="status"></span> Signing in…
+                        <span class="spinner-border me-1" role="status"></span> Signing inâ€¦
                     </span>
                 </button>
             </form>

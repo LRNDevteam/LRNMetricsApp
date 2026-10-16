@@ -108,6 +108,9 @@ SELECT CASE WHEN OBJECT_ID(N'dbo.ARWB_usp_LoadClaimsFromSource', N'P') IS NULL T
             // The reporting team's denial category / Non-Collectible masters drive this sync's categories.
             await CopyReportingDenialMastersAsync(connection, labId, ct);
 
+            // The fee schedule (Fees Schedule Import) prices the denied lines -> Revenue Expectation.
+            var feeScheduleNote = await CopyFeeScheduleAsync(connection, labId, ct);
+
             await using var cmd = new SqlCommand("dbo.ARWB_usp_LoadClaimsFromSource", connection)
             {
                 CommandType = CommandType.StoredProcedure,
@@ -138,7 +141,8 @@ SELECT CASE WHEN OBJECT_ID(N'dbo.ARWB_usp_LoadClaimsFromSource', N'P') IS NULL T
                           $"{verification:N0} moved to Status Change Verification" +
                           (verification > 0
                               ? managers.Count > 0 ? $" ({managers.Count} RCM Manager(s))." : " (no RCM Manager on file - sent to every manager of the lab)."
-                              : ".");
+                              : ".") +
+                          (feeScheduleNote is null ? "" : " " + feeScheduleNote);
 
             _logger.LogInformation("Lab {LabId}: {Message}", labId, message);
             return new(ArWorkbenchSyncStatus.Succeeded, message, refreshRunId, claimRows, verification, managers.Count);
@@ -259,6 +263,98 @@ IF OBJECT_ID(N'dbo.NonCollectibleDenialMaster', N'U') IS NOT NULL
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Lab {LabId}: could not copy the reporting denial masters; the sync uses the previous copy.", labId);
+        }
+    }
+
+    /// <summary>
+    /// LRNMaster.dbo.FeeSchedule (LRN Metrics > Master Values > Fees Schedule Import) -> the lab's
+    /// dbo.ARWB_CptFeeSchedule, the rates dbo.ARWB_usp_PriceClaimLines prices claim lines with. When the
+    /// rates changed, EVERY line is re-priced now, because the sync only prices the lines it reloads;
+    /// the sync's claim-state recalculation then rolls the new line values into each claim's Revenue
+    /// Expectation and Recovery Status. Returns a note for the run log, or null when nothing changed.
+    /// A failure is logged and the sync continues with the previous rates. Same copy as the API's
+    /// Data Processing > Run.
+    /// </summary>
+    private async Task<string?> CopyFeeScheduleAsync(SqlConnection lab, int labId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(_masterConnectionString)) return null;
+
+        try
+        {
+            await using (var probe = new SqlCommand("SELECT OBJECT_ID(N'dbo.ARWB_CptFeeSchedule', N'U');", lab))
+                if (await probe.ExecuteScalarAsync(ct) is null or DBNull) return null;
+
+            var master = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            string? source = null;
+            await using (var conn = new SqlConnection(_masterConnectionString))
+            {
+                await conn.OpenAsync(ct);
+                await using var cmd = new SqlCommand(@"
+IF OBJECT_ID(N'dbo.FeeSchedule', N'U') IS NOT NULL
+    SELECT HCPCS, Rate, SourceFile FROM dbo.FeeSchedule WHERE NULLIF(LTRIM(RTRIM(HCPCS)), N'') IS NOT NULL;", conn) { CommandTimeout = 120 };
+                await using var r = await cmd.ExecuteReaderAsync(ct);
+                while (await r.ReadAsync(ct))
+                {
+                    master[r.GetString(0).Trim()] = r.GetDecimal(1);
+                    source ??= r.IsDBNull(2) ? null : r.GetString(2);
+                }
+            }
+
+            // No schedule imported yet: leave whatever the lab has.
+            if (master.Count == 0) return null;
+
+            var current = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            await using (var cmd = new SqlCommand("SELECT CPTCode, Rate FROM dbo.ARWB_CptFeeSchedule WHERE Modifier IS NULL;", lab) { CommandTimeout = 120 })
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+                while (await r.ReadAsync(ct)) current[r.GetString(0).Trim()] = r.GetDecimal(1);
+
+            if (current.Count == master.Count && master.All(kv => current.TryGetValue(kv.Key, out var rate) && rate == kv.Value))
+                return null;
+
+            var rows = new DataTable();
+            rows.Columns.Add("CPTCode", typeof(string));
+            rows.Columns.Add("Rate", typeof(decimal));
+            rows.Columns.Add("EffectiveFrom", typeof(DateTime));
+            rows.Columns.Add("RateSource", typeof(string));
+            rows.Columns.Add("UpdatedOn", typeof(DateTime));
+            rows.Columns.Add("UpdatedBy", typeof(string));
+            var now = DateTime.UtcNow;
+            var rateSource = "Fees Schedule Import" + (string.IsNullOrWhiteSpace(source) ? "" : ": " + source);
+            if (rateSource.Length > 100) rateSource = rateSource[..100];
+            // Effective from 1900: the schedule prices every date of service (a 2025 claim still needs a rate).
+            foreach (var kv in master)
+                rows.Rows.Add(kv.Key, kv.Value, new DateTime(1900, 1, 1), rateSource, now, _options.RunBy);
+
+            await using (var tx = (SqlTransaction)await lab.BeginTransactionAsync(ct))
+            {
+                await using (var clear = new SqlCommand("DELETE FROM dbo.ARWB_CptFeeSchedule;", lab, tx) { CommandTimeout = 120 })
+                    await clear.ExecuteNonQueryAsync(ct);
+                using (var bulk = new SqlBulkCopy(lab, SqlBulkCopyOptions.Default, tx) { DestinationTableName = "dbo.ARWB_CptFeeSchedule", BulkCopyTimeout = 120 })
+                {
+                    foreach (DataColumn c in rows.Columns) bulk.ColumnMappings.Add(c.ColumnName, c.ColumnName);
+                    await bulk.WriteToServerAsync(rows, ct);
+                }
+                await tx.CommitAsync(ct);
+            }
+
+            int priced = 0;
+            await using (var price = new SqlCommand("dbo.ARWB_usp_PriceClaimLines", lab)
+            {
+                CommandType = CommandType.StoredProcedure,
+                CommandTimeout = Math.Max(60, _options.CommandTimeoutSeconds)
+            })
+            {
+                if (await price.ExecuteScalarAsync(ct) is { } value and not DBNull) priced = Convert.ToInt32(value);
+            }
+
+            var note = $"Fee schedule updated: {master.Count:N0} rate(s), {priced:N0} claim line(s) re-priced.";
+            _logger.LogInformation("Lab {LabId}: {Note}", labId, note);
+            return note;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Lab {LabId}: could not copy the fee schedule; the sync uses the previous rates.", labId);
+            return "Fee schedule NOT updated (see the worker log); previous rates kept.";
         }
     }
 

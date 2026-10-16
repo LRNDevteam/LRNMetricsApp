@@ -120,6 +120,13 @@ public static class ArWorkbenchMasterRules
         Types.FirstOrDefault(t => string.Equals(t.Key, key?.Trim(), StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
+    /// Handoff §10: the AR / RCM Manager maintains the Non-Collectible and Auto-Adjust lists alongside
+    /// the System Administrator (test report DEF-08). Every other list stays with the administrator.
+    /// </summary>
+    public static readonly IReadOnlySet<string> ManagerMaintainedTypes =
+        new HashSet<string>(["NON_COLLECTIBLE_CODE", "AUTO_ADJUST_CODE"], StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Duplicate key. Text lists: upper case with spaces, hyphens and slashes removed (as the Denial
     /// Workflow lists), so "Write Off" and "Write-Off" are one value. Code lists: the normalized code,
     /// so "CO-197" and "197" are one value.

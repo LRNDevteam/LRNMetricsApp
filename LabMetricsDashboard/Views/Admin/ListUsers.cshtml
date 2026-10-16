@@ -14,6 +14,8 @@
         .Select(group => group.First())
         .OrderBy(lab => lab.LabName)
         .ToList();
+    // Linking a Microsoft sign-in to an existing account is for full admins only.
+    var canLinkAccounts = LabMetricsDashboard.Filters.MenuAccessFilter.IsFullAdmin(User);
 }
 
 <style>
@@ -103,6 +105,18 @@
     .user-badge-lab {
         background: #64748b;
         color: #fff;
+    }
+    .user-badge-ms {
+        background: #e8f1fb;
+        color: #0b4f9c;
+        border: 1px solid #b6d3f2;
+        font-size: .7rem;
+    }
+    .user-badge-pending {
+        background: #fef3c7;
+        color: #92400e;
+        border: 1px solid #fcd34d;
+        font-size: .7rem;
     }
     .user-action-btn {
         width: 34px;
@@ -243,9 +257,20 @@
                 var labText = Model.UserLabsMap != null && Model.UserLabsMap.TryGetValue(u.LabUserID, out var assignedLabs)
                     ? string.Join(" ", assignedLabs.GroupBy(l => l.LabId).Select(g => g.First().LabName))
                     : string.Empty;
-                var searchText = string.Join(" ", new[] { u.UserName, u.FirstName, u.LastName, u.Email, u.Mobile, roleText, labText });
+                var isPending = string.IsNullOrWhiteSpace(roleText);
+                var searchText = string.Join(" ", new[] { u.UserName, u.FirstName, u.LastName, u.Email, u.Mobile, roleText, labText, u.IsEntra ? "Microsoft" : "Local", isPending ? "Pending" : "" });
                 <tr data-search="@searchText" data-roles="@roleText" data-labs="@labText">
-                    <td class="text-nowrap">@u.UserName</td>
+                    <td class="text-nowrap">
+                        @u.UserName
+                        @if (u.IsEntra)
+                        {
+                            <span class="badge user-badge user-badge-ms ms-1" title="Signs in with Microsoft (MFA)">Microsoft</span>
+                        }
+                        @if (isPending && u.IsActive)
+                        {
+                            <span class="badge user-badge user-badge-pending ms-1" title="No role yet: sees Access pending">Pending</span>
+                        }
+                    </td>
                     <td>@u.FirstName @u.LastName</td>
                     <td class="text-truncate" style="max-width:180px">@u.Email</td>
                     <td>@u.Mobile</td>
@@ -271,9 +296,13 @@
                     <td>
                         <div class="btn-group" role="group">
                             <a class="btn btn-sm btn-primary user-action-btn" asp-action="Edit" asp-route-id="@u.LabUserID" title="Edit user" aria-label="Edit @u.UserName"><i class="bi bi-pencil-square"></i></a>
-                            @if (u.IsActive && !string.IsNullOrWhiteSpace(u.Email))
+                            @if (u.IsActive && !u.IsEntra && !string.IsNullOrWhiteSpace(u.Email))
                             {
                                 <button class="btn btn-sm btn-outline-primary user-action-btn" data-invite-userid="@u.LabUserID" title="Send invitation email" aria-label="Send invitation to @u.UserName"><i class="bi bi-envelope"></i></button>
+                            }
+                            @if (u.IsEntra && isPending && canLinkAccounts)
+                            {
+                                <button class="btn btn-sm btn-outline-success user-action-btn" data-link-userid="@u.LabUserID" data-link-username="@u.UserName" title="Link to an existing account" aria-label="Link @u.UserName to an existing account"><i class="bi bi-link-45deg"></i></button>
                             }
                             <button class="btn btn-sm btn-outline-danger user-action-btn" data-remove-userid="@u.LabUserID" title="Remove user" aria-label="Remove @u.UserName"><i class="bi bi-trash3"></i></button>
                         </div>

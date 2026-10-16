@@ -40,17 +40,10 @@ public sealed class DenialWorkflowController : Controller
         return Json(await _jwtIssuer.CreateTokenAsync(User, cancellationToken));
     }
 
+    // The AR Workbench's LOGOUT_URL. Shared with Account/Logout: a Microsoft user is also signed out
+    // of their Microsoft session.
     [HttpGet("/DenialWorkflow/Logout")]
-    public async Task<IActionResult> Logout()
-    {
-        await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-
-        var authCookie = _configuration["Authentication:CookieName"];
-        Response.Cookies.Delete(string.IsNullOrWhiteSpace(authCookie) ? "LRN.Auth" : authCookie.Trim(), new CookieOptions { Path = "/" });
-        Response.Cookies.Delete("lmd_selected_lab", new CookieOptions { Path = "/" });
-
-        return RedirectToAction("Login", "Account");
-    }
+    public Task<IActionResult> Logout() => LrnSignOut.SignOutAsync(this);
 
     [HttpGet]
     public async Task<IActionResult> Index(

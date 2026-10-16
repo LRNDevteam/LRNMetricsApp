@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using LRN.ReportsApi.Models;
 using LRN.ReportsApi.Security;
 using LRN.ReportsApi.Services;
@@ -114,7 +115,9 @@ public sealed class ArWorkbenchController : ControllerBase
     {
         var (user, denied) = await ResolveUserAsync(labId, ct);
         if (denied is not null) return denied;
-        return Ok(await _repository.GetDashboardAsync(labId, user!, ct));
+        var dashboard = await _repository.GetDashboardAsync(labId, user!, ct);
+        await ApplyCurrentWeekInsightsAsync(dashboard, labId, user!, ct);
+        return Ok(dashboard);
     }
 
     /// <summary>
@@ -231,13 +234,15 @@ public sealed class ArWorkbenchController : ControllerBase
         // Out-of-scope and missing look the same, so a scoped user cannot probe for claim keys.
         if (detail is null) return NotFound(new { message = "Claim not found." });
         detail.DenialCodeInfo = (await CodeMasterInfoForClaimAsync(detail, ct)).ToList();
-        detail.QaReview = await _repository.GetCurrentQaReviewAsync(labId, claimKey, ct);
-        // Client users never see Awaiting QA / Pending Approval cases or internal history.
-        if (user!.RoleCode != "viewer")
+        // Client users never see QA notes, internal follow-ups, the activity timeline, Awaiting QA /
+        // Pending Approval cases or internal requests (§9.2, DEF-15) - not even by opening the URL.
+        if (!ArWorkbenchClientVisibility.IsClientUser(user!))
         {
+            detail.QaReview = await _repository.GetCurrentQaReviewAsync(labId, claimKey, ct);
             detail.CipCases = await _repository.GetClaimCipCasesAsync(labId, claimKey, ct);
             detail.AgentRequests = await _repository.GetClaimAgentRequestsAsync(labId, claimKey, ct);
         }
+        ArWorkbenchClientVisibility.Apply(detail, user!);
         return Ok(detail);
     }
 
@@ -646,6 +651,109 @@ public sealed class ArWorkbenchController : ControllerBase
         if (stored.Count > 0)
             await _repository.AddCipResponseDocumentsAsync(labId, caseId, stored, user!, HttpContext.Connection.RemoteIpAddress?.ToString(), ct);
         return Ok(new { message = $"Response submitted for {caseNumber}{(stored.Count > 0 ? $" with {stored.Count} attachment(s)" : "")} - your AR team will review it.", status });
+    }
+
+    public const int MaxClaimAttachments = 5;
+    public const int MaxDocumentDescriptionLength = 500;
+
+    /// <summary>
+    /// Handoff §8.2 (DEF-13): attach files to a claim - with a follow-up note (followUpId) or on their
+    /// own. Each file carries a document category from the Document Categories list (mandatory) and an
+    /// optional description: documents is a JSON array [{ category, description }] in the same order as
+    /// files; a single category applies to every file without its own. Size and type follow the
+    /// AttachmentMaxBytes / AttachmentAllowedTypes settings. AR users only (an agent: their own claims).
+    /// </summary>
+    [HttpPost("claims/{claimKey:long}/documents")]
+    [RequestSizeLimit(120_000_000)]
+    public async Task<ActionResult> UploadClaimDocuments([FromRoute] long claimKey, [FromQuery] int labId, [FromForm] string? category,
+        [FromForm] string? documents, [FromForm] long? followUpId, [FromForm] List<IFormFile>? files,
+        [FromServices] IArWorkbenchDocumentStore store, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (ArWorkbenchClientVisibility.IsClientUser(user!) || !(user!.Permissions.EditClaim || user.Permissions.Assign))
+            return Forbidden("Only the AR team can attach documents to a claim. Client users attach documents to their escalation responses.");
+
+        List<ArWorkbenchDocumentUploadInfo> details = [];
+        if (!string.IsNullOrWhiteSpace(documents))
+        {
+            try { details = JsonSerializer.Deserialize<List<ArWorkbenchDocumentUploadInfo>>(documents, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? []; }
+            catch (JsonException) { return BadRequest(new { message = "The document details could not be read." }); }
+        }
+
+        // details[i] belongs to files[i]; empty files are dropped only after pairing.
+        var uploads = (files ?? []).Select((f, i) => (File: f,
+                Category: (i < details.Count && !string.IsNullOrWhiteSpace(details[i].Category) ? details[i].Category : category)?.Trim(),
+                Description: i < details.Count ? details[i].Description?.Trim() : null))
+            .Where(u => u.File.Length > 0).ToList();
+        if (uploads.Count == 0) return BadRequest(new { message = "Choose at least one file to attach." });
+        if (uploads.Count > MaxClaimAttachments) return BadRequest(new { message = $"Attach at most {MaxClaimAttachments} files at a time." });
+
+        var listed = (await _repository.GetMasterDataAsync(labId, ct)).Lists.GetValueOrDefault("DOCUMENT_CATEGORY") ?? [];
+        if (listed.Count == 0)
+            return BadRequest(new { message = "No document categories are set up (Master Values > Workbench Lists > Document Categories)." });
+
+        var (maxBytes, allowed) = await AttachmentRulesAsync(labId, ct);
+        var checkedUploads = new List<(IFormFile File, string Category, string? Description)>();
+        foreach (var (f, cat, description) in uploads)
+        {
+            var name = Path.GetFileName(f.FileName);
+            var chosen = listed.FirstOrDefault(c => string.Equals(c, cat, StringComparison.OrdinalIgnoreCase));
+            if (chosen is null) return BadRequest(new { message = $"{name}: choose a document category." });
+            if ((description?.Length ?? 0) > MaxDocumentDescriptionLength)
+                return BadRequest(new { message = $"{name}: the description must be {MaxDocumentDescriptionLength} characters or fewer." });
+            var ext = Path.GetExtension(f.FileName).TrimStart('.').ToLowerInvariant();
+            if (!allowed.Contains(ext)) return BadRequest(new { message = $"{name}: file type .{ext} is not allowed ({string.Join(", ", allowed)})." });
+            var error = await FileUploadGuard.ValidateDocumentAsync(f, maxBytes, ct);
+            if (error is not null) return BadRequest(new { message = $"{name}: {error}" });
+            checkedUploads.Add((f, chosen, string.IsNullOrWhiteSpace(description) ? null : description));
+        }
+
+        var stored = new List<ArWorkbenchClaimUpload>();
+        try
+        {
+            foreach (var (f, chosen, description) in checkedUploads)
+            {
+                await using var s = f.OpenReadStream();
+                stored.Add(new ArWorkbenchClaimUpload(Path.GetFileName(f.FileName), f.ContentType,
+                    await store.SaveAsync(labId, s, Path.GetExtension(f.FileName), ct), chosen, description));
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            foreach (var s in stored) store.Delete(s.Stored.Container, s.Stored.Path);
+            _logger.LogError(ex, "AR Workbench attachment storage failed for lab {LabId}", labId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "The attachments could not be stored. Please contact support." });
+        }
+
+        var ids = await _repository.AddClaimDocumentsAsync(labId, claimKey, followUpId, stored, user, HttpContext.Connection.RemoteIpAddress?.ToString(), ct);
+        if (ids.Count == 0)
+        {
+            foreach (var s in stored) store.Delete(s.Stored.Container, s.Stored.Path);
+            return NotFound(new { message = "Claim not found, or the follow-up note is not on this claim." });
+        }
+        _logger.LogInformation("AR Workbench: {Count} document(s) attached to claim {ClaimKey} (lab {LabId}) by {User}", ids.Count, claimKey, labId, user.UserName);
+        var used = stored.Select(s => s.Category).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return Ok(new { message = $"{ids.Count} document(s) attached{(used.Count == 1 ? $" as {used[0]}" : "")}.", documentIds = ids });
+    }
+
+    /// <summary>The claim's documents (Documents tab). Client users see only CIP-response documents.</summary>
+    [HttpGet("claims/{claimKey:long}/documents")]
+    public async Task<ActionResult<ArWorkbenchPagedResult<ArWorkbenchDocumentRow>>> ClaimDocuments([FromRoute] long claimKey, [FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        return Ok(await _repository.SearchDocumentsAsync(new ArWorkbenchDocumentFilter { LabId = labId, ClaimKey = claimKey, PageSize = 500 }, user!, ct));
+    }
+
+    /// <summary>Document Vault (handoff §8.2, DEF-14): search documents by claim / visit, patient and category, within scope.</summary>
+    [HttpGet("documents")]
+    public async Task<ActionResult<ArWorkbenchPagedResult<ArWorkbenchDocumentRow>>> DocumentVault([FromQuery] ArWorkbenchDocumentFilter filter, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
+        if (denied is not null) return denied;
+        if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+        return Ok(await _repository.SearchDocumentsAsync(filter, user!, ct));
     }
 
     /// <summary>Download an attachment (scope-checked, logged). Clients reach only CIP responses.</summary>
@@ -1235,11 +1343,22 @@ public sealed class ArWorkbenchController : ControllerBase
     [HttpPost("auto-adjustments/mark-posted")]
     public async Task<ActionResult> MarkAdjustmentsPosted([FromQuery] int labId, [FromBody] ArWorkbenchAdjustmentRequest? request, CancellationToken ct)
     {
-        var (user, denied) = await ResolveAssignerAsync(labId, ct);
+        var (user, denied) = await ResolveUserAsync(labId, ct);
         if (denied is not null) return denied;
         var keys = request?.ClaimKeys?.Where(k => k > 0).Distinct().ToList() ?? [];
         if (keys.Count == 0) return BadRequest(new { message = "Select the claims whose adjustment was posted." });
         if (keys.Count > MaxAdjustmentKeys) return BadRequest(new { message = $"Mark at most {MaxAdjustmentKeys:N0} claims at a time." });
+
+        // Team Lead / RCM Manager / Administrator post anything pending. The AR Agent posts the approved
+        // write-offs assigned to them (handoff §8.3, DEF-17); system auto-adjustments stay with the leads.
+        if (!user!.Permissions.Assign)
+        {
+            if (!user.Permissions.EditClaim)
+                return Forbidden("Only the assigned AR agent, a Team Lead, RCM Manager or System Administrator can mark an adjustment as posted.");
+            keys = (await _repository.GetAgentPostableWriteOffsAsync(labId, keys, user.UserName, ct)).ToList();
+            if (keys.Count == 0)
+                return Forbidden("You can mark as posted only the approved write-offs assigned to you. System auto-adjustments are posted by a Team Lead or RCM Manager.");
+        }
 
         var posted = await _repository.MarkAdjustmentsPostedAsync(labId, keys, user!, ct);
         var skipped = keys.Count - posted;
@@ -1734,7 +1853,71 @@ public sealed class ArWorkbenchController : ControllerBase
         var (user, denied) = await ResolveUserAsync(labId, ct);
         if (denied is not null) return denied;
         if (!IsAdminOrManager(user!)) return Forbidden("Only an Administrator or RCM Manager can view data processing.");
-        return Ok(await _repository.GetInsightsAsync(labId, ct));
+        var insights = await _repository.GetInsightsAsync(labId, ct);
+        // System-generated rows carry no description when the claims had none (DEF-02): use the Denial Code Master's.
+        var descriptions = await DenialDescriptionsAsync(insights.Where(i => string.IsNullOrWhiteSpace(i.DenialDescription)).Select(i => i.DenialCode), ct);
+        foreach (var row in insights.Where(i => string.IsNullOrWhiteSpace(i.DenialDescription)))
+            row.DenialDescription = descriptions.GetValueOrDefault(row.DenialCode);
+        return Ok(insights);
+    }
+
+    /// <summary>Normalized code -> Denial Code Master description, for codes shown without one. Empty on any failure.</summary>
+    private async Task<Dictionary<string, string>> DenialDescriptionsAsync(IEnumerable<string?> codes, CancellationToken ct)
+    {
+        var normalized = codes.Select(ArWorkbenchMasterRules.NormalizeDenialCode).Where(c => c is not null).Select(c => c!)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (normalized.Count == 0) return result;
+        try
+        {
+            foreach (var row in await _repository.GetCodeMasterInfoAsync(normalized, ct))
+                if (!string.IsNullOrWhiteSpace(row.DenialDescription)) result[row.DenialCode] = row.DenialDescription!;
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            _logger.LogWarning(ex, "AR Workbench: Denial Code Master lookup failed; descriptions stay blank.");
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// DEF-01: the dashboard's "Latest Denial Analysis Report insights" shows the current week's
+    /// uploaded Key Observations - the rows Data Processing > Current week shows - with the live
+    /// unassigned remainder per code. A week with none uploaded keeps the system-generated top codes.
+    /// Blank descriptions come from the Denial Code Master (DEF-02).
+    /// </summary>
+    private async Task ApplyCurrentWeekInsightsAsync(ArWorkbenchDashboard dashboard, int labId, ArWorkbenchUserContext user, CancellationToken ct)
+    {
+        try
+        {
+            var uploaded = await _repository.GetUploadedInsightsAsync(labId, user, ct);
+            if (uploaded.Current.Count > 0)
+            {
+                dashboard.DenialHighlights = uploaded.Current.Select(i => new ArWorkbenchDenialHighlight
+                {
+                    Code = i.NormalizedCode ?? i.DenialCode,
+                    Description = i.Description,
+                    Count = i.OpenClaims,
+                    Balance = i.OpenBalance,
+                    TopPayer = i.PayerName,
+                    TopPayerBalance = i.InsuranceBalance,
+                    ImpactPct = i.TotalBalance > 0 ? i.InsuranceBalance / i.TotalBalance : 0,
+                    Observation = i.Observation ?? string.Empty,
+                    Category = i.ActionCategory ?? string.Empty,
+                    Action = i.Action ?? string.Empty
+                }).ToList();
+                dashboard.InsightsSource = "Uploaded";
+                dashboard.InsightsWeekStart = uploaded.Current[0].WeekStart;
+            }
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            _logger.LogWarning(ex, "AR Workbench: uploaded Key Observations could not be read; the dashboard shows the system insights.");
+        }
+
+        var descriptions = await DenialDescriptionsAsync(dashboard.DenialHighlights.Where(h => string.IsNullOrWhiteSpace(h.Description)).Select(h => h.Code), ct);
+        foreach (var h in dashboard.DenialHighlights.Where(h => string.IsNullOrWhiteSpace(h.Description)))
+            h.Description = descriptions.GetValueOrDefault(ArWorkbenchMasterRules.NormalizeDenialCode(h.Code) ?? h.Code);
     }
 
     /// <summary>
@@ -1747,7 +1930,12 @@ public sealed class ArWorkbenchController : ControllerBase
         var (user, denied) = await ResolveUserAsync(labId, ct);
         if (denied is not null) return denied;
         if (!IsAdminOrManager(user!)) return Forbidden("Only an Administrator or RCM Manager can view data processing.");
-        return Ok(await _repository.GetUploadedInsightsAsync(labId, user!, ct));
+        var uploaded = await _repository.GetUploadedInsightsAsync(labId, user!, ct);
+        var blank = uploaded.Current.Concat(uploaded.Previous).Where(i => string.IsNullOrWhiteSpace(i.Description)).ToList();
+        var descriptions = await DenialDescriptionsAsync(blank.Select(i => i.NormalizedCode ?? i.DenialCode), ct);
+        foreach (var row in blank)
+            row.Description = descriptions.GetValueOrDefault(ArWorkbenchMasterRules.NormalizeDenialCode(row.NormalizedCode ?? row.DenialCode) ?? row.DenialCode);
+        return Ok(uploaded);
     }
 
     // ---- Timely-filing limits (Master Values) - ARWorkbench.ManageSettings ----------------------
@@ -1937,15 +2125,32 @@ public sealed class ArWorkbenchController : ControllerBase
     [HttpGet("masters")]
     public async Task<ActionResult<ArWorkbenchMasterValuesResponse>> MasterValues([FromQuery] int labId, CancellationToken ct)
     {
-        var (_, denied) = await ResolveSettingsUserAsync(labId, ct);
+        var (_, denied) = await ResolveMasterListUserAsync(labId, null, ct);
         if (denied is not null) return denied;
         return Ok(await _repository.GetMasterValuesAsync(labId, ct));
+    }
+
+    /// <summary>
+    /// The master lists: an AR Workbench administrator for every list; an RCM Manager for the
+    /// Non-Collectible and Auto-Adjust lists (handoff §10, DEF-08). <paramref name="type"/> null = the read.
+    /// </summary>
+    private async Task<(ArWorkbenchUserContext? User, ActionResult? Denied)> ResolveMasterListUserAsync(int labId, string? type, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return (null, denied);
+        if (user!.Permissions.ManageSettings) return (user, null);
+        var isManager = user.RoleCode == "manager";
+        if (isManager && (type is null || ArWorkbenchMasterRules.ManagerMaintainedTypes.Contains(type)))
+            return (user, null);
+        return (null, Forbidden(isManager
+            ? "An RCM Manager maintains the Non-Collectible and Auto-Adjust lists; the other lists are for an AR Workbench administrator."
+            : "Only an AR Workbench administrator can maintain master values and denial codes."));
     }
 
     [HttpPost("masters/{type}")]
     public async Task<ActionResult> AddMasterValue([FromRoute] string type, [FromQuery] int labId, [FromBody] ArWorkbenchMasterValueSaveRequest request, CancellationToken ct)
     {
-        var (user, denied) = await ResolveSettingsUserAsync(labId, ct);
+        var (user, denied) = await ResolveMasterListUserAsync(labId, type, ct);
         if (denied is not null) return denied;
         var master = ArWorkbenchMasterRules.Find(type);
         if (master is null) return UnknownList(type);
@@ -1958,7 +2163,7 @@ public sealed class ArWorkbenchController : ControllerBase
     [HttpPut("masters/{type}")]
     public async Task<ActionResult> UpdateMasterValue([FromRoute] string type, [FromQuery] int labId, [FromBody] ArWorkbenchMasterValueSaveRequest request, CancellationToken ct)
     {
-        var (user, denied) = await ResolveSettingsUserAsync(labId, ct);
+        var (user, denied) = await ResolveMasterListUserAsync(labId, type, ct);
         if (denied is not null) return denied;
         var master = ArWorkbenchMasterRules.Find(type);
         if (master is null) return UnknownList(type);
@@ -1974,7 +2179,7 @@ public sealed class ArWorkbenchController : ControllerBase
     [HttpDelete("masters/{type}")]
     public async Task<ActionResult> DeleteMasterValue([FromRoute] string type, [FromQuery] int labId, [FromQuery] string? value, CancellationToken ct)
     {
-        var (_, denied) = await ResolveSettingsUserAsync(labId, ct);
+        var (_, denied) = await ResolveMasterListUserAsync(labId, type, ct);
         if (denied is not null) return denied;
         var master = ArWorkbenchMasterRules.Find(type);
         if (master is null) return UnknownList(type);

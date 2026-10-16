@@ -747,6 +747,17 @@ WHERE NULLIF(LTRIM(RTRIM(r.ClaimID)), N'''') IS NOT NULL
         INNER JOIN #reload r ON r.ClaimKey = cl.ClaimKey
         WHERE EXISTS (SELECT 1 FROM dbo.ARWB_ClaimLineDenial ld WHERE ld.ClaimLineKey = cl.ClaimLineKey);
 
+        -- Remember every CPT denied on the claim. A later sync where the line is paid carries no
+        -- denial code, but the line still belongs to the Revenue Expectation (04, PriceClaimLines /
+        -- RecalculateClaimState), so a denied -> paid claim can reach Fully Recovered.
+        INSERT INTO dbo.ARWB_ClaimDeniedCpt (ClaimKey, CPTCode, FirstDeniedOn, FirstRefreshRunId)
+        SELECT x.ClaimKey, x.CPTCode, @Now, @RunId
+        FROM (SELECT DISTINCT cl.ClaimKey, CPTCode = LTRIM(RTRIM(cl.CPTCode))
+              FROM dbo.ARWB_ClaimLine cl
+              INNER JOIN #reload r ON r.ClaimKey = cl.ClaimKey
+              WHERE cl.HasDenial = 1 AND NULLIF(LTRIM(RTRIM(cl.CPTCode)), N'') IS NOT NULL) x
+        WHERE NOT EXISTS (SELECT 1 FROM dbo.ARWB_ClaimDeniedCpt d WHERE d.ClaimKey = x.ClaimKey AND d.CPTCode = x.CPTCode);
+
         -- Claim-level line rollup
         UPDATE c
         SET c.LineSetChecksum = r.LineChecksum,

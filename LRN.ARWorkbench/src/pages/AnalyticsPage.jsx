@@ -114,7 +114,8 @@ export default function AnalyticsPage() {
       </div>
       <div className="arwb-section-note arwb-section">
         Definitions: <b>Initial Insurance AR</b> is the original insurance balance identified at intake. <b>Recovered</b> is
-        additional payments and adjustments booked since intake. <b>Outstanding</b> is the remaining insurance balance today.
+        insurance payments dated after the claim's denial date (claims with no denial: after the claim entered the workbench) —
+        payments only; adjustments and write-offs are not recovery. <b>Outstanding</b> is the remaining insurance balance today.
         Recovery Rate = Recovered ÷ Initial Insurance AR — claims with a zero initial balance are left out of the rate.
       </div>
 

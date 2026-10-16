@@ -117,11 +117,19 @@ public sealed class ArWorkbenchDashboard
     public List<ArWorkbenchDashboardBar> WorkflowStatuses { get; set; } = new();
     /// <summary>Workable AR Queue leaves (not Closed / Patient AR) with an open insurance balance.</summary>
     public List<ArWorkbenchDashboardBar> QueueVolumes { get; set; } = new();
-    /// <summary>AR Collections Progress: per top-level AR queue, revenue expectation (initial insurance AR) and count.</summary>
+    /// <summary>AR Collections Progress: per top-level AR queue, Revenue Expectation (fee-schedule priced) and count.</summary>
     public List<ArWorkbenchDashboardBar> ArProgress { get; set; } = new();
 
     // Tables
+    /// <summary>
+    /// "Latest Denial Analysis Report insights": the CURRENT week's uploaded Key Observations - the same
+    /// rows Data Processing > Current week shows (DEF-01) - or, for a week with none uploaded, the
+    /// system-generated top codes. <see cref="InsightsSource"/> says which.
+    /// </summary>
     public List<ArWorkbenchDenialHighlight> DenialHighlights { get; set; } = new();
+    /// <summary>"Uploaded" (team Key Observations) or "System" (top unassigned denial codes).</summary>
+    public string InsightsSource { get; set; } = "System";
+    public DateTime? InsightsWeekStart { get; set; }
     public List<ArWorkbenchAgentProductivity> Agents { get; set; } = new();
 }
 
@@ -188,6 +196,11 @@ public sealed class ArWorkbenchClaimFilter
     /// </summary>
     public List<string> DenialCode { get; set; } = new();
     /// <summary>
+    /// <see cref="DenialCode"/> matches the PRIMARY denial only - how insights count a code, so routing an
+    /// insight to the Work Queue returns exactly the insight's claims (test report OBS-02).
+    /// </summary>
+    public bool PrimaryDenialOnly { get; set; }
+    /// <summary>
     /// Denial classification from the central Denial Code Master (Master Values > Denial Code
     /// Descriptions): a claim matches when its primary denial code carries one of them.
     /// </summary>
@@ -248,7 +261,7 @@ public sealed class ArWorkbenchClaimRow
     public decimal InsuranceBalance { get; set; }
     public decimal PatientBalance { get; set; }
     public decimal InitialInsuranceAR { get; set; }
-    /// <summary>Expected payment: the fee-schedule allowable over the claim's lines (handoff section 7).</summary>
+    /// <summary>Revenue Expectation: fee-schedule rate x units over the claim's denied lines (handoff section 7).</summary>
     public decimal RevenueExpectation { get; set; }
     public decimal RecoveredAmount { get; set; }
     public decimal RemainingAR { get; set; }
@@ -272,6 +285,14 @@ public sealed class ArWorkbenchClaimRow
     public string? QaStatus { get; set; }
     public int OpenCipCases { get; set; }
     public int PendingAgentRequests { get; set; }
+    /// <summary>In Progress / Partially Recovered / Fully Recovered / No Recovery (paid vs Revenue Expectation).</summary>
+    public string? RecoveryStatus { get; set; }
+    /// <summary>
+    /// Auto-adjusted or write-off approved: the workbench has nullified the insurance balance (RemainingAR 0)
+    /// while <see cref="InsuranceBalance"/> still shows the master file's amount until the PMS posting
+    /// reaches a sync (DEF-20). Screens show the workbench balance; the amount to post stays in the export.
+    /// </summary>
+    public bool IsBalanceNullified { get; set; }
 }
 
 public static class ArWorkbenchFilterValues
@@ -352,6 +373,12 @@ public sealed class ArWorkbenchClaimLine
     public string? DenialCode { get; set; }
     public DateTime? DenialDate { get; set; }
     public string? ICDCode { get; set; }
+    /// <summary>Fee schedule rate for the CPT (Fees Schedule Import); null when the CPT has no rate.</summary>
+    public decimal? ExpectedRate { get; set; }
+    /// <summary>Rate x units for this line.</summary>
+    public decimal RevenueExpectation { get; set; }
+    /// <summary>True when the line counts toward the claim's Revenue Expectation (its CPT was denied on the claim).</summary>
+    public bool InRevenueExpectation { get; set; }
     /// <summary>dbo.LineLevelData.RecordId of the line: ICD Code, Units and Modifier are read from it live.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public int? SourceRecordId { get; set; }

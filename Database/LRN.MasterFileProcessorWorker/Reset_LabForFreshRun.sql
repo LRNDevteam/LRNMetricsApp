@@ -23,11 +23,10 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 GO
 
-USE LRNMaster;
 GO
 
-DECLARE @LabId    INT           = 27,          -- <<< Cove
-        @LabName  VARCHAR(120)  = 'WellHealth',     -- <<< must match dbo.LRN_Run_Log.LabName
+DECLARE @LabId    INT           = 2,          -- <<< Cove
+        @LabName  VARCHAR(120)  = 'Inhealth_DTR',     -- <<< must match dbo.LRN_Run_Log.LabName
         @WhatIf   BIT           = 0;          -- <<< 1 = preview only, 0 = actually delete
 
 ------------------------------------------------------------------------------------------------

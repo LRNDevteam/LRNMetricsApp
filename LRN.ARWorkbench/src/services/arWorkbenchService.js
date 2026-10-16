@@ -32,6 +32,17 @@ export const arWorkbenchService = {
     return api(`client-cip/template${qs({ labId })}`, { method: 'POST', body: form });
   },
   downloadDocument: (labId, documentId, fileName) => downloadFile(`documents/${documentId}${qs({ labId })}`, fileName || 'attachment'),
+  // Claim attachments (handoff §8.2): docs = [{ file, category, description }], optionally on a follow-up
+  // note; the claim's documents; and the Document Vault search (claim / visit, patient, category).
+  uploadClaimDocuments: (labId, claimKey, docs, followUpId) => {
+    const form = new FormData();
+    if (followUpId) form.append('followUpId', String(followUpId));
+    form.append('documents', JSON.stringify((docs || []).map((d) => ({ category: d.category, description: d.description || null }))));
+    (docs || []).forEach((d) => form.append('files', d.file));
+    return api(`claims/${claimKey}/documents${qs({ labId })}`, { method: 'POST', body: form });
+  },
+  claimDocuments: (labId, claimKey) => api(`claims/${claimKey}/documents${qs({ labId })}`),
+  documentVault: (filter, signal) => api(`documents${qs(filter)}`, { signal }),
   convertLegacyCip: (labId, preview) => api(`cip/convert-legacy${qs({ labId, preview })}`, { method: 'POST' }),
   cipBulk: (labId, caseIds, decision, note) => api(`cip/bulk${qs({ labId })}`, json('POST', { caseIds, decision, note })),
 

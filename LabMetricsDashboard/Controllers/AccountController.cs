@@ -1,22 +1,31 @@
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
+using LabMetricsDashboard.Services.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
+using System.Globalization;
 using System.Security.Claims;
 
 namespace LabMetricsDashboard.Controllers;
 
+/// <summary>
+/// Two ways in, one way out: the username/password form and "Sign in with Microsoft" (Entra ID,
+/// MFA enforced by Entra) both end in <see cref="CompleteSignInAsync"/>, which issues the same auth
+/// cookie with the same claims - so the AR Workbench, AuthToken and LRN.ReportsApi see no difference.
+/// </summary>
 [AllowAnonymous]
 public class AccountController : Controller
 {
     private readonly IUserManagementRepository _repo;
     private readonly IPasswordHasher _hasher;
-    private readonly LabConfigOptions _labConfig;
-    private readonly LabSettings _labSettings;
+    private readonly LrnSignInService _signIn;
+    private readonly HybridAuthOptions _hybrid;
     private readonly ILogger<AccountController> _logger;
     private readonly IConfiguration _configuration;
     private readonly IMemoryCache _cache;
@@ -25,8 +34,8 @@ public class AccountController : Controller
     public AccountController(
         IUserManagementRepository repo,
         IPasswordHasher hasher,
-        LabConfigOptions labConfig,
-        LabSettings labSettings,
+        LrnSignInService signIn,
+        IOptions<HybridAuthOptions> hybrid,
         ILogger<AccountController> logger,
         IConfiguration configuration,
         IMemoryCache cache,
@@ -34,13 +43,15 @@ public class AccountController : Controller
     {
         _repo = repo;
         _hasher = hasher;
-        _labConfig = labConfig;
-        _labSettings = labSettings;
+        _signIn = signIn;
+        _hybrid = hybrid.Value;
         _logger = logger;
         _configuration = configuration;
         _cache = cache;
         _invitations = invitations;
     }
+
+    private string? RemoteIp => HttpContext.Connection.RemoteIpAddress?.ToString();
 
     // ── First login: set a password from the invitation email ───────────────────────────
     // The link carries ?token=; the email also carries a one-time password. Both must match an open
@@ -52,7 +63,9 @@ public class AccountController : Controller
     public async Task<IActionResult> SetPassword(string? token)
     {
         var invite = string.IsNullOrWhiteSpace(token) ? null : await _invitations.FindOpenAsync(token);
-        return View(new SetPasswordViewModel { Token = token ?? string.Empty, UserName = invite?.UserName, LinkValid = invite is not null });
+        var model = new SetPasswordViewModel { Token = token ?? string.Empty, UserName = invite?.UserName, LinkValid = invite is not null };
+        if (invite is not null && await IsMicrosoftAccountAsync(invite.LabUserId)) RefuseMicrosoftAccount(model);
+        return View(model);
     }
 
     [HttpPost]
@@ -64,6 +77,13 @@ public class AccountController : Controller
         model.UserName = invite?.UserName;
         model.LinkValid = invite is not null;
         if (invite is null) return View(model);
+
+        // An invitation sent before the account was linked to Microsoft must not hand it a password.
+        if (await IsMicrosoftAccountAsync(invite.LabUserId))
+        {
+            RefuseMicrosoftAccount(model);
+            return View(model);
+        }
 
         var policyError = ValidateNewPassword(model.NewPassword);
         if (string.IsNullOrWhiteSpace(model.OneTimePassword))
@@ -95,6 +115,15 @@ public class AccountController : Controller
         }
     }
 
+    private async Task<bool> IsMicrosoftAccountAsync(int labUserId)
+        => (await _repo.GetUserByIdAsync(labUserId))?.IsEntra == true;
+
+    private static void RefuseMicrosoftAccount(SetPasswordViewModel model)
+    {
+        model.LinkValid = false;
+        model.Message = "This account signs in with Microsoft and has no password. Use \"Sign in with Microsoft\" on the sign-in page.";
+    }
+
     // Same rule as LRN.ReportsApi ArWorkbenchUserRules.ValidatePassword.
     private static string? ValidateNewPassword(string? password)
     {
@@ -105,9 +134,10 @@ public class AccountController : Controller
     }
 
     [HttpGet]
-    public IActionResult Login(string? returnUrl = null, int denied = 0)
+    public IActionResult Login(string? returnUrl = null, int denied = 0, int msError = 0)
     {
         ViewData["ReturnUrl"] = returnUrl;
+        ViewData["EnableMicrosoftLogin"] = _hybrid.EnableMicrosoftLogin;
 
         // Set by OnRedirectToAccessDenied when an already-signed-in user was refused a page. Without
         // this the refusal looked like the login form simply reloading, over and over.
@@ -126,202 +156,192 @@ public class AccountController : Controller
                 + "ask an administrator to map menus to it under Admin > Role Menu Mapping.";
         }
 
+        // Set by the OpenID Connect handler's OnRemoteFailure (cancelled, MFA not completed ...).
+        if (msError == 1 && TempData["LoginError"] is null)
+            TempData["LoginError"] = "Microsoft sign-in was cancelled or did not complete. Please try again.";
+
         return View(new LoginViewModel());
     }
 
+    // ── Local: username + password ──────────────────────────────────────────────────────
     [HttpPost]
     [ValidateAntiForgeryToken]
     [EnableRateLimiting("login")]
     public async Task<IActionResult> Login(LoginViewModel model, string? returnUrl = null)
     {
         ViewData["ReturnUrl"] = returnUrl;
+        ViewData["EnableMicrosoftLogin"] = _hybrid.EnableMicrosoftLogin;
         if (!ModelState.IsValid) return View(model);
 
-        var lockoutKey = LoginLockoutKey(model.UserName);
+        var login = model.UserName.Trim();
+        const string invalid = "Invalid username or password.";
+
+        var lockoutKey = LoginLockoutKey(login);
         if (_cache.TryGetValue<DateTimeOffset>(lockoutKey, out var lockedUntil) && lockedUntil > DateTimeOffset.UtcNow)
         {
             ModelState.AddModelError(string.Empty, "Too many failed sign-in attempts. Please wait a few minutes and try again.");
             return View(model);
         }
 
-        var user = await _repo.GetUserByUserNameAsync(model.UserName);
+        var user = await _repo.GetUserByUserNameAsync(login);
+
+        // Organization accounts (switch on once every staff member is linked to Microsoft).
+        if (_hybrid.EnableMicrosoftLogin && _hybrid.BlockOrganizationLocalLogin
+            && (_hybrid.IsOrganizationEmail(login) || _hybrid.IsOrganizationEmail(user?.Email)))
+        {
+            await AuditAsync(user?.LabUserID, login, LrnAuth.LocalProvider, false, "UseMicrosoft");
+            ModelState.AddModelError(string.Empty, "Organization accounts sign in with Microsoft. Use the \"Sign in with Microsoft\" button.");
+            return View(model);
+        }
+
         if (user == null || !user.IsActive)
         {
-            RecordFailedLogin(model.UserName);
-            ModelState.AddModelError(string.Empty, "Invalid username or password.");
+            _hasher.Hash(model.Password);   // similar work either way, so timing does not reveal which usernames exist
+            RecordFailedLogin(login);
+            await AuditAsync(user?.LabUserID, login, LrnAuth.LocalProvider, false, user == null ? "Unknown" : "Inactive");
+            ModelState.AddModelError(string.Empty, invalid);
+            return View(model);
+        }
+
+        // Linked to Microsoft: the password was retired when the accounts were linked.
+        if (user.IsEntra)
+        {
+            await AuditAsync(user.LabUserID, login, LrnAuth.LocalProvider, false, "UseMicrosoft");
+            ModelState.AddModelError(string.Empty, _hybrid.EnableMicrosoftLogin
+                ? "This account signs in with Microsoft. Use the \"Sign in with Microsoft\" button."
+                : invalid);
+            return View(model);
+        }
+
+        if (user.LockoutEndUtc > DateTime.UtcNow)
+        {
+            await AuditAsync(user.LabUserID, login, LrnAuth.LocalProvider, false, "LockedOut");
+            ModelState.AddModelError(string.Empty, "This account is temporarily locked after too many failed sign-in attempts. Try again later or contact your administrator.");
             return View(model);
         }
 
         if (string.IsNullOrEmpty(user.PasswordHash) || !_hasher.Verify(user.PasswordHash, model.Password))
         {
-            RecordFailedLogin(model.UserName);
-            ModelState.AddModelError(string.Empty, "Invalid username or password.");
+            RecordFailedLogin(login);
+            await _repo.RecordFailedLoginAsync(user.LabUserID,
+                _configuration.GetValue<int?>("Security:LoginLockout:MaxFailedAttempts") ?? 5,
+                _configuration.GetValue<int?>("Security:LoginLockout:LockoutMinutes") ?? 15);
+            await AuditAsync(user.LabUserID, login, LrnAuth.LocalProvider, false, "BadPassword");
+            ModelState.AddModelError(string.Empty, invalid);
             return View(model);
         }
 
-        ClearFailedLogin(model.UserName);
+        ClearFailedLogin(login);
+        return await CompleteSignInAsync(user, LrnAuth.LocalProvider, login, returnUrl);
+    }
 
-        // Resolve roles + labs for the user.
-        // These three queries are independent — run them concurrently instead of
-        // sequentially. Against a remote SQL server this cuts login time by two
-        // full network round trips (each repo call opens its own pooled connection).
-        var rolesForUserTask = _repo.GetUserRolesAsync(user.LabUserID);
-        var allRolesTask     = _repo.GetAllRolesAsync();
-        var userLabsTask     = _repo.GetUserLabsAsync(user.LabUserID);
-        await Task.WhenAll(rolesForUserTask, allRolesTask, userLabsTask);
+    // ── Microsoft Entra ID ──────────────────────────────────────────────────────────────
+    // A plain GET link from the login page: a form POST would need login.microsoftonline.com in the
+    // CSP form-action list. The OpenID Connect handler signs the result into the short-lived external
+    // cookie, and MicrosoftCallback lets LabUsers decide.
 
-        var rolesForUser = await rolesForUserTask;
-        var allRoles     = (await allRolesTask).ToDictionary(r => r.RoleID, r => r.RoleName);
-        var roleNames = rolesForUser
-            .Select(r => allRoles.TryGetValue(r.RoleID, out var n) ? n : string.Empty)
-            .Where(n => !string.IsNullOrWhiteSpace(n))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+    [HttpGet]
+    public IActionResult MicrosoftLogin(string? returnUrl = null)
+    {
+        if (!_hybrid.EnableMicrosoftLogin) return RedirectToAction(nameof(Login));
 
-        var userLabs = (await userLabsTask).ToList();
+        var callback = Url.Action(nameof(MicrosoftCallback),
+            new { returnUrl = !string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl) ? returnUrl : null });
+        return Challenge(
+            new OpenIdConnectChallengeProperties { RedirectUri = callback, Prompt = "select_account" },
+            LrnAuth.EntraScheme);
+    }
 
-        // IMPORTANT:
-        // For login redirects and lab claims, rely on LabConfig:LabsID mapping from appsettings.json.
-        // This makes the behavior consistent across environments even if dbo.Labs entries differ.
-        var mappedLabs = userLabs
-            .Select(ul => new { ul.ULID, ul.LabId, Name = _labConfig.GetLabNameById(ul.LabId) })
-            .Where(x => !string.IsNullOrWhiteSpace(x.Name))
-            // If the user has multiple labs, keep them unique by LabId but preserve the
-            // "most recently assigned" ordering. We treat the newest UserLabs row as the
-            // most recent assignment (highest ULID).
-            .OrderByDescending(x => x.ULID)
-            .DistinctBy(x => x.LabId)
-            .ToList();
+    [HttpGet]
+    public async Task<IActionResult> MicrosoftCallback(string? returnUrl = null)
+    {
+        if (!_hybrid.EnableMicrosoftLogin) return RedirectToAction(nameof(Login));
 
-        var unmappedLabIds = userLabs
-            .Select(ul => ul.LabId)
-            .Where(id => string.IsNullOrWhiteSpace(_labConfig.GetLabNameById(id)))
-            .Distinct()
-            .ToList();
+        var external = await HttpContext.AuthenticateAsync(LrnAuth.ExternalScheme);
+        await HttpContext.SignOutAsync(LrnAuth.ExternalScheme);   // one-time use
 
-        if (unmappedLabIds.Count > 0)
+        if (!external.Succeeded || external.Principal is null)
         {
-            _logger.LogWarning(
-                "User {UserName} has UserLabs assignments with LabId(s) not found in LabConfig:LabsID: [{LabIds}]",
-                user.UserName, string.Join(",", unmappedLabIds));
+            TempData["LoginError"] = "Microsoft sign-in did not complete. Please try again.";
+            return RedirectToAction(nameof(Login));
         }
 
-        // For downstream UI lab selector, it still uses LabSettings.Labs keys.
-        // We log if mapped labs are missing per-lab JSON config so deployment can be fixed.
-        var mappedButMissingJson = mappedLabs.Where(x => !_labSettings.Labs.ContainsKey(x.Name!)).ToList();
-        if (mappedButMissingJson.Count > 0)
+        var p = external.Principal;
+        var upn = p.FindFirstValue("preferred_username") ?? p.FindFirstValue("email") ?? string.Empty;
+        var tenantText = p.FindFirstValue("tid");
+
+        // Single-tenant registration, but checked here as well: only this tenant's accounts get in.
+        if (!Guid.TryParse(p.FindFirstValue("oid"), out var objectId)
+            || !Guid.TryParse(tenantText, out var tenantId)
+            || !Guid.TryParse(_configuration["MFAAzureAd:TenantId"], out var expectedTenant)
+            || tenantId != expectedTenant)
         {
-            _logger.LogWarning(
-                "User {UserName} mapped labs [{Labs}] are not present in LabSettings.Labs (missing per-lab JSON / LabConfig:Labs).",
-                user.UserName, string.Join(",", mappedButMissingJson.Select(l => $"{l.LabId}:{l.Name}")));
+            await AuditAsync(null, upn, LrnAuth.EntraProvider, false, "WrongTenantOrClaims");
+            TempData["LoginError"] = "This Microsoft account cannot be used here.";
+            return RedirectToAction(nameof(Login));
         }
 
-        // Every other role test here goes through IsRole, which ignores case AND spacing. This one
-        // used a bare string.Equals against "Admin", so it recognised ONLY a role spelled exactly
-        // "Admin" - "Super Admin", "LRN Admin" and "LRNAdmin" all fell through to the lab-assignment
-        // checks below and were signed straight back out. The rest of the app (MenuAccessFilter,
-        // ReportBoardController, AnalyticsController) has always treated those as admin, so login
-        // was the one place that disagreed.
-        //
-        // "Lab Admin" is deliberately NOT here: a lab admin is scoped to a lab by definition, so it
-        // must keep going through the lab-assignment check rather than bypassing it.
-        var isAdmin = roleNames.Any(r =>
-            IsRole(r, "Admin") || IsRole(r, "Super Admin") || IsRole(r, "LRN Admin"));
-        var isArManager = roleNames.Any(r => IsRole(r, "AR Manager") || IsRole(r, "ARManager"));
-        var isArReviewer = roleNames.Any(r => IsRole(r, "AR Reviewer") || IsRole(r, "ARReviewer") || IsRole(r, "AR Analyser") || IsRole(r, "ARAnalyser") || IsRole(r, "AR Analyzer") || IsRole(r, "ARAnalyzer"));
-        var isClientManager = roleNames.Any(r => IsRole(r, "Client Manager") || IsRole(r, "ClientManager"));
-        var isAccountManager = roleNames.Any(r => IsRole(r, "Account Manager") || IsRole(r, "AccountManager"));
-        // The 8 AR Workbench roles in dbo.Roles all start with "AR Workbench - " (the same prefix
-        // LRN.ReportsApi uses to find them - see LRNMaster_01_ARWB_Roles_Access.sql).
-        var isArWorkbenchUser = roleNames.Any(r => (r ?? string.Empty).TrimStart().StartsWith("AR Workbench - ", StringComparison.OrdinalIgnoreCase));
-
-        // Build claims
-        var claims = new List<Claim>
+        // Match ONLY on the object id. Never link to a local account by email or UPN automatically:
+        // an administrator does that (Admin > Manage Users > Link).
+        var user = await _repo.GetUserByEntraObjectIdAsync(objectId);
+        if (user is null)
         {
-            new(ClaimTypes.NameIdentifier, user.LabUserID.ToString()),
-            new(ClaimTypes.Name,           user.UserName),
-            new("FullName",                $"{user.FirstName} {user.LastName}".Trim()),
+            user = await _repo.GetOrCreateEntraUserAsync(objectId, tenantId, upn, p.FindFirstValue("email"), p.FindFirstValue("name"));
+            await AuditAsync(user.LabUserID, upn, LrnAuth.EntraProvider, false, "Provisioned");
+            _logger.LogInformation("Provisioned Microsoft user {Upn} ({ObjectId}) as LabUserID {Id} with no role.", upn, objectId, user.LabUserID);
+        }
+
+        return await CompleteSignInAsync(user, LrnAuth.EntraProvider, upn, returnUrl);
+    }
+
+    // ── Shared tail for both providers ──────────────────────────────────────────────────
+    private async Task<IActionResult> CompleteSignInAsync(LabUser user, string provider, string loginValue, string? returnUrl)
+    {
+        var result = await _signIn.BuildAsync(user);
+        switch (result.Outcome)
+        {
+            case LrnSignInOutcome.Inactive:
+                await AuditAsync(user.LabUserID, loginValue, provider, false, "Inactive");
+                TempData["LoginError"] = "Your account is inactive. Please contact your administrator.";
+                return RedirectToAction(nameof(Login));
+            case LrnSignInOutcome.NoRole:
+                await AuditAsync(user.LabUserID, loginValue, provider, false, "NoRole");
+                TempData["PendingUser"] = user.UserName;
+                return RedirectToAction(nameof(AccessPending));
+            case LrnSignInOutcome.NoLabs:
+                await AuditAsync(user.LabUserID, loginValue, provider, false, "NoLabs");
+                TempData["LoginError"] = "Your account has no lab assignments. Please contact your administrator.";
+                return RedirectToAction(nameof(Login));
+            case LrnSignInOutcome.LabsNotMapped:
+                await AuditAsync(user.LabUserID, loginValue, provider, false, "LabsNotMapped");
+                TempData["LoginError"] = "Your assigned lab(s) are not mapped in this environment. Please contact your administrator.";
+                return RedirectToAction(nameof(Login));
+        }
+
+        var properties = new AuthenticationProperties
+        {
+            // Always a session cookie (no browser Expires/Max-Age), so closing the browser ends
+            // the session and forces a fresh login on reopen. The 8h ExpiresUtc still caps an
+            // idle session within the same browser run. RememberMe no longer persists across
+            // browser close by design.
+            IsPersistent = false,
+            ExpiresUtc   = DateTimeOffset.UtcNow.AddHours(8)
         };
-        foreach (var rn in roleNames)
-        {
-            claims.Add(new Claim(ClaimTypes.Role, rn));
-        }
-        foreach (var lab in mappedLabs)
-        {
-            claims.Add(new Claim("LabName", lab.Name!));
-        }
+        properties.Items[LrnAuth.ValidatedItem] = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+        await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, result.Principal!, properties);
 
-        var identity  = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
-        var principal = new ClaimsPrincipal(identity);
-        await HttpContext.SignInAsync(
-            CookieAuthenticationDefaults.AuthenticationScheme,
-            principal,
-            new AuthenticationProperties
-            {
-                // Always a session cookie (no browser Expires/Max-Age), so closing the browser ends
-                // the session and forces a fresh login on reopen. The 8h ExpiresUtc still caps an
-                // idle session within the same browser run. RememberMe no longer persists across
-                // browser close by design.
-                IsPersistent = false,
-                ExpiresUtc   = DateTimeOffset.UtcNow.AddHours(8)
-            });
+        await _repo.RecordSuccessfulLoginAsync(user.LabUserID);
+        await AuditAsync(user.LabUserID, loginValue, provider, true, null);
 
         // Honor ?returnUrl=... if it's local
         if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
-        {
             return Redirect(returnUrl);
-        }
 
-        // Routing rules. AR Workbench users land on the AR Workbench dashboard, like the Denial
-        // Workflow roles it replaced.
-        var isDenialWorkflowUser = isArManager || isArReviewer || isClientManager || isAccountManager || isArWorkbenchUser;
-
-        // 1) Admin without a Denial Workflow / AR Workbench role => Report Control Board (the landing/home page).
-        //    Users with those roles are routed to the AR Workbench dashboard below.
-        if (isAdmin && !isDenialWorkflowUser)
-        {
+        // Admin without a Denial Workflow / AR Workbench role => Report Control Board (the landing page).
+        if (result.IsAdmin && !result.IsDenialWorkflowUser)
             return RedirectToAction("Index", "ReportBoard");
-        }
 
-        // 2) Non-admin with no lab assignments at all ? friendly error
-        if (userLabs.Count == 0)
-        {
-            // Logged with the roles, because from the user's side this is indistinguishable from a
-            // rejected password and the only signal was a generic banner.
-            _logger.LogWarning(
-                "Login blocked for {UserName}: no rows in UserLabs. Roles: [{Roles}]. "
-                + "Assign the user a lab, or the account cannot sign in.",
-                user.UserName, string.Join(", ", roleNames));
-
-            TempData["LoginError"] =
-                "Your account has no lab assignments. Please contact your administrator.";
-            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-            return RedirectToAction(nameof(Login));
-        }
-
-        // 2b) Non-admin has lab assignments, but the environment doesn't have LabConfig:LabsID mapping.
-        //     In this case we cannot resolve which lab name to route to.
-        if (mappedLabs.Count == 0)
-        {
-            // The LabId exists in UserLabs but LabConfig:LabsID has no name for it, so there is
-            // nowhere to route. Naming the ids makes this a two-minute config fix instead of a
-            // support ticket.
-            _logger.LogWarning(
-                "Login blocked for {UserName}: UserLabs has LabId(s) [{LabIds}] but none resolve "
-                + "through LabConfig:LabsID. Roles: [{Roles}]. Add the mapping to appsettings.",
-                user.UserName,
-                string.Join(", ", userLabs.Select(l => l.LabId).Distinct()),
-                string.Join(", ", roleNames));
-
-            TempData["LoginError"] =
-                "Your assigned lab(s) are not mapped in this environment. Please contact your administrator.";
-            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-            return RedirectToAction(nameof(Login));
-        }
-
-        // 3) Non-admin (1 or many labs). AR and AR Workbench users go directly to the AR Workbench.
-        var defaultLabName = mappedLabs[0].Name!;
-        Response.Cookies.Append("lmd_selected_lab", defaultLabName, new CookieOptions
+        Response.Cookies.Append("lmd_selected_lab", result.DefaultLabName!, new CookieOptions
         {
             Expires     = DateTimeOffset.UtcNow.AddDays(30),
             HttpOnly    = false,
@@ -330,7 +350,8 @@ public class AccountController : Controller
             IsEssential = true
         });
 
-        if (isDenialWorkflowUser)
+        // AR and AR Workbench users go directly to the AR Workbench.
+        if (result.IsDenialWorkflowUser)
         {
             var workflowUrl = _configuration["DenialWorkflowReactUrl"];
             if (!string.IsNullOrWhiteSpace(workflowUrl))
@@ -343,28 +364,38 @@ public class AccountController : Controller
             return RedirectToAction("Index", "DenialWorkflow", new { tab = "dashboard" });
         }
 
-        // Report Control Board is the landing/home page for everyone (was: Dashboard). The selected
-        // lab is still remembered via the lmd_selected_lab cookie above, so the Revenue dashboard
-        // opens on the right lab when reached from the board.
+        // Report Control Board is the landing/home page for everyone. The selected lab is remembered
+        // via the lmd_selected_lab cookie above, so the Revenue dashboard opens on the right lab.
         return RedirectToAction("Index", "ReportBoard");
+    }
+
+    /// <summary>The audit trail must never be the reason a sign-in fails.</summary>
+    private async Task AuditAsync(int? labUserId, string? loginValue, string provider, bool succeeded, string? reason)
+    {
+        try
+        {
+            await _repo.WriteLoginAuditAsync(labUserId, loginValue, provider, succeeded, reason, RemoteIp);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not write LoginAudit for {Login} ({Provider}, {Reason}).", loginValue, provider, reason ?? "Success");
+        }
     }
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Logout()
-    {
-        await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-        return RedirectToAction(nameof(Login));
-    }
+    public Task<IActionResult> Logout() => LrnSignOut.SignOutAsync(this);
 
     [HttpGet]
     public IActionResult AccessDenied() => View();
 
-    private static bool IsRole(string? actual, string expected)
-        => string.Equals(NormalizeRoleToken(actual), NormalizeRoleToken(expected), StringComparison.OrdinalIgnoreCase);
-
-    private static string NormalizeRoleToken(string? value)
-        => new string((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+    /// <summary>Signed in successfully (password or Microsoft), but no role yet: no cookie was issued.</summary>
+    [HttpGet]
+    public IActionResult AccessPending()
+    {
+        ViewData["EnableMicrosoftLogin"] = _hybrid.EnableMicrosoftLogin;
+        return View();
+    }
 
     private string LoginFailureKey(string userName)
         => $"login-fail:{HttpContext.Connection.RemoteIpAddress}:{NormalizeUserName(userName)}";

@@ -107,4 +107,20 @@ public sealed class MenuAccessFilter : IAsyncAuthorizationFilter
         user.Claims
             .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role)
             .Any(c => FullAdminRoles.Contains(c.Value.Replace(" ", string.Empty).ToUpperInvariant()));
+
+    /// <summary>User-management policy: <see cref="IsFullAdmin"/> or <see cref="IsLabAdmin"/> (scoped to their labs by AdminController).</summary>
+    public const string UserAdminPolicy = "UserAdmin";
+
+    internal static bool IsLabAdmin(System.Security.Claims.ClaimsPrincipal user) =>
+        user.Claims
+            .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role)
+            .Any(c => IsLabAdminRole(c.Value));
+
+    /// <summary>The admin role names a Lab Admin may not grant: the full-admin set plus Lab Admin itself.</summary>
+    internal static bool IsAdminRoleName(string? roleName) =>
+        FullAdminRoles.Contains((roleName ?? string.Empty).Replace(" ", string.Empty).ToUpperInvariant())
+        || IsLabAdminRole(roleName);
+
+    private static bool IsLabAdminRole(string? roleName) =>
+        (roleName ?? string.Empty).Replace(" ", string.Empty).Equals("LABADMIN", StringComparison.OrdinalIgnoreCase);
 }

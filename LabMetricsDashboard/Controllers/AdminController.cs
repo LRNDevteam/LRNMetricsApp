@@ -4,6 +4,8 @@ using LabMetricsDashboard.Models.Menu;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
+using System.Security.Claims;
 
 namespace LabMetricsDashboard.Controllers;
 
@@ -41,6 +43,56 @@ public class AdminController : Controller
         return null;
     }
 
+    // ── Who may change whom ──────────────────────────────────────────────────────────────
+    // The user-management POSTs are not menu items, so MenuAccessFilter never guarded them. They now
+    // require UserAdminPolicy (full admin or Lab Admin) and, for a Lab Admin, these per-request
+    // checks: only users in (or not yet in) their own labs, only their own labs, and no admin roles.
+
+    private bool IsFullAdmin => MenuAccessFilter.IsFullAdmin(User);
+    private int CurrentUserId => int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : 0;
+
+    private async Task<HashSet<int>> MyLabIdsAsync()
+        => (await _repo.GetUserLabsAsync(CurrentUserId)).Select(l => l.LabId).ToHashSet();
+
+    private async Task<List<string>> RoleNamesOfAsync(int labUserId)
+    {
+        var names = (await _repo.GetAllRolesAsync()).ToDictionary(r => r.RoleID, r => r.RoleName);
+        return (await _repo.GetUserRolesAsync(labUserId))
+            .Select(ur => names.TryGetValue(ur.RoleID, out var n) ? n : string.Empty)
+            .Where(n => n.Length > 0)
+            .ToList();
+    }
+
+    /// <summary>Null when the caller may change <paramref name="targetUserId"/>; otherwise why not.</summary>
+    private async Task<string?> UserScopeErrorAsync(int targetUserId)
+    {
+        if (IsFullAdmin) return null;
+        if ((await RoleNamesOfAsync(targetUserId)).Any(MenuAccessFilter.IsAdminRoleName))
+            return "Only a Super Admin can change an administrator's account.";
+        var targetLabs = (await _repo.GetUserLabsAsync(targetUserId)).Select(l => l.LabId).ToList();
+        // No labs yet - typically a new "Sign in with Microsoft" user waiting for access.
+        if (targetLabs.Count == 0) return null;
+        var mine = await MyLabIdsAsync();
+        return targetLabs.Any(mine.Contains) ? null : "That user is not in any of your labs.";
+    }
+
+    private async Task<string?> RoleGrantErrorAsync(int roleId)
+    {
+        if (IsFullAdmin) return null;
+        var role = (await _repo.GetAllRolesAsync()).FirstOrDefault(r => r.RoleID == roleId);
+        if (role is null) return "That role no longer exists.";
+        return MenuAccessFilter.IsAdminRoleName(role.RoleName) ? "Only a Super Admin can grant an administrator role." : null;
+    }
+
+    private async Task<string?> LabGrantErrorAsync(IEnumerable<int> labIds)
+    {
+        if (IsFullAdmin) return null;
+        var mine = await MyLabIdsAsync();
+        return labIds.All(mine.Contains) ? null : "You can only assign your own labs.";
+    }
+
+    private IActionResult Refused(string message) => StatusCode(StatusCodes.Status403Forbidden, new { success = false, errors = new[] { message } });
+
     private static string InviteMessage(string userName, string email, UserInvitationResult invite) => invite.EmailSent
         ? $"User '{userName}' created. An invitation with a one-time password was emailed to {email}."
         : $"User '{userName}' created, but the invitation email could not be sent ({invite.Message}). Use Send invite on the user list once mail is working.";
@@ -50,11 +102,15 @@ public class AdminController : Controller
     /// <summary>Resend the first-login invitation: new link and one-time password; earlier ones stop working.</summary>
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [Authorize(Policy = MenuAccessFilter.UserAdminPolicy)]
     public async Task<IActionResult> SendInvitationAjax([FromForm] int userId, CancellationToken ct)
     {
         if (userId <= 0) return BadRequest(new { success = false, errors = new[] { "Invalid user" } });
         var user = await _repo.GetUserByIdAsync(userId);
         if (user == null) return NotFound(new { success = false, errors = new[] { "That user no longer exists." } });
+        if (await UserScopeErrorAsync(userId) is { } scopeError) return Refused(scopeError);
+        // An invitation sets a password; a Microsoft account has none and signs in with Microsoft.
+        if (user.IsEntra) return Conflict(new { success = false, errors = new[] { "This user signs in with Microsoft and needs no invitation." } });
         if (!user.IsActive) return Conflict(new { success = false, errors = new[] { "Activate the user before sending an invitation." } });
         if (ValidateInviteEmail(user.Email) is { } emailError) return BadRequest(new { success = false, errors = new[] { emailError + " Edit the user first." } });
 
@@ -260,6 +316,8 @@ public class AdminController : Controller
                 mobile = u.Mobile,
                 isExternalUser = u.IsExternalUser,
                 isActive = u.IsActive,
+                authProvider = u.AuthProvider,
+                lastLoginUtc = u.LastLoginUtc,
                 roles = roles,
                 labs = labs
             });
@@ -299,11 +357,16 @@ public class AdminController : Controller
     }
 
     [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Policy = MenuAccessFilter.UserAdminPolicy)]
     public async Task<IActionResult> CreateUserAjax([FromForm] AdminViewModel vm)
     {
         // Validate using ModelState and explicit checks
         var errors = new List<string>();
         if (vm == null) return BadRequest(new { success = false, errors = new[] { "Invalid request" } });
+        if (vm.NewUserRoleId is > 0 && await RoleGrantErrorAsync(vm.NewUserRoleId.Value) is { } roleError) return Refused(roleError);
+        if (await LabGrantErrorAsync(GetSelectedLabIds(vm)) is { } labError) return Refused(labError);
+        if (!IsFullAdmin && !GetSelectedLabIds(vm).Any()) return Refused("Assign at least one of your labs.");
 
         // DataAnnotation validation for password/compare will be on ModelState
         if (!ModelState.IsValid)
@@ -349,6 +412,8 @@ public class AdminController : Controller
     }
 
     [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
     public async Task<IActionResult> CreateRoleAjax([FromForm] AdminViewModel vm)
     {
         var role = vm?.NewRole;
@@ -358,50 +423,106 @@ public class AdminController : Controller
     }
 
     [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Policy = MenuAccessFilter.UserAdminPolicy)]
     public async Task<IActionResult> AssignRoleAjax([FromForm] int assignUserId, [FromForm] int assignRoleId)
     {
         if (assignUserId <= 0 || assignRoleId <= 0) return BadRequest(new { success = false, errors = new[] { "Invalid user or role" } });
+        if ((await UserScopeErrorAsync(assignUserId) ?? await RoleGrantErrorAsync(assignRoleId)) is { } error) return Refused(error);
         await _repo.AssignRoleAsync(assignUserId, assignRoleId);
         return Json(new { success = true });
     }
 
     [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Policy = MenuAccessFilter.UserAdminPolicy)]
     public async Task<IActionResult> AssignUserLabAjax([FromForm] int assignUserId, [FromForm] int labId)
     {
         if (assignUserId <= 0 || labId <= 0) return BadRequest(new { success = false, errors = new[] { "Invalid user or lab" } });
+        if ((await UserScopeErrorAsync(assignUserId) ?? await LabGrantErrorAsync(new[] { labId })) is { } error) return Refused(error);
         var ul = new UserLab { LabId = labId, LabUserID = assignUserId };
         await _repo.AssignUserLabAsync(ul);
         return Json(new { success = true });
     }
 
     [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Policy = MenuAccessFilter.UserAdminPolicy)]
     public async Task<IActionResult> RemoveUserRole([FromForm] int userRoleId)
     {
         if (userRoleId <= 0) return BadRequest();
+        var userRole = await _repo.GetUserRoleByIdAsync(userRoleId);
+        if (userRole is null) return Json(new { success = true });   // already gone
+        if ((await UserScopeErrorAsync(userRole.LabUserID) ?? await RoleGrantErrorAsync(userRole.RoleID)) is { } error) return Refused(error);
         await _repo.RemoveUserRoleAsync(userRoleId);
         return Json(new { success = true });
     }
 
     [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Policy = MenuAccessFilter.UserAdminPolicy)]
     public async Task<IActionResult> RemoveUserLab([FromForm] int ulid)
     {
         if (ulid <= 0) return BadRequest();
+        var userLab = await _repo.GetUserLabByIdAsync(ulid);
+        if (userLab is null) return Json(new { success = true });   // already gone
+        if ((await UserScopeErrorAsync(userLab.LabUserID) ?? await LabGrantErrorAsync(new[] { userLab.LabId })) is { } error) return Refused(error);
         await _repo.RemoveUserLabAsync(ulid);
         return Json(new { success = true });
     }
 
     [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Policy = MenuAccessFilter.UserAdminPolicy)]
     public async Task<IActionResult> RemoveUser([FromForm] int userId)
     {
         if (userId <= 0) return BadRequest(new { success = false, errors = new[] { "Invalid user" } });
+        if (await UserScopeErrorAsync(userId) is { } error) return Refused(error);
         await _repo.DeactivateUserAsync(userId, User?.Identity?.Name);
         return Json(new { success = true });
     }
 
+    /// <summary>
+    /// Admin > Manage Users > Link: moves a pending "Sign in with Microsoft" row onto the person's
+    /// existing account, which keeps its username, roles and labs and becomes Microsoft-only.
+    /// </summary>
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
+    public async Task<IActionResult> LinkEntraUser([FromForm] int pendingUserId, [FromForm] string? existingUserName)
+    {
+        var pending = pendingUserId > 0 ? await _repo.GetUserByIdAsync(pendingUserId) : null;
+        if (pending is null || !pending.IsEntra)
+            return BadRequest(new { success = false, errors = new[] { "Choose a user who signed in with Microsoft." } });
+
+        var existing = string.IsNullOrWhiteSpace(existingUserName) ? null : await _repo.GetUserByUserNameAsync(existingUserName.Trim());
+        if (existing is null)
+            return BadRequest(new { success = false, errors = new[] { $"No user named '{existingUserName?.Trim()}' was found." } });
+
+        try
+        {
+            await _repo.LinkEntraUserAsync(existing.LabUserID, pending.LabUserID, User.Identity?.Name ?? "admin");
+        }
+        catch (SqlException ex) when (ex.Number is >= 50001 and <= 50004)
+        {
+            return BadRequest(new { success = false, errors = new[] { ex.Message } });
+        }
+
+        return Json(new { success = true, message = $"'{existing.UserName}' now signs in with Microsoft as {pending.UserName}. Its roles and labs are unchanged; its password no longer works." });
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Policy = MenuAccessFilter.UserAdminPolicy)]
     public async Task<IActionResult> CreateUser(AdminViewModel vm)
     {
+        if (vm.NewUserRoleId is > 0 && await RoleGrantErrorAsync(vm.NewUserRoleId.Value) is { } roleError)
+            ModelState.AddModelError("NewUserRoleId", roleError);
+        if (await LabGrantErrorAsync(GetSelectedLabIds(vm)) is { } labError)
+            ModelState.AddModelError("NewUserLabIds", labError);
+        else if (!IsFullAdmin && !GetSelectedLabIds(vm).Any())
+            ModelState.AddModelError("NewUserLabIds", "Assign at least one of your labs.");
+
         // Server-side validation via ModelState
         if (!ModelState.IsValid)
         {
@@ -468,7 +589,18 @@ public class AdminController : Controller
         if (user == null) return NotFound();
         ViewBag.Labs = (await _repo.GetAllLabsAsync()).Where(lab => lab.IsActive).ToList();
         ViewBag.SelectedLabIds = (await _repo.GetUserLabsAsync(id)).Select(lab => lab.LabId).Distinct().ToList();
-        ViewBag.CanSetPassword = CanSetPasswords;
+        // Roles: active ones, plus any the user already holds (so an inactive role still shows and can
+        // be removed). A Lab Admin is not offered administrator roles they cannot grant.
+        var selectedRoleIds = (await _repo.GetUserRolesAsync(id)).Select(ur => ur.RoleID).Distinct().ToList();
+        ViewBag.SelectedRoleIds = selectedRoleIds;
+        ViewBag.Roles = (await _repo.GetAllRolesAsync())
+            .Where(r => r.IsActive || selectedRoleIds.Contains(r.RoleID))
+            .Where(r => IsFullAdmin || selectedRoleIds.Contains(r.RoleID) || !MenuAccessFilter.IsAdminRoleName(r.RoleName))
+            .OrderBy(r => r.RoleName)
+            .ToList();
+        // A Microsoft account has no password to set: it signs in with Microsoft.
+        ViewBag.CanSetPassword = CanSetPasswords && !user.IsEntra;
+        ViewBag.IsMicrosoftAccount = user.IsEntra;
         return View(user);
     }
 
@@ -480,13 +612,51 @@ public class AdminController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Edit([FromForm] LabUser user, [FromForm] string? Password, [FromForm] string? ConfirmPassword, [FromForm] int[] LabIds)
+    [Authorize(Policy = MenuAccessFilter.UserAdminPolicy)]
+    public async Task<IActionResult> Edit([FromForm] LabUser user, [FromForm] string? Password, [FromForm] string? ConfirmPassword, [FromForm] int[] LabIds,
+        [FromForm] int[] RoleIds, [FromForm] bool RolesSubmitted)
     {
         if (user == null || user.LabUserID <= 0) return RedirectToAction(nameof(ListUsers));
 
         // Preserve non-editable fields (e.g. IsExternalUser, MiddleName) by loading the existing record.
         var existing = await _repo.GetUserByIdAsync(user.LabUserID);
         if (existing == null) return NotFound();
+
+        // A Lab Admin edits users in their labs and adds or removes only their own labs; any other
+        // lab the user has is left exactly as it was.
+        var submittedLabIds = LabIds.Where(id => id > 0).Distinct().ToList();
+        HashSet<int>? myLabs = null;
+        if (!IsFullAdmin)
+        {
+            myLabs = await MyLabIdsAsync();
+            var currentLabIds = (await _repo.GetUserLabsAsync(existing.LabUserID)).Select(l => l.LabId).ToHashSet();
+            var scopeError = await UserScopeErrorAsync(existing.LabUserID)
+                ?? (submittedLabIds.Any(id => !myLabs.Contains(id) && !currentLabIds.Contains(id)) ? "You can only assign your own labs." : null);
+            if (scopeError is not null)
+            {
+                TempData["AdminError"] = scopeError;
+                return RedirectToAction("Edit", new { id = user.LabUserID });
+            }
+        }
+
+        // Roles: work out the change first and refuse it as a whole if any part is not allowed, so a
+        // rejected save never leaves the user half-updated.
+        var currentRoles = (await _repo.GetUserRolesAsync(existing.LabUserID)).ToList();
+        var submittedRoleIds = RoleIds.Where(id => id > 0).Distinct().ToHashSet();
+        var rolesToAdd = RolesSubmitted
+            ? submittedRoleIds.Where(id => currentRoles.All(ur => ur.RoleID != id)).ToList()
+            : new List<int>();
+        var rolesToRemove = RolesSubmitted
+            ? currentRoles.Where(ur => !submittedRoleIds.Contains(ur.RoleID)).ToList()
+            : new List<UserRole>();
+        foreach (var roleId in rolesToAdd.Concat(rolesToRemove.Select(ur => ur.RoleID)).Distinct())
+        {
+            if (await RoleGrantErrorAsync(roleId) is { } roleError)
+            {
+                TempData["AdminError"] = roleError;
+                return RedirectToAction("Edit", new { id = user.LabUserID });
+            }
+        }
 
         existing.UserName = user.UserName;
         existing.FirstName = user.FirstName;
@@ -498,6 +668,11 @@ public class AdminController : Controller
         string? pwdHash = null;
         if (!string.IsNullOrEmpty(Password) || !string.IsNullOrEmpty(ConfirmPassword))
         {
+            if (existing.IsEntra)
+            {
+                TempData["AdminError"] = "This user signs in with Microsoft and has no password to set.";
+                return RedirectToAction("Edit", new { id = user.LabUserID });
+            }
             if (!CanSetPasswords)
             {
                 TempData["AdminError"] = "Only a Super Admin can set a user's password. Use Send password link on the user list instead.";
@@ -517,15 +692,25 @@ public class AdminController : Controller
         }
 
         await _repo.UpdateUserAsync(existing, pwdHash);
-        var existingLabs = await _repo.GetUserLabsAsync(existing.LabUserID);
-        foreach (var lab in existingLabs)
+        var existingLabs = (await _repo.GetUserLabsAsync(existing.LabUserID)).ToList();
+        // Labs outside a Lab Admin's own set are not theirs to change: keep them as they are.
+        var untouchable = myLabs is null
+            ? new HashSet<int>()
+            : existingLabs.Select(l => l.LabId).Where(id => !myLabs.Contains(id)).ToHashSet();
+        foreach (var lab in existingLabs.Where(l => !untouchable.Contains(l.LabId)))
         {
             await _repo.RemoveUserLabAsync(lab.ULID);
         }
-        foreach (var labId in LabIds.Where(id => id > 0).Distinct())
+        foreach (var labId in submittedLabIds.Where(id => !untouchable.Contains(id)))
         {
             await _repo.AssignUserLabAsync(new UserLab { LabUserID = existing.LabUserID, LabId = labId });
         }
+
+        foreach (var userRole in rolesToRemove)
+            await _repo.RemoveUserRoleAsync(userRole.UserRoleId);
+        foreach (var roleId in rolesToAdd)
+            await _repo.AssignRoleAsync(existing.LabUserID, roleId);
+
         return RedirectToAction(nameof(ListUsers));
     }
 
@@ -539,6 +724,7 @@ public class AdminController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
     public async Task<IActionResult> CreateRole(Role role)
     {
         if (string.IsNullOrWhiteSpace(role.RoleName))
@@ -552,10 +738,13 @@ public class AdminController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [Authorize(Policy = MenuAccessFilter.UserAdminPolicy)]
     public async Task<IActionResult> AssignRole(int assignUserId, int assignRoleId)
     {
         if (assignUserId <= 0 || assignRoleId <= 0)
             return RedirectToAction("Index");
+        if ((await UserScopeErrorAsync(assignUserId) ?? await RoleGrantErrorAsync(assignRoleId)) is not null)
+            return Forbid();
 
         await _repo.AssignRoleAsync(assignUserId, assignRoleId);
         return RedirectToAction("Index");
@@ -563,10 +752,13 @@ public class AdminController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [Authorize(Policy = MenuAccessFilter.UserAdminPolicy)]
     public async Task<IActionResult> AssignUserLab(int assignUserId, int labId)
     {
         if (assignUserId <= 0 || labId <= 0)
             return RedirectToAction("Index");
+        if ((await UserScopeErrorAsync(assignUserId) ?? await LabGrantErrorAsync(new[] { labId })) is not null)
+            return Forbid();
 
         var ul = new UserLab { LabId = labId, LabUserID = assignUserId };
         await _repo.AssignUserLabAsync(ul);
@@ -601,6 +793,7 @@ public class AdminController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
     public async Task<IActionResult> CreateLab(Lab lab)
     {
         if (lab == null || string.IsNullOrWhiteSpace(lab.LabName))
@@ -640,6 +833,7 @@ public class AdminController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
     public async Task<IActionResult> EditLab(Lab lab)
     {
         if (lab == null || lab.LabId <= 0) return RedirectToAction(nameof(ManageLabs));

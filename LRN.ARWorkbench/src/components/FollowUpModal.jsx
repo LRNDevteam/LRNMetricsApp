@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
+import { DocumentRowsEditor, useAttachmentRules, validateDocuments } from './Documents';
 import Modal from './Modal';
 import { Badge, ErrorBox } from './Status';
 
@@ -49,6 +50,9 @@ export default function FollowUpModal({ claim, lastFollowUp, onClose, onDone, su
   }));
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // Documents on the note (handoff §8.2, DEF-13): optional, each with its own category and description.
+  const attachmentRules = useAttachmentRules();
+  const [docs, setDocs] = useState([]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const setStatus = (status) => setForm((f) => ({ ...f, claimStatus: status, fixResolution: pickFix(status, f.fixResolution) }));
@@ -59,6 +63,8 @@ export default function FollowUpModal({ claim, lastFollowUp, onClose, onDone, su
   async function save() {
     if (!form.comment.trim()) { setError('Add a follow-up comment: what did you find or do?'); return; }
     if (isCip && !form.cipComment.trim()) { setError('Add the CIP comment the client will see.'); return; }
+    const docProblem = validateDocuments(docs, attachmentRules);
+    if (docProblem) { setError(docProblem); return; }
     setBusy(true);
     setError('');
     try {
@@ -74,6 +80,15 @@ export default function FollowUpModal({ claim, lastFollowUp, onClose, onDone, su
         cipRequiredInfo: isCip ? form.cipRequiredInfo : null,
         cipComment: isCip ? form.cipComment.trim() : null
       });
+      if (docs.length) {
+        try {
+          await arWorkbenchService.uploadClaimDocuments(labId, claim.ClaimKey, docs, result?.followUpId);
+          result.message = `${result.message || 'Follow-up saved.'} ${docs.length} document(s) attached.`;
+        } catch (e) {
+          // The note is saved; only the files failed. Say so rather than lose the note.
+          result.message = `${result.message || 'Follow-up saved.'} The attachments could not be uploaded (${e.message || 'error'}) - add them on the claim's Documents tab.`;
+        }
+      }
       onDone?.(result);
     } catch (e) {
       setError(e.message || 'The follow-up note could not be saved.');
@@ -118,6 +133,10 @@ export default function FollowUpModal({ claim, lastFollowUp, onClose, onDone, su
           <input id="fu-next" type="date" className="arwb-input" value={form.nextFollowUpDate} min={new Date().toISOString().slice(0, 10)}
             onChange={(e) => set('nextFollowUpDate', e.target.value)} />
           <div className="arwb-field-note">Drives the Re-follow-up Required queue — clear it if no further follow-up is expected.</div>
+        </div>
+        <div className="arwb-field span-2">
+          <label>Documents <span className="arwb-hint">(optional — appeal letters, EOBs, payer correspondence)</span></label>
+          <DocumentRowsEditor docs={docs} onChange={setDocs} disabled={busy} />
         </div>
       </div>
 

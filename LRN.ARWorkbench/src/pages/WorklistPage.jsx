@@ -177,7 +177,10 @@ export default function WorklistPage({ view = 'mywork' }) {
     { key: 'panelName', label: 'Panel Type', sortKey: 'panelName' },
     { key: 'denialCategory', label: 'Denial Category', sortKey: 'denialCategory', wrap: true },
     { key: 'insuranceBalance', label: 'Ins. Balance', align: 'end', sortKey: 'insuranceBalance',
-      render: (r) => <span className="mono">{fmt.money(r.insuranceBalance)}</span>, csv: (r) => r.insuranceBalance },
+      render: (r) => (r.isBalanceNullified
+        ? <span className="mono" title={`Nullified in the workbench - ${fmt.money(r.insuranceBalance)} to post in the PMS`}>{fmt.money(0)}</span>
+        : <span className="mono">{fmt.money(r.insuranceBalance)}</span>),
+      csv: (r) => r.insuranceBalance },
     { key: 'priority', label: 'Priority', sortKey: 'priority', render: (r) => <PriorityText priority={r.priority} /> },
     ...(view === 'followup' ? [
       { key: 'agingBucket', label: 'Aging', sortKey: 'agingDays', defaultHidden: true, render: (r) => r.agingBucket || '—' },

@@ -44,6 +44,10 @@
     <PackageReference Include="ClosedXML" Version="0.104.2" />
     <PackageReference Include="CsvHelper" Version="33.0.1" />
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.1.1" />
+    <!-- Reads the legacy .xls the Medicare Clinical Laboratory Fee Schedule is published in (ClosedXML is .xlsx only). -->
+    <PackageReference Include="ExcelDataReader" Version="3.8.0" />
+    <!-- Sign in with Microsoft (Entra ID). 9.0.x to match the net9 shared framework, per the note above. -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="9.0.15" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.15" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.15">

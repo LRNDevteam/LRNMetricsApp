@@ -56,4 +56,70 @@ IF OBJECT_ID(N'dbo.NonCollectibleDenialMaster', N'U') IS NOT NULL
         }
         await tx.CommitAsync(ct);
     }
+
+    /// <summary>
+    /// LRNMaster.dbo.FeeSchedule (LRN Metrics > Master Values > Fees Schedule Import) -> the lab's
+    /// dbo.ARWB_CptFeeSchedule. When the rates changed every line is re-priced here (the sync only
+    /// prices the lines it reloads); the sync's claim-state recalculation then rolls them into Revenue
+    /// Expectation and Recovery Status. Same copy as the Master File Processor's. An empty master
+    /// (nothing imported yet) leaves the lab's rates alone.
+    /// </summary>
+    private async Task CopyFeeScheduleAsync(SqlConnection lab, CancellationToken ct)
+    {
+        if (!await TableExistsAsync(lab, "dbo.ARWB_CptFeeSchedule", ct)) return;
+
+        var master = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        string? source = null;
+        await using (var conn = new SqlConnection(_masterConnectionString))
+        {
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand(@"
+IF OBJECT_ID(N'dbo.FeeSchedule', N'U') IS NOT NULL
+    SELECT HCPCS, Rate, SourceFile FROM dbo.FeeSchedule WHERE NULLIF(LTRIM(RTRIM(HCPCS)), N'') IS NOT NULL;", conn) { CommandTimeout = 120 };
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                master[r.GetString(0).Trim()] = r.GetDecimal(1);
+                source ??= r.IsDBNull(2) ? null : r.GetString(2);
+            }
+        }
+        if (master.Count == 0) return;
+
+        var current = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        await using (var cmd = new SqlCommand("SELECT CPTCode, Rate FROM dbo.ARWB_CptFeeSchedule WHERE Modifier IS NULL;", lab) { CommandTimeout = 120 })
+        await using (var r = await cmd.ExecuteReaderAsync(ct))
+            while (await r.ReadAsync(ct)) current[r.GetString(0).Trim()] = r.GetDecimal(1);
+
+        if (current.Count == master.Count && master.All(kv => current.TryGetValue(kv.Key, out var rate) && rate == kv.Value))
+            return;
+
+        var rows = new DataTable();
+        rows.Columns.Add("CPTCode", typeof(string));
+        rows.Columns.Add("Rate", typeof(decimal));
+        rows.Columns.Add("EffectiveFrom", typeof(DateTime));
+        rows.Columns.Add("RateSource", typeof(string));
+        rows.Columns.Add("UpdatedOn", typeof(DateTime));
+        rows.Columns.Add("UpdatedBy", typeof(string));
+        var rateSource = "Fees Schedule Import" + (string.IsNullOrWhiteSpace(source) ? "" : ": " + source);
+        if (rateSource.Length > 100) rateSource = rateSource[..100];
+        var now = DateTime.UtcNow;
+        // Effective from 1900: the schedule prices every date of service.
+        foreach (var kv in master)
+            rows.Rows.Add(kv.Key, kv.Value, new DateTime(1900, 1, 1), rateSource, now, "AR Workbench Data Processing");
+
+        await using (var tx = (SqlTransaction)await lab.BeginTransactionAsync(ct))
+        {
+            await using (var clear = new SqlCommand("DELETE FROM dbo.ARWB_CptFeeSchedule;", lab, tx) { CommandTimeout = 120 })
+                await clear.ExecuteNonQueryAsync(ct);
+            using (var bulk = new SqlBulkCopy(lab, SqlBulkCopyOptions.Default, tx) { DestinationTableName = "dbo.ARWB_CptFeeSchedule", BulkCopyTimeout = 120 })
+            {
+                foreach (DataColumn c in rows.Columns) bulk.ColumnMappings.Add(c.ColumnName, c.ColumnName);
+                await bulk.WriteToServerAsync(rows, ct);
+            }
+            await tx.CommitAsync(ct);
+        }
+
+        await using var price = new SqlCommand("dbo.ARWB_usp_PriceClaimLines", lab) { CommandType = CommandType.StoredProcedure, CommandTimeout = 1800 };
+        await price.ExecuteNonQueryAsync(ct);
+    }
 }
