@@ -14,6 +14,9 @@ public interface IDenialSummaryRepository
     Task<DenialPeriodResult> GetWeeklyAsync(string connectionString, string prefix, DenialSummaryFilters filters, CancellationToken ct = default);
     Task<IReadOnlyList<DenialListRow>> GetDenialListAsync(string connectionString, string prefix, DenialSummaryFilters filters, CancellationToken ct = default);
     Task<IReadOnlyList<DenialPlanTypeRow>> GetPlanTypeAsync(string connectionString, string prefix, DenialSummaryFilters filters, CancellationToken ct = default);
+    Task<IReadOnlyList<DenialPayorVsPayerRow>> GetPayorVsPayerAsync(string connectionString, string prefix, DenialSummaryFilters filters, CancellationToken ct = default);
+    Task<IReadOnlyList<DenialFacilityRow>> GetByFacilityAsync(string connectionString, string prefix, DenialSummaryFilters filters, CancellationToken ct = default);
+    Task<IReadOnlyList<DenialFacilityPctRow>> GetFacilityPctAsync(string connectionString, string prefix, DenialSummaryFilters filters, CancellationToken ct = default);
     Task<DenialSummaryFilterOptions> GetFilterOptionsAsync(string connectionString, string prefix, CancellationToken ct = default);
     Task<DenialSummaryTiles> GetSummaryTilesAsync(string connectionString, string prefix, CancellationToken ct = default);
 }
@@ -120,6 +123,71 @@ public sealed class SqlDenialSummaryRepository : IDenialSummaryRepository
 
         while (await rd.ReadAsync(ct))
             rows.Add(new DenialPlanTypeRow(Str(rd, oRowType), Str(rd, oType), Int(rd, oClaims), Dec(rd, oBal), Int(rd, oSort)));
+        return rows;
+    }
+
+    public async Task<IReadOnlyList<DenialPayorVsPayerRow>> GetPayorVsPayerAsync(string connectionString, string prefix, DenialSummaryFilters filters, CancellationToken ct = default)
+    {
+        var rows = new List<DenialPayorVsPayerRow>();
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = CreateFilteredCommand(conn, $"dbo.usp_Get{prefix}_DenialPayorVsPayer", filters);
+        await using var rd = await cmd.ExecuteReaderAsync(ct);
+
+        int oRowType = rd.GetOrdinal("RowType"), oPayer = rd.GetOrdinal("PayerName"), oCode = rd.GetOrdinal("DenialCode"),
+            oType = rd.GetOrdinal("PayerType"), oClaims = rd.GetOrdinal("ClaimCount"),
+            oBal = rd.GetOrdinal("TotalInsuranceBalance"), oSort = rd.GetOrdinal("SortOrder"),
+            oPayerRank = rd.GetOrdinal("PayerRank"), oCodeRank = rd.GetOrdinal("CodeRank");
+
+        while (await rd.ReadAsync(ct))
+        {
+            rows.Add(new DenialPayorVsPayerRow(
+                Str(rd, oRowType), Str(rd, oPayer), Str(rd, oCode), Str(rd, oType),
+                Int(rd, oPayerRank), Int(rd, oCodeRank), Int(rd, oClaims), Dec(rd, oBal), Int(rd, oSort)));
+        }
+        return rows;
+    }
+
+    public async Task<IReadOnlyList<DenialFacilityRow>> GetByFacilityAsync(string connectionString, string prefix, DenialSummaryFilters filters, CancellationToken ct = default)
+    {
+        var rows = new List<DenialFacilityRow>();
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = CreateFilteredCommand(conn, $"dbo.usp_Get{prefix}_DenialByFacility", filters);
+        await using var rd = await cmd.ExecuteReaderAsync(ct);
+
+        int oRowType = rd.GetOrdinal("RowType"), oClinic = rd.GetOrdinal("ClinicName"), oCode = rd.GetOrdinal("DenialCode"),
+            oClinicRank = rd.GetOrdinal("ClinicRank"), oCodeRank = rd.GetOrdinal("CodeRank"),
+            oClaims = rd.GetOrdinal("ClaimCount"), oBal = rd.GetOrdinal("TotalInsuranceBalance"), oSort = rd.GetOrdinal("SortOrder");
+
+        while (await rd.ReadAsync(ct))
+        {
+            rows.Add(new DenialFacilityRow(
+                Str(rd, oRowType), Str(rd, oClinic), Str(rd, oCode),
+                Int(rd, oClinicRank), Int(rd, oCodeRank), Int(rd, oClaims), Dec(rd, oBal), Int(rd, oSort)));
+        }
+        return rows;
+    }
+
+    public async Task<IReadOnlyList<DenialFacilityPctRow>> GetFacilityPctAsync(string connectionString, string prefix, DenialSummaryFilters filters, CancellationToken ct = default)
+    {
+        var rows = new List<DenialFacilityPctRow>();
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = CreateFilteredCommand(conn, $"dbo.usp_Get{prefix}_DenialFacilityPct", filters);
+        await using var rd = await cmd.ExecuteReaderAsync(ct);
+
+        int oRowType = rd.GetOrdinal("RowType"), oClinic = rd.GetOrdinal("ClinicName"),
+            oBilled = rd.GetOrdinal("ClaimsBilled"), oAdj = rd.GetOrdinal("AdjudicatedClaims"),
+            oDenied = rd.GetOrdinal("DeniedClaims"), oPct = rd.GetOrdinal("DeniedPct"),
+            oSort = rd.GetOrdinal("SortOrder"), oClinicRank = rd.GetOrdinal("ClinicRank");
+
+        while (await rd.ReadAsync(ct))
+        {
+            rows.Add(new DenialFacilityPctRow(
+                Str(rd, oRowType), Str(rd, oClinic), Int(rd, oClinicRank),
+                Int(rd, oBilled), Int(rd, oAdj), Int(rd, oDenied), Dec(rd, oPct), Int(rd, oSort)));
+        }
         return rows;
     }
 

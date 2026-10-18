@@ -407,6 +407,41 @@ public sealed class ClaimLineDbService
     }
 
     /// <summary>
+    /// Sets ClaimLevelData.BilledUnbilled for NorthWest via
+    /// <c>dbo.usp_UpdateNW_ClaimLevelData_BilledUnbilled</c>. The SP writes its own
+    /// row to <c>dbo.NW_BilledUnbilled_UpdateLog</c>; the counts are returned for the job log.
+    /// </summary>
+    public (int TotalRows, int Billed, int UnBilled, int RowsUpdated, string? Error) UpdateNorthWestBilledUnbilled(string? runId)
+    {
+        try
+        {
+            using var conn = new SqlConnection(_connectionString);
+            conn.Open();
+            using var cmd = new SqlCommand("dbo.usp_UpdateNW_ClaimLevelData_BilledUnbilled", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 1800
+            };
+            cmd.Parameters.Add("@RunId", SqlDbType.NVarChar, 500).Value = (object?)runId ?? DBNull.Value;
+            cmd.Parameters.Add("@TriggeredBy", SqlDbType.NVarChar, 100).Value = "ClaimLineCSVDataCapture";
+            using var reader = cmd.ExecuteReader();
+            if (!reader.Read())
+                return (0, 0, 0, 0, null);
+
+            int Int(string name) => reader[name] is int v ? v : 0;
+            return (Int("TotalRows"),
+                    Int("BilledFirstBilled") + Int("BilledEmedix"),
+                    Int("UnBilledBlank") + Int("UnBilledOther"),
+                    Int("RowsUpdated"),
+                    null);
+        }
+        catch (Exception ex)
+        {
+            return (0, 0, 0, 0, ex.Message);
+        }
+    }
+
+    /// <summary>
     /// Runs all NorthWest-specific production report stored procedures after ingestion.
     /// Each SP is executed independently so a failure in one does not block the others.
     /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging.
@@ -741,7 +776,9 @@ public sealed class ClaimLineDbService
             ["Elixir_LRN"]       = "Elix",
             ["VariantX"]         = "VarX",
             ["VariantX_LRN"]     = "VarX",
-            ["AnalyzePathology"] = "AnP",
+            ["AnalyzePathology"]  = "AnP",
+            ["Analyze_Pathology"] = "AnP",
+            ["Analyze Pathology"] = "AnP",
             ["NorthWest"]        = "NW",
             ["NWL"]              = "NW",
             ["PCRLabsofAmerica"] = "PCR",
@@ -1048,11 +1085,29 @@ public sealed class ClaimLineDbService
             "dbo.usp_RefreshWH_DenialPlanType",
         ]);
 
+    /// <summary>
+    /// Refreshes the NorthWest Denial Summary aggregates (Monthly / Weekly, Denial List,
+    /// Plan Type, Payor vs Payer, Facility wise, Denial vs Facility %) from dbo.ClaimLevelData.
+    /// Run after <c>usp_UpdateNW_ClaimLevelData_BilledUnbilled</c> so Facility % sees Billed.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshNorthWestDenialReports()
+        => RunProductionReportSPs([
+            "dbo.usp_RefreshNW_DenialMonthly",
+            "dbo.usp_RefreshNW_DenialWeekly",
+            "dbo.usp_RefreshNW_DenialList",
+            "dbo.usp_RefreshNW_DenialPlanType",
+            "dbo.usp_RefreshNW_DenialPayorVsPayer",
+            "dbo.usp_RefreshNW_DenialByFacility",
+            "dbo.usp_RefreshNW_DenialFacilityPct",
+        ]);
+
     /// <summary>Refreshes the NorthWest Collection Summary aggregates.</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshNorthWestCollectionReports()
         => RunProductionReportSPs([
-            ..BuildCollectionSummarySpList("NW"),
+            ..BuildCollectionSummarySpList("NW").Where(sp => !sp.EndsWith("_CS_AvgPayments", StringComparison.Ordinal)),
             "dbo.usp_RefreshNW_CS_InsuranceVsPayment",
+            "dbo.usp_RefreshNW_CLS_ByFacility",
+            "dbo.usp_RefreshNW_CLS_FacilityPaymentPct",
         ]);
 
     /// <summary>Refreshes the PCRLabsofAmerica Collection Summary aggregates.</summary>

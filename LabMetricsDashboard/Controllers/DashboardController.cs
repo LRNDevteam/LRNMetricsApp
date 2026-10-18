@@ -1520,6 +1520,112 @@ public class DashboardController : Controller
     }
 
     /// <summary>
+    /// NorthWest "By Facility" tree (Clinic &gt; Payer &gt; Referring Provider) as a partial view (AJAX tab).
+    /// </summary>
+    public async Task<IActionResult> ClinicByFacility(
+        string? lab,
+        List<string>? filterClinicNames,
+        List<string>? filterSalesRepNames,
+        List<string>? filterPayerNames,
+        List<string>? filterPanelNames,
+        string? filterDosFrom,
+        string? filterDosTo,
+        string? filterFirstBillFrom,
+        string? filterFirstBillTo,
+        CancellationToken ct = default)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+
+        if (string.IsNullOrWhiteSpace(selectedLab)
+            || !_labSettings.Labs.TryGetValue(selectedLab, out var config)
+            || !config.LineClaimEnable
+            || string.IsNullOrWhiteSpace(config.DbConnectionString)
+            || !LabCollectionPrefix.HasClinicFacilityTabs(selectedLab))
+        {
+            return PartialView("_ClinicByFacility", new NwByFacilityViewModel
+            {
+                SelectedLab  = selectedLab ?? string.Empty,
+                ErrorMessage = "By Facility is not available for this lab.",
+            });
+        }
+
+        var dbLabName = string.IsNullOrWhiteSpace(config.DbLabName) ? selectedLab : config.DbLabName;
+        var (cn, sr, pn, pl, dosF, dosT, fbF, fbT) = NormalizeFilters(
+            filterClinicNames, filterSalesRepNames, filterPayerNames, filterPanelNames,
+            filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo);
+
+        try
+        {
+            var vm = await _clinicSummaryRepo.GetNwByFacilityAsync(
+                config.DbConnectionString, dbLabName, cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct);
+            return PartialView("_ClinicByFacility", vm);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Clinic By Facility query failed for lab '{LabName}'.", selectedLab);
+            return PartialView("_ClinicByFacility", new NwByFacilityViewModel
+            {
+                SelectedLab  = selectedLab,
+                ErrorMessage = $"Failed to load: {ex.Message}",
+            });
+        }
+    }
+
+    /// <summary>
+    /// NorthWest "Facility vs Payment (%)" (InsurancePayment &gt; 0, by ClinicName) as a partial view (AJAX tab).
+    /// </summary>
+    public async Task<IActionResult> ClinicFacilityPaymentPct(
+        string? lab,
+        List<string>? filterClinicNames,
+        List<string>? filterSalesRepNames,
+        List<string>? filterPayerNames,
+        List<string>? filterPanelNames,
+        string? filterDosFrom,
+        string? filterDosTo,
+        string? filterFirstBillFrom,
+        string? filterFirstBillTo,
+        CancellationToken ct = default)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+
+        if (string.IsNullOrWhiteSpace(selectedLab)
+            || !_labSettings.Labs.TryGetValue(selectedLab, out var config)
+            || !config.LineClaimEnable
+            || string.IsNullOrWhiteSpace(config.DbConnectionString)
+            || !LabCollectionPrefix.HasClinicFacilityTabs(selectedLab))
+        {
+            return PartialView("_ClinicFacilityPaymentPct", new NwFacilityPaymentPctViewModel
+            {
+                SelectedLab  = selectedLab ?? string.Empty,
+                ErrorMessage = "Facility vs Payment (%) is not available for this lab.",
+            });
+        }
+
+        var dbLabName = string.IsNullOrWhiteSpace(config.DbLabName) ? selectedLab : config.DbLabName;
+        var (cn, sr, pn, pl, dosF, dosT, fbF, fbT) = NormalizeFilters(
+            filterClinicNames, filterSalesRepNames, filterPayerNames, filterPanelNames,
+            filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo);
+
+        try
+        {
+            var vm = await _clinicSummaryRepo.GetNwFacilityPaymentPctAsync(
+                config.DbConnectionString, dbLabName, cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct);
+            return PartialView("_ClinicFacilityPaymentPct", vm);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Clinic Facility vs Payment (%) query failed for lab '{LabName}'.", selectedLab);
+            return PartialView("_ClinicFacilityPaymentPct", new NwFacilityPaymentPctViewModel
+            {
+                SelectedLab  = selectedLab,
+                ErrorMessage = $"Failed to load: {ex.Message}",
+            });
+        }
+    }
+
+    /// <summary>
     /// Downloads the current Clinic Summary filtered data as a formatted Excel file.
     /// Accepts the same filter parameters as <see cref="ClinicSummary"/>.
     /// </summary>
@@ -1611,6 +1717,16 @@ public class DashboardController : Controller
                     connStr, dbLabName, cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct)
                 : null;
 
+            var hasFacilityTabs = LabCollectionPrefix.HasClinicFacilityTabs(selectedLab);
+            var byFacilityVm = hasFacilityTabs
+                ? await _clinicSummaryRepo.GetNwByFacilityAsync(
+                    connStr, dbLabName, cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct)
+                : null;
+            var facilityPaymentPctVm = hasFacilityTabs
+                ? await _clinicSummaryRepo.GetNwFacilityPaymentPctAsync(
+                    connStr, dbLabName, cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct)
+                : null;
+
             using var workbook = ClinicSummaryExcelExportBuilder.CreateWorkbook(
                 rows, totals,
                 result.TopCollectedClinics, result.TopCollectedSalesReps,
@@ -1622,6 +1738,8 @@ public class DashboardController : Controller
                 dollarAnalysis: dollarAnalysis,
                 dosCount: dosCountVm,
                 paymentBilled: paymentBilledVm,
+                byFacility: byFacilityVm,
+                facilityPaymentPct: facilityPaymentPctVm,
                 activeFilters: new List<(string, IReadOnlyList<string>?)>
                 {
                     ("Clinic", filterClinicNames is { Count: > 0 } ? filterClinicNames : null),
@@ -2334,8 +2452,7 @@ public class DashboardController : Controller
             CodingResult codingResult = new([], 0, 0);
             PayerBreakdownResult pbResult = new([], [], [], [], 0);
             PayerBreakdownResult pnlResult = new([], [], [], [], 0);
-            PayerBreakdownResult insightDaqResult = new([], [], [], [], 0);
-            PayerBreakdownResult insightWebResult = new([], [], [], [], 0);
+            PayerBreakdownResult top10Result = new([], [], [], [], 0);
             HighestPayerBreakdownResult hpResult = new([], [], [], [], 0, 0);
             PayerPanelResult pxpResult = new([], [], [], 0, 0);
             UnbilledAgingResult uaResult = new([], [], 0, 0);
@@ -2357,8 +2474,7 @@ public class DashboardController : Controller
                 pxpResult.PayerRows.RemoveAll(r => excPayers.Contains(r.PayerName));
                 foreach (var panel in pnlResult.PayerRows)
                     panel.ChildRows.RemoveAll(c => excPayers.Contains(c.PayerName));
-                insightDaqResult.PayerRows.RemoveAll(r => excPayers.Contains(r.PayerName));
-                insightWebResult.PayerRows.RemoveAll(r => excPayers.Contains(r.PayerName));
+                top10Result.PayerRows.RemoveAll(r => excPayers.Contains(r.PayerName));
                 foreach (var src in hpResult.SourceRows)
                     src.TopPayers.RemoveAll(tp => excPayers.Contains(tp.PayerName));
 
@@ -2433,20 +2549,13 @@ public class DashboardController : Controller
                 PanelBreakdownGrandTotal          = pnlResult.GrandTotal,
                 PanelBreakdownGrandChargesByMonth = pnlResult.GrandTotalChargesByMonth ?? [],
                 PanelBreakdownGrandTotalCharges   = pnlResult.GrandTotalCharges,
-                InsightDaqMonths                  = insightDaqResult.Months,
-                InsightDaqYears                   = insightDaqResult.Years,
-                InsightDaqRows                    = insightDaqResult.PayerRows,
-                InsightDaqGrandByMonth            = insightDaqResult.GrandTotalByMonth,
-                InsightDaqGrandTotal              = insightDaqResult.GrandTotal,
-                InsightDaqGrandChargesByMonth     = insightDaqResult.GrandTotalChargesByMonth ?? [],
-                InsightDaqGrandTotalCharges       = insightDaqResult.GrandTotalCharges,
-                InsightWebPmMonths                = insightWebResult.Months,
-                InsightWebPmYears                 = insightWebResult.Years,
-                InsightWebPmRows                  = insightWebResult.PayerRows,
-                InsightWebPmGrandByMonth          = insightWebResult.GrandTotalByMonth,
-                InsightWebPmGrandTotal            = insightWebResult.GrandTotal,
-                InsightWebPmGrandChargesByMonth   = insightWebResult.GrandTotalChargesByMonth ?? [],
-                InsightWebPmGrandTotalCharges     = insightWebResult.GrandTotalCharges,
+                Top10PayerMonths                  = top10Result.Months,
+                Top10PayerYears                   = top10Result.Years,
+                Top10PayerRows                    = top10Result.PayerRows,
+                Top10PayerGrandByMonth            = top10Result.GrandTotalByMonth,
+                Top10PayerGrandTotal              = top10Result.GrandTotal,
+                Top10PayerGrandChargesByMonth     = top10Result.GrandTotalChargesByMonth ?? [],
+                Top10PayerGrandTotalCharges       = top10Result.GrandTotalCharges,
                 HighestPayerMonths                = hpResult.Months,
                 HighestPayerYears                 = hpResult.Years,
                 HighestPayerRows                  = hpResult.SourceRows,
@@ -3051,35 +3160,22 @@ public class DashboardController : Controller
                     vm.PanelBreakdownGrandTotalCharges = pnlResult.GrandTotalCharges;
                     break;
                 }
-                case "insight-pane":
+                case "top10-payer-pane":
                 {
-                    var tDaq = _nwSummaryRepo.GetInsightBreakdownAsync(connStr, "Daq", livePayerFilter, livePanelFilter,
+                    var top10Result = await _nwSummaryRepo.GetTop10PayerBreakdownAsync(connStr, livePayerFilter, livePanelFilter,
                         dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
-                    var tWeb = _nwSummaryRepo.GetInsightBreakdownAsync(connStr, "Webpm", livePayerFilter, livePanelFilter,
-                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
-                    await Task.WhenAll(tDaq, tWeb);
-                    var insightDaqResult = tDaq.Result;
-                    var insightWebResult = tWeb.Result;
                     if (vm.FilterPayerNamesExclude && vm.FilterPayerNames.Count > 0)
                     {
                         var exc = vm.FilterPayerNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
-                        insightDaqResult.PayerRows.RemoveAll(r => exc.Contains(r.PayerName));
-                        insightWebResult.PayerRows.RemoveAll(r => exc.Contains(r.PayerName));
+                        top10Result.PayerRows.RemoveAll(r => exc.Contains(r.PayerName));
                     }
-                    vm.InsightDaqMonths = insightDaqResult.Months;
-                    vm.InsightDaqYears = insightDaqResult.Years;
-                    vm.InsightDaqRows = insightDaqResult.PayerRows;
-                    vm.InsightDaqGrandByMonth = insightDaqResult.GrandTotalByMonth;
-                    vm.InsightDaqGrandTotal = insightDaqResult.GrandTotal;
-                    vm.InsightDaqGrandChargesByMonth = insightDaqResult.GrandTotalChargesByMonth ?? [];
-                    vm.InsightDaqGrandTotalCharges = insightDaqResult.GrandTotalCharges;
-                    vm.InsightWebPmMonths = insightWebResult.Months;
-                    vm.InsightWebPmYears = insightWebResult.Years;
-                    vm.InsightWebPmRows = insightWebResult.PayerRows;
-                    vm.InsightWebPmGrandByMonth = insightWebResult.GrandTotalByMonth;
-                    vm.InsightWebPmGrandTotal = insightWebResult.GrandTotal;
-                    vm.InsightWebPmGrandChargesByMonth = insightWebResult.GrandTotalChargesByMonth ?? [];
-                    vm.InsightWebPmGrandTotalCharges = insightWebResult.GrandTotalCharges;
+                    vm.Top10PayerMonths = top10Result.Months;
+                    vm.Top10PayerYears = top10Result.Years;
+                    vm.Top10PayerRows = top10Result.PayerRows;
+                    vm.Top10PayerGrandByMonth = top10Result.GrandTotalByMonth;
+                    vm.Top10PayerGrandTotal = top10Result.GrandTotal;
+                    vm.Top10PayerGrandChargesByMonth = top10Result.GrandTotalChargesByMonth ?? [];
+                    vm.Top10PayerGrandTotalCharges = top10Result.GrandTotalCharges;
                     break;
                 }
                 case "highest-payer-pane":
@@ -3625,17 +3721,14 @@ public class DashboardController : Controller
             var t8 = _nwSummaryRepo.GetPanelBreakdownAsync(
                 connStr, payerArg, panelArg,
                 dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
-            var t9 = _nwSummaryRepo.GetInsightBreakdownAsync(
-                connStr, "Daq", payerArg, panelArg,
+            var t9 = _nwSummaryRepo.GetTop10PayerBreakdownAsync(
+                connStr, payerArg, panelArg,
                 dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
-            var t10 = _nwSummaryRepo.GetInsightBreakdownAsync(
-                connStr, "Webpm", payerArg, panelArg,
-                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
-            var t11 = _nwSummaryRepo.GetHighestPayerBreakdownAsync(
+            var t10 = _nwSummaryRepo.GetHighestPayerBreakdownAsync(
                 connStr, payerArg, panelArg,
                 dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
 
-            await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11);
+            await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10);
 
             var monthlyResult = t1.Result;
             var weeklyResult  = t2.Result;
@@ -3645,9 +3738,8 @@ public class DashboardController : Controller
             var uaResult      = t6.Result;
             var cptResult     = t7.Result;
             var pnlResult     = t8.Result;
-            var insightDaqResult = t9.Result;
-            var insightWebResult = t10.Result;
-            var hpResult      = t11.Result;
+            var top10Result   = t9.Result;
+            var hpResult      = t10.Result;
 
             _logger.LogInformation(
                 "[NWExcelExport] Data fetched in {Ms}ms — Monthly={M} panels, Weekly={W} panels",
@@ -3693,20 +3785,13 @@ public class DashboardController : Controller
                 PanelBreakdownGrandTotal          = pnlResult.GrandTotal,
                 PanelBreakdownGrandChargesByMonth = pnlResult.GrandTotalChargesByMonth ?? [],
                 PanelBreakdownGrandTotalCharges   = pnlResult.GrandTotalCharges,
-                InsightDaqMonths                  = insightDaqResult.Months,
-                InsightDaqYears                   = insightDaqResult.Years,
-                InsightDaqRows                    = insightDaqResult.PayerRows,
-                InsightDaqGrandByMonth            = insightDaqResult.GrandTotalByMonth,
-                InsightDaqGrandTotal              = insightDaqResult.GrandTotal,
-                InsightDaqGrandChargesByMonth     = insightDaqResult.GrandTotalChargesByMonth ?? [],
-                InsightDaqGrandTotalCharges       = insightDaqResult.GrandTotalCharges,
-                InsightWebPmMonths                = insightWebResult.Months,
-                InsightWebPmYears                 = insightWebResult.Years,
-                InsightWebPmRows                  = insightWebResult.PayerRows,
-                InsightWebPmGrandByMonth          = insightWebResult.GrandTotalByMonth,
-                InsightWebPmGrandTotal            = insightWebResult.GrandTotal,
-                InsightWebPmGrandChargesByMonth   = insightWebResult.GrandTotalChargesByMonth ?? [],
-                InsightWebPmGrandTotalCharges     = insightWebResult.GrandTotalCharges,
+                Top10PayerMonths                  = top10Result.Months,
+                Top10PayerYears                   = top10Result.Years,
+                Top10PayerRows                    = top10Result.PayerRows,
+                Top10PayerGrandByMonth            = top10Result.GrandTotalByMonth,
+                Top10PayerGrandTotal              = top10Result.GrandTotal,
+                Top10PayerGrandChargesByMonth     = top10Result.GrandTotalChargesByMonth ?? [],
+                Top10PayerGrandTotalCharges       = top10Result.GrandTotalCharges,
                 HighestPayerMonths                = hpResult.Months,
                 HighestPayerYears                 = hpResult.Years,
                 HighestPayerRows                  = hpResult.SourceRows,

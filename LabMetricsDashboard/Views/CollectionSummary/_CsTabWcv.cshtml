@@ -102,7 +102,18 @@
         </div>
     </div>
 
-    @if (Model.IsWellHealthLab)
+    @if (Model.IsNorthWestLab)
+    {
+    <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+        <strong>Source:</strong> Claim Level Data &bull;
+        <strong>Filter:</strong> InsurancePayment &gt; 0 &bull;
+        <strong>Rows:</strong> PanelType &rarr; Top 5 PayerName_Raw by Claim Count &bull;
+        <strong>Columns:</strong> Last 4 weeks, Thursday&ndash;Wednesday (Check Date) &bull;
+        <strong>Values:</strong> Count of unique ClaimID, Sum of InsurancePayment &bull;
+        <strong>Sorted by:</strong> Claim Count DESC
+    </div>
+    }
+    else if (Model.IsWellHealthLab)
     {
     <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
         <strong>Source:</strong> Claim Level Data &bull;

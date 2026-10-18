@@ -5,6 +5,7 @@
 {
     var ps = Model.ProviderSummary;
     var maxClaims = ps.Rows.Count > 0 ? ps.Rows.Max(r => r.NoOfClaims) : 1;
+    var psCharge = ps.HasChargeAmount;
 
     <div class="cs-rpt-wrap">
         <div class="cs-rpt-scroll">
@@ -14,6 +15,7 @@
                         <th style="text-align:center;width:46px">#</th>
                         <th style="text-align:left;min-width:260px">Referring Provider</th>
                         <th style="min-width:140px">No. of Claims</th>
+                        @if (psCharge) { <th style="min-width:170px">Sum of ChargeAmount</th> }
                         <th style="min-width:170px">Insurance Payments</th>
                         <th style="min-width:170px">Insurance Balance</th>
                         <th style="min-width:160px">Patient Balance</th>
@@ -30,6 +32,7 @@
                             <td style="text-align:center;font-weight:700;color:#0d3460">@row.Rank</td>
                             <td style="text-align:left;font-weight:600;color:#1e293b">@row.ReferringProvider</td>
                             <td style="text-align:right;font-weight:700">@row.NoOfClaims.N0OrDash()</td>
+                            @if (psCharge) { <td style="text-align:right">@Acct2(row.ChargeAmount)</td> }
                             <td style="text-align:right">@Acct2(row.InsurancePayments)</td>
                             <td style="text-align:right">@Acct2(row.InsuranceBalance)</td>
                             <td style="text-align:right">@Acct2(row.PatientBalance)</td>
@@ -54,6 +57,7 @@
                         <td style="text-align:center;color:#fff">�</td>
                         <td style="text-align:left;color:#fff">Grand Total</td>
                         <td style="text-align:right;color:#fff">@ps.GrandNoClaims.N0OrDash()</td>
+                        @if (psCharge) { <td style="text-align:right;color:#fff">@Acct2(ps.GrandChargeAmount)</td> }
                         <td style="text-align:right;color:#fff">@Acct2(ps.GrandInsurancePayments)</td>
                         <td style="text-align:right;color:#fff">@Acct2(ps.GrandInsuranceBalance)</td>
                         <td style="text-align:right;color:#fff">@Acct2(ps.GrandPatientBalance)</td>
@@ -67,7 +71,7 @@
     <div class="mt-2" style="font-size:.68rem;color:#94a3b8">
         <strong>Source:</strong> ClaimLevelData (all rows) &bull;
         <strong>Rows:</strong> ReferringProvider &bull;
-        <strong>Metrics:</strong> COUNT(DISTINCT ClaimID) � SUM(InsurancePayment) � SUM(InsuranceBalance) � SUM(PatientBalance) &bull;
+        <strong>Metrics:</strong> @(psCharge ? "COUNT(ClaimID) \u00B7 SUM(ChargeAmount)" : "COUNT(DISTINCT ClaimID)") &middot; SUM(InsurancePayment) &middot; SUM(InsuranceBalance) &middot; SUM(PatientBalance) &bull;
         <strong>Sorted by:</strong> No. of Claims DESC &bull;
         <strong>Claim Share:</strong> Row claims / Grand Total claims � 100
     </div>

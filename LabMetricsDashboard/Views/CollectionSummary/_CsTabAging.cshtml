@@ -220,6 +220,15 @@
                     <strong>Sorted by:</strong> Claim Count DESC &bull;
                     <strong>Metric:</strong> Count of unique ClaimID, SUM(InsuranceBalance)</span>
                 }
+                else if (Model.IsNorthWestLab)
+                {
+                    <span><strong>Data:</strong> Claim Level Data &bull;
+                    <strong>Filter:</strong> ClaimStatus = No Response &bull;
+                    <strong>Rows:</strong> PayerName_Raw &bull;
+                    <strong>Aging Buckets:</strong> Aging (Current, 30+, 60+, 90+, 120+) &bull;
+                    <strong>Sorted by:</strong> Claim Count DESC &bull;
+                    <strong>Metric:</strong> Count of unique ClaimID, SUM(InsuranceBalance)</span>
+                }
                 else
                 {
                     <span><strong>Data:</strong> Claim Level Data (Source &times; Payer) &bull;

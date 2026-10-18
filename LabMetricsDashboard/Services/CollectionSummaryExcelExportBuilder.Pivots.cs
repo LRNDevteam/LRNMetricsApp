@@ -227,6 +227,11 @@ public static partial class CollectionSummaryExcelExportBuilder
         var years = periods.Select(p => p.Year).Distinct().OrderBy(y => y).ToList();
         var isAugustus = labName.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
             || labName.Equals("Augustus", StringComparison.OrdinalIgnoreCase);
+        var isNorthWest = LabCollectionPrefix.IsNorthWest(labName);
+        var sortByClaims = isAugustus || isNorthWest;
+        var sheetTitle = isNorthWest ? "Payer vs Payment" : "Insurance Vs Payments";
+        // NorthWest client sheet: CheckDate Year Total columns only.
+        var showMonths = !isNorthWest;
 
         var pivotRows = rows
             .Where(r => r.BillYear > 1900 && r.BillMonth is >= 1 and <= 12)
@@ -241,18 +246,18 @@ public static partial class CollectionSummaryExcelExportBuilder
                 TotalClaims = g.Sum(x => x.NoOfPaidClaims),
                 TotalPay = g.Sum(x => x.InsurancePayment),
             })
-            .OrderByDescending(r => isAugustus ? r.TotalClaims : r.TotalPay)
+            .OrderByDescending(r => sortByClaims ? r.TotalClaims : r.TotalPay)
             .ToList();
 
         const int metrics = 2;
-        int colCount = 1 + periods.Count * metrics + years.Count * metrics + metrics;
+        int colCount = 1 + (showMonths ? periods.Count : 0) * metrics + years.Count * metrics + metrics;
 
-        var ws = wb.AddWorksheet("Insurance Vs Payments");
+        var ws = wb.AddWorksheet(sheetTitle);
         ws.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
 
         int row = 1;
-        ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, $"Insurance Vs Payments — {labName}");
+        ExcelTheme.Collection.WriteTitleBar(ws, row, colCount, $"{sheetTitle} — {labName}");
         row++;
 
         int hRow1 = row;
@@ -260,7 +265,7 @@ public static partial class CollectionSummaryExcelExportBuilder
         int hCol = 2;
         foreach (var year in years)
         {
-            var mons = periods.Where(p => p.Year == year).ToList();
+            var mons = periods.Where(p => showMonths && p.Year == year).ToList();
             int span = mons.Count * metrics + metrics;
             WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + span - 1, year.ToString(), ExcelTheme.Collection.HeaderBg);
             hCol += span;
@@ -271,7 +276,7 @@ public static partial class CollectionSummaryExcelExportBuilder
         hCol = 2;
         foreach (var year in years)
         {
-            foreach (var p in periods.Where(x => x.Year == year))
+            foreach (var p in periods.Where(x => showMonths && x.Year == year))
             {
                 var mk = new DateTime(p.Year, p.Month, 1).ToString("MMM");
                 WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1, mk, ExcelTheme.Collection.HeaderBg);
@@ -291,7 +296,7 @@ public static partial class CollectionSummaryExcelExportBuilder
         }
         foreach (var year in years)
         {
-            foreach (var _ in periods.Where(x => x.Year == year))
+            foreach (var _ in periods.Where(x => showMonths && x.Year == year))
                 WriteMetricPair();
             WriteMetricPair();
         }
@@ -316,8 +321,11 @@ public static partial class CollectionSummaryExcelExportBuilder
                 foreach (var p in periods.Where(x => x.Year == year))
                 {
                     pr.Cells.TryGetValue((p.Year, p.Month), out var cell);
-                    WriteCell(ws, row, col++, cell.Count, bg);
-                    WriteCell(ws, row, col++, cell.Payment, bg, isCurrency: true);
+                    if (showMonths)
+                    {
+                        WriteCell(ws, row, col++, cell.Count, bg);
+                        WriteCell(ws, row, col++, cell.Payment, bg, isCurrency: true);
+                    }
                     yClaims += cell.Count;
                     yPay += cell.Payment;
                 }

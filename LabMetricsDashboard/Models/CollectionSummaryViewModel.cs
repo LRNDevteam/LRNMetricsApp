@@ -110,6 +110,18 @@ public sealed class CollectionSummaryViewModel
     /// <summary>WellHealth: SP-only logic with its own filters, sorts and labels.</summary>
     public bool IsWellHealthLab => LabCollectionPrefix.IsWellHealth(SelectedLab);
 
+    /// <summary>NorthWest: client-logic labels, claim-count sorts and the Women's Health Panel breakdown.</summary>
+    public bool IsNorthWestLab => LabCollectionPrefix.IsNorthWest(SelectedLab);
+
+    /// <summary>Date-basis Avg Payments tabs are titled "Panel Averages - by DOS / by Check Date".</summary>
+    public bool UsesPanelAveragesTitles => LabCollectionPrefix.UsesPanelAveragesTitles(SelectedLab);
+
+    /// <summary>Insurance pivots (Insurance / Payer Vs Payment, Panel Vs Payment) sorted by claim count.</summary>
+    public bool SortsPaymentPivotsByClaims => IsAugustusLab || IsNorthWestLab;
+
+    /// <summary>Women's Health Panel breakdown (NorthWest).</summary>
+    public WomensHealthBreakdownResult WomensHealthBreakdown { get; set; } = WomensHealthBreakdownResult.Empty;
+
     /// <summary>Panel Average tab (see <see cref="LabCollectionPrefix.ShowsPanelAverage"/>).</summary>
     public bool ShowPanelAverage => LabCollectionPrefix.ShowsPanelAverage(SelectedLab);
 
@@ -195,13 +207,15 @@ public sealed record StatusSummaryPayerRow(
     int     NoClaims,
     decimal InsurancePayments,
     decimal InsuranceBalance,
-    decimal PatientBalance);
+    decimal PatientBalance,
+    decimal ChargeAmount = 0m);
 
 /// <summary>Level-3 leaf: one CPTCodeXUnitsXModifier within a ClaimStatus → Panel branch.</summary>
 public sealed class StatusSummaryCptRow
 {
     public required string CptCode           { get; set; }
     public int     NoClaims                  { get; set; }
+    public decimal ChargeAmount              { get; set; }
     public decimal InsurancePayments         { get; set; }
     public decimal InsuranceBalance          { get; set; }
     public decimal PatientBalance            { get; set; }
@@ -213,6 +227,7 @@ public sealed class StatusSummaryPanelRow
 {
     public required string PanelName         { get; set; }
     public int     NoClaims                  { get; set; }
+    public decimal ChargeAmount              { get; set; }
     public decimal InsurancePayments         { get; set; }
     public decimal InsuranceBalance          { get; set; }
     public decimal PatientBalance            { get; set; }
@@ -224,6 +239,7 @@ public sealed class StatusSummaryClaimRow
 {
     public required string ClaimStatus          { get; set; }
     public int     NoClaims                     { get; set; }
+    public decimal ChargeAmount                 { get; set; }
     public decimal InsurancePayments            { get; set; }
     public decimal InsuranceBalance             { get; set; }
     public decimal PatientBalance               { get; set; }
@@ -239,10 +255,36 @@ public sealed class StatusSummaryResult
     public static readonly StatusSummaryResult Empty = new();
     public List<StatusSummaryClaimRow> Rows  { get; set; } = [];
     public int     GrandNoClaims             { get; set; }
+    public decimal GrandChargeAmount         { get; set; }
     public decimal GrandInsurancePayments    { get; set; }
     public decimal GrandInsuranceBalance     { get; set; }
     public decimal GrandPatientBalance       { get; set; }
     public bool    HasData                   => Rows.Count > 0;
+
+    /// <summary>
+    /// The SP returns ChargeAmount (NorthWest): a Sum of ChargeAmount column is shown
+    /// before Sum of InsurancePayment.
+    /// </summary>
+    public bool    HasChargeAmount           { get; set; }
+
+    /// <summary>False when the SP returns no PanelName (ClaimStatus → CPT → Payer).</summary>
+    public bool    HasPanelLevel             => Rows.Any(r => r.PanelRows.Any(p => !string.IsNullOrWhiteSpace(p.PanelName)));
+}
+
+/// <summary>One ClaimStatus row of the Women's Health Panel breakdown (NorthWest).</summary>
+public sealed record WomensHealthBreakdownRow(
+    string  ClaimStatus,
+    int     NoOfClaims,
+    decimal ChargeAmount,
+    decimal InsurancePayment,
+    decimal InsuranceBalance);
+
+/// <summary>Women's Health Panel breakdown: PanelType = Women's Health, rows by ClaimStatus.</summary>
+public sealed class WomensHealthBreakdownResult
+{
+    public static readonly WomensHealthBreakdownResult Empty = new();
+    public List<WomensHealthBreakdownRow> Rows { get; set; } = [];
+    public bool HasData => Rows.Count > 0;
 }
 
 // Genetics vs ID Avg types
@@ -339,13 +381,17 @@ public sealed record InsuranceAgingRow(
 /// One row in the "Panel vs Payment" table.
 /// Source: ClaimLevelData where InsurancePayment &gt; 0.
 /// Grouped by PanelName, sorted by SUM(InsurancePayment) descending.
+/// NorthWest: month = ChargeEnteredDate; NoOfClaims / InsurancePayments are the paid
+/// (InsurancePayment &gt; 0) values and BilledClaims / BilledCharges the BilledUnbilled = Billed values.
 /// </summary>
 public sealed record PanelPaymentRow(
 string PanelName,
 int NoOfClaims,
 decimal InsurancePayments,
 int BillYear = 0,
-int BillMonth = 0);
+int BillMonth = 0,
+int BilledClaims = 0,
+decimal BilledCharges = 0m);
 
 /// <summary>
 /// One row in the "Insurance vs Payment %" table.

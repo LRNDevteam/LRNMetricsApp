@@ -258,7 +258,7 @@ public sealed class ExecutiveSummaryExcelBuilder
                         row.ValuesByYearMonth.TryGetValue((year, m), out var val);
                         var cell = sheet.Cell(rowIdx, colIdx);
                         cell.Value = (double)val;
-                        SetNumberFormat(cell, row.Category);
+                        SetNumberFormat(cell, row);
                         colIdx++;
                     }
                     decimal ytVal;
@@ -266,20 +266,22 @@ public sealed class ExecutiveSummaryExcelBuilder
                         ytVal = row.YearTotal(year);
                     else if (row.Category == "Avg" && row.ValuesByYearMonth.TryGetValue((year, 0), out var ytSentinel))
                         ytVal = ytSentinel;
+                    else if (IsAriaWindowRow(row))
+                        ytVal = row.ValuesByYearMonth.TryGetValue((year, 0), out var ariaYear) ? ariaYear : 0m;
                     else
                         ytVal = row.ValuesByYearMonth
                             .Where(kv => kv.Key.Year == year && kv.Key.Month != 0)
                             .Sum(kv => kv.Value);
                     var ytCell = sheet.Cell(rowIdx, colIdx);
                     ytCell.Value = (double)ytVal;
-                    SetNumberFormat(ytCell, row.Category);
+                    SetNumberFormat(ytCell, row);
                     ytCell.Style.Font.Bold = true;
                     colIdx++;
                 }
 
                 bool hasMonthlyBuckets = row.ValuesByYearMonth.Keys.Any(k => k.Year != 0 && k.Month != 0);
                 decimal grandVal;
-                if (row.HasSpTotals || row.Category == "Avg" || !hasMonthlyBuckets)
+                if (row.HasSpTotals || row.Category == "Avg" || IsAriaWindowRow(row) || !hasMonthlyBuckets)
                     row.ValuesByYearMonth.TryGetValue((0, 0), out grandVal);
                 else
                     grandVal = row.ValuesByYearMonth
@@ -287,7 +289,7 @@ public sealed class ExecutiveSummaryExcelBuilder
                         .Sum(kv => kv.Value);
                 var grandCell = sheet.Cell(rowIdx, grandCol);
                 grandCell.Value = (double)grandVal;
-                SetNumberFormat(grandCell, row.Category);
+                SetNumberFormat(grandCell, row);
                 grandCell.Style.Font.Bold = true;
 
                 XLColor rowFill;
@@ -356,12 +358,24 @@ public sealed class ExecutiveSummaryExcelBuilder
         sheet.Row(hr2).Height = 20;
     }
 
-    private void SetNumberFormat(IXLCell cell, string category)
+    private void SetNumberFormat(IXLCell cell, ExecSummaryRow row)
     {
-        cell.Style.NumberFormat.Format = IsDollar(category)
-            ? ExcelTheme.Collection.AccountingNumberFormat
-            : ExcelTheme.Collection.CountNumberFormat;
+        cell.Style.NumberFormat.Format = IsAriaPctRow(row.RowCode)
+            ? "0.0000"
+            : IsDollar(row.Category)
+                ? ExcelTheme.Collection.AccountingNumberFormat
+                : ExcelTheme.Collection.CountNumberFormat;
     }
+
+    // Aria A1/A2/AP are FirstBilledDate windows, not DOS buckets; months must not be summed.
+    private static bool IsAriaWindowRow(ExecSummaryRow row) =>
+        row.RowCode is "S.1.A1" or "S.1.A2" or "S.1.AP"
+            or "S.3.A1" or "S.3.A2" or "S.3.AP"
+            or "AC.1.A1" or "AC.1.A2" or "AC.1.AP"
+            or "AC.3.A1" or "AC.3.A2" or "AC.3.AP";
+
+    private static bool IsAriaPctRow(string? rowCode) =>
+        rowCode is "S.1.AP" or "S.3.AP" or "AC.1.AP" or "AC.3.AP";
 
     private static bool IsDollar(string cat) => cat is "Cash" or "Avg";
 

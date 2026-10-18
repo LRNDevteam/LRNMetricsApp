@@ -1,6 +1,8 @@
 @model LabMetricsDashboard.Models.CollectionSummaryViewModel
 @{
-    var rowsData = Model.PanelPayments;
+    var rowsData = Model.IsNorthWestLab
+        ? Model.PanelPayments.OrderByDescending(r => r.NoOfClaims).ToList()
+        : Model.PanelPayments;
     // Pivot mode when any row carries a real BillYear/Month (e.g. Elixir).
     var hasMonthlyGrain = rowsData.Any(r => r.BillYear > 0 && r.BillMonth > 0);
 }
@@ -22,6 +24,144 @@
         <div style="font-size:2rem;opacity:.4">&#128202;</div>
         <div class="fw-semibold mt-2">No panel payment data available</div>
         <div class="small mt-1">No matching claim records found. Try adjusting your filters.</div>
+    </div>
+}
+else if (Model.IsNorthWestLab && hasMonthlyGrain)
+{
+    var nwPeriods = rowsData
+        .Where(r => r.BillYear > 0 && r.BillMonth > 0)
+        .Select(r => (Year: r.BillYear, Month: r.BillMonth))
+        .Distinct()
+        .OrderBy(p => p.Year).ThenBy(p => p.Month)
+        .ToList();
+    var nwYears = nwPeriods.Select(p => p.Year).Distinct().OrderBy(y => y).ToList();
+    var nwCells = rowsData
+        .Where(r => r.BillYear > 0 && r.BillMonth > 0)
+        .GroupBy(r => (r.PanelName, r.BillYear, r.BillMonth))
+        .ToDictionary(
+            g => g.Key,
+            g => (BilledClaims: g.Sum(x => x.BilledClaims), BilledCharges: g.Sum(x => x.BilledCharges),
+                  PaidClaims: g.Sum(x => x.NoOfClaims), Payments: g.Sum(x => x.InsurancePayments)));
+    var nwPanels = rowsData
+        .GroupBy(r => r.PanelName, StringComparer.OrdinalIgnoreCase)
+        .Select(g => new
+        {
+            PanelName     = g.Key,
+            BilledClaims  = g.Sum(x => x.BilledClaims),
+            BilledCharges = g.Sum(x => x.BilledCharges),
+            PaidClaims    = g.Sum(x => x.NoOfClaims),
+            Payments      = g.Sum(x => x.InsurancePayments)
+        })
+        .OrderByDescending(p => p.BilledClaims).ThenByDescending(p => p.PaidClaims)
+        .ToList();
+    string[] nwMetrics = ["Billed Claim Count", "Total Billed Charges", "Paid Claim Count", "Insurance Payment"];
+
+    <div class="cs-rpt-wrap">
+        <div class="cs-rpt-scroll">
+            <table class="cs-rpt-table">
+                <thead>
+                    <tr>
+                        <th rowspan="3">Panel</th>
+                        @foreach (var year in nwYears)
+                        {
+                            <th colspan="@(nwPeriods.Count(p => p.Year == year) * 4 + 4)">@year</th>
+                        }
+                        <th colspan="4" rowspan="2" class="cs-pr-grand">Grand Total</th>
+                    </tr>
+                    <tr>
+                        @foreach (var year in nwYears)
+                        {
+                            foreach (var p in nwPeriods.Where(p => p.Year == year))
+                            {
+                                <th colspan="4">@(new DateTime(p.Year, p.Month, 1).ToString("MMM"))</th>
+                            }
+                            <th colspan="4" class="cs-pr-year">@year Total</th>
+                        }
+                    </tr>
+                    <tr>
+                        @foreach (var year in nwYears)
+                        {
+                            foreach (var _ in nwPeriods.Where(p => p.Year == year))
+                            {
+                                foreach (var m in nwMetrics) { <th>@m</th> }
+                            }
+                            foreach (var m in nwMetrics) { <th class="cs-pr-year">@m</th> }
+                        }
+                        @foreach (var m in nwMetrics) { <th class="cs-pr-grand">@m</th> }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var panel in nwPanels)
+                    {
+                        <tr>
+                            <td style="text-align:left;font-weight:600">@panel.PanelName</td>
+                            @foreach (var year in nwYears)
+                            {
+                                int yBilled = 0, yPaid = 0;
+                                decimal yCharges = 0m, yPay = 0m;
+                                foreach (var p in nwPeriods.Where(p => p.Year == year))
+                                {
+                                    nwCells.TryGetValue((panel.PanelName, p.Year, p.Month), out var c);
+                                    yBilled += c.BilledClaims; yCharges += c.BilledCharges;
+                                    yPaid += c.PaidClaims; yPay += c.Payments;
+                                    <td style="text-align:right">@c.BilledClaims.N0OrDash()</td>
+                                    <td style="text-align:right">@Acct2(c.BilledCharges)</td>
+                                    <td style="text-align:right">@c.PaidClaims.N0OrDash()</td>
+                                    <td style="text-align:right">@Acct2(c.Payments)</td>
+                                }
+                                <td style="text-align:right;font-weight:700" class="cs-pr-year">@yBilled.N0OrDash()</td>
+                                <td style="text-align:right;font-weight:700" class="cs-pr-year">@Acct2(yCharges)</td>
+                                <td style="text-align:right;font-weight:700" class="cs-pr-year">@yPaid.N0OrDash()</td>
+                                <td style="text-align:right;font-weight:700" class="cs-pr-year">@Acct2(yPay)</td>
+                            }
+                            <td style="text-align:right;font-weight:700" class="cs-pr-grand">@panel.BilledClaims.N0OrDash()</td>
+                            <td style="text-align:right;font-weight:700" class="cs-pr-grand">@Acct2(panel.BilledCharges)</td>
+                            <td style="text-align:right;font-weight:700" class="cs-pr-grand">@panel.PaidClaims.N0OrDash()</td>
+                            <td style="text-align:right;font-weight:700" class="cs-pr-grand">@Acct2(panel.Payments)</td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td style="text-align:left">Grand Total</td>
+                        @foreach (var year in nwYears)
+                        {
+                            int yBilled = 0, yPaid = 0;
+                            decimal yCharges = 0m, yPay = 0m;
+                            foreach (var p in nwPeriods.Where(p => p.Year == year))
+                            {
+                                var monthRows = rowsData.Where(r => r.BillYear == p.Year && r.BillMonth == p.Month).ToList();
+                                var mBilled = monthRows.Sum(r => r.BilledClaims);
+                                var mCharges = monthRows.Sum(r => r.BilledCharges);
+                                var mPaid = monthRows.Sum(r => r.NoOfClaims);
+                                var mPay = monthRows.Sum(r => r.InsurancePayments);
+                                yBilled += mBilled; yCharges += mCharges; yPaid += mPaid; yPay += mPay;
+                                <td style="text-align:right">@mBilled.N0OrDash()</td>
+                                <td style="text-align:right">@Acct2(mCharges)</td>
+                                <td style="text-align:right">@mPaid.N0OrDash()</td>
+                                <td style="text-align:right">@Acct2(mPay)</td>
+                            }
+                            <td style="text-align:right" class="cs-pr-year">@yBilled.N0OrDash()</td>
+                            <td style="text-align:right" class="cs-pr-year">@Acct2(yCharges)</td>
+                            <td style="text-align:right" class="cs-pr-year">@yPaid.N0OrDash()</td>
+                            <td style="text-align:right" class="cs-pr-year">@Acct2(yPay)</td>
+                        }
+                        <td style="text-align:right" class="cs-pr-grand">@nwPanels.Sum(p => p.BilledClaims).N0OrDash()</td>
+                        <td style="text-align:right" class="cs-pr-grand">@Acct2(nwPanels.Sum(p => p.BilledCharges))</td>
+                        <td style="text-align:right" class="cs-pr-grand">@nwPanels.Sum(p => p.PaidClaims).N0OrDash()</td>
+                        <td style="text-align:right" class="cs-pr-grand">@Acct2(nwPanels.Sum(p => p.Payments))</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+
+    <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+        <strong>Source:</strong> Claim Level Data &bull;
+        <strong>Rows:</strong> PanelType &bull; <strong>Columns:</strong> ChargeEnteredDate month &bull;
+        <strong>Sorted by:</strong> Billed Claim Count DESC &bull;
+        <strong>Billed:</strong> BilledUnbilled = Billed &mdash; Count of unique ClaimID, Sum of ChargeAmount &bull;
+        <strong>Paid:</strong> InsurancePayment &gt; 0 &mdash; Count of unique ClaimID, Sum of InsurancePayment
     </div>
 }
 else if (!hasMonthlyGrain)
@@ -62,7 +202,7 @@ else if (!hasMonthlyGrain)
     <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
         <strong>Source:</strong> @(Model.IsAugustusLab ? "Collection Claim Level Data" : "Claim Level Data") &bull;
         <strong>Filter:</strong> InsurancePayment &gt; 0@(Model.IsAugustusLab ? " · Posted Date" : "") &bull;
-        <strong>Sorted by:</strong> @(Model.IsAugustusLab ? "Count of PanelNew DESC" : "SUM(InsurancePayment) DESC") &bull;
+        <strong>Sorted by:</strong> @(Model.IsAugustusLab ? "Count of PanelNew DESC" : Model.IsNorthWestLab ? "Claim Count DESC" : "SUM(InsurancePayment) DESC") &bull;
         <strong>Metric:</strong> @(Model.IsAugustusLab ? "COUNT(*) (Count of PanelNew), SUM(InsurancePayment)" : "COUNT(DISTINCT ClaimID), SUM(InsurancePayment)")
     </div>
 }
@@ -98,7 +238,7 @@ else
         });
     var pivotRows = isSpLogic
         ? pivotGroups.ToList()
-        : pivotGroups.OrderByDescending(r => Model.IsAugustusLab ? r.TotalCount : r.TotalPayment).ToList();
+        : pivotGroups.OrderByDescending(r => Model.SortsPaymentPivotsByClaims ? r.TotalCount : r.TotalPayment).ToList();
 
     <div class="cs-rpt-wrap">
         <div class="cs-rpt-scroll">

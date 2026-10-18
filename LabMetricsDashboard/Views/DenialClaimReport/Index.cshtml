@@ -131,9 +131,30 @@
             <li class="nav-item" role="presentation">
                 <button class="nav-link @(tab == "plantype" ? "active" : "")" data-bs-toggle="pill"
                         data-bs-target="#dcr-plantype" type="button" data-tab-key="plantype">
-                    <i class="bi bi-diagram-3 me-2"></i>Denial List - Plan Type
+                    <i class="bi bi-diagram-3 me-2"></i>@(Model.HasDenialFacilityTabs ? "Plan Type" : "Denial List - Plan Type")
                 </button>
             </li>
+            @if (Model.HasDenialFacilityTabs)
+            {
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link @(tab == "payor" ? "active" : "")" data-bs-toggle="pill"
+                            data-bs-target="#dcr-payor" type="button" data-tab-key="payor">
+                        <i class="bi bi-people me-2"></i>Payor vs Payer
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link @(tab == "facility" ? "active" : "")" data-bs-toggle="pill"
+                            data-bs-target="#dcr-facility" type="button" data-tab-key="facility">
+                        <i class="bi bi-building me-2"></i>Facility wise Denial
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link @(tab == "facilitypct" ? "active" : "")" data-bs-toggle="pill"
+                            data-bs-target="#dcr-facilitypct" type="button" data-tab-key="facilitypct">
+                        <i class="bi bi-percent me-2"></i>Denial vs Facility %
+                    </button>
+                </li>
+            }
         }
         <li class="nav-item" role="presentation">
             <button class="nav-link @(tab == "insight" ? "active" : "")" data-bs-toggle="pill"
@@ -242,6 +263,30 @@
                     </div>
                 </div>
             </div>
+            @if (Model.HasDenialFacilityTabs)
+            {
+                <div class="tab-pane fade @(tab == "payor" ? "show active" : "")" id="dcr-payor">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-body">
+                            @await Html.PartialAsync("_DenialPayorVsPayerGrid", Model.PayorVsPayer)
+                        </div>
+                    </div>
+                </div>
+                <div class="tab-pane fade @(tab == "facility" ? "show active" : "")" id="dcr-facility">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-body">
+                            @await Html.PartialAsync("_DenialFacilityGrid", Model.FacilityDenial)
+                        </div>
+                    </div>
+                </div>
+                <div class="tab-pane fade @(tab == "facilitypct" ? "show active" : "")" id="dcr-facilitypct">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-body">
+                            @await Html.PartialAsync("_DenialFacilityPctGrid", Model.FacilityPct)
+                        </div>
+                    </div>
+                </div>
+            }
         }
 
         <div class="tab-pane fade @(tab == "insight" ? "show active" : "")" id="dcr-insight">

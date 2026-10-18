@@ -195,19 +195,21 @@ public static class LabClaimLineColumnCatalog
                 "DODWeek", "CheckNumber", "LineLevelICD", "Facility", "ClaimUID", "InsuranceBalance_Decimal",
                 "DenialDate", "Bucket30Count", "Bucket30Amount", "Bucket60Count", "Bucket60Amount"
             ],
+        // Matches Sql/ClaimLineDetails_SPs/NorthWest_Details.sql. Hidden on NorthWest: LabID, LabName,
+        // SourceFileID, IngestedOn, CsvRowHash, Payer_Code, Payer_Common_Code, Payer_Group_Code,
+        // Global_Payer_ID, InsuranceBalance_Decimal, UID.
         ["NorthWest"] =
             [
-                "LabID", "LabName", "ClaimID", "AccessionNumber", "SourceFileID", "IngestedOn",
-                "CsvRowHash", "PayerName_Raw", "PayerName", "Payer_Code", "Payer_Common_Code", "Payer_Group_Code",
-                "Global_Payer_ID", "PayerType", "BillingProvider", "ReferringProvider", "ClinicName", "SalesRepname",
-                "PatientID", "PatientDOB", "DateofService", "ChargeEnteredDate", "FirstBilledDate", "Panelname",
+                "ClaimID", "AccessionNumber", "PayerName_Raw", "PayerName", "PayerType", "BillingProvider",
+                "ReferringProvider", "ClinicName", "SalesRepname", "PatientID", "PatientDOB", "DateofService",
+                "ChargeEnteredDate", "FirstBilledDate", "Panelname",
                 "CPTCodeXUnitsXModifier", "POS", "TOS", "ChargeAmount", "AllowedAmount", "InsurancePayment",
                 "PatientPayment", "TotalPayments", "InsuranceAdjustments", "PatientAdjustments", "TotalAdjustments", "InsuranceBalance",
                 "PatientBalance", "TotalBalance", "CheckDate", "ClaimStatus", "DenialCode", "DenialCodeNormalized", "DenialDescription", "ICDCode",
                 "DaystoDOS", "RollingDays", "DaystoBill", "DaystoPost", "ICDPointer", "InsertedDateTime",
-                "InsuranceBalance_Decimal", "UID", "Aging", "PatientName", "LISPatientName", "SubscriberId",
+                "Aging", "PatientName", "LISPatientName", "SubscriberId",
                 "PanelType", "EnteredWeek", "EnteredStatus", "LastActivityDate", "EmedixSubmissionDate", "ClaimType",
-                "BilledStatus", "BilledWeek", "PostedWeek", "ModField", "CheqNo", "DuplicatePaymentPosted",
+                "BilledUnbilled", "BilledStatus", "BilledWeek", "PostedWeek", "ModField", "CheqNo", "DuplicatePaymentPosted",
                 "ActualPayment", "ProcTotalBal", "DeniedStatus", "ScrubberEditReason", "EmedixRejectionDate", "EmedixRejection",
                 "RejectionCategory", "TimeToPay", "PaymentPercent", "FullyPaidCount", "FullyPaidAmount", "Adjudicated",
                 "AdjudicatedAmount", "Bucket30", "Bucket30Amount", "Bucket60", "Bucket60Amount", "ClaimUID",

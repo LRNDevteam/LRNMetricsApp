@@ -111,10 +111,12 @@ public interface INorthWestProductionSummaryRepository
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 
-    /// <summary>Insight Daq/WebPM: top 10 payers for display; Grand Total sums all payers for the source.</summary>
-    Task<SharedPayerBreakdownResult> GetInsightBreakdownAsync(
+    /// <summary>
+    /// Calls usp_GetNW_Top10PayerBreakdown. One row per Source (Daq, WebPM) holding that source's
+    /// overall total across all payers; its ChildRows are the source's Top 10 PayerName_Raw by Claim Count.
+    /// </summary>
+    Task<SharedPayerBreakdownResult> GetTop10PayerBreakdownAsync(
         string connectionString,
-        string source,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
         DateOnly? filterDosFrom = null,

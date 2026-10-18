@@ -5,6 +5,7 @@
     if (!string.IsNullOrEmpty(lisPaneOnly))
         Layout = null;
     var lisLazy = ViewData["LisLazy"] as bool? == true;
+    var lisEmbed = string.Equals(Context.Request.Query["embed"], "1", StringComparison.Ordinal);
     ViewData["Title"] = $"LIS Summary - {Model.CurrentLabName}";
     ViewData["SelectedLab"] = Model.CurrentLabName;
     ViewData["PageLabel"] = "LIS Summary";
@@ -1676,6 +1677,9 @@ else if (result is null)
 }
 else if (activeTab == "summary")
 {
+    @* Executive Summary "LIMS Highlights" frame shows only the summary grid and Key Insights. *@
+    if (!lisEmbed)
+    {
     <div id="lisKeyMetricsHost">
         @if (result.KeyMetrics is { Months.Count: > 0 } keyMetrics)
         {
@@ -1701,6 +1705,7 @@ else if (activeTab == "summary")
             <div class="lis-kpi-value">@result.KpiCards.SelfPayCount.ToString("N0")</div>
         </div>
     </div>
+    }
 
     <div class="card border-0 shadow-sm table-card">
         <div class="card-body">

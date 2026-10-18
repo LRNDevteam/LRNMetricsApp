@@ -291,6 +291,7 @@ public sealed class DenialClaimReportController : Controller
         if (LabCollectionPrefix.HasDenialSummary(labName))
         {
             model.HasDenialLists = true;
+            model.HasDenialFacilityTabs = LabCollectionPrefix.HasDenialFacilityTabs(labName);
             model.DenialListSearch = string.IsNullOrWhiteSpace(listCode) ? null : listCode.Trim();
             try
             {
@@ -302,21 +303,39 @@ public sealed class DenialClaimReportController : Controller
                     : _denialLists.GetDenialListAsync(connectionString, prefix,
                         new DenialSummaryFilters { DenialCodeSearch = model.DenialListSearch }, ct);
                 var planTask = _denialLists.GetPlanTypeAsync(connectionString, prefix, noFilters, ct);
-                await Task.WhenAll(allListTask, searchTask, planTask);
+                Task<IReadOnlyList<DenialPayorVsPayerRow>>? payorTask = null;
+                Task<IReadOnlyList<DenialFacilityRow>>? facilityTask = null;
+                Task<IReadOnlyList<DenialFacilityPctRow>>? facilityPctTask = null;
+                if (model.HasDenialFacilityTabs)
+                {
+                    payorTask = _denialLists.GetPayorVsPayerAsync(connectionString, prefix, noFilters, ct);
+                    facilityTask = _denialLists.GetByFacilityAsync(connectionString, prefix, noFilters, ct);
+                    facilityPctTask = _denialLists.GetFacilityPctAsync(connectionString, prefix, noFilters, ct);
+                }
+
+                var tasks = new List<Task> { allListTask, searchTask, planTask };
+                if (payorTask is not null) tasks.Add(payorTask);
+                if (facilityTask is not null) tasks.Add(facilityTask);
+                if (facilityPctTask is not null) tasks.Add(facilityPctTask);
+                await Task.WhenAll(tasks);
+
                 model.DenialList = searchTask.Result;
                 model.DenialListCodeOptions = allListTask.Result
                     .Where(r => r.RowType == "D")
                     .Select(r => r.DenialCode)
                     .ToList();
                 model.PlanType = planTask.Result;
+                if (payorTask is not null) model.PayorVsPayer = payorTask.Result;
+                if (facilityTask is not null) model.FacilityDenial = facilityTask.Result;
+                if (facilityPctTask is not null) model.FacilityPct = facilityPctTask.Result;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Denial List / Plan Type failed for lab {Lab}.", labName);
-                model.Error ??= "The Denial List and Plan Type tabs could not be loaded for this lab.";
+                _logger.LogError(ex, "Denial List / Plan Type / Facility tabs failed for lab {Lab}.", labName);
+                model.Error ??= "The Denial List tabs could not be loaded for this lab.";
             }
         }
-        else if (model.ActiveTab is "list" or "plantype")
+        else if (model.ActiveTab is "list" or "plantype" or "payor" or "facility" or "facilitypct")
         {
             model.ActiveTab = "monthly";
         }
@@ -513,6 +532,9 @@ public sealed class DenialClaimReportController : Controller
         "weekly" => "weekly",
         "list" => "list",
         "plantype" => "plantype",
+        "payor" => "payor",
+        "facility" => "facility",
+        "facilitypct" => "facilitypct",
         "insight" => "insight",
         "claims" => "claims",
         _ => "monthly"

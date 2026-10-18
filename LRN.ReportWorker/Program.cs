@@ -96,6 +96,7 @@ var host = Host.CreateDefaultBuilder(args)
             LabMetricsDashboard.Services.SqlLisSummaryRepository>();
         services.AddSingleton<LabMetricsDashboard.Services.INotesRepository,
             LabMetricsDashboard.Services.SqlNotesRepository>();
+        services.AddSingleton<LabMetricsDashboard.Services.ExecutiveSummaryHighlightsExcel>();
         // Denial Dashboard reads go straight to SQL (the same queries LRN.ReportsApi runs
         // for the page) — the HTTP client mints its JWT from the signed-in HttpContext,
         // which a background service does not have.

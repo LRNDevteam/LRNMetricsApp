@@ -1,8 +1,13 @@
 @model LabMetricsDashboard.Models.Notes.ReportInsightsPanelModel
+@{
+    // Embedded in the NorthWest Executive Summary highlight tabs: display only.
+    var riReadOnly = string.Equals(Context.Request.Query["embed"], "1", StringComparison.Ordinal);
+}
 <link rel="stylesheet" href="~/css/report-insights.css" asp-append-version="true" />
 
 <div id="riRoot"
      class="ri-panel ri-collapsed"
+     data-readonly="@(riReadOnly ? "1" : null)"
      data-base="@Url.Content("~/")"
      data-lab="@Model.Lab"
      data-report-name="@Model.ReportName"
@@ -25,13 +30,13 @@
                 Template
                 <select id="riTemplate" class="form-select form-select-sm"></select>
             </label>
-            <button type="button" class="btn btn-sm btn-outline-light" id="riArchiveBtn">
+            <button type="button" class="btn btn-sm btn-outline-light" id="riArchiveBtn" hidden="@riReadOnly">
                 Archived Notes
             </button>
-            <button type="button" class="btn btn-sm btn-primary" id="riAddBtn">
+            <button type="button" class="btn btn-sm btn-primary" id="riAddBtn" hidden="@riReadOnly">
                 <i class="bi bi-plus-lg"></i> Add Insight
             </button>
-            <button type="button" class="ri-expand-btn" id="riExpandBtn"
+            <button type="button" class="ri-expand-btn" id="riExpandBtn" hidden="@riReadOnly"
                     title="Maximize insights" aria-label="Maximize insights">
                 <i class="bi bi-arrows-fullscreen" aria-hidden="true"></i>
             </button>

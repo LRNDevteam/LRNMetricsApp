@@ -24,6 +24,12 @@ IF OBJECT_ID('dbo.LineLevelData', 'U') IS NOT NULL AND COL_LENGTH('dbo.LineLevel
     ALTER TABLE dbo.LineLevelData ADD [DenialCodeNormalized] nvarchar(400) NULL;
 IF OBJECT_ID('dbo.LineLevelData', 'U') IS NOT NULL AND COL_LENGTH('dbo.LineLevelData', 'DenialDescription') IS NULL
     ALTER TABLE dbo.LineLevelData ADD [DenialDescription] nvarchar(max) NULL;
+-- BilledUnbilled / DeniedStatus are filled by dbo.usp_UpdateNW_ClaimLevelData_BilledUnbilled
+-- (ClaimLineCSVDataCapture/Sql/NorthWest/40_NW_ClaimLevelData_BilledUnbilled.sql).
+IF OBJECT_ID('dbo.ClaimLevelData', 'U') IS NOT NULL AND COL_LENGTH('dbo.ClaimLevelData', 'BilledUnbilled') IS NULL
+    ALTER TABLE dbo.ClaimLevelData ADD [BilledUnbilled] nvarchar(250) NULL;
+IF OBJECT_ID('dbo.ClaimLevelData', 'U') IS NOT NULL AND COL_LENGTH('dbo.ClaimLevelData', 'DeniedStatus') IS NULL
+    ALTER TABLE dbo.ClaimLevelData ADD [DeniedStatus] nvarchar(500) NULL;
 GO
 
 CREATE OR ALTER PROCEDURE dbo.usp_GetClaimLevelDetails
@@ -98,21 +104,15 @@ BEGIN
     DECLARE @HasPanel         BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
     DECLARE @HasAging         BIT = CASE WHEN EXISTS (SELECT 1 FROM @AgingList) THEN 1 ELSE 0 END;
 
-    /* ==== NorthWest ClaimLevel columns (Sql/Select_Script) — add/remove fields here ==== */
+    /* ==== NorthWest ClaimLevel columns (Sql/Select_Script) — add/remove fields here ====
+       Hidden: LabID, LabName, SourceFileID, IngestedOn, CsvRowHash, Payer_Code, Payer_Common_Code,
+               Payer_Group_Code, Global_Payer_ID, InsuranceBalance_Decimal, UID.
+       Keep in step with the NorthWest entry in LabClaimLineColumnCatalog (Excel downloads). */
     SELECT
-            [LabID],
-            [LabName],
             CASE WHEN [ClaimID] LIKE '%.00' THEN LEFT([ClaimID], LEN([ClaimID])-3) ELSE ISNULL(LTRIM(RTRIM([ClaimID])),'') END AS [ClaimID],
             [AccessionNumber],
-            [SourceFileID],
-            [IngestedOn],
-            [CsvRowHash],
             [PayerName_Raw],
             ISNULL(LTRIM(RTRIM([PayerName])),'') AS [PayerName],
-            [Payer_Code],
-            [Payer_Common_Code],
-            [Payer_Group_Code],
-            [Global_Payer_ID],
             ISNULL(LTRIM(RTRIM([PayerType])),'') AS [PayerType],
             [BillingProvider],
             [ReferringProvider],
@@ -150,8 +150,6 @@ BEGIN
             [DaystoPost],
             [ICDPointer],
             [InsertedDateTime],
-            ISNULL(TRY_CAST([InsuranceBalance_Decimal] AS DECIMAL(18,2)), 0) AS [InsuranceBalance_Decimal],
-            [UID],
             [Aging],
             [PatientName],
             [LISPatientName],
@@ -162,6 +160,7 @@ BEGIN
             [LastActivityDate],
             [EmedixSubmissionDate],
             [ClaimType],
+            [BilledUnbilled],
             [BilledStatus],
             [BilledWeek],
             [PostedWeek],

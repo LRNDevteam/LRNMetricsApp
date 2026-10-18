@@ -103,21 +103,14 @@ public sealed class ProductionReportViewModel
     public Dictionary<string, decimal> PanelBreakdownGrandChargesByMonth { get; set; } = [];
     public decimal PanelBreakdownGrandTotalCharges { get; set; }
 
-    public List<string> InsightDaqMonths { get; set; } = [];
-    public List<int> InsightDaqYears { get; set; } = [];
-    public List<PayerBreakdownRow> InsightDaqRows { get; set; } = [];
-    public Dictionary<string, int> InsightDaqGrandByMonth { get; set; } = [];
-    public int InsightDaqGrandTotal { get; set; }
-    public Dictionary<string, decimal> InsightDaqGrandChargesByMonth { get; set; } = [];
-    public decimal InsightDaqGrandTotalCharges { get; set; }
-
-    public List<string> InsightWebPmMonths { get; set; } = [];
-    public List<int> InsightWebPmYears { get; set; } = [];
-    public List<PayerBreakdownRow> InsightWebPmRows { get; set; } = [];
-    public Dictionary<string, int> InsightWebPmGrandByMonth { get; set; } = [];
-    public int InsightWebPmGrandTotal { get; set; }
-    public Dictionary<string, decimal> InsightWebPmGrandChargesByMonth { get; set; } = [];
-    public decimal InsightWebPmGrandTotalCharges { get; set; }
+    /// <summary>NorthWest Top 10 Payer (Webpm + Daq); grand totals cover the 10 payers shown.</summary>
+    public List<string> Top10PayerMonths { get; set; } = [];
+    public List<int> Top10PayerYears { get; set; } = [];
+    public List<PayerBreakdownRow> Top10PayerRows { get; set; } = [];
+    public Dictionary<string, int> Top10PayerGrandByMonth { get; set; } = [];
+    public int Top10PayerGrandTotal { get; set; }
+    public Dictionary<string, decimal> Top10PayerGrandChargesByMonth { get; set; } = [];
+    public decimal Top10PayerGrandTotalCharges { get; set; }
 
     public List<string> HighestPayerMonths { get; set; } = [];
     public List<int> HighestPayerYears { get; set; } = [];

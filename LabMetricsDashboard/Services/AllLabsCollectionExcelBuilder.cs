@@ -251,6 +251,7 @@ public sealed class AllLabsCollectionExcelBuilder
         var insVsPayTask    = useAggregates && aggregatePrefix is not null
             ? _repo.GetInsuranceVsPaymentFromAggregatesAsync(connStr, aggregatePrefix, ct)
             : _repo.GetInsuranceVsPaymentAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
+        var womensHealthTask = _repo.GetWomensHealthBreakdownAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
 
         // Count raw rows before fetching to enforce the 200K limit
         var claimCountTask = _repo.GetClaimLevelDataCountAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
@@ -260,7 +261,7 @@ public sealed class AllLabsCollectionExcelBuilder
             monthlyTask, weeklyTask, reimbTask, totPayTask,
             agingTask, panelPayTask, insPctTask,
             cptPctTask, avgPayTask, avgPay3Task, avgPayDosTask, statusTask, providerTask,
-            repPayTask, insVsPayTask,
+            repPayTask, insVsPayTask, womensHealthTask,
             claimCountTask, lineCountTask);
 
         int claimCount       = await claimCountTask;
@@ -300,9 +301,8 @@ public sealed class AllLabsCollectionExcelBuilder
             ProviderSummary       = await providerTask,
             RepPayments           = await repPayTask,
             InsuranceVsPayment    = await insVsPayTask,
-            ShowInsuranceVsPayment = !string.Equals(
-                LabCollectionPrefix.GetPrefix(labName), "NW",
-                StringComparison.OrdinalIgnoreCase),
+            ShowInsuranceVsPayment = true,
+            WomensHealthBreakdown = await womensHealthTask,
         };
 
         using var labWorkbook = CollectionSummaryExcelExportBuilder.CreateWorkbook(

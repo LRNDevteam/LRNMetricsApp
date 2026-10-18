@@ -23,6 +23,7 @@ public sealed class ExecutiveSummaryController : Controller
     private readonly IConfiguration _config;
     private readonly ILogger<ExecutiveSummaryController> _logger;
     private readonly BeechTreeRevenuePipelineLisService _pipelineLis;
+    private readonly ExecutiveSummaryHighlightsExcel _highlights;
 
     // Maps LabSettings key → SP prefix used to build "dbo.usp_Get{prefix}_ExecutiveSummary".
     // Keep aligned with PhiExecutiveSummaryController.LabPrefixMap.
@@ -80,7 +81,8 @@ public sealed class ExecutiveSummaryController : Controller
         PredictionInsightLoader insightLoader,
         IConfiguration config,
         ILogger<ExecutiveSummaryController> logger,
-        BeechTreeRevenuePipelineLisService pipelineLis)
+        BeechTreeRevenuePipelineLisService pipelineLis,
+        ExecutiveSummaryHighlightsExcel highlights)
     {
         _labSettings = labSettings;
         _repo        = repo;
@@ -89,6 +91,7 @@ public sealed class ExecutiveSummaryController : Controller
         _config = config;
         _logger      = logger;
         _pipelineLis = pipelineLis;
+        _highlights  = highlights;
     }
 
     // All labs in LabPrefixMap now support extended filter parameters.
@@ -174,6 +177,8 @@ public sealed class ExecutiveSummaryController : Controller
                 return View(excelVm);
             var excelBuilder = new ExecutiveSummaryExcelBuilder();
             var fileBytes = excelBuilder.Build(excelVm);
+            if (ExecutiveSummaryHighlightsExcel.AppliesTo(labName))
+                fileBytes = await _highlights.AppendAsync(fileBytes, labName, ct);
             return File(fileBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 $"ExecutiveSummary_{labName}_{DateTime.Now:yyyyMMdd}.xlsx");
         }

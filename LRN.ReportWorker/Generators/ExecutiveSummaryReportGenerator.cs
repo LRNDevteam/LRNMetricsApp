@@ -20,15 +20,18 @@ public sealed class ExecutiveSummaryReportGenerator : IReportGenerator
 
     private readonly LabSettings _labSettings;
     private readonly SqlPhiExecutiveSummaryRepository _repo;
+    private readonly ExecutiveSummaryHighlightsExcel _highlights;
     private readonly ILogger<ExecutiveSummaryReportGenerator> _logger;
 
     public ExecutiveSummaryReportGenerator(
         LabSettings labSettings,
         SqlPhiExecutiveSummaryRepository repo,
+        ExecutiveSummaryHighlightsExcel highlights,
         ILogger<ExecutiveSummaryReportGenerator> logger)
     {
         _labSettings = labSettings;
         _repo        = repo;
+        _highlights  = highlights;
         _logger      = logger;
     }
 
@@ -95,6 +98,11 @@ public sealed class ExecutiveSummaryReportGenerator : IReportGenerator
         await Progress(70);
 
         var bytes = new ExecutiveSummaryExcelBuilder().Build(vm);
+        await Progress(75);
+
+        // NorthWest: Production / Collection / LIMS Highlights tabs of the page.
+        if (ExecutiveSummaryHighlightsExcel.AppliesTo(job.LabName))
+            bytes = await _highlights.AppendAsync(bytes, job.LabName, ct);
         await Progress(90);
 
         Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);

@@ -430,6 +430,44 @@
     </div>
 </div>
 
+@* Highlight tabs (NorthWest): each report loads in a frame on its first click. *@
+if (isNorthWestLab)
+{
+<ul class="nav es-hl-tabs mb-3" id="esHlTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="es-main-tab" data-bs-toggle="tab" data-bs-target="#es-main-pane"
+                type="button" role="tab" aria-controls="es-main-pane" aria-selected="true">
+            <i class="bi bi-grid-3x3-gap-fill"></i> 1. Executive Summary
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="es-prod-tab" data-bs-toggle="tab" data-bs-target="#es-prod-pane"
+                type="button" role="tab" aria-controls="es-prod-pane" aria-selected="false">
+            <i class="bi bi-bar-chart-line"></i> 2. Production Highlights
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="es-coll-tab" data-bs-toggle="tab" data-bs-target="#es-coll-pane"
+                type="button" role="tab" aria-controls="es-coll-pane" aria-selected="false">
+            <i class="bi bi-cash-stack"></i> 3. Collection Highlights
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="es-lims-tab" data-bs-toggle="tab" data-bs-target="#es-lims-pane"
+                type="button" role="tab" aria-controls="es-lims-pane" aria-selected="false">
+            <i class="bi bi-clipboard2-pulse"></i> 4. LIMS Highlights
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link disabled" id="es-denial-tab" type="button" role="tab"
+                aria-disabled="true" disabled title="Coming soon">
+            <i class="bi bi-shield-exclamation"></i> 5. Denial Highlights
+        </button>
+    </li>
+</ul>
+@Html.Raw("<div class=\"tab-content\" id=\"esHlTabContent\"><div class=\"tab-pane fade show active\" id=\"es-main-pane\" role=\"tabpanel\" aria-labelledby=\"es-main-tab\">")
+}
+
 <!-- ── Analysis-range / RunID banner (shared partial) ───── -->
 <div id="es-analysis-banner">
 @{
@@ -1121,6 +1159,94 @@
     </div>
 </div>
 </div>
+
+@if (!esTableOnly && isNorthWestLab)
+{
+    var hlFrames = new[]
+    {
+        (Pane: "es-prod-pane", Tab: "es-prod-tab", Title: "Production Highlights",
+            Src: Url.Action("ProductionSummaryReport", "Dashboard",
+                new { lab = Model.SelectedLab, embed = 1, embedTabs = "monthly-pane,weekly-pane" })),
+        (Pane: "es-coll-pane", Tab: "es-coll-tab", Title: "Collection Highlights",
+            Src: Url.Action("Index", "CollectionSummary",
+                new { lab = Model.SelectedLab, embed = 1, embedTabs = "mcv-pane,wcv-pane,top5grid-pane,avgpaydos-pane,avgpay-pane" })),
+        (Pane: "es-lims-pane", Tab: "es-lims-tab", Title: "LIMS Highlights",
+            Src: Url.Action("Index", "LisSummary", new { lab = Model.SelectedLab, embed = 1 })),
+    };
+    @Html.Raw("</div>")
+    foreach (var f in hlFrames)
+    {
+        <div class="tab-pane fade" id="@f.Pane" role="tabpanel" aria-labelledby="@f.Tab">
+            <div class="es-hl-loading">
+                <span class="spinner-border spinner-border-sm text-secondary me-2" role="status" aria-hidden="true"></span>
+                Loading @f.Title…
+            </div>
+            <iframe class="es-hl-frame" title="@f.Title" data-src="@f.Src"></iframe>
+        </div>
+    }
+    @Html.Raw("</div>")
+
+<style>
+    .es-hl-tabs {
+        display: flex; flex-wrap: wrap; gap: .45rem; align-items: center;
+        padding: .55rem .65rem;
+        background: linear-gradient(135deg, #f8fafd 0%, #eef3fa 100%);
+        border: 1px solid #dce4f0; border-radius: 1rem;
+        box-shadow: 0 2px 10px rgba(15,23,42,.04);
+    }
+    .es-hl-tabs .nav-item { margin: 0; display: flex; }
+    .es-hl-tabs .nav-link {
+        display: inline-flex; align-items: center; gap: .4rem;
+        padding: .5rem .95rem; min-height: 38px; margin: 0;
+        font-size: .8rem; font-weight: 700; letter-spacing: .015em; white-space: nowrap;
+        color: #3b5578; background: #fff;
+        border: 1.5px solid #d4dde9; border-radius: .75rem;
+        box-shadow: 0 1px 3px rgba(15,23,42,.04);
+        transition: all .18s ease;
+    }
+    .es-hl-tabs .nav-link i { opacity: .7; transition: opacity .18s; }
+    .es-hl-tabs .nav-link:hover {
+        color: #0e3460; background: #edf2fb; border-color: #b4c6e0;
+        box-shadow: 0 2px 8px rgba(15,23,42,.08);
+    }
+    .es-hl-tabs .nav-link:hover i,
+    .es-hl-tabs .nav-link.active i { opacity: 1; }
+    .es-hl-tabs .nav-link.active {
+        color: #fff; border-color: #0e3460;
+        background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+        box-shadow: 0 4px 14px rgba(14,52,96,.30);
+    }
+    .es-hl-tabs .nav-link.disabled { opacity: .45; pointer-events: none; background: #fff; }
+    .es-hl-loading { padding: 2.5rem; text-align: center; color: #64748b; font-size: .85rem; }
+    .es-hl-frame { display: block; width: 100%; height: 600px; border: 0; }
+</style>
+<script nonce='@Context.Items["CspNonce"]'>
+    // Highlight frames load on the first click of their tab, then size themselves to the report.
+    (function () {
+        var tabs = document.getElementById('esHlTabs');
+        if (!tabs) return;
+
+        tabs.addEventListener('shown.bs.tab', function (e) {
+            var pane = document.querySelector(e.target.getAttribute('data-bs-target'));
+            var frame = pane && pane.querySelector('iframe.es-hl-frame');
+            if (!frame || frame.getAttribute('src')) return;
+            frame.addEventListener('load', function () {
+                var loading = pane.querySelector('.es-hl-loading');
+                if (loading) loading.remove();
+            }, { once: true });
+            frame.setAttribute('src', frame.getAttribute('data-src'));
+        });
+
+        window.addEventListener('message', function (e) {
+            if (e.origin !== window.location.origin || !e.data || !e.data.lmdEmbedHeight) return;
+            document.querySelectorAll('iframe.es-hl-frame').forEach(function (frame) {
+                if (frame.contentWindow === e.source && e.data.lmdEmbedHeight > 100)
+                    frame.style.height = e.data.lmdEmbedHeight + 'px';
+            });
+        });
+    })();
+</script>
+}
 
 @if (!esTableOnly)
 {

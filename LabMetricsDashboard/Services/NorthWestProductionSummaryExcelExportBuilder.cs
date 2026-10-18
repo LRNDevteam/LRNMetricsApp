@@ -106,20 +106,24 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         BuildCodingSheet(wb, vm);
         BuildPayerBreakdownSheet(wb, vm);
         BuildPanelBreakdownSheet(wb, vm);
-        BuildPayerMonthBreakdownSheet(wb, "Insight Daq", "Insight Daq — Top 10 Payers (Grand Total = all payers)", "Payer",
-            vm.InsightDaqRows, vm.InsightDaqYears, vm.InsightDaqMonths,
-            vm.InsightDaqGrandByMonth, vm.InsightDaqGrandChargesByMonth,
-            vm.InsightDaqGrandTotal, vm.InsightDaqGrandTotalCharges);
-        BuildPayerMonthBreakdownSheet(wb, "Insight WebPM", "Insight WebPM — Top 10 Payers (Grand Total = all payers)", "Payer",
-            vm.InsightWebPmRows, vm.InsightWebPmYears, vm.InsightWebPmMonths,
-            vm.InsightWebPmGrandByMonth, vm.InsightWebPmGrandChargesByMonth,
-            vm.InsightWebPmGrandTotal, vm.InsightWebPmGrandTotalCharges);
         BuildHighestPayerSheet(wb, vm);
+        BuildTop10PayerSheets(wb, vm);
         BuildPayerPanelSheet(wb, vm);
         BuildUnbilledAgingSheet(wb, vm);
         BuildCptBreakdownSheet(wb, vm);
         WriteFilterFooter(wb, vm);
 
+        return wb;
+    }
+
+    /// <summary>
+    /// Monthly &amp; Weekly sheet only — the Production Highlights section of the
+    /// NorthWest Executive Summary download.
+    /// </summary>
+    public static XLWorkbook CreateHighlightsWorkbook(ProductionReportViewModel vm, string labName)
+    {
+        var wb = new XLWorkbook();
+        BuildMonthlyAndWeeklySheet(wb, vm, labName);
         return wb;
     }
 
@@ -142,15 +146,8 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         BuildCodingSheet(wb, vm);
         BuildPayerBreakdownSheet(wb, vm);
         BuildPanelBreakdownSheet(wb, vm);
-        BuildPayerMonthBreakdownSheet(wb, "Insight Daq", "Insight Daq — Top 10 Payers (Grand Total = all payers)", "Payer",
-            vm.InsightDaqRows, vm.InsightDaqYears, vm.InsightDaqMonths,
-            vm.InsightDaqGrandByMonth, vm.InsightDaqGrandChargesByMonth,
-            vm.InsightDaqGrandTotal, vm.InsightDaqGrandTotalCharges);
-        BuildPayerMonthBreakdownSheet(wb, "Insight WebPM", "Insight WebPM — Top 10 Payers (Grand Total = all payers)", "Payer",
-            vm.InsightWebPmRows, vm.InsightWebPmYears, vm.InsightWebPmMonths,
-            vm.InsightWebPmGrandByMonth, vm.InsightWebPmGrandChargesByMonth,
-            vm.InsightWebPmGrandTotal, vm.InsightWebPmGrandTotalCharges);
         BuildHighestPayerSheet(wb, vm);
+        BuildTop10PayerSheets(wb, vm);
         BuildPayerPanelSheet(wb, vm);
         BuildUnbilledAgingSheet(wb, vm);
         BuildCptBreakdownSheet(wb, vm);
@@ -395,7 +392,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
 
         int hCol = 2;
         WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + weeks.Count * 2 - 1,
-            "Billed Week", PrExcel.InsightsHeaderBg);
+            "Thursday – Wednesday", PrExcel.InsightsHeaderBg);
         WriteMergedHeader(ws, hRow1, hRow1 + 1, hCol + weeks.Count * 2, hCol + weeks.Count * 2 + 1,
             "Total", PrExcel.InsightsHeaderBg);
 
@@ -549,11 +546,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         PrExcel.ApplyDefaults(ws);
 
         var pbYears = vm.PayerBreakdownYears.Where(y => y > 1900).ToList();
-        var pbMonths = vm.PayerBreakdownMonths.Where(m => int.Parse(m[..4]) > 1900).ToList();
-        var pbMonthsByYear = pbMonths
-            .GroupBy(m => int.Parse(m[..4]))
-            .OrderBy(g => g.Key)
-            .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
+        var pbMonthsByYear = pbYears.ToDictionary(y => y, _ => new List<string>());
 
         const int metrics = 2;
         int colCount = 1;
@@ -673,11 +666,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         PrExcel.ApplyDefaults(ws);
 
         var years = vm.PanelBreakdownYears.Where(y => y > 1900).ToList();
-        var months = vm.PanelBreakdownMonths.Where(m => int.Parse(m[..4]) > 1900).ToList();
-        var monthsByYear = months
-            .GroupBy(m => int.Parse(m[..4]))
-            .OrderBy(g => g.Key)
-            .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
+        var monthsByYear = years.ToDictionary(y => y, _ => new List<string>());
 
         const int metrics = 2;
         int colCount = 1;
@@ -754,31 +743,6 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             WriteCurrencyCell(ws, row, col, panel.GrandTotalCharges, PrExcel.GroupRowBg);
             ws.Row(row).Style.Font.Bold = true;
             row++;
-
-            int firstChild = row;
-            int payerIdx = 0;
-            foreach (var payer in panel.ChildRows)
-            {
-                var bg = PrExcel.ChildRowBg;
-                col = 1;
-                WriteCell(ws, row, col++, $"    {payer.PayerName}", bg, isText: true);
-                foreach (var year in years)
-                {
-                    var mons = monthsByYear.GetValueOrDefault(year, []);
-                    foreach (var mk in mons)
-                    {
-                        WriteCell(ws, row, col++, payer.ByMonth.GetValueOrDefault(mk, 0), bg);
-                        WriteCurrencyCell(ws, row, col++, payer.ByMonthCharges.GetValueOrDefault(mk, 0m), bg);
-                    }
-                    WriteCell(ws, row, col++, payer.ByYear.GetValueOrDefault(year, 0), bg);
-                    WriteCurrencyCell(ws, row, col++, payer.ByYearCharges.GetValueOrDefault(year, 0m), bg);
-                }
-                WriteCell(ws, row, col++, payer.GrandTotal, bg);
-                WriteCurrencyCell(ws, row, col, payer.GrandTotalCharges, bg);
-                row++;
-                payerIdx++;
-            }
-            GroupChildRows(ws, firstChild, row - 1);
         }
 
         PrExcel.StyleGreenTotalRow(ws, row, 1, colCount);
@@ -812,6 +776,20 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         FinishOutline(ws);
     }
 
+    private static void BuildTop10PayerSheets(XLWorkbook wb, ProductionReportViewModel vm)
+    {
+        foreach (var source in vm.Top10PayerRows.Where(r => r.ChildRows.Count > 0))
+        {
+            var label = source.PayerName.Equals("Daq", StringComparison.OrdinalIgnoreCase) ? "Daq" : "WebPM";
+            BuildPayerMonthBreakdownSheet(wb, $"Top 10 Payer {label}",
+                $"Top 10 Payer — {label} (by Claim Count)", "Payer",
+                source.ChildRows, vm.Top10PayerYears, vm.Top10PayerMonths,
+                source.ByMonth, source.ByMonthCharges,
+                source.GrandTotal, source.GrandTotalCharges,
+                $"{label} Overall Total");
+        }
+    }
+
     private static void BuildPayerMonthBreakdownSheet(
         XLWorkbook wb,
         string sheetName,
@@ -823,7 +801,8 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         Dictionary<string, int> grandByMonth,
         Dictionary<string, decimal> grandChargesByMonth,
         int grandTotal,
-        decimal grandTotalCharges)
+        decimal grandTotalCharges,
+        string totalLabel = "Grand Total")
     {
         if (rows.Count == 0) return;
 
@@ -917,7 +896,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
 
         PrExcel.StyleGreenTotalRow(ws, row, 1, colCount);
         int gtCol = 1;
-        ws.Cell(row, gtCol++).Value = "Grand Total";
+        ws.Cell(row, gtCol++).Value = totalLabel;
         foreach (var year in years)
         {
             var mons = monthsByYear.GetValueOrDefault(year, []);
@@ -1266,7 +1245,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
                 WriteCptBreakdownSheet(
                     wb,
                     Truncate($"CPT {label}"),
-                    $"CPT Breakdown — {label} (Billed Date)",
+                    $"CPT Breakdown — {label} (Charge Entered Date)",
                     source.ChildRows,
                     vm.CptBreakdownYears,
                     vm.CptBreakdownMonths,
@@ -1278,7 +1257,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         WriteCptBreakdownSheet(
             wb,
             "CPT Breakdown",
-            "CPT Breakdown (Billed Date)",
+            "CPT Breakdown (Charge Entered Date)",
             vm.CptBreakdownRows,
             vm.CptBreakdownYears,
             vm.CptBreakdownMonths,
@@ -1301,11 +1280,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         PrExcel.ApplyDefaults(ws);
 
         var cptYears = yearsAll.Where(y => y > 1900).ToList();
-        var cptMonths = monthsAll.Where(m => int.Parse(m[..4]) > 1900).ToList();
-        var cptMonthsByYear = cptMonths
-            .GroupBy(m => m.Length >= 4 ? int.Parse(m[..4]) : 0)
-            .OrderBy(g => g.Key)
-            .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
+        var cptMonthsByYear = cptYears.ToDictionary(y => y, _ => new List<string>());
 
         int colCount = 1;
         foreach (var year in cptYears)
@@ -1354,13 +1329,13 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             var mons = cptMonthsByYear.GetValueOrDefault(year, []);
             foreach (var _ in mons)
             {
-                WriteHeaderCell(ws, hRow3, hCol++, "Count of CPT", PrExcel.MetricHeaderBg);
+                WriteHeaderCell(ws, hRow3, hCol++, "Claim Count", PrExcel.MetricHeaderBg);
                 WriteHeaderCell(ws, hRow3, hCol++, "Billed Amount", PrExcel.MetricHeaderBg);
             }
-            WriteHeaderCell(ws, hRow3, hCol++, "Count of CPT", PrExcel.MetricHeaderBg);
+            WriteHeaderCell(ws, hRow3, hCol++, "Claim Count", PrExcel.MetricHeaderBg);
             WriteHeaderCell(ws, hRow3, hCol++, "Billed Amount", PrExcel.MetricHeaderBg);
         }
-        WriteHeaderCell(ws, hRow3, hCol++, "Count of CPT", PrExcel.MetricHeaderBg);
+        WriteHeaderCell(ws, hRow3, hCol++, "Claim Count", PrExcel.MetricHeaderBg);
         WriteHeaderCell(ws, hRow3, hCol,   "Billed Amount", PrExcel.MetricHeaderBg);
 
         row = hRow3 + 1;

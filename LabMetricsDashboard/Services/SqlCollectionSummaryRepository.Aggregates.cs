@@ -1282,7 +1282,7 @@ public sealed partial class SqlCollectionSummaryRepository
     /// (which is what the snapshot table stores).
     /// </summary>
     private static CollectionMonthlyVolumeResult BuildMonthlyVolumePivot(
-        List<CollectionRawPivotRow> rawRows, bool keepSourceOrder = false)
+        List<CollectionRawPivotRow> rawRows, bool keepSourceOrder = false, int topPayerCount = 3)
     {
         if (rawRows.Count == 0)
         {
@@ -1349,8 +1349,8 @@ public sealed partial class SqlCollectionSummaryRepository
             }
 
             // Totals (panelByMonth, panelByYear, panelEnc/panelPaid) already include ALL payers.
-            // TopPayers drill-down: show only the top-3 ranked payers (PayerRank 1-3 from DB).
-            // When PayerRank == 0 the data came from a live query � fall back to top-3 by count.
+            // TopPayers drill-down: show only the top ranked payers (PayerRank 1..topPayerCount from DB).
+            // When PayerRank == 0 the data came from a live query - fall back to top by count.
             bool hasDbRank = payerAgg.Keys.Any(k =>
                 rawRows.Any(r => r.PanelName == pg.Key && r.PayerName == k && r.PayerRank > 0));
 
@@ -1359,7 +1359,7 @@ public sealed partial class SqlCollectionSummaryRepository
                 : payerAgg.OrderByDescending(kv => kv.Value.totalEnc);
             var topPayers = orderedPayers
                 .Where(kv => !hasDbRank ||
-                    rawRows.Any(r => r.PanelName == pg.Key && r.PayerName == kv.Key && r.PayerRank > 0 && r.PayerRank <= 3))
+                    rawRows.Any(r => r.PanelName == pg.Key && r.PayerName == kv.Key && r.PayerRank > 0 && r.PayerRank <= topPayerCount))
                 .Select(kv => new CollectionPayerDrillDown
                 {
                     PayerName          = kv.Key,
@@ -1400,7 +1400,8 @@ public sealed partial class SqlCollectionSummaryRepository
     /// </summary>
     private static CollectionWeeklyVolumeResult BuildWeeklyVolumePivotFromAggregate(
         List<(string Panel, string Payer, byte PayerRank, byte Week, DateTime Start, DateTime End, int Claims, decimal Paid)> rows,
-        bool keepSourceOrder = false)
+        bool keepSourceOrder = false,
+        int topPayerCount = 3)
     {
         if (rows.Count == 0)
         {
@@ -1457,7 +1458,7 @@ public sealed partial class SqlCollectionSummaryRepository
                 payerAgg[r.Payer] = pa;
             }
 
-            // Display only top-3 payers (PayerRank 1-3 from DB).
+            // Display only the top payers (PayerRank 1..topPayerCount from DB).
             // The panel-level totals above already include every payer.
             bool hasDbRank = pg.Any(r => r.PayerRank > 0);
             var orderedPayers = keepSourceOrder && hasDbRank
@@ -1465,7 +1466,7 @@ public sealed partial class SqlCollectionSummaryRepository
                 : payerAgg.OrderByDescending(kv => kv.Value.totalEnc);
             var topPayers = orderedPayers
                 .Where(kv => !hasDbRank ||
-                    pg.Any(r => r.Payer == kv.Key && r.PayerRank > 0 && r.PayerRank <= 3))
+                    pg.Any(r => r.Payer == kv.Key && r.PayerRank > 0 && r.PayerRank <= topPayerCount))
                 .Select(kv => new CollectionWeeklyPayerDrillDown
                 {
                     PayerName          = kv.Key,
@@ -1501,6 +1502,12 @@ public sealed partial class SqlCollectionSummaryRepository
     private static StatusSummaryResult BuildStatusSummaryHierarchy(
         List<(string Status, string Panel, string Cpt, string Payer,
               int N, decimal IP, decimal IB, decimal PB)> flat)
+        => BuildStatusSummaryHierarchy(
+            flat.Select(x => (x.Status, x.Panel, x.Cpt, x.Payer, x.N, CA: 0m, x.IP, x.IB, x.PB)).ToList());
+
+    private static StatusSummaryResult BuildStatusSummaryHierarchy(
+        List<(string Status, string Panel, string Cpt, string Payer,
+              int N, decimal CA, decimal IP, decimal IB, decimal PB)> flat)
     {
         var statusGroups = flat
             .GroupBy(x => x.Status, StringComparer.OrdinalIgnoreCase)
@@ -1521,7 +1528,8 @@ public sealed partial class SqlCollectionSummaryRepository
                                         NoClaims:          yg.Sum(z => z.N),
                                         InsurancePayments: yg.Sum(z => z.IP),
                                         InsuranceBalance:  yg.Sum(z => z.IB),
-                                        PatientBalance:    yg.Sum(z => z.PB)))
+                                        PatientBalance:    yg.Sum(z => z.PB),
+                                        ChargeAmount:      yg.Sum(z => z.CA)))
                                     .OrderByDescending(p => p.NoClaims)
                                     .ToList();
 
@@ -1529,6 +1537,7 @@ public sealed partial class SqlCollectionSummaryRepository
                                 {
                                     CptCode           = cg.Key,
                                     NoClaims          = cg.Sum(z => z.N),
+                                    ChargeAmount      = cg.Sum(z => z.CA),
                                     InsurancePayments = cg.Sum(z => z.IP),
                                     InsuranceBalance  = cg.Sum(z => z.IB),
                                     PatientBalance    = cg.Sum(z => z.PB),
@@ -1542,6 +1551,7 @@ public sealed partial class SqlCollectionSummaryRepository
                         {
                             PanelName         = pg.Key,
                             NoClaims          = pg.Sum(z => z.N),
+                            ChargeAmount      = pg.Sum(z => z.CA),
                             InsurancePayments = pg.Sum(z => z.IP),
                             InsuranceBalance  = pg.Sum(z => z.IB),
                             PatientBalance    = pg.Sum(z => z.PB),
@@ -1555,6 +1565,7 @@ public sealed partial class SqlCollectionSummaryRepository
                 {
                     ClaimStatus       = sg.Key,
                     NoClaims          = sg.Sum(z => z.N),
+                    ChargeAmount      = sg.Sum(z => z.CA),
                     InsurancePayments = sg.Sum(z => z.IP),
                     InsuranceBalance  = sg.Sum(z => z.IB),
                     PatientBalance    = sg.Sum(z => z.PB),
@@ -1568,6 +1579,7 @@ public sealed partial class SqlCollectionSummaryRepository
         {
             Rows                   = statusGroups,
             GrandNoClaims          = flat.Sum(x => x.N),
+            GrandChargeAmount      = flat.Sum(x => x.CA),
             GrandInsurancePayments = flat.Sum(x => x.IP),
             GrandInsuranceBalance  = flat.Sum(x => x.IB),
             GrandPatientBalance    = flat.Sum(x => x.PB),

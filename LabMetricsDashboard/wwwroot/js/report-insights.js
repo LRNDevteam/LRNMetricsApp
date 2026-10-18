@@ -5,6 +5,8 @@
     "use strict";
     const root = document.getElementById("riRoot");
     if (!root) return;
+    // Embedded report (Executive Summary highlights): insights are shown open, without row actions.
+    const readOnly = root.dataset.readonly === "1";
 
     function parseWeekRange(text) {
         const out = { start: "", end: "" };
@@ -417,14 +419,15 @@
 
     function buildTableHtml(opts) {
         const float = !!(opts && opts.float);
+        const noActs = float || readOnly;
         const L = reportLayout();
-        const colCount = float ? 13 : 14;
+        const colCount = noActs ? 13 : 14;
         const thead = `<thead><tr>
             <th>#</th><th>${esc(L.risk)}</th><th>${esc(L.party)}</th><th class="ri-insights">${esc(L.insights)}</th>
             <th>${esc(L.claims)}</th><th>${esc(L.charge)}</th>
             <th class="ri-action">${esc(L.action)}</th>
             <th>${esc(L.feedback)}</th><th>${esc(L.owner)}</th>
-            <th>${esc(L.discuss)}</th><th>${esc(L.eta)}</th><th>${esc(L.closed)}</th><th>${esc(L.status)}</th>${float ? "" : "<th></th>"}
+            <th>${esc(L.discuss)}</th><th>${esc(L.eta)}</th><th>${esc(L.closed)}</th><th>${esc(L.status)}</th>${noActs ? "" : "<th></th>"}
         </tr></thead>`;
         const tfoot = float ? "" : `<tfoot><tr class="ri-foot-row"><td colspan="${colCount}"><div class="ri-footer">${esc(L.footer)}<small>${esc(L.footerSub)}</small></div></td></tr></tfoot>`;
         return `<table class="ri-table">${thead}<tbody>${rows.map(n => {
@@ -433,7 +436,7 @@
             const discuss = /yet to discuss|discuss/i.test(st);
             const carry = n.archiveStatus === "Carry Forward" ? `<span class="ri-carry">Carry Forward</span>` : "";
             const canDelete = n.archiveStatus !== "Archived";
-            const acts = float ? "" : `<td class="ri-row-acts">
+            const acts = noActs ? "" : `<td class="ri-row-acts">
                     <button type="button" class="btn btn-sm btn-outline-secondary" data-view="${n.noteId}">View</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" data-hist="${n.noteId}">History</button>
                     ${canDelete ? `<button type="button" class="btn btn-sm btn-outline-danger" data-del="${n.noteId}">Delete</button>` : ""}
@@ -1280,7 +1283,7 @@
             ensureLoaded().then(() => refreshTemplates().then(() => renderRows()));
         }
     }
-    setOpen(false);
+    setOpen(readOnly);
     if (toggle) {
         toggle.addEventListener("click", () => setOpen(root.classList.contains("ri-collapsed")));
     }

@@ -1,0 +1,120 @@
+@model NwByFacilityViewModel
+@using System.Text.Json
+
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="alert alert-warning" style="font-size:.85rem">
+        <i class="bi bi-exclamation-triangle"></i> @Model.ErrorMessage
+    </div>
+    return;
+}
+
+@if (!Model.Clinics.Any())
+{
+    <div class="text-center text-muted py-4" style="font-size:.85rem">No data available.</div>
+    return;
+}
+
+@{
+    var clinics = Model.Clinics.ToList();
+    var payersByClinic = Model.Rows.Where(r => r.Level == 2)
+        .GroupBy(r => r.ClinicName, StringComparer.OrdinalIgnoreCase)
+        .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+    var providersByPayer = Model.Rows.Where(r => r.Level == 3)
+        .GroupBy(r => (r.ClinicName, r.PayerName))
+        .ToDictionary(g => g.Key, g => g.ToList());
+
+    // Child levels are sent as data and built on expand: [payer, claims, charge, insBal, patBal, [[provider, ...]]].
+    var children = clinics.Select(c =>
+        (payersByClinic.TryGetValue(c.ClinicName, out var payers) ? payers : [])
+            .Select(p => new object[]
+            {
+                p.PayerName, p.NoOfClaims, p.ChargeAmount, p.InsuranceBalance, p.PatientBalance,
+                (providersByPayer.TryGetValue((p.ClinicName, p.PayerName), out var providers) ? providers : [])
+                    .Select(v => new object[] { v.ReferringProvider, v.NoOfClaims, v.ChargeAmount, v.InsuranceBalance, v.PatientBalance })
+                    .ToList(),
+            })
+            .ToList())
+        .ToList();
+}
+
+<style>
+.cbf-scroll { max-height: 72vh; overflow: auto; }
+.cbf-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .76rem; }
+.cbf-table thead th {
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+    color: rgba(255,255,255,.9); font-weight: 700; font-size: .66rem;
+    letter-spacing: .04em; text-transform: uppercase;
+    padding: .6rem .8rem; text-align: right; white-space: nowrap;
+    position: sticky; top: 0; z-index: 3;
+}
+.cbf-table thead th:first-child { text-align: left; min-width: 320px; position: sticky; left: 0; z-index: 4; }
+.cbf-table td {
+    padding: .45rem .8rem; vertical-align: middle; text-align: right; white-space: nowrap;
+    border-right: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb;
+    font-variant-numeric: tabular-nums; background: #fff;
+}
+.cbf-table td:first-child { text-align: left; position: sticky; left: 0; z-index: 1; }
+.cbf-clinic-row td { background: #f8f9fc; cursor: pointer; }
+.cbf-clinic-row td:first-child { font-weight: 700; color: #0e3460; }
+.cbf-payer-row td { cursor: pointer; }
+.cbf-payer-row td:first-child { padding-left: 1.8rem; font-weight: 600; color: #1e293b; }
+.cbf-provider-row td:first-child { padding-left: 3.4rem; color: #475569; }
+.cbf-expanded > td:first-child .cs-drill-chevron { transform: rotate(90deg); }
+.cbf-table .cs-drill-chevron {
+    display: inline-block; font-size: .65rem; margin-right: .35rem; color: #64748b;
+    transition: transform .2s; vertical-align: middle;
+}
+.cbf-table tfoot td {
+    background: #f1f5f9; font-weight: 700; color: #0e3460;
+    border-top: 2px solid #0a2a4a; position: sticky; bottom: 0; z-index: 2;
+}
+.cbf-table tfoot td:first-child { z-index: 3; }
+</style>
+
+<div class="cbf-scroll" id="cbfTableRoot">
+    <table class="cbf-table">
+        <thead>
+            <tr>
+                <th><i class="bi bi-building me-1"></i>Clinic / Payer / Referring Provider</th>
+                <th>Claim Count</th>
+                <th>Sum of ChargeAmount</th>
+                <th>Sum of InsuranceBalance</th>
+                <th>Sum of PatientBalance</th>
+            </tr>
+        </thead>
+        <tbody>
+            @for (var i = 0; i < clinics.Count; i++)
+            {
+                var c = clinics[i];
+                <tr class="cbf-clinic-row" data-cbf-clinic="@i">
+                    <td><i class="bi bi-chevron-right cs-drill-chevron" aria-hidden="true"></i>@c.ClinicName</td>
+                    <td>@c.NoOfClaims.ToString("N0")</td>
+                    <td>@Acct2(c.ChargeAmount)</td>
+                    <td>@Acct2(c.InsuranceBalance)</td>
+                    <td>@Acct2(c.PatientBalance)</td>
+                </tr>
+            }
+        </tbody>
+        @if (Model.GrandTotal is { } gt)
+        {
+            <tfoot>
+                <tr>
+                    <td>Grand Total (@clinics.Count.ToString("N0") clinics)</td>
+                    <td>@gt.NoOfClaims.ToString("N0")</td>
+                    <td>@Acct2(gt.ChargeAmount)</td>
+                    <td>@Acct2(gt.InsuranceBalance)</td>
+                    <td>@Acct2(gt.PatientBalance)</td>
+                </tr>
+            </tfoot>
+        }
+    </table>
+</div>
+<script type="application/json" id="cbfData">@Html.Raw(JsonSerializer.Serialize(children))</script>
+
+<div class="text-muted mt-2" style="font-size:.68rem">
+    Source: Claim Level Data &middot; Filter: none &middot;
+    Rows: ClinicName &gt; PayerName_Raw &gt; ReferringProvider &middot; Sorted by Claim Count &middot;
+    Values: Count of unique ClaimID, Sum of ChargeAmount, Sum of InsuranceBalance, Sum of PatientBalance &middot;
+    Lab: @Model.SelectedLab
+</div>

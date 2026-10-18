@@ -165,6 +165,40 @@ public sealed record DenialPlanTypeRow(
     decimal TotalInsuranceBalance,
     int SortOrder);
 
+/// <summary>NW Payor vs Payer (usp_GetNW_DenialPayorVsPayer): P payer, C denial under payer, T total.</summary>
+public sealed record DenialPayorVsPayerRow(
+    string RowType,
+    string PayerName,
+    string DenialCode,
+    string PayerType,
+    int PayerRank,
+    int CodeRank,
+    int ClaimCount,
+    decimal TotalInsuranceBalance,
+    int SortOrder);
+
+/// <summary>NW Facility wise Denial Breakdown (usp_GetNW_DenialByFacility): F clinic, D denial, T total.</summary>
+public sealed record DenialFacilityRow(
+    string RowType,
+    string ClinicName,
+    string DenialCode,
+    int ClinicRank,
+    int CodeRank,
+    int ClaimCount,
+    decimal TotalInsuranceBalance,
+    int SortOrder);
+
+/// <summary>NW Denial vs Facility % (usp_GetNW_DenialFacilityPct): F clinic, T total.</summary>
+public sealed record DenialFacilityPctRow(
+    string RowType,
+    string ClinicName,
+    int ClinicRank,
+    int ClaimsBilled,
+    int AdjudicatedClaims,
+    int DeniedClaims,
+    decimal DeniedPct,
+    int SortOrder);
+
 /// <summary>Filter dropdown values and the denial date range (usp_GetAnP_DenialFilterOptions).</summary>
 public sealed record DenialSummaryFilterOptions(
     IReadOnlyList<string> PayerNames,

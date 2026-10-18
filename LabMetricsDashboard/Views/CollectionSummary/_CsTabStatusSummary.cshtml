@@ -2,6 +2,8 @@
 @if (Model.StatusSummary.HasData)
 {
     int ssIdx = 0;
+    var ssHasPanel = Model.StatusSummary.HasPanelLevel;
+    var ssCharge = Model.StatusSummary.HasChargeAmount;
     <style>
     /* Status Summary – tree toggle button */
     .ss-toggle {
@@ -49,6 +51,7 @@
                     <tr>
                         <th>Row Labels</th>
                         <th>Count of Claims</th>
+                        @if (ssCharge) { <th>Sum of ChargeAmount</th> }
                         <th>Ins. Payments</th>
                         <th>Ins. Balance</th>
                         <th>Pt Balance</th>
@@ -67,6 +70,7 @@
                             @csRow.ClaimStatus
                         </td>
                         <td style="text-align:right">@csRow.NoClaims.N0OrDash()</td>
+                        @if (ssCharge) { <td style="text-align:right">@Acct2(csRow.ChargeAmount)</td> }
                         <td style="text-align:right">@Acct2(csRow.InsurancePayments)</td>
                         <td style="text-align:right">@Acct2(csRow.InsuranceBalance)</td>
                         <td style="text-align:right">@Acct2(csRow.PatientBalance)</td>
@@ -77,6 +81,8 @@
                         var panelKey = csKey + "p" + panelIdx.ToString();
                         var panelHasChildren = panelRow.CptRows.Count > 0;
                         panelIdx++;
+                        if (ssHasPanel)
+                        {
                         <tr class="ss-lvl2" data-parent="@csKey" data-sskey="@panelKey" style="cursor:pointer;display:none;background:#eef3ff">
                             <td style="text-align:left;color:#1b3a5c;padding-left:1.6rem">
                                 @if (panelHasChildren) { <span class="ss-toggle" data-sskey="@panelKey">+</span> }
@@ -84,23 +90,30 @@
                                 <i class="bi bi-grid-3x3-gap" style="font-size:.7rem;opacity:.55;margin-right:3px"></i>@panelRow.PanelName
                             </td>
                             <td style="text-align:right">@panelRow.NoClaims.N0OrDash()</td>
+                            @if (ssCharge) { <td style="text-align:right">@Acct2(panelRow.ChargeAmount)</td> }
                             <td style="text-align:right">@Acct2(panelRow.InsurancePayments)</td>
                             <td style="text-align:right">@Acct2(panelRow.InsuranceBalance)</td>
                             <td style="text-align:right">@Acct2(panelRow.PatientBalance)</td>
                         </tr>
+                        }
+                        // Without a panel level, CPT rows hang directly off the claim status row.
+                        var cptParentKey = ssHasPanel ? panelKey : csKey;
+                        var cptPad = ssHasPanel ? "3rem" : "1.6rem";
+                        var payerPad = ssHasPanel ? "4.4rem" : "3rem";
                         int cptIdx = 0;
                         foreach (var cptRow in panelRow.CptRows)
                         {
                             var cptKey = panelKey + "c" + cptIdx.ToString();
                             var cptHasChildren = cptRow.Payers.Count > 0;
                             cptIdx++;
-                            <tr class="ss-lvl3" data-parent="@panelKey" data-sskey="@cptKey" style="cursor:pointer;display:none;background:#f6f8ff">
-                                <td style="text-align:left;color:#334155;padding-left:3rem">
+                            <tr class="ss-lvl3" data-parent="@cptParentKey" data-sskey="@cptKey" style="cursor:pointer;display:none;background:#f6f8ff">
+                                <td style="text-align:left;color:#334155;padding-left:@cptPad">
                                     @if (cptHasChildren) { <span class="ss-toggle" data-sskey="@cptKey">+</span> }
                                     else { <span style="display:inline-block;width:20px"></span> }
                                     <i class="bi bi-tag" style="font-size:.65rem;opacity:.45;margin-right:3px"></i>@cptRow.CptCode
                                 </td>
                                 <td style="text-align:right">@cptRow.NoClaims.N0OrDash()</td>
+                                @if (ssCharge) { <td style="text-align:right">@Acct2(cptRow.ChargeAmount)</td> }
                                 <td style="text-align:right">@Acct2(cptRow.InsurancePayments)</td>
                                 <td style="text-align:right">@Acct2(cptRow.InsuranceBalance)</td>
                                 <td style="text-align:right">@Acct2(cptRow.PatientBalance)</td>
@@ -108,10 +121,11 @@
                             foreach (var payerRow in cptRow.Payers)
                             {
                                 <tr class="ss-lvl4" data-parent="@cptKey" style="display:none;background:#fff">
-                                    <td style="text-align:left;padding-left:4.4rem">
+                                    <td style="text-align:left;padding-left:@payerPad">
                                         <i class="bi bi-building" style="font-size:.65rem;opacity:.4;margin-right:3px"></i>@payerRow.PayerName
                                     </td>
                                     <td style="text-align:right">@payerRow.NoClaims.N0OrDash()</td>
+                                    @if (ssCharge) { <td style="text-align:right">@Acct2(payerRow.ChargeAmount)</td> }
                                     <td style="text-align:right">@Acct2(payerRow.InsurancePayments)</td>
                                     <td style="text-align:right">@Acct2(payerRow.InsuranceBalance)</td>
                                     <td style="text-align:right">@Acct2(payerRow.PatientBalance)</td>
@@ -125,6 +139,7 @@
                     <tr style="background:#0d3460;color:#fff;font-weight:600;font-size:.79rem">
                         <td style="text-align:left;padding-left:.5rem;color:#fff">Grand Total</td>
                         <td style="text-align:right;color:#fff">@Model.StatusSummary.GrandNoClaims.N0OrDash()</td>
+                        @if (ssCharge) { <td style="text-align:right">@Acct2(Model.StatusSummary.GrandChargeAmount)</td> }
                         <td style="text-align:right">@Acct2(Model.StatusSummary.GrandInsurancePayments)</td>
                         <td style="text-align:right">@Acct2(Model.StatusSummary.GrandInsuranceBalance)</td>
                         <td style="text-align:right">@Acct2(Model.StatusSummary.GrandPatientBalance)</td>
@@ -135,7 +150,8 @@
     </div>
     <div class="mt-2" style="font-size:.68rem;color:#94a3b8">
         <strong>Source:</strong> ClaimLevelData (all rows) &bull;
-        <strong>Rows:</strong> ClaimStatus &rarr; PanelName &rarr; CPT Code &times; Units &times; Modifier &rarr; PayerName_Raw &bull;
+        <strong>Rows:</strong> ClaimStatus &rarr; @if (ssHasPanel) { <text>PanelName &rarr;</text> } CPT Code &times; Units &times; Modifier &rarr; PayerName_Raw &bull;
+        <strong>Values:</strong> @(ssCharge ? "Count of ClaimID" : "Count of Claims (unique ClaimID)") &bull; @(ssCharge ? "Sum of ChargeAmount \u2022 " : "")Sum of InsurancePayment &bull; Sum of InsuranceBalance &bull; Sum of PatientBalance &bull;
         <strong>Sorted by:</strong> Count of Claims DESC &bull; Click any row to expand / collapse
     </div>
 }

@@ -553,6 +553,7 @@ builder.Services.AddScoped<SqlPhiExecutiveSummaryRepository>();
 builder.Services.AddScoped<BeechTreeRevenuePipelineLisService>();
 builder.Services.AddScoped<INotesRepository, SqlNotesRepository>();
 builder.Services.AddScoped<ExecutiveSummaryExcelBuilder>();
+builder.Services.AddScoped<ExecutiveSummaryHighlightsExcel>();
 
 // User management repository (uses DefaultConnection from appsettings.json)
 builder.Services.AddScoped<IUserManagementRepository, SqlUserManagementRepository>();

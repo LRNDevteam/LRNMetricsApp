@@ -530,6 +530,15 @@
             <i class="bi bi-cash-stack"></i>Clinic Vs Payment vs Billed
         </div>
     }
+    @if (LabCollectionPrefix.HasClinicFacilityTabs(Model.SelectedLab))
+    {
+        <div class="cs-tab" data-cs-tab="tabByFacility">
+            <i class="bi bi-diagram-3"></i>By Facility
+        </div>
+        <div class="cs-tab" data-cs-tab="tabFacilityPaymentPct">
+            <i class="bi bi-percent"></i>Facility vs Payment (%)
+        </div>
+    }
 </div>
 
 <!-- ── Tab: Clinic Summary (main data table) ─────────────────────── -->
@@ -904,6 +913,23 @@ else
     </div>
 }
 
+@if (LabCollectionPrefix.HasClinicFacilityTabs(Model.SelectedLab))
+{
+    <!-- ── Tab: By Facility (AJAX-loaded) ─────────────────────────────── -->
+    <div class="cs-tab-panel" id="tabByFacility">
+        <div id="cbfPanelContent" class="text-center py-4 text-muted" style="font-size:.85rem">
+            <i class="bi bi-arrow-clockwise spin-slow"></i> Loading By Facility…
+        </div>
+    </div>
+
+    <!-- ── Tab: Facility vs Payment (%) (AJAX-loaded) ─────────────────── -->
+    <div class="cs-tab-panel" id="tabFacilityPaymentPct">
+        <div id="cfpPanelContent" class="text-center py-4 text-muted" style="font-size:.85rem">
+            <i class="bi bi-arrow-clockwise spin-slow"></i> Loading Facility vs Payment (%)…
+        </div>
+    </div>
+}
+
 <!-- Ranking grids remain visible below every Clinic Summary analysis tab. -->
 <div id="topBreakdownHost"></div>
 
@@ -1067,6 +1093,54 @@ else
     var dollarAnalysisLoaded = false;
     var dosCountLoaded = false;
     var paymentBilledLoaded = false;
+    var byFacilityLoaded = false;
+    var facilityPaymentPctLoaded = false;
+    var cbfData = null;
+
+    function cbfAcct(v) {
+        var num = !v ? '-'
+            : (v < 0 ? '(' : '') + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + (v < 0 ? ')' : '');
+        return '<span class="acct"><span class="acct-sym">$</span><span class="acct-val">' + num + '</span></span>';
+    }
+
+    // values: [name, claims, charge, insuranceBalance, patientBalance]
+    function cbfRow(cls, values, expandable, attrs) {
+        var tr = document.createElement('tr');
+        tr.className = cls;
+        Object.keys(attrs).forEach(function (k) { tr.setAttribute(k, attrs[k]); });
+        var first = document.createElement('td');
+        if (expandable) {
+            var chev = document.createElement('i');
+            chev.className = 'bi bi-chevron-right cs-drill-chevron';
+            first.appendChild(chev);
+        }
+        first.appendChild(document.createTextNode(values[0]));
+        tr.appendChild(first);
+        var count = document.createElement('td');
+        count.textContent = Number(values[1]).toLocaleString('en-US');
+        tr.appendChild(count);
+        [values[2], values[3], values[4]].forEach(function (m) {
+            var td = document.createElement('td');
+            td.innerHTML = cbfAcct(Number(m));
+            tr.appendChild(td);
+        });
+        return tr;
+    }
+
+    // Collapsing hides every descendant row; expanding shows only the direct children.
+    function cbfToggle(row, descendantSelector, childSelector, build) {
+        var open = row.classList.toggle('cbf-expanded');
+        if (open && !row.hasAttribute('data-cbf-built')) {
+            row.setAttribute('data-cbf-built', '1');
+            var anchor = row;
+            build().forEach(function (child) { anchor.after(child); anchor = child; });
+            return;
+        }
+        row.parentNode.querySelectorAll(open ? childSelector : descendantSelector).forEach(function (child) {
+            child.style.display = open ? '' : 'none';
+            if (!open) child.classList.remove('cbf-expanded');
+        });
+    }
 
     // Store the current page's nonce for reuse in AJAX-loaded scripts
     var pageNonce = '@Context.Items["CspNonce"]';
@@ -1118,6 +1192,37 @@ else
     // Same > chevron pattern as Sales Rep Summary — delegated so it works
     // even if partial script injection is blocked by CSP.
     document.addEventListener('click', function (e) {
+        var cbfClinic = e.target.closest('#cbfTableRoot tr.cbf-clinic-row');
+        var cbfPayer = cbfClinic ? null : e.target.closest('#cbfTableRoot tr.cbf-payer-row');
+        if (cbfClinic || cbfPayer) {
+            if (!cbfData) {
+                var dataEl = document.getElementById('cbfData');
+                cbfData = dataEl ? JSON.parse(dataEl.textContent) : [];
+            }
+            if (cbfClinic) {
+                var ci = cbfClinic.getAttribute('data-cbf-clinic');
+                cbfToggle(cbfClinic, 'tr[data-cbf-parent-clinic="' + ci + '"]',
+                    'tr.cbf-payer-row[data-cbf-parent-clinic="' + ci + '"]', function () {
+                    return (cbfData[ci] || []).map(function (p, pi) {
+                        return cbfRow('cbf-payer-row', p, p[5].length > 0,
+                            { 'data-cbf-parent-clinic': ci, 'data-cbf-payer': ci + '-' + pi });
+                    });
+                });
+            } else {
+                var key = cbfPayer.getAttribute('data-cbf-payer');
+                var parts = key.split('-');
+                var clinicKey = cbfPayer.getAttribute('data-cbf-parent-clinic');
+                var payerSelector = 'tr[data-cbf-parent-payer="' + key + '"]';
+                cbfToggle(cbfPayer, payerSelector, payerSelector, function () {
+                    return cbfData[parts[0]][parts[1]][5].map(function (v) {
+                        return cbfRow('cbf-provider-row', v, false,
+                            { 'data-cbf-parent-payer': key, 'data-cbf-parent-clinic': clinicKey });
+                    });
+                });
+            }
+            return;
+        }
+
         var breakdownRow = e.target.closest('.clinic-breakdown-parent[data-clinic-breakdown-target]');
         if (breakdownRow) {
             var breakdownId = breakdownRow.getAttribute('data-clinic-breakdown-target');
@@ -1170,6 +1275,16 @@ else
             if (target === 'tabDosCounts' && !dosCountLoaded) {
                 dosCountLoaded = true;
                 loadAndInject('@Url.Action("ClinicDosCount", "Dashboard")' + '?' + getFilterParams(), 'cdcPanelContent', false);
+            }
+
+            if (target === 'tabByFacility' && !byFacilityLoaded) {
+                byFacilityLoaded = true;
+                loadAndInject('@Url.Action("ClinicByFacility", "Dashboard")' + '?' + getFilterParams(), 'cbfPanelContent', false);
+            }
+
+            if (target === 'tabFacilityPaymentPct' && !facilityPaymentPctLoaded) {
+                facilityPaymentPctLoaded = true;
+                loadAndInject('@Url.Action("ClinicFacilityPaymentPct", "Dashboard")' + '?' + getFilterParams(), 'cfpPanelContent', false);
             }
 
             if (target === 'tabPaymentBilled' && !paymentBilledLoaded) {

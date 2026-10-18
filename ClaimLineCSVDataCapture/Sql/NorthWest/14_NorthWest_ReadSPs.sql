@@ -568,11 +568,10 @@ BEGIN
     SELECT
         LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))            AS PayerName,
         ISNULL(LTRIM(RTRIM(Aging)), 'Unknown')                    AS AgingBucket,
-        COUNT(*)                                                  AS ClaimCount,
+        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))            AS ClaimCount,
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)    AS TotalCharges
     FROM   dbo.ClaimLevelData
-    WHERE  LTRIM(RTRIM(ClaimStatus)) IN ('Unbilled in Daq', 'Unbilled in Webpm')
-      AND  (FirstBilledDate IS NULL OR LTRIM(RTRIM(FirstBilledDate)) = '')
+    WHERE  UPPER(LTRIM(RTRIM(ISNULL(ClaimStatus, N'')))) IN (N'UNBILLED IN DAQ', N'UNBILLED IN WEBPM')
       AND  (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))) IN (SELECT Value FROM @PayerList))
       AND  (@DosFrom         IS NULL OR TRY_CAST(DateOfService    AS DATE) >= @DosFrom)
       AND  (@DosTo           IS NULL OR TRY_CAST(DateOfService    AS DATE) <= @DosTo)

@@ -1,0 +1,63 @@
+@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+@* Top 5 Insurances as two grids side by side (NorthWest Executive Summary, Collection Highlights). *@
+<style>
+    .t5g-wrap { display: flex; flex-wrap: wrap; gap: 2.5rem; align-items: flex-start; }
+    .t5g-table { border-collapse: collapse; font-size: .82rem; min-width: 420px; }
+    .t5g-table th, .t5g-table td { border: 1px solid #d5e1ef; padding: .38rem .6rem; color: #00214d; }
+    .t5g-table thead th { color: #fff; font-weight: 800; text-align: center; text-transform: uppercase; font-size: .7rem; letter-spacing: .015em; border-color: #284f75; }
+    .t5g-table .t5g-title th { background: #08294d; }
+    .t5g-table .t5g-head th { background: #174c76; }
+    .t5g-table tbody tr:nth-child(even) td { background: #f7fafd; }
+    .t5g-table td.t5g-val { text-align: center; white-space: nowrap; }
+    .t5g-table td.t5g-amt { white-space: nowrap; }
+    .t5g-table td.t5g-amt span { float: left; }
+    .t5g-table td.t5g-amt b { float: right; font-weight: 400; }
+    .t5g-table .t5g-foot td { background: #e8eef6 !important; height: 1.5rem; }
+</style>
+
+<div class="t5g-wrap">
+    <table class="t5g-table">
+        <thead>
+            <tr class="t5g-title"><th colspan="2">Top 5 Insurances | Reimbursement Percentages vs Billed Charge</th></tr>
+            <tr class="t5g-head"><th>Insurance</th><th>Percentage</th></tr>
+        </thead>
+        <tbody>
+            @if (Model.Top5Reimbursement.Count == 0)
+            {
+                <tr><td colspan="2" class="text-muted text-center">No reimbursement data available</td></tr>
+            }
+            @foreach (var r in Model.Top5Reimbursement)
+            {
+                <tr>
+                    <td>@r.PayerName</td>
+                    <td class="t5g-val">@r.ReimbursementPct.ToString("N0")%</td>
+                </tr>
+            }
+            <tr class="t5g-foot"><td colspan="2"></td></tr>
+        </tbody>
+    </table>
+
+    @if (Model.ShowTop5TotalPayments)
+    {
+        <table class="t5g-table">
+            <thead>
+                <tr class="t5g-title"><th colspan="2">Top 5 Insurances | Total Payment</th></tr>
+                <tr class="t5g-head"><th>Insurance</th><th>Total Payment</th></tr>
+            </thead>
+            <tbody>
+                @if (Model.Top5TotalPayments.Count == 0)
+                {
+                    <tr><td colspan="2" class="text-muted text-center">No payment data available</td></tr>
+                }
+                @foreach (var r in Model.Top5TotalPayments)
+                {
+                    <tr>
+                        <td>@r.PayerName</td>
+                        <td class="t5g-amt"><span>$</span><b>@r.TotalPayments.ToString("N0")</b></td>
+                    </tr>
+                }
+                <tr class="t5g-foot"><td colspan="2"></td></tr>
+            </tbody>
+        </table>
+    }
+</div>

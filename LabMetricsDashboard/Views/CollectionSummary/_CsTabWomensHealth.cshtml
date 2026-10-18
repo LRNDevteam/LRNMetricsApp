@@ -1,0 +1,58 @@
+@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+@if (Model.WomensHealthBreakdown.HasData)
+{
+    var whRows = Model.WomensHealthBreakdown.Rows;
+    var whClaims = whRows.Sum(r => r.NoOfClaims);
+    <div class="cs-rpt-wrap">
+        <div class="cs-rpt-scroll">
+            <table class="cs-rpt-table" id="tblWomensHealth">
+                <thead>
+                    <tr>
+                        <th style="text-align:left;min-width:220px">Claim Status</th>
+                        <th style="min-width:130px">Claim Count</th>
+                        <th style="min-width:170px">Sum of ChargeAmount</th>
+                        <th style="min-width:170px">Sum of InsurancePayment</th>
+                        <th style="min-width:170px">Sum of InsuranceBalance</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in whRows)
+                    {
+                        <tr>
+                            <td style="text-align:left;font-weight:600">@row.ClaimStatus</td>
+                            <td style="text-align:right;font-weight:700">@row.NoOfClaims.N0OrDash()</td>
+                            <td style="text-align:right">@Acct2(row.ChargeAmount)</td>
+                            <td style="text-align:right">@Acct2(row.InsurancePayment)</td>
+                            <td style="text-align:right">@Acct2(row.InsuranceBalance)</td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot>
+                    <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                        <td style="text-align:left;color:#fff">Grand Total</td>
+                        <td style="text-align:right;color:#fff">@whClaims.N0OrDash()</td>
+                        <td style="text-align:right;color:#fff">@Acct2(whRows.Sum(r => r.ChargeAmount))</td>
+                        <td style="text-align:right;color:#fff">@Acct2(whRows.Sum(r => r.InsurancePayment))</td>
+                        <td style="text-align:right;color:#fff">@Acct2(whRows.Sum(r => r.InsuranceBalance))</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+
+    <div class="mt-2" style="font-size:.68rem;color:#94a3b8">
+        <strong>Source:</strong> Claim Level Data &bull;
+        <strong>Filter:</strong> PanelType = Women's Health (any spelling, e.g. Women'sHealth / Womens Health) &bull;
+        <strong>Rows:</strong> ClaimStatus &bull;
+        <strong>Sorted by:</strong> Claim Count DESC &bull;
+        <strong>Values:</strong> Count of ClaimID, Sum of ChargeAmount, Sum of InsurancePayment, Sum of InsuranceBalance
+    </div>
+}
+else
+{
+    <div class="text-center py-5 text-muted">
+        <div style="font-size:2rem;opacity:.4">&#128202;</div>
+        <div class="fw-semibold mt-2">No Women's Health Panel data available</div>
+        <div class="small mt-1">No claims with PanelType = Women's Health match the filters.</div>
+    </div>
+}

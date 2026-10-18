@@ -1247,4 +1247,146 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
             GrandTotal = grandTotal,
         };
     }
+
+    /// <inheritdoc />
+    public async Task<NwByFacilityViewModel> GetNwByFacilityAsync(
+        string connectionString,
+        string labName,
+        List<string>? filterClinicNames = null,
+        List<string>? filterSalesRepNames = null,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        var rows = new List<NwFacilityRow>();
+        NwFacilityRow? grandTotal = null;
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand("dbo.usp_GetNW_CLS_ByFacility", conn)
+        {
+            CommandType = CommandType.StoredProcedure,
+            CommandTimeout = 300,
+        };
+        cmd.Parameters.AddRange(BuildNwClinicSpParameters(
+            filterClinicNames, filterSalesRepNames, filterPayerNames, filterPanelNames,
+            filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo));
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var row = new NwFacilityRow(
+                Level:             Convert.ToInt32(reader["RowLevel"]),
+                ClinicName:        reader.GetString("ClinicName"),
+                PayerName:         reader.GetString("PayerName"),
+                ReferringProvider: reader.GetString("ReferringProvider"),
+                NoOfClaims:        GetInt32Safe(reader, "NoOfClaims"),
+                ChargeAmount:      GetDecimalSafe(reader, "ChargeAmount"),
+                InsuranceBalance:  GetDecimalSafe(reader, "InsuranceBalance"),
+                PatientBalance:    GetDecimalSafe(reader, "PatientBalance"));
+            if (row.Level == 0) grandTotal = row;
+            else rows.Add(row);
+        }
+
+        return new NwByFacilityViewModel
+        {
+            SelectedLab = labName,
+            Rows = rows
+                .OrderBy(r => r.Level)
+                .ThenByDescending(r => r.NoOfClaims)
+                .ThenBy(r => r.ClinicName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(r => r.ReferringProvider, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            GrandTotal = grandTotal,
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<NwFacilityPaymentPctViewModel> GetNwFacilityPaymentPctAsync(
+        string connectionString,
+        string labName,
+        List<string>? filterClinicNames = null,
+        List<string>? filterSalesRepNames = null,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        var rows = new List<NwFacilityPaymentPctRow>();
+        NwFacilityPaymentPctRow? grandTotal = null;
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand("dbo.usp_GetNW_CLS_FacilityPaymentPct", conn)
+        {
+            CommandType = CommandType.StoredProcedure,
+            CommandTimeout = 300,
+        };
+        cmd.Parameters.AddRange(BuildNwClinicSpParameters(
+            filterClinicNames, filterSalesRepNames, filterPayerNames, filterPanelNames,
+            filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo));
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var pctOrdinal = reader.GetOrdinal("AvgPaymentPct");
+            var row = new NwFacilityPaymentPctRow(
+                reader.GetString("ClinicName"),
+                GetInt32Safe(reader, "NoOfClaims"),
+                reader.IsDBNull(pctOrdinal) ? null : reader.GetDecimal(pctOrdinal));
+            if (Convert.ToInt32(reader["RowLevel"]) == 0) grandTotal = row;
+            else rows.Add(row);
+        }
+
+        return new NwFacilityPaymentPctViewModel
+        {
+            SelectedLab = labName,
+            Rows = rows
+                .OrderByDescending(r => r.NoOfClaims)
+                .ThenBy(r => r.ClinicName, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            GrandTotal = grandTotal,
+        };
+    }
+
+    private static SqlParameter[] BuildNwClinicSpParameters(
+        List<string>? clinics, List<string>? salesReps, List<string>? payers, List<string>? panels,
+        DateOnly? dosFrom, DateOnly? dosTo, DateOnly? firstBillFrom, DateOnly? firstBillTo)
+    {
+        static SqlParameter List(string name, List<string>? values) =>
+            new(name, SqlDbType.NVarChar, -1)
+            {
+                Value = values is { Count: > 0 } ? string.Join("|", values) : DBNull.Value,
+            };
+
+        static SqlParameter Date(string name, DateOnly? value) =>
+            new(name, SqlDbType.Date)
+            {
+                Value = value.HasValue ? value.Value.ToDateTime(TimeOnly.MinValue) : DBNull.Value,
+            };
+
+        return
+        [
+            List("@ClinicNames", clinics),
+            List("@SalesRepNames", salesReps),
+            List("@PayerNames", payers),
+            List("@PanelNames", panels),
+            Date("@DosFrom", dosFrom),
+            Date("@DosTo", dosTo),
+            Date("@FirstBillFrom", firstBillFrom),
+            Date("@FirstBillTo", firstBillTo),
+        ];
+    }
 }

@@ -33,6 +33,8 @@
         .ThenBy(p => p.Month)
         .ToList();
     var years = periods.Select(p => p.Year).Distinct().OrderBy(y => y).ToList();
+    // NorthWest client sheet: Payer vs Payment columns are CheckDate Year Total only.
+    var yearOnly = Model.IsNorthWestLab;
     var pivotRows = rowsData
         .GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
         .Select(g => new
@@ -49,7 +51,7 @@
             TotalCount   = g.Sum(x => x.NoOfPaidClaims),
             TotalPayment = g.Sum(x => x.InsurancePayment)
         })
-        .OrderByDescending(r => Model.IsAugustusLab ? r.TotalCount : r.TotalPayment)
+        .OrderByDescending(r => Model.SortsPaymentPivotsByClaims ? r.TotalCount : r.TotalPayment)
         .ToList();
 }
 
@@ -142,7 +144,7 @@ else if (rowsData.Count > 0)
                         <th rowspan="3">Row Labels</th>
                         @foreach (var year in years)
                         {
-                            var yearMonthCount = periods.Count(p => p.Year == year);
+                            var yearMonthCount = yearOnly ? 0 : periods.Count(p => p.Year == year);
                             <th colspan="@(yearMonthCount * 2 + 2)">@year</th>
                         }
                         <th colspan="2" rowspan="2" class="cs-pr-grand">Grand Total</th>
@@ -150,7 +152,7 @@ else if (rowsData.Count > 0)
                     <tr>
                         @foreach (var year in years)
                         {
-                            foreach (var p in periods.Where(p => p.Year == year))
+                            foreach (var p in periods.Where(p => !yearOnly && p.Year == year))
                             {
                                 var monthLabel = new DateTime(p.Year, p.Month, 1).ToString("MMM");
                                 <th colspan="2">@monthLabel</th>
@@ -161,7 +163,7 @@ else if (rowsData.Count > 0)
                     <tr>
                         @foreach (var year in years)
                         {
-                            foreach (var _ in periods.Where(p => p.Year == year))
+                            foreach (var _ in periods.Where(p => !yearOnly && p.Year == year))
                             {
                                 <th>Count of Paid Claims</th>
                                 <th>Sum of Insurance Payment</th>
@@ -189,8 +191,11 @@ else if (rowsData.Count > 0)
                                     var payment = cell?.Payment ?? 0m;
                                     yearCount += count;
                                     yearPayment += payment;
-                                    <td style="text-align:right">@count.N0OrDash()</td>
-                                    <td style="text-align:right">@Acct2(payment)</td>
+                                    if (!yearOnly)
+                                    {
+                                        <td style="text-align:right">@count.N0OrDash()</td>
+                                        <td style="text-align:right">@Acct2(payment)</td>
+                                    }
                                 }
                                 <td style="text-align:right;font-weight:700">@yearCount.N0OrDash()</td>
                                 <td style="text-align:right;font-weight:700">@Acct2(yearPayment)</td>
@@ -214,8 +219,11 @@ else if (rowsData.Count > 0)
                                 var payment = monthRows.Sum(r => r.InsurancePayment);
                                 yearCount += count;
                                 yearPayment += payment;
-                                <td style="text-align:right;color:#fff">@count.N0OrDash()</td>
-                                <td style="text-align:right;color:#fff">@Acct2(payment)</td>
+                                if (!yearOnly)
+                                {
+                                    <td style="text-align:right;color:#fff">@count.N0OrDash()</td>
+                                    <td style="text-align:right;color:#fff">@Acct2(payment)</td>
+                                }
                             }
                             <td style="text-align:right;color:#fff">@yearCount.N0OrDash()</td>
                             <td style="text-align:right;color:#fff">@Acct2(yearPayment)</td>
@@ -229,7 +237,17 @@ else if (rowsData.Count > 0)
     </div>
 
     <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
-        <strong>Source:</strong> @(Model.IsAugustusLab ? "Collection Claim Level Data (Posted Date)" : "Aggregate snapshot table") <code>@(Model.IsAugustusLab ? "usp_GetAug_CS_InsuranceVsPayment_v2" : "{prefix}_CS_InsuranceVsPayment")</code>
+        @if (Model.IsNorthWestLab)
+        {
+            <span><strong>Source:</strong> Claim Level Data &bull; <strong>Filter:</strong> InsurancePayment &gt; 0 &bull;
+            <strong>Rows:</strong> PayerName_Raw &bull; <strong>Columns:</strong> CheckDate Year Total &bull;
+            <strong>Sorted by:</strong> Count of ClaimID DESC &bull;
+            <strong>Values:</strong> Count of unique ClaimID, Sum of InsurancePayment</span>
+        }
+        else
+        {
+            <strong>Source:</strong> @(Model.IsAugustusLab ? "Collection Claim Level Data (Posted Date)" : "Aggregate snapshot table") <code>@(Model.IsAugustusLab ? "usp_GetAug_CS_InsuranceVsPayment_v2" : "{prefix}_CS_InsuranceVsPayment")</code>
+        }
     </div>
 }
 else

@@ -1,9 +1,11 @@
 -- ============================================================
 -- NorthWest Lab - Unbilled vs Aging
 -- Rule:
---   Filter  : ClaimStatus IN ('Unbilled in Daq', 'Unbilled in Webpm')
---   Rows    : PayerName
---   Columns : Aging | No of claim count | Sum of charge amount
+--   Filter  : ClaimStatus IN ('Unbilled in Daq', 'Unbilled in WebPM')
+--   Rows    : PayerName_Raw
+--   Columns : Aging
+--   Values  : Count of unique Claim ID, Sum of Charge Amount
+--   Sort    : Claim Count (applied by the dashboard reader)
 --
 -- Creates aggregate table + stored procedure to populate it.
 -- ============================================================
@@ -37,13 +39,13 @@ BEGIN
     SELECT
         LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))        AS PayerName_Raw,
         ISNULL(LTRIM(RTRIM(ISNULL(Aging, 'Unknown'))), 'Unknown') AS Aging,
-        COUNT(*)                                           AS ClaiamCount,
+        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))           AS ClaimCount,
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0) AS TotalCharges
     INTO #Raw
     FROM dbo.ClaimLevelData
-    WHERE LTRIM(RTRIM(ClaimStatus)) IN (
-          'Unbilled in Daq',
-          'Unbilled in Webpm'
+    WHERE UPPER(LTRIM(RTRIM(ISNULL(ClaimStatus, N'')))) IN (
+          N'UNBILLED IN DAQ',
+          N'UNBILLED IN WEBPM'
       )
     --  AND NULLIF(LTRIM(RTRIM(PayerName_Raw)), '') IS NOT NULL
     -- and  (FirstBilledDate IS NULL OR LTRIM(RTRIM(FirstBilledDate)) = '')

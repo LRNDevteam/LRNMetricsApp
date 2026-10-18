@@ -729,7 +729,7 @@ foreach (var lab in labConfigs)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // STEP 13b — LIS Summary aggregate (Analyze Pathology, WellHealth)
+    // STEP 13b — LIS Summary aggregate (Analyze Pathology, WellHealth, NorthWest)
     //
     // Runs regardless of the STEP 8 outcome: LIMS files arrive independently of
     // Claim/Line runs. The refresh compares dbo.LIMSMaster's signature with the
@@ -796,6 +796,19 @@ foreach (var lab in labConfigs)
     // LineLevelData for this RunId, so the aggregates below can be rebuilt.
     // ─────────────────────────────────────────────────────────────────────────
     log.Header($"STEP 15 — Post-change refresh — {lab.LabName}");
+
+    // ── NorthWest: ClaimLevelData.BilledUnbilled (before any aggregate) ──────
+    if (lab.LabName.Equals("NorthWest", StringComparison.OrdinalIgnoreCase))
+    {
+        log.Info($"  [NW BilledUnbilled] Running usp_UpdateNW_ClaimLevelData_BilledUnbilled…");
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var (buTotal, buBilled, buUnBilled, buUpdated, buError) = db.UpdateNorthWestBilledUnbilled(latestRunId);
+        sw.Stop();
+        if (buError is null)
+            log.Info($"  [NW BilledUnbilled] OK ({sw.ElapsedMilliseconds} ms) — {buTotal} row(s): Billed {buBilled}, UnBilled {buUnBilled}; {buUpdated} row(s) updated.");
+        else
+            log.Error($"  [NW BilledUnbilled] FAILED ({sw.ElapsedMilliseconds} ms): {buError}");
+    }
 
     // ── Rebuild BTWOSummary for BeechTree when STEP 13 did not already do it ──
     // BTWOSummary joins BTTransactionDetailData to ClaimLevelData on
@@ -887,6 +900,30 @@ foreach (var lab in labConfigs)
             }
 
             collSummaryResults = RunCollectionSummary(log, db, "NW CS", db.RefreshNorthWestCollectionReports);
+
+            // Denial Summary aggregates (after BilledUnbilled + Collection; Facility % needs Billed).
+            log.Info($"  [NW Denial] Running NorthWest Denial Summary SPs…");
+            try
+            {
+                var denialResults = db.RefreshNorthWestDenialReports();
+                foreach (var (spName, elapsedMs, error) in denialResults)
+                {
+                    if (error is null)
+                        log.Info($"  [NW Denial] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [NW Denial] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+
+                var dFailed = denialResults.Count(r => r.Error is not null);
+                var dPassed = denialResults.Count(r => r.Error is null);
+                log.Info($"  [NW Denial] {dPassed}/{denialResults.Count} SP(s) succeeded.");
+                if (dFailed > 0)
+                    log.Warn($"  [NW Denial] {dFailed} SP(s) failed — see errors above.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [NW Denial] Unexpected error running NorthWest Denial Summary SPs: {ex.Message}");
+            }
         }
 
         // ── Augustus Labs production report aggregates ───────────────────────
@@ -1070,7 +1107,9 @@ foreach (var lab in labConfigs)
 
         // ── Analyze Pathology production report aggregates ────────────────────
         // Production Summary per client logic sheet; other reports mirror VariantX. Prefix AnP_.
-        if (lab.LabName.Equals("AnalyzePathology", StringComparison.OrdinalIgnoreCase))
+        if (lab.LabName.Equals("AnalyzePathology", StringComparison.OrdinalIgnoreCase)
+            || lab.LabName.Equals("Analyze_Pathology", StringComparison.OrdinalIgnoreCase)
+            || lab.LabName.Equals("Analyze Pathology", StringComparison.OrdinalIgnoreCase))
         {
             log.Info($"  [AnP Reports] Running Analyze Pathology production report SPs…");
             try

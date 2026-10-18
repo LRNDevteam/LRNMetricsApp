@@ -14,7 +14,7 @@ public sealed class DenialClaimReportViewModel
     public string CurrentLab { get; set; } = string.Empty;
     public string? Error { get; set; }
 
-    /// <summary>"monthly", "weekly", "list", "plantype", "insight" or "claims" - which tab opens.</summary>
+    /// <summary>"monthly", "weekly", "list", "plantype", "payor", "facility", "facilitypct", "insight" or "claims".</summary>
     public string ActiveTab { get; set; } = "monthly";
 
     public BreakdownPivotViewModel Monthly { get; set; } = new();
@@ -25,8 +25,15 @@ public sealed class DenialClaimReportViewModel
     /// _DenialPlanType); only those labs show the Denial List and Plan Type tabs.
     /// </summary>
     public bool HasDenialLists { get; set; }
+
+    /// <summary>NorthWest: Payor vs Payer, Facility wise, Denial vs Facility % tabs.</summary>
+    public bool HasDenialFacilityTabs { get; set; }
+
     public IReadOnlyList<LabMetricsDashboard.Models.DenialListRow> DenialList { get; set; } = [];
     public IReadOnlyList<LabMetricsDashboard.Models.DenialPlanTypeRow> PlanType { get; set; } = [];
+    public IReadOnlyList<LabMetricsDashboard.Models.DenialPayorVsPayerRow> PayorVsPayer { get; set; } = [];
+    public IReadOnlyList<LabMetricsDashboard.Models.DenialFacilityRow> FacilityDenial { get; set; } = [];
+    public IReadOnlyList<LabMetricsDashboard.Models.DenialFacilityPctRow> FacilityPct { get; set; } = [];
 
     /// <summary>Denial List tab search (whole denial codes, see usp_GetAnP_DenialList); null when not searching.</summary>
     public string? DenialListSearch { get; set; }

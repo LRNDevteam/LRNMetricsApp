@@ -110,7 +110,14 @@ public static class LabCollectionPrefix
     /// <c>usp_Get{prefix}_CS_AvgPayments_ClientLogic</c>, with "Last 3 Months" hidden.
     /// </summary>
     public static bool UsesAvgPaymentsByDateBasis(string? labName) =>
-        GetPrefix(labName) is "RT" or "BT" or "IHD" or "WH";
+        GetPrefix(labName) is "RT" or "BT" or "IHD" or "WH" or "NW";
+
+    /// <summary>
+    /// Labs whose two date-basis Average Payments tabs / sheets are titled
+    /// "Panel Averages - by DOS" and "Panel Averages - by Check Date".
+    /// </summary>
+    public static bool UsesPanelAveragesTitles(string? labName) =>
+        GetPrefix(labName) is "WH" or "NW";
 
     /// <summary>
     /// Labs with the Collection Summary "Avg Payments Last 3 Months" tab and Excel sheet.
@@ -150,6 +157,15 @@ public static class LabCollectionPrefix
         GetPrefix(labName) is "WH";
 
     /// <summary>
+    /// NorthWest client-logic Collection Summary: payment-percent tabs show Average of PaymentPercent,
+    /// Status Summary / Provider show Sum of ChargeAmount, insurance pivots sort by claim count,
+    /// "Payer vs Payment" replaces Insurance Vs Payment, plus the Women's Health Panel breakdown
+    /// (<c>usp_GetNW_CS_WomensHealthBreakdown</c>).
+    /// </summary>
+    public static bool IsNorthWest(string? labName) =>
+        GetPrefix(labName) is "NW";
+
+    /// <summary>
     /// Claim / line column behind the Collection Summary "Posted Date" and its Check Date filter.
     /// Analyze Pathology and WellHealth use PaymentPostedDate (claim file "Posted Date"); other labs use CheckDate.
     /// </summary>
@@ -165,7 +181,7 @@ public static class LabCollectionPrefix
     /// <c>{prefix}_Denial*</c> aggregate tables refreshed at claim-file ingest.
     /// </summary>
     public static bool HasDenialSummary(string? labName) =>
-        GetPrefix(labName) is "AnP" or "WH";
+        GetPrefix(labName) is "AnP" or "WH" or "NW";
 
     /// <summary>
     /// What the Denial Summary Monthly / Weekly SPs rank insurances and their top denials by
@@ -173,6 +189,12 @@ public static class LabCollectionPrefix
     /// </summary>
     public static string DenialSummaryRankBasis(string? labName) =>
         GetPrefix(labName) is "WH" ? "Total Insurance Balance" : "claim count";
+
+    /// <summary>
+    /// NorthWest Denial Summary adds Payor vs Payer, Facility wise Denial Breakdown, and
+    /// Denial vs Facility % tabs (usp_GetNW_DenialPayorVsPayer / ByFacility / FacilityPct).
+    /// </summary>
+    public static bool HasDenialFacilityTabs(string? labName) => IsNorthWest(labName);
 
     /// <summary>
     /// Labs whose Clinic Panel Status, Clinic $ Analysis and Count by DOS Month pivots only
@@ -201,6 +223,12 @@ public static class LabCollectionPrefix
     /// </summary>
     public static bool HasClinicPaymentBilledTab(string? labName) =>
         GetPrefix(labName) is "IHD";
+
+    /// <summary>
+    /// Labs with the Clinic Summary "By Facility" (Clinic &gt; Payer &gt; Referring Provider) and
+    /// "Facility vs Payment (%)" tabs and Excel sheets, read from usp_Get{prefix}_CLS_* SPs.
+    /// </summary>
+    public static bool HasClinicFacilityTabs(string? labName) => IsNorthWest(labName);
 
     /// <summary>
     /// Returns the correct <c>ClaimLevelData</c> column to use for the Panel filter dropdown.

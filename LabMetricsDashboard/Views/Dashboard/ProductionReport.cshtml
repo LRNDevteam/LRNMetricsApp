@@ -128,18 +128,11 @@
     decimal InsightGrandYearCharges(Dictionary<string, decimal> byMonth, int year) =>
         byMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
 
-    var daqYears = Model.InsightDaqYears.Where(y => y > 1900).ToList();
-    var daqMonthsByYear = InsightMonthsByYear(Model.InsightDaqMonths);
-    int daqGrandTotal = Model.InsightDaqGrandByMonth
+    var t10Years = Model.Top10PayerYears.Where(y => y > 1900).ToList();
+    var t10MonthsByYear = InsightMonthsByYear(Model.Top10PayerMonths);
+    int t10GrandTotal = Model.Top10PayerGrandByMonth
         .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value);
-    decimal daqGrandTotalCharges = Model.InsightDaqGrandChargesByMonth
-        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value);
-
-    var webYears = Model.InsightWebPmYears.Where(y => y > 1900).ToList();
-    var webMonthsByYear = InsightMonthsByYear(Model.InsightWebPmMonths);
-    int webGrandTotal = Model.InsightWebPmGrandByMonth
-        .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value);
-    decimal webGrandTotalCharges = Model.InsightWebPmGrandChargesByMonth
+    decimal t10GrandTotalCharges = Model.Top10PayerGrandChargesByMonth
         .Where(kv => IsYm(kv.Key)).Sum(kv => kv.Value);
 
     var hpYears = Model.HighestPayerYears.Where(y => y > 1900).ToList();
@@ -182,6 +175,18 @@
         .GroupBy(m => int.Parse(m[..4]))
         .OrderBy(g => g.Key)
         .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
+
+    // NorthWest sheet: Panel, Payer, and CPT columns are the Charge Entered year total.
+    // Monthly, Highest payer, and Top 10 stay month + year.
+    if (Model.IsNorthWestLab)
+    {
+        pbMonths = new List<string>();
+        pbMonthsByYear = pbYears.ToDictionary(y => y, _ => new List<string>());
+        pnlMonths = new List<string>();
+        pnlMonthsByYear = pnlYears.ToDictionary(y => y, _ => new List<string>());
+        cptMonths = new List<string>();
+        cptMonthsByYear = cptYears.ToDictionary(y => y, _ => new List<string>());
+    }
 
     decimal CptUnits(Dictionary<string, CptBreakdownCell>? d, string mk)
         => d is not null && d.TryGetValue(mk, out var c) ? c.Units : 0m;
@@ -815,17 +820,17 @@ th.pr-month-data, td.pr-month-data {
         @if (Model.IsNorthWestLab)
         {
         <li class="nav-item" role="presentation">
-            <button class="nav-link" id="insight-tab" data-bs-toggle="pill"
-                    data-bs-target="#insight-pane" type="button" role="tab"
-                    aria-controls="insight-pane" aria-selected="false">
-                <i class="bi bi-lightbulb"></i> Insight
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
             <button class="nav-link" id="highest-payer-tab" data-bs-toggle="pill"
                     data-bs-target="#highest-payer-pane" type="button" role="tab"
                     aria-controls="highest-payer-pane" aria-selected="false">
                 <i class="bi bi-trophy"></i> Highest payer Breakdown
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="top10-payer-tab" data-bs-toggle="pill"
+                    data-bs-target="#top10-payer-pane" type="button" role="tab"
+                    aria-controls="top10-payer-pane" aria-selected="false">
+                <i class="bi bi-list-ol"></i> Top 10 Payer
             </button>
         </li>
         }
@@ -1120,7 +1125,9 @@ th.pr-month-data, td.pr-month-data {
                                 <tr>
                                     <th rowspan="3">Panel &amp; Insurance</th>
                                     <th colspan="@(weeks.Count * 2)">
-                                        Data based on Last 4 Week [@headerDateLabel]
+                                        @(Model.IsNorthWestLab
+                                            ? "Thursday – Wednesday (EnteredWeek)"
+                                            : $"Data based on Last 4 Week [{headerDateLabel}]")
                                     </th>
                                     <th colspan="2" rowspan="2" class="pr-grand-total">Grand Total</th>
                                 </tr>
@@ -1214,7 +1221,7 @@ th.pr-month-data, td.pr-month-data {
                 <div class="text-center py-5 text-muted">
                     <div style="font-size:2rem;opacity:.4">&#128202;</div>
                     <div class="fw-semibold mt-2">No weekly claim volume data available</div>
-                    <div class="small mt-1">No billed claims found in the last 4 weeks. Try adjusting your filters.</div>
+                    <div class="small mt-1">@(Model.IsNorthWestLab ? "No billed claims with EnteredWeek filled in. Try adjusting your filters." : "No billed claims found in the last 4 weeks. Try adjusting your filters.")</div>
                 </div>
             }
 
@@ -1239,9 +1246,18 @@ th.pr-month-data, td.pr-month-data {
             <div class="pr-rule-footer mt-3 small text-muted" style="opacity:.65;line-height:1.45;border-top:1px dashed #cfd6df;padding-top:.5rem">
                 <div><span class="fw-semibold">Week Range:</span> @weeklyActiveWeek</div>
                 <ul class="mb-0 ps-3" style="font-size:.78rem">
-                    <li>Source: <code>ClaimLevelData</code> · Last 4 complete <code>@weeklyActiveWeek</code> weeks</li>
-                    <li>Rows: <code>PanelName</code> &nbsp;·&nbsp; Drill-down: Top 3 <code>PayerName</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
-                    <li>Columns: Week of <code>@weeklyDateColumn</code></li>
+                    @if (Model.IsNorthWestLab)
+                    {
+                        <li>Source: <code>ClaimLevelData</code> · <code>BilledUnbilled</code> = Billed · <code>EnteredWeek</code> is not blank</li>
+                        <li>Rows: <code>PanelType</code> &nbsp;·&nbsp; Drill-down: Top 5 <code>PayerName_Raw</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
+                        <li>Columns: Thursday–Wednesday week of <code>EnteredWeek</code></li>
+                    }
+                    else
+                    {
+                        <li>Source: <code>ClaimLevelData</code> · Last 4 complete <code>@weeklyActiveWeek</code> weeks</li>
+                        <li>Rows: <code>PanelName</code> &nbsp;·&nbsp; Drill-down: Top 3 <code>PayerName</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
+                        <li>Columns: Week of <code>@weeklyDateColumn</code></li>
+                    }
                     @if (weeklyIsRule5)
                     {
                         <li>Filter: Exclude <code>PayerName_Raw</code> containing <code>None</code>, <code>Accu Labs</code>, <code>Client Bill</code>, <code>Client</code>, <code>Patient</code>, <code>Patient Pay</code> &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
@@ -1361,6 +1377,14 @@ th.pr-month-data, td.pr-month-data {
                                 &nbsp;·&nbsp; Columns: First Billed Date month
                                 &nbsp;·&nbsp; Values: Count of unique Claim ID, Sum of Charge Amount
                                 &nbsp;·&nbsp; Sorted by: Claim Count DESC</span>
+                        }
+                        else if (Model.IsNorthWestLab)
+                        {
+                        <span><span class="filter-label">Filter:</span>
+                            <span class="filter-key-2">BilledUnbilled</span> = Billed
+                            &nbsp;·&nbsp; Rows: <span class="filter-key">PayerName_Raw</span>
+                            &nbsp;·&nbsp; Columns: <span class="filter-key">ChargeEnteredDate</span> year total
+                            &nbsp;·&nbsp; Sorted by Claim Count</span>
                         }
                         else
                         {
@@ -1667,6 +1691,14 @@ th.pr-month-data, td.pr-month-data {
                             &nbsp;·&nbsp; Rows: <span class="filter-key">PayerName_Raw</span>
                             &nbsp;·&nbsp; Columns: <span class="filter-key">AgingDOS</span></span>
                         }
+                        else if (Model.IsNorthWestLab)
+                        {
+                        <span><span class="filter-label">Filter:</span>
+                            <span class="filter-key-2">ClaimStatus</span> = Unbilled in Daq, Unbilled in WebPM
+                            &nbsp;·&nbsp; Rows: <span class="filter-key">PayerName_Raw</span>
+                            &nbsp;·&nbsp; Columns: <span class="filter-key">Aging</span>
+                            &nbsp;·&nbsp; Sorted by Claim Count</span>
+                        }
                         else
                         {
                         <span><span class="filter-label">Filter:</span>
@@ -1744,7 +1776,7 @@ th.pr-month-data, td.pr-month-data {
                 <div class="text-center py-5 text-muted">
                     <div style="font-size:2rem;opacity:.4">&#128202;</div>
                     <div class="fw-semibold mt-2">No unbilled aging data available</div>
-                    <div class="small mt-1"><strong>Reason:</strong> No claims with blank <code>FirstBilledDate</code> found (unbilled = FirstBilledDate blank). Try adjusting your filters.</div>
+                    <div class="small mt-1"><strong>Reason:</strong> @(Model.IsNorthWestLab ? "No claims with ClaimStatus Unbilled in Daq or Unbilled in WebPM." : "No claims with blank FirstBilledDate found (unbilled = FirstBilledDate blank).") Try adjusting your filters.</div>
                 </div>
             }
             }
@@ -1854,13 +1886,13 @@ th.pr-month-data, td.pr-month-data {
                                                     var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                                     foreach (var mk in mons)
                                                     {
-                                                        <th class="pr-month-data">@(cptUnitsHeader)</th>
+                                                        <th class="pr-month-data">Claim Count</th>
                                                         <th class="pr-month-data">Billed Amount</th>
                                                     }
-                                                    <th class="pr-year-total">@(cptUnitsHeader)</th>
+                                                    <th class="pr-year-total">Claim Count</th>
                                                     <th class="pr-year-total">Billed Amount</th>
                                                 }
-                                                <th class="pr-grand-total">@(cptUnitsHeader)</th>
+                                                <th class="pr-grand-total">Claim Count</th>
                                                 <th class="pr-grand-total">Billed Amount</th>
                                             </tr>
                                         </thead>
@@ -1912,7 +1944,7 @@ th.pr-month-data, td.pr-month-data {
                             <div class="text-center py-5 text-muted">
                                 <div style="font-size:2rem;opacity:.4">&#128202;</div>
                                 <div class="fw-semibold mt-2">@tab.EmptyTitle</div>
-                                <div class="small mt-1"><strong>Reason:</strong> No billed line-level data found for Source = @tab.SourceLabel. Try adjusting your filters.</div>
+                                <div class="small mt-1"><strong>Reason:</strong> No line-level data found for Source = @tab.SourceLabel. Try adjusting your filters.</div>
                             </div>
                         }
                     </div>
@@ -2108,8 +2140,10 @@ th.pr-month-data, td.pr-month-data {
                             }
                             else if (Model.IsNorthWestLab)
                             {
-                            <text><span class="filter-key-2">ChargeEnteredDate</span> is a valid date
-                            &nbsp;·&nbsp; FirstBilledDate is a date, or blank with Emedix date</text>
+                            <text><span class="filter-key-2">BilledUnbilled</span> = Billed
+                            &nbsp;·&nbsp; Rows: <span class="filter-key-2">PanelType</span>
+                            &nbsp;·&nbsp; Columns: <span class="filter-key-2">ChargeEnteredDate</span> year total
+                            &nbsp;·&nbsp; Sorted by Claim Count</text>
                             }
                             else
                             {
@@ -2178,8 +2212,18 @@ th.pr-month-data, td.pr-month-data {
                                 @foreach (var panel in Model.PanelBreakdownRows)
                                 {
                                     var pnlGroupId = $"pnl-{pnlIdx++}";
-                                    <tr class="pr-panel-row pr-hp-toggle" data-hp-group="@pnlGroupId" role="button" aria-expanded="false" title="Open / close payers">
-                                        <td><i class="bi bi-chevron-right pr-hp-chevron" aria-hidden="true"></i>@panel.PayerName</td>
+                                    <tr class="@(Model.IsNorthWestLab ? "pr-panel-row" : "pr-panel-row pr-hp-toggle")"
+                                        data-hp-group="@pnlGroupId"
+                                        role="@(Model.IsNorthWestLab ? null : "button")"
+                                        aria-expanded="@(Model.IsNorthWestLab ? null : "false")"
+                                        title="@(Model.IsNorthWestLab ? null : "Open / close payers")">
+                                        <td>
+                                            @if (!Model.IsNorthWestLab)
+                                            {
+                                                <i class="bi bi-chevron-right pr-hp-chevron" aria-hidden="true"></i>
+                                            }
+                                            @panel.PayerName
+                                        </td>
                                         @foreach (var year in pnlYears)
                                         {
                                             var pnlMons = pnlMonthsByYear.ContainsKey(year) ? pnlMonthsByYear[year] : new List<string>();
@@ -2195,7 +2239,7 @@ th.pr-month-data, td.pr-month-data {
                                         <td class="pr-grand-total">@Acct(panel.GrandTotalCharges)</td>
                                     </tr>
 
-                                    @foreach (var payer in panel.ChildRows)
+                                    @foreach (var payer in Model.IsNorthWestLab ? new List<PayerBreakdownRow>() : panel.ChildRows)
                                     {
                                         <tr class="pr-payer-row pr-hp-child" data-hp-parent="@pnlGroupId">
                                             <td>@payer.PayerName</td>
@@ -2250,63 +2294,36 @@ th.pr-month-data, td.pr-month-data {
         </div>
         }
 
-        @if ((prChrome || PrShow("insight-pane")) && Model.IsNorthWestLab)
+        @if ((prChrome || PrShow("top10-payer-pane")) && Model.IsNorthWestLab)
         {
-        <div class="tab-pane fade" id="insight-pane" role="tabpanel" aria-labelledby="insight-tab" data-pr-lazy="insight-pane">
-            @if (PrShow("insight-pane"))
+        <div class="tab-pane fade" id="top10-payer-pane" role="tabpanel" aria-labelledby="top10-payer-tab" data-pr-lazy="top10-payer-pane">
+            @if (PrShow("top10-payer-pane"))
             {
-            <div class="pr-insight-toolbar">
-                <div class="pr-source-toggle" id="insightSourceToggle" role="tablist" aria-label="Billing source">
-                    <button class="pr-source-toggle-btn active" id="insight-daq-tab" type="button" role="tab"
-                            data-bs-toggle="pill" data-bs-target="#insight-daq-pane" data-source="daq"
-                            aria-controls="insight-daq-pane" aria-selected="true">Daq</button>
-                    <button class="pr-source-toggle-btn" id="insight-webpm-tab" type="button" role="tab"
-                            data-bs-toggle="pill" data-bs-target="#insight-webpm-pane" data-source="webpm"
-                            aria-controls="insight-webpm-pane" aria-selected="false">WebPM</button>
-                </div>
-                <div class="pr-filter-summary" style="margin:0;">
-                    <span class="filter-dot">•</span>
-                    <span>Top 10 payers shown. <strong>Grand Total = all payers</strong> for this source.</span>
-                </div>
+            <div class="pr-filter-summary">
+                <span class="filter-dot">•</span>
+                <span>BilledUnbilled = Billed. One grid per Source (Daq, WebPM): Top 10 PayerName_Raw by Claim Count. <strong>Overall Total = every payer in that source.</strong></span>
             </div>
-            <div class="tab-content" id="insightSubTabContent">
+            <div>
             @{
-                var insightTabs = new[]
-                {
-                    new {
-                        PaneId = "insight-daq-pane",
-                        Active = true,
-                        SourceLabel = "Daq",
-                        EmptyTitle = "No Insight Daq data available",
-                        Rows = Model.InsightDaqRows,
-                        Years = daqYears,
-                        MonthsByYear = daqMonthsByYear,
-                        GrandByMonth = Model.InsightDaqGrandByMonth,
-                        GrandChargesByMonth = Model.InsightDaqGrandChargesByMonth,
-                        GrandTotal = daqGrandTotal,
-                        GrandTotalCharges = daqGrandTotalCharges,
-                    },
-                    new {
-                        PaneId = "insight-webpm-pane",
-                        Active = false,
-                        SourceLabel = "Webpm",
-                        EmptyTitle = "No Insight WebPM data available",
-                        Rows = Model.InsightWebPmRows,
-                        Years = webYears,
-                        MonthsByYear = webMonthsByYear,
-                        GrandByMonth = Model.InsightWebPmGrandByMonth,
-                        GrandChargesByMonth = Model.InsightWebPmGrandChargesByMonth,
-                        GrandTotal = webGrandTotal,
-                        GrandTotalCharges = webGrandTotalCharges,
-                    },
-                };
+                var t10Sources = t10Years.Count > 0
+                    ? Model.Top10PayerRows.Where(r => r.ChildRows.Count > 0).ToList()
+                    : new List<PayerBreakdownRow>();
             }
-            @foreach (var tab in insightTabs)
+            @foreach (var src in t10Sources)
             {
-                <div class="tab-pane fade @(tab.Active ? "show active" : "")" id="@tab.PaneId" role="tabpanel">
-                    @if (tab.Rows.Count > 0 && tab.Years.Count > 0)
-                    {
-                        <div class="pr-wrap">
+                var tab = new
+                {
+                    Rows = src.ChildRows,
+                    Years = t10Years,
+                    MonthsByYear = t10MonthsByYear,
+                    GrandByMonth = src.ByMonth,
+                    GrandChargesByMonth = src.ByMonthCharges,
+                    GrandTotal = src.GrandTotal,
+                    GrandTotalCharges = src.GrandTotalCharges,
+                };
+                var srcLabel = src.PayerName.Equals("Daq", StringComparison.OrdinalIgnoreCase) ? "Daq" : "WebPM";
+                        <div class="fw-semibold mt-3 mb-2" style="color:#0e3460">Top 10 Payer &ndash; @srcLabel</div>
+                        <div class="pr-wrap mb-3">
                             <div class="pr-scroll">
                                 <table class="pr-table">
                                     <colgroup>
@@ -2385,7 +2402,7 @@ th.pr-month-data, td.pr-month-data {
                                     </tbody>
                                     <tfoot>
                                         <tr class="pr-total-row">
-                                            <td>Grand Total</td>
+                                            <td>@srcLabel Overall Total</td>
                                             @foreach (var year in tab.Years)
                                             {
                                                 var insMons = tab.MonthsByYear.ContainsKey(year) ? tab.MonthsByYear[year] : new List<string>();
@@ -2404,17 +2421,15 @@ th.pr-month-data, td.pr-month-data {
                                 </table>
                             </div>
                         </div>
-                    }
-                    else
+            }
+                    @if (t10Sources.Count == 0)
                     {
                         <div class="text-center py-5 text-muted">
                             <div style="font-size:2rem;opacity:.4">&#128202;</div>
-                            <div class="fw-semibold mt-2">@tab.EmptyTitle</div>
-                            <div class="small mt-1"><strong>Reason:</strong> No billed claim-level data found for Source = @tab.SourceLabel. Try adjusting your filters.</div>
+                            <div class="fw-semibold mt-2">No Top 10 Payer data available</div>
+                            <div class="small mt-1"><strong>Reason:</strong> No billed claim-level data found for Source = Webpm / Daq. Try adjusting your filters.</div>
                         </div>
                     }
-                </div>
-            }
             </div>
             }
         </div>
@@ -2916,19 +2931,6 @@ th.pr-month-data, td.pr-month-data {
                 loadPrPane(sel && document.querySelector(sel));
             });
             loadPrPane(document.querySelector('#prTabContent .tab-pane.active[data-pr-lazy]'));
-        }
-
-        var sourceToggle = document.getElementById('insightSourceToggle');
-        if (sourceToggle) {
-            sourceToggle.addEventListener('click', function (e) {
-                var btn = e.target.closest('.pr-source-toggle-btn');
-                if (!btn) return;
-                sourceToggle.querySelectorAll('.pr-source-toggle-btn').forEach(function (b) {
-                    var on = b === btn;
-                    b.classList.toggle('active', on);
-                    b.setAttribute('aria-selected', on ? 'true' : 'false');
-                });
-            });
         }
 
         var cptSourceToggle = document.getElementById('cptSourceToggle');

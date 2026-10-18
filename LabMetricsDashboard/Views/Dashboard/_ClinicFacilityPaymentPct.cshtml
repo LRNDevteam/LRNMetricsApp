@@ -1,0 +1,81 @@
+@model NwFacilityPaymentPctViewModel
+
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="alert alert-warning" style="font-size:.85rem">
+        <i class="bi bi-exclamation-triangle"></i> @Model.ErrorMessage
+    </div>
+    return;
+}
+
+@if (Model.Rows.Count == 0)
+{
+    <div class="text-center text-muted py-4" style="font-size:.85rem">No data available.</div>
+    return;
+}
+
+@functions {
+    private static string Pct(decimal? value) => value.HasValue ? value.Value.ToString("N2") + "%" : "-";
+}
+
+<style>
+.cfp-scroll { max-height: 72vh; overflow: auto; }
+.cfp-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .76rem; }
+.cfp-table thead th {
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+    color: rgba(255,255,255,.9); font-weight: 700; font-size: .66rem;
+    letter-spacing: .04em; text-transform: uppercase;
+    padding: .6rem .8rem; text-align: right; white-space: nowrap;
+    position: sticky; top: 0; z-index: 3;
+}
+.cfp-table thead th:first-child { text-align: left; min-width: 320px; }
+.cfp-table td {
+    padding: .45rem .8rem; text-align: right; white-space: nowrap;
+    border-right: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb;
+    font-variant-numeric: tabular-nums;
+}
+.cfp-table td:first-child { text-align: left; font-weight: 600; color: #1e293b; }
+.cfp-table tbody tr:hover { background: #f0f4ff; }
+.cfp-table tfoot td {
+    background: #f1f5f9; font-weight: 700; color: #0e3460;
+    border-top: 2px solid #0a2a4a; position: sticky; bottom: 0;
+}
+</style>
+
+<div class="cfp-scroll">
+    <table class="cfp-table">
+        <thead>
+            <tr>
+                <th><i class="bi bi-building me-1"></i>Clinic Name</th>
+                <th>Claim Count</th>
+                <th>Average of Payment %</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var row in Model.Rows)
+            {
+                <tr>
+                    <td>@row.ClinicName</td>
+                    <td>@row.NoOfClaims.ToString("N0")</td>
+                    <td>@Pct(row.AvgPaymentPct)</td>
+                </tr>
+            }
+        </tbody>
+        @if (Model.GrandTotal is { } gt)
+        {
+            <tfoot>
+                <tr>
+                    <td>Grand Total (@Model.Rows.Count.ToString("N0") clinics)</td>
+                    <td>@gt.NoOfClaims.ToString("N0")</td>
+                    <td>@Pct(gt.AvgPaymentPct)</td>
+                </tr>
+            </tfoot>
+        }
+    </table>
+</div>
+
+<div class="text-muted mt-2" style="font-size:.68rem">
+    Source: Claim Level Data &middot; Filter: InsurancePayment &gt; 0 &middot; Rows: ClinicName &middot;
+    Sorted by Claim Count &middot; Values: Count of unique ClaimID, Average(Payment %) (PaymentPercent &times; 100) &middot;
+    Lab: @Model.SelectedLab
+</div>

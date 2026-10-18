@@ -1,0 +1,52 @@
+@model IReadOnlyList<LabMetricsDashboard.Models.DenialPayorVsPayerRow>
+@* NorthWest Payor vs Payer - dbo.usp_GetNW_DenialPayorVsPayer *@
+@if (Model.Count == 0)
+{
+    <div class="text-center text-muted py-4">No Payor vs Payer rows were found for the selected lab.</div>
+}
+else
+{
+    <div class="pr-wrap">
+        <div class="pr-scroll dcr-pr-scroll">
+            <table class="pr-table" style="width:100%">
+                <thead>
+                    <tr>
+                        <th>Payer Name</th>
+                        <th>Denial Code</th>
+                        <th>Payer Type</th>
+                        <th>No. of Claims</th>
+                        <th class="pr-grand-total">Insurance Balance</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in Model.Where(r => r.RowType != "T"))
+                    {
+                        var isPayer = r.RowType == "P";
+                        <tr class="@(isPayer ? "pr-panel-row" : "pr-hp-child")">
+                            <td>@(isPayer ? r.PayerName : "")</td>
+                            <td>@(isPayer ? "" : r.DenialCode)</td>
+                            <td>@(isPayer ? r.PayerType : "")</td>
+                            <td>@r.ClaimCount.N0OrDash()</td>
+                            <td class="pr-grand-total">@Acct2(r.TotalInsuranceBalance)</td>
+                        </tr>
+                    }
+                </tbody>
+                @if (Model.FirstOrDefault(r => r.RowType == "T") is { } total)
+                {
+                    <tfoot>
+                        <tr class="pr-total-row">
+                            <td colspan="3">Grand Total</td>
+                            <td>@total.ClaimCount.N0OrDash()</td>
+                            <td>@Acct2(total.TotalInsuranceBalance)</td>
+                        </tr>
+                    </tfoot>
+                }
+            </table>
+        </div>
+    </div>
+}
+<div class="dcr-pr-note">
+    <strong>Source:</strong> Claim Level &nbsp;|&nbsp; <strong>Filter:</strong> Denial Code not blank and InsuranceBalance &gt; 0
+    &nbsp;|&nbsp; <strong>Rows:</strong> Payer Name_Raw, Denial Code
+    &nbsp;|&nbsp; <strong>Sorted by:</strong> Claim Count DESC
+</div>

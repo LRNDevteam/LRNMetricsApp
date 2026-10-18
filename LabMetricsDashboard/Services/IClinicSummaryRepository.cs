@@ -92,6 +92,40 @@ public interface IClinicSummaryRepository
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// NorthWest "By Facility" via <c>dbo.usp_GetNW_CLS_ByFacility</c>
+    /// (snapshot <c>NW_CLS_ByFacility</c> when no filter is set).
+    /// </summary>
+    Task<NwByFacilityViewModel> GetNwByFacilityAsync(
+        string connectionString,
+        string labName,
+        List<string>? filterClinicNames = null,
+        List<string>? filterSalesRepNames = null,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// NorthWest "Facility vs Payment (%)" via <c>dbo.usp_GetNW_CLS_FacilityPaymentPct</c>
+    /// (snapshot <c>NW_CLS_FacilityPaymentPct</c> when no filter is set).
+    /// </summary>
+    Task<NwFacilityPaymentPctViewModel> GetNwFacilityPaymentPctAsync(
+        string connectionString,
+        string labName,
+        List<string>? filterClinicNames = null,
+        List<string>? filterSalesRepNames = null,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default);
 }
 
 /// <summary>Result container for clinic summary query including filter option lists.</summary>

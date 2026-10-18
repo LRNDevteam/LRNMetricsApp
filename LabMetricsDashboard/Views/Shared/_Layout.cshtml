@@ -14,6 +14,10 @@
     var showReportPageLoader =
         (string.Equals(bootController, "Dashboard", StringComparison.OrdinalIgnoreCase)
             && string.Equals(bootAction, "ProductionReport", StringComparison.OrdinalIgnoreCase));
+    // ?embed=1 — the report is framed inside another page (NorthWest Executive Summary
+    // highlight tabs): no menu, footer or page chrome. ?embedTabs= lists the tab panes to keep.
+    var isEmbed = string.Equals(Context.Request.Query["embed"], "1", StringComparison.Ordinal);
+    var embedTabs = isEmbed ? Context.Request.Query["embedTabs"].ToString() : null;
 }
 <!DOCTYPE html>
 <html lang="en" class="@(showReportPageLoader ? "lmd-boot" : null)">
@@ -1007,6 +1011,26 @@
         border-radius: 50%;
         animation: lrnRptBtnPulse 1.2s ease-out 3;
         }
+
+        /* -- Embedded report (?embed=1) --------------------------------- */
+        body.lmd-embed { background: #fff; margin-bottom: 0 !important; }
+        body.lmd-embed > header,
+        body.lmd-embed > footer,
+        body.lmd-embed .lrn-report-toast,
+        body.lmd-embed .rpt-page-head,
+        body.lmd-embed .rpt-filter-wrap,
+        body.lmd-embed .lis-tabs { display: none !important; }
+        body.lmd-embed > .container-fluid { padding: 0 !important; }
+        body.lmd-embed main { padding-bottom: 0 !important; }
+        /* Lighter selected tab inside the frame so it stands apart from the host page's dark tab. */
+        body.lmd-embed .nav-pills .nav-link.active,
+        body.lmd-embed .pr-tabs .nav-link.active,
+        body.lmd-embed .cs-rpt-tabs .nav-link.active {
+            color: #0e3460 !important;
+            background: #e3edf9 !important;
+            border-color: #7fa3cf !important;
+            box-shadow: 0 2px 8px rgba(14, 52, 96, .12) !important;
+        }
     </style>
 </head>
 @{
@@ -1016,7 +1040,7 @@
     var routeAction = bootAction;
 }
 
-<body>
+<body class="@(isEmbed ? "lmd-embed" : null)" data-embed-tabs="@embedTabs">
 
 
     <!-- Full-screen loader overlay -->
@@ -2044,7 +2068,67 @@
         })();
     </script>
 
-    @await Html.PartialAsync("_HelpBotWidget")
+    @if (isEmbed)
+    {
+        <script nonce='@Context.Items["CspNonce"]'>
+            (function () {
+                var allowed = (document.body.getAttribute('data-embed-tabs') || '')
+                    .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+
+                // Keep only the listed panes of a report's tab strip; other tab strips are untouched.
+                function filterTabs() {
+                    if (!allowed.length) return;
+                    var kept = [];
+                    document.querySelectorAll('[data-bs-toggle="tab"][data-bs-target],[data-bs-toggle="pill"][data-bs-target]').forEach(function (btn) {
+                        var id = (btn.getAttribute('data-bs-target') || '').replace(/^#/, '');
+                        var pane = id && document.getElementById(id);
+                        if (!pane) return;
+                        var sameStrip = allowed.some(function (a) {
+                            var p = document.getElementById(a);
+                            return p && p.parentElement === pane.parentElement;
+                        });
+                        if (!sameStrip) return;
+                        if (allowed.indexOf(id) >= 0) { kept.push(btn); return; }
+                        (btn.closest('li') || btn).style.display = 'none';
+                    });
+                    var active = kept.some(function (b) { return b.classList.contains('active'); });
+                    if (!active && kept.length && window.bootstrap) bootstrap.Tab.getOrCreateInstance(kept[0]).show();
+                }
+
+                // Links leave the frame: a full report page inside it would bring its menu along.
+                document.addEventListener('click', function (e) {
+                    var a = e.target.closest ? e.target.closest('a[href]') : null;
+                    if (!a || a.target || a.hasAttribute('data-bs-toggle')) return;
+                    var href = a.getAttribute('href') || '';
+                    if (!href || href.charAt(0) === '#' || /^javascript:/i.test(href)) return;
+                    a.target = '_blank';
+                    a.rel = 'noopener';
+                }, true);
+
+                // Tell the host page how tall the report is so the frame never scrolls.
+                function postHeight() {
+                    if (window.parent === window) return;
+                    var host = document.querySelector('body > .container-fluid');
+                    var h = Math.ceil(host ? host.getBoundingClientRect().bottom + window.scrollY : document.body.scrollHeight) + 2;
+                    window.parent.postMessage({ lmdEmbedHeight: h }, window.location.origin);
+                }
+
+                function init() {
+                    filterTabs();
+                    postHeight();
+                    var host = document.querySelector('body > .container-fluid');
+                    if (host && window.ResizeObserver) new ResizeObserver(postHeight).observe(host);
+                    window.addEventListener('load', postHeight);
+                }
+                if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+                else init();
+            })();
+        </script>
+    }
+    else
+    {
+        @await Html.PartialAsync("_HelpBotWidget")
+    }
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 

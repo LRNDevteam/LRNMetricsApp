@@ -18,10 +18,15 @@ public static class LisSummaryAggregateLabs
         ["WellHealth"] = "WH_",
         ["Well_Health"] = "WH_",
         ["Well Health"] = "WH_",
+        ["NorthWest"] = "NW_",
+        ["North West"] = "NW_",
+        ["NorthWest_Labs"] = "NW_",
+        ["NWL"] = "NW_",
     };
 
     private static readonly Dictionary<int, string> PrefixByLabId = new()
     {
+        [23] = "NW_",
         [26] = "AnP_",
         [27] = "WH_",
     };

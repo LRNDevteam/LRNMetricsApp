@@ -1,6 +1,8 @@
 @model LabMetricsDashboard.Models.CollectionSummaryViewModel
 @{
     var csPaneOnly = ViewData["CsPaneOnly"] as string;
+    // Embedded in the NorthWest Executive Summary: the Top 5 cards become the "Top 5 Insurances" grid tab.
+    var csEmbed = string.Equals(Context.Request.Query["embed"], "1", StringComparison.Ordinal);
     if (!string.IsNullOrEmpty(csPaneOnly))
         Layout = null;
     ViewData["Title"]       = $"Collection Summary - {Model.SelectedLab}";
@@ -984,6 +986,8 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
 
 @if (!string.IsNullOrWhiteSpace(Model.SelectedLab) && string.IsNullOrWhiteSpace(Model.ErrorMessage))
 {
+    if (!csEmbed)
+    {
     <!-- ?? Top-5 Insurance Dashboard Cards (always visible) ?????? -->
     <div id="csTop5Host" data-cs-tab="top5">
         @if (csPaneOnly == "top5")
@@ -1006,7 +1010,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <div class="top5-card-hdr reimb-hdr">
                     <div>
                         <div class="top5-card-hdr-title">Reimbursement Rate</div>
-                        <div class="top5-card-hdr-sub">@(Model.IsWellHealthLab ? "Top 5 payers by insurance payment" : Model.UsesSpCollectionLogic ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
+                        <div class="top5-card-hdr-sub">@(Model.IsWellHealthLab || Model.IsNorthWestLab ? "Top 5 payers by insurance payment" : Model.UsesSpCollectionLogic ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
                     </div>
                     <span class="top5-card-badge reimb-badge">
                         <i class="bi bi-percent"></i> Reimbursement
@@ -1057,7 +1061,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 </div>
 
                 <div class="top5-card-footer">
-                    @if (Model.IsWellHealthLab)
+                    @if (Model.IsWellHealthLab || Model.IsNorthWestLab)
                     {
                         <span>Top 5 by <span class="top5-hl-blue">Insurance Payment</span> &bull;
                         InsurancePayment &gt; 0 &bull; Payment % = Average(PaymentPercent)</span>
@@ -1106,7 +1110,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <div class="top5-card-hdr totpay-hdr">
                     <div>
                         <div class="top5-card-hdr-title">Total Payments</div>
-                        <div class="top5-card-hdr-sub">@(Model.IsWellHealthLab ? "Top 5 payers by total payment" : Model.UsesSpCollectionLogic ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
+                        <div class="top5-card-hdr-sub">@(Model.IsWellHealthLab || Model.IsNorthWestLab ? "Top 5 payers by total payment" : Model.UsesSpCollectionLogic ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
                     </div>
                     <span class="top5-card-badge totpay-badge">
                         <i class="bi bi-cash-stack"></i> Payments
@@ -1155,7 +1159,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 </div>
 
                 <div class="top5-card-footer">
-                    @(Model.UsesSpCollectionLogic ? "Sorted by" : "Ranked by") <span class="top5-hl-green">@(Model.IsWellHealthLab ? "total payment (InsurancePayment > 0)" : Model.UsesSpCollectionLogic ? "claim count" : "unique visit count")</span> &bull;
+                    @(Model.UsesSpCollectionLogic ? "Sorted by" : "Ranked by") <span class="top5-hl-green">@(Model.IsWellHealthLab || Model.IsNorthWestLab ? "total payment (InsurancePayment > 0)" : Model.UsesSpCollectionLogic ? "claim count" : "unique visit count")</span> &bull;
                     Top payer accounts for <span class="top5-hl-green">@topPayerPct.ToString("F0")%</span> of total payments
                 </div>
             }
@@ -1183,6 +1187,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             <div class="cs-lazy-pane" data-lazy-tab="top5"></div>
         }
     </div>
+    }
 
     @if (string.IsNullOrEmpty(csPaneOnly))
     {
@@ -1202,13 +1207,23 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <i class="bi bi-calendar-week"></i> Weekly Claim Volume
             </button>
         </li>
+        @if (csEmbed)
+        {
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="top5grid-tab" data-bs-toggle="pill"
+                        data-bs-target="#top5grid-pane" type="button" role="tab"
+                        aria-controls="top5grid-pane" aria-selected="false">
+                    <i class="bi bi-trophy"></i> Top 5 Insurances
+                </button>
+            </li>
+        }
         @if (Model.ShowAvgPaymentsByDateBasis)
         {
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="avgpaydos-tab" data-bs-toggle="pill"
                         data-bs-target="#avgpaydos-pane" type="button" role="tab"
                         aria-controls="avgpaydos-pane" aria-selected="false">
-                    <i class="bi bi-cash-coin"></i> @(Model.IsWellHealthLab ? "Panel Averages - by DOS" : "Avg Payments - DOS")
+                    <i class="bi bi-cash-coin"></i> @(Model.UsesPanelAveragesTitles ? "Panel Averages - by DOS" : "Avg Payments - DOS")
                 </button>
             </li>
         }
@@ -1216,7 +1231,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             <button class="nav-link" id="avgpay-tab" data-bs-toggle="pill"
                     data-bs-target="#avgpay-pane" type="button" role="tab"
                     aria-controls="avgpay-pane" aria-selected="false">
-                <i class="bi bi-cash-coin"></i> @(Model.IsWellHealthLab ? "Panel Averages - by Check Date" : Model.ShowAvgPaymentsByDateBasis ? "Avg Payments - Check Date" : "Avg Payments")
+                <i class="bi bi-cash-coin"></i> @(Model.UsesPanelAveragesTitles ? "Panel Averages - by Check Date" : Model.ShowAvgPaymentsByDateBasis ? "Avg Payments - Check Date" : "Avg Payments")
             </button>
         </li>
         @if (Model.ShowAvgPaymentsLast3Months)
@@ -1266,7 +1281,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <button class="nav-link" id="insvspay-tab" data-bs-toggle="pill"
                         data-bs-target="#insvspay-pane" type="button" role="tab"
                         aria-controls="insvspay-pane" aria-selected="false">
-                    <i class="bi bi-cash-stack"></i> @(Model.IsWellHealthLab ? "Total Insurance Payment" : "Insurance Vs Payment")
+                    <i class="bi bi-cash-stack"></i> @(Model.IsWellHealthLab ? "Total Insurance Payment" : Model.IsNorthWestLab ? "Payer vs Payment" : "Insurance Vs Payment")
                 </button>
             </li>
         }
@@ -1284,6 +1299,16 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     <i class="bi bi-card-checklist"></i> Status Summary
                 </button>
             </li>
+            @if (Model.IsNorthWestLab)
+            {
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="whpanel-tab" data-bs-toggle="pill"
+                            data-bs-target="#whpanel-pane" type="button" role="tab"
+                            aria-controls="whpanel-pane" aria-selected="false">
+                        <i class="bi bi-gender-female"></i> Women's Health Panel
+                    </button>
+                </li>
+            }
             @if (Model.ShowGeneticsVsIdAvg)
             {
                 <li class="nav-item" role="presentation">
@@ -1477,7 +1502,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     <strong>Filter (base):</strong> @(Model.UsesSpCollectionLogic ? "InsurancePayment ≠ 0" : "InsurancePayment > 0") &nbsp;·&nbsp; @(Model.UsesSpCollectionLogic ? "PaymentPostedDate" : "CheckDate") not blank/invalid &bull;
                     <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) – @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &nbsp;|&nbsp; DOS: @(string.IsNullOrWhiteSpace(Model.FilterDosFrom) ? "-" : Model.FilterDosFrom) – @(string.IsNullOrWhiteSpace(Model.FilterDosTo) ? "-" : Model.FilterDosTo) &nbsp;|&nbsp; @Model.PostedDateLabel: @(string.IsNullOrWhiteSpace(Model.FilterCheckDateFrom) ? "-" : Model.FilterCheckDateFrom) – @(string.IsNullOrWhiteSpace(Model.FilterCheckDateTo) ? "-" : Model.FilterCheckDateTo) &bull;
                     <strong>Rows:</strong> PanelName &bull;
-                    <strong>Drill-down:</strong> Top 3 PayerName_Raw by Unique ClaimID count &bull;
+                    <strong>Drill-down:</strong> Top @(Model.IsNorthWestLab ? 5 : 3) PayerName_Raw by Unique ClaimID count &bull;
                     <strong>Columns:</strong> @(Model.UsesSpCollectionLogic ? "PaymentPostedDate" : "CheckDate") (Year, Month) — No. of Claims + Insurance Paid Amount &bull;
                     <strong>Sorted by:</strong> @(Model.IsWellHealthLab ? "Grand Total Insurance Payment DESC" : "Grand Total (Unique ClaimID count) DESC")
                 </div>
@@ -1502,6 +1527,10 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         {
         <!-- Weekly Claim Volume tab -->
         <div class="tab-pane fade" id="wcv-pane"           role="tabpanel" aria-labelledby="wcv-tab"           data-cs-tab="wcv">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabWcv",          Model) } else { <div class="cs-lazy-pane" data-lazy-tab="wcv"></div> }</div>
+        @if (csEmbed)
+        {
+            <div class="tab-pane fade" id="top5grid-pane" role="tabpanel" aria-labelledby="top5grid-tab" data-cs-tab="top5grid"><div class="cs-lazy-pane" data-lazy-tab="top5grid"></div></div>
+        }
         @if (Model.ShowPanelAverage)
         {
             <div class="tab-pane fade" id="panelavg-pane" role="tabpanel" aria-labelledby="panelavg-tab" data-cs-tab="panelavg">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabPanelAvg", Model) } else { <div class="cs-lazy-pane" data-lazy-tab="panelavg"></div> }</div>
@@ -1531,6 +1560,11 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         <div class="tab-pane fade" id="cptpctpay-pane"     role="tabpanel" aria-labelledby="cptpctpay-tab"     data-cs-tab="cptpctpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabCptPctPay",    Model) } else { <div class="cs-lazy-pane" data-lazy-tab="cptpctpay"></div> }</div>
         <!-- Status Summary tab -->
         <div class="tab-pane fade" id="statussummary-pane" role="tabpanel" aria-labelledby="statussummary-tab" data-cs-tab="statussummary">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabStatusSummary", Model) } else { <div class="cs-lazy-pane" data-lazy-tab="statussummary"></div> }</div>
+        @if (Model.IsNorthWestLab)
+        {
+            <!-- Women's Health Panel breakdown tab (NorthWest, live SP) -->
+            <div class="tab-pane fade" id="whpanel-pane"   role="tabpanel" aria-labelledby="whpanel-tab"      data-cs-tab="whpanel"><div class="cs-lazy-pane" data-lazy-tab="whpanel"></div></div>
+        }
         @if (Model.ShowGeneticsVsIdAvg)
         {
             <!-- Genetics vs ID Avg tab (Rising Tides) -->

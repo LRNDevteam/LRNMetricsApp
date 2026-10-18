@@ -1,0 +1,54 @@
+@model IReadOnlyList<LabMetricsDashboard.Models.DenialFacilityPctRow>
+@* NorthWest Denial vs Facility % - dbo.usp_GetNW_DenialFacilityPct *@
+@if (Model.Count == 0)
+{
+    <div class="text-center text-muted py-4">No Denial vs Facility % rows were found for the selected lab.</div>
+}
+else
+{
+    <div class="pr-wrap">
+        <div class="pr-scroll dcr-pr-scroll">
+            <table class="pr-table" style="width:100%">
+                <thead>
+                    <tr>
+                        <th>Clinic Name</th>
+                        <th>No. of Claims Billed</th>
+                        <th>No. of Adjudicated Claims</th>
+                        <th>No. of Denied Claims</th>
+                        <th class="pr-grand-total">Denied %</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in Model.Where(r => r.RowType != "T"))
+                    {
+                        <tr class="pr-panel-row">
+                            <td>@r.ClinicName</td>
+                            <td>@r.ClaimsBilled.N0OrDash()</td>
+                            <td>@r.AdjudicatedClaims.N0OrDash()</td>
+                            <td>@r.DeniedClaims.N0OrDash()</td>
+                            <td class="pr-grand-total">@(r.AdjudicatedClaims == 0 ? "—" : (r.DeniedPct * 100m).ToString("0.00") + "%")</td>
+                        </tr>
+                    }
+                </tbody>
+                @if (Model.FirstOrDefault(r => r.RowType == "T") is { } total)
+                {
+                    <tfoot>
+                        <tr class="pr-total-row">
+                            <td>Grand Total</td>
+                            <td>@total.ClaimsBilled.N0OrDash()</td>
+                            <td>@total.AdjudicatedClaims.N0OrDash()</td>
+                            <td>@total.DeniedClaims.N0OrDash()</td>
+                            <td>@(total.AdjudicatedClaims == 0 ? "—" : (total.DeniedPct * 100m).ToString("0.00") + "%")</td>
+                        </tr>
+                    </tfoot>
+                }
+            </table>
+        </div>
+    </div>
+}
+<div class="dcr-pr-note">
+    <strong>Source:</strong> Claim Level &nbsp;|&nbsp; <strong>Filter:</strong> BilledUnbilled = Billed
+    &nbsp;|&nbsp; <strong>Rows:</strong> ClinicName
+    &nbsp;|&nbsp; <strong>Denied %:</strong> Denied Claims / Adjudicated Claims
+    &nbsp;|&nbsp; <strong>Sorted by:</strong> No. of Claims Billed DESC
+</div>

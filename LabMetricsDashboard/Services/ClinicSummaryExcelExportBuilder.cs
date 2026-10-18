@@ -28,7 +28,9 @@ public static class ClinicSummaryExcelExportBuilder
         ClinicDollarAnalysisViewModel? dollarAnalysis = null,
         ClinicDosCountViewModel? dosCount = null,
         IReadOnlyList<(string Label, IReadOnlyList<string>? Values)>? activeFilters = null,
-        ClinicPaymentBilledViewModel? paymentBilled = null)
+        ClinicPaymentBilledViewModel? paymentBilled = null,
+        NwByFacilityViewModel? byFacility = null,
+        NwFacilityPaymentPctViewModel? facilityPaymentPct = null)
     {
         var wb = new XLWorkbook();
 
@@ -49,6 +51,12 @@ public static class ClinicSummaryExcelExportBuilder
 
         if (paymentBilled is { Clinics.Count: > 0 })
             BuildPaymentBilledSheet(wb, paymentBilled);
+
+        if (byFacility is { Rows.Count: > 0 })
+            BuildByFacilitySheet(wb, byFacility);
+
+        if (facilityPaymentPct is { Rows.Count: > 0 })
+            BuildFacilityPaymentPctSheet(wb, facilityPaymentPct);
 
         if (activeFilters is { Count: > 0 })
         {
@@ -641,6 +649,114 @@ public static class ClinicSummaryExcelExportBuilder
         ws.SheetView.FreezeRows(1);
         ws.SheetView.FreezeColumns(1);
         ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 12, firstColMinWidth: 40);
+    }
+
+    // ?? NorthWest By Facility sheet ??????????????????????????????????
+
+    private static void BuildByFacilitySheet(XLWorkbook wb, NwByFacilityViewModel vm)
+    {
+        var ws = wb.AddWorksheet("By Facility");
+        ws.TabColor = ExcelTheme.TabGreen;
+        ExcelTheme.ApplyDefaults(ws);
+
+        string[] headers = ["Clinic / Payer / Referring Provider", "Claim Count", "Sum of ChargeAmount",
+            "Sum of InsuranceBalance", "Sum of PatientBalance"];
+        ExcelTheme.WriteHeaderRow(ws, 1, 1, headers);
+        ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
+        int lastCol = headers.Length;
+
+        void WriteRow(int row, string label, NwFacilityRow r, XLColor bg, bool bold, int indent)
+        {
+            ws.Cell(row, 1).Value = label;
+            ws.Cell(row, 2).Value = r.NoOfClaims;
+            ws.Cell(row, 3).Value = r.ChargeAmount;
+            ws.Cell(row, 4).Value = r.InsuranceBalance;
+            ws.Cell(row, 5).Value = r.PatientBalance;
+            for (int c = 1; c <= lastCol; c++)
+            {
+                ExcelTheme.StyleDataCell(ws.Cell(row, c), bg);
+                if (bold) ws.Cell(row, c).Style.Font.SetBold(true);
+            }
+            ws.Cell(row, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+            ws.Cell(row, 1).Style.Alignment.Indent = indent;
+            ws.Cell(row, 2).Style.NumberFormat.Format = "#,##0";
+            for (int c = 3; c <= lastCol; c++)
+                ws.Cell(row, c).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
+        }
+
+        var payersByClinic = vm.Rows.Where(r => r.Level == 2)
+            .GroupBy(r => r.ClinicName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+        var providersByPayer = vm.Rows.Where(r => r.Level == 3)
+            .GroupBy(r => (r.ClinicName, r.PayerName))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        int rowNum = 2;
+        int idx = 0;
+        foreach (var clinic in vm.Clinics)
+        {
+            WriteRow(rowNum++, clinic.ClinicName, clinic, ExcelTheme.GetRowBg(idx++), bold: true, indent: 0);
+            int firstPayerRow = rowNum;
+            foreach (var payer in payersByClinic.GetValueOrDefault(clinic.ClinicName) ?? [])
+            {
+                WriteRow(rowNum++, payer.PayerName, payer, XLColor.White, bold: false, indent: 1);
+                int firstProviderRow = rowNum;
+                foreach (var provider in providersByPayer.GetValueOrDefault((payer.ClinicName, payer.PayerName)) ?? [])
+                    WriteRow(rowNum++, provider.ReferringProvider, provider, XLColor.White, bold: false, indent: 2);
+                if (rowNum > firstProviderRow)
+                    ws.Rows(firstProviderRow, rowNum - 1).Group();
+            }
+            if (rowNum > firstPayerRow)
+            {
+                ws.Rows(firstPayerRow, rowNum - 1).Group();
+                ws.Rows(firstPayerRow, rowNum - 1).Collapse();
+            }
+        }
+
+        if (vm.GrandTotal is { } gt)
+            WriteRow(rowNum, "Grand Total", gt, ExcelTheme.TotalRowBg, bold: true, indent: 0);
+
+        ws.SheetView.FreezeRows(1);
+        ExcelTheme.AutoFitColumns(ws, lastCol, minWidth: 18, firstColMinWidth: 45);
+    }
+
+    // ?? NorthWest Facility vs Payment (%) sheet ??????????????????????
+
+    private static void BuildFacilityPaymentPctSheet(XLWorkbook wb, NwFacilityPaymentPctViewModel vm)
+    {
+        var ws = wb.AddWorksheet("Facility vs Payment %");
+        ws.TabColor = ExcelTheme.TabGreen;
+        ExcelTheme.ApplyDefaults(ws);
+
+        string[] headers = ["Clinic Name", "Claim Count", "Average of Payment %"];
+        ExcelTheme.WriteHeaderRow(ws, 1, 1, headers);
+        int lastCol = headers.Length;
+
+        void WriteRow(int row, NwFacilityPaymentPctRow r, XLColor bg, bool bold, string? label = null)
+        {
+            ws.Cell(row, 1).Value = label ?? r.ClinicName;
+            ws.Cell(row, 2).Value = r.NoOfClaims;
+            if (r.AvgPaymentPct.HasValue)
+                ws.Cell(row, 3).Value = r.AvgPaymentPct.Value / 100m;
+            for (int c = 1; c <= lastCol; c++)
+            {
+                ExcelTheme.StyleDataCell(ws.Cell(row, c), bg);
+                if (bold) ws.Cell(row, c).Style.Font.SetBold(true);
+            }
+            ws.Cell(row, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+            ws.Cell(row, 2).Style.NumberFormat.Format = "#,##0";
+            ws.Cell(row, 3).Style.NumberFormat.Format = "0.00%";
+        }
+
+        int rowNum = 2;
+        for (int i = 0; i < vm.Rows.Count; i++)
+            WriteRow(rowNum++, vm.Rows[i], ExcelTheme.GetRowBg(i), bold: false);
+
+        if (vm.GrandTotal is { } gt)
+            WriteRow(rowNum, gt, ExcelTheme.TotalRowBg, bold: true, label: "Grand Total");
+
+        ws.SheetView.FreezeRows(1);
+        ExcelTheme.AutoFitColumns(ws, lastCol, minWidth: 18, firstColMinWidth: 45);
     }
 
     private static void WritePanelStatusRow(

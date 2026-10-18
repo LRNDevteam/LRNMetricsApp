@@ -495,11 +495,10 @@ public sealed class ProductionReportGenerator : IReportGenerator
         var t6 = _nwRepo.GetUnbilledAgingAsync(connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
         var t7 = _nwRepo.GetCptBreakdownAsync(connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
         var t8 = _nwRepo.GetPanelBreakdownAsync(connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
-        var t9 = _nwRepo.GetInsightBreakdownAsync(connStr, "Daq", payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
-        var t10 = _nwRepo.GetInsightBreakdownAsync(connStr, "Webpm", payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
-        var t11 = _nwRepo.GetHighestPayerBreakdownAsync(connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
+        var t9 = _nwRepo.GetTop10PayerBreakdownAsync(connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
+        var t10 = _nwRepo.GetHighestPayerBreakdownAsync(connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
 
-        await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11);
+        await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10);
         await progress(45);
 
         var monthlyResult = t1.Result;
@@ -510,9 +509,8 @@ public sealed class ProductionReportGenerator : IReportGenerator
         var uaResult      = t6.Result;
         var cptResult     = t7.Result;
         var pnlResult     = t8.Result;
-        var insightDaqResult = t9.Result;
-        var insightWebResult = t10.Result;
-        var hpResult      = t11.Result;
+        var top10Result   = t9.Result;
+        var hpResult      = t10.Result;
 
         var vm = new ProductionReportViewModel
         {
@@ -554,20 +552,13 @@ public sealed class ProductionReportGenerator : IReportGenerator
             PanelBreakdownGrandTotal          = pnlResult.GrandTotal,
             PanelBreakdownGrandChargesByMonth = pnlResult.GrandTotalChargesByMonth ?? [],
             PanelBreakdownGrandTotalCharges   = pnlResult.GrandTotalCharges,
-            InsightDaqMonths                  = insightDaqResult.Months,
-            InsightDaqYears                   = insightDaqResult.Years,
-            InsightDaqRows                    = insightDaqResult.PayerRows,
-            InsightDaqGrandByMonth            = insightDaqResult.GrandTotalByMonth,
-            InsightDaqGrandTotal              = insightDaqResult.GrandTotal,
-            InsightDaqGrandChargesByMonth     = insightDaqResult.GrandTotalChargesByMonth ?? [],
-            InsightDaqGrandTotalCharges       = insightDaqResult.GrandTotalCharges,
-            InsightWebPmMonths                = insightWebResult.Months,
-            InsightWebPmYears                 = insightWebResult.Years,
-            InsightWebPmRows                  = insightWebResult.PayerRows,
-            InsightWebPmGrandByMonth          = insightWebResult.GrandTotalByMonth,
-            InsightWebPmGrandTotal            = insightWebResult.GrandTotal,
-            InsightWebPmGrandChargesByMonth   = insightWebResult.GrandTotalChargesByMonth ?? [],
-            InsightWebPmGrandTotalCharges     = insightWebResult.GrandTotalCharges,
+            Top10PayerMonths                  = top10Result.Months,
+            Top10PayerYears                   = top10Result.Years,
+            Top10PayerRows                    = top10Result.PayerRows,
+            Top10PayerGrandByMonth            = top10Result.GrandTotalByMonth,
+            Top10PayerGrandTotal              = top10Result.GrandTotal,
+            Top10PayerGrandChargesByMonth     = top10Result.GrandTotalChargesByMonth ?? [],
+            Top10PayerGrandTotalCharges       = top10Result.GrandTotalCharges,
             HighestPayerMonths                = hpResult.Months,
             HighestPayerYears                 = hpResult.Years,
             HighestPayerRows                  = hpResult.SourceRows,

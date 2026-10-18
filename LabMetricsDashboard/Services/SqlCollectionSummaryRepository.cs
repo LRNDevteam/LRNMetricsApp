@@ -283,7 +283,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
 
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms",
             spName, raw.Count, sw.ElapsedMilliseconds);
-        return BuildMonthlyVolumePivot(raw, keepSourceOrder: spOrdered);
+        return BuildMonthlyVolumePivot(raw, keepSourceOrder: spOrdered, topPayerCount: CollectionTopPayerCount(prefix));
     }
 
     private async Task<CollectionWeeklyVolumeResult> GetCollectionWeeklyVolumeViaSpAsync(
@@ -353,8 +353,12 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 spName, lastRow.Week, lastRow.Start, lastRow.End, lastRow.Panel, lastRow.Payer);
         }
 
-        return BuildWeeklyVolumePivotFromAggregate(rows, keepSourceOrder: spOrdered);
+        return BuildWeeklyVolumePivotFromAggregate(rows, keepSourceOrder: spOrdered, topPayerCount: CollectionTopPayerCount(prefix));
     }
+
+    // NorthWest client sheet: Monthly / Weekly drill-down shows the Top 5 payers; other labs keep 3.
+    private static int CollectionTopPayerCount(string prefix) =>
+        string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ? 5 : 3;
 
     // ── NW SP helpers for the remaining 9 tabs ─────────────────────────────
     // Each follows the same pattern as GetCollectionMonthlyVolumeViaSpAsync:
@@ -726,7 +730,9 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 BillYear:          HasColumn(r, "BilledYear")  ? GetInt32OrDefault(r, "BilledYear")
                     : HasColumn(r, "BillYear") ? GetInt32OrDefault(r, "BillYear") : 0,
                 BillMonth:         HasColumn(r, "BilledMonth") ? GetInt32OrDefault(r, "BilledMonth")
-                    : HasColumn(r, "BillMonth") ? GetInt32OrDefault(r, "BillMonth") : 0));
+                    : HasColumn(r, "BillMonth") ? GetInt32OrDefault(r, "BillMonth") : 0,
+                BilledClaims:      HasColumn(r, "BilledClaims")  ? GetInt32OrDefault(r, "BilledClaims") : 0,
+                BilledCharges:     HasColumn(r, "BilledCharges") ? GetDecimalOrDefault(r, "BilledCharges") : 0m));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
         return new PanelPaymentResult(rows);
@@ -948,7 +954,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         CancellationToken ct)
     {
         var flat = new List<(string Status, string Panel, string Cpt, string Payer,
-                             int N, decimal IP, decimal IB, decimal PB)>();
+                             int N, decimal CA, decimal IP, decimal IB, decimal PB)>();
         var sw = Stopwatch.StartNew();
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
@@ -963,6 +969,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             filterDosFrom, filterDosTo,
             filterCheckDateFrom, filterCheckDateTo));
         await using var r = await cmd.ExecuteReaderAsync(ct);
+        // NorthWest also returns ChargeAmount; the client sheet shows it next to InsurancePayment.
+        var hasCharge = HasColumn(r, "ChargeAmount");
         while (await r.ReadAsync(ct))
         {
             flat.Add((
@@ -971,12 +979,15 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 GetStringOrEmpty(r, "CptCode"),
                 GetStringOrEmpty(r, "PayerName"),
                 GetInt32OrDefault(r, "NoOfClaims"),
+                hasCharge ? GetDecimalOrDefault(r, "ChargeAmount") : 0m,
                 GetDecimalOrDefault(r, "InsurancePayment"),
                 GetDecimalOrDefault(r, "InsuranceBalance"),
                 GetDecimalOrDefault(r, "PatientBalance")));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, flat.Count, sw.ElapsedMilliseconds);
-        return BuildStatusSummaryHierarchy(flat);
+        var result = BuildStatusSummaryHierarchy(flat);
+        result.HasChargeAmount = hasCharge;
+        return result;
     }
 
     private async Task<ProviderSummaryResult> GetProviderSummaryViaSpAsync(
@@ -1003,6 +1014,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             filterDosFrom, filterDosTo,
             filterCheckDateFrom, filterCheckDateTo));
         await using var r = await cmd.ExecuteReaderAsync(ct);
+        // NorthWest also returns ChargeAmount; the client sheet shows it next to InsurancePayments.
+        var hasCharge = HasColumn(r, "ChargeAmount");
         while (await r.ReadAsync(ct))
         {
             rows.Add(new ProviderSummaryRow(
@@ -1011,16 +1024,19 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 NoOfClaims:         GetInt32OrDefault(r, "NoOfClaims"),
                 InsurancePayments:  GetDecimalOrDefault(r, "InsurancePayments"),
                 InsuranceBalance:   GetDecimalOrDefault(r, "InsuranceBalance"),
-                PatientBalance:     GetDecimalOrDefault(r, "PatientBalance")));
+                PatientBalance:     GetDecimalOrDefault(r, "PatientBalance"),
+                ChargeAmount:       hasCharge ? GetDecimalOrDefault(r, "ChargeAmount") : 0m));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
         return new ProviderSummaryResult
         {
             Rows                   = rows,
             GrandNoClaims          = rows.Sum(row => row.NoOfClaims),
+            GrandChargeAmount      = rows.Sum(row => row.ChargeAmount),
             GrandInsurancePayments = rows.Sum(row => row.InsurancePayments),
             GrandInsuranceBalance  = rows.Sum(row => row.InsuranceBalance),
             GrandPatientBalance    = rows.Sum(row => row.PatientBalance),
+            HasChargeAmount        = hasCharge,
         };
     }
 
@@ -2277,6 +2293,50 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             filterDosFrom, filterDosTo,
             filterCheckDateFrom, filterCheckDateTo,
             ct).ConfigureAwait(false);
+    }
+
+    public async Task<WomensHealthBreakdownResult> GetWomensHealthBreakdownAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        if (!LabCollectionPrefix.IsNorthWest(labName))
+            return WomensHealthBreakdownResult.Empty;
+
+        const string spName = "dbo.usp_GetNW_CS_WomensHealthBreakdown";
+        var rows = new List<WomensHealthBreakdownRow>();
+        var sw = Stopwatch.StartNew();
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(spName, conn)
+        {
+            CommandType = System.Data.CommandType.StoredProcedure,
+            CommandTimeout = 120
+        };
+        cmd.Parameters.AddRange(BuildCollectionReadSpParameters(
+            filterPayerNames, filterPanelNames,
+            filterFirstBillFrom, filterFirstBillTo,
+            filterDosFrom, filterDosTo,
+            filterCheckDateFrom, filterCheckDateTo));
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            rows.Add(new WomensHealthBreakdownRow(
+                ClaimStatus:      GetStringOrEmpty(r, "ClaimStatus"),
+                NoOfClaims:       GetInt32OrDefault(r, "NoOfClaims"),
+                ChargeAmount:     GetDecimalOrDefault(r, "ChargeAmount"),
+                InsurancePayment: GetDecimalOrDefault(r, "InsurancePayment"),
+                InsuranceBalance: GetDecimalOrDefault(r, "InsuranceBalance")));
+        }
+        _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
+        return new WomensHealthBreakdownResult { Rows = rows };
     }
 
     public async Task<GeneticsVsIdAvgResult> GetGeneticsVsIdAvgAsync(

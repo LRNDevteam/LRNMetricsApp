@@ -422,6 +422,21 @@ public interface ICollectionSummaryRepository
         string? labName = null,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Women's Health Panel breakdown (NorthWest) via <c>usp_GetNW_CS_WomensHealthBreakdown</c>:
+    /// ClaimStatus rows with claim count, Sum of ChargeAmount, InsurancePayment and InsuranceBalance.
+    /// Returns <see cref="WomensHealthBreakdownResult.Empty"/> for other labs.
+    /// </summary>
+    Task<WomensHealthBreakdownResult> GetWomensHealthBreakdownAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
+        CancellationToken ct = default);
+
     Task<CptPaymentPctResult>          GetCptPaymentPctFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
     Task<StatusSummaryResult>          GetStatusSummaryFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
     Task<ProviderSummaryResult>        GetProviderSummaryFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
@@ -607,7 +622,8 @@ public sealed record ProviderSummaryRow(
     int     NoOfClaims,
     decimal InsurancePayments,
     decimal InsuranceBalance,
-    decimal PatientBalance);
+    decimal PatientBalance,
+    decimal ChargeAmount = 0m);
 
 /// <summary>Result container for the Provider Summary tab.</summary>
 public sealed class ProviderSummaryResult
@@ -615,8 +631,15 @@ public sealed class ProviderSummaryResult
     public static readonly ProviderSummaryResult Empty = new();
     public List<ProviderSummaryRow> Rows             { get; set; } = [];
     public int     GrandNoClaims          { get; set; }
+    public decimal GrandChargeAmount      { get; set; }
     public decimal GrandInsurancePayments { get; set; }
     public decimal GrandInsuranceBalance  { get; set; }
     public decimal GrandPatientBalance    { get; set; }
     public bool    HasData                => Rows.Count > 0;
+
+    /// <summary>
+    /// The SP returns ChargeAmount (NorthWest): a Sum of ChargeAmount column is shown
+    /// before Insurance Payments.
+    /// </summary>
+    public bool    HasChargeAmount        { get; set; }
 }

@@ -282,7 +282,7 @@ public class CollectionSummaryController : Controller
             /// <summary>
             /// Wraps the repository result into the view-ready pivot structure.
             /// </summary>
-            private static CollectionMonthlyVolumePivot BuildCollectionMonthlyPivot(CollectionMonthlyVolumeResult result)
+            internal static CollectionMonthlyVolumePivot BuildCollectionMonthlyPivot(CollectionMonthlyVolumeResult result)
     {
         if (result.PanelRows.Count == 0)
             return CollectionMonthlyVolumePivot.Empty;
@@ -302,7 +302,7 @@ public class CollectionSummaryController : Controller
     /// <summary>
     /// Wraps the weekly repository result into the view-ready pivot structure.
     /// </summary>
-    private static CollectionWeeklyVolumePivot BuildCollectionWeeklyPivot(CollectionWeeklyVolumeResult result)
+    internal static CollectionWeeklyVolumePivot BuildCollectionWeeklyPivot(CollectionWeeklyVolumeResult result)
     {
         if (result.PanelRows.Count == 0)
             return CollectionWeeklyVolumePivot.Empty;
@@ -418,6 +418,7 @@ public class CollectionSummaryController : Controller
                     return PartialView("Index", vm);
 
                 case "top5":
+                case "top5grid":
                     var reimb = useAggregates
                         ? await _repo.GetTop5ReimbursementFromAggregatesAsync(connStr, aggregatePrefix!, ct)
                         : await _repo.GetTop5ReimbursementAsync(
@@ -433,7 +434,9 @@ public class CollectionSummaryController : Controller
                     vm.Top5Reimbursement = reimb.Rows;
                     vm.Top5TotalPayments = totPay.Rows;
                     vm.ShowTop5TotalPayments = !config.DisableShowTop5TotalPayments;
-                    FirstPaintLog.Write(_logger, "Collection", selectedLab, "tab-top5", 0);
+                    FirstPaintLog.Write(_logger, "Collection", selectedLab, "tab-" + tab.ToLowerInvariant(), 0);
+                    if (string.Equals(tab, "top5grid", StringComparison.OrdinalIgnoreCase))
+                        return PartialView("_CsTabTop5Grid", vm);
                     ViewData["CsPaneOnly"] = "top5";
                     return PartialView("Index", vm);
 
@@ -548,6 +551,13 @@ public class CollectionSummaryController : Controller
                     vm.StatusSummary = ss;
                     return PartialView("_CsTabStatusSummary", vm);
 
+                case "whpanel":
+                    if (!LabCollectionPrefix.IsNorthWest(selectedLab))
+                        return Content(string.Empty);
+                    vm.WomensHealthBreakdown = await _repo.GetWomensHealthBreakdownAsync(connStr, payerFilter, panelFilter,
+                        fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+                    return PartialView("_CsTabWomensHealth", vm);
+
                 case "genidavg":
                     vm.GeneticsVsIdAvg = await _repo.GetGeneticsVsIdAvgAsync(connStr, payerFilter, panelFilter,
                         fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
@@ -654,6 +664,11 @@ public class CollectionSummaryController : Controller
                 connStr, payerFilter, panelFilter,
                 fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
             : Task.FromResult(GeneticsVsIdAvgResult.Empty);
+        var womensHealthTask = LabCollectionPrefix.IsNorthWest(selectedLab)
+            ? _repo.GetWomensHealthBreakdownAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
+            : Task.FromResult(WomensHealthBreakdownResult.Empty);
         var analysisRangeTask = _analysisRange.GetAsync(connStr, ct);
 
         // Soft-fail per sheet when a Collection Summary SP is not deployed on a lab DB
@@ -731,6 +746,8 @@ public class CollectionSummaryController : Controller
             GeneticsVsIdAvg = await AwaitOrDefaultAsync(
                 geneticsVsIdAvgTask, GeneticsVsIdAvgResult.Empty, "Genetics vs ID Avg", selectedLab, _logger),
             ShowGeneticsVsIdAvg = showGeneticsVsIdAvg,
+            WomensHealthBreakdown = await AwaitOrDefaultAsync(
+                womensHealthTask, WomensHealthBreakdownResult.Empty, "Women's Health Panel", selectedLab, _logger),
             AnalysisRange = await AwaitOrDefaultAsync(
                 analysisRangeTask, AnalysisRangeInfo.Empty, "Analysis Range", selectedLab, _logger),
         };
