@@ -68,8 +68,12 @@ const GROUPS = [
 
 // view (from the Master Values submenu): 'mapper' | 'workbench' - one family of lists; 'fix' - the
 // Fix / Resolution by Claim Status table.
+// The RCM Manager maintains these two lists (handoff §10, DEF-08); the API enforces the same.
+const MANAGER_LISTS = ['NON_COLLECTIBLE_CODE', 'AUTO_ADJUST_CODE'];
+
 export default function MasterDataPage({ view = 'mapper' }) {
-  const { labId, lab, masterData, reloadMasterData } = useWorkbench();
+  const { labId, lab, masterData, reloadMasterData, user } = useWorkbench();
+  const managerOnly = !user?.siteAdmin && !user?.permissions?.manageSettings;
   const tab = view === 'fix' ? 'fix' : 'lists';
   const wantMapper = view === 'mapper';
   const wantWorkbench = view === 'workbench';
@@ -105,11 +109,12 @@ export default function MasterDataPage({ view = 'mapper' }) {
       }
     }
     if (wantWorkbench) {
-      if (workbench.status === 'fulfilled') next.push(...fromWorkbench(workbench.value));
-      else setLoadError(workbench.reason?.message || 'The AR Workbench lists could not be loaded.');
+      if (workbench.status === 'fulfilled') {
+        next.push(...fromWorkbench(workbench.value).filter((l) => !managerOnly || MANAGER_LISTS.includes(String(l.type).toUpperCase())));
+      } else setLoadError(workbench.reason?.message || 'The AR Workbench lists could not be loaded.');
     }
     setLists(next);
-  }, [labId, tab, wantMapper, wantWorkbench]);
+  }, [labId, tab, wantMapper, wantWorkbench, managerOnly]);
 
   useEffect(() => { load(); }, [load]);
 

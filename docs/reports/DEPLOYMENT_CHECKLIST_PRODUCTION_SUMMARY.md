@@ -36,7 +36,7 @@
 
 **Execute these scripts in order**:
 ```sql
--- From: E:\LRN-GitHub\2026\LRNDevTeam\ClaimLineCSVDataCapture\Sql\InHealthDTR\
+-- From: E:\LRN-GitHub\2026\LRNDevTeam\Database\ClaimLineCSVDataCapture\InHealthDTR\
 -- 1. Monthly Summary
 EXEC sp_executesql N'
   /* Content of 06_InHealthDTR_MonthlyBilledProductionSummary.sql */

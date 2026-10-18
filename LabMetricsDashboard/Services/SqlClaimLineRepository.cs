@@ -9,7 +9,7 @@ namespace LabMetricsDashboard.Services;
 /// Reads paginated Claim Level and Line Level detail rows from
 /// <c>dbo.ClaimLevelData</c> and <c>dbo.LineLevelData</c> via
 /// <c>usp_GetClaimLevel*</c> / <c>usp_GetLineLevel*</c>
-/// (common: Sql/ClaimLineDetails_SPs.sql; lab SELECT lists: Sql/ClaimLineDetails_SPs/{Lab}_Details.sql).
+/// (common: Database/LabMetricsDashboard/ClaimLineDetails_SPs.sql; lab SELECT lists: Database/LabMetricsDashboard/ClaimLineDetails_SPs/{Lab}_Details.sql).
 /// </summary>
 public sealed class SqlClaimLineRepository : IClaimLineRepository
 {

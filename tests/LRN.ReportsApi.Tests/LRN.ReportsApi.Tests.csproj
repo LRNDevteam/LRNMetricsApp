@@ -23,10 +23,10 @@
   <!-- The DBA-runnable RPT-01 setup script is parse-checked by ArActivityReportTests, so a typo in
        it is caught at build time rather than in a maintenance window. -->
   <ItemGroup>
-    <None Include="..\..\LRN.ReportsApi\Sql\ArReports\RPT01_ActivityDetail_Setup.sql"
+    <None Include="..\..\Database\LRN.ReportsApi\ArReports\RPT01_ActivityDetail_Setup.sql"
           Link="Sql\RPT01_ActivityDetail_Setup.sql"
           CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\..\LRN.ReportsApi\Sql\DenialWorkflow_MasterValues_Setup.sql"
+    <None Include="..\..\Database\LRN.ReportsApi\DenialWorkflow_MasterValues_Setup.sql"
           Link="Sql\DenialWorkflow_MasterValues_Setup.sql"
           CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

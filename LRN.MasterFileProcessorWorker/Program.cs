@@ -93,6 +93,12 @@ var host = Host.CreateDefaultBuilder(args)
 		services.AddSingleton<LRN.MasterFileProcessorWorker.Database.LabSourceRunGate>();
 		services.AddSingleton<LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequestStore>();
 
+		// After the line/claim load: refresh the lab's AR Workbench (Denial Workbench) claims and move
+		// assigned claims whose claim status changed to RCM Manager verification.
+		services.Configure<LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncOptions>(
+			context.Configuration.GetSection(LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncOptions.SectionName));
+		services.AddSingleton<LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncService>();
+
 		services.AddHostedService<MasterFileProcessorWorker>();
 	})
 	.Build();

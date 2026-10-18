@@ -135,7 +135,7 @@ export default function UserEmailsPanel({ roles }) {
       {error && <div style={{ padding: '0 16px 12px' }}><ErrorBox message={error} onRetry={load} /></div>}
       {!data && !error && <Loading text="Loading sent emails…" />}
       {data && data.installed === false && (
-        <div className="arwb-hint" style={{ padding: 24, textAlign: 'center' }}>The email log is not set up yet. Run LRN.ReportsApi/Sql/UserMail_Setup.sql on LRNMaster.</div>
+        <div className="arwb-hint" style={{ padding: 24, textAlign: 'center' }}>The email log is not set up yet. Run Database/LRN.ReportsApi/UserMail_Setup.sql on LRNMaster.</div>
       )}
       {data && data.installed !== false && (
         <>

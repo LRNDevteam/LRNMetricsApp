@@ -40,17 +40,10 @@ public sealed class DenialWorkflowController : Controller
         return Json(await _jwtIssuer.CreateTokenAsync(User, cancellationToken));
     }
 
+    // The AR Workbench's LOGOUT_URL. Shared with Account/Logout: a Microsoft user is also signed out
+    // of their Microsoft session.
     [HttpGet("/DenialWorkflow/Logout")]
-    public async Task<IActionResult> Logout()
-    {
-        await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-
-        var authCookie = _configuration["Authentication:CookieName"];
-        Response.Cookies.Delete(string.IsNullOrWhiteSpace(authCookie) ? "LRN.Auth" : authCookie.Trim(), new CookieOptions { Path = "/" });
-        Response.Cookies.Delete("lmd_selected_lab", new CookieOptions { Path = "/" });
-
-        return RedirectToAction("Login", "Account");
-    }
+    public Task<IActionResult> Logout() => LrnSignOut.SignOutAsync(this);
 
     [HttpGet]
     public async Task<IActionResult> Index(
@@ -486,7 +479,11 @@ public sealed class DenialWorkflowController : Controller
         return "User";
     }
 
-    private bool HasAnyRole(params string[] roles) => roles.Any(role => User.IsInRole(role));
+    // "Admin" stands for every full admin (Admin, Super Admin, LRN Admin - MenuAccessFilter's rule), so
+    // a Super Admin is not refused pages a role spelled exactly "Admin" can open.
+    private bool HasAnyRole(params string[] roles) =>
+        roles.Any(role => User.IsInRole(role))
+        || (roles.Contains("Admin", StringComparer.OrdinalIgnoreCase) && LabMetricsDashboard.Filters.MenuAccessFilter.IsFullAdmin(User));
 
     /// <summary>
     /// Lab User: view-only access to the Denial Workflow React app. Matched on the normalised

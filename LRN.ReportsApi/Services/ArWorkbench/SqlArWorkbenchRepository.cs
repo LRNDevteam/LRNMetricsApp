@@ -14,6 +14,7 @@ public interface IArWorkbenchRepository
     Task<ArWorkbenchQueueSummary> GetQueueSummaryAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchDashboard> GetDashboardAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchPagedResult<ArWorkbenchClaimRow>> GetClaimsAsync(ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<ArWorkbenchPagedResult<ArWorkbenchClaimRow>> GetClaimsForExportAsync(ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, int maxRows, CancellationToken ct);
     /// <param name="context">The page's current filters: lists cascade (each counted over the other filters). Null = lab-wide.</param>
     Task<ArWorkbenchFilterOptions> GetFilterOptionsAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct, ArWorkbenchClaimFilter? context = null);
     Task<ArWorkbenchClaimDetail?> GetClaimDetailAsync(int labId, long claimKey, ArWorkbenchUserContext user, CancellationToken ct);
@@ -53,12 +54,24 @@ public interface IArWorkbenchRepository
     Task<ArWorkbenchAuditPage> GetAuditLogAsync(ArWorkbenchAuditFilter filter, ArWorkbenchUserContext user, bool withOptions, CancellationToken ct);
 
     // Attachments (SqlArWorkbenchRepository.Documents.cs)
+    Task<IReadOnlyList<long>> AddClaimDocumentsAsync(int labId, long claimKey, long? followUpId,
+        IReadOnlyList<ArWorkbenchClaimUpload> files, ArWorkbenchUserContext user, string? clientIp, CancellationToken ct);
+    Task<ArWorkbenchPagedResult<ArWorkbenchDocumentRow>> SearchDocumentsAsync(ArWorkbenchDocumentFilter filter, ArWorkbenchUserContext user, CancellationToken ct);
     Task<IReadOnlyList<long>> AddCipResponseDocumentsAsync(int labId, long cipCaseId, IReadOnlyList<(string FileName, string? ContentType, StoredDocument Stored)> files, ArWorkbenchUserContext user, string? clientIp, CancellationToken ct);
     Task<Dictionary<long, List<ArWorkbenchDocumentInfo>>> GetCipDocumentsAsync(int labId, IReadOnlyCollection<long> caseIds, CancellationToken ct);
     Task<(ArWorkbenchDocumentInfo Info, string Container, string Path)?> GetDocumentForDownloadAsync(int labId, long documentId, ArWorkbenchUserContext user, string? clientIp, CancellationToken ct);
     Task<Dictionary<string, (long CipCaseId, string Status)>> GetClientCipIndexAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchLegacyCipResult> ConvertLegacyEscalationsAsync(int labId, string runBy, bool previewOnly, CancellationToken ct);
     Task<Dictionary<long, string>> GetCipStatusesAsync(int labId, IReadOnlyCollection<long> caseIds, ArWorkbenchUserContext user, CancellationToken ct);
+
+    // Status Change Verification + notifications (SqlArWorkbenchRepository.StatusVerification.cs)
+    Task<IReadOnlyList<string>> GetRcmManagerUserNamesAsync(int labId, CancellationToken ct);
+    Task<ArWorkbenchStatusVerificationQueue> GetStatusVerificationQueueAsync(ArWorkbenchStatusVerificationFilter filter, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<ArWorkbenchStatusVerificationResolveResult> ResolveStatusVerificationAsync(int labId, IReadOnlyList<long> claimKeys, string action, string note, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<ArWorkbenchNotificationList> GetNotificationsAsync(int labId, ArWorkbenchUserContext user, bool unreadOnly, CancellationToken ct);
+    Task<int> MarkNotificationsReadAsync(int labId, IReadOnlyList<long> notificationIds, bool all, ArWorkbenchUserContext user, CancellationToken ct);
+    /// <summary>Claims export: assignment, latest follow-up note, QA review and status verification per claim (keys already scope-checked).</summary>
+    Task<Dictionary<long, ArWorkbenchClaimExportDetail>> GetClaimExportDetailsAsync(int labId, IReadOnlyList<long> claimKeys, CancellationToken ct);
 
     // QA Verification (SqlArWorkbenchRepository.Qa.cs)
     Task<ArWorkbenchQaQueue> GetQaQueueAsync(ArWorkbenchQaFilter filter, ArWorkbenchUserContext user, CancellationToken ct);
@@ -86,6 +99,7 @@ public interface IArWorkbenchRepository
     // Automatic Adjustment (SqlArWorkbenchRepository.AutoAdjust.cs)
     Task<ArWorkbenchAdjustmentResult> ProcessAutoAdjustmentsAsync(int labId, IReadOnlyList<long>? claimKeys, bool previewOnly, ArWorkbenchUserContext user, CancellationToken ct);
     Task<int> MarkAdjustmentsPostedAsync(int labId, IReadOnlyList<long> claimKeys, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<IReadOnlyList<long>> GetAgentPostableWriteOffsAsync(int labId, IReadOnlyList<long> claimKeys, string agentUser, CancellationToken ct);
 
     // User Management (SqlArWorkbenchRepository.Users.cs) - LRNMaster user tables
     Task<IReadOnlyList<ArWorkbenchLabOption>> GetAllLabsAsync(CancellationToken ct);
@@ -254,7 +268,7 @@ public sealed partial class SqlArWorkbenchRepository : IArWorkbenchRepository
             _labConnectionSourceById.TryGetValue(labId, out var source);
             throw new InvalidOperationException(
                 $"AR Workbench tables are not installed for LabId {labId} in database '{database}' (connection from {source}). " +
-                "Run LRN.ReportsApi/Sql/ArWorkbench scripts 01-07 (or ARWB_Lab_Database_Setup_Merged.sql) in that lab database, or point that setting at the right database.");
+                "Run Database/LRN.ReportsApi/ArWorkbench scripts 01-07 (or 2_RUN_IN_EACH_LAB_DB_ARWB_Setup.sql) in that lab database, or point that setting at the right database.");
         }
         return connection;
     }
@@ -490,6 +504,22 @@ WHERE u.UserName IN ({string.Join(",", paramNames)});";
         return clauses.Count == 0 ? string.Empty : " AND " + string.Join(" AND ", clauses);
     }
 
+    /// <summary>
+    /// Handoff §3.2 / §10: the restricted (overall AR) queues - Closed, Non-Collectible, Patient AR -
+    /// are for Admin, Manager and Team Lead. A QA Reviewer works the QA queue, so the claim list, its
+    /// filters and the queue counts leave restricted claims out for them (test report DEF-16: the UI hid
+    /// the Work Queue but the API still returned every claim). <paramref name="allowQaReviewed"/> keeps a
+    /// claim the reviewer has a QA review on reachable from its QA history once it has closed.
+    /// The AR Agent is already limited to their own caseload by <see cref="AppendScope"/>.
+    /// </summary>
+    private static string RestrictedQueueScope(ArWorkbenchUserContext user, string alias = "w", bool allowQaReviewed = false)
+    {
+        if (user.SiteAdmin || !string.Equals(user.RoleCode, "qa", StringComparison.OrdinalIgnoreCase)) return string.Empty;
+        return allowQaReviewed
+            ? $" AND ({alias}.IsRestrictedQueue = 0 OR EXISTS (SELECT 1 FROM dbo.ARWB_ClaimQaReview qrs WHERE qrs.ClaimKey = {alias}.ClaimKey))"
+            : $" AND {alias}.IsRestrictedQueue = 0";
+    }
+
     // ==========================================================================================
     // Queues
     // ==========================================================================================
@@ -498,7 +528,7 @@ WHERE u.UserName IN ({string.Join(",", paramNames)});";
     {
         await using var connection = await OpenLabAsync(labId, ct);
         await using var cmd = connection.CreateCommand();
-        var scope = AppendScope(cmd, user);
+        var scope = AppendScope(cmd, user) + RestrictedQueueScope(user);
 
         cmd.CommandText = $@"
 SELECT QueueId, ParentQueueId, QueueLabel, IsPriority, SortOrder, BadgeClass
@@ -517,7 +547,8 @@ SELECT
     ISNULL(SUM(w.RemainingAR), 0),
     SUM(CASE WHEN w.WorkflowStatus = 'Unassigned' AND w.IsOpenInsuranceAR = 1 THEN 1 ELSE 0 END),
     SUM(CASE WHEN w.ArQueueId = 'submittedqa' THEN 1 ELSE 0 END),
-    SUM(CASE WHEN w.IsRefollowupDue = 1 AND w.WorkflowStatus IN ('Assigned', 'QA Rejected', 'Completed') AND w.IsOpenInsuranceAR = 1 THEN 1 ELSE 0 END)
+    SUM(CASE WHEN w.IsRefollowupDue = 1 AND w.WorkflowStatus IN ('Assigned', 'QA Rejected', 'Completed') AND w.IsOpenInsuranceAR = 1 THEN 1 ELSE 0 END),
+    SUM(CASE WHEN w.WorkflowStatus = 'Pending Verification' THEN 1 ELSE 0 END)
 FROM dbo.ARWB_Claim w
 WHERE 1 = 1 {scope};
 
@@ -569,6 +600,7 @@ WHERE r.RequestStatus = 'Pending' {scope};";
             summary.UnassignedOpen = reader.IsDBNull(4) ? 0 : reader.GetInt32(4);
             summary.AwaitingQa = reader.IsDBNull(5) ? 0 : reader.GetInt32(5);
             summary.RefollowupDue = reader.IsDBNull(6) ? 0 : reader.GetInt32(6);
+            summary.StatusVerificationPending = reader.IsDBNull(7) ? 0 : reader.GetInt32(7);
         }
 
         await reader.NextResultAsync(ct);
@@ -607,7 +639,7 @@ WHERE r.RequestStatus = 'Pending' {scope};";
         ["Other"] = ("Review", "Review payer remittance remarks and determine the appropriate corrective action.")
     };
 
-    private static readonly string[] WorkflowStatusOrder = ["Unassigned", "Assigned", "Submitted for QA", "QA Rejected", "Completed"];
+    private static readonly string[] WorkflowStatusOrder = ["Unassigned", "Assigned", "Pending Verification", "Submitted for QA", "QA Rejected", "Completed"];
 
     /// <summary>
     /// Every tile, chart and table of the mockup's System Administrator dashboard in one round trip.
@@ -640,8 +672,8 @@ SELECT
 FROM dbo.ARWB_Claim w
 WHERE 1 = 1 {scope};
 
--- 1. Data refresh (latest successful load)
-SELECT TOP (1) CompletedOn, SourcePeriodStart, SourcePeriodEnd
+-- 1. Data refresh (latest successful load): when it ran, and when the master file it read was loaded
+SELECT TOP (1) CompletedOn, SourcePeriodStart, SourcePeriodEnd, SourceLoadedOn, SourceFileName
 FROM dbo.ARWB_RefreshRun
 WHERE RunStatus = 'Succeeded'
 ORDER BY RefreshRunId DESC;
@@ -675,8 +707,9 @@ WHERE w.IsOpenInsuranceAR = 1 AND w.ArQueueId NOT IN ('closed', 'patientar') {sc
 GROUP BY w.ArQueueId, w.ArSubQueueId, t.QueueLabel, s.QueueLabel, t.SortOrder, s.SortOrder
 ORDER BY t.SortOrder, s.SortOrder;
 
--- 6. AR Collections Progress: revenue expectation (initial insurance AR) per top-level queue
-SELECT w.ArQueueId, t.QueueLabel, COUNT(*), ISNULL(SUM(w.InitialInsuranceAR), 0), ISNULL(SUM(w.RecoveredAmount), 0)
+-- 6. AR Collections Progress: Revenue Expectation (fee-schedule priced, handoff section 7 - DEF-11;
+--    it used to show the initial insurance AR under that name) per top-level queue
+SELECT w.ArQueueId, t.QueueLabel, COUNT(*), ISNULL(SUM(w.RevenueExpectation), 0), ISNULL(SUM(w.RecoveredAmount), 0)
 FROM dbo.ARWB_Claim w
 INNER JOIN dbo.ARWB_ArQueue t ON t.QueueId = w.ArQueueId
 WHERE 1 = 1 {scope}
@@ -732,6 +765,8 @@ ORDER BY SUM(w.RecoveredAmount) DESC;";
             d.DataRefreshedOn = reader.IsDBNull(0) ? null : reader.GetDateTime(0);
             d.SourcePeriodStart = reader.IsDBNull(1) ? null : reader.GetDateTime(1);
             d.SourcePeriodEnd = reader.IsDBNull(2) ? null : reader.GetDateTime(2);
+            d.DataLoadedOn = reader.IsDBNull(3) ? null : reader.GetDateTime(3);
+            d.DataSourceFile = reader.IsDBNull(4) ? null : reader.GetString(4);
         }
 
         await reader.NextResultAsync(ct);
@@ -871,16 +906,29 @@ ORDER BY SUM(w.RecoveredAmount) DESC;";
     // Claims
     // ==========================================================================================
 
-    public async Task<ArWorkbenchPagedResult<ArWorkbenchClaimRow>> GetClaimsAsync(ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, CancellationToken ct)
+    public Task<ArWorkbenchPagedResult<ArWorkbenchClaimRow>> GetClaimsAsync(ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, CancellationToken ct)
     {
         var page = Math.Max(1, filter.Page);
         var pageSize = Math.Clamp(filter.PageSize <= 0 ? 50 : filter.PageSize, 1, MaxPageSize);
+        return QueryClaimsAsync(filter, user, page, pageSize, 30, ct);
+    }
 
+    /// <summary>
+    /// Export: the first <paramref name="maxRows"/> matching claims in one query. Paging 500 at a time
+    /// re-ran the count and an ever-deeper OFFSET for every page (170 round trips for 84,000 claims).
+    /// </summary>
+    public Task<ArWorkbenchPagedResult<ArWorkbenchClaimRow>> GetClaimsForExportAsync(ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, int maxRows, CancellationToken ct)
+        => QueryClaimsAsync(filter, user, 1, Math.Max(1, maxRows), 600, ct);
+
+    private async Task<ArWorkbenchPagedResult<ArWorkbenchClaimRow>> QueryClaimsAsync(ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, int page, int pageSize, int timeoutSeconds, CancellationToken ct)
+    {
+        await ResolveClassificationAsync(filter, ct);
         await using var connection = await OpenLabAsync(filter.LabId, ct);
         await using var cmd = connection.CreateCommand();
+        cmd.CommandTimeout = timeoutSeconds;
 
         var where = BuildClaimFilter(cmd, filter);
-        var scope = AppendScope(cmd, user);
+        var scope = AppendScope(cmd, user) + RestrictedQueueScope(user);
         var orderColumn = SortColumns.TryGetValue(filter.SortBy ?? string.Empty, out var col) ? col : "w.RemainingAR";
         var direction = filter.SortDesc ? "DESC" : "ASC";
 
@@ -902,13 +950,14 @@ WITH pg AS
 )
 SELECT
     v.ClaimKey, v.ClaimID, v.LabName, v.PatientID, v.PatientName, v.PayerName, v.PayerType, v.ClinicName, v.ReferringProvider, v.PanelName,
-    v.DateOfService, v.DenialCode, v.DenialCategory, v.DenialReason, v.SourceClaimStatus, v.ChargeAmount, v.InsuranceBalance, v.PatientBalance,
+    v.DateOfService, COALESCE(v.DenialCodesNormalized, v.DenialCode) AS DenialCode, v.DenialCategory, v.DenialReason, v.SourceClaimStatus, v.ChargeAmount, v.InsuranceBalance, v.PatientBalance,
     v.InitialInsuranceAR, v.RevenueExpectation, v.RecoveredAmount, v.RemainingAR, v.WorkflowStatus, v.Priority, v.AssignedAgentUser,
     v.LastFollowUpDate, v.NextFollowUpDate, v.FixResolution, v.AgingDays, v.AgingBucket,
     v.IsTflRisk, v.IsNonCollectible, tw.HasNonCollectibleDenial, v.ArQueueId, v.ArQueueLabel, v.ArQueueBadgeClass,
     v.ArSubQueueId, v.ArSubQueueLabel, DATEDIFF(day, {UntouchedSinceSql("tw")}, SYSUTCDATETIME()) AS DaysSinceLastTouch,
     v.QaStatus, v.OpenCipCases, v.PendingAgentRequests,
-    v.LineCount, cpt.CPTCode AS FirstCptCode
+    v.LineCount, cpt.CPTCode AS FirstCptCode,
+    v.RecoveryStatus, CAST(CASE WHEN v.IsAutoAdjusted = 1 OR v.IsWriteOffApproved = 1 THEN 1 ELSE 0 END AS bit) AS IsBalanceNullified
 FROM pg
 INNER JOIN dbo.ARWB_vw_ClaimWorklist v ON v.ClaimKey = pg.ClaimKey
 INNER JOIN dbo.ARWB_Claim tw ON tw.ClaimKey = pg.ClaimKey
@@ -972,7 +1021,9 @@ ORDER BY pg.Seq;";
                 OpenCipCases = N("OpenCipCases") ?? 0,
                 PendingAgentRequests = N("PendingAgentRequests") ?? 0,
                 LineCount = N("LineCount") ?? 0,
-                FirstCptCode = S("FirstCptCode")
+                FirstCptCode = S("FirstCptCode"),
+                RecoveryStatus = S("RecoveryStatus"),
+                IsBalanceNullified = B("IsBalanceNullified")
             });
         }
 
@@ -981,8 +1032,10 @@ ORDER BY pg.Seq;";
         var names = await GetDisplayNamesAsync(result.Items.Select(i => i.AssignedAgentUser), ct);
         foreach (var item in result.Items)
         {
-            if (item.AssignedAgentUser is not null && names.TryGetValue(item.AssignedAgentUser, out var name))
-                item.AssignedAgentName = name;
+            // An agent with no first / last name on file (or no longer in LabUsers) shows their user
+            // name rather than nothing (test report OBS-07).
+            if (!string.IsNullOrWhiteSpace(item.AssignedAgentUser))
+                item.AssignedAgentName = names.TryGetValue(item.AssignedAgentUser, out var name) ? name : item.AssignedAgentUser;
         }
         return result;
     }
@@ -1100,9 +1153,28 @@ ORDER BY pg.Seq;";
             {
                 cmd.Parameters.Add($"@Dc{i}", SqlDbType.NVarChar, 50).Value = denialCodes[i];
                 cmd.Parameters.Add($"@DcL{i}", SqlDbType.NVarChar, 60).Value = "%," + denialCodes[i].Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + ",%";
-                any.Add($"w.PrimaryDenialCode = @Dc{i} OR w.LineDenialCodesSearch LIKE @DcL{i}");
+                any.Add(filter.PrimaryDenialOnly
+                    ? $"w.PrimaryDenialCode = @Dc{i}"
+                    : $"w.PrimaryDenialCode = @Dc{i} OR w.LineDenialCodesSearch LIKE @DcL{i}");
             }
             where.Add("(" + string.Join(" OR ", any) + ")");
+        }
+        // Denial classification -> its primary codes (resolved from LRNMaster by ResolveClassificationAsync).
+        // Codes are letters and digits only (normalized), so a comma list split as XML is safe.
+        if (filter.ClassificationCodes is { } classCodes)
+        {
+            var codes = classCodes.Where(c => c.Length > 0 && c.All(char.IsLetterOrDigit)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (codes.Count == 0)
+            {
+                where.Add("1 = 0");     // a classification no code carries matches nothing
+            }
+            else
+            {
+                cmd.Parameters.Add("@ClsCodes", SqlDbType.NVarChar, -1).Value = string.Join(",", codes);
+                where.Add(@"w.PrimaryDenialCode IN (SELECT c.v.value('.', 'nvarchar(50)')
+                          FROM (SELECT x = CAST(N'<c>' + REPLACE(@ClsCodes, N',', N'</c><c>') + N'</c>' AS xml)) t
+                          CROSS APPLY t.x.nodes('/c') c(v))");
+            }
         }
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
@@ -1123,11 +1195,65 @@ ORDER BY pg.Seq;";
     /// selected values always stay visible to untick. A value with no claims left is dropped unless
     /// it is selected.
     /// </summary>
+    /// <summary>
+    /// Normalized denial code -> its denial classifications (LRNMaster), from the Denial Mapper Super
+    /// Master (Master Values > Denial Code Master; codes stored with their group prefix, several rows
+    /// per code for CPT-specific scenarios) and the central Denial Code Master. Empty when neither is
+    /// reachable: the classification filter then simply has no options.
+    /// </summary>
+    private async Task<Dictionary<string, HashSet<string>>> GetCodeClassificationsAsync(CancellationToken ct)
+    {
+        var map = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        void Add(string? rawCode, string? classification)
+        {
+            var code = ArWorkbenchMasterRules.NormalizeDenialCode(rawCode);
+            var cls = classification?.Trim();
+            if (code is null || string.IsNullOrEmpty(cls)) return;
+            if (!map.TryGetValue(code, out var set)) map[code] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            set.Add(cls);
+        }
+
+        try
+        {
+            await using var master = new SqlConnection(_masterConnectionString);
+            await master.OpenAsync(ct);
+            await using var cmd = new SqlCommand(@"
+IF OBJECT_ID(N'dbo.DenialMapperSuperMaster', N'U') IS NOT NULL
+    SELECT DenialCode, DenialClassification FROM dbo.DenialMapperSuperMaster
+    WHERE IsActive = 1 AND NULLIF(LTRIM(RTRIM(DenialClassification)), N'') IS NOT NULL;
+IF OBJECT_ID(N'dbo.ARWB_DenialCodeMaster', N'U') IS NOT NULL
+    SELECT DenialCode, DenialClassification FROM dbo.ARWB_DenialCodeMaster
+    WHERE IsActive = 1 AND NULLIF(LTRIM(RTRIM(DenialClassification)), N'') IS NOT NULL;", master) { CommandTimeout = 60 };
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            do
+            {
+                while (await r.ReadAsync(ct))
+                    Add(r.IsDBNull(0) ? null : r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1));
+            } while (await r.NextResultAsync(ct));
+        }
+        catch (SqlException)
+        {
+            // LRNMaster unreachable: no classification options, other filters unaffected.
+        }
+        return map;
+    }
+
+    /// <summary>Turns the filter's denial classifications into the primary codes BuildClaimFilter matches.</summary>
+    private async Task ResolveClassificationAsync(ArWorkbenchClaimFilter filter, CancellationToken ct)
+    {
+        var wanted = (filter.Classification ?? []).Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (wanted.Count == 0) { filter.ClassificationCodes = null; return; }
+        var classOf = await GetCodeClassificationsAsync(ct);
+        filter.ClassificationCodes = classOf.Where(kv => kv.Value.Overlaps(wanted)).Select(kv => kv.Key).ToList();
+    }
+
     public async Task<ArWorkbenchFilterOptions> GetFilterOptionsAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct, ArWorkbenchClaimFilter? context = null)
     {
         await using var connection = await OpenLabAsync(labId, ct);
         var cascading = context is not null;
         context ??= new ArWorkbenchClaimFilter { LabId = labId };
+        await ResolveClassificationAsync(context, ct);
 
         // One query per list: its WHERE is the context minus that list's own selection.
         async Task<List<ArWorkbenchFilterOption>> FacetAsync(Func<ArWorkbenchClaimFilter, ArWorkbenchClaimFilter> without, Func<string, string> sql,
@@ -1135,7 +1261,7 @@ ORDER BY pg.Seq;";
         {
             await using var cmd = connection.CreateCommand();
             cmd.CommandTimeout = 120;
-            var where = BuildClaimFilter(cmd, without(context.Copy())) + AppendScope(cmd, user);
+            var where = BuildClaimFilter(cmd, without(context.Copy())) + AppendScope(cmd, user) + RestrictedQueueScope(user);
             cmd.CommandText = sql(where);
             var chosen = new HashSet<string>(selected ?? [], StringComparer.OrdinalIgnoreCase);
             var list = new List<ArWorkbenchFilterOption>();
@@ -1199,6 +1325,27 @@ WHERE m.ListType = 'AGING_BUCKET' AND m.IsActive = 1 ORDER BY m.SortOrder;", con
             SourceStatuses = await FacetAsync(f => { f.SourceStatus = new(); return f; }, w => Distinct("w.SourceClaimStatus", w), context.SourceStatus, ArWorkbenchFilterValues.None, "(No status)")
         };
 
+        // Denial classification: claims counted by primary code (over every other filter), then summed
+        // per classification of the LRNMaster masters. A code with several classifications counts in each.
+        var classOf = await GetCodeClassificationsAsync(ct);
+        if (classOf.Count > 0)
+        {
+            var byCode = await FacetAsync(f => { f.Classification = new(); f.ClassificationCodes = null; return f; },
+                w => $"SELECT w.PrimaryDenialCode, COUNT(*) FROM dbo.ARWB_Claim w WHERE w.PrimaryDenialCode IS NOT NULL AND {w} GROUP BY w.PrimaryDenialCode;",
+                null);
+            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var o in byCode)
+                if (classOf.TryGetValue(o.Value, out var set))
+                    foreach (var cls in set) counts[cls] = counts.GetValueOrDefault(cls) + o.Count;
+            // A selected classification stays listed (to untick) even when nothing matches now.
+            foreach (var chosen in context.Classification ?? [])
+                if (!string.IsNullOrWhiteSpace(chosen) && !counts.ContainsKey(chosen.Trim())) counts[chosen.Trim()] = 0;
+            options.Classifications = counts
+                .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(kv => new ArWorkbenchFilterOption { Value = kv.Key, Label = kv.Key, Count = kv.Value })
+                .ToList();
+        }
+
         // Agent options show the person's name; the value stays the LabUsers.UserName.
         var names = await GetDisplayNamesAsync(options.Agents.Select(a => a.Value), ct);
         foreach (var a in options.Agents)
@@ -1213,7 +1360,7 @@ WHERE m.ListType = 'AGING_BUCKET' AND m.IsActive = 1 ORDER BY m.SortOrder;", con
         await using var connection = await OpenLabAsync(labId, ct);
         await using var cmd = connection.CreateCommand();
         cmd.Parameters.Add("@ClaimKey", SqlDbType.BigInt).Value = claimKey;
-        var scope = AppendScope(cmd, user);
+        var scope = AppendScope(cmd, user) + RestrictedQueueScope(user, allowQaReviewed: true);
 
         // The scope check runs once, on the claim row; the child queries only run for a claim the
         // caller is allowed to see.
@@ -1229,16 +1376,29 @@ INNER JOIN dbo.ARWB_WorkflowTemplateStage s ON s.TemplateKey = t.TemplateKey
 WHERE c.ClaimKey = @ClaimKey AND @Allowed = 1
 ORDER BY s.StageOrder;
 
-SELECT LineNumber, CPTCode, Units, Modifier, ChargeAmount, AllowedAmount, InsurancePayment, InsuranceAdjustments,
-       InsuranceBalance, PatientBalance, LineClaimStatus, PayStatus, DenialCode, DenialDate, ICDCode, SourceRecordId
-FROM dbo.ARWB_ClaimLine WHERE ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY LineNumber;
+SELECT l.LineNumber, l.CPTCode, l.Units, l.Modifier, l.ChargeAmount, l.AllowedAmount, l.InsurancePayment, l.InsuranceAdjustments,
+       l.InsuranceBalance, l.PatientBalance, l.LineClaimStatus, l.PayStatus, l.DenialCode, l.DenialDate, l.ICDCode, l.SourceRecordId,
+       l.ExpectedRate, l.RevenueExpectation,
+       -- In the claim's Revenue Expectation: the CPT has been denied on this claim (or the claim never had a denied line).
+       CASE WHEN OBJECT_ID(N'dbo.ARWB_ClaimDeniedCpt', N'U') IS NULL THEN CAST(1 AS bit)
+            WHEN NOT EXISTS (SELECT 1 FROM dbo.ARWB_ClaimDeniedCpt d WHERE d.ClaimKey = l.ClaimKey) THEN CAST(1 AS bit)
+            WHEN EXISTS (SELECT 1 FROM dbo.ARWB_ClaimDeniedCpt d WHERE d.ClaimKey = l.ClaimKey AND d.CPTCode = LTRIM(RTRIM(l.CPTCode))) THEN CAST(1 AS bit)
+            ELSE CAST(0 AS bit) END
+FROM dbo.ARWB_ClaimLine l WHERE l.ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY l.LineNumber;
 
 SELECT ActivityId, ActivityOn, ActionType, Detail, UserName, RoleCode, IsSystem
 FROM dbo.ARWB_ClaimActivity WHERE ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY ActivityOn DESC, ActivityId DESC;
 
 SELECT FollowUpId, ClaimType, FollowUpType, FollowUpClaimStatus, DenialRootCause, FixResolution, FollowUpComment,
        NextFollowUpDate, CreatedBy, CreatedOn
-FROM dbo.ARWB_ClaimFollowUp WHERE ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY CreatedOn DESC;";
+FROM dbo.ARWB_ClaimFollowUp WHERE ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY CreatedOn DESC;
+
+-- Each line's denial codes, one row per code, with the workbench category and description.
+SELECT cl.LineNumber, ld.Ordinal, ld.DenialCodeRaw, ld.DenialCode, ld.GroupCode, ld.DenialCategory, ld.DenialReason, ld.IsNonCollectible
+FROM dbo.ARWB_ClaimLineDenial ld
+INNER JOIN dbo.ARWB_ClaimLine cl ON cl.ClaimLineKey = ld.ClaimLineKey
+WHERE ld.ClaimKey = @ClaimKey AND @Allowed = 1
+ORDER BY cl.LineNumber, ld.Ordinal;";
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) return null;
@@ -1274,7 +1434,10 @@ FROM dbo.ARWB_ClaimFollowUp WHERE ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY
                 DenialCode = Str(reader, 12),
                 DenialDate = Date(reader, 13),
                 ICDCode = Str(reader, 14),
-                SourceRecordId = reader.IsDBNull(15) ? null : reader.GetInt32(15)
+                SourceRecordId = reader.IsDBNull(15) ? null : reader.GetInt32(15),
+                ExpectedRate = reader.IsDBNull(16) ? null : reader.GetDecimal(16),
+                RevenueExpectation = reader.GetDecimal(17),
+                InRevenueExpectation = reader.GetBoolean(18)
             });
         }
 
@@ -1308,6 +1471,23 @@ FROM dbo.ARWB_ClaimFollowUp WHERE ClaimKey = @ClaimKey AND @Allowed = 1 ORDER BY
                 NextFollowUpDate = Date(reader, 7),
                 CreatedBy = reader.GetString(8),
                 CreatedOn = reader.GetDateTime(9)
+            });
+        }
+
+        await reader.NextResultAsync(ct);
+        var linesByNumber = detail.Lines.GroupBy(l => l.LineNumber).ToDictionary(g => g.Key, g => g.First());
+        while (await reader.ReadAsync(ct))
+        {
+            if (!linesByNumber.TryGetValue(reader.GetInt32(0), out var line)) continue;
+            line.Denials.Add(new ArWorkbenchLineDenial
+            {
+                Ordinal = Convert.ToInt32(reader.GetValue(1)),
+                DenialCodeRaw = Str(reader, 2),
+                DenialCode = Str(reader, 3),
+                GroupCode = Str(reader, 4),
+                DenialCategory = Str(reader, 5),
+                DenialDescription = Str(reader, 6),
+                IsNonCollectible = !reader.IsDBNull(7) && reader.GetBoolean(7)
             });
         }
 
@@ -1486,7 +1666,24 @@ SELECT SettingKey, SettingValue FROM dbo.ARWB_AppSetting;";
 
     public async Task<ArWorkbenchRefreshRun?> RunRefreshAsync(int labId, string runBy, string? note, CancellationToken ct, bool reprocessAll = false)
     {
+        // Claims whose source status changed while assigned go to one of these RCM Managers (step 3g).
+        var managers = await GetRcmManagerUserNamesAsync(labId, ct);
+
         await using var connection = await OpenLabAsync(labId, ct);
+
+        // A lab whose procedure predates step 3g has no @VerificationManagers parameter.
+        bool takesManagers;
+        await using (var probe = new SqlCommand(
+            "SELECT COUNT(*) FROM sys.parameters WHERE object_id = OBJECT_ID(N'dbo.ARWB_usp_LoadClaimsFromSource') AND name = N'@VerificationManagers';", connection))
+        {
+            takesManagers = Convert.ToInt32(await probe.ExecuteScalarAsync(ct)) > 0;
+        }
+
+        // The reporting team's denial category / Non-Collectible masters drive this sync's categories.
+        await CopyReportingDenialMastersAsync(connection, ct);
+
+        // The fee schedule (LRN Metrics > Master Values > Fees Schedule Import) prices the denied lines.
+        await CopyFeeScheduleAsync(connection, ct);
 
         // The load can take minutes on a large lab. Run it to completion, then read the run row back.
         await using (var cmd = new SqlCommand("dbo.ARWB_usp_LoadClaimsFromSource", connection) { CommandType = CommandType.StoredProcedure, CommandTimeout = 1800 })
@@ -1494,6 +1691,8 @@ SELECT SettingKey, SettingValue FROM dbo.ARWB_AppSetting;";
             cmd.Parameters.Add("@RunBy", SqlDbType.NVarChar, 256).Value = runBy;
             cmd.Parameters.Add("@Note", SqlDbType.NVarChar, 1000).Value = (object?)note ?? DBNull.Value;
             cmd.Parameters.Add("@ReprocessAll", SqlDbType.Bit).Value = reprocessAll;
+            if (takesManagers)
+                cmd.Parameters.Add("@VerificationManagers", SqlDbType.NVarChar, -1).Value = managers.Count == 0 ? DBNull.Value : string.Join(",", managers);
             await cmd.ExecuteNonQueryAsync(ct);
         }
 
@@ -1505,7 +1704,7 @@ SELECT SettingKey, SettingValue FROM dbo.ARWB_AppSetting;";
     private static string RefreshRunSelect(string top) => $@"
 SELECT {top} RefreshRunId, SourceRunId, SourceFileName, SourcePeriodStart, SourcePeriodEnd, RunStatus, StartedOn, CompletedOn,
        SourceClaimRows, SourceLineRows, ClaimsInserted, ClaimsUpdated, ClaimsUnchanged, ClaimsNoLongerInSource, ClaimsLinesReloaded,
-       RunBy, ErrorMessage
+       RunBy, ErrorMessage, SourceLoadedOn, ClaimsStatusVerification
 FROM dbo.ARWB_RefreshRun";
 
     private static ArWorkbenchRefreshRun ReadRefreshRun(SqlDataReader r) => new()
@@ -1526,7 +1725,9 @@ FROM dbo.ARWB_RefreshRun";
         ClaimsNoLongerInSource = Int(r, 13),
         ClaimsLinesReloaded = Int(r, 14),
         RunBy = Str(r, 15),
-        ErrorMessage = Str(r, 16)
+        ErrorMessage = Str(r, 16),
+        SourceLoadedOn = Date(r, 17),
+        ClaimsStatusVerification = Int(r, 18)
     };
 
     private static string? Str(SqlDataReader r, int i) => r.IsDBNull(i) ? null : r.GetString(i);

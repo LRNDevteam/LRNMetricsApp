@@ -4,7 +4,7 @@ namespace DenialDatabaseProcessorWorker.Services.ReportLogging;
 /// The task-progression vocabulary for dbo.DenialTaskBoard.Status (spec DD-07).
 ///
 /// These mirror dbo.DenialStatusMaster, which LRN.ReportsApi seeds in every lab database
-/// (Sql/Denial_Lab_Database_Setup_Merged.sql). The seven human statuses are the API's; the three
+/// (Database/LRN.ReportsApi/Denial_Lab_Database_Setup_Merged.sql). The seven human statuses are the API's; the three
 /// system statuses at the bottom are set ONLY by this worker and must never be offered to a user
 /// or accepted by an API endpoint (DD-08).
 ///

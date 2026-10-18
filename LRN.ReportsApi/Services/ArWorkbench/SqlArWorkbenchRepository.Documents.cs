@@ -107,6 +107,148 @@ END;";
         return (info, r.GetString(7), r.GetString(8));
     }
 
+    /// <summary>
+    /// Follow-up attachments (handoff §8.2, DEF-13): files an AR user attaches to a claim - optionally to
+    /// one of its follow-up notes - each with its own document category and optional description. The claim
+    /// must be in the caller's scope (an agent: their own caseload); nothing is recorded otherwise and the result is empty.
+    /// </summary>
+    public async Task<IReadOnlyList<long>> AddClaimDocumentsAsync(int labId, long claimKey, long? followUpId,
+        IReadOnlyList<ArWorkbenchClaimUpload> files, ArWorkbenchUserContext user, string? clientIp, CancellationToken ct)
+    {
+        var ids = new List<long>();
+        if (files.Count == 0) return ids;
+        await using var connection = await OpenLabAsync(labId, ct);
+        await using var tx = (SqlTransaction)await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+        foreach (var (fileName, contentType, stored, category, description) in files)
+        {
+            await using var cmd = connection.CreateCommand();
+            cmd.Transaction = tx;
+            var scope = AppendScope(cmd, user);
+            cmd.CommandText = $@"
+INSERT INTO dbo.ARWB_Document (ClaimKey, FollowUpId, DocumentSource, DocumentCategory, Description, FileName, ContentType, SizeBytes,
+                               BlobContainer, BlobPath, ContentSha256, UploadedBy, UploadedByRole)
+SELECT w.ClaimKey, @FollowUp, 'FollowUp', @Category, @Description, @Name, @Type, @Size, @Container, @Path, @Sha, @User, @Role
+FROM dbo.ARWB_Claim w
+WHERE w.ClaimKey = @ClaimKey {scope}
+  AND (@FollowUp IS NULL OR EXISTS (SELECT 1 FROM dbo.ARWB_ClaimFollowUp f WHERE f.FollowUpId = @FollowUp AND f.ClaimKey = w.ClaimKey));
+IF @@ROWCOUNT = 0 BEGIN SELECT CAST(NULL AS bigint); RETURN; END;
+DECLARE @Id bigint = CAST(SCOPE_IDENTITY() AS bigint);
+INSERT INTO dbo.ARWB_DocumentAccessLog (DocumentId, AccessType, UserName, RoleCode, ClientIp) VALUES (@Id, 'Upload', @User, @Role, @Ip);
+INSERT INTO dbo.ARWB_ClaimActivity (ClaimKey, ActivityOn, ActionType, Detail, UserName, RoleCode, IsSystem)
+VALUES (@ClaimKey, SYSUTCDATETIME(), N'Document Uploaded', CONCAT(@Category, N': ', @Name, N' - ' + @Description), @User, @Role, 0);
+SELECT @Id;";
+            cmd.Parameters.Add("@ClaimKey", SqlDbType.BigInt).Value = claimKey;
+            cmd.Parameters.Add("@FollowUp", SqlDbType.BigInt).Value = (object?)followUpId ?? DBNull.Value;
+            cmd.Parameters.Add("@Category", SqlDbType.NVarChar, 100).Value = Truncate(category, 100);
+            cmd.Parameters.Add("@Description", SqlDbType.NVarChar, 500).Value = string.IsNullOrWhiteSpace(description) ? DBNull.Value : (object)Truncate(description.Trim(), 500);
+            cmd.Parameters.Add("@Name", SqlDbType.NVarChar, 260).Value = Truncate(fileName, 260);
+            cmd.Parameters.Add("@Type", SqlDbType.NVarChar, 200).Value = (object?)contentType ?? DBNull.Value;
+            cmd.Parameters.Add("@Size", SqlDbType.BigInt).Value = stored.SizeBytes;
+            cmd.Parameters.Add("@Container", SqlDbType.NVarChar, 100).Value = stored.Container;
+            cmd.Parameters.Add("@Path", SqlDbType.NVarChar, 1024).Value = stored.Path;
+            cmd.Parameters.Add("@Sha", SqlDbType.VarChar, 64).Value = stored.Sha256;
+            cmd.Parameters.Add("@User", SqlDbType.NVarChar, 256).Value = Truncate(user.UserName, 256);
+            cmd.Parameters.Add("@Role", SqlDbType.VarChar, 20).Value = Truncate(user.RoleCode, 20);
+            cmd.Parameters.Add("@Ip", SqlDbType.VarChar, 64).Value = (object?)clientIp ?? DBNull.Value;
+            if (await cmd.ExecuteScalarAsync(ct) is long id) ids.Add(id);
+            else { await tx.RollbackAsync(ct); return []; }
+        }
+        await tx.CommitAsync(ct);
+        return ids;
+    }
+
+    /// <summary>
+    /// Document Vault (handoff §8.2, DEF-14) and a claim's Documents tab: documents on claims in the
+    /// caller's scope, searchable by claim / visit (accession), patient and category. A client user
+    /// only ever sees CIP-response documents.
+    /// </summary>
+    public async Task<ArWorkbenchPagedResult<ArWorkbenchDocumentRow>> SearchDocumentsAsync(ArWorkbenchDocumentFilter filter, ArWorkbenchUserContext user, CancellationToken ct)
+    {
+        var page = Math.Max(1, filter.Page);
+        var pageSize = Math.Clamp(filter.PageSize <= 0 ? 50 : filter.PageSize, 1, 500);
+        await using var connection = await OpenLabAsync(filter.LabId, ct);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandTimeout = 60;
+        var scope = AppendScope(cmd, user);
+
+        var where = new List<string> { "d.IsDeleted = 0" };
+        if (ArWorkbenchClientVisibility.IsClientUser(user)) where.Add("d.DocumentSource = 'CipResponse'");
+        if (filter.ClaimKey is long key)
+        {
+            where.Add("d.ClaimKey = @ClaimKey");
+            cmd.Parameters.Add("@ClaimKey", SqlDbType.BigInt).Value = key;
+        }
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            where.Add("(w.ClaimID LIKE @Search OR w.AccessionNumber LIKE @Search OR w.PatientName LIKE @Search OR w.PatientID LIKE @Search OR d.FileName LIKE @Search OR d.Description LIKE @Search)");
+            cmd.Parameters.Add("@Search", SqlDbType.NVarChar, 210).Value = "%" + EscapeLike(filter.Search.Trim()) + "%";
+        }
+        if (!string.IsNullOrWhiteSpace(filter.Category))
+        {
+            where.Add("d.DocumentCategory = @Category");
+            cmd.Parameters.Add("@Category", SqlDbType.NVarChar, 100).Value = filter.Category.Trim();
+        }
+        if (!string.IsNullOrWhiteSpace(filter.Source))
+        {
+            where.Add("d.DocumentSource = @Source");
+            cmd.Parameters.Add("@Source", SqlDbType.VarChar, 20).Value = filter.Source.Trim();
+        }
+        if (filter.From is DateTime from)
+        {
+            where.Add("d.UploadedOn >= @From");
+            cmd.Parameters.Add("@From", SqlDbType.DateTime2).Value = from.Date;
+        }
+        if (filter.To is DateTime to)
+        {
+            where.Add("d.UploadedOn < @To");
+            cmd.Parameters.Add("@To", SqlDbType.DateTime2).Value = to.Date.AddDays(1);
+        }
+        cmd.Parameters.Add("@Offset", SqlDbType.Int).Value = (page - 1) * pageSize;
+        cmd.Parameters.Add("@PageSize", SqlDbType.Int).Value = pageSize;
+
+        var filterSql = string.Join(" AND ", where) + scope;
+        cmd.CommandText = $@"
+SELECT COUNT(*) FROM dbo.ARWB_Document d INNER JOIN dbo.ARWB_Claim w ON w.ClaimKey = d.ClaimKey WHERE {filterSql};
+SELECT d.DocumentId, d.ClaimKey, w.ClaimID, w.AccessionNumber, w.PatientName, w.PatientID, w.DateOfService, w.PayerName,
+       d.DocumentSource, d.DocumentCategory, d.FollowUpId, d.CipCaseId, d.CipRoundNumber, d.FileName, d.ContentType, d.SizeBytes,
+       d.UploadedBy, d.UploadedOn, d.Description
+FROM dbo.ARWB_Document d INNER JOIN dbo.ARWB_Claim w ON w.ClaimKey = d.ClaimKey
+WHERE {filterSql}
+ORDER BY d.UploadedOn DESC, d.DocumentId DESC
+OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
+
+        var result = new ArWorkbenchPagedResult<ArWorkbenchDocumentRow> { Page = page, PageSize = pageSize };
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        if (await r.ReadAsync(ct)) result.TotalCount = r.GetInt32(0);
+        await r.NextResultAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            result.Items.Add(new ArWorkbenchDocumentRow
+            {
+                DocumentId = r.GetInt64(0),
+                ClaimKey = r.GetInt64(1),
+                ClaimID = r.GetString(2),
+                AccessionNumber = Str(r, 3),
+                PatientName = Str(r, 4),
+                PatientID = Str(r, 5),
+                DateOfService = r.IsDBNull(6) ? null : r.GetDateTime(6),
+                PayerName = Str(r, 7),
+                DocumentSource = r.GetString(8),
+                DocumentCategory = r.GetString(9),
+                FollowUpId = r.IsDBNull(10) ? null : r.GetInt64(10),
+                CipCaseId = r.IsDBNull(11) ? null : r.GetInt64(11),
+                RoundNumber = r.IsDBNull(12) ? null : r.GetInt32(12),
+                FileName = r.GetString(13),
+                ContentType = Str(r, 14),
+                SizeBytes = r.GetInt64(15),
+                UploadedBy = r.GetString(16),
+                UploadedOn = r.GetDateTime(17),
+                Description = Str(r, 18)
+            });
+        }
+        return result;
+    }
+
     /// <summary>The client-visible CIP cases in scope, by case number (bulk CSV response).</summary>
     public async Task<Dictionary<string, (long CipCaseId, string Status)>> GetClientCipIndexAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct)
     {

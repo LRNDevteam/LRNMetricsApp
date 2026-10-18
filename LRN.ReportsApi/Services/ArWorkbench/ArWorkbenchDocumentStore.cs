@@ -18,6 +18,9 @@ public interface IArWorkbenchDocumentStore
 
 public sealed record StoredDocument(string Container, string Path, long SizeBytes, string Sha256);
 
+/// <summary>A stored file being attached to a claim, with its own category and optional description.</summary>
+public sealed record ArWorkbenchClaimUpload(string FileName, string? ContentType, StoredDocument Stored, string Category, string? Description);
+
 /// <summary>
 /// Disk store under ArWorkbenchDocuments:RootPath (default: the Denial Workflow upload root +
 /// \ARWorkbench). Files are named by a GUID - never by the uploaded name - in lab\yyyy\MM folders.

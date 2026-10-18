@@ -38,9 +38,9 @@ poll cycle.
 
 ## Deployment
 
-1. Run `LRN.ReportsApi/Sql/Payer_Matching_Reference_Tables_DDL_and_Seed.sql` (already deployed in
+1. Run `Database/LRN.ReportsApi/Payer_Matching_Reference_Tables_DDL_and_Seed.sql` (already deployed in
    most environments — it seeds the rules tables and 438 aliases).
-2. **Run `LRN.ReportsApi/Sql/001_payer_mapper_additions.sql` before deploying this build** — it is
+2. **Run `Database/LRN.ReportsApi/001_payer_mapper_additions.sql` before deploying this build** — it is
    idempotent and adds `MappingStatus` / `MappedBy` / `LastEvaluatedOn` to `LabInsuranceMaster`
    (with backfill) plus `PendingMatchCandidates` and `PayerMatchAudit`. The web app's Lab master
    queries reference these columns, so the script is a hard prerequisite.

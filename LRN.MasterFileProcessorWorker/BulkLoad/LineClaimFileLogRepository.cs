@@ -8,7 +8,7 @@ namespace LRN.MasterFileProcessorWorker.BulkLoad;
 /// <para>
 /// The existing columns are written exactly as they are; the outcome columns
 /// (Status / RowsCopied / ErrorMessage / CompletedDateTime) are an ADDITIVE migration
-/// (sql/Labs/_Common/02_LineClaimFileLogs.sql) and are written only when present,
+/// (Database/LRN.MasterFileProcessorWorker/Labs/_Common/02_LineClaimFileLogs.sql) and are written only when present,
 /// so this code runs against both the old and the new table shape.
 /// </para>
 /// </summary>

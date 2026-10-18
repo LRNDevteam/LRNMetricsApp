@@ -140,7 +140,7 @@ foreach (var lab in labConfigs)
             }
             catch (Exception aggEx)
             {
-                log.Warn($"  Aggregate check failed — {aggEx.Message} (run Sql/04_CodingAggregates.sql on this DB).");
+                log.Warn($"  Aggregate check failed — {aggEx.Message} (run Database/CaptureDataApp/04_CodingAggregates.sql on this DB).");
                 reportLog.Begin(runId, lab.LabName, sourceFileName);
                 reportLog.Fail(runId, lab.LabName, "AGGREGATES", aggEx.ToString(), sourceFileName);
             }

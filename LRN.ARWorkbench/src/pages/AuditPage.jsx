@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import DataTable, { withSortKeys } from '../components/DataTable';
+import { ExportButton } from '../components/ExportJobs';
 import { AUDIT_SORT_KEYS } from '../config/sortKeys';
 import Icon from '../components/Icon';
 import MultiSelect from '../components/MultiSelect';
@@ -28,7 +29,6 @@ export default function AuditPage() {
   const [data, setData] = useState(null);
   const [options, setOptions] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -60,16 +60,9 @@ export default function AuditPage() {
   const setList = (k, v) => { setLists((l) => ({ ...l, [k]: v })); setQuery((q) => ({ ...q, page: 1 })); };
   const openClaim = (r) => navigate(`/claims/${r.claimKey}`, { state: { from: '/audit' } });
 
-  async function exportAll() {
-    setExporting(true);
-    try {
-      const { page, pageSize, ...rest } = filter; // eslint-disable-line no-unused-vars
-      await arWorkbenchService.auditExport(rest);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setExporting(false);
-    }
+  function startExport() {
+    const { page, pageSize, ...rest } = filter; // eslint-disable-line no-unused-vars
+    return arWorkbenchService.startAuditExport(rest);
   }
 
   const columns = [
@@ -137,9 +130,8 @@ export default function AuditPage() {
           onPageSize={(pageSize) => setQuery((q) => ({ ...q, pageSize, page: 1 }))}
           onRowClick={openClaim}
           toolbar={(
-            <button type="button" className="arwb-btn arwb-btn-sm" disabled={exporting} onClick={exportAll} title="Every matching entry (up to 50,000) as Excel">
-              {exporting ? <span className="arwb-spinner" /> : <Icon name="download" size={15} />} Export Excel
-            </button>
+            <ExportButton scope="Audit Log" label="Export Excel" start={startExport}
+              title="Every matching entry (up to 50,000) as Excel - built in the background" />
           )}
         />
       </div>

@@ -2,7 +2,7 @@ namespace LRN.ReportsApi.Models;
 
 // ============================================================================================
 // AR Workbench - DTOs for /api/ar-workbench. Backed by the [arwb] schema in each lab database
-// (LRN.ReportsApi/Sql/ArWorkbench).
+// (Database/LRN.ReportsApi/ArWorkbench).
 // ============================================================================================
 
 public sealed class ArWorkbenchPermissions
@@ -75,6 +75,8 @@ public sealed class ArWorkbenchQueueSummary
     public int RefollowupDue { get; set; }
     /// <summary>Escalation &amp; reassignment requests waiting for a lead's answer (nav badge).</summary>
     public int AgentRequestsPending { get; set; }
+    /// <summary>Claims held for RCM Manager status change verification (nav badge).</summary>
+    public int StatusVerificationPending { get; set; }
     public List<ArWorkbenchQueueNode> Queues { get; set; } = new();
 }
 
@@ -93,6 +95,9 @@ public sealed class ArWorkbenchDashboard
     public int IdentifiedLastWeek { get; set; }
     public decimal TotalOutstandingAR { get; set; }
     public DateTime? DataRefreshedOn { get; set; }
+    /// <summary>When the master file the last sync read was loaded (UTC) - the reports application's date.</summary>
+    public DateTime? DataLoadedOn { get; set; }
+    public string? DataSourceFile { get; set; }
     public DateTime? SourcePeriodStart { get; set; }
     public DateTime? SourcePeriodEnd { get; set; }
     public int Unassigned { get; set; }
@@ -112,11 +117,19 @@ public sealed class ArWorkbenchDashboard
     public List<ArWorkbenchDashboardBar> WorkflowStatuses { get; set; } = new();
     /// <summary>Workable AR Queue leaves (not Closed / Patient AR) with an open insurance balance.</summary>
     public List<ArWorkbenchDashboardBar> QueueVolumes { get; set; } = new();
-    /// <summary>AR Collections Progress: per top-level AR queue, revenue expectation (initial insurance AR) and count.</summary>
+    /// <summary>AR Collections Progress: per top-level AR queue, Revenue Expectation (fee-schedule priced) and count.</summary>
     public List<ArWorkbenchDashboardBar> ArProgress { get; set; } = new();
 
     // Tables
+    /// <summary>
+    /// "Latest Denial Analysis Report insights": the CURRENT week's uploaded Key Observations - the same
+    /// rows Data Processing > Current week shows (DEF-01) - or, for a week with none uploaded, the
+    /// system-generated top codes. <see cref="InsightsSource"/> says which.
+    /// </summary>
     public List<ArWorkbenchDenialHighlight> DenialHighlights { get; set; } = new();
+    /// <summary>"Uploaded" (team Key Observations) or "System" (top unassigned denial codes).</summary>
+    public string InsightsSource { get; set; } = "System";
+    public DateTime? InsightsWeekStart { get; set; }
     public List<ArWorkbenchAgentProductivity> Agents { get; set; } = new();
 }
 
@@ -182,6 +195,19 @@ public sealed class ArWorkbenchClaimFilter
     /// denial or any line denial is one of them, after the claim sync's normalization.
     /// </summary>
     public List<string> DenialCode { get; set; } = new();
+    /// <summary>
+    /// <see cref="DenialCode"/> matches the PRIMARY denial only - how insights count a code, so routing an
+    /// insight to the Work Queue returns exactly the insight's claims (test report OBS-02).
+    /// </summary>
+    public bool PrimaryDenialOnly { get; set; }
+    /// <summary>
+    /// Denial classification from the central Denial Code Master (Master Values > Denial Code
+    /// Descriptions): a claim matches when its primary denial code carries one of them.
+    /// </summary>
+    public List<string> Classification { get; set; } = new();
+    /// <summary>The primary codes of <see cref="Classification"/>, resolved by the repository. Never read from the request.</summary>
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever, System.Text.Json.Serialization.JsonIgnore]
+    public List<string>? ClassificationCodes { get; set; }
     public string? Search { get; set; }
     public bool OpenInsuranceArOnly { get; set; }
     public bool TflRiskOnly { get; set; }
@@ -235,7 +261,7 @@ public sealed class ArWorkbenchClaimRow
     public decimal InsuranceBalance { get; set; }
     public decimal PatientBalance { get; set; }
     public decimal InitialInsuranceAR { get; set; }
-    /// <summary>Expected payment: the fee-schedule allowable over the claim's lines (handoff section 7).</summary>
+    /// <summary>Revenue Expectation: fee-schedule rate x units over the claim's denied lines (handoff section 7).</summary>
     public decimal RevenueExpectation { get; set; }
     public decimal RecoveredAmount { get; set; }
     public decimal RemainingAR { get; set; }
@@ -259,6 +285,14 @@ public sealed class ArWorkbenchClaimRow
     public string? QaStatus { get; set; }
     public int OpenCipCases { get; set; }
     public int PendingAgentRequests { get; set; }
+    /// <summary>In Progress / Partially Recovered / Fully Recovered / No Recovery (paid vs Revenue Expectation).</summary>
+    public string? RecoveryStatus { get; set; }
+    /// <summary>
+    /// Auto-adjusted or write-off approved: the workbench has nullified the insurance balance (RemainingAR 0)
+    /// while <see cref="InsuranceBalance"/> still shows the master file's amount until the PMS posting
+    /// reaches a sync (DEF-20). Screens show the workbench balance; the amount to post stays in the export.
+    /// </summary>
+    public bool IsBalanceNullified { get; set; }
 }
 
 public static class ArWorkbenchFilterValues
@@ -281,6 +315,8 @@ public sealed class ArWorkbenchFilterOptions
     public List<ArWorkbenchFilterOption> AgingBuckets { get; set; } = new();
     public List<ArWorkbenchFilterOption> FixResolutions { get; set; } = new();
     public List<ArWorkbenchFilterOption> SourceStatuses { get; set; } = new();
+    /// <summary>Denial classifications (central Denial Code Master) of the claims' primary denials.</summary>
+    public List<ArWorkbenchFilterOption> Classifications { get; set; } = new();
 }
 
 /// <summary>Tile counts for My Work and Follow-Up Management, over the caller's scope.</summary>
@@ -337,9 +373,32 @@ public sealed class ArWorkbenchClaimLine
     public string? DenialCode { get; set; }
     public DateTime? DenialDate { get; set; }
     public string? ICDCode { get; set; }
+    /// <summary>Fee schedule rate for the CPT (Fees Schedule Import); null when the CPT has no rate.</summary>
+    public decimal? ExpectedRate { get; set; }
+    /// <summary>Rate x units for this line.</summary>
+    public decimal RevenueExpectation { get; set; }
+    /// <summary>True when the line counts toward the claim's Revenue Expectation (its CPT was denied on the claim).</summary>
+    public bool InRevenueExpectation { get; set; }
     /// <summary>dbo.LineLevelData.RecordId of the line: ICD Code, Units and Modifier are read from it live.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public int? SourceRecordId { get; set; }
+    /// <summary>The line's denial codes (dbo.ARWB_ClaimLineDenial), one per code, in the order received.</summary>
+    public List<ArWorkbenchLineDenial> Denials { get; set; } = new();
+}
+
+public sealed class ArWorkbenchLineDenial
+{
+    public int Ordinal { get; set; }
+    /// <summary>As received, group prefix kept (e.g. CO-16).</summary>
+    public string? DenialCodeRaw { get; set; }
+    /// <summary>Normalized (16), the key of the denial masters.</summary>
+    public string? DenialCode { get; set; }
+    public string? GroupCode { get; set; }
+    /// <summary>Workbench category (Workbench Category Map).</summary>
+    public string? DenialCategory { get; set; }
+    /// <summary>The lab's Denial Code Master description, else the category map's reason.</summary>
+    public string? DenialDescription { get; set; }
+    public bool IsNonCollectible { get; set; }
 }
 
 public sealed class ArWorkbenchActivity
@@ -438,4 +497,7 @@ public sealed class ArWorkbenchRefreshRun
     public int? ClaimsLinesReloaded { get; set; }
     public string? RunBy { get; set; }
     public string? ErrorMessage { get; set; }
+    /// <summary>When the master file this run read was loaded (UTC).</summary>
+    public DateTime? SourceLoadedOn { get; set; }
+    public int? ClaimsStatusVerification { get; set; }
 }

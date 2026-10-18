@@ -323,7 +323,7 @@ footer li{margin-bottom:.35em;}
 
     <div class="callout warn">
       <b>What this audit is.</b> A static read of the DDL in
-      <code>LRN.ReportsApi/Sql/</code> and the SQL embedded in
+      <code>Database/LRN.ReportsApi/</code> and the SQL embedded in
       <code>SqlDenialWorkflowRepository.cs</code>. No lab database was queried — connection strings
       resolve from Key Vault and per-lab config on the application server, and those databases hold
       PHI. Before build, run the verification script in §4 against one real lab to confirm the

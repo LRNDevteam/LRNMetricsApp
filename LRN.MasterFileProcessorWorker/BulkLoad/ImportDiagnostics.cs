@@ -108,7 +108,7 @@ public static class ImportDiagnostics
             foreach (var table in new[] { "dbo.ReportRunIdInfoLog", "dbo.ReportsWorkflowTracker" })
             {
                 var exists = await TableExistsAsync(master!, table, ct);
-                Report($"{table} exists", exists, exists ? "" : "run sql/LRNMaster/*.sql");
+                Report($"{table} exists", exists, exists ? "" : "run Database/LRN.MasterFileProcessorWorker/LRNMaster/*.sql");
             }
         }
 
@@ -196,12 +196,12 @@ public static class ImportDiagnostics
                              .Select(l => l!.SqlTableName)))
             {
                 var exists = await TableExistsAsync(labConn!, table, ct);
-                Report($"  {table} exists", exists, exists ? "" : $"run sql/Labs/{catalog}/*.sql");
+                Report($"  {table} exists", exists, exists ? "" : $"run Database/LRN.MasterFileProcessorWorker/Labs/{catalog}/*.sql");
             }
 
             var hasStatus = await ColumnExistsAsync(labConn!, "dbo.LineClaimFileLogs", "Status", ct);
             Report("  LineClaimFileLogs.Status column", hasStatus,
-                hasStatus ? "" : "optional - run sql/Labs/_Common/02_LineClaimFileLogs.sql to record load outcomes");
+                hasStatus ? "" : "optional - run Database/LRN.MasterFileProcessorWorker/Labs/_Common/02_LineClaimFileLogs.sql to record load outcomes");
 
             // Column drift. Table existence is not enough: a table left over from an earlier
             // iteration is skipped by CREATE TABLE IF NOT EXISTS, and the load then fails mid-swap
@@ -234,7 +234,7 @@ public static class ImportDiagnostics
                         missing.Count == 0
                             ? $"{expected.Count} mapped columns present"
                             : $"{missing.Count} missing ({string.Join(", ", missing.Take(6))}{(missing.Count > 6 ? ", ..." : "")}) " +
-                              $"- re-run sql/Labs/{catalog}/*.sql, which adds missing columns to existing tables");
+                              $"- re-run Database/LRN.MasterFileProcessorWorker/Labs/{catalog}/*.sql, which adds missing columns to existing tables");
                 }
             }
         }

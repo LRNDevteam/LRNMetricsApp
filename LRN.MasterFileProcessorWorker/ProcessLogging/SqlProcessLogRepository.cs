@@ -103,7 +103,7 @@ public sealed class SqlProcessLogRepository : IProcessLogRepository
     {
         if (!_opt.Enabled) return;
 
-        // Written only when the additive migration (sql/LRNMaster/04_*.sql) has been applied, so the
+        // Written only when the additive migration (Database/LRN.MasterFileProcessorWorker/LRNMaster/04_*.sql) has been applied, so the
         // worker runs correctly against a database where it has not.
         var runLogHasLab = await ColumnExistsAsync(_opt.RunLogTable, "LabId", ct);
 

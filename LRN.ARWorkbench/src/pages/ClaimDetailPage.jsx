@@ -4,6 +4,7 @@ import AgentRequestModal from '../components/AgentRequestModal';
 import AssignModal from '../components/AssignModal';
 import AutoAdjustModal from '../components/AutoAdjustModal';
 import { Attachments } from '../components/CipShared';
+import { DocumentTable, UploadDocuments } from '../components/Documents';
 import FollowUpModal from '../components/FollowUpModal';
 import QaDecisionModal, { QA_CRITERIA } from '../components/QaDecisionModal';
 import Icon from '../components/Icon';
@@ -19,7 +20,7 @@ import { arQueueBadgeClass, fmt } from '../utils/format';
 const PHASES = ['Identified', 'Assigned', 'QA Verification', 'Completed'];
 const PHASE_OF_STATUS = { Unassigned: 0, Assigned: 1, 'Submitted for QA': 2, 'QA Rejected': 2, Completed: 3 };
 
-const BACK_LABELS = { '/my-work': 'My Work', '/qa': 'QA Verification Queue', '/audit': 'Audit Logs', '/cip': 'CIP Escalations', '/agent-requests': 'Escalation & Reassignment Requests' };
+const BACK_LABELS = { '/my-work': 'My Work', '/qa': 'QA Verification Queue', '/audit': 'Audit Logs', '/cip': 'CIP Escalations', '/agent-requests': 'Escalation & Reassignment Requests', '/status-verification': 'Status Change Verification' };
 
 // The mockup's CORRECTIVE_ACTION text per denial category.
 const CORRECTIVE_ACTION = {
@@ -98,12 +99,15 @@ export default function ClaimDetailPage() {
   const c = detail.claim;
   const phase = PHASE_OF_STATUS[c.WorkflowStatus] ?? 0;
   const agent = c.AssignedAgentName || c.AssignedAgentUser;
+  // Client users (Client / Clinic / Provider Viewer) never see internal notes (handoff §9.2): the
+  // API leaves follow-ups, the timeline and QA out for them, so their tabs are not offered either.
+  const isClientUser = user?.roleCode === 'viewer' && !user?.siteAdmin;
   const tabs = [
     ['overview', 'Overview'],
     ['cpt', 'CPT / Line Detail'],
     ['denial', 'Denial Info'],
-    ['followups', `Follow-Ups (${detail.followUps.length})`],
-    ['activity', 'Activity Timeline'],
+    ...(isClientUser ? [] : [['followups', `Follow-Ups (${detail.followUps.length})`], ['activity', 'Activity Timeline']]),
+    ['documents', `Documents${c.DocumentCount ? ` (${c.DocumentCount})` : ''}`],
     ...(detail.qaReview ? [['qa', 'QA Review']] : []),
     ...(detail.cipCases?.length ? [['cip', `CIP Case${detail.cipCases.length > 1 ? `s (${detail.cipCases.length})` : ''}`]] : []),
     ...(detail.agentRequests?.length ? [['requests', `Requests (${detail.agentRequests.length})`]] : [])
@@ -148,7 +152,9 @@ export default function ClaimDetailPage() {
               <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => setDialog('autoadjust')}
                 title="Non-collectible denial: write off the insurance balance automatically">Process Automatic Adjustment</button>
             )}
-            {can('assign') && c.ArQueueId === 'autoadj' && (
+            {c.ArQueueId === 'autoadj' && (can('assign')
+              // The agent posts their own approved write-off in the PMS and marks it (handoff §8.3).
+              || (isAgent && can('editClaim') && c.IsWriteOffApproved && c.AssignedAgentUser?.toLowerCase() === user?.userName?.toLowerCase())) && (
               <button type="button" className="arwb-btn arwb-btn-sm" disabled={posting} onClick={markPosted}
                 title="The adjustment / write-off has been posted in the PMS">{posting ? 'Saving…' : 'Mark as Posted'}</button>
             )}
@@ -201,10 +207,11 @@ export default function ClaimDetailPage() {
         </div>
         <div className="arwb-tab-panel">
           {tab === 'overview' && <Overview c={c} />}
-          {tab === 'cpt' && <Cpt lines={detail.lines} />}
-          {tab === 'denial' && <Denial c={c} followUps={detail.followUps} codes={detail.denialCodeInfo || []} />}
+          {tab === 'cpt' && <Cpt lines={detail.lines} codes={detail.denialCodeInfo || []} />}
+          {tab === 'denial' && <Denial c={c} followUps={detail.followUps} codes={detail.denialCodeInfo || []} lines={detail.lines || []} />}
           {tab === 'followups' && <FollowUps c={c} rows={detail.followUps} />}
           {tab === 'activity' && <Activity rows={detail.activity} />}
+          {tab === 'documents' && <ClaimDocuments claimKey={c.ClaimKey} canUpload={!isClientUser && (can('editClaim') || can('assign'))} onUploaded={(m) => done(m, 'documents')} />}
           {tab === 'requests' && <AgentRequests rows={detail.agentRequests || []} />}
           {tab === 'cip' && <CipCases cases={detail.cipCases || []} canManage={can('approve')} labId={labId} />}
           {tab === 'qa' && detail.qaReview && (
@@ -314,52 +321,128 @@ function Overview({ c }) {
 
 // Mockup renderCpt: the CPT table, with the line's denial shown on a "↳" row beneath it. ICD Code,
 // Units and Modifier come from the line's dbo.LineLevelData row (the API reads them live).
-function Cpt({ lines }) {
+// Handoff 2.3 / Feature #4 (DEF-04): each CPT row with a denial has an expand control revealing its
+// line-level denial codes - original group prefix kept - with description, category and the Denial
+// Code Master classification. Rate / Rev. Expectation come from the fee schedule (Fees Schedule
+// Import); a line marked * counts toward the claim's Revenue Expectation (its CPT was denied).
+function Cpt({ lines, codes = [] }) {
+  const [open, setOpen] = useState(() => new Set());
+  const byCode = Object.fromEntries(codes.map((r) => [(r.denialCode || '').toUpperCase(), r]));
   const { rows, th } = useTableSort(lines, {
     line: (l) => l.lineNumber, cpt: (l) => l.cptCode, icd: (l) => l.icdCode, units: (l) => (l.units == null ? null : Number(l.units)),
     modifier: (l) => l.modifier, billed: (l) => l.chargeAmount, allowed: (l) => l.allowedAmount, paid: (l) => l.insurancePayment,
     adjusted: (l) => l.insuranceAdjustments, balance: (l) => l.insuranceBalance, status: (l) => l.payStatus || l.lineClaimStatus,
-    denial: (l) => l.denialCode
+    rate: (l) => l.expectedRate, expectation: (l) => l.revenueExpectation, denial: (l) => l.denialCode
   }, { key: 'line', desc: false });
   if (!lines.length) return <div className="arwb-empty-state"><Icon name="search" /><div>No line-level rows were found for this claim.</div></div>;
+
+  const toggle = (n) => setOpen((prev) => { const next = new Set(prev); if (next.has(n)) next.delete(n); else next.add(n); return next; });
+  const denialsOf = (l) => (l.denials?.length ? l.denials : (l.denialCode ? [{ ordinal: 1, denialCodeRaw: l.denialCode }] : []));
+  const anyDenied = lines.some((l) => denialsOf(l).length);
+  const allOpen = anyDenied && lines.every((l) => !denialsOf(l).length || open.has(l.lineNumber));
+
   return (
-    <div className="arwb-table-wrap">
-      <table className="arwb-data-table">
-        <thead>
-          <tr>
-            {th('line', '#', { className: 'num' })}{th('cpt', 'CPT')}{th('icd', 'ICD Code')}{th('units', 'Units', { className: 'num' })}{th('modifier', 'Modifier')}
-            {th('billed', 'Billed', { className: 'num' })}{th('allowed', 'Allowed', { className: 'num' })}{th('paid', 'Paid', { className: 'num' })}
-            {th('adjusted', 'Adjusted', { className: 'num' })}{th('balance', 'Balance', { className: 'num' })}{th('status', 'Status')}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((l) => {
-            const status = l.payStatus || l.lineClaimStatus;
-            return [
-              <tr key={l.lineNumber}>
-                <td className="num arwb-hint">{l.lineNumber}</td>
-                <td className="mono">{l.cptCode || '—'}</td>
-                <td className="wrap mono">{l.icdCode || '—'}</td>
-                <td className="num">{l.units ?? '—'}</td>
-                <td className="mono">{l.modifier || '—'}</td>
-                <td className="num mono">{fmt.money(l.chargeAmount)}</td>
-                <td className="num mono">{fmt.money(l.allowedAmount)}</td>
-                <td className="num mono">{fmt.money(l.insurancePayment)}</td>
-                <td className="num mono">{fmt.money(l.insuranceAdjustments)}</td>
-                <td className="num mono">{fmt.money(l.insuranceBalance)}</td>
-                <td>{status ? <Badge className={lineStatusBadge(status)}>{status}</Badge> : '—'}</td>
-              </tr>,
-              l.denialCode && (
-                <tr key={`${l.lineNumber}-d`} className="arwb-cpt-sub">
-                  <td />
-                  <td colSpan={10} className="arwb-hint wrap">↳ Denial <span className="mono">{l.denialCode}</span>{l.denialDate ? ` · ${fmt.date(l.denialDate)}` : ''}</td>
-                </tr>
-              )
-            ];
-          })}
-        </tbody>
-      </table>
-    </div>
+    <>
+      {anyDenied && (
+        <div className="arwb-flex-between" style={{ marginBottom: 8 }}>
+          <span className="arwb-hint">Expand a CPT to see its line-level denial codes. * = counts toward the claim's Revenue Expectation.</span>
+          <button type="button" className="arwb-btn arwb-btn-sm"
+            onClick={() => setOpen(allOpen ? new Set() : new Set(lines.filter((l) => denialsOf(l).length).map((l) => l.lineNumber)))}>
+            {allOpen ? 'Collapse all' : 'Expand all'}
+          </button>
+        </div>
+      )}
+      <div className="arwb-table-wrap">
+        <table className="arwb-data-table">
+          <thead>
+            <tr>
+              <th scope="col" style={{ width: 34 }} aria-label="Expand" />
+              {th('line', '#', { className: 'num' })}{th('cpt', 'CPT')}{th('icd', 'ICD Code')}{th('units', 'Units', { className: 'num' })}{th('modifier', 'Modifier')}
+              {th('billed', 'Billed', { className: 'num' })}{th('allowed', 'Allowed', { className: 'num' })}{th('paid', 'Paid', { className: 'num' })}
+              {th('adjusted', 'Adjusted', { className: 'num' })}{th('balance', 'Balance', { className: 'num' })}
+              {th('rate', 'Fee Rate', { className: 'num' })}{th('expectation', 'Rev. Expectation', { className: 'num' })}{th('status', 'Status')}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((l) => {
+              const status = l.payStatus || l.lineClaimStatus;
+              const denials = denialsOf(l);
+              const isOpen = open.has(l.lineNumber);
+              return [
+                <tr key={l.lineNumber}>
+                  <td>
+                    {denials.length > 0 && (
+                      <button type="button" className="arwb-btn arwb-btn-sm" aria-expanded={isOpen}
+                        aria-label={`${isOpen ? 'Collapse' : 'Expand'} denials for CPT ${l.cptCode || l.lineNumber}`}
+                        onClick={() => toggle(l.lineNumber)} style={{ padding: '0 6px', minWidth: 0 }}>
+                        {isOpen ? '▾' : '▸'}
+                      </button>
+                    )}
+                  </td>
+                  <td className="num arwb-hint">{l.lineNumber}</td>
+                  <td className="mono">{l.cptCode || '—'}{l.inRevenueExpectation && denials.length > 0 ? ' *' : ''}</td>
+                  <td className="wrap mono">{l.icdCode || '—'}</td>
+                  <td className="num">{l.units ?? '—'}</td>
+                  <td className="mono">{l.modifier || '—'}</td>
+                  <td className="num mono">{fmt.money(l.chargeAmount)}</td>
+                  <td className="num mono">{fmt.money(l.allowedAmount)}</td>
+                  <td className="num mono">{fmt.money(l.insurancePayment)}</td>
+                  <td className="num mono">{fmt.money(l.insuranceAdjustments)}</td>
+                  <td className="num mono">{fmt.money(l.insuranceBalance)}</td>
+                  <td className="num mono">{l.expectedRate == null ? <span className="text-muted-ink" title="No fee schedule rate for this CPT">—</span> : fmt.money(l.expectedRate)}</td>
+                  <td className="num mono">{l.inRevenueExpectation ? fmt.money(l.revenueExpectation) : <span className="text-muted-ink" title="Not a denied CPT: not part of the claim's Revenue Expectation">{fmt.money(l.revenueExpectation)}</span>}</td>
+                  <td>{status ? <Badge className={lineStatusBadge(status)}>{status}</Badge> : '—'}</td>
+                </tr>,
+                isOpen && denials.map((d) => {
+                  const master = byCode[(d.denialCode || '').toUpperCase()];
+                  const description = d.denialDescription || master?.denialDescription;
+                  return (
+                    <tr key={`${l.lineNumber}-d-${d.ordinal}-${d.denialCodeRaw}`} className="arwb-cpt-sub">
+                      <td />
+                      <td colSpan={13} className="wrap">
+                        <span className="arwb-hint">↳ Denial </span>
+                        <span className="arwb-code-chip">{d.denialCodeRaw || d.denialCode}</span>
+                        {l.denialDate ? <span className="arwb-hint"> · {fmt.date(l.denialDate)}</span> : null}
+                        {' · '}{description || <span className="text-muted-ink">No description</span>}
+                        {' · '}{d.denialCategory ? <Badge className="arwb-badge-accent">{d.denialCategory}</Badge> : <span className="text-muted-ink">Unmapped</span>}
+                        {master?.denialClassification ? <> · <Badge>{master.denialClassification}</Badge></> : null}
+                        {(d.isNonCollectible || master?.isNonCollectible) && <> <Badge className="arwb-badge-critical">Non-Collectible</Badge></>}
+                      </td>
+                    </tr>
+                  );
+                })
+              ];
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+// Handoff §8.2 (DEF-13 / DEF-14): the claim's documents - follow-up attachments and CIP responses -
+// and, for the AR team, an upload with a mandatory category. A client sees CIP responses only.
+function ClaimDocuments({ claimKey, canUpload, onUploaded }) {
+  const { labId } = useWorkbench();
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState('');
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    let live = true;
+    setError('');
+    arWorkbenchService.claimDocuments(labId, claimKey)
+      .then((r) => { if (live) setRows(r?.items || []); })
+      .catch((e) => { if (live) setError(e.message || 'The documents could not be loaded.'); });
+    return () => { live = false; };
+  }, [labId, claimKey, reload]);
+
+  return (
+    <>
+      {canUpload && <UploadDocuments claimKey={claimKey} onUploaded={(m) => { setReload((k) => k + 1); onUploaded?.(m); }} />}
+      <ErrorBox message={error} />
+      {rows === null && !error ? <Loading /> : <DocumentTable rows={rows || []} />}
+    </>
   );
 }
 
@@ -517,56 +600,91 @@ function QaTab({ review, c, latest, canDecide, userName, onDecide }) {
   );
 }
 
-// The central Denial Code Master (Master Values > Denial Code Descriptions) for every code on the
-// claim, primary first. Codes are without their group prefix (CO-4 and PR4 are both 4).
-function DenialCodeMaster({ codes, primary, lineCodes }) {
-  const order = [primary, ...lineCodes].filter(Boolean);
+// Line-level denials: one row per denial code on each CPT line, with its description and denial
+// category. The description is the lab's Denial Code Master text from the sync, else the central
+// Denial Code Descriptions master; codes are matched without their group prefix (CO-4 = PR4 = 4).
+function LineDenials({ lines, codes, primary }) {
   const byCode = Object.fromEntries(codes.map((r) => [r.denialCode, r]));
-  const listed = [...new Set(order)];
-  const missing = listed.filter((code) => !byCode[code]);
+  const items = lines.flatMap((l) => {
+    const denials = l.denials?.length ? l.denials : (l.denialCode ? [{ ordinal: 1, denialCodeRaw: l.denialCode }] : []);
+    return denials.map((d) => ({ line: l, d, master: d.denialCode ? byCode[d.denialCode] : null }));
+  });
+  const { rows, th } = useTableSort(items, {
+    line: (x) => x.line.lineNumber * 100 + (x.d.ordinal || 0), cpt: (x) => x.line.cptCode, code: (x) => x.d.denialCode || x.d.denialCodeRaw,
+    description: (x) => x.d.denialDescription || x.master?.denialDescription || '', category: (x) => x.d.denialCategory || '',
+    date: (x) => x.line.denialDate, balance: (x) => x.line.insuranceBalance
+  }, { key: 'line', desc: false });
+
+  if (!items.length) {
+    return <div className="arwb-empty-state"><Icon name="search" /><div>No line-level denial codes on this claim.</div></div>;
+  }
   return (
-    <DetailSection title="Denial Code Master" hint={listed.length ? null : 'No denial codes on this claim'}>
-      {listed.filter((code) => byCode[code]).map((code) => {
-        const r = byCode[code];
-        return (
-          <div key={code} className="arwb-code-info">
-            <div className="arwb-code-info-head">
-              <span className={`arwb-code-chip${code === primary ? ' primary' : ''}`}>{code}</span>
-              {code === primary && <span className="arwb-hint">primary</span>}
-              {r.isNonCollectible && <Badge className="arwb-badge-critical">Non-Collectible</Badge>}
-              <span className="grow">{r.denialDescription || <span className="text-muted-ink">No description</span>}</span>
-            </div>
-            <div className="arwb-code-info-grid">
-              <span>Action Category</span><b>{r.actionCategory || '—'}</b>
-              <span>Classification</span><b>{r.denialClassification || '—'}</b>
-              <span>Coverage Status</span><b>{r.coverageStatus || '—'}</b>
-              <span>ICD Compliance</span><b>{r.icdComplianceStatus || '—'}</b>
-              <span>Denial Validity</span><b>{r.denialValidity || '—'}</b>
-            </div>
-          </div>
-        );
-      })}
-      {missing.length > 0 && (
-        <div className="arwb-hint">Not in the Denial Code master: {missing.map((code) => <span key={code} className="arwb-code-chip">{code}</span>)}</div>
-      )}
-    </DetailSection>
+    <div className="arwb-table-wrap">
+      <table className="arwb-data-table">
+        <thead>
+          <tr>
+            {th('line', '#', { className: 'num' })}{th('cpt', 'CPT')}{th('code', 'Denial Code')}{th('description', 'Denial Description')}
+            {th('category', 'Denial Category')}{th('date', 'Denial Date')}{th('balance', 'Ins. Balance', { className: 'num' })}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ line: l, d, master }) => {
+            const description = d.denialDescription || master?.denialDescription;
+            const nonCollectible = d.isNonCollectible || master?.isNonCollectible;
+            return (
+              <tr key={`${l.lineNumber}-${d.ordinal}-${d.denialCodeRaw}`}>
+                <td className="num arwb-hint">{l.lineNumber}</td>
+                <td className="mono">{l.cptCode || '—'}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  <span className={`arwb-code-chip${d.denialCode && d.denialCode === primary ? ' primary' : ''}`}>{d.denialCodeRaw || d.denialCode}</span>
+                  {nonCollectible && <> <Badge className="arwb-badge-critical">Non-Collectible</Badge></>}
+                </td>
+                <td className="wrap">{description || <span className="text-muted-ink">No description</span>}</td>
+                <td>{d.denialCategory ? <Badge className="arwb-badge-accent">{d.denialCategory}</Badge> : <span className="text-muted-ink">Unmapped</span>}</td>
+                <td>{l.denialDate ? fmt.date(l.denialDate) : '—'}</td>
+                <td className="num mono">{fmt.money(l.insuranceBalance)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
-function Denial({ c, followUps, codes }) {
+function Denial({ c, followUps, codes, lines }) {
   const latest = followUps[0];
   const lineCodes = (c.LineDenialCodes || '').split(',').map((s) => s.trim()).filter(Boolean);
   const primary = c.PrimaryDenialCode;
+  // DEF-03: a claim whose sync left the normalized list / reason blank still shows what it carries:
+  // the codes as received (CARC group prefix CO/PR/PI/OA removed, as everywhere else) and the
+  // Denial Code Master's description of the primary code.
+  const receivedCodes = (c.DenialCode || '').split(/[,;|]/).map((s) => s.trim().replace(/^(CO|PR|PI|OA)[-\s]?(?=[A-Z]?\d)/i, '')).filter(Boolean);
+  const allCodes = c.DenialCodesNormalized
+    || [...new Set([primary, ...receivedCodes, ...lineCodes].filter(Boolean))].join(', ')
+    || null;
+  const reason = c.DenialReason
+    || codes.find((x) => (x.denialCode || '').toUpperCase() === (primary || '').toUpperCase())?.denialDescription
+    || null;
   return (
     <>
     <div className="arwb-grid-2">
       <DetailSection title="Denial" hint={c.DenialCategory ? null : 'No denial on this claim'}>
         <Row label="Denial Category">{c.DenialCategory ? <Badge className="arwb-badge-accent">{c.DenialCategory}</Badge> : null}</Row>
-        <Row label="Primary Denial Code">{c.PrimaryDenialCodeRaw || c.DenialCode ? <span className="arwb-code-chip primary">{c.PrimaryDenialCodeRaw || c.DenialCode}</span> : null}</Row>
-        <Row label="Denial Reason">{c.DenialReason}</Row>
+        <Row label="Primary Denial Code">
+          {c.PrimaryDenialCode
+            ? <><span className="arwb-code-chip primary">{c.PrimaryDenialCode}</span>{c.PrimaryDenialCodeRaw && c.PrimaryDenialCodeRaw !== c.PrimaryDenialCode && <span className="arwb-hint"> as received: {c.PrimaryDenialCodeRaw}</span>}</>
+            : null}
+        </Row>
+        <Row label="All Denial Codes">{allCodes}</Row>
+        <Row label="Denial Reason">{reason}</Row>
         <Row label="Denial Date">{c.DenialDate ? fmt.date(c.DenialDate) : null}</Row>
         <Row label="Line-Level Codes">
-          {lineCodes.length ? lineCodes.map((code) => <span key={code} className={`arwb-code-chip${code === primary ? ' primary' : ''}`}>{code}</span>) : null}
+          {lineCodes.length
+            ? <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 6 }}>
+                {lineCodes.map((code) => <span key={code} className={`arwb-code-chip${code === primary ? ' primary' : ''}`}>{code}</span>)}
+              </span>
+            : null}
         </Row>
         <Row label="Claim Status (source)">{c.SourceClaimStatus}</Row>
       </DetailSection>
@@ -589,9 +707,10 @@ function Denial({ c, followUps, codes }) {
         </Row>
       </DetailSection>
     </div>
-    <div style={{ marginTop: 16 }}>
-      <DenialCodeMaster codes={codes} primary={primary} lineCodes={lineCodes} />
-    </div>
+    <section className="arwb-detail-section" style={{ marginTop: 16 }}>
+      <div className="arwb-detail-section-head">Line-Level Denials</div>
+      <LineDenials lines={lines} codes={codes} primary={primary} />
+    </section>
     </>
   );
 }

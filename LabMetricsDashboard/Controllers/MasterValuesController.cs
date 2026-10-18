@@ -27,7 +27,8 @@ public sealed class MasterValuesController : Controller
 
     // ── Payer Master roles (Requirements Spec §2) ─────────────────────────────
     private bool HasAnyRole(params string[] roles) => roles.Any(r => User.IsInRole(r));
-    private bool IsLrnAdmin => HasAnyRole("Admin", "LRN Admin", "LRNAdmin");
+    // Admin, Super Admin or LRN Admin, ignoring case and spaces (MenuAccessFilter's rule).
+    private bool IsLrnAdmin => LabMetricsDashboard.Filters.MenuAccessFilter.IsFullAdmin(User);
     private bool IsPayerPolicyAdmin => HasAnyRole("Payer Policy Admin", "PayerPolicyAdmin");
     private bool IsReportsAnalyst => HasAnyRole("Reports Analyst", "ReportsAnalyst");
     private bool IsReportsManager => HasAnyRole("Reports Manager", "ReportsManager");

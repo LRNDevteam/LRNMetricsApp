@@ -492,7 +492,7 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
     /// <summary>
     /// Panel Breakdown with payer drill-down (Production Summary).
     /// Calls <c>usp_Get{Prefix}PanelBreakdownWithPayers</c>, deployed by
-    /// <c>Sql\40_AllLabs_PanelBreakdownWithPayers.sql</c>. Labs whose database has
+    /// <c>Database\ClaimLineCSVDataCapture\40_AllLabs_PanelBreakdownWithPayers.sql</c>. Labs whose database has
     /// not had that script run yet return an empty result and the table simply stays
     /// hidden - same behaviour as before this method existed.
     /// </summary>

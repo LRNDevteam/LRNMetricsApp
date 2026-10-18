@@ -4,7 +4,7 @@ namespace LabMetricsDashboard.Services;
 /// Labs whose LIS Summary is served from pre-built aggregate tables
 /// (dbo.{Prefix}LIS_FieldSets / _SummaryGroups / _KeyMetricsDaily / _FilterOptions / _RefreshLog)
 /// instead of grouping dbo.LIMSMaster on every page load. The tables are created by
-/// Sql/{Lab}/25_{Lab}_LISSummary_Aggregate_Tables.sql and refreshed by
+/// Database/ClaimLineCSVDataCapture/{Lab}/25_{Lab}_LISSummary_Aggregate_Tables.sql and refreshed by
 /// ClaimLineCSVDataCapture when a new LIMS file lands.
 /// </summary>
 public static class LisSummaryAggregateLabs

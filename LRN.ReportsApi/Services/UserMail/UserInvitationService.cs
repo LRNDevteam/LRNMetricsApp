@@ -74,7 +74,7 @@ public sealed class UserInvitationService : IUserInvitationService
         catch (Exception ex)
         {
             var error = ex is Microsoft.Data.SqlClient.SqlException
-                ? "the invitation tables are missing or unreachable - run LRN.ReportsApi/Sql/UserMail_Setup.sql"
+                ? "the invitation tables are missing or unreachable - run Database/LRN.ReportsApi/UserMail_Setup.sql"
                 : $"the invitation could not be sent: {ex.Message}";
             _logger.LogError(ex, "{App} invitation for LabUserID {Id} failed; the user is kept.", application, labUserId);
             // Best effort: the log itself may be what failed.

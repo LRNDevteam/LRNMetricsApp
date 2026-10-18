@@ -15,6 +15,15 @@ const GOOD = 'var(--good)';
 const WARNING = 'var(--warning)';
 const pct0 = (v) => `${Math.round(Number(v || 0) * 100)}%`;
 
+// The master file's load time is the date the reports application shows for the same data, so it
+// leads; the workbench sync time follows. (QC 10.12.2026: the two dates must match.)
+function dataNote(d, labName) {
+  const parts = [labName || ''];
+  if (d.dataLoadedOn) parts.push(`master file loaded ${fmt.dateTime(d.dataLoadedOn)}`);
+  if (d.dataRefreshedOn) parts.push(`synced ${fmt.dateTime(d.dataRefreshedOn)}`);
+  return parts.filter(Boolean).join(' · ');
+}
+
 function Delta({ tone = 'flat', children }) {
   return <span className={`arwb-kpi-delta ${tone}`}>{children}</span>;
 }
@@ -62,7 +71,7 @@ export default function DashboardPage() {
     { label: 'Total Eligible Claims', value: fmt.count(d.totalClaims),
       delta: <Delta tone={identDiff === 0 ? 'flat' : identDiff > 0 ? 'up' : 'down'}>{`${identDiff >= 0 ? '+' : ''}${identDiff} identified this wk`}</Delta> },
     { label: 'Total Outstanding Insurance AR', value: fmt.money(d.totalOutstandingAR),
-      delta: d.dataRefreshedOn ? <Delta>as of {fmt.date(d.dataRefreshedOn)}</Delta> : null },
+      delta: (d.dataLoadedOn || d.dataRefreshedOn) ? <Delta>as of {fmt.date(d.dataLoadedOn || d.dataRefreshedOn)}</Delta> : null },
     { label: 'Claims Awaiting Assignment', value: fmt.count(d.unassigned),
       delta: d.unassigned > 0 ? <Delta tone="down">needs manager action</Delta> : <Delta tone="up">queue clear</Delta> },
     { label: 'Claims In Progress', value: fmt.count(d.inProgress) },
@@ -81,7 +90,7 @@ export default function DashboardPage() {
 
   return (
     <>
-      <PageHeader note={d.dataRefreshedOn ? `${lab?.labName || ''} · data refreshed ${fmt.date(d.dataRefreshedOn)}` : lab?.labName}>
+      <PageHeader note={dataNote(d, lab?.labName)}>
         <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => setReload((n) => n + 1)}>
           <Icon name="refresh" size={14} />Refresh
         </button>
@@ -92,9 +101,12 @@ export default function DashboardPage() {
       </div>
 
       {!isViewer && (
-        <Card icon="layers" title="Latest Denial Analysis Report insights" sub="from the latest data load" flush
+        <Card icon="layers" title="Latest Denial Analysis Report insights" flush
+          sub={d.insightsSource === 'Uploaded'
+            ? `current week's Key Observations${d.insightsWeekStart ? ` (week of ${fmt.date(d.insightsWeekStart)})` : ''} · open, unassigned claims`
+            : 'top denial codes from the latest data load (no Key Observations uploaded for the current week)'}
           action={canOpen(user, 'data-processing') && <GoTo onClick={() => navigate('/data-processing')}>Open Data Processing</GoTo>}>
-          <DenialHighlights rows={d.denialHighlights} onRoute={canDrill ? (code) => openQueue({ code }) : null} />
+          <DenialHighlights rows={d.denialHighlights} onRoute={canDrill ? (code) => openQueue({ code, primary: '1', status: 'Unassigned', open: '1' }) : null} />
         </Card>
       )}
 

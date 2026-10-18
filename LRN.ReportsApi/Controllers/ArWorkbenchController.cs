@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using LRN.ReportsApi.Models;
 using LRN.ReportsApi.Security;
 using LRN.ReportsApi.Services;
@@ -37,12 +38,14 @@ public sealed class ArWorkbenchController : ControllerBase
     private readonly IWorkflowMasterValuesRepository _mapperMasters;
     private readonly IUserInvitationService _invitations;
     private readonly IUserMailRepository _userMail;
+    private readonly IArWorkbenchExportJobService _exports;
     private readonly ILogger<ArWorkbenchController> _logger;
 
     public ArWorkbenchController(IArWorkbenchRepository repository, IDenialWorkflowService workflowService,
         IDenialMapperRepository mapper, IDenialMapperExcelService mapperExcel, IWorkflowMasterValuesRepository mapperMasters,
-        IUserInvitationService invitations, IUserMailRepository userMail, ILogger<ArWorkbenchController> logger)
+        IUserInvitationService invitations, IUserMailRepository userMail, IArWorkbenchExportJobService exports, ILogger<ArWorkbenchController> logger)
     {
+        _exports = exports;
         _repository = repository;
         _workflowService = workflowService;
         _mapper = mapper;
@@ -112,7 +115,9 @@ public sealed class ArWorkbenchController : ControllerBase
     {
         var (user, denied) = await ResolveUserAsync(labId, ct);
         if (denied is not null) return denied;
-        return Ok(await _repository.GetDashboardAsync(labId, user!, ct));
+        var dashboard = await _repository.GetDashboardAsync(labId, user!, ct);
+        await ApplyCurrentWeekInsightsAsync(dashboard, labId, user!, ct);
+        return Ok(dashboard);
     }
 
     /// <summary>
@@ -229,13 +234,15 @@ public sealed class ArWorkbenchController : ControllerBase
         // Out-of-scope and missing look the same, so a scoped user cannot probe for claim keys.
         if (detail is null) return NotFound(new { message = "Claim not found." });
         detail.DenialCodeInfo = (await CodeMasterInfoForClaimAsync(detail, ct)).ToList();
-        detail.QaReview = await _repository.GetCurrentQaReviewAsync(labId, claimKey, ct);
-        // Client users never see Awaiting QA / Pending Approval cases or internal history.
-        if (user!.RoleCode != "viewer")
+        // Client users never see QA notes, internal follow-ups, the activity timeline, Awaiting QA /
+        // Pending Approval cases or internal requests (§9.2, DEF-15) - not even by opening the URL.
+        if (!ArWorkbenchClientVisibility.IsClientUser(user!))
         {
+            detail.QaReview = await _repository.GetCurrentQaReviewAsync(labId, claimKey, ct);
             detail.CipCases = await _repository.GetClaimCipCasesAsync(labId, claimKey, ct);
             detail.AgentRequests = await _repository.GetClaimAgentRequestsAsync(labId, claimKey, ct);
         }
+        ArWorkbenchClientVisibility.Apply(detail, user!);
         return Ok(detail);
     }
 
@@ -550,9 +557,16 @@ public sealed class ArWorkbenchController : ControllerBase
         var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
         if (denied is not null) return denied;
         if (!user!.Permissions.ViewAudit) return Forbidden("Only a System Administrator or RCM Manager can view the audit log.");
+        var output = await BuildAuditExportAsync(_repository, filter, user, ct);
+        _logger.LogInformation("AR Workbench audit export lab {LabId} by {User}: {Rows} rows", filter.LabId, user.UserName, output.RowCount);
+        return File(output.Content, XlsxContentType, $"ARWorkbench_AuditLog_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+    }
+
+    private static async Task<ArWorkbenchExportOutput> BuildAuditExportAsync(IArWorkbenchRepository repository, ArWorkbenchAuditFilter filter, ArWorkbenchUserContext user, CancellationToken ct)
+    {
         filter.Page = 1;
         filter.PageSize = 50_000;
-        var page = await _repository.GetAuditLogAsync(filter, user, false, ct);
+        var page = await repository.GetAuditLogAsync(filter, user, false, ct);
 
         using var wb = new ClosedXML.Excel.XLWorkbook();
         var ws = wb.Worksheets.Add("Audit Log");
@@ -579,8 +593,7 @@ public sealed class ArWorkbenchController : ControllerBase
         ws.Column(9).Width = Math.Min(ws.Column(9).Width, 90);
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
-        _logger.LogInformation("AR Workbench audit export lab {LabId} by {User}: {Rows} rows", filter.LabId, user.UserName, page.Rows.Items.Count);
-        return File(ms.ToArray(), XlsxContentType, $"ARWorkbench_AuditLog_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+        return new ArWorkbenchExportOutput(ms.ToArray(), page.Rows.Items.Count);
     }
 
     // ---- Client portal (T064 / T065 / T066) ------------------------------------------------------
@@ -638,6 +651,109 @@ public sealed class ArWorkbenchController : ControllerBase
         if (stored.Count > 0)
             await _repository.AddCipResponseDocumentsAsync(labId, caseId, stored, user!, HttpContext.Connection.RemoteIpAddress?.ToString(), ct);
         return Ok(new { message = $"Response submitted for {caseNumber}{(stored.Count > 0 ? $" with {stored.Count} attachment(s)" : "")} - your AR team will review it.", status });
+    }
+
+    public const int MaxClaimAttachments = 5;
+    public const int MaxDocumentDescriptionLength = 500;
+
+    /// <summary>
+    /// Handoff §8.2 (DEF-13): attach files to a claim - with a follow-up note (followUpId) or on their
+    /// own. Each file carries a document category from the Document Categories list (mandatory) and an
+    /// optional description: documents is a JSON array [{ category, description }] in the same order as
+    /// files; a single category applies to every file without its own. Size and type follow the
+    /// AttachmentMaxBytes / AttachmentAllowedTypes settings. AR users only (an agent: their own claims).
+    /// </summary>
+    [HttpPost("claims/{claimKey:long}/documents")]
+    [RequestSizeLimit(120_000_000)]
+    public async Task<ActionResult> UploadClaimDocuments([FromRoute] long claimKey, [FromQuery] int labId, [FromForm] string? category,
+        [FromForm] string? documents, [FromForm] long? followUpId, [FromForm] List<IFormFile>? files,
+        [FromServices] IArWorkbenchDocumentStore store, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (ArWorkbenchClientVisibility.IsClientUser(user!) || !(user!.Permissions.EditClaim || user.Permissions.Assign))
+            return Forbidden("Only the AR team can attach documents to a claim. Client users attach documents to their escalation responses.");
+
+        List<ArWorkbenchDocumentUploadInfo> details = [];
+        if (!string.IsNullOrWhiteSpace(documents))
+        {
+            try { details = JsonSerializer.Deserialize<List<ArWorkbenchDocumentUploadInfo>>(documents, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? []; }
+            catch (JsonException) { return BadRequest(new { message = "The document details could not be read." }); }
+        }
+
+        // details[i] belongs to files[i]; empty files are dropped only after pairing.
+        var uploads = (files ?? []).Select((f, i) => (File: f,
+                Category: (i < details.Count && !string.IsNullOrWhiteSpace(details[i].Category) ? details[i].Category : category)?.Trim(),
+                Description: i < details.Count ? details[i].Description?.Trim() : null))
+            .Where(u => u.File.Length > 0).ToList();
+        if (uploads.Count == 0) return BadRequest(new { message = "Choose at least one file to attach." });
+        if (uploads.Count > MaxClaimAttachments) return BadRequest(new { message = $"Attach at most {MaxClaimAttachments} files at a time." });
+
+        var listed = (await _repository.GetMasterDataAsync(labId, ct)).Lists.GetValueOrDefault("DOCUMENT_CATEGORY") ?? [];
+        if (listed.Count == 0)
+            return BadRequest(new { message = "No document categories are set up (Master Values > Workbench Lists > Document Categories)." });
+
+        var (maxBytes, allowed) = await AttachmentRulesAsync(labId, ct);
+        var checkedUploads = new List<(IFormFile File, string Category, string? Description)>();
+        foreach (var (f, cat, description) in uploads)
+        {
+            var name = Path.GetFileName(f.FileName);
+            var chosen = listed.FirstOrDefault(c => string.Equals(c, cat, StringComparison.OrdinalIgnoreCase));
+            if (chosen is null) return BadRequest(new { message = $"{name}: choose a document category." });
+            if ((description?.Length ?? 0) > MaxDocumentDescriptionLength)
+                return BadRequest(new { message = $"{name}: the description must be {MaxDocumentDescriptionLength} characters or fewer." });
+            var ext = Path.GetExtension(f.FileName).TrimStart('.').ToLowerInvariant();
+            if (!allowed.Contains(ext)) return BadRequest(new { message = $"{name}: file type .{ext} is not allowed ({string.Join(", ", allowed)})." });
+            var error = await FileUploadGuard.ValidateDocumentAsync(f, maxBytes, ct);
+            if (error is not null) return BadRequest(new { message = $"{name}: {error}" });
+            checkedUploads.Add((f, chosen, string.IsNullOrWhiteSpace(description) ? null : description));
+        }
+
+        var stored = new List<ArWorkbenchClaimUpload>();
+        try
+        {
+            foreach (var (f, chosen, description) in checkedUploads)
+            {
+                await using var s = f.OpenReadStream();
+                stored.Add(new ArWorkbenchClaimUpload(Path.GetFileName(f.FileName), f.ContentType,
+                    await store.SaveAsync(labId, s, Path.GetExtension(f.FileName), ct), chosen, description));
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            foreach (var s in stored) store.Delete(s.Stored.Container, s.Stored.Path);
+            _logger.LogError(ex, "AR Workbench attachment storage failed for lab {LabId}", labId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "The attachments could not be stored. Please contact support." });
+        }
+
+        var ids = await _repository.AddClaimDocumentsAsync(labId, claimKey, followUpId, stored, user, HttpContext.Connection.RemoteIpAddress?.ToString(), ct);
+        if (ids.Count == 0)
+        {
+            foreach (var s in stored) store.Delete(s.Stored.Container, s.Stored.Path);
+            return NotFound(new { message = "Claim not found, or the follow-up note is not on this claim." });
+        }
+        _logger.LogInformation("AR Workbench: {Count} document(s) attached to claim {ClaimKey} (lab {LabId}) by {User}", ids.Count, claimKey, labId, user.UserName);
+        var used = stored.Select(s => s.Category).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return Ok(new { message = $"{ids.Count} document(s) attached{(used.Count == 1 ? $" as {used[0]}" : "")}.", documentIds = ids });
+    }
+
+    /// <summary>The claim's documents (Documents tab). Client users see only CIP-response documents.</summary>
+    [HttpGet("claims/{claimKey:long}/documents")]
+    public async Task<ActionResult<ArWorkbenchPagedResult<ArWorkbenchDocumentRow>>> ClaimDocuments([FromRoute] long claimKey, [FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        return Ok(await _repository.SearchDocumentsAsync(new ArWorkbenchDocumentFilter { LabId = labId, ClaimKey = claimKey, PageSize = 500 }, user!, ct));
+    }
+
+    /// <summary>Document Vault (handoff §8.2, DEF-14): search documents by claim / visit, patient and category, within scope.</summary>
+    [HttpGet("documents")]
+    public async Task<ActionResult<ArWorkbenchPagedResult<ArWorkbenchDocumentRow>>> DocumentVault([FromQuery] ArWorkbenchDocumentFilter filter, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
+        if (denied is not null) return denied;
+        if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+        return Ok(await _repository.SearchDocumentsAsync(filter, user!, ct));
     }
 
     /// <summary>Download an attachment (scope-checked, logged). Clients reach only CIP responses.</summary>
@@ -838,6 +954,64 @@ public sealed class ArWorkbenchController : ControllerBase
         return (user, null);
     }
 
+    // ==========================================================================================
+    // Status Change Verification. The claim sync moves an assigned, not-completed claim whose
+    // master-file claim status changed to 'Pending Verification' under an RCM Manager of the lab;
+    // an RCM Manager or System Administrator decides it here.
+    // ==========================================================================================
+
+    [HttpGet("status-verification")]
+    public async Task<ActionResult<ArWorkbenchStatusVerificationQueue>> StatusVerificationQueue([FromQuery] ArWorkbenchStatusVerificationFilter filter, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
+        if (denied is not null) return denied;
+        if (!IsAdminOrManager(user!)) return Forbidden("Only an RCM Manager or System Administrator can open Status Change Verification.");
+        if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+        return Ok(await _repository.GetStatusVerificationQueueAsync(filter, user!, ct));
+    }
+
+    [HttpPost("status-verification/resolve")]
+    public async Task<ActionResult<ArWorkbenchStatusVerificationResolveResult>> ResolveStatusVerification([FromQuery] int labId, [FromBody] ArWorkbenchStatusVerificationResolve? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!IsAdminOrManager(user!)) return Forbidden("Only an RCM Manager or System Administrator can decide status change verifications.");
+
+        var action = ArWorkbenchStatusVerificationActions.Normalize(request?.Action);
+        if (action is null) return BadRequest(new { message = "Choose Return to Agent, Release to Unassigned or Complete." });
+        var keys = (request!.ClaimKeys ?? []).Where(k => k > 0).Distinct().ToList();
+        if (keys.Count == 0) return BadRequest(new { message = "Select the claims to verify." });
+        if (keys.Count > 1000) return BadRequest(new { message = "Verify at most 1,000 claims at a time." });
+        var note = request.Note?.Trim();
+        if (string.IsNullOrEmpty(note)) return BadRequest(new { message = "Add a verification note: it is recorded on the claim and sent to the agent." });
+        if (note.Length > 2000) return BadRequest(new { message = "The note must be 2,000 characters or fewer." });
+
+        var result = await _repository.ResolveStatusVerificationAsync(labId, keys, action, note, user!, ct);
+        _logger.LogInformation("AR Workbench status verification lab {LabId} by {User}: {Action} {Message}", labId, user!.UserName, action, result.Message);
+        return Ok(result);
+    }
+
+    // ==========================================================================================
+    // Notifications (top bar bell): ARWB_Notification rows addressed to the caller or their role.
+    // ==========================================================================================
+
+    [HttpGet("notifications")]
+    public async Task<ActionResult<ArWorkbenchNotificationList>> Notifications([FromQuery] int labId, [FromQuery] bool unreadOnly, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        return Ok(await _repository.GetNotificationsAsync(labId, user!, unreadOnly, ct));
+    }
+
+    [HttpPost("notifications/read")]
+    public async Task<ActionResult> MarkNotificationsRead([FromQuery] int labId, [FromBody] ArWorkbenchNotificationReadRequest? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var marked = await _repository.MarkNotificationsReadAsync(labId, request?.NotificationIds ?? [], request?.All == true, user!, ct);
+        return Ok(new { marked });
+    }
+
     private async Task<IReadOnlyCollection<string>> QaErrorTypesAsync(int labId, CancellationToken ct)
     {
         var lists = (await _repository.GetMasterDataAsync(labId, ct)).Lists;
@@ -1009,7 +1183,7 @@ public sealed class ArWorkbenchController : ControllerBase
         if (parsed is null) return BadRequest(new { message = parseError });
 
         var (installed, rows) = await _repository.GetCodeMasterAsync(ct);
-        if (!installed) return BadRequest(new { message = "The Denial Code master is not installed. Run LRN.ReportsApi/Sql/ArWorkbench/LRNMaster_02_ARWB_DenialCodeMaster.sql in LRNMaster." });
+        if (!installed) return BadRequest(new { message = "The Denial Code master is not installed. Run Database/LRN.ReportsApi/ArWorkbench/LRNMaster/LRNMaster_02_ARWB_DenialCodeMaster.sql in LRNMaster." });
 
         var options = await CodeMasterOptionsAsync(labId, rows, ct);
         var merge = ArWorkbenchCodeMasterRules.Merge(rows.ToDictionary(r => r.DenialCode, StringComparer.OrdinalIgnoreCase), parsed, options);
@@ -1169,11 +1343,22 @@ public sealed class ArWorkbenchController : ControllerBase
     [HttpPost("auto-adjustments/mark-posted")]
     public async Task<ActionResult> MarkAdjustmentsPosted([FromQuery] int labId, [FromBody] ArWorkbenchAdjustmentRequest? request, CancellationToken ct)
     {
-        var (user, denied) = await ResolveAssignerAsync(labId, ct);
+        var (user, denied) = await ResolveUserAsync(labId, ct);
         if (denied is not null) return denied;
         var keys = request?.ClaimKeys?.Where(k => k > 0).Distinct().ToList() ?? [];
         if (keys.Count == 0) return BadRequest(new { message = "Select the claims whose adjustment was posted." });
         if (keys.Count > MaxAdjustmentKeys) return BadRequest(new { message = $"Mark at most {MaxAdjustmentKeys:N0} claims at a time." });
+
+        // Team Lead / RCM Manager / Administrator post anything pending. The AR Agent posts the approved
+        // write-offs assigned to them (handoff §8.3, DEF-17); system auto-adjustments stay with the leads.
+        if (!user!.Permissions.Assign)
+        {
+            if (!user.Permissions.EditClaim)
+                return Forbidden("Only the assigned AR agent, a Team Lead, RCM Manager or System Administrator can mark an adjustment as posted.");
+            keys = (await _repository.GetAgentPostableWriteOffsAsync(labId, keys, user.UserName, ct)).ToList();
+            if (keys.Count == 0)
+                return Forbidden("You can mark as posted only the approved write-offs assigned to you. System auto-adjustments are posted by a Team Lead or RCM Manager.");
+        }
 
         var posted = await _repository.MarkAdjustmentsPostedAsync(labId, keys, user!, ct);
         var skipped = keys.Count - posted;
@@ -1207,7 +1392,8 @@ public sealed class ArWorkbenchController : ControllerBase
             Managers = ManagerOptions(users),
             Teams = users.Select(u => u.TeamName).Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t!)
                 .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList(),
-            AllLabs = manager.AllLabs
+            AllLabs = manager.AllLabs,
+            CanSetPasswords = CanSetPasswords(manager)
         });
     }
 
@@ -1297,7 +1483,7 @@ public sealed class ArWorkbenchController : ControllerBase
         catch (SqlException ex)
         {
             _logger.LogError(ex, "AR Workbench invitation for {User} failed in SQL.", userName);
-            return (false, "the invitation tables are missing - run LRN.ReportsApi/Sql/UserMail_Setup.sql");
+            return (false, "the invitation tables are missing - run Database/LRN.ReportsApi/UserMail_Setup.sql");
         }
     }
 
@@ -1394,6 +1580,8 @@ public sealed class ArWorkbenchController : ControllerBase
         string? hash = null;
         if (!string.IsNullOrEmpty(request.Password))
         {
+            if (!CanSetPasswords(manager))
+                return Forbidden("Only a Super Admin or an AR Workbench System Administrator can set a user's password. Use Send password link instead.");
             var passwordError = ArWorkbenchUserRules.ValidatePassword(request.Password);
             if (passwordError is not null) return BadRequest(new { message = passwordError });
             hash = ArWorkbenchUserRules.HashPassword(request.Password);
@@ -1410,6 +1598,15 @@ public sealed class ArWorkbenchController : ControllerBase
     }
 
     private sealed record UserManager(ArWorkbenchUserContext User, bool AllLabs, IReadOnlyList<ArWorkbenchLabOption> Labs, IReadOnlySet<int> LabIds);
+
+    /// <summary>
+    /// Setting another user's password (for a user who cannot get the email link, or cannot change
+    /// their own) is for the top admins only: a Super Admin (Admin / LRN Admin - every lab), or a
+    /// holder of the "AR Workbench - System Administrator" role. A Lab Admin manages users but does not.
+    /// </summary>
+    private static bool CanSetPasswords(UserManager manager) =>
+        manager.AllLabs
+        || manager.User.RoleNames.Any(r => string.Equals(r, "System Administrator", StringComparison.OrdinalIgnoreCase));
 
     private async Task<(UserManager? Manager, ActionResult? Denied)> ResolveUserManagerAsync(int labId, CancellationToken ct)
     {
@@ -1512,22 +1709,141 @@ public sealed class ArWorkbenchController : ControllerBase
         if (denied is not null) return denied;
         if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
 
-        var rows = new List<ArWorkbenchClaimRow>();
-        filter.PageSize = 500;
-        var total = 0;
-        for (filter.Page = 1; rows.Count < ArWorkbenchClaimExcel.MaxRows; filter.Page++)
-        {
-            var page = await _repository.GetClaimsAsync(filter, user!, ct);
-            total = page.TotalCount;
-            rows.AddRange(page.Items);
-            if (page.Items.Count < filter.PageSize) break;
-        }
-        if (rows.Count > ArWorkbenchClaimExcel.MaxRows) rows.RemoveRange(ArWorkbenchClaimExcel.MaxRows, rows.Count - ArWorkbenchClaimExcel.MaxRows);
+        var output = await BuildClaimsExportAsync(_repository, filter, user!, await LabNameAsync(filter.LabId, ct), ct);
+        _logger.LogInformation("AR Workbench claim export for lab {LabId} by {User}: {Rows} rows", filter.LabId, user!.UserName, output.RowCount);
+        return File(output.Content, XlsxContentType, $"ARWorkbench_Claims_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+    }
 
-        var labName = (await _workflowService.GetLabsForUserAsync(CurrentUserName(), ct)).FirstOrDefault(l => l.LabId == filter.LabId)?.LabName ?? $"Lab {filter.LabId}";
-        var bytes = ArWorkbenchClaimExcel.Build(rows, $"AR Workbench claims — {labName} — {DateTime.Now:MM/dd/yyyy HH:mm}", total > rows.Count);
-        _logger.LogInformation("AR Workbench claim export for lab {LabId} by {User}: {Rows} of {Total} rows", filter.LabId, user!.UserName, rows.Count, total);
-        return File(bytes, XlsxContentType, $"ARWorkbench_Claims_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+    private async Task<string> LabNameAsync(int labId, CancellationToken ct) =>
+        (await _workflowService.GetLabsForUserAsync(CurrentUserName(), ct)).FirstOrDefault(l => l.LabId == labId)?.LabName ?? $"Lab {labId}";
+
+    private static async Task<ArWorkbenchExportOutput> BuildClaimsExportAsync(IArWorkbenchRepository repository, ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, string labName, CancellationToken ct)
+    {
+        // One query for every row (up to MaxRows), not 500-row pages.
+        var result = await repository.GetClaimsForExportAsync(filter, user, ArWorkbenchClaimExcel.MaxRows, ct);
+        var rows = result.Items;
+        var total = result.TotalCount;
+
+        // Assignment, the latest follow-up note, its QA review and the status verification per claim.
+        var details = await repository.GetClaimExportDetailsAsync(filter.LabId, rows.Select(r => r.ClaimKey).ToList(), ct);
+        var bytes = ArWorkbenchClaimExcel.Build(rows, details, $"AR Workbench claims — {labName} — {DateTime.Now:MM/dd/yyyy HH:mm}", total > rows.Count);
+        return new ArWorkbenchExportOutput(bytes, rows.Count);
+    }
+
+    // ---- Background exports (Denial Workflow Overall Download pattern) --------------------------
+    // The Export buttons queue a job and return at once; the page polls the job, and the file is
+    // downloaded when it is ready. The direct GET exports above stay for older clients.
+
+    /// <param name="exportScope">The screen / button the export came from, e.g. "Work Queue - Filtered". Names the file.</param>
+    [HttpPost("exports/claims")]
+    public async Task<ActionResult<ArWorkbenchExportJob>> StartClaimsExport([FromQuery] ArWorkbenchClaimFilter filter, [FromQuery] string? exportScope, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
+        if (denied is not null) return denied;
+        if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+
+        var labName = await LabNameAsync(filter.LabId, ct);
+        var scope = ExportScope(exportScope, "Claims");
+        return StartExport("claims", scope, filter.LabId, user!, $"ARWorkbench_{FilePart(scope)}_{FilePart(labName)}_{DateTime.Now:yyyyMMdd_HHmm}.xlsx",
+            (services, token) => BuildClaimsExportAsync(services.GetRequiredService<IArWorkbenchRepository>(), filter, user!, labName, token));
+    }
+
+    [HttpPost("exports/audit")]
+    public async Task<ActionResult<ArWorkbenchExportJob>> StartAuditExport([FromQuery] ArWorkbenchAuditFilter filter, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
+        if (denied is not null) return denied;
+        if (!user!.Permissions.ViewAudit) return Forbidden("Only a System Administrator or RCM Manager can view the audit log.");
+        if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+
+        return StartExport("audit", "Audit Log", filter.LabId, user, $"ARWorkbench_AuditLog_{DateTime.Now:yyyyMMdd_HHmm}.xlsx",
+            (services, token) => BuildAuditExportAsync(services.GetRequiredService<IArWorkbenchRepository>(), filter, user, token));
+    }
+
+    [HttpPost("exports/reports/{reportId}")]
+    public async Task<ActionResult<ArWorkbenchExportJob>> StartReportExport([FromRoute] string reportId, [FromQuery] int labId, [FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var info = ArWorkbenchReportRules.Catalog.FirstOrDefault(r => string.Equals(r.Id, reportId, StringComparison.OrdinalIgnoreCase));
+        if (info is null) return NotFound(new { message = "Report not found." });
+        if (!CanOpenReport(user!, info.Id)) return Forbidden("This report is only available to the AR team.");
+        var (range, rangeError) = ArWorkbenchReportRules.ResolveRange(from, to, DateTime.UtcNow.Date);
+        if (rangeError is not null) return BadRequest(new { message = rangeError });
+
+        return StartExport("report", info.Title, labId, user!, $"ARWorkbench_{FilePart(info.Title)}_{DateTime.Now:yyyyMMdd_HHmm}.xlsx",
+            async (services, token) =>
+            {
+                var report = await services.GetRequiredService<IArWorkbenchRepository>().GetReportAsync(labId, info.Id, range!, user!, token)
+                    ?? throw new InvalidOperationException("Report not found.");
+                return new ArWorkbenchExportOutput(ArWorkbenchReportExcel.Build(report), report.Rows.Count);
+            });
+    }
+
+    /// <summary>The caller's export jobs (running and recent), newest first - the Downloads list.</summary>
+    [HttpGet("exports")]
+    public async Task<ActionResult<IReadOnlyList<ArWorkbenchExportJob>>> ListExports([FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        return Ok(_exports.List(user!.UserName));
+    }
+
+    [HttpGet("exports/{jobId}")]
+    public async Task<ActionResult<ArWorkbenchExportJob>> ExportStatus([FromRoute] string jobId, [FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var job = _exports.Get(jobId, user!.UserName);
+        return job is null ? NotFound(new { message = "Export job was not found. It may have expired - please start the export again." }) : Ok(job);
+    }
+
+    [HttpGet("exports/{jobId}/download")]
+    public async Task<ActionResult> DownloadExport([FromRoute] string jobId, [FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var file = _exports.GetFile(jobId, user!.UserName);
+        if (file is null) return NotFound(new { message = "The export file is not ready or is no longer available. Please start the export again." });
+        return PhysicalFile(file.FilePath, file.ContentType, file.FileName);
+    }
+
+    /// <summary>Cancels a running export, or removes a finished one (and its file) from the list.</summary>
+    [HttpDelete("exports/{jobId}")]
+    public async Task<ActionResult<ArWorkbenchExportJob>> CancelExport([FromRoute] string jobId, [FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var job = _exports.CancelOrRemove(jobId, user!.UserName);
+        return job is null ? NotFound(new { message = "Export job was not found." }) : Ok(job);
+    }
+
+    private ActionResult<ArWorkbenchExportJob> StartExport(string kind, string scope, int labId, ArWorkbenchUserContext user, string fileName, ArWorkbenchExportBuilder build)
+    {
+        try
+        {
+            var job = _exports.Start(new ArWorkbenchExportRequest(kind, scope, labId, user.UserName, fileName), build);
+            _logger.LogInformation("AR Workbench export {JobId} ({Scope}) queued for lab {LabId} by {User}", job.JobId, scope, labId, user.UserName);
+            return Accepted(job);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
+    }
+
+    private static string ExportScope(string? value, string fallback)
+    {
+        var text = new string((value ?? string.Empty).Where(ch => char.IsLetterOrDigit(ch) || ch is ' ' or '-' or '&' or '/').ToArray()).Trim();
+        return string.IsNullOrWhiteSpace(text) ? fallback : text[..Math.Min(text.Length, 60)];
+    }
+
+    private static string FilePart(string value)
+    {
+        var safe = new string((value ?? string.Empty).Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray());
+        while (safe.Contains("__")) safe = safe.Replace("__", "_");
+        safe = safe.Trim('_');
+        return string.IsNullOrWhiteSpace(safe) ? "Export" : safe[..Math.Min(safe.Length, 48)];
     }
 
     /// <summary>Denial Analysis Report on the Data Processing screen: current + previous sync week.</summary>
@@ -1537,7 +1853,71 @@ public sealed class ArWorkbenchController : ControllerBase
         var (user, denied) = await ResolveUserAsync(labId, ct);
         if (denied is not null) return denied;
         if (!IsAdminOrManager(user!)) return Forbidden("Only an Administrator or RCM Manager can view data processing.");
-        return Ok(await _repository.GetInsightsAsync(labId, ct));
+        var insights = await _repository.GetInsightsAsync(labId, ct);
+        // System-generated rows carry no description when the claims had none (DEF-02): use the Denial Code Master's.
+        var descriptions = await DenialDescriptionsAsync(insights.Where(i => string.IsNullOrWhiteSpace(i.DenialDescription)).Select(i => i.DenialCode), ct);
+        foreach (var row in insights.Where(i => string.IsNullOrWhiteSpace(i.DenialDescription)))
+            row.DenialDescription = descriptions.GetValueOrDefault(row.DenialCode);
+        return Ok(insights);
+    }
+
+    /// <summary>Normalized code -> Denial Code Master description, for codes shown without one. Empty on any failure.</summary>
+    private async Task<Dictionary<string, string>> DenialDescriptionsAsync(IEnumerable<string?> codes, CancellationToken ct)
+    {
+        var normalized = codes.Select(ArWorkbenchMasterRules.NormalizeDenialCode).Where(c => c is not null).Select(c => c!)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (normalized.Count == 0) return result;
+        try
+        {
+            foreach (var row in await _repository.GetCodeMasterInfoAsync(normalized, ct))
+                if (!string.IsNullOrWhiteSpace(row.DenialDescription)) result[row.DenialCode] = row.DenialDescription!;
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            _logger.LogWarning(ex, "AR Workbench: Denial Code Master lookup failed; descriptions stay blank.");
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// DEF-01: the dashboard's "Latest Denial Analysis Report insights" shows the current week's
+    /// uploaded Key Observations - the rows Data Processing > Current week shows - with the live
+    /// unassigned remainder per code. A week with none uploaded keeps the system-generated top codes.
+    /// Blank descriptions come from the Denial Code Master (DEF-02).
+    /// </summary>
+    private async Task ApplyCurrentWeekInsightsAsync(ArWorkbenchDashboard dashboard, int labId, ArWorkbenchUserContext user, CancellationToken ct)
+    {
+        try
+        {
+            var uploaded = await _repository.GetUploadedInsightsAsync(labId, user, ct);
+            if (uploaded.Current.Count > 0)
+            {
+                dashboard.DenialHighlights = uploaded.Current.Select(i => new ArWorkbenchDenialHighlight
+                {
+                    Code = i.NormalizedCode ?? i.DenialCode,
+                    Description = i.Description,
+                    Count = i.OpenClaims,
+                    Balance = i.OpenBalance,
+                    TopPayer = i.PayerName,
+                    TopPayerBalance = i.InsuranceBalance,
+                    ImpactPct = i.TotalBalance > 0 ? i.InsuranceBalance / i.TotalBalance : 0,
+                    Observation = i.Observation ?? string.Empty,
+                    Category = i.ActionCategory ?? string.Empty,
+                    Action = i.Action ?? string.Empty
+                }).ToList();
+                dashboard.InsightsSource = "Uploaded";
+                dashboard.InsightsWeekStart = uploaded.Current[0].WeekStart;
+            }
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            _logger.LogWarning(ex, "AR Workbench: uploaded Key Observations could not be read; the dashboard shows the system insights.");
+        }
+
+        var descriptions = await DenialDescriptionsAsync(dashboard.DenialHighlights.Where(h => string.IsNullOrWhiteSpace(h.Description)).Select(h => h.Code), ct);
+        foreach (var h in dashboard.DenialHighlights.Where(h => string.IsNullOrWhiteSpace(h.Description)))
+            h.Description = descriptions.GetValueOrDefault(ArWorkbenchMasterRules.NormalizeDenialCode(h.Code) ?? h.Code);
     }
 
     /// <summary>
@@ -1550,7 +1930,12 @@ public sealed class ArWorkbenchController : ControllerBase
         var (user, denied) = await ResolveUserAsync(labId, ct);
         if (denied is not null) return denied;
         if (!IsAdminOrManager(user!)) return Forbidden("Only an Administrator or RCM Manager can view data processing.");
-        return Ok(await _repository.GetUploadedInsightsAsync(labId, user!, ct));
+        var uploaded = await _repository.GetUploadedInsightsAsync(labId, user!, ct);
+        var blank = uploaded.Current.Concat(uploaded.Previous).Where(i => string.IsNullOrWhiteSpace(i.Description)).ToList();
+        var descriptions = await DenialDescriptionsAsync(blank.Select(i => i.NormalizedCode ?? i.DenialCode), ct);
+        foreach (var row in blank)
+            row.Description = descriptions.GetValueOrDefault(ArWorkbenchMasterRules.NormalizeDenialCode(row.NormalizedCode ?? row.DenialCode) ?? row.DenialCode);
+        return Ok(uploaded);
     }
 
     // ---- Timely-filing limits (Master Values) - ARWorkbench.ManageSettings ----------------------
@@ -1740,15 +2125,32 @@ public sealed class ArWorkbenchController : ControllerBase
     [HttpGet("masters")]
     public async Task<ActionResult<ArWorkbenchMasterValuesResponse>> MasterValues([FromQuery] int labId, CancellationToken ct)
     {
-        var (_, denied) = await ResolveSettingsUserAsync(labId, ct);
+        var (_, denied) = await ResolveMasterListUserAsync(labId, null, ct);
         if (denied is not null) return denied;
         return Ok(await _repository.GetMasterValuesAsync(labId, ct));
+    }
+
+    /// <summary>
+    /// The master lists: an AR Workbench administrator for every list; an RCM Manager for the
+    /// Non-Collectible and Auto-Adjust lists (handoff §10, DEF-08). <paramref name="type"/> null = the read.
+    /// </summary>
+    private async Task<(ArWorkbenchUserContext? User, ActionResult? Denied)> ResolveMasterListUserAsync(int labId, string? type, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return (null, denied);
+        if (user!.Permissions.ManageSettings) return (user, null);
+        var isManager = user.RoleCode == "manager";
+        if (isManager && (type is null || ArWorkbenchMasterRules.ManagerMaintainedTypes.Contains(type)))
+            return (user, null);
+        return (null, Forbidden(isManager
+            ? "An RCM Manager maintains the Non-Collectible and Auto-Adjust lists; the other lists are for an AR Workbench administrator."
+            : "Only an AR Workbench administrator can maintain master values and denial codes."));
     }
 
     [HttpPost("masters/{type}")]
     public async Task<ActionResult> AddMasterValue([FromRoute] string type, [FromQuery] int labId, [FromBody] ArWorkbenchMasterValueSaveRequest request, CancellationToken ct)
     {
-        var (user, denied) = await ResolveSettingsUserAsync(labId, ct);
+        var (user, denied) = await ResolveMasterListUserAsync(labId, type, ct);
         if (denied is not null) return denied;
         var master = ArWorkbenchMasterRules.Find(type);
         if (master is null) return UnknownList(type);
@@ -1761,7 +2163,7 @@ public sealed class ArWorkbenchController : ControllerBase
     [HttpPut("masters/{type}")]
     public async Task<ActionResult> UpdateMasterValue([FromRoute] string type, [FromQuery] int labId, [FromBody] ArWorkbenchMasterValueSaveRequest request, CancellationToken ct)
     {
-        var (user, denied) = await ResolveSettingsUserAsync(labId, ct);
+        var (user, denied) = await ResolveMasterListUserAsync(labId, type, ct);
         if (denied is not null) return denied;
         var master = ArWorkbenchMasterRules.Find(type);
         if (master is null) return UnknownList(type);
@@ -1777,7 +2179,7 @@ public sealed class ArWorkbenchController : ControllerBase
     [HttpDelete("masters/{type}")]
     public async Task<ActionResult> DeleteMasterValue([FromRoute] string type, [FromQuery] int labId, [FromQuery] string? value, CancellationToken ct)
     {
-        var (_, denied) = await ResolveSettingsUserAsync(labId, ct);
+        var (_, denied) = await ResolveMasterListUserAsync(labId, type, ct);
         if (denied is not null) return denied;
         var master = ArWorkbenchMasterRules.Find(type);
         if (master is null) return UnknownList(type);

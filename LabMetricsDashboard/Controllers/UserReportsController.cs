@@ -218,7 +218,7 @@ public class UserReportsController : Controller
             _logger.LogError(ex, "Queue failed ({Lab}, {Type}) for {User}: queue objects missing.", lab, reportType, UserName);
             return StatusCode(500, new
             {
-                message = $"Report queue is not set up on lab '{lab}'. Deploy SQL_Scripts/UserReqReports (01 schema + 02 procs) to that lab database, then try again.",
+                message = $"Report queue is not set up on lab '{lab}'. Deploy Database/Shared/UserReqReports (01 schema + 02 procs) to that lab database, then try again.",
             });
         }
         catch (Exception ex)

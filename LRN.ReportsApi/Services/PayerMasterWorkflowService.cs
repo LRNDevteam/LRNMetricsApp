@@ -830,7 +830,7 @@ public sealed class PayerMasterWorkflowService : IPayerMasterWorkflowService
         }
     }
 
-    // Mirrors Sql/PayerMaster_Workflow_Setup.sql so a missed deployment step cannot break the workflow.
+    // Mirrors Database/LRN.ReportsApi/PayerMaster_Workflow_Setup.sql so a missed deployment step cannot break the workflow.
     private const string SchemaSql = """
         IF OBJECT_ID('dbo.PayerMasterApprovalRequests', 'U') IS NULL
         BEGIN

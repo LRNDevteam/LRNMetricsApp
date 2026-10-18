@@ -29,7 +29,8 @@ export default function DataProcessingPage() {
   // A denial code opens the Work Queue on that code (primary or line, any spelling - CO-242, 242).
   // "Route to Work Queue" narrows to what is still unassigned with an open balance.
   const openCode = (code) => navigate(`/work-queue?${new URLSearchParams({ code, open: '1' })}`);
-  const route = (code) => navigate(`/work-queue?${new URLSearchParams({ code, status: 'Unassigned', open: '1' })}`);
+  // primary=1: the insight counts claims by PRIMARY denial, so the routed list must too (OBS-02).
+  const route = (code) => navigate(`/work-queue?${new URLSearchParams({ code, primary: '1', status: 'Unassigned', open: '1' })}`);
   const systemRows = (current) => (insights || []).filter((i) => (current ? i.isCurrentWeek : !i.isCurrentWeek));
   const uploadedRows = (current) => (current ? uploaded?.current : uploaded?.previous) || [];
   // A week shows the team's uploaded Key Observations when there are any, else the system insights.
@@ -91,6 +92,11 @@ export default function DataProcessingPage() {
 
       {last && (
         <div className="arwb-grid arwb-grid-kpi arwb-section">
+          {/* OBS-01: a lab whose master file carries no InsertedDateTime has no source load time;
+              the sync that read it is the next best answer, and is labelled as such. */}
+          <Stat label="Master file loaded"
+            value={last.sourceLoadedOn ? fmt.dateTime(last.sourceLoadedOn)
+              : last.completedOn ? `${fmt.dateTime(last.completedOn)} (synced)` : '—'} />
           <Stat label="Last refresh" value={fmt.dateTime(last.completedOn)} />
           <Stat label="Source period" value={`${fmt.date(last.sourcePeriodStart)} – ${fmt.date(last.sourcePeriodEnd)}`} />
           <Stat label="Claims in source" value={fmt.count(last.sourceClaimRows)} />

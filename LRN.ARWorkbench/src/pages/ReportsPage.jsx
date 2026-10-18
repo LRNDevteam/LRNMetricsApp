@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import useTableSort from '../components/useTableSort';
 import { Link, useSearchParams } from 'react-router';
+import { ExportButton } from '../components/ExportJobs';
 import Icon from '../components/Icon';
 import { Card } from '../components/Panel';
 import { ErrorBox, Loading, PageHeader } from '../components/Status';
@@ -36,7 +37,6 @@ export default function ReportsPage() {
   const [error, setError] = useState('');
   const [reportError, setReportError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const [reload, setReload] = useState(0);
   const outputRef = useRef(null);
 
@@ -73,11 +73,6 @@ export default function ReportsPage() {
   const others = catalog.reports.filter((r) => !r.featured);
   const info = catalog.reports.find((r) => r.id === reportId);
 
-  async function exportReport() {
-    setExporting(true);
-    try { await arWorkbenchService.reportExport(labId, report.id, { from, to }, report.title); } catch (e) { setReportError(e.message); } finally { setExporting(false); }
-  }
-
   return (
     <>
       <PageHeader note={lab?.labName} />
@@ -112,9 +107,9 @@ export default function ReportsPage() {
             flush
             action={(
               <>
-                <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-ghost" onClick={exportReport} disabled={exporting}>
-                  <Icon name="doc" size={15} /> {exporting ? 'Exporting…' : 'Export'}
-                </button>
+                <ExportButton scope={report.title} label="Export" className="arwb-btn arwb-btn-sm arwb-btn-ghost"
+                  title="This report as Excel - built in the background"
+                  start={() => arWorkbenchService.startReportExport(labId, report.id, { from, to })} />
                 <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-ghost" onClick={() => setParams({})} aria-label="Close report">×</button>
               </>
             )}>

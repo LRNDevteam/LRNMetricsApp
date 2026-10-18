@@ -410,7 +410,7 @@
             const target = e.target.closest('[data-remove-role]');
             if (target) {
                 const id = target.getAttribute('data-remove-role');
-                fetch('@Url.Action("RemoveUserRole", "Admin")', { method: 'POST', headers: { 'Content-Type':'application/x-www-form-urlencoded' }, body: 'userRoleId=' + encodeURIComponent(id), credentials: 'same-origin' })
+                fetch('@Url.Action("RemoveUserRole", "Admin")', { method: 'POST', headers: { 'Content-Type':'application/x-www-form-urlencoded', 'RequestVerificationToken': (document.querySelector('input[name="__RequestVerificationToken"]') || {}).value || '' }, body: 'userRoleId=' + encodeURIComponent(id), credentials: 'same-origin' })
                 .then(r=>{ if (r.ok) { const uid = document.getElementById('mapUserSelect').value; if (uid) loadMappingsForUser(uid); } else alert('Remove failed'); });
             }
         });
@@ -419,7 +419,7 @@
             const target = e.target.closest('[data-remove-ul]');
             if (target) {
                 const id = target.getAttribute('data-remove-ul');
-                fetch('@Url.Action("RemoveUserLab", "Admin")', { method: 'POST', headers: { 'Content-Type':'application/x-www-form-urlencoded' }, body: 'ulid=' + encodeURIComponent(id), credentials: 'same-origin' })
+                fetch('@Url.Action("RemoveUserLab", "Admin")', { method: 'POST', headers: { 'Content-Type':'application/x-www-form-urlencoded', 'RequestVerificationToken': (document.querySelector('input[name="__RequestVerificationToken"]') || {}).value || '' }, body: 'ulid=' + encodeURIComponent(id), credentials: 'same-origin' })
                 .then(r=>{ if (r.ok) { const uid = document.getElementById('mapUserSelect2').value; if (uid) loadMappingsForUser(uid); } else alert('Remove failed'); });
             }
         });

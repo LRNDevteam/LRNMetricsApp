@@ -66,11 +66,8 @@
 	<!-- Reference material only: never compiled, never copied to the output folder. -->
 	<ItemGroup>
 		<None Remove="Sample\**" />
-		<None Remove="sql\**" />
 		<Content Remove="Sample\**" />
-		<Content Remove="sql\**" />
 		<None Include="Sample\**" CopyToOutputDirectory="Never" />
-		<None Include="sql\**" CopyToOutputDirectory="Never" />
 	</ItemGroup>
 
 </Project>

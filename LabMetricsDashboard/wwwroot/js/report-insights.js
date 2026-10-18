@@ -1148,7 +1148,7 @@
     let loadPromise = null;
     let featureAvailable = false;
     let weekLifecycle = false;
-    const notEnabledMsg = "Insights are not enabled for this lab yet. Run the NotesInsights SQL scripts (SQL_Scripts\\NotesInsights 01-10) on this lab's database.";
+    const notEnabledMsg = "Insights are not enabled for this lab yet. Run the NotesInsights SQL scripts (Database\\Shared\\NotesInsights 01-10) on this lab's database.";
     function showPanelLoading() {
         if (el.body) el.body.innerHTML = `<div class="ri-empty"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Loading insights…</div>`;
     }

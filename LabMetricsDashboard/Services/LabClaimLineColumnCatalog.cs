@@ -2,7 +2,7 @@ namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// Per-lab ClaimLevel / LineLevel column lists from Sql/Select_Script.
-/// DB pages/Excel follow the lab SP SELECT list (Sql/ClaimLineDetails_SPs/{Lab}_Details.sql);
+/// DB pages/Excel follow the lab SP SELECT list (Database/LabMetricsDashboard/ClaimLineDetails_SPs/{Lab}_Details.sql);
 /// this catalog is the CSV fallback and money-heading helper.
 /// </summary>
 public static class LabClaimLineColumnCatalog
@@ -68,7 +68,7 @@ public static class LabClaimLineColumnCatalog
 
     private static readonly Dictionary<string, string[]> ClaimByLab = new(StringComparer.OrdinalIgnoreCase)
     {
-        // Matches Sql/ClaimLineDetails_SPs/AnalyzePathology_Details.sql.
+        // Matches Database/LabMetricsDashboard/ClaimLineDetails_SPs/AnalyzePathology_Details.sql.
         ["AnalyzePathology"] =
             [
                 "LabID", "LabName", "ClaimID", "AccessionNumber", "SourceFileID", "IngestedOn",
@@ -329,7 +329,7 @@ public static class LabClaimLineColumnCatalog
                 "Bucket30Amount", "Bucket60", "Bucket60Amount", "Facility", "OrderingProviderID", "ClaimUID",
                 "DaystoDOS", "RollingDays", "DaystoBill", "DaystoPost", "InsertedDateTime"
             ],
-        // Matches Sql/ClaimLineDetails_SPs/WellHealth_Details.sql.
+        // Matches Database/LabMetricsDashboard/ClaimLineDetails_SPs/WellHealth_Details.sql.
         ["WellHealth"] =
             [
                 "LabID", "LabName", "ClaimID", "AccessionNumber", "PayerName_Raw", "PayerName",
@@ -350,7 +350,7 @@ public static class LabClaimLineColumnCatalog
 
     private static readonly Dictionary<string, string[]> LineByLab = new(StringComparer.OrdinalIgnoreCase)
     {
-        // Matches Sql/ClaimLineDetails_SPs/AnalyzePathology_Details.sql.
+        // Matches Database/LabMetricsDashboard/ClaimLineDetails_SPs/AnalyzePathology_Details.sql.
         ["AnalyzePathology"] =
             [
                 "LabID", "LabName", "ClaimID", "AccessionNumber", "SourceFileID", "IngestedOn",
@@ -596,7 +596,7 @@ public static class LabClaimLineColumnCatalog
                 "DenialDate", "ICDCode", "ICDPointer", "Facility", "OrderingProviderID", "TF",
                 "DaystoDOS", "RollingDays", "DaystoBill", "DaystoPost", "InsertedDateTime"
             ],
-        // Matches Sql/ClaimLineDetails_SPs/WellHealth_Details.sql.
+        // Matches Database/LabMetricsDashboard/ClaimLineDetails_SPs/WellHealth_Details.sql.
         ["WellHealth"] =
             [
                 "LabID", "LabName", "ClaimID", "AccessionNumber", "SourceFileID", "IngestedOn",
@@ -630,7 +630,7 @@ public static class LabClaimLineColumnCatalog
 
     /// <summary>
     /// Table columns behind the Payer Type and Clinic filters. VariantX has no PayerType or
-    /// ClinicName, so PlanType and Facility stand in (as in Sql/ClaimLineDetails_SPs/VariantX_Details.sql).
+    /// ClinicName, so PlanType and Facility stand in (as in Database/LabMetricsDashboard/ClaimLineDetails_SPs/VariantX_Details.sql).
     /// </summary>
     public static (string PayerType, string Clinic) GetFilterColumns(string? labName)
         => string.Equals(NormalizeLab(labName), "VariantX", StringComparison.OrdinalIgnoreCase)

@@ -44,6 +44,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 	private readonly ReportRunIdInfoLogger _runInfo;
 	private readonly ReportsWorkflowTrackerRepository _workflowTracker;
 	private readonly LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequestStore _rerunRequests;
+	private readonly LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncService _arWorkbenchSync;
 
 	private ColumnSchema? _commonLineSchema;
 	private ColumnSchema? _commonClaimSchema;
@@ -70,7 +71,8 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		LRN.MasterFileProcessorWorker.Database.LabSourceRunGate labRunGate,
 		ReportRunIdInfoLogger runInfo,
 		ReportsWorkflowTrackerRepository workflowTracker,
-		LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequestStore rerunRequests)
+		LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequestStore rerunRequests,
+		LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncService arWorkbenchSync)
 	{
 		_logger = logger;
 		_fileLog = fileLog;
@@ -92,6 +94,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		_runInfo = runInfo;
 		_workflowTracker = workflowTracker;
 		_rerunRequests = rerunRequests;
+		_arWorkbenchSync = arWorkbenchSync;
 
 	}
 
@@ -1101,6 +1104,69 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 
 				await TryMarkSourceRunIngestedAsync(lab, sourceRunId, runCtx.RunId, ingested, ct);
 
+				// STEP 87: AR Workbench (Denial Workbench) sync. With this week's line and claim level
+				// rows committed, the workbench copies the latest of both, and every assigned claim
+				// that is not completed or closed whose claim status changed (No Response -> Paid,
+				// Adjust -> Denied, ...) moves to Status Change Verification under one of the lab's
+				// RCM Managers, who is notified in the AR Workbench. Contained like step 85: a failure
+				// here is a warning on a run whose files and tables are already done.
+				//
+				// Per lab: only labs with "ArWorkbenchEnabled": true under MasterFileProcessor:Labs run
+				// it. Not every lab has the AR Workbench, and a lab without its tables must not have the
+				// denial copy / fee schedule / recovery steps attempted against its database at all.
+				if (IsArWorkbenchEnabledForLab(lab))
+				{
+					stepSeq = 87;
+					var step87 = new StepLogRow
+					{
+						StepSeq = stepSeq,
+						StepName = "Sync AR Workbench (Denial Workbench)",
+						StepCategory = "Load",
+						SourceSystem = "SQL",
+						StartTimeIST = _processLog.NowIST(),
+						Status = "IN_PROGRESS"
+					};
+					activeStep = step87;
+					await _processLog.StepStartAsync(runCtx, step87, ct);
+
+					var arwb = await TrySyncArWorkbenchAsync(lab, runCtx.RunId, bulkOutcomes, ct);
+
+					step87.EndTimeIST = _processLog.NowIST();
+					step87.Status = arwb.Status switch
+					{
+						LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncStatus.Succeeded => "SUCCESS",
+						LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncStatus.Skipped => "SKIPPED",
+						_ => "WARNING"
+					};
+					step87.RecordsOut = arwb.ClaimRows;
+					step87.ErrorMessage = Truncate(arwb.Message, 780);
+					await _processLog.StepEndAsync(runCtx, step87, ct);
+					activeStep = null;
+
+					_fileLog.Info($"Lab {lab.LabId}: AR Workbench sync {arwb.Status}: {arwb.Message}");
+
+					if (arwb.Status == LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncStatus.Failed)
+					{
+						await _processLog.LogErrorAsync(runCtx, new ErrorLogRow
+						{
+							Severity = "WARNING",
+							StepName = step87.StepName,
+							ErrorCode = "ARWB_SYNC_FAILED",
+							ErrorSummary = Truncate(arwb.Message, 780),
+							FileName = selected.Name,
+							FilePath = selected.SharePointPath,
+							RecommendedAction = "Check the AR Workbench scripts in the lab database, then run Data Processing > Run in the AR Workbench.",
+							OwnerTeam = "LRN",
+							Status = "OPEN"
+						}, ct);
+						runRow.TotalWarnings += 1;
+					}
+				}
+				else
+				{
+					_fileLog.Info($"Lab {lab.LabId}: AR Workbench sync not run - set \"ArWorkbenchEnabled\": true for this lab under MasterFileProcessor:Labs to enable it.");
+				}
+
 				// The load has finished with the staged files, so the folder can go now rather than
 				// waiting for the finally - the rest of this run has no use for it.
 				TryDeleteDirectory(stagingFolder);
@@ -2085,16 +2151,19 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 	/// half the data was lost. Every sheet whose name ends with Line Level / LineLevel -- with or
 	/// without a system prefix -- is therefore taken from the workbook itself.
 	/// </para>
+	/// <para>
+	/// A line level split into period sheets ("Webpm Linelevel 2026" + "Webpm Linelevel 2025") is
+	/// loaded in full: every period sheet is taken (LineLevelSheetResolver). This applies to any lab -
+	/// a lab that normally sends one sheet switches to discovery as soon as its workbook carries a
+	/// dated line-level sheet.
+	/// </para>
 	/// Falls back to the static candidate list when nothing matches, so behavior is unchanged for
 	/// labs and files that do not use this naming.
 	/// </summary>
 	private string GetEffectiveLineSheetCandidates(LabFileMap lab, string workbookPath)
 	{
 		var configured = GetEffectiveLineSheetCandidates(lab);
-
-		// Only the multi-sheet labs need discovery; single-sheet labs keep the configured list.
-		if (!IsNorthWestLab(lab) && string.IsNullOrWhiteSpace(lab.LineLevelSheetNames))
-			return configured;
+		var multiSheetLab = IsNorthWestLab(lab) || !string.IsNullOrWhiteSpace(lab.LineLevelSheetNames);
 
 		List<string> workbookSheets;
 		try
@@ -2107,25 +2176,24 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			return configured;
 		}
 
-		var lineSheets = workbookSheets
-			.Where(IsLineLevelSheetName)
-			.ToList();
-
-		if (lineSheets.Count == 0)
+		// Single-sheet labs keep the configured list unless this workbook splits the line level by period.
+		if (!multiSheetLab && !workbookSheets.Any(LineLevelSheetResolver.HasPeriod))
 			return configured;
 
-		// When prefixed sheets identify both source systems, a bare "Line Level" sheet alongside
-		// them is ambiguous (likely a rollup) and is excluded rather than double-counted.
-		var prefixed = lineSheets.Where(s => !string.IsNullOrWhiteSpace(ExtractSourceLabel(s))).ToList();
-		var selected = prefixed.Count >= 2 ? prefixed : lineSheets;
+		var selected = LineLevelSheetResolver.Select(workbookSheets, out var ignored);
 
-		if (selected.Count != lineSheets.Count)
+		if (selected.Count == 0)
+			return configured;
+
+		// When prefixed sheets identify two or more source systems, a bare "Line Level" sheet alongside
+		// them is ambiguous (likely a rollup) and is excluded rather than double-counted.
+		if (ignored.Count > 0)
 		{
 			_logger.LogInformation(
 				"Lab {LabId}: ignoring unprefixed line-level sheet(s) [{Ignored}] because prefixed sheets [{Prefixed}] are present.",
 				lab.LabId,
-				string.Join(", ", lineSheets.Except(selected)),
-				string.Join(", ", prefixed));
+				string.Join(", ", ignored),
+				string.Join(", ", selected));
 		}
 
 		_logger.LogInformation(
@@ -2136,19 +2204,6 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		_fileLog.Info($"Lab {lab.LabId}: line-level sheets resolved from workbook -> [{string.Join(", ", selected)}]");
 
 		return string.Join(",", selected);
-	}
-
-	/// <summary>
-	/// True for sheet names that denote line-level data, with or without a system prefix:
-	/// "Line Level", "LineLevel", "Daq Line Level", "Webpm LineLevel", "Master Line Level", ...
-	/// </summary>
-	private static bool IsLineLevelSheetName(string? sheetName)
-	{
-		if (string.IsNullOrWhiteSpace(sheetName))
-			return false;
-
-		var normalized = new string(sheetName.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
-		return normalized.EndsWith("LINELEVEL", StringComparison.Ordinal);
 	}
 
 	/// <summary>
@@ -2505,6 +2560,54 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		}
 	}
 
+	/// <summary>
+	/// Step 87: the AR Workbench sync, against the SAME database the bulk copy just wrote to (resolved
+	/// the same way as <see cref="TryImportLineClaimLevelAsync"/>). Runs only when this run committed
+	/// the claim level and no level failed: syncing a half-loaded week would flag claims as dropped
+	/// out and raise verifications from stale statuses. Never throws.
+	/// </summary>
+	private async Task<LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncOutcome> TrySyncArWorkbenchAsync(
+		LabFileMap lab,
+		string runId,
+		IReadOnlyList<LineClaimImportOutcome> bulkOutcomes,
+		CancellationToken ct)
+	{
+		var claimLoaded = bulkOutcomes.Any(o =>
+			string.Equals(o.FileType, FileTypes.ClaimLevel, StringComparison.OrdinalIgnoreCase) && o.Succeeded && !o.Skipped);
+
+		if (!claimLoaded || bulkOutcomes.Any(o => !o.Succeeded))
+		{
+			return new(LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncStatus.Skipped,
+				"Line/claim level data did not fully load in this run; the AR Workbench keeps its previous sync.");
+		}
+
+		try
+		{
+			var labConnectionString = GetLabConfigValue(lab, "LabDbConnectionString")
+				?? _configuration.GetConnectionString(GetLabConfigValue(lab, "LabDbConnectionKey") ?? string.Empty);
+
+			var resolved = await _labRegistry.TryResolveLabAsync(
+				lab.LabId, labConnectionString, ResolvePath(_lineClaimOptions.LabMappingsFolder), ct);
+
+			if (resolved is null)
+			{
+				return new(LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncStatus.Skipped,
+					"The lab database connection could not be resolved.");
+			}
+
+			return await _arWorkbenchSync.SyncLabAsync(lab.LabId, resolved.ConnectionString, runId, ct);
+		}
+		catch (OperationCanceledException) when (ct.IsCancellationRequested)
+		{
+			throw;
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "Lab {LabId}: AR Workbench sync failed.", lab.LabId);
+			return new(LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncStatus.Failed, ex.Message);
+		}
+	}
+
 	private static bool IsNorthWestLab(LabFileMap lab)
 	{
 		if (lab == null) return false;
@@ -2554,15 +2657,19 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 		var missingSources = new Queue<string>(knownSources.Where(k => !present.Contains(k)));
 
+		// One system missing: every unprefixed sheet is that system's delivery, even when it is split
+		// by period ("Line Level 2025" + "Line Level 2026" beside "Daq Line Level" are both Webpm).
+		var onlyMissing = missingSources.Count == 1 ? missingSources.Peek() : null;
+
 		for (int i = 0; i < pairs.Length; i++)
 		{
 			if (!string.IsNullOrWhiteSpace(pairs[i].SourceValue))
 				continue;
 
-			if (missingSources.Count == 0)
+			if (onlyMissing is null && missingSources.Count == 0)
 				break;
 
-			var inferred = missingSources.Dequeue();
+			var inferred = onlyMissing ?? missingSources.Dequeue();
 
 			_logger.LogInformation(
 				"Lab {LabId}: sheet '{Sheet}' has no system prefix; tagging its rows Source='{Source}' (the configured system missing from this workbook).",
@@ -2578,26 +2685,11 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		return pairs;
 	}
 
-	private static string ExtractSourceLabel(string sheetName)
-	{
-		// "Webpm Line Level"/"Webpm LineLevel" -> "Webpm", "Daq Line Level" -> "Daq".
-		// An unprefixed sheet ("Line Level"/"LineLevel") carries no system name, so it yields
-		// "" and its rows get a blank Source rather than the literal sheet name.
-		var trimmed = (sheetName ?? string.Empty).Trim();
-
-		foreach (var suffix in new[] { "Line Level", "LineLevel" })
-		{
-			if (!trimmed.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
-				continue;
-
-			return trimmed.Substring(0, trimmed.Length - suffix.Length)
-				.Trim()
-				.Trim('-', '_')
-				.Trim();
-		}
-
-		return trimmed;
-	}
+	// "Webpm Line Level"/"Webpm Linelevel 2026" -> "Webpm", "Daq Line Level" -> "Daq".
+	// An unprefixed sheet ("Line Level"/"Line Level 2025") carries no system name, so it yields
+	// "" and its rows get a blank Source rather than the literal sheet name. The period is never
+	// part of the Source: both years of a split sheet load as the same system.
+	private static string ExtractSourceLabel(string sheetName) => LineLevelSheetResolver.SystemLabel(sheetName);
 
 	private static bool ShouldCopyClaimStatusToLineLevel(LabFileMap lab)
 	{
@@ -3264,6 +3356,15 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 		return _opt.PanelMasterFilePath;
 	}
+
+	/// <summary>
+	/// Step 87 runs only when the worker-wide ArWorkbenchSync switch allows the lab AND the lab's own
+	/// entry under MasterFileProcessor:Labs says "ArWorkbenchEnabled": true. Labs without the AR
+	/// Workbench (no ARWB_* tables) leave the key out and are never touched by the denial copy, the
+	/// fee schedule copy or the recovery calculation.
+	/// </summary>
+	private bool IsArWorkbenchEnabledForLab(LabFileMap lab)
+		=> _arWorkbenchSync.IsEnabledFor(lab.LabId) && ParseBool(GetLabConfigValue(lab, "ArWorkbenchEnabled"), false);
 
 	private string? GetLabConfigValue(LabFileMap lab, string key)
 	{

@@ -994,7 +994,7 @@ public sealed class ExecutiveSummaryController : Controller
         if (!await _repo.StoredProcedureExistsAsync(config.DbConnectionString, lisSp, ct))
         {
             vm.ErrorMessage =
-                $"'{lisSp}' has not been deployed yet. Run SqlScripts/usp_GetBeechTree_ThreePillarLisDiagnostic.sql against the Beech_Tree lab database.";
+                $"'{lisSp}' has not been deployed yet. Run Database/LabMetricsDashboard/usp_GetBeechTree_ThreePillarLisDiagnostic.sql against the Beech_Tree lab database.";
             return View(vm);
         }
 
@@ -1031,7 +1031,7 @@ public sealed class ExecutiveSummaryController : Controller
         if (!await _repo.StoredProcedureExistsAsync(config.DbConnectionString, sp, ct))
         {
             vm.ErrorMessage =
-                $"'{sp}' has not been deployed yet. Run SqlScripts/usp_GetBeechTree_ThreePillarPmsDiagnostic.sql against the Beech_Tree lab database, then click this tab again.";
+                $"'{sp}' has not been deployed yet. Run Database/LabMetricsDashboard/usp_GetBeechTree_ThreePillarPmsDiagnostic.sql against the Beech_Tree lab database, then click this tab again.";
             return PartialView("_ThreePillarPms", vm);
         }
 
@@ -1071,7 +1071,7 @@ public sealed class ExecutiveSummaryController : Controller
         if (!await _repo.StoredProcedureExistsAsync(config.DbConnectionString, sp, ct))
         {
             vm.ErrorMessage =
-                $"'{sp}' has not been deployed yet. Run SqlScripts/usp_GetBeechTree_ThreePillarCashDiagnostic.sql against the Beech_Tree lab database, then click this tab again.";
+                $"'{sp}' has not been deployed yet. Run Database/LabMetricsDashboard/usp_GetBeechTree_ThreePillarCashDiagnostic.sql against the Beech_Tree lab database, then click this tab again.";
             return PartialView("_ThreePillarCash", vm);
         }
 

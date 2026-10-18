@@ -82,7 +82,7 @@ public sealed class LevelMapping
     /// <para>
     /// On by default, but it only takes effect where the destination table actually has the column,
     /// so nothing changes for a database that has not run
-    /// <c>sql/Labs/_Common/03_AdditionalFields.sql</c>. Set false for a lab that must keep its rows
+    /// <c>Database/LRN.MasterFileProcessorWorker/Labs/_Common/03_AdditionalFields.sql</c>. Set false for a lab that must keep its rows
     /// strictly to the mapped columns.
     /// </para>
     /// </summary>

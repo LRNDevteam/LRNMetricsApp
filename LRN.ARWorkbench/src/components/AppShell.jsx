@@ -4,11 +4,20 @@ import ChangePasswordModal from './ChangePasswordModal';
 import { Notice } from './Status';
 import { LOGOUT_URL } from '../config/apiConfig';
 import { navForUser, ROUTES } from '../config/navigation';
+import { ExportJobsProvider, useExportJobs } from '../context/ExportJobsContext';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
 import { clearJwt } from '../services/auth';
 import { fmt } from '../utils/format';
+import { ExportJobsMenu } from './ExportJobs';
 import Icon from './Icon';
+import NotificationBell from './NotificationBell';
+
+// Background export outcome (started / ready / failed), shown above whichever page is open.
+function ExportNotice() {
+  const { notice, setNotice } = useExportJobs();
+  return <Notice notice={notice} onClose={() => setNotice(null)} />;
+}
 
 function ScopeBadge({ access, roleCode, labName }) {
   if (!access) return null;
@@ -55,6 +64,11 @@ function NavItem({ item, count }) {
 
 /** The mockup's app shell: white sidebar (brand mark, icon nav, count pills) and a sticky topbar. */
 export default function AppShell() {
+  // Export jobs outlive page changes, so their provider sits above the routed pages.
+  return <ExportJobsProvider><Shell /></ExportJobsProvider>;
+}
+
+function Shell() {
   const { labs, labId, setLabId, user } = useWorkbench();
   const location = useLocation();
   const [counts, setCounts] = useState({});
@@ -95,7 +109,7 @@ export default function AppShell() {
     if (!labId || !user) return undefined;
     const controller = new AbortController();
     arWorkbenchService.queues(labId, controller.signal)
-      .then((s) => setCounts({ unassignedOpen: s.unassignedOpen, awaitingQa: s.awaitingQa, refollowupDue: s.refollowupDue, agentRequestsPending: s.agentRequestsPending }))
+      .then((s) => setCounts({ unassignedOpen: s.unassignedOpen, awaitingQa: s.awaitingQa, refollowupDue: s.refollowupDue, agentRequestsPending: s.agentRequestsPending, statusVerificationPending: s.statusVerificationPending }))
       .catch(() => { /* badges are optional; the page itself reports errors */ });
     return () => controller.abort();
   }, [labId, user, location.pathname]);
@@ -176,6 +190,8 @@ export default function AppShell() {
               ) : labName && <span className="arwb-badge arwb-badge-accent">{labName}</span>}
             </div>
             <ScopeBadge access={user?.access} roleCode={user?.roleCode} labName={labName} />
+            <ExportJobsMenu />
+            <NotificationBell labId={labId} user={user} />
             <div className="arwb-user-menu" ref={userMenuRef}>
               <button type="button" className="arwb-user-chip arwb-user-chip-btn" onClick={() => setUserMenuOpen((v) => !v)}
                 aria-haspopup="menu" aria-expanded={userMenuOpen} title="Account">
@@ -208,6 +224,7 @@ export default function AppShell() {
         </header>
         <main className="arwb-view-container">
           <Notice notice={accountNotice} onClose={() => setAccountNotice(null)} />
+          <ExportNotice />
           {user?.clientActive === false && (
             <div className="arwb-alert" role="status" style={{ marginBottom: 14 }}>
               <span className="grow">This client is <b>deactivated</b> in the AR Workbench: only administrators can open it, and the nightly snapshot skips it. Reactivate it in Client Management.</span>

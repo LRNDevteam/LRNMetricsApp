@@ -516,7 +516,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
 
                 -- Payer mapper bookkeeping on every touched row: Mapped when a GlobalPayerID arrived with
                 -- the import, otherwise Unmapped with a cleared LastEvaluatedOn so the pipeline/worker
-                -- (re-)evaluates the row (columns come from Sql/001_payer_mapper_additions.sql).
+                -- (re-)evaluates the row (columns come from Database/LRN.ReportsApi/001_payer_mapper_additions.sql).
                 IF COL_LENGTH('dbo.LabInsuranceMaster', 'MappingStatus') IS NOT NULL
                     UPDATE m
                     SET MappingStatus = CASE WHEN m.GlobalPayerID IS NOT NULL THEN 'Mapped'

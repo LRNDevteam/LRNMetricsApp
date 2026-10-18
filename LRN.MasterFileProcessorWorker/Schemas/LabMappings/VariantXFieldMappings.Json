@@ -2,7 +2,7 @@
   "LabId": 25,
   "LabName": "VariantX",
   "DatabaseName": "VariantX_LRN",
-  "_comment": "BulkCopyToTable starts FALSE for both levels. Run sql/VariantX/01_CreateTables.sql against the lab database, confirm a CSV run produces the expected columns, then flip it. LabId 25 is provisional - confirm against LRNMaster.dbo.Labs before use.",
+  "_comment": "BulkCopyToTable starts FALSE for both levels. Run Database/LRN.MasterFileProcessorWorker/VariantX/01_CreateTables.sql against the lab database, confirm a CSV run produces the expected columns, then flip it. LabId 25 is provisional - confirm against LRNMaster.dbo.Labs before use.",
   "ClaimLevel": {
     "Enabled": true,
     "CreateCsv": true,

@@ -66,7 +66,7 @@ public sealed class LineClaimBulkLoader
         await EnsureTableExistsAsync(conn, level.SqlTableName, ct).ConfigureAwait(false);
 
         // AdditionalFields is opt-in on the table, not in config: a lab database that has not had
-        // sql/Labs/_Common/03_AdditionalFields.sql applied must keep loading exactly as before
+        // Database/LRN.MasterFileProcessorWorker/Labs/_Common/03_AdditionalFields.sql applied must keep loading exactly as before
         // rather than fail every row with 'Invalid column name'.
         var captureAdditionalFields = level.CaptureAdditionalFields
             && await ColumnExistsAsync(conn, level.SqlTableName, AuditColumns.AdditionalFields, ct).ConfigureAwait(false);
@@ -75,7 +75,7 @@ public sealed class LineClaimBulkLoader
         {
             _logger.LogWarning(
                 "Lab {LabId} [{FileType}]: {Table} has no {Column} column, so unmapped CSV columns will be dropped. " +
-                "Run sql/Labs/_Common/03_AdditionalFields.sql against this database to capture them.",
+                "Run Database/LRN.MasterFileProcessorWorker/Labs/_Common/03_AdditionalFields.sql against this database to capture them.",
                 lab.LabId, fileType, level.SqlTableName, AuditColumns.AdditionalFields);
         }
 

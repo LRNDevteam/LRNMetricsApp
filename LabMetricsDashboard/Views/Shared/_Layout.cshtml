@@ -1368,6 +1368,31 @@
     <script nonce='@Context.Items["CspNonce"]' src="~/lib/chart.js/chart.umd.js"></script>
     <script nonce='@Context.Items["CspNonce"]' src="~/js/site.js" asp-append-version="true"></script>
     <script nonce='@Context.Items["CspNonce"]'>
+        // One top-bar panel open at a time. Each button stops its click from bubbling (so its own
+        // panel is not closed by its own outside-click handler), which also meant the OTHER panels'
+        // outside-click handlers never ran: opening the lab picker over an open reports panel left
+        // both showing. Every opener calls this first; Escape and the account menu close them too.
+        window.lrnCloseNavPanels = function (except) {
+            var lab = document.getElementById('navLabPanel');
+            if (lab && lab !== except) lab.classList.remove('open');
+            ['navBellPanel', 'rptPanel'].forEach(function (id) {
+                var p = document.getElementById(id);
+                if (p && p !== except) p.style.display = 'none';
+            });
+            if (except !== 'account' && window.bootstrap && bootstrap.Dropdown) {
+                // Whole page: the account menu sits in the top bar, outside the .navbar element.
+                document.querySelectorAll('[data-bs-toggle="dropdown"][aria-expanded="true"]').forEach(function (t) {
+                    var d = bootstrap.Dropdown.getInstance(t);
+                    if (d) d.hide();
+                });
+            }
+        };
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') window.lrnCloseNavPanels(); });
+        // The account menu (and any other navbar dropdown) opening closes the custom panels.
+        document.addEventListener('show.bs.dropdown', function () { window.lrnCloseNavPanels('account'); });
+    </script>
+
+    <script nonce='@Context.Items["CspNonce"]'>
         // Payer mapping notification bell: MappingStatus counts + recent Payer Master notifications.
         (function () {
             var wrap = document.getElementById('navBellWrap');
@@ -1412,6 +1437,7 @@
             btn.addEventListener('click', function (e) {
                 e.stopPropagation();
                 var open = panel.style.display === 'block';
+                if (!open) window.lrnCloseNavPanels(panel);
                 panel.style.display = open ? 'none' : 'block';
                 if (!open) { refresh(); loadNotes(); }
             });
@@ -1602,6 +1628,7 @@
             btn.addEventListener('click', function (e) {
                 e.stopPropagation();
                 var open = panel.style.display === 'block';
+                if (!open) window.lrnCloseNavPanels(panel);
                 panel.style.display = open ? 'none' : 'block';
                 if (!open) refresh();
             });
@@ -1770,6 +1797,7 @@
 
         btn.addEventListener('click', function (e) {
         e.stopPropagation();
+        if (!panel.classList.contains('open')) window.lrnCloseNavPanels(panel);
         panel.classList.toggle('open');
         if (panel.classList.contains('open') && search) {
         search.value = '';
@@ -2001,6 +2029,7 @@
                 var btn = document.getElementById('rptBtn');
                 var panel = document.getElementById('rptPanel');
                 if (!wrap || !btn || !panel) return;
+                if (window.lrnCloseNavPanels) window.lrnCloseNavPanels(panel);
                 panel.style.display = 'block';
                 if (typeof window.lrnReportsBadgeRefresh === 'function') {
                     window.lrnReportsBadgeRefresh();

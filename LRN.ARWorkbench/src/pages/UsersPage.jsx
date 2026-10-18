@@ -13,7 +13,8 @@ import { fmt } from '../utils/format';
 // The mockup's User Management (App.views.users), on the real LRNMaster user tables. A Super Admin
 // manages every lab; an AR Workbench System Administrator (or Lab Admin) manages the labs assigned
 // to them. Add User is its own page (UserCreatePage): no password is set by the admin - the user is
-// emailed a one-time password and a link to create their own. The API enforces every rule; rows
+// emailed a one-time password and a link to create their own. On Edit, a Super Admin or System
+// Administrator may also set a password directly (a user who cannot change their own). The API enforces every rule; rows
 // the caller may not change come back read-only with the reason.
 
 function EditUserModal({ data, user, onClose, onSaved }) {
@@ -27,8 +28,13 @@ function EditUserModal({ data, user, onClose, onSaved }) {
     managerUserId: user.managerUserId || '',
     teamName: user.teamName || '',
     // { [labId]: clinic or provider } for a Clinic / Provider Viewer
-    scopes: Object.fromEntries((user.scopes || []).map((s) => [s.labId, s.clinicName || s.providerName || '']))
+    scopes: Object.fromEntries((user.scopes || []).map((s) => [s.labId, s.clinicName || s.providerName || ''])),
+    // Set Password (Super Admin / System Administrator only): blank keeps the current password
+    password: '',
+    confirmPassword: ''
   }));
+  const [showPassword, setShowPassword] = useState(false);
+  const canSetPassword = Boolean(data.canSetPasswords);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -41,15 +47,21 @@ function EditUserModal({ data, user, onClose, onSaved }) {
     if (!form.roleId) { setError('Choose a role.'); return; }
     if (form.labIds.length === 0) { setError('Choose at least one lab.'); return; }
     if (roleScope && form.labIds.some((id) => !form.scopes[id])) { setError(`Choose the ${roleScope === 'clinic' ? 'clinic' : 'referring provider'} for every selected lab.`); return; }
+    const settingPassword = canSetPassword && (form.password || form.confirmPassword);
+    if (settingPassword) {
+      if (form.password.length < 8 || form.password.length > 128) { setError('The new password must be 8 to 128 characters.'); return; }
+      if (form.password !== form.confirmPassword) { setError('The new password and its confirmation do not match.'); return; }
+    }
     setBusy(true);
     setError('');
     try {
       const result = await arWorkbenchService.updateUser(labId, user.labUserId, {
         email: form.email.trim(), roleId: Number(form.roleId), labIds: form.labIds, isActive: form.isActive,
         managerUserId: form.managerUserId ? Number(form.managerUserId) : null, teamName: form.teamName.trim() || null,
-        scopes: scopesBody(roleScope, form.labIds, form.scopes)
+        scopes: scopesBody(roleScope, form.labIds, form.scopes),
+        password: settingPassword ? form.password : null
       });
-      onSaved({ kind: 'good', text: result?.message || 'Saved.' });
+      onSaved({ kind: 'good', text: (result?.message || 'Saved.') + (settingPassword ? ` New password set for ${user.userName} - share it with them securely.` : '') });
     } catch (e) {
       setError(e.message);
       setBusy(false);
@@ -58,7 +70,9 @@ function EditUserModal({ data, user, onClose, onSaved }) {
 
   return (
     <Modal title={`Edit ${user.userName}`} wide busy={busy} onClose={onClose} onSubmit={save} submitLabel="Save Changes"
-      subtitle="Passwords are never set here. Use Send password link on the user list to let the user choose a new one.">
+      subtitle={canSetPassword
+        ? 'Leave Set Password blank to keep the current password. Send password link on the user list lets the user choose their own.'
+        : 'Passwords are not set here. Use Send password link on the user list to let the user choose a new one.'}>
       <ErrorBox message={error} />
       <div className="arwb-form-grid">
         <div className="arwb-field">
@@ -105,6 +119,28 @@ function EditUserModal({ data, user, onClose, onSaved }) {
         <div style={{ marginTop: 12 }}>
           <ScopePicker labId={labId} roleScope={roleScope} labs={data.labs} labIds={form.labIds} scopes={form.scopes} onChange={(v) => set('scopes', v)} />
         </div>
+      )}
+      {canSetPassword && (
+        <fieldset className="arwb-field" style={{ marginTop: 16, border: 0, padding: 0 }}>
+          <legend className="arwb-field-label" style={{ fontSize: 'inherit' }}>Set Password <span className="arwb-hint">(optional — Super Admin / System Administrator)</span></legend>
+          <div className="arwb-form-grid">
+            <div className="arwb-field">
+              <label htmlFor="u-pass">New password</label>
+              <input id="u-pass" type={showPassword ? 'text' : 'password'} className="arwb-input" maxLength={128} autoComplete="new-password"
+                value={form.password} onChange={(e) => set('password', e.target.value)} />
+            </div>
+            <div className="arwb-field">
+              <label htmlFor="u-pass2">Confirm new password</label>
+              <input id="u-pass2" type={showPassword ? 'text' : 'password'} className="arwb-input" maxLength={128} autoComplete="new-password"
+                value={form.confirmPassword} onChange={(e) => set('confirmPassword', e.target.value)} />
+            </div>
+          </div>
+          <div className="arwb-checkbox-row">
+            <input id="u-pass-show" type="checkbox" checked={showPassword} onChange={(e) => setShowPassword(e.target.checked)} />
+            <label htmlFor="u-pass-show">Show password</label>
+          </div>
+          <small className="arwb-hint">8 to 128 characters. The user signs in with it straight away (LRN Metrics and the AR Workbench share the login).</small>
+        </fieldset>
       )}
     </Modal>
   );

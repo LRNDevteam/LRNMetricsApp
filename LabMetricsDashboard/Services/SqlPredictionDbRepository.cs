@@ -438,12 +438,12 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
             if (!tableExists)
                 return new PredictionDbDiagnostic(false, procExists, 0, null, null,
                     "Table dbo.PayerValidationReport does not exist in this lab's database. " +
-                    "Run PredictionAnalysisApp/Database/01_CreateTables.sql against this lab's database.");
+                    "Run Database/PredictionAnalysisApp/01_CreateTables.sql against this lab's database.");
 
             if (!procExists)
                 return new PredictionDbDiagnostic(true, false, 0, null, null,
                     "Stored procedure dbo.usp_GetPayerValidationReport is missing. " +
-                    "Run PredictionAnalysisApp/Database/02_CreateStoredProcedures.sql against this lab's database.");
+                    "Run Database/PredictionAnalysisApp/02_CreateStoredProcedures.sql against this lab's database.");
 
             // SP 5: usp_GetPayerValidationRunStats — latest RunId + total row count
             await using (var cmd = new SqlCommand("dbo.usp_GetPayerValidationRunStats", conn)

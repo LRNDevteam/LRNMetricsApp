@@ -4,6 +4,7 @@ import AssignModal from '../components/AssignModal';
 import AutoAdjustModal from '../components/AutoAdjustModal';
 import BulkUpdateModal from '../components/BulkUpdateModal';
 import DataTable, { withSortKeys } from '../components/DataTable';
+import { ExportButton } from '../components/ExportJobs';
 import { CLAIM_SORT_KEYS } from '../config/sortKeys';
 import Icon from '../components/Icon';
 import MultiSelect from '../components/MultiSelect';
@@ -52,8 +53,13 @@ function buildColumns(openClaim) {
     { key: 'denialCategory', label: 'Denial Category', sortKey: 'denialCategory', wrap: true },
     { key: 'denialReason', label: 'Denial Reason', wrap: true, defaultHidden: true },
     { key: 'sourceClaimStatus', label: 'Claim Status', defaultHidden: true },
+    // Auto-adjusted / approved write-off: the workbench has nullified the balance (§6, DEF-20); the
+    // master file's amount is what still has to be posted in the PMS, so it stays in the tooltip.
     { key: 'insuranceBalance', label: 'Ins. Balance', align: 'end', sortKey: 'insuranceBalance',
-      render: (r) => <span className="mono">{fmt.money(r.insuranceBalance)}</span>, csv: (r) => r.insuranceBalance },
+      render: (r) => (r.isBalanceNullified
+        ? <span className="mono" title={`Nullified in the workbench - ${fmt.money(r.insuranceBalance)} to post in the PMS`}>{fmt.money(0)}</span>
+        : <span className="mono">{fmt.money(r.insuranceBalance)}</span>),
+      csv: (r) => r.insuranceBalance },
     { key: 'agingBucket', label: 'Aging', sortKey: 'agingDays', render: (r) => r.agingBucket || '—' },
     { key: 'isTflRisk', label: 'TFL', render: (r) => <TflBadge atRisk={r.isTflRisk} />, csv: (r) => (r.isTflRisk ? 'At Risk' : 'OK') },
     { key: 'priority', label: 'Priority', sortKey: 'priority', render: (r) => <PriorityText priority={r.priority} /> },
@@ -64,10 +70,11 @@ function buildColumns(openClaim) {
     { key: 'queue', label: 'AR Queue', render: (r) => <QueueBadge queueId={r.arQueueId} label={r.arQueueLabel} subLabel={r.arSubQueueLabel} />,
       csv: (r) => [r.arQueueLabel, r.arSubQueueLabel].filter(Boolean).join(' · ') },
     { key: 'fixResolution', label: 'Fix / Resolution', wrap: true, defaultHidden: true },
-    { key: 'revenueExpectation', label: 'Expected Payment', align: 'end', sortKey: 'revenueExpectation',
+    { key: 'revenueExpectation', label: 'Revenue Expectation', align: 'end', sortKey: 'revenueExpectation',
       render: (r) => <span className="mono">{fmt.money(r.revenueExpectation)}</span>, csv: (r) => r.revenueExpectation },
     { key: 'recoveredAmount', label: 'Recovered', align: 'end', sortKey: 'recoveredAmount', defaultHidden: true,
       render: (r) => <span className="mono">{fmt.money(r.recoveredAmount)}</span>, csv: (r) => r.recoveredAmount },
+    { key: 'recoveryStatus', label: 'Recovery Status', defaultHidden: true, render: (r) => r.recoveryStatus || '—', csv: (r) => r.recoveryStatus || '' },
     { key: 'remainingAR', label: 'Remaining AR', align: 'end', sortKey: 'remainingAR', defaultHidden: true,
       render: (r) => <span className="mono">{fmt.money(r.remainingAR)}</span>, csv: (r) => r.remainingAR },
     { key: 'lastFollowUpDate', label: 'Last Follow-Up', sortKey: 'lastFollowUpDate', render: (r) => fmt.date(r.lastFollowUpDate), csv: (r) => fmt.date(r.lastFollowUpDate) },
@@ -97,20 +104,13 @@ export default function WorkQueuePage() {
   const [posting, setPosting] = useState(false);
   const [notice, setNotice] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const [exporting, setExporting] = useState('');   // '' | 'filtered' | 'all'
 
-  // Server-side Excel of every matching claim (or every claim in scope), not just this page.
-  async function exportExcel(filtered) {
-    setExporting(filtered ? 'filtered' : 'all');
-    setError('');
-    try {
-      const { page, pageSize: _ps, ...rest } = filter; // eslint-disable-line no-unused-vars
-      await arWorkbenchService.exportClaims(filtered ? rest : { labId, sortBy: filter.sortBy, sortDesc: filter.sortDesc });
-    } catch (e) {
-      setError(e.message || 'The export failed.');
-    } finally {
-      setExporting('');
-    }
+  // Server-side Excel of every matching claim (or every claim in scope), not just this page - a
+  // background job; the Downloads tracker saves the file when it is ready.
+  function startExport(filtered) {
+    const { page, pageSize: _ps, ...rest } = filter; // eslint-disable-line no-unused-vars
+    return arWorkbenchService.startClaimsExport(filtered ? rest : { labId, sortBy: filter.sortBy, sortDesc: filter.sortDesc },
+      filtered ? 'Work Queue - Filtered' : 'Work Queue - All');
   }
   async function markPosted() {
     setPosting(true);
@@ -141,7 +141,9 @@ export default function WorkQueuePage() {
       page: Number(params.get('page')) || 1,
       pageSize,
       // ?code= from the Denial Analysis Report: primary or line denial code, any spelling.
-      denialCode: params.getAll('code')
+      denialCode: params.getAll('code'),
+      // ?primary=1 (Route to Work Queue from an insight): the PRIMARY denial only, as insights count (OBS-02).
+      primaryDenialOnly: params.get('primary') === '1'
     };
     LIST_FILTERS.forEach((lf) => { f[lf.api] = params.getAll(lf.param); });
     return f;
@@ -213,7 +215,8 @@ export default function WorkQueuePage() {
 
   const activeChips = [
     ...params.getAll('code').map((v) => ({
-      key: `code:${v}`, text: `Denial Code: ${v}`, remove: () => update({ code: params.getAll('code').filter((x) => x !== v) })
+      key: `code:${v}`, text: `${params.get('primary') === '1' ? 'Primary Denial' : 'Denial Code'}: ${v}`,
+      remove: () => update({ code: params.getAll('code').filter((x) => x !== v), ...(params.getAll('code').length <= 1 ? { primary: '' } : {}) })
     })),
     ...LIST_FILTERS.flatMap((lf) => params.getAll(lf.param).map((v) => {
       const label = options?.[lf.options]?.find((o) => o.value === v)?.label ?? v;
@@ -306,14 +309,10 @@ export default function WorkQueuePage() {
                 <Icon name="upload" size={15} /> Bulk Update (Excel)
               </button>
             )}
-            <button type="button" className="arwb-btn arwb-btn-sm" disabled={exporting !== ''} onClick={() => exportExcel(true)}
-              title="Every claim that matches the current filters, not just this page">
-              {exporting === 'filtered' ? <span className="arwb-spinner" /> : <Icon name="download" size={15} />} Export Filtered
-            </button>
-            <button type="button" className="arwb-btn arwb-btn-sm" disabled={exporting !== ''} onClick={() => exportExcel(false)}
-              title="Every claim you can see, ignoring the filters">
-              {exporting === 'all' ? <span className="arwb-spinner" /> : <Icon name="download" size={15} />} Export All
-            </button>
+            <ExportButton scope="Work Queue - Filtered" label="Export Filtered" start={() => startExport(true)}
+              title="Every claim that matches the current filters, not just this page (built in the background)" />
+            <ExportButton scope="Work Queue - All" label="Export All" start={() => startExport(false)}
+              title="Every claim you can see, ignoring the filters (built in the background)" />
           </>
         )}
       />

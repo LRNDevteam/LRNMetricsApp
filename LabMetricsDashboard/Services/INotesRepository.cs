@@ -4,7 +4,7 @@ namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// Data access for the generic Notes &amp; Insights feature. Every method
-/// routes through a stored procedure (see SQL_Scripts/NotesInsights) — no
+/// routes through a stored procedure (see Database/Shared/NotesInsights) — no
 /// inline SQL. The caller supplies the lab-specific connection string, the
 /// same way the Executive Summary repository does.
 /// </summary>

@@ -62,6 +62,56 @@ public sealed class ArWorkbenchDocumentInfo
     public DateTime UploadedOn { get; set; }
 }
 
+/// <summary>
+/// A claim document in the Document Vault / a claim's Documents tab (handoff §8.2, DEF-13 / DEF-14):
+/// follow-up attachments and CIP responses, with the claim and patient they belong to.
+/// </summary>
+public sealed class ArWorkbenchDocumentRow
+{
+    public long DocumentId { get; set; }
+    public long ClaimKey { get; set; }
+    public string ClaimID { get; set; } = string.Empty;
+    public string? AccessionNumber { get; set; }
+    public string? PatientName { get; set; }
+    public string? PatientID { get; set; }
+    public DateTime? DateOfService { get; set; }
+    public string? PayerName { get; set; }
+    /// <summary>FollowUp | CipResponse | Other.</summary>
+    public string DocumentSource { get; set; } = string.Empty;
+    public string DocumentCategory { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public long? FollowUpId { get; set; }
+    public long? CipCaseId { get; set; }
+    public int? RoundNumber { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string? ContentType { get; set; }
+    public long SizeBytes { get; set; }
+    public string UploadedBy { get; set; } = string.Empty;
+    public DateTime UploadedOn { get; set; }
+}
+
+/// <summary>The category and description of one uploaded file (claim document upload, same order as the files).</summary>
+public sealed class ArWorkbenchDocumentUploadInfo
+{
+    public string? Category { get; set; }
+    public string? Description { get; set; }
+}
+
+/// <summary>Document Vault search: claim / visit, patient and category (handoff §8.2).</summary>
+public sealed class ArWorkbenchDocumentFilter
+{
+    public int LabId { get; set; }
+    /// <summary>Claim ID, accession (visit) number, patient name or patient account - partial match.</summary>
+    public string? Search { get; set; }
+    public string? Category { get; set; }
+    public string? Source { get; set; }
+    public DateTime? From { get; set; }
+    public DateTime? To { get; set; }
+    public long? ClaimKey { get; set; }
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 50;
+}
+
 /// <summary>T065 bulk CSV response upload outcome (mockup handleBulkCipUpload).</summary>
 public sealed class ArWorkbenchCipBulkResponseResult
 {

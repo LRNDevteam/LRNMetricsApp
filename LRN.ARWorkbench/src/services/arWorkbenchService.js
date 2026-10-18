@@ -32,6 +32,17 @@ export const arWorkbenchService = {
     return api(`client-cip/template${qs({ labId })}`, { method: 'POST', body: form });
   },
   downloadDocument: (labId, documentId, fileName) => downloadFile(`documents/${documentId}${qs({ labId })}`, fileName || 'attachment'),
+  // Claim attachments (handoff §8.2): docs = [{ file, category, description }], optionally on a follow-up
+  // note; the claim's documents; and the Document Vault search (claim / visit, patient, category).
+  uploadClaimDocuments: (labId, claimKey, docs, followUpId) => {
+    const form = new FormData();
+    if (followUpId) form.append('followUpId', String(followUpId));
+    form.append('documents', JSON.stringify((docs || []).map((d) => ({ category: d.category, description: d.description || null }))));
+    (docs || []).forEach((d) => form.append('files', d.file));
+    return api(`claims/${claimKey}/documents${qs({ labId })}`, { method: 'POST', body: form });
+  },
+  claimDocuments: (labId, claimKey) => api(`claims/${claimKey}/documents${qs({ labId })}`),
+  documentVault: (filter, signal) => api(`documents${qs(filter)}`, { signal }),
   convertLegacyCip: (labId, preview) => api(`cip/convert-legacy${qs({ labId, preview })}`, { method: 'POST' }),
   cipBulk: (labId, caseIds, decision, note) => api(`cip/bulk${qs({ labId })}`, json('POST', { caseIds, decision, note })),
 
@@ -39,6 +50,14 @@ export const arWorkbenchService = {
   createAgentRequest: (labId, claimKey, body) => api(`claims/${encodeURIComponent(claimKey)}/agent-requests${qs({ labId })}`, json('POST', body)),
   agentRequests: (filter, signal) => api(`agent-requests${qs(filter)}`, { signal }),
   resolveAgentRequests: (labId, body) => api(`agent-requests/resolve${qs({ labId })}`, json('POST', body)),
+
+  // Status Change Verification (RCM Manager / admin): claims whose master-file claim status changed while assigned
+  statusVerification: (filter, signal) => api(`status-verification${qs(filter)}`, { signal }),
+  resolveStatusVerification: (labId, body) => api(`status-verification/resolve${qs({ labId })}`, json('POST', body)),
+
+  // Notification bell: addressed to the user or their role
+  notifications: (labId, signal) => api(`notifications${qs({ labId })}`, { signal }),
+  markNotificationsRead: (labId, body) => api(`notifications/read${qs({ labId })}`, json('POST', body)),
 
   // QA Verification Queue (ARWorkbench.QaDecide)
   qaQueue: (filter, signal) => api(`qa${qs(filter)}`, { signal }),
@@ -96,6 +115,16 @@ export const arWorkbenchService = {
   // Follow-up notes, claim export, insights, timely-filing limits
   logFollowUp: (labId, claimKey, body) => api(`claims/${encodeURIComponent(claimKey)}/follow-ups${qs({ labId })}`, json('POST', body)),
   exportClaims: (filter) => downloadFile(`claims/export${qs(filter)}`, 'ARWorkbench_Claims.xlsx'),
+
+  // Background exports (the Denial Workflow Overall Download pattern): start returns a job, the
+  // Downloads tracker polls it and saves the file when it is Completed. See ExportJobsContext.
+  startClaimsExport: (filter, exportScope) => api(`exports/claims${qs({ ...filter, exportScope })}`, { method: 'POST' }),
+  startAuditExport: (filter) => api(`exports/audit${qs(filter)}`, { method: 'POST' }),
+  startReportExport: (labId, reportId, range) => api(`exports/reports/${encodeURIComponent(reportId)}${qs({ labId, ...range })}`, { method: 'POST' }),
+  exportJobs: (labId, signal) => api(`exports${qs({ labId })}`, { signal }),
+  exportJob: (labId, jobId, signal) => api(`exports/${encodeURIComponent(jobId)}${qs({ labId })}`, { signal }),
+  downloadExport: (labId, jobId, fileName) => downloadFile(`exports/${encodeURIComponent(jobId)}/download${qs({ labId })}`, fileName || 'ARWorkbench_Export.xlsx'),
+  cancelExport: (labId, jobId) => api(`exports/${encodeURIComponent(jobId)}${qs({ labId })}`, { method: 'DELETE' }),
   insights: (labId, signal) => api(`data-processing/insights${qs({ labId })}`, { signal }),
   uploadedInsights: (labId, signal) => api(`data-processing/uploaded-insights${qs({ labId })}`, { signal }),
   tflSettings: (labId) => api(`settings/tfl${qs({ labId })}`),

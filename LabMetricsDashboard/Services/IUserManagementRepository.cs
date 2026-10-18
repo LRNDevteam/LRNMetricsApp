@@ -36,6 +36,23 @@ public interface IUserManagementRepository
     /// </summary>
     Task<IEnumerable<AnalystManagerTeam>> GetAnalystManagerTeamMapAsync();
 
+    Task<UserRole?> GetUserRoleByIdAsync(int userRoleId);
+    Task<UserLab?> GetUserLabByIdAsync(int ulid);
+
+    // ── Hybrid sign-in (local password + Microsoft Entra ID) ─────────────────────────────
+    Task<LabUser?> GetUserByEntraObjectIdAsync(Guid objectId);
+
+    /// <summary>Returns the Entra user for <paramref name="objectId"/>, creating it - active, no roles, no labs - on first sign-in.</summary>
+    Task<LabUser> GetOrCreateEntraUserAsync(Guid objectId, Guid tenantId, string upn, string? email, string? displayName);
+
+    /// <summary>Persistent per-account lockout: after <paramref name="maxAttempts"/> failures the account is locked for <paramref name="lockoutMinutes"/>.</summary>
+    Task RecordFailedLoginAsync(int labUserId, int maxAttempts, int lockoutMinutes);
+    Task RecordSuccessfulLoginAsync(int labUserId);
+    Task WriteLoginAuditAsync(int? labUserId, string? loginValue, string provider, bool succeeded, string? reason, string? ipAddress);
+
+    /// <summary>Moves a pending Microsoft sign-in onto an existing local account (dbo.usp_LinkEntraUser).</summary>
+    Task LinkEntraUserAsync(int existingLabUserId, int pendingLabUserId, string linkedBy);
+
     // ?? Lab management (LabMaster) ?????????????????????????????????
     Task<LabMetricsDashboard.Models.Lab?> GetLabByIdAsync(int labId);
     Task<LabMetricsDashboard.Models.Lab?> GetLabByNameAsync(string labName);

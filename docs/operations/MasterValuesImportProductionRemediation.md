@@ -26,6 +26,6 @@ From an elevated PowerShell session, grant the API app pool access (replace the 
 
 ## Before retrying a timed-out import
 
-Run `LRN.ReportsApi/Sql/MasterValues_Insurance_Import_Audit.sql` against `LRNMaster`. Adjust `@ImportWindowStartUtc` to the failed request's UTC start time, review rows inserted or updated during that window, and resolve unexpected duplicates before uploading again.
+Run `Database/LRN.ReportsApi/MasterValues_Insurance_Import_Audit.sql` against `LRNMaster`. Adjust `@ImportWindowStartUtc` to the failed request's UTC start time, review rows inserted or updated during that window, and resolve unexpected duplicates before uploading again.
 
 After deployment, new insurance-payer imports use a temporary staging table, `SqlBulkCopy`, a serializable transaction, and set-based update/insert operations. A cancellation rolls back the complete database phase.

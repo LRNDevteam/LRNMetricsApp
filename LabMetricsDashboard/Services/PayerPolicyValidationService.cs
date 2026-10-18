@@ -115,7 +115,7 @@ public sealed class PayerPolicyValidationService
             {
                 _logger.LogWarning(
                     "usp_GetPayerValidationReportPaged is missing on {Lab} — falling back to legacy full load. " +
-                    "Deploy PredictionAnalysisApp/Database/12_PayerValidationReportPaged.sql for fast paging.",
+                    "Deploy Database/PredictionAnalysisApp/12_PayerValidationReportPaged.sql for fast paging.",
                     labName);
                 // fall through to legacy path below
             }

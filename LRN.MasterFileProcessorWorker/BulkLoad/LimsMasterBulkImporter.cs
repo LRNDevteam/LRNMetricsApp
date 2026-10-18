@@ -147,7 +147,7 @@ public sealed class LimsMasterBulkImporter
 		{
 			_logger.LogInformation(
 				"LIMS import: {TableName} has no {Column} column, so any column added to the file beyond the schema JSON is dropped. " +
-				"Run sql/Create_LIMSMaster.sql to add it.",
+				"Run Database/LRN.MasterFileProcessorWorker/Create_LIMSMaster.sql to add it.",
 				tableName,
 				request.AdditionalFieldsColumn);
 		}
@@ -1098,7 +1098,7 @@ public sealed class LimsImportRequest
 	/// as JSON, rather than dropping them.
 	/// <para>
 	/// On by default, but it only takes effect where the destination table actually has that column,
-	/// so a database that has not run sql/Create_LIMSMaster.sql keeps loading exactly as before.
+	/// so a database that has not run Database/LRN.MasterFileProcessorWorker/Create_LIMSMaster.sql keeps loading exactly as before.
 	/// </para>
 	/// </summary>
 	public bool CaptureAdditionalFields { get; set; } = true;

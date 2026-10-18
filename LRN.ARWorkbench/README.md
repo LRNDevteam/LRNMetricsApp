@@ -8,7 +8,7 @@ The requirement is in `docs/Denial_WorkFlow/` (Build Reference, Developer Docume
 
 ## Setup
 
-1. **Database.** Run `LRNMaster_01_ARWB_Roles_Access.sql` once in LRNMaster. In each lab database, run `00_ARWB_Drop_Existing_Objects.sql` (removes the old `arwb` schema and all workbench data), then scripts 01 to 07 of `LRN.ReportsApi/Sql/ArWorkbench`. You can run `ARWB_Lab_Database_Setup_Merged.sql` instead of 01 to 07. Then run the first load:
+1. **Database.** Run `LRNMaster_01_ARWB_Roles_Access.sql` once in LRNMaster. In each lab database, run `00_ARWB_Drop_Existing_Objects.sql` (removes the old `arwb` schema and all workbench data), then scripts 01 to 07 of `Database/LRN.ReportsApi/ArWorkbench`. You can run `2_RUN_IN_EACH_LAB_DB_ARWB_Setup.sql` instead of 01 to 07. Then run the first load:
    `EXEC dbo.ARWB_usp_LoadClaimsFromSource @RunBy = N'you';`
    See that folder's README.
 2. **API.** `LRN.ReportsApi` needs no configuration beyond what it already has. It uses the same `LabConfig:LabsID` and lab connection strings as the Denial Workflow.
