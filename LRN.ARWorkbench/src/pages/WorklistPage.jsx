@@ -26,7 +26,8 @@ const MY_WORK_TILES = [
   ['overdue', 'Overdue', 'overdue', { followUpWindow: 'overdue', activeOnly: true }],
   ['highPriority', 'High Priority', 'highPriority', { priority: ['High'], activeOnly: true }],
   ['refollowup', 'Re-follow-up Required', 'refollowupRequired', { queue: ['refollowup'] }],
-  ['cipResponse', 'CIP Response Received', 'cipResponseReceived', { queue: ['cipresponse'] }],
+  // Assigned only: a reply still waiting for the manager's review is in the same queue (DEF-19) but not the agent's yet.
+  ['cipResponse', 'CIP Response Received', 'cipResponseReceived', { queue: ['cipresponse'], status: ['Assigned'] }],
   ['awaitingPayer', 'Awaiting Payer Response', 'awaitingPayer', { awaitingPayerOnly: true, activeOnly: true }],
   ['submittedQA', 'Submitted for QA', 'submittedForQa', { status: ['Submitted for QA'] }],
   ['rejectedQA', 'Rejected QA Items', 'qaRejected', { status: ['QA Rejected'] }]

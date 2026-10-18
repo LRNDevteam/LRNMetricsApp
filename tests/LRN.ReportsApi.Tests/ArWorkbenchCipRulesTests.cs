@@ -1,3 +1,4 @@
+using LRN.ReportsApi.Models;
 using LRN.ReportsApi.Services.ArWorkbench;
 using Xunit;
 
@@ -5,6 +6,27 @@ namespace LRN.ReportsApi.Tests;
 
 public class ArWorkbenchCipRulesTests
 {
+    /// <summary>DEF-18: whole-client and Clinic Viewers respond; a Provider Viewer is read-only; internal roles never respond.</summary>
+    [Theory]
+    [InlineData("viewer", "all", true)]
+    [InlineData("viewer", "client", true)]
+    [InlineData("viewer", "clinic", true)]
+    [InlineData("viewer", "provider", false)]
+    [InlineData("agent", "all", false)]
+    [InlineData("lead", "all", false)]
+    public void Who_responds_to_a_client_escalation(string roleCode, string level, bool canRespond)
+    {
+        var user = new ArWorkbenchUserContext { RoleCode = roleCode, Access = new ArWorkbenchAccessScope { Level = level } };
+        Assert.Equal(canRespond, ArWorkbenchCipRules.CanRespond(user));
+    }
+
+    [Fact]
+    public void An_administrator_may_respond_on_the_clients_behalf()
+    {
+        Assert.True(ArWorkbenchCipRules.CanRespond(new ArWorkbenchUserContext { RoleCode = "agent", SiteAdmin = true }));
+        Assert.True(ArWorkbenchCipRules.CanRespond(new ArWorkbenchUserContext { RoleCode = "admin", Permissions = new ArWorkbenchPermissions { ManageSettings = true } }));
+    }
+
     [Theory]
     [InlineData(ArWorkbenchCipAction.Approve, "Pending Approval", "Sent to Client")]
     [InlineData(ArWorkbenchCipAction.Reject, "Pending Approval", "Returned to Agent")]

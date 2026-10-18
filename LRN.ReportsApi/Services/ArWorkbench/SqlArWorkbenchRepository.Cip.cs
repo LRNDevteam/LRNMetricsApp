@@ -348,4 +348,15 @@ public static class ArWorkbenchCipRules
 
     /// <summary>The client acts on Respond only; the internal approvers on everything else.</summary>
     public static bool IsClientAction(ArWorkbenchCipAction action) => action == ArWorkbenchCipAction.Respond;
+
+    /// <summary>
+    /// Who may respond to a client escalation: whole-client and Clinic Viewers (handoff §9.1 / §10.1 -
+    /// CIPs are routed to the clinic's scoped users, who respond; DEF-18). A Clinic Viewer reaches only
+    /// their clinic's requests: every respond path (single, CSV template, CSV upload) reads the cases
+    /// through the caller's scope. Provider Viewers stay read-only. Administrators may respond on a
+    /// client's behalf.
+    /// </summary>
+    public static bool CanRespond(ArWorkbenchUserContext user) =>
+        user.SiteAdmin || user.Permissions.ManageSettings
+        || (user.RoleCode == "viewer" && user.Access.Level is not "provider");
 }

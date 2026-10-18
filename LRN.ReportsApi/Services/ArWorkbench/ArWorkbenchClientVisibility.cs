@@ -22,7 +22,37 @@ public static class ArWorkbenchClientVisibility
         "WorkedStatus", "FixResolution", "AdHocFollowUpAssigned"
     ];
 
+    /// <summary>
+    /// Claims export columns a client never gets: every note on the claim, the follow-up note fields,
+    /// its QA review, the status verification and who the claim is assigned to. The claim's own data
+    /// (codes, amounts, dates, statuses from the master file) stays.
+    /// </summary>
+    public static readonly IReadOnlySet<string> InternalExportColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "Assigned Agent", "Fix / Resolution", "Notes", "Assigned By", "Assigned On",
+        "Follow-Up Notes Logged", "FU Claim Type", "FU Follow Up Type", "FU Claim Status", "FU Denial Root Cause",
+        "FU Fix / Resolution", "FU Comment", "FU Next Follow-Up Date", "FU CIP Category", "FU CIP Required Info",
+        "FU CIP Comment", "FU Logged By", "FU Logged By Role", "FU Logged On",
+        "QA Status", "QA Reviewed By", "QA Reviewer Role", "QA Reviewed On", "QA Error Type", "QA / Manager Comment",
+        "Status Verification", "Source Status Change", "Verification Manager", "Verification Decision",
+        "Verified By", "Verified On", "Verification Comment"
+    };
+
     public static bool IsClientUser(ArWorkbenchUserContext user) => !user.SiteAdmin && user.RoleCode == "viewer";
+
+    /// <summary>The claim list (GET claims): the same internal fields the claim page hides.</summary>
+    public static void Apply(IEnumerable<ArWorkbenchClaimRow> rows, ArWorkbenchUserContext user)
+    {
+        if (!IsClientUser(user)) return;
+        foreach (var row in rows)
+        {
+            row.AssignedAgentUser = null;
+            row.AssignedAgentName = null;
+            row.FixResolution = null;
+            row.QaStatus = null;
+            row.PendingAgentRequests = 0;
+        }
+    }
 
     /// <summary>Removes everything internal from <paramref name="detail"/> when the caller is a client user.</summary>
     public static void Apply(ArWorkbenchClaimDetail detail, ArWorkbenchUserContext user)

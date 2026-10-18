@@ -208,7 +208,9 @@ public sealed class ArWorkbenchController : ControllerBase
         var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
         if (denied is not null) return denied;
         if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
-        return Ok(await _repository.GetClaimsAsync(filter, user!, ct));
+        var page = await _repository.GetClaimsAsync(filter, user!, ct);
+        ArWorkbenchClientVisibility.Apply(page.Items, user!);
+        return Ok(page);
     }
 
     /// <summary>
@@ -356,6 +358,51 @@ public sealed class ArWorkbenchController : ControllerBase
     public sealed class ArWorkbenchRunRequest
     {
         public string? Note { get; set; }
+    }
+
+    /// <summary>
+    /// Run Master File Load: queues LRN.MasterFileProcessorWorker for this lab (the LRNMaster re-run
+    /// queue). On its next poll the worker pulls the lab's latest line-level and claim-level master
+    /// files from SharePoint, reloads dbo.LineLevelData / dbo.ClaimLevelData with the denial data,
+    /// and runs the AR Workbench sync. The request returns at once; progress is read from
+    /// GET data-processing/master-file-runs.
+    /// </summary>
+    [HttpPost("data-processing/master-file-run")]
+    public async Task<ActionResult<ArWorkbenchMasterFileQueueResult>> QueueMasterFileRun([FromQuery] int labId, [FromBody] ArWorkbenchRunRequest? request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!IsAdminOrManager(user!)) return Forbidden("Only an Administrator or RCM Manager can run the master file load.");
+        if ((request?.Note?.Length ?? 0) > 1000) return BadRequest(new { message = "Note must be 1000 characters or fewer." });
+
+        var context = new ArWorkbenchMasterFileRequestContext
+        {
+            RequestedBy = user!.UserName,
+            RequestedByRole = user.SiteAdmin ? SiteAdminRole() : user.RoleCode,
+            ClientIp = HttpContext.Connection.RemoteIpAddress?.ToString(),
+            UserAgent = Request.Headers.UserAgent.ToString(),
+            Note = request?.Note
+        };
+        var result = await _repository.QueueMasterFileRunAsync(labId, await LabNameAsync(labId, ct), context, ct);
+        if (!result.Installed)
+            return Conflict(new { message = "The master file load queue (LRNMaster dbo.MasterFileProcessorRerunRequest) is not installed. Run Database/LRN.MasterFileProcessorWorker/Create_RerunRequests.sql." });
+        if (!result.Queued)
+            return Conflict(new { message = result.ExistingStatus == "Claimed"
+                ? "A master file load for this lab is already in progress. Wait for it to finish."
+                : "A master file load for this lab is already queued. The Master File Processor picks it up on its next poll." });
+
+        _logger.LogInformation("AR Workbench master file load queued for lab {LabId} by {User} (request {RequestId})", labId, user.UserName, result.RequestId);
+        return Ok(result);
+    }
+
+    /// <summary>The lab's master file load requests, newest first (queued / in progress / completed / failed).</summary>
+    [HttpGet("data-processing/master-file-runs")]
+    public async Task<ActionResult<ArWorkbenchMasterFileRunList>> MasterFileRuns([FromQuery] int labId, [FromQuery] int top = 25, CancellationToken ct = default)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!IsAdminOrManager(user!)) return Forbidden("Only an Administrator or RCM Manager can view data processing.");
+        return Ok(await _repository.GetMasterFileRunsAsync(labId, top, ct));
     }
 
     // ==========================================================================================
@@ -849,16 +896,10 @@ public sealed class ArWorkbenchController : ControllerBase
         return (max, types.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => x.TrimStart('.').ToLowerInvariant()).ToHashSet());
     }
 
-    /// <summary>
-    /// T066: client (viewer) users with whole-client access respond; Clinic and Provider Viewers see
-    /// their clinic's / provider's requests read-only. Administrators may respond on a client's behalf.
-    /// </summary>
-    private static bool CanRespondToCip(ArWorkbenchUserContext user) =>
-        user.SiteAdmin || user.Permissions.ManageSettings
-        || (user.RoleCode == "viewer" && user.Access.Level is not ("clinic" or "provider"));
+    private static bool CanRespondToCip(ArWorkbenchUserContext user) => ArWorkbenchCipRules.CanRespond(user);
 
     private static string CipReadOnlyMessage(ArWorkbenchUserContext user) =>
-        user.RoleCode == "viewer" ? "Your access is limited to a clinic or provider, so escalation requests are read-only for you." : "Only a client user can respond to an escalation.";
+        user.RoleCode == "viewer" ? "Your access is limited to a provider, so escalation requests are read-only for you." : "Only a client user can respond to an escalation.";
 
     // Viewers (any scope) see their requests; the API decides who may respond.
     private static bool CanViewClientCip(ArWorkbenchUserContext user) => user.RoleCode == "viewer" || user.SiteAdmin || user.Permissions.ManageSettings;
@@ -1725,8 +1766,11 @@ public sealed class ArWorkbenchController : ControllerBase
         var total = result.TotalCount;
 
         // Assignment, the latest follow-up note, its QA review and the status verification per claim.
+        // A client user's file leaves all of that out (handoff §9.2, DEF-15) - the export is reachable
+        // by calling the API directly even though no client screen offers it.
+        var clientView = ArWorkbenchClientVisibility.IsClientUser(user);
         var details = await repository.GetClaimExportDetailsAsync(filter.LabId, rows.Select(r => r.ClaimKey).ToList(), ct);
-        var bytes = ArWorkbenchClaimExcel.Build(rows, details, $"AR Workbench claims — {labName} — {DateTime.Now:MM/dd/yyyy HH:mm}", total > rows.Count);
+        var bytes = ArWorkbenchClaimExcel.Build(rows, details, $"AR Workbench claims — {labName} — {DateTime.Now:MM/dd/yyyy HH:mm}", total > rows.Count, clientView);
         return new ArWorkbenchExportOutput(bytes, rows.Count);
     }
 

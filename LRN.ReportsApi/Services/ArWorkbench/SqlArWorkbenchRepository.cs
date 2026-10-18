@@ -22,6 +22,9 @@ public interface IArWorkbenchRepository
     Task<IReadOnlyList<ArWorkbenchRefreshRun>> GetRefreshRunsAsync(int labId, int top, CancellationToken ct);
     /// <param name="reprocessAll">Re-derive every claim's denial category and queue from the current master data.</param>
     Task<ArWorkbenchRefreshRun?> RunRefreshAsync(int labId, string runBy, string? note, CancellationToken ct, bool reprocessAll = false);
+    // Master File Processor load requests (SqlArWorkbenchRepository.MasterFileRuns.cs) - LRNMaster queue
+    Task<ArWorkbenchMasterFileQueueResult> QueueMasterFileRunAsync(int labId, string labName, ArWorkbenchMasterFileRequestContext context, CancellationToken ct);
+    Task<ArWorkbenchMasterFileRunList> GetMasterFileRunsAsync(int labId, int top, CancellationToken ct);
 
     // My Work / Follow-Up Management tiles (SqlArWorkbenchRepository.WorkSummary.cs)
     Task<ArWorkbenchWorkSummary> GetWorkSummaryAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
@@ -217,6 +220,14 @@ public sealed partial class SqlArWorkbenchRepository : IArWorkbenchRepository
     /// The mockup's "Awaiting Payer Response" (MW_AWAITING_PAYER_FIX): the last note's fix /
     /// resolution means the ball is with the payer.
     /// </summary>
+    /// <summary>
+    /// The claim sits in a queue that feeds assignment (dbo.ARWB_ArQueue.IsAutoRouted - the four
+    /// Possible Collectible queues and Re-Follow-Up). "Claims Awaiting Assignment", the Work Queue
+    /// badge and the assignment pool are these claims, unassigned with an open balance (DEF-05 / DEF-06).
+    /// </summary>
+    internal static string AutoRoutedSql(string alias = "w") =>
+        $"EXISTS (SELECT 1 FROM dbo.ARWB_ArQueue arq WHERE arq.QueueId = COALESCE({alias}.ArSubQueueId, {alias}.ArQueueId) AND arq.IsAutoRouted = 1)";
+
     internal static readonly string[] AwaitingPayerResolutions =
         ["Pending Payer Adjudication", "Resubmitted - E", "Resubmitted - F", "Resubmitted - P", "Reconsideration Submitted", "Appealed"];
 
@@ -545,7 +556,7 @@ SELECT
     ISNULL(SUM(w.InitialInsuranceAR), 0),
     ISNULL(SUM(w.RecoveredAmount), 0),
     ISNULL(SUM(w.RemainingAR), 0),
-    SUM(CASE WHEN w.WorkflowStatus = 'Unassigned' AND w.IsOpenInsuranceAR = 1 THEN 1 ELSE 0 END),
+    SUM(CASE WHEN w.WorkflowStatus = 'Unassigned' AND w.IsOpenInsuranceAR = 1 AND {AutoRoutedSql()} THEN 1 ELSE 0 END),
     SUM(CASE WHEN w.ArQueueId = 'submittedqa' THEN 1 ELSE 0 END),
     SUM(CASE WHEN w.IsRefollowupDue = 1 AND w.WorkflowStatus IN ('Assigned', 'QA Rejected', 'Completed') AND w.IsOpenInsuranceAR = 1 THEN 1 ELSE 0 END),
     SUM(CASE WHEN w.WorkflowStatus = 'Pending Verification' THEN 1 ELSE 0 END)
@@ -659,7 +670,8 @@ SELECT
     SUM(CASE WHEN DATEDIFF(day, w.FirstBilledDate, @Today) BETWEEN 0 AND 7  THEN 1 ELSE 0 END),
     SUM(CASE WHEN DATEDIFF(day, w.FirstBilledDate, @Today) BETWEEN 8 AND 14 THEN 1 ELSE 0 END),
     ISNULL(SUM(w.RemainingAR), 0),
-    SUM(CASE WHEN w.WorkflowStatus = 'Unassigned' THEN 1 ELSE 0 END),
+    -- Claims Awaiting Assignment: unassigned, open, in a queue that feeds assignment (DEF-06)
+    SUM(CASE WHEN w.WorkflowStatus = 'Unassigned' AND w.IsOpenInsuranceAR = 1 AND {AutoRoutedSql()} THEN 1 ELSE 0 END),
     SUM(CASE WHEN w.WorkflowStatus = 'Assigned' THEN 1 ELSE 0 END),
     SUM(CASE WHEN w.WorkflowStatus = 'Submitted for QA' THEN 1 ELSE 0 END),
     SUM(CASE WHEN w.WorkflowStatus = 'QA Rejected' THEN 1 ELSE 0 END),
@@ -1107,6 +1119,7 @@ ORDER BY pg.Seq;";
         AddIn("w.ClinicName", "Cl", filter.Clinic, 500, ArWorkbenchFilterValues.None);
 
         if (filter.OpenInsuranceArOnly) where.Add("w.IsOpenInsuranceAR = 1");
+        if (filter.AutoRoutedOnly) where.Add(AutoRoutedSql());
         if (filter.TflRiskOnly) where.Add("w.IsTflRisk = 1");
         if (filter.AssignedOnly) where.Add("w.AssignedAgentUser IS NOT NULL");
         if (filter.FollowUpActionableOnly) where.Add("w.IsFollowUpActionable = 1");

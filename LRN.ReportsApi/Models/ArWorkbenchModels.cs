@@ -210,6 +210,12 @@ public sealed class ArWorkbenchClaimFilter
     public List<string>? ClassificationCodes { get; set; }
     public string? Search { get; set; }
     public bool OpenInsuranceArOnly { get; set; }
+    /// <summary>
+    /// Only claims in a queue that feeds assignment (dbo.ARWB_ArQueue.IsAutoRouted: the four Possible
+    /// Collectible queues and Re-Follow-Up). Non-Collectible, Unbilled, Patient AR and Closed claims stay
+    /// out of the assignment feed (handoff §3.2, DEF-05 / DEF-06) but remain open to the Work Queue.
+    /// </summary>
+    public bool AutoRoutedOnly { get; set; }
     public bool TflRiskOnly { get; set; }
     /// <summary>Only claims that have an agent (Assignment Management's reassign table, My Work).</summary>
     public bool AssignedOnly { get; set; }

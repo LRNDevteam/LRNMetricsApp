@@ -207,5 +207,8 @@ export const arWorkbenchService = {
   snapshots: (labId, top = 14) => api(`data-processing/snapshots${qs({ labId, top })}`),
   runSnapshot: (labId) => api(`data-processing/snapshots/run${qs({ labId })}`, { method: 'POST' }),
   refreshRuns: (labId, top = 10) => api(`data-processing/runs${qs({ labId, top })}`),
-  runRefresh: (labId, note) => api(`data-processing/run${qs({ labId })}`, { method: 'POST', body: JSON.stringify({ note }) })
+  runRefresh: (labId, note) => api(`data-processing/run${qs({ labId })}`, { method: 'POST', body: JSON.stringify({ note }) }),
+  // Master File Processor load for the lab (SharePoint -> line / claim level + denials -> AR Workbench sync), queued
+  masterFileRuns: (labId, top = 25, signal) => api(`data-processing/master-file-runs${qs({ labId, top })}`, { signal }),
+  runMasterFileLoad: (labId, note) => api(`data-processing/master-file-run${qs({ labId })}`, { method: 'POST', body: JSON.stringify({ note }) })
 };

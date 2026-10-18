@@ -22,13 +22,18 @@ public sealed partial class SqlArWorkbenchRepository
 
     private static readonly JsonSerializerOptions CriteriaJson = new(JsonSerializerDefaults.Web);
 
-    /// <summary>The batch pool: unassigned, open insurance balance - narrowed by the criteria.</summary>
+    /// <summary>
+    /// The batch pool: unassigned, open insurance balance, in a queue that feeds assignment (Possible
+    /// Collectible / Re-Follow-Up; DEF-05) - narrowed by the criteria. Non-Collectible and Unbilled
+    /// claims are still assignable one by one from the Work Queue.
+    /// </summary>
     private static ArWorkbenchClaimFilter PoolFilter(int labId, ArWorkbenchBatchCriteria? c) => new()
     {
         LabId = labId,
         Status = ["Unassigned"],
         Agent = [ArWorkbenchClaimFilter.UnassignedAgent],
         OpenInsuranceArOnly = true,
+        AutoRoutedOnly = true,
         Category = c?.Category ?? [],
         Payer = c?.Payer ?? [],
         Panel = c?.Panel ?? [],

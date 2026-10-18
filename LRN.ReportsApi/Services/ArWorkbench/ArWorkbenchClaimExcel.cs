@@ -11,7 +11,7 @@ internal static class ArWorkbenchClaimExcel
 {
     public const int MaxRows = 100_000;
 
-    private static readonly (string Header, Func<ArWorkbenchClaimRow, ArWorkbenchClaimExportDetail?, object?> Value, string? Format)[] Columns =
+    private static readonly (string Header, Func<ArWorkbenchClaimRow, ArWorkbenchClaimExportDetail?, object?> Value, string? Format)[] AllColumns =
     [
         // Claim columns in the AR team's layout (QC 10.12.2026, sheet "Missing Columns")
         ("Claim ID", (r, x) => r.ClaimID, null),
@@ -137,29 +137,36 @@ internal static class ArWorkbenchClaimExcel
     public static byte[] Build(IReadOnlyList<ArWorkbenchClaimRow> rows, string title, bool truncated)
         => Build(rows, new Dictionary<long, ArWorkbenchClaimExportDetail>(), title, truncated);
 
-    public static byte[] Build(IReadOnlyList<ArWorkbenchClaimRow> rows, IReadOnlyDictionary<long, ArWorkbenchClaimExportDetail> details, string title, bool truncated)
+    /// <summary>The export's column headers; a client user's export leaves out the internal ones (DEF-15).</summary>
+    internal static IReadOnlyList<string> Headers(bool clientView) => ColumnsFor(clientView).Select(c => c.Header).ToList();
+
+    private static (string Header, Func<ArWorkbenchClaimRow, ArWorkbenchClaimExportDetail?, object?> Value, string? Format)[] ColumnsFor(bool clientView) =>
+        clientView ? AllColumns.Where(c => !ArWorkbenchClientVisibility.InternalExportColumns.Contains(c.Header)).ToArray() : AllColumns;
+
+    public static byte[] Build(IReadOnlyList<ArWorkbenchClaimRow> rows, IReadOnlyDictionary<long, ArWorkbenchClaimExportDetail> details, string title, bool truncated, bool clientView = false)
     {
+        var columns = ColumnsFor(clientView);
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add("Claims");
         DenialExcelTheme.ApplyDefaults(sheet);
         sheet.TabColor = DenialExcelTheme.TabGreen;
 
         sheet.Cell(1, 1).Value = title + (truncated ? $" — first {MaxRows:N0} rows" : "");
-        var titleRange = sheet.Range(1, 1, 1, Columns.Length).Merge();
+        var titleRange = sheet.Range(1, 1, 1, columns.Length).Merge();
         titleRange.Style.Font.SetBold().Font.SetFontColor(XLColor.White).Font.SetFontSize(DenialExcelTheme.FontSizeTitle);
         titleRange.Style.Fill.SetBackgroundColor(DenialExcelTheme.TitleBg);
 
-        for (var c = 0; c < Columns.Length; c++)
-            DenialExcelTheme.StyleHeaderCell(sheet.Cell(2, c + 1).SetValue(Columns[c].Header));
+        for (var c = 0; c < columns.Length; c++)
+            DenialExcelTheme.StyleHeaderCell(sheet.Cell(2, c + 1).SetValue(columns[c].Header));
 
         var row = 3;
         foreach (var r in rows)
         {
             details.TryGetValue(r.ClaimKey, out var x);
-            for (var c = 0; c < Columns.Length; c++)
+            for (var c = 0; c < columns.Length; c++)
             {
                 var cell = sheet.Cell(row, c + 1);
-                cell.Value = Columns[c].Value(r, x) switch
+                cell.Value = columns[c].Value(r, x) switch
                 {
                     null => Blank.Value,
                     DateTime d => d,
@@ -172,12 +179,12 @@ internal static class ArWorkbenchClaimExcel
             row++;
         }
 
-        for (var c = 0; c < Columns.Length; c++)
-            if (Columns[c].Format is { } fmt && rows.Count > 0)
+        for (var c = 0; c < columns.Length; c++)
+            if (columns[c].Format is { } fmt && rows.Count > 0)
                 sheet.Range(3, c + 1, row - 1, c + 1).Style.NumberFormat.Format = fmt;
 
         sheet.SheetView.FreezeRows(2);
-        if (rows.Count > 0) sheet.Range(2, 1, row - 1, Columns.Length).SetAutoFilter();
+        if (rows.Count > 0) sheet.Range(2, 1, row - 1, columns.Length).SetAutoFilter();
         sheet.Columns().AdjustToContents(2, Math.Min(row, 300));
 
         using var stream = new MemoryStream();

@@ -29,7 +29,8 @@ SELECT
     Overdue             = ISNULL(SUM(CASE WHEN w.NextFollowUpDate < @Today AND w.IsFinanciallyClosed = 0 THEN 1 ELSE 0 END), 0),
     HighPriority        = ISNULL(SUM(CASE WHEN w.Priority = 'High' AND w.IsFinanciallyClosed = 0 THEN 1 ELSE 0 END), 0),
     RefollowupRequired  = ISNULL(SUM(CASE WHEN w.ArQueueId = 'refollowup' THEN 1 ELSE 0 END), 0),
-    CipResponseReceived = ISNULL(SUM(CASE WHEN w.ArQueueId = 'cipresponse' THEN 1 ELSE 0 END), 0),
+    -- Back with the agent; a reply still awaiting the manager's review (Completed) is not theirs yet (DEF-19)
+    CipResponseReceived = ISNULL(SUM(CASE WHEN w.ArQueueId = 'cipresponse' AND w.WorkflowStatus = 'Assigned' THEN 1 ELSE 0 END), 0),
     AwaitingPayer       = ISNULL(SUM(CASE WHEN w.FixResolution IN ({awaiting}) AND w.IsFinanciallyClosed = 0 THEN 1 ELSE 0 END), 0),
     SubmittedForQa      = ISNULL(SUM(CASE WHEN w.WorkflowStatus = 'Submitted for QA' THEN 1 ELSE 0 END), 0),
     QaRejected          = ISNULL(SUM(CASE WHEN w.WorkflowStatus = 'QA Rejected' THEN 1 ELSE 0 END), 0)

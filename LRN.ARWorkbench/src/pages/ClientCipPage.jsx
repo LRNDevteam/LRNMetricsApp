@@ -12,7 +12,7 @@ import { Attachments, CIP_BADGE } from '../components/CipShared';
 // Client portal - Escalation Requests (mockup client.js, App.views['client-cip']).
 //   T064: Awaiting Your Response / Submitted - Under Review / Resolved; Respond with text + up to 3 files.
 //   T065: bulk CSV response template - download the open requests, fill Response, upload.
-//   T066: Clinic and Provider Viewers see their clinic's / provider's requests read-only.
+//   T066 / DEF-18: Clinic Viewers respond to their clinic's requests; Provider Viewers see their provider's read-only.
 // The client never sees Awaiting QA or Pending Approval, nor a case rejected internally.
 
 const TABS = [
@@ -116,8 +116,9 @@ function ViewModal({ row, onClose }) {
 
 export default function ClientCipPage() {
   const { labId, user } = useWorkbench();
-  // T066: a viewer limited to a clinic or provider sees the requests read-only.
-  const readOnly = user?.roleCode === 'viewer' && ['clinic', 'provider'].includes(user?.access?.level);
+  // A viewer limited to a provider sees the requests read-only; a Clinic Viewer responds (DEF-18).
+  // The API enforces the same rule.
+  const readOnly = user?.roleCode === 'viewer' && user?.access?.level === 'provider';
   const [tab, setTab] = useState('awaiting');
   const [searchText, setSearchText] = useState('');
   const [search, setSearch] = useState('');
@@ -200,7 +201,7 @@ export default function ClientCipPage() {
       <div className="arwb-card arwb-section" style={{ padding: 16 }}>
         <div className="arwb-hint">
           {readOnly
-            ? 'These are the requests your AR team sent for your clinic / provider. Your access is read-only — the client contact responds.'
+            ? 'These are the requests your AR team sent for your provider. Your access is read-only — the client or clinic contact responds.'
             : 'Your AR team needs information on the items below. Respond with what is requested and attach any supporting documentation — they will review it and follow up. Items needing more information after review are marked and sent back to you.'}
         </div>
         <div className="arwb-grid arwb-grid-kpi" style={{ marginTop: 12 }}>

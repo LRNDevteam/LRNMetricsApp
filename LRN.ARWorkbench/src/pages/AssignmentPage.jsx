@@ -187,8 +187,10 @@ export default function AssignmentPage() {
   const [uaOptions, setUaOptions] = useState(null);
 
   // The section's fixed population plus the user's Payer / Denial Category / Classification picks.
+  // autoRoutedOnly: only the queues that feed assignment (Possible Collectible / Re-Follow-Up, DEF-05);
+  // Non-Collectible and Unbilled claims are assigned from the Work Queue when a project needs them.
   const uaBase = useMemo(() => ({
-    labId, status: ['Unassigned'], agent: ['__unassigned'], openInsuranceArOnly: true, minDaysUntouched: untouchedDays,
+    labId, status: ['Unassigned'], agent: ['__unassigned'], openInsuranceArOnly: true, autoRoutedOnly: true, minDaysUntouched: untouchedDays,
     payer: uaFilter.payer, category: uaFilter.category, classification: uaFilter.classification
   }), [labId, untouchedDays, uaFilter]);
 
@@ -381,7 +383,7 @@ export default function AssignmentPage() {
       <div className="arwb-card arwb-card-flush arwb-section">
         <div className="arwb-card-head">
           <h3>Unassigned Claims</h3>
-          <span className="arwb-card-sub">{fmt.count(uaData.totalCount)} claims with an open balance, untouched for {untouchedDays}+ days{uaFiltered ? ' matching the filters' : ''}</span>
+          <span className="arwb-card-sub">{fmt.count(uaData.totalCount)} Possible Collectible / Re-Follow-Up claims with an open balance, untouched for {untouchedDays}+ days{uaFiltered ? ' matching the filters' : ''}</span>
         </div>
         <div className="arwb-panel-pad">
           <div className="arwb-filter-bar">

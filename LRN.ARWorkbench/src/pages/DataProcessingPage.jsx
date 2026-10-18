@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import Icon from '../components/Icon';
 import useTableSort from '../components/useTableSort';
@@ -18,6 +18,12 @@ export default function DataProcessingPage() {
   const [running, setRunning] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [note, setNote] = useState('');
+  // Run Master File Load: queues the Master File Processor for this lab (see MasterFileLoads).
+  const [confirmingLoad, setConfirmingLoad] = useState(false);
+  const [loadNote, setLoadNote] = useState('');
+  const [queueing, setQueueing] = useState(false);
+  const [loadMessage, setLoadMessage] = useState('');
+  const [loadsVersion, setLoadsVersion] = useState(0);
 
   const load = useCallback(() => {
     setError('');
@@ -60,15 +66,57 @@ export default function DataProcessingPage() {
     }
   }
 
+  async function queueMasterFileLoad() {
+    setConfirmingLoad(false);
+    setQueueing(true);
+    setError('');
+    setLoadMessage('');
+    try {
+      await arWorkbenchService.runMasterFileLoad(labId, loadNote.trim() || null);
+      setLoadNote('');
+      setLoadMessage('Master file load queued. The Master File Processor picks it up on its next poll; follow it under Master File Loads below.');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setQueueing(false);
+      setLoadsVersion((v) => v + 1);
+    }
+  }
+
   const last = runs?.find((r) => r.runStatus === 'Succeeded');
 
   return (
     <>
       <PageHeader note={`Sync every claim and line for ${lab?.labName || 'this lab'} from the claim-level and line-level master files`}>
-        <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" disabled={running} onClick={() => setConfirming(true)}>
+        <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" disabled={queueing}
+          onClick={() => { setConfirming(false); setConfirmingLoad(true); }}
+          title="Run the Master File Processor for this lab: load the latest line-level and claim-level master files from SharePoint, with the denial data, then sync">
+          {queueing ? <><span className="arwb-spinner" /> Queuing…</> : <><Icon name="refresh" size={15} /> Run Master File Load</>}
+        </button>
+        <button type="button" className="arwb-btn arwb-btn-sm" disabled={running}
+          onClick={() => { setConfirmingLoad(false); setConfirming(true); }}
+          title="Re-sync the AR Workbench from the master data already loaded in this lab's database">
           {running ? <><span className="arwb-spinner" /> Processing…</> : <><Icon name="refresh" size={15} /> Run Data Processing</>}
         </button>
       </PageHeader>
+
+      {confirmingLoad && (
+        <div className="arwb-card arwb-confirm">
+          <p style={{ marginTop: 0 }}>
+            This queues the Master File Processor for {lab?.labName || 'this lab'}. On its next poll it takes the lab’s latest master file from the
+            SharePoint master folder, reloads <code>dbo.LineLevelData</code> and <code>dbo.ClaimLevelData</code> with the denial data, then runs
+            the AR Workbench sync. The file is processed even if it was processed before. It runs in the background; a large lab can take a while.
+          </p>
+          <div className="arwb-field" style={{ marginBottom: 10 }}>
+            <label htmlFor="dp-load-note">Reason / note (optional)</label>
+            <input id="dp-load-note" className="arwb-input" value={loadNote} maxLength={1000} onChange={(e) => setLoadNote(e.target.value)} />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" onClick={queueMasterFileLoad}>Run master file load</button>
+            <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-ghost" onClick={() => setConfirmingLoad(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
 
       {confirming && (
         <div className="arwb-card arwb-confirm">
@@ -89,6 +137,9 @@ export default function DataProcessingPage() {
       )}
 
       <ErrorBox message={error} />
+      {loadMessage && <div className="arwb-hint" style={{ padding: '0 0 12px' }}>{loadMessage}</div>}
+
+      <MasterFileLoads labId={labId} version={loadsVersion} onFinished={load} />
 
       {last && (
         <div className="arwb-grid arwb-grid-kpi arwb-section">
@@ -179,6 +230,136 @@ function SystemInsightTable({ rows: all, onCode, onRoute }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// Master File Processor loads queued for the lab (LRNMaster dbo.MasterFileProcessorRerunRequest).
+// Pending = queued for the worker's next poll, Claimed = the worker is running it; only the worker
+// closes a request (Completed / Failed). Refreshes itself while anything is still in progress.
+const LOAD_POLL_MS = 15000;
+const isLoadOpen = (r) => r.status === 'Pending' || r.status === 'Claimed';
+
+function loadStatus(r) {
+  if (r.status === 'Pending') return ['Queued', 'arwb-badge-warning'];
+  if (r.status === 'Claimed') return ['In progress', 'arwb-badge-info'];
+  if (r.status === 'Failed' || r.resultStatus === 'FAILED') return ['Failed', 'arwb-badge-critical'];
+  if (r.resultStatus === 'SKIPPED') return ['Skipped', 'arwb-badge-neutral'];
+  return ['Completed', 'arwb-badge-good'];
+}
+
+function MasterFileLoads({ labId, version, onFinished }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [tab, setTab] = useState('progress');
+  const openIds = useRef(null);
+
+  const load = useCallback((signal) => {
+    arWorkbenchService.masterFileRuns(labId, 25, signal)
+      .then((d) => { setData(d); setError(''); })
+      .catch((e) => { if (e.name !== 'AbortError') { setData((d) => d || { installed: true, runs: [] }); setError(e.message); } });
+  }, [labId]);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    load(ac.signal);
+    return () => ac.abort();
+  }, [load, version]);
+
+  const runs = data?.runs || [];
+  const open = runs.filter(isLoadOpen);
+  const done = runs.filter((r) => !isLoadOpen(r));
+  const hasOpen = open.length > 0;
+
+  // Poll only while a load is queued or running.
+  useEffect(() => {
+    if (!hasOpen) return undefined;
+    const id = setInterval(() => load(), LOAD_POLL_MS);
+    return () => clearInterval(id);
+  }, [hasOpen, load]);
+
+  // A load that just finished changed the lab's data: refresh the rest of the page once.
+  useEffect(() => {
+    if (!data) return;
+    const ids = new Set(open.map((r) => r.requestId));
+    const prev = openIds.current;
+    openIds.current = ids;
+    if (prev && [...prev].some((id) => !ids.has(id))) onFinished?.();
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const rows = tab === 'progress' ? open : done;
+
+  return (
+    <div className="arwb-table-card arwb-section">
+      <div className="arwb-panel-head">
+        <h3>Master File Loads</h3>
+        <span className="arwb-card-sub">
+          Master File Processor runs for this lab: latest line-level and claim-level master files from SharePoint, denial data, then the AR Workbench sync
+          {hasOpen ? ' · refreshing every 15 seconds' : ''}
+        </span>
+        <div className="arwb-panel-head-actions">
+          <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-ghost" onClick={() => load()} title="Refresh">
+            <Icon name="refresh" size={15} />
+          </button>
+        </div>
+      </div>
+      <div className="arwb-tabs arwb-tabs-flush" role="tablist">
+        {[['progress', 'In Progress', open.length], ['completed', 'Completed', done.length]].map(([id, label, n]) => (
+          <button key={id} type="button" role="tab" aria-selected={tab === id} className={`arwb-tab-btn ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>
+            {label}<Badge className={`arwb-tab-count ${id === 'progress' && n ? 'arwb-badge-info' : 'arwb-badge-neutral'}`}>{n}</Badge>
+          </button>
+        ))}
+      </div>
+      <ErrorBox message={error} />
+      {data && !data.installed && (
+        <div className="arwb-empty-state">
+          The master file load queue is not installed in LRNMaster. Run <code>Database/LRN.MasterFileProcessorWorker/Create_RerunRequests.sql</code>.
+        </div>
+      )}
+      {(!data || data.installed) && (
+        <div className="arwb-table-wrap">
+          <table className="arwb-data-table">
+            <thead>
+              <tr>
+                <th scope="col">#</th><th scope="col">Status</th><th scope="col">Requested</th><th scope="col">By</th>
+                <th scope="col">Started</th><th scope="col">{tab === 'progress' ? 'Worker' : 'Finished'}</th>
+                <th scope="col">Run ID</th><th scope="col">{tab === 'progress' ? 'Note' : 'Result'}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!data && <tr><td colSpan={8}><Loading /></td></tr>}
+              {data && rows.length === 0 && (
+                <tr><td colSpan={8}><div className="arwb-empty-state">
+                  {tab === 'progress' ? 'No master file load is queued or running. Use Run Master File Load to start one.' : 'No completed master file loads yet.'}
+                </div></td></tr>
+              )}
+              {rows.map((r) => {
+                const [label, cls] = loadStatus(r);
+                return (
+                  <tr key={r.requestId}>
+                    <td>{r.requestId}</td>
+                    <td>
+                      <Badge className={cls}>{r.status === 'Claimed' && <span className="arwb-spinner" />} {label}</Badge>
+                      {r.requestedFromApp && r.requestedFromApp !== 'LRN.ARWorkbench' && <div className="arwb-hint">from {r.requestedFromApp}</div>}
+                    </td>
+                    <td>{fmt.dateTime(r.requestedOn)}</td>
+                    <td>{r.requestedBy || '—'}</td>
+                    <td>{r.claimedOn ? fmt.dateTime(r.claimedOn) : <span className="arwb-hint">waiting for the next poll</span>}</td>
+                    <td>{tab === 'progress' ? (r.claimedByHost || '—') : fmt.dateTime(r.completedOn)}</td>
+                    <td className="mono">{r.runId || '—'}</td>
+                    <td className="wrap">
+                      {tab === 'progress'
+                        ? (r.note || '—')
+                        : <>{r.resultMessage ? <span className={label === 'Failed' ? 'text-critical' : undefined}>{r.resultMessage}</span> : (r.resultStatus || '—')}
+                          {r.note && <div className="arwb-hint">Note: {r.note}</div>}</>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
