@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
 import { fmt } from '../utils/format';
@@ -23,7 +23,7 @@ export function DocumentTable({ rows: all, showClaim = false, onOpenClaim }) {
   const { labId } = useWorkbench();
   const [error, setError] = useState('');
   const { rows, th } = useTableSort(all, {
-    uploaded: (d) => d.uploadedOn, file: (d) => d.fileName, category: (d) => d.documentCategory, source: (d) => d.documentSource,
+    uploaded: (d) => d.uploadedOn, file: (d) => d.fileName, type: (d) => d.documentTypeName, category: (d) => d.documentCategory, source: (d) => d.documentSource,
     claim: (d) => d.claimID, patient: (d) => d.patientName, by: (d) => d.uploadedBy, size: (d) => d.sizeBytes
   }, { key: 'uploaded', desc: true });
 
@@ -41,7 +41,7 @@ export function DocumentTable({ rows: all, showClaim = false, onOpenClaim }) {
         <table className="arwb-data-table">
           <thead>
             <tr>
-              {th('uploaded', 'Uploaded')}{th('file', 'File')}{th('category', 'Category')}{th('source', 'Source')}
+              {th('uploaded', 'Uploaded')}{th('file', 'File')}{th('type', 'Document Type')}{th('category', 'Category')}{th('source', 'Source')}
               {showClaim && <>{th('claim', 'Claim')}{th('patient', 'Patient')}</>}
               {th('by', 'Uploaded By')}{th('size', 'Size', { className: 'num' })}
               <th scope="col" className="num">Action</th>
@@ -52,6 +52,7 @@ export function DocumentTable({ rows: all, showClaim = false, onOpenClaim }) {
               <tr key={d.documentId}>
                 <td>{fmt.dateTime(d.uploadedOn)}</td>
                 <td className="wrap">{d.fileName}{d.description ? <div className="arwb-hint">{d.description}</div> : null}</td>
+                <td className="wrap">{d.documentTypeName || '—'}</td>
                 <td><Badge className="arwb-badge-accent">{d.documentCategory}</Badge></td>
                 <td>{SOURCE_LABEL[d.documentSource] || d.documentSource}{d.roundNumber ? ` · round ${d.roundNumber}` : ''}</td>
                 {showClaim && (
@@ -85,38 +86,66 @@ export const MAX_DESCRIPTION = 500;
 // The lab's attachment rules (Master Values settings), with the API's defaults.
 export function useAttachmentRules() {
   const { masterData } = useWorkbench();
-  const categories = masterData?.lists?.DOCUMENT_CATEGORY || [];
   const maxBytes = Number(masterData?.settings?.AttachmentMaxBytes) || 15 * 1024 * 1024;
   const allowed = String(masterData?.settings?.AttachmentAllowedTypes || 'pdf,png,jpg,jpeg,tif,tiff,gif,doc,docx,xls,xlsx,csv,txt')
     .split(',').map((t) => t.trim().replace(/^\./, '').toLowerCase()).filter(Boolean);
-  return { categories, maxBytes, allowed };
+  return { maxBytes, allowed };
+}
+
+// The Document Type dropdown (LRNMaster dbo.ARDocumentTypeMaster - the same for every lab), loaded once.
+let documentTypesRequest = null;
+export function useDocumentTypes() {
+  const { labId } = useWorkbench();
+  const [state, setState] = useState({ types: [], loading: true, error: '' });
+  useEffect(() => {
+    if (!labId) return undefined;
+    let live = true;
+    if (!documentTypesRequest) {
+      documentTypesRequest = arWorkbenchService.documentTypes(labId).catch((e) => { documentTypesRequest = null; throw e; });
+    }
+    documentTypesRequest
+      .then((types) => live && setState({ types: types || [], loading: false, error: '' }))
+      .catch((e) => live && setState({ types: [], loading: false, error: e.message || 'The document types could not be loaded.' }));
+    return () => { live = false; };
+  }, [labId]);
+  return state;
 }
 
 // The first problem with the documents to upload, or '' when they can go (the API checks again).
 export function validateDocuments(docs, { maxBytes, allowed }) {
   for (const d of docs) {
     const name = d.file.name;
-    if (!d.category) return `${name}: choose a document category.`;
+    if (!d.documentTypeId) return `${name}: choose a document type.`;
     if (d.file.size > maxBytes) return `${name} is larger than ${Math.round(maxBytes / 1024 / 1024)} MB.`;
     if (!allowed.includes((name.split('.').pop() || '').toLowerCase())) return `${name}: that file type is not allowed (${allowed.join(', ')}).`;
-    if ((d.description || '').length > MAX_DESCRIPTION) return `${name}: the description must be ${MAX_DESCRIPTION} characters or fewer.`;
+    if ((d.description || '').length > MAX_DESCRIPTION) return `${name}: the notes must be ${MAX_DESCRIPTION} characters or fewer.`;
   }
   return '';
 }
 
 let nextDocId = 1;
 
-// One row per document: the file, its category and a description. "Add documents" picks one or more
-// files; each becomes a row (category defaults to the one used last). Up to MAX_DOCUMENTS rows.
+// One row per document: the file, its document type and optional notes. "Add documents" picks one or more
+// files; each becomes a row (the type defaults to the one used last). Up to MAX_DOCUMENTS rows.
 export function DocumentRowsEditor({ docs, onChange, disabled }) {
-  const { categories, maxBytes, allowed } = useAttachmentRules();
+  const { maxBytes, allowed } = useAttachmentRules();
+  const { types, loading, error: typesError } = useDocumentTypes();
   const [inputKey, setInputKey] = useState(0);
   const room = MAX_DOCUMENTS - docs.length;
+  // Grouped by category for <optgroup>, in the API's order (category, then name).
+  const groups = useMemo(() => {
+    const map = new Map();
+    for (const t of types) {
+      if (!map.has(t.documentCategory)) map.set(t.documentCategory, []);
+      map.get(t.documentCategory).push(t);
+    }
+    return [...map.entries()];
+  }, [types]);
 
   function add(fileList) {
-    const lastCategory = docs.length ? docs[docs.length - 1].category : '';
+    const lastType = docs.length ? docs[docs.length - 1].documentTypeId : '';
     const added = Array.from(fileList || []).slice(0, Math.max(room, 0))
-      .map((file) => ({ id: nextDocId++, file, category: lastCategory, description: '' }));
+      .map((file) => ({ id: nextDocId++, file, documentTypeId: lastType, description: '' }));
     if (added.length) onChange([...docs, ...added]);
     setInputKey((k) => k + 1);
   }
@@ -125,14 +154,15 @@ export function DocumentRowsEditor({ docs, onChange, disabled }) {
 
   return (
     <div>
+      <ErrorBox message={typesError} />
       {docs.length > 0 && (
         <div className="arwb-table-wrap" style={{ marginBottom: 8 }}>
           <table className="arwb-data-table">
             <thead>
               <tr>
                 <th scope="col">File</th>
-                <th scope="col" style={{ width: 200 }}>Category *</th>
-                <th scope="col">Description</th>
+                <th scope="col" style={{ width: 260 }}>Document Type *</th>
+                <th scope="col">Notes <span className="arwb-hint">(optional)</span></th>
                 <th scope="col" className="num" aria-label="Remove" />
               </tr>
             </thead>
@@ -141,15 +171,19 @@ export function DocumentRowsEditor({ docs, onChange, disabled }) {
                 <tr key={d.id}>
                   <td className="wrap">{d.file.name}<div className="arwb-hint">{size(d.file.size)}</div></td>
                   <td>
-                    <select className="arwb-select" aria-label={`Category for ${d.file.name}`} value={d.category} disabled={disabled}
-                      onChange={(e) => update(d.id, { category: e.target.value })}>
-                      <option value="">{categories.length ? 'Choose…' : 'No document categories set up'}</option>
-                      {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                    <select className="arwb-select" aria-label={`Document type for ${d.file.name}`} value={d.documentTypeId} disabled={disabled}
+                      onChange={(e) => update(d.id, { documentTypeId: e.target.value ? Number(e.target.value) : '' })}>
+                      <option value="">{loading ? 'Loading…' : types.length ? 'Choose a document type…' : 'No document types set up'}</option>
+                      {groups.map(([category, list]) => (
+                        <optgroup key={category} label={category}>
+                          {list.map((t) => <option key={t.documentTypeId} value={t.documentTypeId}>{t.documentTypeName}</option>)}
+                        </optgroup>
+                      ))}
                     </select>
                   </td>
                   <td>
-                    <input className="arwb-input" aria-label={`Description for ${d.file.name}`} maxLength={MAX_DESCRIPTION} disabled={disabled}
-                      placeholder={i === 0 ? 'e.g. Appeal letter sent to payer' : 'What is this document?'}
+                    <input className="arwb-input" aria-label={`Notes for ${d.file.name}`} maxLength={MAX_DESCRIPTION} disabled={disabled}
+                      placeholder={i === 0 ? 'Optional, e.g. Appeal letter sent to payer on 10/15' : 'Optional notes'}
                       value={d.description} onChange={(e) => update(d.id, { description: e.target.value })} />
                   </td>
                   <td className="num">
@@ -169,14 +203,14 @@ export function DocumentRowsEditor({ docs, onChange, disabled }) {
           onChange={(e) => add(e.target.files)} />
       </label>
       <div className="arwb-field-note">
-        Up to {MAX_DOCUMENTS} documents, {Math.round(maxBytes / 1024 / 1024)} MB each ({allowed.join(', ')}). Each needs a category; the description is optional.
+        Up to {MAX_DOCUMENTS} documents, {Math.round(maxBytes / 1024 / 1024)} MB each ({allowed.join(', ')}). Each needs a document type; notes are optional.
         {room <= 0 ? ' The limit is reached - remove one to add another.' : ''}
       </div>
     </div>
   );
 }
 
-// Attach documents to a claim, each with a mandatory category and a description (DEF-13). AR users only; the API enforces scope.
+// Attach documents to a claim, each with a mandatory document type and optional notes (DEF-13). AR users only; the API enforces scope.
 export function UploadDocuments({ claimKey, onUploaded }) {
   const { labId } = useWorkbench();
   const rules = useAttachmentRules();

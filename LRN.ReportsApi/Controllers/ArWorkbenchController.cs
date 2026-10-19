@@ -86,13 +86,15 @@ public sealed class ArWorkbenchController : ControllerBase
     /// <summary>
     /// User menu > Change password: any signed-in workbench user changes their OWN password (the LRN
     /// Metrics login, dbo.LabUsers). The current password is required; the user comes from the token.
+    /// A Microsoft (Azure AD) account has no password here: it is changed at Microsoft.
     /// </summary>
     [HttpPost("me/password")]
     public async Task<ActionResult> ChangeOwnPassword([FromQuery] int labId, [FromBody] ArWorkbenchChangePasswordRequest? request, CancellationToken ct)
     {
         var (user, denied) = await ResolveUserAsync(labId, ct);
         if (denied is not null) return denied;
-        if (user!.LabUserId is not int labUserId) return BadRequest(new { message = "Your user account was not found." });
+        if (user!.IsMicrosoftAccount) return Conflict(new { message = MicrosoftPasswordMessage });
+        if (user.LabUserId is not int labUserId) return BadRequest(new { message = "Your user account was not found." });
         var error = ArWorkbenchUserRules.ValidatePasswordChange(request?.CurrentPassword, request?.NewPassword);
         if (error is not null) return BadRequest(new { message = error });
 
@@ -703,16 +705,26 @@ public sealed class ArWorkbenchController : ControllerBase
     public const int MaxClaimAttachments = 5;
     public const int MaxDocumentDescriptionLength = 500;
 
+    /// <summary>The upload's Document Type dropdown (LRNMaster dbo.ARDocumentTypeMaster, active rows).</summary>
+    [HttpGet("document-types")]
+    public async Task<ActionResult<IReadOnlyList<ArWorkbenchDocumentType>>> DocumentTypes([FromQuery] int labId, CancellationToken ct)
+    {
+        var (_, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        return Ok(await _repository.GetDocumentTypesAsync(ct));
+    }
+
     /// <summary>
     /// Handoff §8.2 (DEF-13): attach files to a claim - with a follow-up note (followUpId) or on their
-    /// own. Each file carries a document category from the Document Categories list (mandatory) and an
-    /// optional description: documents is a JSON array [{ category, description }] in the same order as
-    /// files; a single category applies to every file without its own. Size and type follow the
-    /// AttachmentMaxBytes / AttachmentAllowedTypes settings. AR users only (an agent: their own claims).
+    /// own. Each file carries a document type from LRNMaster dbo.ARDocumentTypeMaster (mandatory; its
+    /// category is stored as the document category) and optional notes: documents is a JSON array
+    /// [{ documentTypeId, description }] in the same order as files; a single documentTypeId applies to
+    /// every file without its own. Size and type follow the AttachmentMaxBytes / AttachmentAllowedTypes
+    /// settings. AR users only (an agent: their own claims).
     /// </summary>
     [HttpPost("claims/{claimKey:long}/documents")]
     [RequestSizeLimit(120_000_000)]
-    public async Task<ActionResult> UploadClaimDocuments([FromRoute] long claimKey, [FromQuery] int labId, [FromForm] string? category,
+    public async Task<ActionResult> UploadClaimDocuments([FromRoute] long claimKey, [FromQuery] int labId, [FromForm] int? documentTypeId,
         [FromForm] string? documents, [FromForm] long? followUpId, [FromForm] List<IFormFile>? files,
         [FromServices] IArWorkbenchDocumentStore store, CancellationToken ct)
     {
@@ -730,25 +742,25 @@ public sealed class ArWorkbenchController : ControllerBase
 
         // details[i] belongs to files[i]; empty files are dropped only after pairing.
         var uploads = (files ?? []).Select((f, i) => (File: f,
-                Category: (i < details.Count && !string.IsNullOrWhiteSpace(details[i].Category) ? details[i].Category : category)?.Trim(),
+                TypeId: i < details.Count && details[i].DocumentTypeId is int own ? own : documentTypeId,
                 Description: i < details.Count ? details[i].Description?.Trim() : null))
             .Where(u => u.File.Length > 0).ToList();
         if (uploads.Count == 0) return BadRequest(new { message = "Choose at least one file to attach." });
         if (uploads.Count > MaxClaimAttachments) return BadRequest(new { message = $"Attach at most {MaxClaimAttachments} files at a time." });
 
-        var listed = (await _repository.GetMasterDataAsync(labId, ct)).Lists.GetValueOrDefault("DOCUMENT_CATEGORY") ?? [];
-        if (listed.Count == 0)
-            return BadRequest(new { message = "No document categories are set up (Master Values > Workbench Lists > Document Categories)." });
+        var types = await _repository.GetDocumentTypesAsync(ct);
+        if (types.Count == 0)
+            return BadRequest(new { message = "No document types are set up. Run Database/LRN.ReportsApi/ArWorkbench/LRNMaster/LRNMaster_04_ARDocumentTypeMaster.sql in LRNMaster." });
 
         var (maxBytes, allowed) = await AttachmentRulesAsync(labId, ct);
-        var checkedUploads = new List<(IFormFile File, string Category, string? Description)>();
-        foreach (var (f, cat, description) in uploads)
+        var checkedUploads = new List<(IFormFile File, ArWorkbenchDocumentType Type, string? Description)>();
+        foreach (var (f, typeId, description) in uploads)
         {
             var name = Path.GetFileName(f.FileName);
-            var chosen = listed.FirstOrDefault(c => string.Equals(c, cat, StringComparison.OrdinalIgnoreCase));
-            if (chosen is null) return BadRequest(new { message = $"{name}: choose a document category." });
+            var chosen = types.FirstOrDefault(t => t.DocumentTypeId == typeId);
+            if (chosen is null) return BadRequest(new { message = $"{name}: choose a document type." });
             if ((description?.Length ?? 0) > MaxDocumentDescriptionLength)
-                return BadRequest(new { message = $"{name}: the description must be {MaxDocumentDescriptionLength} characters or fewer." });
+                return BadRequest(new { message = $"{name}: the notes must be {MaxDocumentDescriptionLength} characters or fewer." });
             var ext = Path.GetExtension(f.FileName).TrimStart('.').ToLowerInvariant();
             if (!allowed.Contains(ext)) return BadRequest(new { message = $"{name}: file type .{ext} is not allowed ({string.Join(", ", allowed)})." });
             var error = await FileUploadGuard.ValidateDocumentAsync(f, maxBytes, ct);
@@ -780,7 +792,7 @@ public sealed class ArWorkbenchController : ControllerBase
             return NotFound(new { message = "Claim not found, or the follow-up note is not on this claim." });
         }
         _logger.LogInformation("AR Workbench: {Count} document(s) attached to claim {ClaimKey} (lab {LabId}) by {User}", ids.Count, claimKey, labId, user.UserName);
-        var used = stored.Select(s => s.Category).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var used = stored.Select(s => s.Type.DocumentTypeName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         return Ok(new { message = $"{ids.Count} document(s) attached{(used.Count == 1 ? $" as {used[0]}" : "")}.", documentIds = ids });
     }
 
@@ -1566,7 +1578,8 @@ public sealed class ArWorkbenchController : ControllerBase
         if (denied is not null) return denied;
         var (target, refused) = await ResolveManageTargetAsync(manager!, labUserId, ct);
         if (refused is not null) return refused;
-        if (!target!.IsActive) return Conflict(new { message = "Activate the user before sending an invitation." });
+        if (target!.IsMicrosoftAccount) return Conflict(new { message = "This user signs in with Microsoft and needs no invitation or password link." });
+        if (!target.IsActive) return Conflict(new { message = "Activate the user before sending an invitation." });
         var (email, emailError) = ArWorkbenchUserRules.ValidateEmail(target.Email);
         if (email is null) return BadRequest(new { message = $"This user has no valid email address ({emailError}). Edit the user first." });
 
@@ -1623,6 +1636,8 @@ public sealed class ArWorkbenchController : ControllerBase
         {
             if (!CanSetPasswords(manager))
                 return Forbidden("Only a Super Admin or an AR Workbench System Administrator can set a user's password. Use Send password link instead.");
+            if ((await _repository.GetManageTargetAsync(labUserId, ct))?.IsMicrosoftAccount == true)
+                return BadRequest(new { message = "This user signs in with Microsoft; their password is managed in their Microsoft account, not here." });
             var passwordError = ArWorkbenchUserRules.ValidatePassword(request.Password);
             if (passwordError is not null) return BadRequest(new { message = passwordError });
             hash = ArWorkbenchUserRules.HashPassword(request.Password);
@@ -1637,6 +1652,9 @@ public sealed class ArWorkbenchController : ControllerBase
             _logger.LogInformation("AR Workbench user LabUserID {Id} updated by {Admin}{Reset}", labUserId, manager.User.UserName, hash is null ? "" : " (password reset)");
         return ToResult(result);
     }
+
+    private const string MicrosoftPasswordMessage =
+        "You sign in with your Microsoft account. Change your password in your Microsoft account (https://mysignins.microsoft.com/security-info), not here.";
 
     private sealed record UserManager(ArWorkbenchUserContext User, bool AllLabs, IReadOnlyList<ArWorkbenchLabOption> Labs, IReadOnlySet<int> LabIds);
 

@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using LRN.ReportsApi.Models;
 
 namespace LRN.ReportsApi.Services.ArWorkbench;
 
@@ -18,8 +19,8 @@ public interface IArWorkbenchDocumentStore
 
 public sealed record StoredDocument(string Container, string Path, long SizeBytes, string Sha256);
 
-/// <summary>A stored file being attached to a claim, with its own category and optional description.</summary>
-public sealed record ArWorkbenchClaimUpload(string FileName, string? ContentType, StoredDocument Stored, string Category, string? Description);
+/// <summary>A stored file being attached to a claim, with its own document type (category from the type) and optional notes.</summary>
+public sealed record ArWorkbenchClaimUpload(string FileName, string? ContentType, StoredDocument Stored, ArWorkbenchDocumentType Type, string? Description);
 
 /// <summary>
 /// Disk store under ArWorkbenchDocuments:RootPath (default: the Denial Workflow upload root +

@@ -92,10 +92,20 @@ public sealed class DenialSummarySnapshotService : IDenialSummarySnapshotService
         var today = LocalNow(now).Date;
         var month = DenialSummarySchedule.LastCompletedMonth(today);
         var taken = 0;
+        var noDatabase = new List<string>();
 
         foreach (var (labId, labName) in _repo.GetConfiguredLabs())
         {
             ct.ThrowIfCancellationRequested();
+
+            // A lab listed in LabConfig without a database in this environment (a Test API that only
+            // carries some labs) is not a failure - skip it rather than log an error every pass.
+            if (!_repo.HasLabConnection(labId))
+            {
+                noDatabase.Add($"{labId} ({labName})");
+                continue;
+            }
+
             try
             {
                 // Week boundaries are per lab (Rising Tides: Friday-Thursday; others Monday-Sunday).
@@ -109,6 +119,9 @@ public sealed class DenialSummarySnapshotService : IDenialSummarySnapshotService
                 _logger.LogError(ex, "Denial Summary snapshot failed for lab {LabId} ({LabName}).", labId, labName);
             }
         }
+
+        if (noDatabase.Count > 0)
+            _logger.LogDebug("Denial Summary snapshots skipped, no lab database configured: {Labs}.", string.Join(", ", noDatabase));
 
         return taken;
     }

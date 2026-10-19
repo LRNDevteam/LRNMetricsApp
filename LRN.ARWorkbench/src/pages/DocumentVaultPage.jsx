@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { DocumentTable } from '../components/Documents';
+import { DocumentTable, useDocumentTypes } from '../components/Documents';
 import { ErrorBox, Loading } from '../components/Status';
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
@@ -15,7 +15,11 @@ const PAGE_SIZE = 50;
 export default function DocumentVaultPage() {
   const { labId, masterData } = useWorkbench();
   const navigate = useNavigate();
-  const categories = masterData?.lists?.DOCUMENT_CATEGORY || [];
+  const { types } = useDocumentTypes();
+  // New uploads carry their document type's category; older ones a lab DOCUMENT_CATEGORY value.
+  const categories = useMemo(() => [...new Set([
+    ...types.map((t) => t.documentCategory), ...(masterData?.lists?.DOCUMENT_CATEGORY || [])
+  ])], [types, masterData]);
   const [filter, setFilter] = useState({ search: '', category: '', source: '', from: '', to: '' });
   const [applied, setApplied] = useState(filter);
   const [page, setPage] = useState(1);
@@ -48,7 +52,7 @@ export default function DocumentVaultPage() {
         <div className="arwb-form-grid">
           <div className="arwb-field span-2">
             <label htmlFor="dv-search">Claim / Visit / Patient</label>
-            <input id="dv-search" className="arwb-input" maxLength={200} placeholder="Claim ID, accession (visit) number, patient name or account, file name"
+            <input id="dv-search" className="arwb-input" maxLength={200} placeholder="Claim ID, accession (visit) number, patient name or account, file name, document type"
               value={filter.search} onChange={(e) => set('search', e.target.value)} />
           </div>
           <div className="arwb-field">

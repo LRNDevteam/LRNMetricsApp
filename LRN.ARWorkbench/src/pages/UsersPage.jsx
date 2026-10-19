@@ -34,7 +34,9 @@ function EditUserModal({ data, user, onClose, onSaved }) {
     confirmPassword: ''
   }));
   const [showPassword, setShowPassword] = useState(false);
-  const canSetPassword = Boolean(data.canSetPasswords);
+  // A Microsoft (Azure AD) user's password lives in their Microsoft account: nothing to set here.
+  const microsoft = isAzureAd(user);
+  const canSetPassword = Boolean(data.canSetPasswords) && !microsoft;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -70,9 +72,11 @@ function EditUserModal({ data, user, onClose, onSaved }) {
 
   return (
     <Modal title={`Edit ${user.userName}`} wide busy={busy} onClose={onClose} onSubmit={save} submitLabel="Save Changes"
-      subtitle={canSetPassword
-        ? 'Leave Set Password blank to keep the current password. Send password link on the user list lets the user choose their own.'
-        : 'Passwords are not set here. Use Send password link on the user list to let the user choose a new one.'}>
+      subtitle={microsoft
+        ? 'Signs in with Microsoft — their password is managed in their Microsoft account.'
+        : canSetPassword
+          ? 'Leave Set Password blank to keep the current password. Send password link on the user list lets the user choose their own.'
+          : 'Passwords are not set here. Use Send password link on the user list to let the user choose a new one.'}>
       <ErrorBox message={error} />
       <div className="arwb-form-grid">
         <div className="arwb-field">
@@ -202,7 +206,27 @@ function InviteBadge({ invite }) {
   if (!invite || invite.hasPassword) return null;
   if (invite.lastEmailStatus === 'Failed') return <Badge className="arwb-badge-critical" title="The last invitation email could not be sent">Invite failed</Badge>;
   if (invite.lastEmailStatus === 'Sent') return <Badge className="arwb-badge-info" title={invite.lastEmailUtc ? `Sent ${fmt.date(invite.lastEmailUtc)}` : ''}>Invite sent</Badge>;
-  return <Badge className="arwb-badge-warning" title="No password set and no invitation sent">No password</Badge>;
+  return null;
+}
+
+const isAzureAd = (u) => String(u.authProvider || '').toLowerCase() === 'entra';
+
+// Azure AD users: inactive (waiting for access) first, then the most recent sign-in; never signed in last.
+function azureOrder(a, b) {
+  if (a.isActive !== b.isActive) return a.isActive ? 1 : -1;
+  const ta = a.lastLoginUtc ? Date.parse(a.lastLoginUtc) : -Infinity;
+  const tb = b.lastLoginUtc ? Date.parse(b.lastLoginUtc) : -Infinity;
+  return tb - ta;
+}
+
+// Icon-only row action; the label is the tooltip and the accessible name.
+function IconAction({ icon, label, onClick, danger, disabled }) {
+  return (
+    <button type="button" className={`arwb-btn arwb-btn-sm${danger ? ' arwb-btn-danger' : ''}`} title={label} aria-label={label}
+      disabled={disabled} onClick={onClick}>
+      <Icon name={icon} size={15} />
+    </button>
+  );
 }
 
 export default function UsersPage() {
@@ -217,6 +241,7 @@ export default function UsersPage() {
   const [term, setTerm] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const [tab, setTab] = useState('users');   // users | emails
+  const [kind, setKind] = useState('system');   // system | azure
 
   // The Add User page hands its result back in history state; drop it so a refresh does not repeat it.
   useEffect(() => {
@@ -230,16 +255,27 @@ export default function UsersPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  const counts = useMemo(() => {
+    const all = data?.users || [];
+    const azure = all.filter(isAzureAd).length;
+    return { system: all.length - azure, azure };
+  }, [data]);
+
   const rows = useMemo(() => {
     const q = term.trim().toLowerCase();
-    return (data?.users || []).filter((u) => (showInactive || u.isActive)
+    const azure = kind === 'azure';
+    const list = (data?.users || []).filter((u) => isAzureAd(u) === azure
+      // Azure AD users always include inactive ones - they lead the list.
+      && (azure || showInactive || u.isActive)
       && (!q || u.userName.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q)
         || u.roles.some((r) => r.label.toLowerCase().includes(q)) || u.labs.some((l) => l.labName.toLowerCase().includes(q))
         || (u.scopes || []).some((s) => (s.clinicName || s.providerName || '').toLowerCase().includes(q))));
-  }, [data, term, showInactive]);
+    return azure ? [...list].sort(azureOrder) : list;
+  }, [data, term, showInactive, kind]);
   const { rows: sortedRows, th } = useTableSort(rows, {
     user: (u) => u.userName, email: (u) => u.email, role: (u) => u.roles.map((r) => r.label).join(', '), labs: (u) => u.labs.map((l) => l.labName).join(', '),
-    manager: (u) => u.managerName || u.teamName, status: (u) => (u.isActive ? 0 : 1), createdBy: (u) => u.createdBy
+    manager: (u) => u.managerName || u.teamName, status: (u) => (u.isActive ? 0 : 1),
+    lastLogin: (u) => (u.lastLoginUtc ? Date.parse(u.lastLoginUtc) : null), createdBy: (u) => u.createdBy
   });
 
   if (!data && !error) return <Loading text="Loading users…" />;
@@ -268,25 +304,35 @@ export default function UsersPage() {
         <div className="arwb-card arwb-card-flush">
           <div className="arwb-card-head">
             <h3>Users</h3>
-            <span className="arwb-card-sub">{rows.length} of {data.users.length}</span>
+            <span className="arwb-card-sub">{rows.length} of {kind === 'azure' ? counts.azure : counts.system}</span>
             <div className="arwb-card-head-actions">
               <input type="search" className="arwb-input" style={{ width: 240 }} placeholder="Find user, email, role, lab, clinic…" value={term}
                 onChange={(e) => setTerm(e.target.value)} aria-label="Find a user" />
-              <label className="arwb-checkbox-row" style={{ margin: 0 }}>
-                <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> Show inactive
-              </label>
+              {kind === 'system' && (
+                <label className="arwb-checkbox-row" style={{ margin: 0 }}>
+                  <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> Show inactive
+                </label>
+              )}
               <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" disabled={!data.labs.length || !data.roles.length}
                 onClick={() => navigate('/users/new')}>
                 <Icon name="plus" size={15} /> Add User
               </button>
             </div>
           </div>
+          <div className="arwb-tabs" role="tablist" aria-label="User type" style={{ padding: '0 16px' }}>
+            <button type="button" role="tab" aria-selected={kind === 'system'} className={`arwb-tab-btn${kind === 'system' ? ' active' : ''}`} onClick={() => setKind('system')}>
+              System Users <span className="arwb-hint">({counts.system})</span>
+            </button>
+            <button type="button" role="tab" aria-selected={kind === 'azure'} className={`arwb-tab-btn${kind === 'azure' ? ' active' : ''}`} onClick={() => setKind('azure')}>
+              Azure AD Users <span className="arwb-hint">({counts.azure})</span>
+            </button>
+          </div>
           <div className="arwb-table-wrap">
             <table className="arwb-data-table">
               <thead>
                 <tr>
                   {th('user', 'Username')}{th('email', 'Email')}{th('role', 'Role / Access')}{th('labs', 'Labs')}{th('manager', 'Manager / Team')}
-                  {th('status', 'Status')}{th('createdBy', 'Created By')}<th />
+                  {th('status', 'Status')}{th('lastLogin', 'Last Login')}{th('createdBy', 'Created By')}<th scope="col" aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
@@ -313,35 +359,31 @@ export default function UsersPage() {
                     <td>
                       <div className="arwb-status-stack">
                         {u.isActive ? <Badge className="arwb-badge-good">Active</Badge> : <Badge className="arwb-badge-neutral">Inactive</Badge>}
-                        {u.isActive && <InviteBadge invite={u.invite} />}
+                        {u.isActive && !isAzureAd(u) && <InviteBadge invite={u.invite} />}
                       </div>
                     </td>
+                    <td className="arwb-hint">{u.lastLoginUtc ? fmt.dateTime(u.lastLoginUtc) : 'Never'}</td>
                     <td className="arwb-hint">{u.createdBy || '—'}</td>
                     <td className="num">
                       {u.canEdit
                         ? (
-                          <div className="arwb-row-actions">
-                            <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => setEditing(u)}><Icon name="edit" size={14} /> Edit</button>
-                            {u.isActive && (
-                              <button type="button" className="arwb-btn arwb-btn-sm" disabled={!u.email} title={u.email ? '' : 'Add an email address first'}
-                                onClick={() => setConfirm({ action: 'invite', user: u })}>
-                                <Icon name="mail" size={14} /> {u.invite?.hasPassword ? 'Send password link' : 'Resend invitation'}
-                              </button>
+                          <div className="arwb-row-actions" style={{ flexWrap: 'nowrap' }}>
+                            <IconAction icon="edit" label={`Edit ${u.userName}`} onClick={() => setEditing(u)} />
+                            {u.isActive && !isAzureAd(u) && (
+                              <IconAction icon="mail"
+                                label={!u.email ? 'Add an email address first' : u.invite?.hasPassword ? 'Send password link' : 'Resend invitation'}
+                                disabled={!u.email} onClick={() => setConfirm({ action: 'invite', user: u })} />
                             )}
-                            <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => setConfirm({ action: u.isActive ? 'deactivate' : 'activate', user: u })}>
-                              {u.isActive ? 'Deactivate' : 'Activate'}
-                            </button>
-                            <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-danger" onClick={() => setConfirm({ action: 'delete', user: u })}
-                              aria-label={`Delete ${u.userName}`}>
-                              <Icon name="trash" size={14} />
-                            </button>
+                            <IconAction icon={u.isActive ? 'userOff' : 'userCheck'} label={u.isActive ? `Deactivate ${u.userName}` : `Activate ${u.userName}`}
+                              onClick={() => setConfirm({ action: u.isActive ? 'deactivate' : 'activate', user: u })} />
+                            <IconAction icon="trash" label={`Delete ${u.userName}`} danger onClick={() => setConfirm({ action: 'delete', user: u })} />
                           </div>
                         )
                         : <span className="arwb-hint" title={u.readOnlyReason || ''}>Read-only</span>}
                     </td>
                   </tr>
                 ))}
-                {rows.length === 0 && <tr><td colSpan={8} className="arwb-hint" style={{ textAlign: 'center', padding: 24 }}>No users match.</td></tr>}
+                {rows.length === 0 && <tr><td colSpan={9} className="arwb-hint" style={{ textAlign: 'center', padding: 24 }}>No users match.</td></tr>}
               </tbody>
             </table>
           </div>

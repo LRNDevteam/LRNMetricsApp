@@ -795,6 +795,12 @@ IF COL_LENGTH(N'dbo.ARWB_Document', N'Description') IS NULL
     ALTER TABLE dbo.ARWB_Document ADD Description nvarchar(500) NULL;
 GO
 
+-- The document type chosen on upload, from LRNMaster dbo.ARDocumentTypeMaster (copied: the master is in
+-- another database). DocumentCategory then holds that type's category. NULL on CIP responses and older rows.
+IF COL_LENGTH(N'dbo.ARWB_Document', N'DocumentTypeID') IS NULL
+    ALTER TABLE dbo.ARWB_Document ADD DocumentTypeID int NULL, DocumentTypeCode nvarchar(100) NULL, DocumentTypeName nvarchar(200) NULL;
+GO
+
 -- HIPAA: every view and download is logged.
 IF OBJECT_ID(N'dbo.ARWB_DocumentAccessLog', N'U') IS NULL
 CREATE TABLE dbo.ARWB_DocumentAccessLog

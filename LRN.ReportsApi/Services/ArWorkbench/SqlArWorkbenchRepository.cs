@@ -57,6 +57,8 @@ public interface IArWorkbenchRepository
     Task<ArWorkbenchAuditPage> GetAuditLogAsync(ArWorkbenchAuditFilter filter, ArWorkbenchUserContext user, bool withOptions, CancellationToken ct);
 
     // Attachments (SqlArWorkbenchRepository.Documents.cs)
+    /// <summary>Active document types (LRNMaster dbo.ARDocumentTypeMaster); empty when the table is not installed.</summary>
+    Task<IReadOnlyList<ArWorkbenchDocumentType>> GetDocumentTypesAsync(CancellationToken ct);
     Task<IReadOnlyList<long>> AddClaimDocumentsAsync(int labId, long claimKey, long? followUpId,
         IReadOnlyList<ArWorkbenchClaimUpload> files, ArWorkbenchUserContext user, string? clientIp, CancellationToken ct);
     Task<ArWorkbenchPagedResult<ArWorkbenchDocumentRow>> SearchDocumentsAsync(ArWorkbenchDocumentFilter filter, ArWorkbenchUserContext user, CancellationToken ct);
@@ -228,6 +230,16 @@ public sealed partial class SqlArWorkbenchRepository : IArWorkbenchRepository
     internal static string AutoRoutedSql(string alias = "w") =>
         $"EXISTS (SELECT 1 FROM dbo.ARWB_ArQueue arq WHERE arq.QueueId = COALESCE({alias}.ArSubQueueId, {alias}.ArQueueId) AND arq.IsAutoRouted = 1)";
 
+    /// <summary>
+    /// The same rule as <see cref="AutoRoutedSql"/> for use INSIDE an aggregate, where SQL Server
+    /// refuses a subquery (error 130): join the claim's queue once (QueueId is the key, so no row
+    /// is duplicated) and test <see cref="AutoRoutedJoinedSql"/> in the SUM.
+    /// </summary>
+    internal static string AutoRoutedJoinSql(string alias = "w") =>
+        $"LEFT JOIN dbo.ARWB_ArQueue arq ON arq.QueueId = COALESCE({alias}.ArSubQueueId, {alias}.ArQueueId)";
+
+    internal const string AutoRoutedJoinedSql = "arq.IsAutoRouted = 1";
+
     internal static readonly string[] AwaitingPayerResolutions =
         ["Pending Payer Adjudication", "Resubmitted - E", "Resubmitted - F", "Resubmitted - P", "Reconsideration Submitted", "Appealed"];
 
@@ -304,7 +316,7 @@ public sealed partial class SqlArWorkbenchRepository : IArWorkbenchRepository
         // Fail early with the setup message if the lab has not been prepared.
         await using (await OpenLabAsync(labId, ct)) { }
 
-        const string sql = @"
+        var sql = @"
 DECLARE @LabUserID int =
 (
     SELECT TOP (1) u.LabUserID
@@ -335,7 +347,8 @@ IF OBJECT_ID(N'dbo.ARWB_UserScope', N'U') IS NOT NULL
     FROM dbo.ARWB_UserScope s
     WHERE s.LabUserID = @LabUserID AND s.LabId = @LabId;
 ELSE
-    SELECT CAST(NULL AS nvarchar(500)) AS ClinicName, CAST(NULL AS nvarchar(500)) AS ProviderName WHERE 1 = 0;";
+    SELECT CAST(NULL AS nvarchar(500)) AS ClinicName, CAST(NULL AS nvarchar(500)) AS ProviderName WHERE 1 = 0;
+" + MicrosoftAccountSql("@LabUserID");
 
         await using var master = new SqlConnection(_masterConnectionString);
         await master.OpenAsync(ct);
@@ -369,6 +382,8 @@ ELSE
             clinic = reader.IsDBNull(0) ? null : reader.GetString(0);
             provider = reader.IsDBNull(1) ? null : reader.GetString(1);
         }
+        await reader.NextResultAsync(ct);
+        if (await reader.ReadAsync(ct)) user.IsMicrosoftAccount = reader.GetBoolean(0);
 
         // A role only counts once it has ARWorkbench.Access.
         var workbenchRoles = roles.Where(r => r.Value.Contains(ArWorkbenchFeatures.Access)).ToList();
@@ -556,11 +571,12 @@ SELECT
     ISNULL(SUM(w.InitialInsuranceAR), 0),
     ISNULL(SUM(w.RecoveredAmount), 0),
     ISNULL(SUM(w.RemainingAR), 0),
-    SUM(CASE WHEN w.WorkflowStatus = 'Unassigned' AND w.IsOpenInsuranceAR = 1 AND {AutoRoutedSql()} THEN 1 ELSE 0 END),
+    SUM(CASE WHEN w.WorkflowStatus = 'Unassigned' AND w.IsOpenInsuranceAR = 1 AND {AutoRoutedJoinedSql} THEN 1 ELSE 0 END),
     SUM(CASE WHEN w.ArQueueId = 'submittedqa' THEN 1 ELSE 0 END),
     SUM(CASE WHEN w.IsRefollowupDue = 1 AND w.WorkflowStatus IN ('Assigned', 'QA Rejected', 'Completed') AND w.IsOpenInsuranceAR = 1 THEN 1 ELSE 0 END),
     SUM(CASE WHEN w.WorkflowStatus = 'Pending Verification' THEN 1 ELSE 0 END)
 FROM dbo.ARWB_Claim w
+{AutoRoutedJoinSql()}
 WHERE 1 = 1 {scope};
 
 SELECT COUNT(*) FROM dbo.ARWB_AgentRequest r INNER JOIN dbo.ARWB_Claim w ON w.ClaimKey = r.ClaimKey
@@ -671,7 +687,7 @@ SELECT
     SUM(CASE WHEN DATEDIFF(day, w.FirstBilledDate, @Today) BETWEEN 8 AND 14 THEN 1 ELSE 0 END),
     ISNULL(SUM(w.RemainingAR), 0),
     -- Claims Awaiting Assignment: unassigned, open, in a queue that feeds assignment (DEF-06)
-    SUM(CASE WHEN w.WorkflowStatus = 'Unassigned' AND w.IsOpenInsuranceAR = 1 AND {AutoRoutedSql()} THEN 1 ELSE 0 END),
+    SUM(CASE WHEN w.WorkflowStatus = 'Unassigned' AND w.IsOpenInsuranceAR = 1 AND {AutoRoutedJoinedSql} THEN 1 ELSE 0 END),
     SUM(CASE WHEN w.WorkflowStatus = 'Assigned' THEN 1 ELSE 0 END),
     SUM(CASE WHEN w.WorkflowStatus = 'Submitted for QA' THEN 1 ELSE 0 END),
     SUM(CASE WHEN w.WorkflowStatus = 'QA Rejected' THEN 1 ELSE 0 END),
@@ -682,6 +698,7 @@ SELECT
     ISNULL(SUM(w.InitialInsuranceAR), 0),
     SUM(CASE WHEN w.WorkedStatus = 'Worked' THEN 1 ELSE 0 END)
 FROM dbo.ARWB_Claim w
+{AutoRoutedJoinSql()}
 WHERE 1 = 1 {scope};
 
 -- 1. Data refresh (latest successful load): when it ran, and when the master file it read was loaded

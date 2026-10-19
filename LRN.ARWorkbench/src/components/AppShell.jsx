@@ -208,9 +208,12 @@ function Shell() {
                     <b>{user?.displayName}</b>
                     <span className="arwb-hint">{user?.userName}</span>
                   </div>
-                  <button type="button" role="menuitem" className="arwb-menu-item" onClick={() => { setUserMenuOpen(false); setChangingPassword(true); }}>
-                    <Icon name="key" size={15} /> Change password
-                  </button>
+                  {/* A Microsoft (Azure AD) account changes its password at Microsoft, not here. */}
+                  {!user?.isMicrosoftAccount && (
+                    <button type="button" role="menuitem" className="arwb-menu-item" onClick={() => { setUserMenuOpen(false); setChangingPassword(true); }}>
+                      <Icon name="key" size={15} /> Change password
+                    </button>
+                  )}
                   <button type="button" role="menuitem" className="arwb-menu-item" onClick={logout}>
                     <Icon name="logout" size={15} /> Sign out
                   </button>
@@ -233,7 +236,7 @@ function Shell() {
           <Outlet />
         </main>
       </div>
-      {changingPassword && (
+      {changingPassword && !user?.isMicrosoftAccount && (
         <ChangePasswordModal onClose={() => setChangingPassword(false)}
           onChanged={(message) => { setChangingPassword(false); setAccountNotice({ kind: 'good', text: message }); }} />
       )}

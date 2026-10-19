@@ -323,13 +323,13 @@ function MasterFileLoads({ labId, version, onFinished }) {
               <tr>
                 <th scope="col">#</th><th scope="col">Status</th><th scope="col">Requested</th><th scope="col">By</th>
                 <th scope="col">Started</th><th scope="col">{tab === 'progress' ? 'Worker' : 'Finished'}</th>
-                <th scope="col">Run ID</th><th scope="col">{tab === 'progress' ? 'Note' : 'Result'}</th>
+                <th scope="col">Run ID</th>{tab === 'progress' && <th scope="col">Note</th>}
               </tr>
             </thead>
             <tbody>
-              {!data && <tr><td colSpan={8}><Loading /></td></tr>}
+              {!data && <tr><td colSpan={tab === 'progress' ? 8 : 7}><Loading /></td></tr>}
               {data && rows.length === 0 && (
-                <tr><td colSpan={8}><div className="arwb-empty-state">
+                <tr><td colSpan={tab === 'progress' ? 8 : 7}><div className="arwb-empty-state">
                   {tab === 'progress' ? 'No master file load is queued or running. Use Run Master File Load to start one.' : 'No completed master file loads yet.'}
                 </div></td></tr>
               )}
@@ -339,7 +339,10 @@ function MasterFileLoads({ labId, version, onFinished }) {
                   <tr key={r.requestId}>
                     <td>{r.requestId}</td>
                     <td>
-                      <Badge className={cls}>{r.status === 'Claimed' && <span className="arwb-spinner" />} {label}</Badge>
+                      {/* Completed tab has no Result column: a failure's reason and any note stay on the status tooltip. */}
+                      <span title={tab === 'progress' ? undefined : [r.resultMessage, r.note && `Note: ${r.note}`].filter(Boolean).join('\n') || undefined}>
+                        <Badge className={cls}>{r.status === 'Claimed' && <span className="arwb-spinner" />} {label}</Badge>
+                      </span>
                       {r.requestedFromApp && r.requestedFromApp !== 'LRN.ARWorkbench' && <div className="arwb-hint">from {r.requestedFromApp}</div>}
                     </td>
                     <td>{fmt.dateTime(r.requestedOn)}</td>
@@ -347,12 +350,7 @@ function MasterFileLoads({ labId, version, onFinished }) {
                     <td>{r.claimedOn ? fmt.dateTime(r.claimedOn) : <span className="arwb-hint">waiting for the next poll</span>}</td>
                     <td>{tab === 'progress' ? (r.claimedByHost || '—') : fmt.dateTime(r.completedOn)}</td>
                     <td className="mono">{r.runId || '—'}</td>
-                    <td className="wrap">
-                      {tab === 'progress'
-                        ? (r.note || '—')
-                        : <>{r.resultMessage ? <span className={label === 'Failed' ? 'text-critical' : undefined}>{r.resultMessage}</span> : (r.resultStatus || '—')}
-                          {r.note && <div className="arwb-hint">Note: {r.note}</div>}</>}
-                    </td>
+                    {tab === 'progress' && <td className="wrap">{r.note || '—'}</td>}
                   </tr>
                 );
               })}

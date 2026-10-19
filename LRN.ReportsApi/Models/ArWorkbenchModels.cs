@@ -38,6 +38,8 @@ public sealed class ArWorkbenchUserContext
     public int? LabUserId { get; set; }
     public string UserName { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
+    /// <summary>Signs in with Microsoft (dbo.LabUsers.AuthProvider = 'Entra'): the password is changed at Microsoft, never here.</summary>
+    public bool IsMicrosoftAccount { get; set; }
     /// <summary>admin | manager | lead | agent | qa | viewer - drives navigation and own-caseload scoping.</summary>
     public string RoleCode { get; set; } = string.Empty;
     /// <summary>The user's AR Workbench role name(s) without the "AR Workbench - " prefix, for display.</summary>
