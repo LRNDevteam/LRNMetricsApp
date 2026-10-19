@@ -1690,6 +1690,7 @@ GO
      3  nullified (auto-adjust / approved write-off), not yet posted,
         master still shows an insurance balance                         -> autoadj / autoadj_system | autoadj_writeoff
      4  Completed AND RemainingAR <= eps                                -> financial state
+     4a Completed AND CIP case Client Responded (reply awaiting review) -> cipresponse (DEF-19)
      5  Completed AND open CIP case                                     -> escalation
      6  Completed AND new denial received on sync                       -> refollowup / refollowup_newdenials
      7  Completed AND re-follow-up due                                  -> refollowup / refollowup_unresolved
@@ -1915,6 +1916,10 @@ BEGIN
             HasActiveCip        = CASE WHEN EXISTS (SELECT 1 FROM dbo.ARWB_CipCase cc
                                                     WHERE cc.ClaimKey = c.ClaimKey AND cc.CaseStatus IN ('Pending Approval', 'Sent to Client', 'Client Responded'))
                                        THEN 1 ELSE 0 END,
+            -- The client has answered and the reply waits for the manager's review (DEF-19).
+            HasClientRespondedCip = CASE WHEN EXISTS (SELECT 1 FROM dbo.ARWB_CipCase cc
+                                                      WHERE cc.ClaimKey = c.ClaimKey AND cc.CaseStatus = 'Client Responded')
+                                         THEN 1 ELSE 0 END,
             HasReturnedCipReply = CASE WHEN EXISTS (SELECT 1 FROM dbo.ARWB_CipCase cc
                                                     WHERE cc.ClaimKey = c.ClaimKey AND cc.CaseStatus = 'Returned to Agent'
                                                       AND cc.ClientRespondedOn IS NOT NULL)
@@ -1956,6 +1961,7 @@ BEGIN
                 WHEN s.IsPendingPosting = 1             THEN 'autoadj'
                 WHEN c.WorkflowStatus = 'Completed' THEN
                     CASE WHEN f.RemainingAR <= @Eps     THEN fin.FinQueue
+                         WHEN s.HasClientRespondedCip = 1 THEN 'cipresponse'
                          WHEN s.HasActiveCip = 1        THEN 'escalation'
                          WHEN c.NewDenialSinceWork = 1  THEN 'refollowup'
                          WHEN s.IsRefollowupDue = 1     THEN 'refollowup'
@@ -1969,6 +1975,7 @@ BEGIN
                 WHEN s.IsPendingPosting = 1             THEN CASE WHEN c.IsAutoAdjusted = 1 THEN 'autoadj_system' ELSE 'autoadj_writeoff' END
                 WHEN c.WorkflowStatus = 'Completed' THEN
                     CASE WHEN f.RemainingAR <= @Eps     THEN fin.FinSubQueue
+                         WHEN s.HasClientRespondedCip = 1 THEN NULL
                          WHEN s.HasActiveCip = 1        THEN NULL
                          WHEN c.NewDenialSinceWork = 1  THEN 'refollowup_newdenials'
                          WHEN s.IsRefollowupDue = 1     THEN 'refollowup_unresolved'

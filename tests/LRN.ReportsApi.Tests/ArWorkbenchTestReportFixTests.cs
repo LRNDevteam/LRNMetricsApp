@@ -74,6 +74,52 @@ public class ArWorkbenchTestReportFixTests
         Assert.False(ArWorkbenchClientVisibility.IsClientUser(admin));
     }
 
+    /// <summary>DEF-15: the claims export a client can reach by calling the API carries no notes or internal work.</summary>
+    [Fact]
+    public void Client_claims_export_leaves_out_every_internal_column()
+    {
+        var client = ArWorkbenchClaimExcel.Headers(clientView: true);
+        var full = ArWorkbenchClaimExcel.Headers(clientView: false);
+
+        foreach (var header in ArWorkbenchClientVisibility.InternalExportColumns)
+        {
+            // A renamed column would otherwise slip back into the client's file unnoticed.
+            Assert.Contains(header, full);
+            Assert.DoesNotContain(header, client);
+        }
+        Assert.Contains("Claim ID", client);
+        Assert.Contains("DenialCode", client);
+        Assert.Contains("Ins. Balance", client);
+    }
+
+    [Fact]
+    public void Client_claim_list_rows_lose_agent_resolution_and_qa()
+    {
+        var row = new ArWorkbenchClaimRow
+        {
+            ClaimID = "19524452", AssignedAgentUser = "ARAgent1", AssignedAgentName = "AR Agent 1",
+            FixResolution = "CIP - Client Escalations", QaStatus = "Approved", PendingAgentRequests = 2
+        };
+        ArWorkbenchClientVisibility.Apply([row], new ArWorkbenchUserContext { RoleCode = "viewer" });
+
+        Assert.Null(row.AssignedAgentUser);
+        Assert.Null(row.AssignedAgentName);
+        Assert.Null(row.FixResolution);
+        Assert.Null(row.QaStatus);
+        Assert.Equal(0, row.PendingAgentRequests);
+        Assert.Equal("19524452", row.ClaimID);
+    }
+
+    [Fact]
+    public void Internal_users_keep_the_claim_list_rows()
+    {
+        var row = new ArWorkbenchClaimRow { AssignedAgentUser = "ARAgent1", FixResolution = "Appealed" };
+        ArWorkbenchClientVisibility.Apply([row], new ArWorkbenchUserContext { RoleCode = "lead" });
+
+        Assert.Equal("ARAgent1", row.AssignedAgentUser);
+        Assert.Equal("Appealed", row.FixResolution);
+    }
+
     /// <summary>DEF-08: the RCM Manager maintains exactly the Non-Collectible and Auto-Adjust lists.</summary>
     [Theory]
     [InlineData("NON_COLLECTIBLE_CODE", true)]

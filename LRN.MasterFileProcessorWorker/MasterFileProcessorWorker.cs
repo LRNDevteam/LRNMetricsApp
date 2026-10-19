@@ -1566,6 +1566,19 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			}
 		}
 
+		// A request for a lab this worker does not run (not in its Labs list, e.g. queued from the AR
+		// Workbench for a lab configured on another instance) would otherwise stay Claimed forever and
+		// block every later request for that lab. Close it with the reason instead.
+		foreach (var orphan in rerunByLab.Values.Where(r => _opt.Labs.All(l => l.LabId != r.LabId)))
+		{
+			await _rerunRequests.CompleteAsync(
+				orphan.RerunRequestId,
+				runId: null,
+				resultStatus: "SKIPPED",
+				message: $"Lab {orphan.LabId} is not configured in this Master File Processor ({Environment.MachineName}).",
+				ct);
+		}
+
 		// Upload the daily master processor log once per run (client requirement)
 		await TryUploadMasterProcessorLogAsync(runLocalNow, masterLogFolder, ct);
 	}
