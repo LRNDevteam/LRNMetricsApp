@@ -104,6 +104,14 @@ public static class DenialClaimReportExcelBuilder
             model.HasDenialLists = true;
             model.DenialList = await lists.GetDenialListAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
             model.PlanType = await lists.GetPlanTypeAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
+
+            if (LabCollectionPrefix.HasDenialFacilityTabs(labName))
+            {
+                model.HasDenialFacilityTabs = true;
+                model.PayorVsPayer = await lists.GetPayorVsPayerAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
+                model.FacilityDenial = await lists.GetByFacilityAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
+                model.FacilityPct = await lists.GetFacilityPctAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
+            }
         }
 
         return model;
@@ -117,8 +125,15 @@ public static class DenialClaimReportExcelBuilder
         WritePivot(workbook.Worksheets.Add("Weekly Summary"), model.Weekly, "Weekly Summary", model.CurrentLab);
         if (model.HasDenialLists)
         {
-            WriteDenialList(workbook.Worksheets.Add("Denial List"), model.DenialList, model.CurrentLab);
-            WritePlanType(workbook.Worksheets.Add("Denial List - Plan Type"), model.PlanType, model.CurrentLab);
+            WriteDenialList(workbook.Worksheets.Add("Denial List"), model.DenialList, model.CurrentLab, model.HasDenialFacilityTabs);
+            WritePlanType(workbook.Worksheets.Add(model.HasDenialFacilityTabs ? "Plan Type" : "Denial List - Plan Type"),
+                model.PlanType, model.CurrentLab, model.HasDenialFacilityTabs);
+        }
+        if (model.HasDenialFacilityTabs)
+        {
+            WritePanelVsPayer(workbook.Worksheets.Add("Panel vs Payer"), model.PayorVsPayer, model.CurrentLab);
+            WriteFacility(workbook.Worksheets.Add("Facility wise Denial"), model.FacilityDenial, model.CurrentLab);
+            WriteFacilityPct(workbook.Worksheets.Add("Denial vs Facility %"), model.FacilityPct, model.CurrentLab);
         }
         WriteInsight(workbook.Worksheets.Add("Denial Insight"), model.Insight, model.CurrentLab);
 
@@ -127,24 +142,229 @@ public static class DenialClaimReportExcelBuilder
 
     // ── Denial List / Plan Type ───────────────────────────────────────────────
 
-    private static void WriteDenialList(IXLWorksheet ws, IReadOnlyList<DenialListRow> rows, string lab)
+    // NorthWest (the labs with the facility tabs) reports DenialCodeNormalized, sorted by Claim Count.
+    private static string DenialFilterCaption(bool normalized) => normalized
+        ? "DenialCodeNormalized not blank and InsuranceBalance > 0"
+        : "Total Insurance Balance > 0 and Denial Code not blank";
+
+    private static void WriteDenialList(IXLWorksheet ws, IReadOnlyList<DenialListRow> rows, string lab, bool normalized)
     {
         var data = rows.Where(r => r.RowType != "T")
             .Select(r => (Label: r.RowType == "D" ? r.DenialCode : r.PayerName, IsParent: r.RowType == "D", r.ClaimCount, r.TotalInsuranceBalance))
             .ToList();
         var total = rows.FirstOrDefault(r => r.RowType == "T");
-        WriteSimpleList(ws, $"{lab} — Denial List", "Total Insurance Balance > 0 and Denial Code not blank | Denial Code, drill down to Insurance | Sorted by Total Insurance Balance DESC",
+        WriteSimpleList(ws, $"{lab} — Denial List",
+            normalized
+                ? $"{DenialFilterCaption(true)} | DenialCodeNormalized, drill down to Insurance | Sorted by Claim Count DESC"
+                : $"{DenialFilterCaption(false)} | Denial Code, drill down to Insurance | Sorted by Total Insurance Balance DESC",
             "Denial Code / Insurance", data, total?.ClaimCount ?? 0, total?.TotalInsuranceBalance ?? 0m);
     }
 
-    private static void WritePlanType(IXLWorksheet ws, IReadOnlyList<DenialPlanTypeRow> rows, string lab)
+    private static void WritePlanType(IXLWorksheet ws, IReadOnlyList<DenialPlanTypeRow> rows, string lab, bool normalized)
     {
         var data = rows.Where(r => r.RowType != "T")
             .Select(r => (Label: r.PayerType, IsParent: true, r.ClaimCount, r.TotalInsuranceBalance))
             .ToList();
         var total = rows.FirstOrDefault(r => r.RowType == "T");
-        WriteSimpleList(ws, $"{lab} — Denial List - Plan Type", "Total Insurance Balance > 0 and Denial Code not blank | Sorted by Total Insurance Balance DESC",
+        WriteSimpleList(ws, $"{lab} — {(normalized ? "Plan Type" : "Denial List - Plan Type")}",
+            $"{DenialFilterCaption(normalized)} | Sorted by {(normalized ? "Claim Count" : "Total Insurance Balance")} DESC",
             "Payer Type", data, total?.ClaimCount ?? 0, total?.TotalInsuranceBalance ?? 0m);
+    }
+
+    // ── NorthWest: Facility wise Denial / Denial vs Facility % / Panel vs Payer ──
+
+    private static void WriteFacility(IXLWorksheet ws, IReadOnlyList<DenialFacilityRow> rows, string lab)
+    {
+        var data = rows.Where(r => r.RowType != "T")
+            .Select(r => (Label: r.RowType == "F" ? r.ClinicName : r.DenialCode, IsParent: r.RowType == "F", r.ClaimCount, r.TotalInsuranceBalance))
+            .ToList();
+        var total = rows.FirstOrDefault(r => r.RowType == "T");
+        WriteSimpleList(ws, $"{lab} — Facility wise Denial Breakdown",
+            $"{DenialFilterCaption(true)} | ClinicName, drill down to DenialCodeNormalized | Sorted by Claim Count DESC",
+            "Clinic Name / Denial Code", data, total?.ClaimCount ?? 0, total?.TotalInsuranceBalance ?? 0m);
+    }
+
+    private static void WriteFacilityPct(IXLWorksheet ws, IReadOnlyList<DenialFacilityPctRow> rows, string lab)
+    {
+        WriteTitle(ws, $"{lab} — Denial vs Facility %",
+            "BilledUnbilled = Billed | ClinicName | Denied % = Denied Claims / Adjudicated Claims | Sorted by No. of Claims Billed DESC");
+
+        var data = rows.Where(r => r.RowType != "T").OrderBy(r => r.SortOrder).ToList();
+        if (data.Count == 0)
+        {
+            WriteEmpty(ws);
+            return;
+        }
+
+        const int headerRow = 4;
+        string[] headers = ["Clinic Name", "No. of Claims Billed", "No. of Adjudicated Claims", "No. of Denied Claims", "Denied %"];
+        for (var c = 0; c < headers.Length; c++)
+            ws.Cell(headerRow, c + 1).Value = headers[c];
+        StyleHeader(ws.Range(headerRow, 1, headerRow, headers.Length));
+
+        var row = headerRow + 1;
+        void Write(string clinic, DenialFacilityPctRow r)
+        {
+            ws.Cell(row, 1).Value = clinic;
+            ws.Cell(row, 2).Value = r.ClaimsBilled;
+            ws.Cell(row, 3).Value = r.AdjudicatedClaims;
+            ws.Cell(row, 4).Value = r.DeniedClaims;
+            ws.Cell(row, 5).Value = r.DeniedPct;
+        }
+        foreach (var r in data)
+        {
+            Write(r.ClinicName, r);
+            row++;
+        }
+        if (rows.FirstOrDefault(r => r.RowType == "T") is { } total)
+        {
+            Write("Grand Total", total);
+            StyleFooter(ws.Range(row, 1, row, headers.Length));
+        }
+        else row--;
+
+        ws.Range(headerRow + 1, 2, row, 4).Style.NumberFormat.SetFormat(Whole);
+        ws.Range(headerRow + 1, 5, row, 5).Style.NumberFormat.SetFormat("0.00%");
+        StyleBody(ws.Range(headerRow, 1, row, headers.Length));
+
+        ws.Column(1).Width = 52;
+        for (var c = 2; c <= headers.Length; c++) ws.Column(c).Width = 18;
+        ws.SheetView.Freeze(headerRow, 1);
+    }
+
+    /// <summary>
+    /// Panel vs Payer: payer rows, their denial codes grouped under them (Excel +/- on the payer
+    /// row), and No. of Claims / Insurance Balance per PanelType plus a Grand Total pair.
+    /// </summary>
+    private static void WritePanelVsPayer(IXLWorksheet ws, IReadOnlyList<DenialPayorVsPayerRow> rows, string lab)
+    {
+        WriteTitle(ws, $"{lab} — Panel vs Payer",
+            $"{DenialFilterCaption(true)} | Payer Name_Raw, drill down to DenialCodeNormalized | Columns: PanelType | Sorted by Claim Count DESC");
+
+        var panels = rows
+            .Where(r => r.RowType == "T" && r.PanelType != "")
+            .OrderByDescending(r => r.ClaimCount)
+            .ThenBy(r => r.PanelType, StringComparer.OrdinalIgnoreCase)
+            .Select(r => r.PanelType)
+            .ToList();
+        var lines = rows
+            .GroupBy(r => r.SortOrder)
+            .OrderBy(g => g.Key)
+            .Select(g => (Total: g.FirstOrDefault(r => r.PanelType == "") ?? g.First(),
+                          Cells: g.Where(r => r.PanelType != "").ToDictionary(r => r.PanelType, StringComparer.OrdinalIgnoreCase)))
+            .ToList();
+        if (lines.Count == 0)
+        {
+            WriteEmpty(ws);
+            return;
+        }
+
+        const int bandRow = 4, headerRow = 5;
+        var lastCol = 1 + (panels.Count + 1) * 2;
+        ws.Range(bandRow, 1, headerRow, 1).Merge().Value = "Payer Name / Denial Code";
+        for (var i = 0; i <= panels.Count; i++)
+        {
+            var col = 2 + i * 2;
+            ws.Range(bandRow, col, bandRow, col + 1).Merge().Value = i < panels.Count ? panels[i] : "Grand Total";
+            ws.Cell(headerRow, col).Value = "No. of Claims";
+            ws.Cell(headerRow, col + 1).Value = "Insurance Balance";
+        }
+        StyleHeader(ws.Range(bandRow, 1, headerRow, lastCol));
+        ws.Range(bandRow, lastCol - 1, headerRow, lastCol).Style.Fill.BackgroundColor = PivotGrandTotal;
+        ws.Range(bandRow, 1, headerRow, lastCol).Style.Alignment.WrapText = true;
+
+        var row = headerRow + 1;
+        void WriteCells(DenialPayorVsPayerRow total, IReadOnlyDictionary<string, DenialPayorVsPayerRow> cells)
+        {
+            for (var i = 0; i < panels.Count; i++)
+            {
+                var cell = cells.GetValueOrDefault(panels[i]);
+                ws.Cell(row, 2 + i * 2).Value = cell?.ClaimCount ?? 0;
+                ws.Cell(row, 3 + i * 2).Value = cell?.TotalInsuranceBalance ?? 0m;
+            }
+            ws.Cell(row, lastCol - 1).Value = total.ClaimCount;
+            ws.Cell(row, lastCol).Value = total.TotalInsuranceBalance;
+        }
+
+        foreach (var (total, cells) in lines.Where(l => l.Total.RowType != "T"))
+        {
+            var isPayer = total.RowType == "P";
+            ws.Cell(row, 1).Value = isPayer ? total.PayerName : total.DenialCode;
+            WriteCells(total, cells);
+            if (isPayer)
+            {
+                ws.Range(row, 1, row, lastCol).Style.Font.SetBold().Fill.SetBackgroundColor(PivotInsuranceRow);
+            }
+            else
+            {
+                ws.Cell(row, 1).Style.Alignment.SetIndent(2);
+                ws.Row(row).OutlineLevel = 1;
+            }
+            row++;
+        }
+        var grand = lines.FirstOrDefault(l => l.Total.RowType == "T");
+        if (grand.Total is not null)
+        {
+            ws.Cell(row, 1).Value = "Grand Total";
+            WriteCells(grand.Total, grand.Cells);
+            StyleFooter(ws.Range(row, 1, row, lastCol));
+        }
+        else row--;
+
+        for (var i = 0; i <= panels.Count; i++)
+        {
+            ws.Range(headerRow + 1, 2 + i * 2, row, 2 + i * 2).Style.NumberFormat.SetFormat("#,##0;-#,##0;\"-\"");
+            ws.Range(headerRow + 1, 3 + i * 2, row, 3 + i * 2).Style.NumberFormat.SetFormat("$#,##0.00;($#,##0.00);\"-\"");
+        }
+        StyleBody(ws.Range(bandRow, 1, row, lastCol));
+
+        ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
+        ws.Column(1).Width = 46;
+        for (var i = 0; i <= panels.Count; i++)
+        {
+            ws.Column(2 + i * 2).Width = 12;
+            ws.Column(3 + i * 2).Width = 18;
+        }
+        ws.SheetView.Freeze(headerRow, 1);
+    }
+
+    private static void WriteTitle(IXLWorksheet ws, string title, string caption)
+    {
+        ws.Cell(1, 1).Value = title;
+        ws.Cell(1, 1).Style.Font.SetBold().Font.SetFontSize(13).Font.SetFontColor(Ink);
+        ws.Cell(2, 1).Value = caption;
+        ws.Cell(2, 1).Style.Font.SetFontSize(9).Font.SetFontColor(XLColor.FromHtml("#6B7A8C"));
+    }
+
+    private static void WriteEmpty(IXLWorksheet ws)
+    {
+        ws.Cell(4, 1).Value = "No denial data for this lab.";
+        ws.Cell(4, 1).Style.Font.SetItalic().Font.SetFontColor(XLColor.FromHtml("#6B7A8C"));
+        ws.Column(1).Width = 60;
+    }
+
+    private static void StyleHeader(IXLRange header)
+    {
+        header.Style.Font.Bold = true;
+        header.Style.Font.FontColor = XLColor.White;
+        header.Style.Fill.BackgroundColor = PivotHeader;
+        header.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        header.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+    }
+
+    private static void StyleFooter(IXLRange footer)
+    {
+        footer.Style.Font.Bold = true;
+        footer.Style.Font.FontColor = XLColor.White;
+        footer.Style.Fill.BackgroundColor = PivotFooter;
+    }
+
+    private static void StyleBody(IXLRange body)
+    {
+        body.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        body.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        body.Style.Border.OutsideBorderColor = Rule;
+        body.Style.Border.InsideBorderColor = Rule;
     }
 
     private static void WriteSimpleList(
@@ -211,6 +431,8 @@ public static class DenialClaimReportExcelBuilder
         body.Style.Border.OutsideBorderColor = Rule;
         body.Style.Border.InsideBorderColor = Rule;
 
+        // Group +/- sits on the parent row, which is above its children.
+        ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
         ws.Column(1).Width = 52;
         ws.Column(2).Width = 15;
         ws.Column(3).Width = 24;

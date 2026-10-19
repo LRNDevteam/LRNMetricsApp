@@ -158,7 +158,8 @@ GO
         Filter : LineLevelData.Source = Webpm | Daq (no BilledUnbilled, no claim Source)
         Row    : CPT Code
         Column : ChargeEnteredDate Year Total (stored by month; UI rolls up year)
-        Values : Count of unique Claim ID, Sum of Charge Amount
+        Values : Count of Claim ID (one per line, as the client pivot counts it:
+                 a claim billed twice for the same CPT counts twice), Sum of Charge Amount
         Sort   : Claim Count (applied in the dashboard reader)
    ----------------------------------------------------------------------------- */
 CREATE OR ALTER PROCEDURE dbo.usp_GetNW_CPTBreakdownBySource
@@ -211,7 +212,7 @@ BEGIN
         SourceName,
         CPTCode,
         BilledYearMonth = CONVERT(NVARCHAR(7), ChargeEnteredDate, 120),
-        CPTCount        = COUNT(DISTINCT ClaimID),
+        CPTCount        = COUNT(ClaimID),
         BilledUnits     = ISNULL(SUM(UnitsValue), 0),
         TotalCharges    = ISNULL(SUM(ChargeAmountValue), 0)
     FROM Lines

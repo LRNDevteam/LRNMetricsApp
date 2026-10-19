@@ -3,7 +3,8 @@
    File     : 43_NW_ClinicSummary_Facility.sql
    Database : NWL_LRN
 
-   Source Claim Level. Claim Count = Count of unique Claim ID; rows sorted by Claim Count.
+   Source Claim Level. Claim Count = Count of Claim ID (one per claim row, not distinct:
+   Daq and WebPM reuse ClaimID values); rows sorted by Claim Count.
 
    By Facility               Filter : none
                              Rows   : ClinicName > PayerName_Raw > ReferringProvider
@@ -13,7 +14,7 @@
                              Values : Claims, Average(Payment %)  (Payment % = PaymentPercent x 100)
 
    RowLevel: 0 = grand total, 1 = clinic, 2 = clinic + payer, 3 = clinic + payer + provider.
-   Each counts unique ClaimIDs at its own level.
+   Each counts claim rows at its own level.
 
    usp_GetNW_CLS_* returns its snapshot table when no filter is passed; with filters
    (or @Live = 1) it computes from ClaimLevelData. usp_RefreshNW_CLS_* stores the @Live = 1 result.
@@ -142,7 +143,7 @@ BEGIN
            ClinicName        = CASE WHEN GROUPING(ClinicName) = 1        THEN N'' ELSE ClinicName        END,
            PayerName         = CASE WHEN GROUPING(PayerName) = 1         THEN N'' ELSE PayerName         END,
            ReferringProvider = CASE WHEN GROUPING(ReferringProvider) = 1 THEN N'' ELSE ReferringProvider END,
-           NoOfClaims        = CAST(COUNT(DISTINCT ClaimKey) AS INT),
+           NoOfClaims        = CAST(COUNT(ClaimKey) AS INT),
            ChargeAmount      = CAST(SUM(ChargeAmt)      AS DECIMAL(18,2)),
            InsuranceBalance  = CAST(SUM(InsBalance)     AS DECIMAL(18,2)),
            PatientBalance    = CAST(SUM(PatientBalance) AS DECIMAL(18,2))
@@ -227,7 +228,7 @@ BEGIN
 
     SELECT RowLevel      = CAST(CASE WHEN GROUPING(ClinicName) = 1 THEN 0 ELSE 1 END AS TINYINT),
            ClinicName    = CASE WHEN GROUPING(ClinicName) = 1 THEN N'' ELSE ClinicName END,
-           NoOfClaims    = CAST(COUNT(DISTINCT ClaimKey) AS INT),
+           NoOfClaims    = CAST(COUNT(ClaimKey) AS INT),
            AvgPaymentPct = CAST(AVG(PaymentPct) AS DECIMAL(9,4))
     FROM dbo.fn_NW_CLS_Claims(@ClinicNames, @SalesRepNames, @PayerNames, @PanelNames,
                               @DosFrom, @DosTo, @FirstBillFrom, @FirstBillTo)

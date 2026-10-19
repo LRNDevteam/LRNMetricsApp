@@ -1,43 +1,114 @@
 @model IReadOnlyList<LabMetricsDashboard.Models.DenialPayorVsPayerRow>
-@* NorthWest Payor vs Payer - dbo.usp_GetNW_DenialPayorVsPayer *@
+@* NorthWest Panel vs Payer - dbo.usp_GetNW_DenialPayorVsPayer (one row per row x PanelType, "" = row total).
+   Payer rows open to their denial codes, as on the Monthly / Weekly grids. *@
+@{
+    var gridId = "dcrpvp_" + Guid.NewGuid().ToString("N")[..10];
+    var panels = Model
+        .Where(r => r.RowType == "T" && r.PanelType != "")
+        .OrderByDescending(r => r.ClaimCount)
+        .ThenBy(r => r.PanelType, StringComparer.OrdinalIgnoreCase)
+        .Select(r => r.PanelType)
+        .ToList();
+    var rows = Model
+        .GroupBy(r => r.SortOrder)
+        .OrderBy(g => g.Key)
+        .Select(g => new
+        {
+            Total = g.FirstOrDefault(r => r.PanelType == "") ?? g.First(),
+            Cells = g.Where(r => r.PanelType != "")
+                     .ToDictionary(r => r.PanelType, StringComparer.OrdinalIgnoreCase)
+        })
+        .ToList();
+    const int labelWidth = 360, claimsWidth = 76, balanceWidth = 124;
+    var minWidth = labelWidth + (panels.Count + 1) * (claimsWidth + balanceWidth);
+}
 @if (Model.Count == 0)
 {
-    <div class="text-center text-muted py-4">No Payor vs Payer rows were found for the selected lab.</div>
+    <div class="text-center text-muted py-4">No Panel vs Payer rows were found for the selected lab.</div>
 }
 else
 {
+    <div class="dcr-pr-caption">
+        Insurances by No. of Claims, split by Panel Type &middot; click an insurance to open its denial codes
+    </div>
     <div class="pr-wrap">
         <div class="pr-scroll dcr-pr-scroll">
-            <table class="pr-table" style="width:100%">
+            <table class="pr-table" id="@gridId" style="width:100%; min-width:@(minWidth)px;">
+                <colgroup>
+                    <col style="width:@(labelWidth)px" />
+                    @for (var i = 0; i <= panels.Count; i++)
+                    {
+                        <col style="width:@(claimsWidth)px" />
+                        <col style="width:@(balanceWidth)px" />
+                    }
+                </colgroup>
                 <thead>
                     <tr>
-                        <th>Payer Name</th>
-                        <th>Denial Code</th>
-                        <th>Payer Type</th>
-                        <th>No. of Claims</th>
+                        <th rowspan="2">Payer Name &amp; Denial Code</th>
+                        @foreach (var p in panels)
+                        {
+                            <th colspan="2">@p</th>
+                        }
+                        <th colspan="2" class="pr-grand-total">Grand Total</th>
+                    </tr>
+                    <tr>
+                        @foreach (var _ in panels)
+                        {
+                            <th>No. of Claims</th>
+                            <th>Insurance Balance</th>
+                        }
+                        <th class="pr-grand-total">No. of Claims</th>
                         <th class="pr-grand-total">Insurance Balance</th>
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var r in Model.Where(r => r.RowType != "T"))
+                    @{ string? groupId = null; }
+                    @foreach (var row in rows.Where(x => x.Total.RowType != "T"))
                     {
-                        var isPayer = r.RowType == "P";
-                        <tr class="@(isPayer ? "pr-panel-row" : "pr-hp-child")">
-                            <td>@(isPayer ? r.PayerName : "")</td>
-                            <td>@(isPayer ? "" : r.DenialCode)</td>
-                            <td>@(isPayer ? r.PayerType : "")</td>
-                            <td>@r.ClaimCount.N0OrDash()</td>
-                            <td class="pr-grand-total">@Acct2(r.TotalInsuranceBalance)</td>
-                        </tr>
+                        if (row.Total.RowType == "P")
+                        {
+                            groupId = $"{gridId}-{row.Total.PayerRank}";
+                            <tr class="pr-panel-row pr-hp-toggle" data-hp-group="@groupId" role="button" aria-expanded="false" title="Open / close denial codes">
+                                <td title="@row.Total.PayerName"><span class="dcr-lbl"><i class="bi bi-chevron-right pr-hp-chevron" aria-hidden="true"></i><span class="dcr-lbl-txt">@row.Total.PayerName</span></span></td>
+                                @foreach (var p in panels)
+                                {
+                                    var cell = row.Cells.GetValueOrDefault(p);
+                                    <td>@((cell?.ClaimCount ?? 0).N0OrDash())</td>
+                                    <td>@Acct2(cell?.TotalInsuranceBalance ?? 0m)</td>
+                                }
+                                <td class="pr-grand-total">@row.Total.ClaimCount.N0OrDash()</td>
+                                <td class="pr-grand-total">@Acct2(row.Total.TotalInsuranceBalance)</td>
+                            </tr>
+                        }
+                        else
+                        {
+                            <tr class="pr-payer-row pr-hp-child" data-hp-parent="@groupId">
+                                <td title="@row.Total.DenialCode"><span class="dcr-lbl"><span class="dcr-lbl-txt">@row.Total.DenialCode</span></span></td>
+                                @foreach (var p in panels)
+                                {
+                                    var cell = row.Cells.GetValueOrDefault(p);
+                                    <td>@((cell?.ClaimCount ?? 0).N0OrDash())</td>
+                                    <td>@Acct2(cell?.TotalInsuranceBalance ?? 0m)</td>
+                                }
+                                <td class="pr-grand-total">@row.Total.ClaimCount.N0OrDash()</td>
+                                <td class="pr-grand-total">@Acct2(row.Total.TotalInsuranceBalance)</td>
+                            </tr>
+                        }
                     }
                 </tbody>
-                @if (Model.FirstOrDefault(r => r.RowType == "T") is { } total)
+                @if (rows.FirstOrDefault(x => x.Total.RowType == "T") is { } total)
                 {
                     <tfoot>
                         <tr class="pr-total-row">
-                            <td colspan="3">Grand Total</td>
-                            <td>@total.ClaimCount.N0OrDash()</td>
-                            <td>@Acct2(total.TotalInsuranceBalance)</td>
+                            <td>Grand Total</td>
+                            @foreach (var p in panels)
+                            {
+                                var cell = total.Cells.GetValueOrDefault(p);
+                                <td>@((cell?.ClaimCount ?? 0).N0OrDash())</td>
+                                <td>@Acct2(cell?.TotalInsuranceBalance ?? 0m)</td>
+                            }
+                            <td>@total.Total.ClaimCount.N0OrDash()</td>
+                            <td>@Acct2(total.Total.TotalInsuranceBalance)</td>
                         </tr>
                     </tfoot>
                 }
@@ -46,7 +117,7 @@ else
     </div>
 }
 <div class="dcr-pr-note">
-    <strong>Source:</strong> Claim Level &nbsp;|&nbsp; <strong>Filter:</strong> Denial Code not blank and InsuranceBalance &gt; 0
-    &nbsp;|&nbsp; <strong>Rows:</strong> Payer Name_Raw, Denial Code
+    <strong>Source:</strong> Claim Level &nbsp;|&nbsp; <strong>Filter:</strong> DenialCodeNormalized not blank and InsuranceBalance &gt; 0
+    &nbsp;|&nbsp; <strong>Rows:</strong> Payer Name_Raw &rsaquo; DenialCodeNormalized &nbsp;|&nbsp; <strong>Columns:</strong> PanelType
     &nbsp;|&nbsp; <strong>Sorted by:</strong> Claim Count DESC
 </div>

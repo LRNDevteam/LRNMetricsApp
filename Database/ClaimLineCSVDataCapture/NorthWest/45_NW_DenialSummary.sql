@@ -8,31 +8,35 @@
               NorthWest client rules below.
 
    COMMON DENIAL FILTER (tabs 1 - 5)
-     DenialCode not blank (LTRIM/RTRIM)
+     DenialCodeNormalized not blank (LTRIM/RTRIM); every "Denial Code" row / drill-down
+     below is DenialCodeNormalized (e.g. CO-197 and PR-197 both report as 197)
      InsuranceBalance > 0 (TRY_CAST after stripping '$' and ',')
      Date axis : CheckDate (NOT DenialDate)  ->  @DenialFrom / @DenialTo filter CheckDate
-     Values    : COUNT(DISTINCT ClaimID), SUM(InsuranceBalance)
+     Values    : COUNT(ClaimID) - one per claim row, not distinct (Daq and WebPM
+                 reuse ClaimID values), SUM(InsuranceBalance)
                  (balance is exposed as TotalInsuranceBalance for the UI contract)
 
    TABS
      1. Monthly        period = month of CheckDate; Top 10 PayerName_Raw by Claim Count
                        then balance; Top 3 DenialCode per payer; year totals + grand total.
                        usp_GetNW_DenialMonthly  (same columns as usp_GetAnP_DenialMonthly)
-     2. Weekly         Week = Thursday-Wednesday on CheckDate. When PostedWeek is not blank,
-                       PostedWeek is the week bucket / label for that claim. The 4 most recent
-                       buckets (by max CheckDate in each bucket) are the columns.
+     2. Weekly         4 Thursday-Wednesday weeks ending on the Wednesday on/after the latest
+                       WeekFolder end (same week range as the other reports). PostedWeek
+                       "Week N" puts a claim in week N; otherwise its CheckDate week.
                        usp_GetNW_DenialWeekly   (same columns as AnP weekly)
      3. Denial List    DenialCode -> PayerName_Raw, sorted by Claim Count DESC then balance.
                        usp_GetNW_DenialList     (RowType D / I / T, as AnP)
-     4. Payor vs Payer usp_GetNW_DenialPlanType     (RowType D / T, by PayerType - AnP contract)
-                       usp_GetNW_DenialPayorVsPayer (RowType P payer / C denial / T total)
+     4. Plan Type      usp_GetNW_DenialPlanType     (RowType D / T, by PayerType - AnP contract)
+        Panel vs Payer usp_GetNW_DenialPayorVsPayer (RowType P payer / C denial / T total)
+                       Rows PayerName_Raw > DenialCodeNormalized; columns PanelType.
+                       One row per row x PanelType, plus PanelType = '' for the row total.
      5. Facility wise  usp_GetNW_DenialByFacility   (RowType F clinic / D denial / T total)
      6. Denial vs Facility %
                        usp_GetNW_DenialFacilityPct  Filter BilledUnbilled = 'Billed' only
                        (no denial-code filter). Per ClinicName:
-                         ClaimsBilled       = distinct ClaimID, BilledStatus = 'Billed'
-                         AdjudicatedClaims  = distinct ClaimID, Adjudicated  = 'Adjudicated'
-                         DeniedClaims       = distinct ClaimID, DeniedStatus = 'Denied'
+                         ClaimsBilled       = claims, BilledUnbilled = 'Billed'
+                         AdjudicatedClaims  = claims, Adjudicated    = 'Adjudicated'
+                         DeniedClaims       = claims, DeniedStatus   = 'Denied'
                          DeniedPct          = DeniedClaims * 1.0 / NULLIF(AdjudicatedClaims, 0)
                        Sorted by ClaimsBilled DESC.
 
@@ -92,7 +96,8 @@ SELECT
     CAST(ISNULL(NULLIF(LTRIM(RTRIM(c.PayerName_Raw)), ''), 'Unknown') AS NVARCHAR(500)) AS PayerName,
     CAST(ISNULL(NULLIF(LTRIM(RTRIM(c.PayerType)), ''), 'Unknown') AS NVARCHAR(200))     AS PayerType,
     CAST(ISNULL(NULLIF(LTRIM(RTRIM(c.ClinicName)), ''), '(Blank)') AS NVARCHAR(500))    AS ClinicName,
-    CAST(NULLIF(LTRIM(RTRIM(c.DenialCode)), '') AS NVARCHAR(400))                       AS DenialCode,
+    CAST(ISNULL(NULLIF(LTRIM(RTRIM(c.PanelType)), ''), 'Unknown') AS NVARCHAR(200))     AS PanelType,
+    CAST(NULLIF(LTRIM(RTRIM(c.DenialCodeNormalized)), '') AS NVARCHAR(400))             AS DenialCode,
     TRY_CAST(NULLIF(LTRIM(RTRIM(c.CheckDate)), '') AS DATE)                             AS CheckDate,
     CAST(NULLIF(LTRIM(RTRIM(c.PostedWeek)), '') AS NVARCHAR(500))                       AS PostedWeek,
     ISNULL(TRY_CAST(REPLACE(REPLACE(LTRIM(RTRIM(c.InsuranceBalance)), '$', ''), ',', '')
@@ -306,6 +311,11 @@ CREATE TABLE dbo.NW_DenialPayorVsPayer
 );
 GO
 
+IF COL_LENGTH(N'dbo.NW_DenialPayorVsPayer', N'PanelType') IS NULL
+    ALTER TABLE dbo.NW_DenialPayorVsPayer
+        ADD PanelType NVARCHAR(200) NOT NULL CONSTRAINT DF_NW_DenialPayorVsPayer_PanelType DEFAULT N'';
+GO
+
 IF OBJECT_ID(N'dbo.NW_DenialByFacility', N'U') IS NULL
 CREATE TABLE dbo.NW_DenialByFacility
 (
@@ -346,10 +356,14 @@ GO
 /* ---------------------------------------------------------------------------
    Monthly / Weekly engine
    @Grain 'M' = every CheckDate month, with a total per year
-          'W' = the 4 most recent week buckets:
-                 - PostedWeek (when not blank) is the bucket / label for that claim
-                 - otherwise the Thursday-Wednesday week of CheckDate
-                 Recency = max CheckDate in the bucket.
+          'W' = the 4 Thursday-Wednesday weeks ending on the Wednesday on/after the
+                billed week-range end date (latest WeekFolder, as the other reports;
+                latest CheckDate up to today when there is no week folder).
+                Labelled "dd MMM - dd MMM". A claim's week:
+                 - PostedWeek "Week 1".."Week 4" -> that week (Week 1 = oldest)
+                 - PostedWeek "MM.dd.yyyy - MM.dd.yyyy" -> the week holding its start
+                 - otherwise the week of its CheckDate
+                Claims outside the 4 weeks are not in the Weekly tab.
    Rows, ranks, labels, cells, totals and both orders are produced here; the page
    and the Excel export lay the rows out as returned.
    --------------------------------------------------------------------------- */
@@ -384,21 +398,41 @@ BEGIN
       AND  (@DenialFrom IS NULL OR d.CheckDate >= @DenialFrom)
       AND  (@DenialTo   IS NULL OR d.CheckDate <= @DenialTo);
 
+    /* Weekly window: 4 Thu-Wed weeks, Week 4 ending on the Wednesday on/after the week-range end */
+    DECLARE @Anchor DATE, @W4End DATE, @W1Start DATE;
+    IF @Grain = 'W'
+    BEGIN
+        SELECT @Anchor = MAX(TRY_CONVERT(DATE, REPLACE(RIGHT(LTRIM(RTRIM(CONVERT(NVARCHAR(100), WeekFolder))), 10), '.', '/'), 101))
+        FROM   dbo.ClaimLevelData
+        WHERE  WeekFolder IS NOT NULL;
+        IF @Anchor IS NULL
+            SELECT @Anchor = MAX(CheckDate) FROM #c WHERE CheckDate <= CAST(GETDATE() AS DATE);
+
+        -- 1900-01-03 was a Wednesday.
+        SET @W4End   = DATEADD(DAY, (7 - DATEDIFF(DAY, '19000103', @Anchor) % 7) % 7, @Anchor);
+        SET @W1Start = DATEADD(DAY, -27, @W4End);
+    END;
+
     /* Bucket of every claim */
-    SELECT c.ClaimKey, c.PayerName, c.DenialCode, c.Bal, c.CheckDate, c.PostedWeek, ws.WeekStart,
+    SELECT c.ClaimKey, c.PayerName, c.DenialCode, c.Bal, c.CheckDate, c.PostedWeek,
            CAST(CASE WHEN @Grain = 'M'
                      THEN CASE WHEN c.CheckDate IS NOT NULL
                                THEN CONVERT(CHAR(10), DATEFROMPARTS(YEAR(c.CheckDate), MONTH(c.CheckDate), 1), 120) END
-                     WHEN c.PostedWeek IS NOT NULL
-                     THEN N'P|' + UPPER(c.PostedWeek)
-                     WHEN c.CheckDate IS NOT NULL
-                     THEN N'C|' + CONVERT(CHAR(10), ws.WeekStart, 120)
+                     WHEN wk.WeekIdx BETWEEN 1 AND @Weeks
+                     THEN N'W|' + CAST(wk.WeekIdx AS NVARCHAR(10))
                 END AS NVARCHAR(520)) AS BucketKey
     INTO   #cb
     FROM   #c c
-    CROSS  APPLY (SELECT CASE WHEN c.CheckDate IS NOT NULL
-                              THEN DATEADD(DAY, -(((DATEDIFF(DAY, '19000104', c.CheckDate) % 7) + 7) % 7), c.CheckDate)
-                         END AS WeekStart) ws;
+    CROSS  APPLY (SELECT TRY_CONVERT(DATE, REPLACE(LTRIM(RTRIM(
+                             LEFT(c.PostedWeek, NULLIF(CHARINDEX(N'-', c.PostedWeek), 0) - 1))), N'.', N'/'), 101) AS PostedStart) pw
+    CROSS  APPLY (SELECT CASE WHEN @Grain <> 'W' THEN NULL
+                              WHEN c.PostedWeek LIKE N'Week [1-4]'
+                                  THEN CAST(RIGHT(c.PostedWeek, 1) AS INT)
+                              WHEN pw.PostedStart BETWEEN @W1Start AND @W4End
+                                  THEN 4 - DATEDIFF(DAY, pw.PostedStart, @W4End) / 7
+                              WHEN c.PostedWeek IS NULL AND c.CheckDate BETWEEN @W1Start AND @W4End
+                                  THEN 4 - DATEDIFF(DAY, c.CheckDate, @W4End) / 7
+                         END AS WeekIdx) wk;
 
     DELETE FROM #cb WHERE BucketKey IS NULL;
 
@@ -432,44 +466,16 @@ BEGIN
     END
     ELSE
     BEGIN
-        ;WITH w AS
-        (
-            SELECT x.BucketKey,
-                   MIN(x.PostedWeek) AS PostedWeek,
-                   MIN(x.WeekStart)  AS WeekStart,
-                   MIN(x.CheckDate)  AS MinCheck,
-                   MAX(x.CheckDate)  AS MaxCheck
-            FROM   #cb x
-            GROUP  BY x.BucketKey
-        ),
-        p AS
-        (
-            SELECT w.BucketKey, w.PostedWeek, w.WeekStart, w.MaxCheck,
-                   CASE WHEN w.PostedWeek IS NULL THEN w.WeekStart
-                        ELSE COALESCE(TRY_CONVERT(DATE, REPLACE(LTRIM(RTRIM(
-                                 LEFT(w.PostedWeek, NULLIF(CHARINDEX(N'-', w.PostedWeek), 0) - 1))), N'.', N'/'), 101),
-                                 w.MinCheck) END AS ps,
-                   CASE WHEN w.PostedWeek IS NULL THEN DATEADD(DAY, 6, w.WeekStart)
-                        ELSE COALESCE(TRY_CONVERT(DATE, REPLACE(LTRIM(RTRIM(
-                                 SUBSTRING(w.PostedWeek, NULLIF(CHARINDEX(N'-', w.PostedWeek), 0) + 1, 500))), N'.', N'/'), 101),
-                                 w.MaxCheck) END AS pe
-            FROM   w
-        )
+        -- All four weeks are columns, even a week with no denials.
         INSERT INTO #per (BucketKey, PeriodType, PeriodKey, PeriodLabel, PeriodStart, PeriodEnd, PeriodYear, SortKey)
-        SELECT t.BucketKey, 'W',
-               CAST(CASE WHEN t.PostedWeek IS NULL
-                         THEN CONVERT(VARCHAR(10), t.WeekStart, 120)
-                         ELSE 'pw' + RIGHT(CONVERT(VARCHAR(8), CONVERT(VARBINARY(4), CHECKSUM(UPPER(t.PostedWeek))), 2), 8)
-                    END AS VARCHAR(10)),
-               CAST(CASE WHEN t.PostedWeek IS NULL
-                         THEN FORMAT(t.ps, 'dd MMM', 'en-US') + N' - ' + FORMAT(t.pe, 'dd MMM', 'en-US')
-                         ELSE LEFT(t.PostedWeek, 40)
-                    END AS NVARCHAR(40)),
-               t.ps, t.pe, YEAR(t.ps),
-               CAST(ROW_NUMBER() OVER (ORDER BY t.RankDate, t.ps, t.BucketKey) AS INT)
-        FROM  (SELECT TOP (@Weeks) p.*, COALESCE(p.MaxCheck, p.pe, p.ps) AS RankDate
-               FROM   p
-               ORDER  BY COALESCE(p.MaxCheck, p.pe, p.ps) DESC, p.ps DESC, p.BucketKey) t;
+        SELECT N'W|' + CAST(k.WeekIdx AS NVARCHAR(10)), 'W',
+               CONVERT(VARCHAR(10), d.ws, 120),
+               CAST(FORMAT(d.ws, 'dd MMM', 'en-US') + N' - ' + FORMAT(d.we, 'dd MMM', 'en-US') AS NVARCHAR(40)),
+               d.ws, d.we, YEAR(d.ws), k.WeekIdx
+        FROM   (VALUES (1), (2), (3), (4)) k(WeekIdx)
+        CROSS  APPLY (SELECT DATEADD(DAY, -6 - 7 * (4 - k.WeekIdx), @W4End) AS ws,
+                             DATEADD(DAY,     -7 * (4 - k.WeekIdx), @W4End) AS we) d
+        WHERE  @W4End IS NOT NULL;
     END;
 
     SELECT CAST(BucketKey AS NVARCHAR(520)) AS BucketKey, PeriodType, PeriodKey, PeriodLabel,
@@ -509,7 +515,7 @@ BEGIN
     SELECT PayerKey,
            ISNULL(MIN(NULLIF(PayerName, N'')), N'(no payer)') AS PayerLabel,
            SUM(Bal) AS Bal,
-           ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT ClaimKey) DESC, SUM(Bal) DESC, PayerKey) AS PayerRank
+           ROW_NUMBER() OVER (ORDER BY COUNT(ClaimKey) DESC, SUM(Bal) DESC, PayerKey) AS PayerRank
     INTO   #pr
     FROM   #b
     GROUP  BY PayerKey;
@@ -523,7 +529,7 @@ BEGIN
     /* Top 3 denial codes per listed payer, by No. of Claims, then balance */
     SELECT b.PayerKey, b.DenialCode,
            ROW_NUMBER() OVER (PARTITION BY b.PayerKey
-                              ORDER BY COUNT(DISTINCT b.ClaimKey) DESC, SUM(b.Bal) DESC, b.DenialCode) AS CodeRank
+                              ORDER BY COUNT(b.ClaimKey) DESC, SUM(b.Bal) DESC, b.DenialCode) AS CodeRank
     INTO   #cr
     FROM   #b b
     JOIN   #pr p ON p.PayerKey = b.PayerKey AND p.PayerRank <= @TopPayers
@@ -567,7 +573,7 @@ BEGIN
                      WHEN GROUPING(PeriodYear) = 0 THEN 'Y'
                      ELSE 'A' END AS CHAR(1)) AS PeriodType,
            BucketKey, PeriodYear,
-           COUNT(DISTINCT ClaimKey) AS ClaimCount,
+           COUNT(ClaimKey) AS ClaimCount,
            SUM(Bal)                 AS Bal
     INTO   #cell
     FROM   m
@@ -699,7 +705,7 @@ BEGIN
         WHERE  WeekFolder IS NOT NULL
     );
 
-    SELECT COUNT(DISTINCT ClaimKey)                       AS DeniedClaims,
+    SELECT COUNT(ClaimKey)                       AS DeniedClaims,
            CAST(ISNULL(SUM(Bal), 0) AS DECIMAL(18,2))     AS InsuranceBalance,
            COUNT(DISTINCT DenialCode)                     AS DenialCodes,
            COUNT(DISTINCT NULLIF(PayerName, N''))         AS Insurances,
@@ -781,10 +787,12 @@ BEGIN
                            WHERE  s.value <> N''
                              AND  NOT EXISTS (SELECT 1
                                               FROM   STRING_SPLIT(REPLACE(d.DenialCode, N',', N' '), N' ') t
-                                              WHERE  t.value = s.value)));
+                                              WHERE  t.value = s.value
+                                                 -- codes are normalized: "CO-16" finds 16
+                                                 OR  t.value = SUBSTRING(s.value, CHARINDEX(N'-', s.value) + 1, 400))));
 
     SELECT DenialCode,
-           ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT ClaimID) DESC, SUM(Bal) DESC, DenialCode) AS CodeRank
+           ROW_NUMBER() OVER (ORDER BY COUNT(ClaimID) DESC, SUM(Bal) DESC, DenialCode) AS CodeRank
     INTO   #dr
     FROM   #b
     GROUP  BY DenialCode;
@@ -796,7 +804,7 @@ BEGIN
                     ELSE 'I' END                               AS RowType,
                ISNULL(b.DenialCode, N'Grand Total')            AS DenialCode,
                ISNULL(b.PayerName, N'')                        AS PayerName,
-               COUNT(DISTINCT b.ClaimID)                       AS ClaimCount,
+               COUNT(b.ClaimID)                       AS ClaimCount,
                CAST(ISNULL(SUM(b.Bal), 0) AS DECIMAL(18,2))    AS TotalInsuranceBalance
         FROM   #b b
         GROUP  BY GROUPING SETS ((b.DenialCode, b.PayerName), (b.DenialCode), ())
@@ -855,7 +863,7 @@ BEGIN
     (
         SELECT CASE WHEN GROUPING(d.PayerType) = 1 THEN 'T' ELSE 'D' END AS RowType,
                ISNULL(d.PayerType, N'Grand Total')                       AS PayerType,
-               COUNT(DISTINCT d.ClaimID)                                 AS ClaimCount,
+               COUNT(d.ClaimID)                                 AS ClaimCount,
                CAST(ISNULL(SUM(d.TotalInsuranceBalance), 0) AS DECIMAL(18,2)) AS TotalInsuranceBalance
         FROM   dbo.fn_NW_DenialClaims(@PayerNames, @PayerTypes, @DenialCodes, @DenialFrom, @DenialTo) d
         WHERE  d.TotalInsuranceBalance > 0
@@ -871,8 +879,10 @@ END
 GO
 
 /* ---------------------------------------------------------------------------
-   Read SP - Payor vs Payer
+   Read SP - Panel vs Payer (shown like the old Payor vs Payer tab)
    RowType 'P' payer (PayerName_Raw), 'C' denial code under the payer, 'T' grand total.
+   Columns are PanelType: one result row per (row, PanelType) cell, plus PanelType = ''
+   for the row total across panels. Every cell of a row carries the same SortOrder.
    PayerType = the payer's most frequent PayerType. Sorted by Claim Count, then balance.
    --------------------------------------------------------------------------- */
 CREATE OR ALTER PROCEDURE dbo.usp_GetNW_DenialPayorVsPayer
@@ -893,14 +903,14 @@ BEGIN
        AND COALESCE(@DenialFrom, @DenialTo) IS NULL
        AND EXISTS (SELECT 1 FROM dbo.NW_DenialPayorVsPayer)
     BEGIN
-        SELECT RowType, PayerName, DenialCode, PayerType, ClaimCount, TotalInsuranceBalance,
+        SELECT RowType, PayerName, DenialCode, PayerType, PanelType, ClaimCount, TotalInsuranceBalance,
                SortOrder, PayerRank, CodeRank
         FROM   dbo.NW_DenialPayorVsPayer
-        ORDER  BY SortOrder;
+        ORDER  BY SortOrder, PanelType;
         RETURN;
     END;
 
-    SELECT d.ClaimID, d.PayerName, d.PayerType, d.DenialCode, d.TotalInsuranceBalance AS Bal
+    SELECT d.ClaimID, d.PayerName, d.PayerType, d.PanelType, d.DenialCode, d.TotalInsuranceBalance AS Bal
     INTO   #b
     FROM   dbo.fn_NW_DenialClaims(@PayerNames, @PayerTypes, @DenialCodes, @DenialFrom, @DenialTo) d
     WHERE  d.TotalInsuranceBalance > 0
@@ -910,7 +920,7 @@ BEGIN
     (
         SELECT PayerName, PayerType,
                ROW_NUMBER() OVER (PARTITION BY PayerName
-                                  ORDER BY COUNT(DISTINCT ClaimID) DESC, PayerType) AS rn
+                                  ORDER BY COUNT(ClaimID) DESC, PayerType) AS rn
         FROM   #b
         GROUP  BY PayerName, PayerType
     )
@@ -920,14 +930,14 @@ BEGIN
     WHERE  rn = 1;
 
     SELECT PayerName,
-           ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT ClaimID) DESC, SUM(Bal) DESC, PayerName) AS PayerRank
+           ROW_NUMBER() OVER (ORDER BY COUNT(ClaimID) DESC, SUM(Bal) DESC, PayerName) AS PayerRank
     INTO   #pr
     FROM   #b
     GROUP  BY PayerName;
 
     SELECT PayerName, DenialCode,
            ROW_NUMBER() OVER (PARTITION BY PayerName
-                              ORDER BY COUNT(DISTINCT ClaimID) DESC, SUM(Bal) DESC, DenialCode) AS CodeRank
+                              ORDER BY COUNT(ClaimID) DESC, SUM(Bal) DESC, DenialCode) AS CodeRank
     INTO   #cr
     FROM   #b
     GROUP  BY PayerName, DenialCode;
@@ -937,16 +947,19 @@ BEGIN
         SELECT CASE WHEN GROUPING(b.PayerName)  = 1 THEN 'T'
                     WHEN GROUPING(b.DenialCode) = 1 THEN 'P'
                     ELSE 'C' END                               AS RowType,
-               ISNULL(b.PayerName,  N'Grand Total')            AS PayerName,
-               ISNULL(b.DenialCode, N'')                       AS DenialCode,
-               COUNT(DISTINCT b.ClaimID)                       AS ClaimCount,
+               CASE WHEN GROUPING(b.PayerName)  = 1 THEN N'Grand Total' ELSE b.PayerName  END AS PayerName,
+               CASE WHEN GROUPING(b.DenialCode) = 1 THEN N''            ELSE b.DenialCode END AS DenialCode,
+               CASE WHEN GROUPING(b.PanelType)  = 1 THEN N''            ELSE b.PanelType  END AS PanelType,
+               COUNT(b.ClaimID)                                AS ClaimCount,
                CAST(ISNULL(SUM(b.Bal), 0) AS DECIMAL(18,2))    AS TotalInsuranceBalance
         FROM   #b b
-        GROUP  BY GROUPING SETS ((b.PayerName, b.DenialCode), (b.PayerName), ())
+        GROUP  BY GROUPING SETS ((b.PayerName, b.DenialCode, b.PanelType), (b.PayerName, b.DenialCode),
+                                 (b.PayerName, b.PanelType), (b.PayerName),
+                                 (b.PanelType), ())
     ),
     ranked AS
     (
-        SELECT g.RowType, g.PayerName, g.DenialCode,
+        SELECT g.RowType, g.PayerName, g.DenialCode, g.PanelType,
                CAST(ISNULL(pt.PayerType, N'') AS NVARCHAR(200)) AS PayerType,
                g.ClaimCount, g.TotalInsuranceBalance,
                ISNULL(pr.PayerRank, 0) AS PayerRank,
@@ -956,14 +969,15 @@ BEGIN
         LEFT   JOIN #pr pr ON pr.PayerName = g.PayerName AND g.RowType <> 'T'
         LEFT   JOIN #cr cr ON cr.PayerName = g.PayerName AND cr.DenialCode = g.DenialCode AND g.RowType = 'C'
     )
-    SELECT CAST(RowType AS CHAR(1)) AS RowType, PayerName, DenialCode, PayerType, ClaimCount, TotalInsuranceBalance,
-           CAST(ROW_NUMBER() OVER (ORDER BY CASE WHEN RowType = 'T' THEN 1 ELSE 0 END,
+    SELECT CAST(RowType AS CHAR(1)) AS RowType, PayerName, DenialCode, PayerType,
+           CAST(PanelType AS NVARCHAR(200)) AS PanelType, ClaimCount, TotalInsuranceBalance,
+           CAST(DENSE_RANK() OVER (ORDER BY CASE WHEN RowType = 'T' THEN 1 ELSE 0 END,
                                             PayerRank,
                                             CASE WHEN RowType = 'P' THEN 0 ELSE 1 END,
                                             CodeRank) AS INT) AS SortOrder,
            PayerRank, CodeRank
     FROM   ranked
-    ORDER  BY SortOrder;
+    ORDER  BY SortOrder, PanelType;
 END
 GO
 
@@ -1004,14 +1018,14 @@ BEGIN
       AND  d.DenialCode IS NOT NULL;
 
     SELECT ClinicName,
-           ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT ClaimID) DESC, SUM(Bal) DESC, ClinicName) AS ClinicRank
+           ROW_NUMBER() OVER (ORDER BY COUNT(ClaimID) DESC, SUM(Bal) DESC, ClinicName) AS ClinicRank
     INTO   #fr
     FROM   #b
     GROUP  BY ClinicName;
 
     SELECT ClinicName, DenialCode,
            ROW_NUMBER() OVER (PARTITION BY ClinicName
-                              ORDER BY COUNT(DISTINCT ClaimID) DESC, SUM(Bal) DESC, DenialCode) AS CodeRank
+                              ORDER BY COUNT(ClaimID) DESC, SUM(Bal) DESC, DenialCode) AS CodeRank
     INTO   #cr
     FROM   #b
     GROUP  BY ClinicName, DenialCode;
@@ -1023,7 +1037,7 @@ BEGIN
                     ELSE 'D' END                               AS RowType,
                ISNULL(b.ClinicName, N'Grand Total')            AS ClinicName,
                ISNULL(b.DenialCode, N'')                       AS DenialCode,
-               COUNT(DISTINCT b.ClaimID)                       AS ClaimCount,
+               COUNT(b.ClaimID)                       AS ClaimCount,
                CAST(ISNULL(SUM(b.Bal), 0) AS DECIMAL(18,2))    AS TotalInsuranceBalance
         FROM   #b b
         GROUP  BY GROUPING SETS ((b.ClinicName, b.DenialCode), (b.ClinicName), ())
@@ -1081,7 +1095,7 @@ BEGIN
 
     SELECT n.ClaimKey,
            n.ClinicName,
-           CASE WHEN LTRIM(RTRIM(ISNULL(c.BilledStatus, N'')))  = N'Billed'       THEN 1 ELSE 0 END AS IsBilled,
+           CASE WHEN LTRIM(RTRIM(ISNULL(c.BilledUnbilled, N''))) = N'Billed'      THEN 1 ELSE 0 END AS IsBilled,
            CASE WHEN LTRIM(RTRIM(ISNULL(c.Adjudicated, N'')))   = N'Adjudicated'  THEN 1 ELSE 0 END AS IsAdjudicated,
            CASE WHEN LTRIM(RTRIM(ISNULL(c.DeniedStatus, N'')))  = N'Denied'       THEN 1 ELSE 0 END AS IsDenied
     INTO   #f
@@ -1104,9 +1118,9 @@ BEGIN
     (
         SELECT CASE WHEN GROUPING(ClinicName) = 1 THEN 'T' ELSE 'F' END AS RowType,
                ISNULL(ClinicName, N'Grand Total')                      AS ClinicName,
-               COUNT(DISTINCT CASE WHEN IsBilled      = 1 THEN ClaimKey END) AS ClaimsBilled,
-               COUNT(DISTINCT CASE WHEN IsAdjudicated = 1 THEN ClaimKey END) AS AdjudicatedClaims,
-               COUNT(DISTINCT CASE WHEN IsDenied      = 1 THEN ClaimKey END) AS DeniedClaims
+               COUNT(CASE WHEN IsBilled      = 1 THEN ClaimKey END) AS ClaimsBilled,
+               COUNT(CASE WHEN IsAdjudicated = 1 THEN ClaimKey END) AS AdjudicatedClaims,
+               COUNT(CASE WHEN IsDenied      = 1 THEN ClaimKey END) AS DeniedClaims
         FROM   #f
         GROUP  BY GROUPING SETS ((ClinicName), ())
     ),
@@ -1315,6 +1329,7 @@ BEGIN
     CREATE TABLE #r
     (
         RowType CHAR(1), PayerName NVARCHAR(500), DenialCode NVARCHAR(400), PayerType NVARCHAR(200),
+        PanelType NVARCHAR(200),
         ClaimCount INT, TotalInsuranceBalance DECIMAL(18,2), SortOrder INT, PayerRank INT, CodeRank INT
     );
 
@@ -1324,9 +1339,9 @@ BEGIN
     BEGIN TRAN;
         TRUNCATE TABLE dbo.NW_DenialPayorVsPayer;
         INSERT INTO dbo.NW_DenialPayorVsPayer
-              (RowType, PayerName, DenialCode, PayerType, ClaimCount, TotalInsuranceBalance,
+              (RowType, PayerName, DenialCode, PayerType, PanelType, ClaimCount, TotalInsuranceBalance,
                SortOrder, PayerRank, CodeRank, RefreshedAt)
-        SELECT RowType, PayerName, DenialCode, PayerType, ClaimCount, TotalInsuranceBalance,
+        SELECT RowType, PayerName, DenialCode, PayerType, PanelType, ClaimCount, TotalInsuranceBalance,
                SortOrder, PayerRank, CodeRank, GETDATE()
         FROM   #r;
     COMMIT;

@@ -1,18 +1,22 @@
 @model IReadOnlyList<LabMetricsDashboard.Models.DenialFacilityRow>
-@* NorthWest Facility wise Denial Breakdown - dbo.usp_GetNW_DenialByFacility *@
+@* NorthWest Facility wise Denial Breakdown - dbo.usp_GetNW_DenialByFacility. Clinic rows open to their denial codes. *@
+@{ var gridId = "dcrfac_" + Guid.NewGuid().ToString("N")[..10]; }
 @if (Model.Count == 0)
 {
     <div class="text-center text-muted py-4">No facility denial rows were found for the selected lab.</div>
 }
 else
 {
-    <div class="pr-wrap">
+    <div class="dcr-pr-caption">
+        Clinics by No. of Claims &middot; click a clinic to open its denial codes
+    </div>
+    <div class="pr-wrap" style="max-width:900px">
         <div class="pr-scroll dcr-pr-scroll">
-            <table class="pr-table" style="width:100%">
+            <table class="pr-table" id="@gridId" style="width:100%">
+                <colgroup><col style="width:480px" /><col style="width:150px" /><col style="width:200px" /></colgroup>
                 <thead>
                     <tr>
-                        <th>Clinic Name</th>
-                        <th>Denial Code</th>
+                        <th>Clinic Name &amp; Denial Code</th>
                         <th>No. of Claims</th>
                         <th class="pr-grand-total">Insurance Balance</th>
                     </tr>
@@ -20,20 +24,30 @@ else
                 <tbody>
                     @foreach (var r in Model.Where(r => r.RowType != "T"))
                     {
-                        var isClinic = r.RowType == "F";
-                        <tr class="@(isClinic ? "pr-panel-row" : "pr-hp-child")">
-                            <td>@(isClinic ? r.ClinicName : "")</td>
-                            <td>@(isClinic ? "" : r.DenialCode)</td>
-                            <td>@r.ClaimCount.N0OrDash()</td>
-                            <td class="pr-grand-total">@Acct2(r.TotalInsuranceBalance)</td>
-                        </tr>
+                        var groupId = $"{gridId}-{r.ClinicRank}";
+                        if (r.RowType == "F")
+                        {
+                            <tr class="pr-panel-row pr-hp-toggle" data-hp-group="@groupId" role="button" aria-expanded="false" title="Open / close denial codes">
+                                <td title="@r.ClinicName"><span class="dcr-lbl"><i class="bi bi-chevron-right pr-hp-chevron" aria-hidden="true"></i><span class="dcr-lbl-txt">@r.ClinicName</span></span></td>
+                                <td>@r.ClaimCount.N0OrDash()</td>
+                                <td class="pr-grand-total">@Acct2(r.TotalInsuranceBalance)</td>
+                            </tr>
+                        }
+                        else
+                        {
+                            <tr class="pr-payer-row pr-hp-child" data-hp-parent="@groupId">
+                                <td title="@r.DenialCode">@r.DenialCode</td>
+                                <td>@r.ClaimCount.N0OrDash()</td>
+                                <td class="pr-grand-total">@Acct2(r.TotalInsuranceBalance)</td>
+                            </tr>
+                        }
                     }
                 </tbody>
                 @if (Model.FirstOrDefault(r => r.RowType == "T") is { } total)
                 {
                     <tfoot>
                         <tr class="pr-total-row">
-                            <td colspan="2">Grand Total</td>
+                            <td>Grand Total</td>
                             <td>@total.ClaimCount.N0OrDash()</td>
                             <td>@Acct2(total.TotalInsuranceBalance)</td>
                         </tr>
@@ -44,7 +58,7 @@ else
     </div>
 }
 <div class="dcr-pr-note">
-    <strong>Source:</strong> Claim Level &nbsp;|&nbsp; <strong>Filter:</strong> Denial Code not blank and InsuranceBalance &gt; 0
-    &nbsp;|&nbsp; <strong>Rows:</strong> ClinicName, Denial Code
+    <strong>Source:</strong> Claim Level &nbsp;|&nbsp; <strong>Filter:</strong> DenialCodeNormalized not blank and InsuranceBalance &gt; 0
+    &nbsp;|&nbsp; <strong>Rows:</strong> ClinicName, DenialCodeNormalized
     &nbsp;|&nbsp; <strong>Sorted by:</strong> Claim Count DESC
 </div>

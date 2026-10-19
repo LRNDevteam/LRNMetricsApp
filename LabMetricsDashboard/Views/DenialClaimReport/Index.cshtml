@@ -139,7 +139,7 @@
                 <li class="nav-item" role="presentation">
                     <button class="nav-link @(tab == "payor" ? "active" : "")" data-bs-toggle="pill"
                             data-bs-target="#dcr-payor" type="button" data-tab-key="payor">
-                        <i class="bi bi-people me-2"></i>Payor vs Payer
+                        <i class="bi bi-people me-2"></i>Panel vs Payer
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
@@ -229,7 +229,7 @@
                                 <span class="input-group-text"><i class="bi bi-search"></i></span>
                                 <input id="dcrListCode" name="listCode" type="search" class="form-control"
                                        list="dcrListCodeOptions" value="@Model.DenialListSearch"
-                                       placeholder="Search denial code, e.g. CO-16" autocomplete="off" maxlength="200" />
+                                       placeholder="@(Model.HasDenialFacilityTabs ? "Search denial code, e.g. 16" : "Search denial code, e.g. CO-16")" autocomplete="off" maxlength="200" />
                                 <button class="btn btn-primary" type="submit">Search</button>
                             </div>
                             @if (Model.DenialListSearch is not null)

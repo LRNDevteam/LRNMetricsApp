@@ -18,7 +18,9 @@ GO
 -- Filter: InsurancePayment > 0, valid CheckDate
 -- Rows: PanelType, PayerName_Raw with PayerRank
 -- Columns: Year/Month from CheckDate
--- Values: Count(DISTINCT ClaimID), Sum(InsurancePayment), Average Paid
+-- Values: Count(DISTINCT Source + ClaimID), Sum(InsurancePayment), Average Paid
+--         (Daq and WebPM number ClaimID independently, so ClaimID alone can
+--          merge two different claims.)
 -- =====================================================================
 CREATE OR ALTER PROCEDURE dbo.usp_GetNW_CS_MonthlyClaimVolume
     @PayerNames      NVARCHAR(MAX) = NULL,
@@ -82,7 +84,9 @@ BEGIN
             LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) AS PayerName,
             YEAR (TRY_CAST(CheckDate AS DATE))             AS BillYear,
             MONTH(TRY_CAST(CheckDate AS DATE))             AS BillMonth,
-            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), '')) AS NoOfClaims,
+            COUNT(DISTINCT CASE WHEN NULLIF(LTRIM(RTRIM(ClaimID)), '') IS NOT NULL
+                                THEN CONCAT(UPPER(LTRIM(RTRIM(ISNULL(dbo.GetAdditionalField(AdditionalFields, 'Source'), '')))),
+                                            N'|', LTRIM(RTRIM(ClaimID))) END) AS NoOfClaims,
             ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0) AS InsurancePayment
         FROM dbo.ClaimLevelData
         WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0

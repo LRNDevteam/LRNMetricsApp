@@ -438,7 +438,10 @@ GO
             LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))               AS PayerName,
             YEAR (TRY_CAST(CheckDate AS DATE))                           AS BillYear,
             MONTH(TRY_CAST(CheckDate AS DATE))                           AS BillMonth,
-            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))            AS NoOfClaims,
+            -- Daq and WebPM number ClaimID independently: unique claim = Source + ClaimID.
+            COUNT(DISTINCT CASE WHEN NULLIF(LTRIM(RTRIM(ClaimID)), '') IS NOT NULL
+                                THEN CONCAT(UPPER(LTRIM(RTRIM(ISNULL(dbo.GetAdditionalField(AdditionalFields, 'Source'), '')))),
+                                            N'|', LTRIM(RTRIM(ClaimID))) END) AS NoOfClaims,
             ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)  AS InsurancePayment
         INTO #raw
         FROM dbo.ClaimLevelData

@@ -165,12 +165,16 @@ public sealed record DenialPlanTypeRow(
     decimal TotalInsuranceBalance,
     int SortOrder);
 
-/// <summary>NW Payor vs Payer (usp_GetNW_DenialPayorVsPayer): P payer, C denial under payer, T total.</summary>
+/// <summary>
+/// NW Panel vs Payer (usp_GetNW_DenialPayorVsPayer): P payer, C denial under payer, T total.
+/// One row per (row, PanelType) cell; PanelType "" is the row total across panels.
+/// </summary>
 public sealed record DenialPayorVsPayerRow(
     string RowType,
     string PayerName,
     string DenialCode,
     string PayerType,
+    string PanelType,
     int PayerRank,
     int CodeRank,
     int ClaimCount,

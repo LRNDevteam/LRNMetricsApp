@@ -138,11 +138,15 @@ public sealed class SqlDenialSummaryRepository : IDenialSummaryRepository
             oType = rd.GetOrdinal("PayerType"), oClaims = rd.GetOrdinal("ClaimCount"),
             oBal = rd.GetOrdinal("TotalInsuranceBalance"), oSort = rd.GetOrdinal("SortOrder"),
             oPayerRank = rd.GetOrdinal("PayerRank"), oCodeRank = rd.GetOrdinal("CodeRank");
+        // Databases where 45_NW_DenialSummary.sql has not been rerun yet return no PanelType.
+        var oPanel = Enumerable.Range(0, rd.FieldCount)
+            .FirstOrDefault(i => rd.GetName(i).Equals("PanelType", StringComparison.OrdinalIgnoreCase), -1);
 
         while (await rd.ReadAsync(ct))
         {
             rows.Add(new DenialPayorVsPayerRow(
                 Str(rd, oRowType), Str(rd, oPayer), Str(rd, oCode), Str(rd, oType),
+                oPanel < 0 ? "" : Str(rd, oPanel),
                 Int(rd, oPayerRank), Int(rd, oCodeRank), Int(rd, oClaims), Dec(rd, oBal), Int(rd, oSort)));
         }
         return rows;

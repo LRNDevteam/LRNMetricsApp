@@ -369,6 +369,9 @@ GO
 
 /* -----------------------------------------------------------------------------
    3. Panel X Payer - PayerName_Raw x PanelType
+      Daq and WebPM number ClaimID independently, so the same ClaimID can be two
+      different claims (one per Source). Unique claim = Source + ClaimID.
+      (Month-grain tabs are unaffected: the reused IDs fall in different months.)
    ----------------------------------------------------------------------------- */
 CREATE OR ALTER PROCEDURE dbo.usp_GetNW_PayerByPanel
     @PayerNames      NVARCHAR(MAX) = NULL,
@@ -398,10 +401,21 @@ BEGIN
     SELECT
         c.PayerName,
         PanelName    = c.PanelType,
-        ClaimCount   = COUNT(DISTINCT c.ClaimID),
+        ClaimCount   = COUNT(DISTINCT CASE WHEN c.ClaimID IS NOT NULL
+                                           THEN CONCAT(k.SourceKey, N'|', c.ClaimID) END),
         TotalCharges = ISNULL(SUM(c.ChargeAmount), 0)
     FROM dbo.fn_NW_BilledClaims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                                 @FirstBillFrom, @FirstBillTo, @FirstBilledFrom, @FirstBilledTo) c
+    CROSS APPLY (
+        SELECT SourceValue = UPPER(LTRIM(RTRIM(ISNULL(dbo.GetAdditionalField(c.AdditionalFields, 'Source'), N''))))
+    ) s
+    CROSS APPLY (
+        SELECT SourceKey = CASE
+                               WHEN s.SourceValue LIKE N'DAQ%'   THEN N'DAQ'
+                               WHEN s.SourceValue LIKE N'WEBPM%' THEN N'WEBPM'
+                               ELSE s.SourceValue
+                           END
+    ) k
     GROUP BY c.PayerName, c.PanelType
     ORDER BY c.PayerName, PanelName
     OPTION (RECOMPILE);
@@ -637,7 +651,7 @@ GO
 
 /* -----------------------------------------------------------------------------
    7. CPT Breakdown - LineLevelData, FirstBilledDate set, Source Webpm / Daq.
-      CPTCount holds the count of unique Claim ID per CPT Code and month.
+      CPTCount holds the count of Claim ID per CPT Code and month (one per line).
    ----------------------------------------------------------------------------- */
 CREATE OR ALTER PROCEDURE dbo.usp_GetNW_CPTBreakdownBySource
     @PayerNames      NVARCHAR(MAX) = NULL,
@@ -687,7 +701,7 @@ BEGIN
         SourceName,
         CPTCode,
         BilledYearMonth = CONVERT(NVARCHAR(7), ChargeEnteredDate, 120),
-        CPTCount        = COUNT(DISTINCT ClaimID),
+        CPTCount        = COUNT(ClaimID),
         BilledUnits     = ISNULL(SUM(UnitsValue), 0),
         TotalCharges    = ISNULL(SUM(ChargeAmountValue), 0)
     FROM Lines
