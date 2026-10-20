@@ -4,9 +4,9 @@ using Microsoft.Data.SqlClient;
 
 namespace LRN.ReportsApi.Services.ArWorkbench;
 
-/// <summary>A user as User Management needs them for invite / activate / delete decisions.</summary>
+/// <summary>A user as User Management needs them for invite / activate / delete / password decisions.</summary>
 public sealed record ArWorkbenchManageTarget(int LabUserId, string UserName, string? Email, bool IsActive,
-    IReadOnlyList<string> RoleNames, IReadOnlyList<int> LabIds);
+    IReadOnlyList<string> RoleNames, IReadOnlyList<int> LabIds, bool IsMicrosoftAccount = false);
 
 /// <summary>
 /// User Management's deactivate / delete actions. Invitations and the email log are shared with LRN
@@ -14,6 +14,17 @@ public sealed record ArWorkbenchManageTarget(int LabUserId, string UserName, str
 /// </summary>
 public sealed partial class SqlArWorkbenchRepository
 {
+    /// <summary>
+    /// One row, one bit: whether the user in <paramref name="idExpression"/> signs in with Microsoft
+    /// (dbo.LabUsers.AuthProvider = 'Entra'). Always 0 on an LRNMaster without HybridAuth_Setup.sql.
+    /// </summary>
+    private static string MicrosoftAccountSql(string idExpression) => $@"
+IF COL_LENGTH(N'dbo.LabUsers', N'AuthProvider') IS NULL
+    SELECT CAST(0 AS bit);
+ELSE
+    EXEC sp_executesql N'SELECT CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.LabUsers WHERE LabUserID = @Uid AND AuthProvider = ''Entra'') THEN 1 ELSE 0 END AS bit);',
+        N'@Uid int', @Uid = {idExpression};";
+
     public async Task<ArWorkbenchManageTarget?> GetManageTargetAsync(int labUserId, CancellationToken ct)
     {
         await using var master = new SqlConnection(_masterConnectionString);
@@ -21,7 +32,7 @@ public sealed partial class SqlArWorkbenchRepository
         await using var cmd = new SqlCommand(@"
 SELECT UserName, Email, CAST(ISNULL(IsActive, 0) AS bit) FROM dbo.LabUsers WHERE LabUserID = @Id;
 SELECT r.RoleName FROM dbo.UserRoles ur INNER JOIN dbo.Roles r ON r.RoleID = ur.RoleID WHERE ur.LabUserID = @Id;
-SELECT DISTINCT LabId FROM dbo.UserLabs WHERE LabUserID = @Id;", master);
+SELECT DISTINCT LabId FROM dbo.UserLabs WHERE LabUserID = @Id;" + MicrosoftAccountSql("@Id"), master);
         cmd.Parameters.Add("@Id", SqlDbType.Int).Value = labUserId;
         await using var r = await cmd.ExecuteReaderAsync(ct);
         if (!await r.ReadAsync(ct)) return null;
@@ -34,7 +45,9 @@ SELECT DISTINCT LabId FROM dbo.UserLabs WHERE LabUserID = @Id;", master);
         while (await r.ReadAsync(ct)) roles.Add(r.GetString(0));
         await r.NextResultAsync(ct);
         while (await r.ReadAsync(ct)) labs.Add(r.GetInt32(0));
-        return new ArWorkbenchManageTarget(labUserId, userName, email, isActive, roles, labs);
+        await r.NextResultAsync(ct);
+        var microsoft = await r.ReadAsync(ct) && r.GetBoolean(0);
+        return new ArWorkbenchManageTarget(labUserId, userName, email, isActive, roles, labs, microsoft);
     }
 
     public async Task<ArWorkbenchSaveResult> SetWorkbenchUserActiveAsync(int labUserId, bool isActive, string modifiedBy, CancellationToken ct)

@@ -32,12 +32,14 @@ export const arWorkbenchService = {
     return api(`client-cip/template${qs({ labId })}`, { method: 'POST', body: form });
   },
   downloadDocument: (labId, documentId, fileName) => downloadFile(`documents/${documentId}${qs({ labId })}`, fileName || 'attachment'),
-  // Claim attachments (handoff §8.2): docs = [{ file, category, description }], optionally on a follow-up
-  // note; the claim's documents; and the Document Vault search (claim / visit, patient, category).
+  // Claim attachments (handoff §8.2): docs = [{ file, documentTypeId, description (notes) }], optionally on a
+  // follow-up note; the Document Type dropdown (LRNMaster dbo.ARDocumentTypeMaster); the claim's documents;
+  // and the Document Vault search (claim / visit, patient, category).
+  documentTypes: (labId) => api(`document-types${qs({ labId })}`),
   uploadClaimDocuments: (labId, claimKey, docs, followUpId) => {
     const form = new FormData();
     if (followUpId) form.append('followUpId', String(followUpId));
-    form.append('documents', JSON.stringify((docs || []).map((d) => ({ category: d.category, description: d.description || null }))));
+    form.append('documents', JSON.stringify((docs || []).map((d) => ({ documentTypeId: Number(d.documentTypeId) || null, description: d.description || null }))));
     (docs || []).forEach((d) => form.append('files', d.file));
     return api(`claims/${claimKey}/documents${qs({ labId })}`, { method: 'POST', body: form });
   },

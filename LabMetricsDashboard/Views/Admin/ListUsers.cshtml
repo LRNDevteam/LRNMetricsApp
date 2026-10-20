@@ -133,6 +133,10 @@
     }
     .users-tabs .nav-link { font-weight: 600; color: #475569; }
     .users-tabs .nav-link.active { color: #0f2942; }
+    .user-kind-tabs { gap: 6px; }
+    .user-kind-tabs .btn { border-radius: 999px; font-weight: 600; }
+    .user-lab-count { text-decoration: none; }
+    .user-lab-count:hover { text-decoration: underline; }
     .email-status { border-radius: 999px; font-weight: 700; padding: .3rem .55rem; }
     .email-error { color: #b91c1c; font-size: .78rem; max-width: 280px; }
     #emailPreview { width: 100%; height: 70vh; border: 1px solid #d7dee8; border-radius: 8px; background: #fff; }
@@ -234,8 +238,22 @@
     </div>
 </div>
 
+@{
+    var azureUserCount = Model.Users.Count(u => u.IsEntra);
+    var systemUserCount = Model.Users.Count() - azureUserCount;
+}
+<div class="d-flex flex-wrap align-items-center mb-2 user-kind-tabs" role="tablist" aria-label="User type">
+    <button type="button" class="btn btn-sm btn-primary" role="tab" aria-selected="true" data-user-kind="local">
+        <i class="bi bi-person-badge me-1"></i>System Users <span class="badge bg-light text-dark ms-1" id="countLocal">@systemUserCount</span>
+    </button>
+    <button type="button" class="btn btn-sm btn-outline-primary" role="tab" aria-selected="false" data-user-kind="entra">
+        <i class="bi bi-microsoft me-1"></i>Azure AD Users <span class="badge bg-light text-dark ms-1" id="countEntra">@azureUserCount</span>
+    </button>
+    <small class="text-muted ms-2" id="userKindHint">Username and password sign-in.</small>
+</div>
+
 <div class="users-table-wrap table-responsive">
-    <table class="table table-sm table-striped users-table" id="usersTable">
+    <table class="table table-sm table-striped users-table" id="usersTable" data-layout="kinds">
         <thead>
             <tr>
                 <th><button type="button" data-sort-column="0">UserName <i class="bi bi-arrow-down-up sort-icon"></i></button></th>
@@ -245,6 +263,7 @@
                 <th><button type="button" data-sort-column="4">Role <i class="bi bi-arrow-down-up sort-icon"></i></button></th>
                 <th><button type="button" data-sort-column="5">Labs <i class="bi bi-arrow-down-up sort-icon"></i></button></th>
                 <th><button type="button" data-sort-column="6">Active <i class="bi bi-arrow-down-up sort-icon"></i></button></th>
+                <th><button type="button" data-sort-column="7">Last Login <i class="bi bi-arrow-down-up sort-icon"></i></button></th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -254,18 +273,19 @@
                 var roleText = Model.UserRolesMap != null && Model.UserRolesMap.TryGetValue(u.LabUserID, out var roles)
                     ? string.Join(" ", roles.GroupBy(r => r.RoleName, StringComparer.OrdinalIgnoreCase).Select(g => g.First().RoleName))
                     : string.Empty;
-                var labText = Model.UserLabsMap != null && Model.UserLabsMap.TryGetValue(u.LabUserID, out var assignedLabs)
-                    ? string.Join(" ", assignedLabs.GroupBy(l => l.LabId).Select(g => g.First().LabName))
-                    : string.Empty;
+                var userLabs = Model.UserLabsMap != null && Model.UserLabsMap.TryGetValue(u.LabUserID, out var assignedLabs)
+                    ? assignedLabs.GroupBy(l => l.LabId).Select(g => g.First().LabName).ToList()
+                    : new List<string>();
+                var labText = string.Join(" ", userLabs);
                 var isPending = string.IsNullOrWhiteSpace(roleText);
                 var searchText = string.Join(" ", new[] { u.UserName, u.FirstName, u.LastName, u.Email, u.Mobile, roleText, labText, u.IsEntra ? "Microsoft" : "Local", isPending ? "Pending" : "" });
-                <tr data-search="@searchText" data-roles="@roleText" data-labs="@labText">
+                var lastLoginIso = u.LastLoginUtc.HasValue
+                    ? DateTime.SpecifyKind(u.LastLoginUtc.Value, DateTimeKind.Utc).ToString("o", System.Globalization.CultureInfo.InvariantCulture)
+                    : string.Empty;
+                <tr data-search="@searchText" data-roles="@roleText" data-labs="@labText"
+                    data-kind="@(u.IsEntra ? "entra" : "local")" data-active="@(u.IsActive ? "1" : "0")">
                     <td class="text-nowrap">
                         @u.UserName
-                        @if (u.IsEntra)
-                        {
-                            <span class="badge user-badge user-badge-ms ms-1" title="Signs in with Microsoft (MFA)">Microsoft</span>
-                        }
                         @if (isPending && u.IsActive)
                         {
                             <span class="badge user-badge user-badge-pending ms-1" title="No role yet: sees Access pending">Pending</span>
@@ -283,16 +303,30 @@
                             }
                         }
                     </td>
-                    <td>
-                        @if (Model.UserLabsMap != null && Model.UserLabsMap.TryGetValue(u.LabUserID, out var labs))
+                    <td data-sort-value="@userLabs.Count.ToString("D4")">
+                        @if (userLabs.Count > 0)
                         {
-                            foreach (var lab in labs.GroupBy(l => l.LabId).Select(g => g.First()))
-                            {
-                                <span class="badge user-badge user-badge-lab me-1">@lab.LabName</span>
-                            }
+                            <a class="user-lab-count" asp-action="Edit" asp-route-id="@u.LabUserID"
+                               title="@string.Join(", ", userLabs.OrderBy(n => n))" aria-label="@userLabs.Count mapped labs - open @u.UserName to see and edit them">
+                                <span class="badge user-badge user-badge-lab">@userLabs.Count @(userLabs.Count == 1 ? "lab" : "labs")</span>
+                            </a>
+                        }
+                        else
+                        {
+                            <span class="text-muted">—</span>
                         }
                     </td>
                     <td>@(u.IsActive?"Yes":"No")</td>
+                    <td class="text-nowrap" data-sort-value="@lastLoginIso">
+                        @if (u.LastLoginUtc.HasValue)
+                        {
+                            <time class="user-last-login" datetime="@lastLoginIso">@u.LastLoginUtc.Value.ToString("MM/dd/yyyy HH:mm") UTC</time>
+                        }
+                        else
+                        {
+                            <span class="text-muted">Never</span>
+                        }
+                    </td>
                     <td>
                         <div class="btn-group" role="group">
                             <a class="btn btn-sm btn-primary user-action-btn" asp-action="Edit" asp-route-id="@u.LabUserID" title="Edit user" aria-label="Edit @u.UserName"><i class="bi bi-pencil-square"></i></a>
@@ -415,6 +449,82 @@ document.addEventListener('DOMContentLoaded', function () {
         return (value || '').toString().trim().toLowerCase();
     }
 
+    const tbody = document.getElementById('tblUsersBody');
+
+    // Run on load and after refreshUsers() rebuilds the rows (create / remove / link).
+    function prepareRows() {
+        let local = 0, entra = 0;
+        Array.from(tbody.querySelectorAll('tr')).forEach(function (row, i) {
+            // Server order (by username), restored when a tab is opened without a column sort.
+            row.setAttribute('data-order', i);
+            if (row.getAttribute('data-kind') === 'entra') entra++; else local++;
+        });
+        const cl = document.getElementById('countLocal'), ce = document.getElementById('countEntra');
+        if (cl) cl.textContent = local;
+        if (ce) ce.textContent = entra;
+
+        // Last login in the viewer's own time zone.
+        tbody.querySelectorAll('time.user-last-login').forEach(function (t) {
+            const d = new Date(t.getAttribute('datetime'));
+            if (!isNaN(d.getTime())) {
+                t.textContent = d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+                    + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+            }
+        });
+    }
+    prepareRows();
+
+    window.afterUsersRefreshed = function () {
+        prepareRows();
+        currentSort = { column: -1, direction: 1 };
+        defaultOrder();
+        window.applyUserFilters();
+    };
+
+    // System Users (username + password) / Azure AD Users (Sign in with Microsoft).
+    let userKind = 'local';
+    const kindHints = {
+        local: 'Username and password sign-in.',
+        entra: 'Sign in with Microsoft (Azure AD). Inactive users first, then the most recent sign-in.'
+    };
+
+    function lastLoginOf(row) {
+        const v = row.children[7] && row.children[7].getAttribute('data-sort-value');
+        const t = v ? Date.parse(v) : NaN;
+        return isNaN(t) ? -Infinity : t;
+    }
+
+    function defaultOrder() {
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.sort(function (a, b) {
+            if (userKind === 'entra') {
+                const ia = a.getAttribute('data-active') === '1', ib = b.getAttribute('data-active') === '1';
+                if (ia !== ib) return ia ? 1 : -1;
+                const la = lastLoginOf(a), lb = lastLoginOf(b);
+                if (la !== lb) return lb > la ? 1 : -1;
+            }
+            return Number(a.getAttribute('data-order')) - Number(b.getAttribute('data-order'));
+        });
+        rows.forEach(function (row) { tbody.appendChild(row); });
+    }
+
+    document.querySelectorAll('[data-user-kind]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            userKind = btn.getAttribute('data-user-kind');
+            document.querySelectorAll('[data-user-kind]').forEach(function (b) {
+                const on = b === btn;
+                b.classList.toggle('btn-primary', on);
+                b.classList.toggle('btn-outline-primary', !on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            const hint = document.getElementById('userKindHint');
+            if (hint) hint.textContent = kindHints[userKind];
+            currentSort = { column: -1, direction: 1 };
+            defaultOrder();
+            window.applyUserFilters();
+        });
+    });
+
     window.applyUserFilters = function () {
         const q = normalize(freeText && freeText.value);
         const selectedRole = normalize(role && role.value);
@@ -424,10 +534,11 @@ document.addEventListener('DOMContentLoaded', function () {
             const text = normalize(row.getAttribute('data-search'));
             const roles = normalize(row.getAttribute('data-roles'));
             const labs = normalize(row.getAttribute('data-labs'));
+            const matchesKind = row.getAttribute('data-kind') === userKind;
             const matchesText = !q || text.indexOf(q) >= 0;
             const matchesRole = !selectedRole || roles.indexOf(selectedRole) >= 0;
             const matchesLab = !selectedLab || labs.indexOf(selectedLab) >= 0;
-            row.classList.toggle('d-none', !(matchesText && matchesRole && matchesLab));
+            row.classList.toggle('d-none', !(matchesKind && matchesText && matchesRole && matchesLab));
         });
     };
 
@@ -444,23 +555,30 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    let currentSort = { column: -1, direction: 1 };
+    var currentSort = { column: -1, direction: 1 };
+    // A cell's data-sort-value (lab count, ISO last login) sorts in place of its text.
+    function sortValue(row, column) {
+        const cell = row.children[column];
+        if (!cell) return '';
+        return normalize(cell.hasAttribute('data-sort-value') ? cell.getAttribute('data-sort-value') : cell.textContent);
+    }
     document.querySelectorAll('[data-sort-column]').forEach(function (button) {
         button.addEventListener('click', function () {
             const column = Number(button.getAttribute('data-sort-column'));
             currentSort.direction = currentSort.column === column ? currentSort.direction * -1 : 1;
             currentSort.column = column;
 
-            const tbody = document.getElementById('tblUsersBody');
             const rows = Array.from(tbody.querySelectorAll('tr'));
             rows.sort(function (a, b) {
-                const av = normalize(a.children[column] && a.children[column].textContent);
-                const bv = normalize(b.children[column] && b.children[column].textContent);
+                const av = sortValue(a, column), bv = sortValue(b, column);
+                if (!av || !bv) return av === bv ? 0 : (av ? -1 : 1);   // blanks (never signed in) last
                 return av.localeCompare(bv, undefined, { numeric: true }) * currentSort.direction;
             });
             rows.forEach(function (row) { tbody.appendChild(row); });
         });
     });
+
+    window.applyUserFilters();
 });
 </script>
 

@@ -11,6 +11,27 @@ namespace LRN.ReportsApi.Services.ArWorkbench;
 /// </summary>
 public sealed partial class SqlArWorkbenchRepository
 {
+    /// <summary>
+    /// The upload's Document Type dropdown: active rows of LRNMaster dbo.ARDocumentTypeMaster (script
+    /// LRNMaster_04_ARDocumentTypeMaster.sql), by category then name. Empty when the table is not installed.
+    /// </summary>
+    public async Task<IReadOnlyList<ArWorkbenchDocumentType>> GetDocumentTypesAsync(CancellationToken ct)
+    {
+        await using var master = new SqlConnection(_masterConnectionString);
+        await master.OpenAsync(ct);
+        await using var cmd = new SqlCommand(@"
+IF OBJECT_ID(N'dbo.ARDocumentTypeMaster', N'U') IS NOT NULL
+    SELECT DocumentTypeID, DocumentCategory, DocumentTypeCode, DocumentTypeName
+    FROM dbo.ARDocumentTypeMaster
+    WHERE IsActive = 1
+    ORDER BY DocumentCategory, DocumentTypeName;", master);
+        var types = new List<ArWorkbenchDocumentType>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            types.Add(new ArWorkbenchDocumentType { DocumentTypeId = r.GetInt32(0), DocumentCategory = r.GetString(1), DocumentTypeCode = r.GetString(2), DocumentTypeName = r.GetString(3) });
+        return types;
+    }
+
     /// <summary>Records the files a client attached to a CIP response (round = the case's current round).</summary>
     public async Task<IReadOnlyList<long>> AddCipResponseDocumentsAsync(int labId, long cipCaseId, IReadOnlyList<(string FileName, string? ContentType, StoredDocument Stored)> files,
         ArWorkbenchUserContext user, string? clientIp, CancellationToken ct)
@@ -109,8 +130,9 @@ END;";
 
     /// <summary>
     /// Follow-up attachments (handoff §8.2, DEF-13): files an AR user attaches to a claim - optionally to
-    /// one of its follow-up notes - each with its own document category and optional description. The claim
-    /// must be in the caller's scope (an agent: their own caseload); nothing is recorded otherwise and the result is empty.
+    /// one of its follow-up notes - each with its own document type (LRNMaster dbo.ARDocumentTypeMaster; its
+    /// category becomes DocumentCategory) and optional notes. The claim must be in the caller's scope (an agent:
+    /// their own caseload); nothing is recorded otherwise and the result is empty.
     /// </summary>
     public async Task<IReadOnlyList<long>> AddClaimDocumentsAsync(int labId, long claimKey, long? followUpId,
         IReadOnlyList<ArWorkbenchClaimUpload> files, ArWorkbenchUserContext user, string? clientIp, CancellationToken ct)
@@ -119,15 +141,16 @@ END;";
         if (files.Count == 0) return ids;
         await using var connection = await OpenLabAsync(labId, ct);
         await using var tx = (SqlTransaction)await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
-        foreach (var (fileName, contentType, stored, category, description) in files)
+        foreach (var (fileName, contentType, stored, docType, description) in files)
         {
             await using var cmd = connection.CreateCommand();
             cmd.Transaction = tx;
             var scope = AppendScope(cmd, user);
             cmd.CommandText = $@"
-INSERT INTO dbo.ARWB_Document (ClaimKey, FollowUpId, DocumentSource, DocumentCategory, Description, FileName, ContentType, SizeBytes,
-                               BlobContainer, BlobPath, ContentSha256, UploadedBy, UploadedByRole)
-SELECT w.ClaimKey, @FollowUp, 'FollowUp', @Category, @Description, @Name, @Type, @Size, @Container, @Path, @Sha, @User, @Role
+INSERT INTO dbo.ARWB_Document (ClaimKey, FollowUpId, DocumentSource, DocumentCategory, DocumentTypeID, DocumentTypeCode, DocumentTypeName,
+                               Description, FileName, ContentType, SizeBytes, BlobContainer, BlobPath, ContentSha256, UploadedBy, UploadedByRole)
+SELECT w.ClaimKey, @FollowUp, 'FollowUp', @Category, @TypeId, @TypeCode, @TypeName,
+       @Description, @Name, @Type, @Size, @Container, @Path, @Sha, @User, @Role
 FROM dbo.ARWB_Claim w
 WHERE w.ClaimKey = @ClaimKey {scope}
   AND (@FollowUp IS NULL OR EXISTS (SELECT 1 FROM dbo.ARWB_ClaimFollowUp f WHERE f.FollowUpId = @FollowUp AND f.ClaimKey = w.ClaimKey));
@@ -135,11 +158,14 @@ IF @@ROWCOUNT = 0 BEGIN SELECT CAST(NULL AS bigint); RETURN; END;
 DECLARE @Id bigint = CAST(SCOPE_IDENTITY() AS bigint);
 INSERT INTO dbo.ARWB_DocumentAccessLog (DocumentId, AccessType, UserName, RoleCode, ClientIp) VALUES (@Id, 'Upload', @User, @Role, @Ip);
 INSERT INTO dbo.ARWB_ClaimActivity (ClaimKey, ActivityOn, ActionType, Detail, UserName, RoleCode, IsSystem)
-VALUES (@ClaimKey, SYSUTCDATETIME(), N'Document Uploaded', CONCAT(@Category, N': ', @Name, N' - ' + @Description), @User, @Role, 0);
+VALUES (@ClaimKey, SYSUTCDATETIME(), N'Document Uploaded', CONCAT(@TypeName, N' (', @Category, N'): ', @Name, N' - ' + @Description), @User, @Role, 0);
 SELECT @Id;";
             cmd.Parameters.Add("@ClaimKey", SqlDbType.BigInt).Value = claimKey;
             cmd.Parameters.Add("@FollowUp", SqlDbType.BigInt).Value = (object?)followUpId ?? DBNull.Value;
-            cmd.Parameters.Add("@Category", SqlDbType.NVarChar, 100).Value = Truncate(category, 100);
+            cmd.Parameters.Add("@Category", SqlDbType.NVarChar, 100).Value = Truncate(docType.DocumentCategory, 100);
+            cmd.Parameters.Add("@TypeId", SqlDbType.Int).Value = docType.DocumentTypeId;
+            cmd.Parameters.Add("@TypeCode", SqlDbType.NVarChar, 100).Value = Truncate(docType.DocumentTypeCode, 100);
+            cmd.Parameters.Add("@TypeName", SqlDbType.NVarChar, 200).Value = Truncate(docType.DocumentTypeName, 200);
             cmd.Parameters.Add("@Description", SqlDbType.NVarChar, 500).Value = string.IsNullOrWhiteSpace(description) ? DBNull.Value : (object)Truncate(description.Trim(), 500);
             cmd.Parameters.Add("@Name", SqlDbType.NVarChar, 260).Value = Truncate(fileName, 260);
             cmd.Parameters.Add("@Type", SqlDbType.NVarChar, 200).Value = (object?)contentType ?? DBNull.Value;
@@ -180,7 +206,7 @@ SELECT @Id;";
         }
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
-            where.Add("(w.ClaimID LIKE @Search OR w.AccessionNumber LIKE @Search OR w.PatientName LIKE @Search OR w.PatientID LIKE @Search OR d.FileName LIKE @Search OR d.Description LIKE @Search)");
+            where.Add("(w.ClaimID LIKE @Search OR w.AccessionNumber LIKE @Search OR w.PatientName LIKE @Search OR w.PatientID LIKE @Search OR d.FileName LIKE @Search OR d.Description LIKE @Search OR d.DocumentTypeName LIKE @Search)");
             cmd.Parameters.Add("@Search", SqlDbType.NVarChar, 210).Value = "%" + EscapeLike(filter.Search.Trim()) + "%";
         }
         if (!string.IsNullOrWhiteSpace(filter.Category))
@@ -211,7 +237,7 @@ SELECT @Id;";
 SELECT COUNT(*) FROM dbo.ARWB_Document d INNER JOIN dbo.ARWB_Claim w ON w.ClaimKey = d.ClaimKey WHERE {filterSql};
 SELECT d.DocumentId, d.ClaimKey, w.ClaimID, w.AccessionNumber, w.PatientName, w.PatientID, w.DateOfService, w.PayerName,
        d.DocumentSource, d.DocumentCategory, d.FollowUpId, d.CipCaseId, d.CipRoundNumber, d.FileName, d.ContentType, d.SizeBytes,
-       d.UploadedBy, d.UploadedOn, d.Description
+       d.UploadedBy, d.UploadedOn, d.Description, d.DocumentTypeName, d.DocumentTypeCode
 FROM dbo.ARWB_Document d INNER JOIN dbo.ARWB_Claim w ON w.ClaimKey = d.ClaimKey
 WHERE {filterSql}
 ORDER BY d.UploadedOn DESC, d.DocumentId DESC
@@ -243,7 +269,9 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
                 SizeBytes = r.GetInt64(15),
                 UploadedBy = r.GetString(16),
                 UploadedOn = r.GetDateTime(17),
-                Description = Str(r, 18)
+                Description = Str(r, 18),
+                DocumentTypeName = Str(r, 19),
+                DocumentTypeCode = Str(r, 20)
             });
         }
         return result;

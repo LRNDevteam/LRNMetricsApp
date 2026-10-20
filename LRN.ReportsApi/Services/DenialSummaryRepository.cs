@@ -8,6 +8,9 @@ namespace LRN.ReportsApi.Services;
 public interface IDenialSummaryRepository
 {
     IReadOnlyList<(int LabId, string LabName)> GetConfiguredLabs();
+
+    /// <summary>True when this environment has a database connection for the lab.</summary>
+    bool HasLabConnection(int labId);
     Task<IReadOnlyList<DenialSummaryObservation>> GetObservationsAsync(int labId, CancellationToken ct);
     Task<DenialSummaryObservationSaveResult> SaveObservationAsync(int labId, DenialSummaryObservationRequest request, string userName, CancellationToken ct);
     Task<IReadOnlyList<DenialSummarySnapshotInfo>> GetSnapshotsAsync(int labId, bool includeArchived, CancellationToken ct);
@@ -48,6 +51,9 @@ public sealed class SqlDenialSummaryRepository : IDenialSummaryRepository
     }
 
     public IReadOnlyList<(int LabId, string LabName)> GetConfiguredLabs() => _labs;
+
+    public bool HasLabConnection(int labId)
+        => _labConnectionsById.TryGetValue(labId, out var connectionString) && !string.IsNullOrWhiteSpace(connectionString);
 
     public async Task<IReadOnlyList<DenialSummaryObservation>> GetObservationsAsync(int labId, CancellationToken ct)
     {

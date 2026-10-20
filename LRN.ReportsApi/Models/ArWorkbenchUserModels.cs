@@ -26,6 +26,10 @@ public sealed class ArWorkbenchManagedUser
     /// <summary>Why the caller cannot edit this user, when CanEdit is false.</summary>
     public string? ReadOnlyReason { get; set; }
     public string? CreatedBy { get; set; }
+    /// <summary>"Local" (username + password) or "Entra" (Sign in with Microsoft / Azure AD).</summary>
+    public string AuthProvider { get; set; } = "Local";
+    /// <summary>Last successful sign-in (either provider); null when never signed in.</summary>
+    public DateTime? LastLoginUtc { get; set; }
     /// <summary>Invitation email / first-login state; null when the invitation tables are not installed.</summary>
     public ArWorkbenchInviteStatus? Invite { get; set; }
 }

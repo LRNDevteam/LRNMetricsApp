@@ -97,7 +97,23 @@ ORDER BY v;", connection) { CommandTimeout = 120 };
     {
         await using var master = new SqlConnection(_masterConnectionString);
         await master.OpenAsync(ct);
-        await using var cmd = new SqlCommand(@"
+
+        // AuthProvider / LastLoginUtc come with HybridAuth_Setup.sql; a master database without them
+        // lists everyone as a password user who has never signed in.
+        bool hasAuthProvider, hasLastLogin;
+        await using (var probe = new SqlCommand(
+            "SELECT CAST(CASE WHEN COL_LENGTH('dbo.LabUsers', 'AuthProvider') IS NULL THEN 0 ELSE 1 END AS bit), " +
+            "CAST(CASE WHEN COL_LENGTH('dbo.LabUsers', 'LastLoginUtc') IS NULL THEN 0 ELSE 1 END AS bit);", master))
+        await using (var p = await probe.ExecuteReaderAsync(ct))
+        {
+            await p.ReadAsync(ct);
+            hasAuthProvider = p.GetBoolean(0);
+            hasLastLogin = p.GetBoolean(1);
+        }
+        var authProviderColumn = hasAuthProvider ? "u.AuthProvider" : "CAST('Local' AS varchar(20))";
+        var lastLoginColumn = hasLastLogin ? "u.LastLoginUtc" : "CAST(NULL AS datetime2)";
+
+        await using var cmd = new SqlCommand($@"
 SELECT DISTINCT ur.LabUserID
 INTO #wb
 FROM dbo.UserRoles ur
@@ -106,7 +122,8 @@ WHERE r.RoleName LIKE @RolePrefix + N'%';
 
 SELECT u.LabUserID, u.UserName, u.Email, CAST(ISNULL(u.IsActive, 0) AS bit), u.CreatedBy,
        u.ManagerUserID, NULLIF(LTRIM(RTRIM(u.TeamName)), N''),
-       COALESCE(NULLIF(LTRIM(RTRIM(CONCAT(ISNULL(m.FirstName, N''), N' ', ISNULL(m.LastName, N'')))), N''), m.UserName)
+       COALESCE(NULLIF(LTRIM(RTRIM(CONCAT(ISNULL(m.FirstName, N''), N' ', ISNULL(m.LastName, N'')))), N''), m.UserName),
+       {authProviderColumn}, {lastLoginColumn}
 FROM dbo.LabUsers u
 INNER JOIN #wb w ON w.LabUserID = u.LabUserID
 LEFT JOIN dbo.LabUsers m ON m.LabUserID = u.ManagerUserID
@@ -144,7 +161,9 @@ ELSE
                     CreatedBy = r.IsDBNull(4) ? null : r.GetString(4),
                     ManagerUserId = r.IsDBNull(5) ? null : r.GetInt32(5),
                     TeamName = r.IsDBNull(6) ? null : r.GetString(6),
-                    ManagerName = r.IsDBNull(7) ? null : r.GetString(7)
+                    ManagerName = r.IsDBNull(7) ? null : r.GetString(7),
+                    AuthProvider = r.IsDBNull(8) || string.IsNullOrWhiteSpace(r.GetString(8)) ? "Local" : r.GetString(8).Trim(),
+                    LastLoginUtc = r.IsDBNull(9) ? null : r.GetDateTime(9)
                 });
             }
             await r.NextResultAsync(ct);

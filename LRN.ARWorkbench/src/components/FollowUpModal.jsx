@@ -50,7 +50,7 @@ export default function FollowUpModal({ claim, lastFollowUp, onClose, onDone, su
   }));
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  // Documents on the note (handoff §8.2, DEF-13): optional, each with its own category and description.
+  // Documents on the note (handoff §8.2, DEF-13): optional, each with its own document type and notes.
   const attachmentRules = useAttachmentRules();
   const [docs, setDocs] = useState([]);
 

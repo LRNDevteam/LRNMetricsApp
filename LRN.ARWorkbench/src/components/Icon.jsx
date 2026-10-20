@@ -37,7 +37,9 @@ const PATHS = {
   star: <polygon points="10,2.8 12.2,7.4 17.2,8 13.5,11.4 14.5,16.4 10,13.9 5.5,16.4 6.5,11.4 2.8,8 7.8,7.4" />,
   starFill: <polygon points="10,2.8 12.2,7.4 17.2,8 13.5,11.4 14.5,16.4 10,13.9 5.5,16.4 6.5,11.4 2.8,8 7.8,7.4" fill="currentColor" />,
   save: <><path d="M4 3h9.5L17 6.5V16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><rect x="6" y="11" width="8" height="6" /><line x1="6.5" y1="3" x2="6.5" y2="7" /><line x1="6.5" y1="7" x2="12" y2="7" /></>,
-  arrowLeft:<><line x1="16" y1="10" x2="4" y2="10" /><polyline points="9,5 4,10 9,15" /></>
+  arrowLeft:<><line x1="16" y1="10" x2="4" y2="10" /><polyline points="9,5 4,10 9,15" /></>,
+  userOff: <><circle cx="8" cy="7" r="3" /><path d="M2.5 16.5c0-3 2.5-4.8 5.5-4.8 1.3 0 2.5.3 3.4.9" /><line x1="13.5" y1="12.5" x2="17.5" y2="16.5" /><line x1="17.5" y1="12.5" x2="13.5" y2="16.5" /></>,
+  userCheck: <><circle cx="8" cy="7" r="3" /><path d="M2.5 16.5c0-3 2.5-4.8 5.5-4.8 1.3 0 2.5.3 3.4.9" /><polyline points="12.8,14.4 14.6,16.2 17.8,12.6" /></>
 };
 
 export default function Icon({ name, size = 17 }) {

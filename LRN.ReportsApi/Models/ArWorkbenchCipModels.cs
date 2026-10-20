@@ -79,6 +79,10 @@ public sealed class ArWorkbenchDocumentRow
     /// <summary>FollowUp | CipResponse | Other.</summary>
     public string DocumentSource { get; set; } = string.Empty;
     public string DocumentCategory { get; set; } = string.Empty;
+    /// <summary>From LRNMaster dbo.ARDocumentTypeMaster; null on CIP responses and older uploads.</summary>
+    public string? DocumentTypeName { get; set; }
+    public string? DocumentTypeCode { get; set; }
+    /// <summary>The uploader's notes on the file (optional).</summary>
     public string? Description { get; set; }
     public long? FollowUpId { get; set; }
     public long? CipCaseId { get; set; }
@@ -90,11 +94,22 @@ public sealed class ArWorkbenchDocumentRow
     public DateTime UploadedOn { get; set; }
 }
 
-/// <summary>The category and description of one uploaded file (claim document upload, same order as the files).</summary>
+/// <summary>The document type and notes of one uploaded file (claim document upload, same order as the files).</summary>
 public sealed class ArWorkbenchDocumentUploadInfo
 {
-    public string? Category { get; set; }
+    /// <summary>LRNMaster dbo.ARDocumentTypeMaster.DocumentTypeID - mandatory.</summary>
+    public int? DocumentTypeId { get; set; }
+    /// <summary>Notes on the file (optional), stored in ARWB_Document.Description.</summary>
     public string? Description { get; set; }
+}
+
+/// <summary>An active row of LRNMaster dbo.ARDocumentTypeMaster - the upload's Document Type dropdown.</summary>
+public sealed class ArWorkbenchDocumentType
+{
+    public int DocumentTypeId { get; set; }
+    public string DocumentCategory { get; set; } = string.Empty;
+    public string DocumentTypeCode { get; set; } = string.Empty;
+    public string DocumentTypeName { get; set; } = string.Empty;
 }
 
 /// <summary>Document Vault search: claim / visit, patient and category (handoff §8.2).</summary>
