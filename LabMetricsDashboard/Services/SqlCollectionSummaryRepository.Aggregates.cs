@@ -670,6 +670,7 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
         if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(prefix, "Cove", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
@@ -683,10 +684,9 @@ public sealed partial class SqlCollectionSummaryRepository
                 filterCheckDateFrom: null, filterCheckDateTo: null,
                 ct).ConfigureAwait(false);
 
-        // Elixir/Cove/BT/Cert snapshots store per-month rows (PanelName, BilledYear, BilledMonth) so the UI
+        // Elixir/BT/Cert snapshots store per-month rows (PanelName, BilledYear, BilledMonth) so the UI
         // can pivot Year/Month. Other labs keep a flat panel-level row.
         bool hasMonthlyGrain = string.Equals(prefix, "Elix", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(prefix, "Cove", StringComparison.OrdinalIgnoreCase)
             || string.Equals(prefix, "BT",   StringComparison.OrdinalIgnoreCase)
             || string.Equals(prefix, "Cert", StringComparison.OrdinalIgnoreCase);
         string sql = hasMonthlyGrain

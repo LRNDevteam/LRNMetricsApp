@@ -113,6 +113,9 @@ public sealed class CollectionSummaryViewModel
     /// <summary>NorthWest: client-logic labels, claim-count sorts and the Women's Health Panel breakdown.</summary>
     public bool IsNorthWestLab => LabCollectionPrefix.IsNorthWest(SelectedLab);
 
+    /// <summary>Panel Vs Payment with Billed / Paid claim counts and amounts per billed month (NorthWest, Cove).</summary>
+    public bool UsesBilledPaidPanelPayment => LabCollectionPrefix.UsesBilledPaidPanelPayment(SelectedLab);
+
     /// <summary>Date-basis Avg Payments tabs are titled "Panel Averages - by DOS / by Check Date".</summary>
     public bool UsesPanelAveragesTitles => LabCollectionPrefix.UsesPanelAveragesTitles(SelectedLab);
 

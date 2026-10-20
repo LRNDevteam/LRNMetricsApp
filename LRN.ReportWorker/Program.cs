@@ -106,6 +106,8 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddTransient<LabMetricsDashboard.Services.SqlDenialRecordRepository>();
         // Denial Summary (DenialClaimReport page) — stateless, takes the lab connection per call.
         services.AddSingleton<LabMetricsDashboard.Services.SqlDenialClaimReportRepository>();
+        services.AddSingleton<LabMetricsDashboard.Services.IDenialClaimReportRepository>(sp =>
+            sp.GetRequiredService<LabMetricsDashboard.Services.SqlDenialClaimReportRepository>());
 
         // One IReportGenerator per report type — add future reports here.
         services.AddSingleton<IReportGenerator, PayerPolicyValidationReportGenerator>();

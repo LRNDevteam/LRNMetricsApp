@@ -14,7 +14,7 @@
     var showReportPageLoader =
         (string.Equals(bootController, "Dashboard", StringComparison.OrdinalIgnoreCase)
             && string.Equals(bootAction, "ProductionReport", StringComparison.OrdinalIgnoreCase));
-    // ?embed=1 — the report is framed inside another page (NorthWest Executive Summary
+    // ?embed=1 — the report is framed inside another page (Executive Summary
     // highlight tabs): no menu, footer or page chrome. ?embedTabs= lists the tab panes to keep.
     var isEmbed = string.Equals(Context.Request.Query["embed"], "1", StringComparison.Ordinal);
     var embedTabs = isEmbed ? Context.Request.Query["embedTabs"].ToString() : null;

@@ -100,8 +100,9 @@ public static partial class CollectionSummaryExcelExportBuilder
     }
 
     /// <summary>
-    /// Collection Highlights section of the NorthWest Executive Summary download:
-    /// Monthly &amp; Weekly, the Top 5 Insurances grids and Panel Averages by DOS / Check Date.
+    /// Collection Highlights section of the Executive Summary download: Monthly &amp; Weekly,
+    /// the Top 5 Insurances grids and the lab's Average Payments tabs (Panel Averages by
+    /// DOS / Check Date for date-basis labs, else Avg Payments and, where shown, Last 3 Months).
     /// </summary>
     public static XLWorkbook CreateHighlightsWorkbook(CollectionSummaryViewModel vm, string labName)
     {
@@ -110,10 +111,21 @@ public static partial class CollectionSummaryExcelExportBuilder
         var insightsWs = BuildMonthlyClaimVolumeSheet(wb, vm, labName);
         BuildWeeklyClaimVolumeSheet(wb, vm, labName, insightsWs);
         BuildTop5InsurancesGridSheet(wb, vm);
-        BuildAvgPaymentsSheet(wb, vm.AvgPaymentsDos, lastMonths: 6,
-            sheetName: PanelAveragesDosSheetName, basisLabel: "Date of Service");
-        BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6,
-            sheetName: PanelAveragesCheckDateSheetName, basisLabel: "Check Date");
+        if (vm.ShowAvgPaymentsByDateBasis)
+        {
+            BuildAvgPaymentsSheet(wb, vm.AvgPaymentsDos, lastMonths: 6,
+                sheetName: vm.IsNorthWestLab ? PanelAveragesDosSheetName : AvgPaymentsDosSheetName,
+                basisLabel: "Date of Service");
+            BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6,
+                sheetName: vm.IsNorthWestLab ? PanelAveragesCheckDateSheetName : AvgPaymentsCheckDateSheetName,
+                basisLabel: "Check Date");
+        }
+        else
+        {
+            BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6);
+            if (vm.ShowAvgPaymentsLast3Months)
+                BuildAvgPaymentsSheet(wb, vm.AvgPaymentsLast3Months, lastMonths: 3);
+        }
 
         ApplySheetOrder(wb);
         return wb;
@@ -727,7 +739,7 @@ public static partial class CollectionSummaryExcelExportBuilder
     {
         // Formatted month grid (no PivotTable) when year/month grain is present — Cove client layout.
         var withPeriod = rows.Any(r => r.BillYear > 1900 && r.BillMonth is >= 1 and <= 12);
-        if (withPeriod && LabCollectionPrefix.IsNorthWest(labName))
+        if (withPeriod && LabCollectionPrefix.UsesBilledPaidPanelPayment(labName))
         {
             BuildNwPanelPaymentSheet(wb, rows, labName);
             return;
@@ -905,8 +917,9 @@ public static partial class CollectionSummaryExcelExportBuilder
     }
 
     /// <summary>
-    /// NorthWest Panel Vs Payment: PanelType x ChargeEnteredDate month with Billed Claim Count,
-    /// Total Billed Charges, Paid Claim Count and Insurance Payment; sorted by Billed Claim Count.
+    /// Panel Vs Payment with Billed Claim Count, Total Billed Charges, Paid Claim Count and Insurance
+    /// Payment per billed month, sorted by Billed Claim Count. NorthWest: PanelType x ChargeEnteredDate;
+    /// Cove: Panelname x FirstBilledDate.
     /// </summary>
     private static void BuildNwPanelPaymentSheet(XLWorkbook wb, List<PanelPaymentRow> rows, string labName)
     {

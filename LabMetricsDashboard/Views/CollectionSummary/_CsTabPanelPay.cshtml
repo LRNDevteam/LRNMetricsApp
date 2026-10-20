@@ -26,7 +26,7 @@
         <div class="small mt-1">No matching claim records found. Try adjusting your filters.</div>
     </div>
 }
-else if (Model.IsNorthWestLab && hasMonthlyGrain)
+else if (Model.UsesBilledPaidPanelPayment && hasMonthlyGrain)
 {
     var nwPeriods = rowsData
         .Where(r => r.BillYear > 0 && r.BillMonth > 0)
@@ -157,11 +157,22 @@ else if (Model.IsNorthWestLab && hasMonthlyGrain)
     </div>
 
     <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
-        <strong>Source:</strong> Claim Level Data &bull;
+    @if (Model.IsNorthWestLab)
+    {
+        <span><strong>Source:</strong> Claim Level Data &bull;
         <strong>Rows:</strong> PanelType &bull; <strong>Columns:</strong> ChargeEnteredDate month &bull;
         <strong>Sorted by:</strong> Billed Claim Count DESC &bull;
         <strong>Billed:</strong> BilledUnbilled = Billed &mdash; Count of unique ClaimID, Sum of ChargeAmount &bull;
-        <strong>Paid:</strong> InsurancePayment &gt; 0 &mdash; Count of unique ClaimID, Sum of InsurancePayment
+        <strong>Paid:</strong> InsurancePayment &gt; 0 &mdash; Count of unique ClaimID, Sum of InsurancePayment</span>
+    }
+    else
+    {
+        <span><strong>Source:</strong> Claim Level Data &bull;
+        <strong>Rows:</strong> Panelname &bull; <strong>Columns:</strong> FirstBilledDate month &bull;
+        <strong>Sorted by:</strong> Billed Claim Count DESC &bull;
+        <strong>Billed:</strong> BillStatus = Billed / Billed - Client Bill &mdash; Count of unique ClaimID, Sum of ChargeAmount &bull;
+        <strong>Paid:</strong> InsurancePayment &gt; 0 and CheckDate not blank &mdash; Count of unique ClaimID, Sum of InsurancePayment</span>
+    }
     </div>
 }
 else if (!hasMonthlyGrain)

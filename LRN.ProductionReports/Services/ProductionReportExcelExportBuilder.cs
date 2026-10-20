@@ -154,6 +154,18 @@ public static partial class ProductionReportExcelExportBuilder
     }
 
     /// <summary>
+    /// Monthly &amp; Weekly sheet only — the Production Highlights section of the
+    /// Executive Summary download.
+    /// </summary>
+    public static XLWorkbook CreateHighlightsWorkbook(
+        ProductionReportViewModel vm, string labName, string? weekFolder = null, string? runId = null)
+    {
+        var wb = new XLWorkbook();
+        BuildMonthlyAndWeeklySheet(wb, vm, labName, weekFolder, runId);
+        return wb;
+    }
+
+    /// <summary>
     /// Creates the workbook with summary tabs only (no raw ClaimLevel/LineLevel sheets).
     /// Use together with <see cref="SqlProductionReportRepository.WriteSpExportToWorkbookAsync"/>
     /// to stream the raw data sheets directly into the workbook from a SqlDataReader,

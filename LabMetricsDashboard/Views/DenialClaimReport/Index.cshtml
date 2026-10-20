@@ -5,6 +5,9 @@
     ViewData["SelectedLab"] = Model.CurrentLab;
 
     var tab = Model.ActiveTab;
+    // Framed in Executive Summary > Denial Highlights: only the Monthly / Weekly grids are shown,
+    // without the tiles or the Fullscreen buttons.
+    var dcrEmbed = string.Equals(Context.Request.Query["embed"], "1", StringComparison.Ordinal);
 }
 
 @* The layout has no Styles section, so these go in the body the same way the original Denial
@@ -70,6 +73,8 @@
         <div class="alert alert-warning py-2">@Model.Error</div>
     }
 
+    @if (!dcrEmbed)
+    {
     <div class="row g-2 mb-3">
         <div class="col-6 col-lg-3">
             <div class="card border-0 shadow-sm h-100"><div class="card-body py-2">
@@ -96,6 +101,7 @@
             </div></div>
         </div>
     </div>
+    }
 
     @if (Model.UndatedGroups > 0)
     {
@@ -189,11 +195,14 @@
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
                     <div class="fs-host" id="monthlyFsHost">
+                        @if (!dcrEmbed)
+                        {
                         <div class="fs-bar">
                             <button type="button" class="fs-btn" data-fs-target="#monthlyFsHost">
                                 <i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span>
                             </button>
                         </div>
+                        }
                         @await Html.PartialAsync("_DenialPivotGrid", Model.Monthly)
                     </div>
                 </div>
@@ -204,11 +213,14 @@
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
                     <div class="fs-host" id="weeklyFsHost">
+                        @if (!dcrEmbed)
+                        {
                         <div class="fs-bar">
                             <button type="button" class="fs-btn" data-fs-target="#weeklyFsHost">
                                 <i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span>
                             </button>
                         </div>
+                        }
                         @await Html.PartialAsync("_DenialPivotGrid", Model.Weekly)
                     </div>
                 </div>

@@ -62,13 +62,52 @@ public static class DenialClaimReportExcelBuilder
         string? balanceColumn,
         CancellationToken ct)
     {
+        var model = await LoadSummaryAsync(repo, connectionString, labName, weekStartsOn, dateColumn, balanceColumn, ct);
+        model.Insight.Bucket = DenialInsightBuckets.Normalize(bucket);
+
+        model.Insight.Rows = await repo.GetInsightsAsync(connectionString, model.Insight.Bucket, ct);
+
+        // Same SPs the page's Denial List / Plan Type tabs read.
+        if (LabCollectionPrefix.HasDenialSummary(labName))
+        {
+            var lists = new SqlDenialSummaryRepository();
+            var prefix = LabCollectionPrefix.GetPrefix(labName);
+            model.HasDenialLists = true;
+            model.DenialList = await lists.GetDenialListAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
+            model.PlanType = await lists.GetPlanTypeAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
+
+            if (LabCollectionPrefix.HasDenialFacilityTabs(labName))
+            {
+                model.HasDenialFacilityTabs = true;
+                model.PayorVsPayer = await lists.GetPayorVsPayerAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
+                model.FacilityDenial = await lists.GetByFacilityAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
+                model.FacilityPct = await lists.GetFacilityPctAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
+            }
+        }
+
+        return model;
+    }
+
+    /// <summary>
+    /// Tiles, Monthly and Weekly only, read the same way the page reads them: the lab's
+    /// usp_Get{prefix}_Denial* SPs when it has them, else the inline ClaimLevelData summary.
+    /// </summary>
+    public static async Task<DenialClaimReportViewModel> LoadSummaryAsync(
+        IDenialClaimReportRepository repo,
+        string connectionString,
+        string labName,
+        DayOfWeek weekStartsOn,
+        string? dateColumn,
+        string? balanceColumn,
+        CancellationToken ct)
+    {
         var model = new DenialClaimReportViewModel
         {
             CurrentLab = labName,
             Insight = new DenialInsightPanelViewModel
             {
                 CurrentLab = labName,
-                Bucket = DenialInsightBuckets.Normalize(bucket)
+                Bucket = DenialInsightBuckets.Normalize(null)
             }
         };
 
@@ -94,27 +133,16 @@ public static class DenialClaimReportExcelBuilder
             model.Weekly = DenialClaimPivotBuilder.Build(groups, weekly: true, WeeklyPeriods, loadedThrough: weekRange.LoadedThrough, weekStartsOn: weekStartsOn);
         }
 
-        model.Insight.Rows = await repo.GetInsightsAsync(connectionString, model.Insight.Bucket, ct);
-
-        // Same SPs the page's Denial List / Plan Type tabs read.
-        if (LabCollectionPrefix.HasDenialSummary(labName))
-        {
-            var lists = new SqlDenialSummaryRepository();
-            var prefix = LabCollectionPrefix.GetPrefix(labName);
-            model.HasDenialLists = true;
-            model.DenialList = await lists.GetDenialListAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
-            model.PlanType = await lists.GetPlanTypeAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
-
-            if (LabCollectionPrefix.HasDenialFacilityTabs(labName))
-            {
-                model.HasDenialFacilityTabs = true;
-                model.PayorVsPayer = await lists.GetPayorVsPayerAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
-                model.FacilityDenial = await lists.GetByFacilityAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
-                model.FacilityPct = await lists.GetFacilityPctAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
-            }
-        }
-
         return model;
+    }
+
+    /// <summary>Monthly Summary and Weekly Summary sheets only.</summary>
+    public static XLWorkbook BuildSummary(DenialClaimReportViewModel model)
+    {
+        var workbook = new XLWorkbook();
+        WritePivot(workbook.Worksheets.Add("Monthly Summary"), model.Monthly, "Monthly Summary", model.CurrentLab);
+        WritePivot(workbook.Worksheets.Add("Weekly Summary"), model.Weekly, "Weekly Summary", model.CurrentLab);
+        return workbook;
     }
 
     public static XLWorkbook Build(DenialClaimReportViewModel model)

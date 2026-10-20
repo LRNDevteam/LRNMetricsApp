@@ -166,6 +166,14 @@ public static class LabCollectionPrefix
         GetPrefix(labName) is "NW";
 
     /// <summary>
+    /// Labs whose Panel Vs Payment shows Billed Claim Count, Total Billed Charges, Paid Claim Count and
+    /// Insurance Payment per billed month (usp_Get{prefix}_CS_PanelVsPayment returns BilledClaims /
+    /// BilledCharges). NorthWest: PanelType x ChargeEnteredDate; Cove: Panelname x FirstBilledDate.
+    /// </summary>
+    public static bool UsesBilledPaidPanelPayment(string? labName) =>
+        GetPrefix(labName) is "NW" or "Cove";
+
+    /// <summary>
     /// Claim / line column behind the Collection Summary "Posted Date" and its Check Date filter.
     /// Analyze Pathology and WellHealth use PaymentPostedDate (claim file "Posted Date"); other labs use CheckDate.
     /// </summary>

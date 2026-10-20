@@ -1,7 +1,7 @@
 @model LabMetricsDashboard.Models.CollectionSummaryViewModel
 @{
     var csPaneOnly = ViewData["CsPaneOnly"] as string;
-    // Embedded in the NorthWest Executive Summary: the Top 5 cards become the "Top 5 Insurances" grid tab.
+    // Embedded in the Executive Summary: the Top 5 cards become the "Top 5 Insurances" grid tab.
     var csEmbed = string.Equals(Context.Request.Query["embed"], "1", StringComparison.Ordinal);
     if (!string.IsNullOrEmpty(csPaneOnly))
         Layout = null;
