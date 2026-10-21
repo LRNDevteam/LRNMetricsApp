@@ -178,7 +178,8 @@ public sealed class ExecutiveSummaryHighlightsExcel
         var prefix = config.EnableCollectionSummaryReport ? LabCollectionPrefix.GetPrefix(labName) : null;
         var useAggregates = prefix is not null
             && !LabCollectionPrefix.IsNorthWest(labName)
-            && !LabCollectionPrefix.UsesSpCollectionLogic(labName);
+            && !LabCollectionPrefix.UsesSpCollectionLogic(labName)
+            && !LabCollectionPrefix.ReadsCollectionSpsLive(labName);
 
         var monthlyTask = useAggregates
             ? _collection.GetCollectionMonthlyVolumeFromAggregatesAsync(connStr, prefix!, ct)

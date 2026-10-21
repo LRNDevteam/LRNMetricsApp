@@ -133,7 +133,8 @@ public class CollectionSummaryController : Controller
             ? LabCollectionPrefix.GetPrefix(selectedLab)
             : null;
         bool useAggregates = aggregatePrefix is not null && !hasActiveFilters
-            && !LabCollectionPrefix.UsesSpCollectionLogic(selectedLab);
+            && !LabCollectionPrefix.UsesSpCollectionLogic(selectedLab)
+            && !LabCollectionPrefix.ReadsCollectionSpsLive(selectedLab);
 
         // Page chrome first — monthly, Top 5, filters, and banner load after HTML.
         var pageSw = Stopwatch.StartNew();
@@ -253,7 +254,8 @@ public class CollectionSummaryController : Controller
         {
             CollectionFilterOptions options;
             if (aggregatePrefix is not null && !hasActiveFilters
-                && !LabCollectionPrefix.UsesSpCollectionLogic(labName))
+                && !LabCollectionPrefix.UsesSpCollectionLogic(labName)
+                && !LabCollectionPrefix.ReadsCollectionSpsLive(labName))
             {
                 // Aggregate snapshot is tiny � orders of magnitude faster than ClaimLevelData.
                 options = await _repo.GetFilterOptionsFromAggregatesAsync(connStr, aggregatePrefix, ct);
@@ -364,7 +366,8 @@ public class CollectionSummaryController : Controller
             ? LabCollectionPrefix.GetPrefix(selectedLab)
             : null;
         bool useAggregates = aggregatePrefix is not null && !hasActiveFilters
-            && !LabCollectionPrefix.UsesSpCollectionLogic(selectedLab);
+            && !LabCollectionPrefix.UsesSpCollectionLogic(selectedLab)
+            && !LabCollectionPrefix.ReadsCollectionSpsLive(selectedLab);
 
         _logger.LogInformation("CollectionSummary[GetTabPartial] Lab={Lab}, AggregatePrefix={Prefix}, UseAggregates={UseAgg}, HasFilters={HasFilters}, Tab={Tab}",
             selectedLab, aggregatePrefix ?? "null", useAggregates, hasActiveFilters, tab);

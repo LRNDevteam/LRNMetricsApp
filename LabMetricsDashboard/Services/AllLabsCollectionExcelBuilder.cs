@@ -199,7 +199,8 @@ public sealed class AllLabsCollectionExcelBuilder
             ? LabCollectionPrefix.GetPrefix(labName)
             : null;
         bool useAggregates = aggregatePrefix is not null
-            && !LabCollectionPrefix.UsesSpCollectionLogic(labName);
+            && !LabCollectionPrefix.UsesSpCollectionLogic(labName)
+            && !LabCollectionPrefix.ReadsCollectionSpsLive(labName);
 
         // Fetch report tabs in parallel
         var monthlyTask     = useAggregates

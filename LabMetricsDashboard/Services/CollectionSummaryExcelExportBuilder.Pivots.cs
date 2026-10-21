@@ -229,7 +229,7 @@ public static partial class CollectionSummaryExcelExportBuilder
             || labName.Equals("Augustus", StringComparison.OrdinalIgnoreCase);
         var isNorthWest = LabCollectionPrefix.IsNorthWest(labName);
         var sortByClaims = isAugustus || isNorthWest;
-        var sheetTitle = isNorthWest ? "Payer vs Payment" : "Insurance Vs Payments";
+        var sheetTitle = isNorthWest || isAugustus ? "Payer vs Payment" : "Insurance Vs Payments";
         // NorthWest client sheet: CheckDate Year Total columns only.
         var showMonths = !isNorthWest;
 

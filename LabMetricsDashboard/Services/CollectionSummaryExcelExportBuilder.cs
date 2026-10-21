@@ -59,10 +59,10 @@ public static partial class CollectionSummaryExcelExportBuilder
         if (vm.ShowAvgPaymentsByDateBasis)
         {
             BuildAvgPaymentsSheet(wb, vm.AvgPaymentsDos, lastMonths: 6,
-                sheetName: vm.IsNorthWestLab ? PanelAveragesDosSheetName : AvgPaymentsDosSheetName,
+                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab ? PanelAveragesDosSheetName : AvgPaymentsDosSheetName,
                 basisLabel: "Date of Service");
             BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6,
-                sheetName: vm.IsNorthWestLab ? PanelAveragesCheckDateSheetName : AvgPaymentsCheckDateSheetName,
+                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab ? PanelAveragesCheckDateSheetName : AvgPaymentsCheckDateSheetName,
                 basisLabel: "Check Date");
         }
         else
@@ -114,10 +114,10 @@ public static partial class CollectionSummaryExcelExportBuilder
         if (vm.ShowAvgPaymentsByDateBasis)
         {
             BuildAvgPaymentsSheet(wb, vm.AvgPaymentsDos, lastMonths: 6,
-                sheetName: vm.IsNorthWestLab ? PanelAveragesDosSheetName : AvgPaymentsDosSheetName,
+                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab ? PanelAveragesDosSheetName : AvgPaymentsDosSheetName,
                 basisLabel: "Date of Service");
             BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6,
-                sheetName: vm.IsNorthWestLab ? PanelAveragesCheckDateSheetName : AvgPaymentsCheckDateSheetName,
+                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab ? PanelAveragesCheckDateSheetName : AvgPaymentsCheckDateSheetName,
                 basisLabel: "Check Date");
         }
         else
@@ -447,7 +447,8 @@ public static partial class CollectionSummaryExcelExportBuilder
         ws.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
 
-        var isSpLogic = LabCollectionPrefix.UsesSpCollectionLogic(labName) || LabCollectionPrefix.IsNorthWest(labName);
+        var isSpLogic = LabCollectionPrefix.UsesSpCollectionLogic(labName) || LabCollectionPrefix.IsNorthWest(labName)
+            || LabCollectionPrefix.IsAugustus(labName);
         string[] headers = isSpLogic
             ? ["Rank", "Payer Name", "Insurance Payment", "Charge Amount", "Claim Count", "Average Payment %"]
             : ["Rank", "Payer Name", "Insurance Payment", "Charge Amount", "Unique Visits", "Reimbursement %"];
@@ -567,6 +568,7 @@ public static partial class CollectionSummaryExcelExportBuilder
         ExcelTheme.ApplyDefaults(ws);
 
         string[] headers = LabCollectionPrefix.UsesSpCollectionLogic(labName) || LabCollectionPrefix.IsNorthWest(labName)
+            || LabCollectionPrefix.IsAugustus(labName)
             ? ["Rank", "Payer Name", "Total Payments", "Claim Count"]
             : ["Rank", "Payer Name", "Total Payments", "Unique Visits"];
         int colCount = headers.Length;
@@ -1047,7 +1049,8 @@ public static partial class CollectionSummaryExcelExportBuilder
 
         var isInHealth = LabCollectionPrefix.IsInHealthDtr(labName)
             || LabCollectionPrefix.UsesSpCollectionLogic(labName)
-            || LabCollectionPrefix.IsNorthWest(labName);
+            || LabCollectionPrefix.IsNorthWest(labName)
+            || LabCollectionPrefix.IsAugustus(labName);
         string[] headers = isInHealth
             ? ["Row Labels", "Count of ClaimID", "Sum of InsurancePayment", "Average of PaymentPercent"]
             : ["Payer Name", "Total Claims", "Insurance Payments", "Payment %"];

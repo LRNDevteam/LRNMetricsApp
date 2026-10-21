@@ -1010,7 +1010,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <div class="top5-card-hdr reimb-hdr">
                     <div>
                         <div class="top5-card-hdr-title">Reimbursement Rate</div>
-                        <div class="top5-card-hdr-sub">@(Model.IsWellHealthLab || Model.IsNorthWestLab ? "Top 5 payers by insurance payment" : Model.UsesSpCollectionLogic ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
+                        <div class="top5-card-hdr-sub">@(Model.IsWellHealthLab || Model.IsNorthWestLab ? "Top 5 payers by insurance payment" : Model.UsesSpCollectionLogic || Model.IsAugustusLab ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
                     </div>
                     <span class="top5-card-badge reimb-badge">
                         <i class="bi bi-percent"></i> Reimbursement
@@ -1066,14 +1066,14 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                         <span>Top 5 by <span class="top5-hl-blue">Insurance Payment</span> &bull;
                         InsurancePayment &gt; 0 &bull; Payment % = Average(PaymentPercent)</span>
                     }
-                    else if (Model.UsesSpCollectionLogic)
+                    else if (Model.UsesSpCollectionLogic || Model.IsAugustusLab)
                     {
                         <span>Top 5 by <span class="top5-hl-blue">Claim Count</span> &bull;
                         InsurancePayment &gt; 0 &bull; Payment % = Average(PaymentPercent)</span>
                     }
                     else
                     {
-                        <span>Ranked by <span class="top5-hl-blue">@(Model.IsAugustusLab ? "Count of ClaimID" : "InsurancePayment")</span> &bull;
+                        <span>Ranked by <span class="top5-hl-blue">InsurancePayment</span> &bull;
                         Formula: SUM(InsurancePayment) / SUM(ChargeAmount) &times; 100</span>
                     }
                 </div>
@@ -1104,13 +1104,13 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 var payTotalVisits = payTotal.Sum(r => r.UniqueVisitCount);
                 var maxPay = payTotal.Max(r => r.TotalPayments);
                 // Analyze Pathology lists the top 5 by claim count, so the first row is not the top payer.
-                var topPayerAmt = Model.UsesSpCollectionLogic ? maxPay : payTotal[0].TotalPayments;
+                var topPayerAmt = Model.UsesSpCollectionLogic || Model.IsAugustusLab ? maxPay : payTotal[0].TotalPayments;
                 var topPayerPct = maxPay == 0m ? 0m : Math.Round(topPayerAmt / payTotalAmt * 100m, 1);
 
                 <div class="top5-card-hdr totpay-hdr">
                     <div>
                         <div class="top5-card-hdr-title">Total Payments</div>
-                        <div class="top5-card-hdr-sub">@(Model.IsWellHealthLab || Model.IsNorthWestLab ? "Top 5 payers by total payment" : Model.UsesSpCollectionLogic ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
+                        <div class="top5-card-hdr-sub">@(Model.IsWellHealthLab || Model.IsNorthWestLab ? "Top 5 payers by total payment" : Model.UsesSpCollectionLogic || Model.IsAugustusLab ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
                     </div>
                     <span class="top5-card-badge totpay-badge">
                         <i class="bi bi-cash-stack"></i> Payments
@@ -1159,7 +1159,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 </div>
 
                 <div class="top5-card-footer">
-                    @(Model.UsesSpCollectionLogic ? "Sorted by" : "Ranked by") <span class="top5-hl-green">@(Model.IsWellHealthLab || Model.IsNorthWestLab ? "total payment (InsurancePayment > 0)" : Model.UsesSpCollectionLogic ? "claim count" : "unique visit count")</span> &bull;
+                    @(Model.UsesSpCollectionLogic || Model.IsAugustusLab ? "Sorted by" : "Ranked by") <span class="top5-hl-green">@(Model.IsWellHealthLab || Model.IsNorthWestLab ? "total payment (InsurancePayment > 0)" : Model.UsesSpCollectionLogic || Model.IsAugustusLab ? "claim count" : "unique visit count")</span> &bull;
                     Top payer accounts for <span class="top5-hl-green">@topPayerPct.ToString("F0")%</span> of total payments
                 </div>
             }
@@ -1258,7 +1258,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             <button class="nav-link" id="aging-tab" data-bs-toggle="pill"
                     data-bs-target="#aging-pane" type="button" role="tab"
                     aria-controls="aging-pane" aria-selected="false">
-                <i class="bi bi-hourglass-split"></i> Insurance vs Aging
+                <i class="bi bi-hourglass-split"></i> @(Model.IsAugustusLab ? "No Response vs Aging" : "Insurance vs Aging")
             </button>
         </li>
         <li class="nav-item" role="presentation">
@@ -1281,7 +1281,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <button class="nav-link" id="insvspay-tab" data-bs-toggle="pill"
                         data-bs-target="#insvspay-pane" type="button" role="tab"
                         aria-controls="insvspay-pane" aria-selected="false">
-                    <i class="bi bi-cash-stack"></i> @(Model.IsWellHealthLab ? "Total Insurance Payment" : Model.IsNorthWestLab ? "Payer vs Payment" : "Insurance Vs Payment")
+                    <i class="bi bi-cash-stack"></i> @(Model.IsWellHealthLab ? "Total Insurance Payment" : Model.IsNorthWestLab || Model.IsAugustusLab ? "Payer vs Payment" : "Insurance Vs Payment")
                 </button>
             </li>
         }
@@ -1501,7 +1501,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     <strong>Source:</strong> ClaimLevelData (all rows) &bull;
                     <strong>Filter (base):</strong> @(Model.UsesSpCollectionLogic ? "InsurancePayment ≠ 0" : "InsurancePayment > 0") &nbsp;·&nbsp; @(Model.UsesSpCollectionLogic ? "PaymentPostedDate" : "CheckDate") not blank/invalid &bull;
                     <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) – @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &nbsp;|&nbsp; DOS: @(string.IsNullOrWhiteSpace(Model.FilterDosFrom) ? "-" : Model.FilterDosFrom) – @(string.IsNullOrWhiteSpace(Model.FilterDosTo) ? "-" : Model.FilterDosTo) &nbsp;|&nbsp; @Model.PostedDateLabel: @(string.IsNullOrWhiteSpace(Model.FilterCheckDateFrom) ? "-" : Model.FilterCheckDateFrom) – @(string.IsNullOrWhiteSpace(Model.FilterCheckDateTo) ? "-" : Model.FilterCheckDateTo) &bull;
-                    <strong>Rows:</strong> PanelName &bull;
+                    <strong>Rows:</strong> @(Model.IsAugustusLab ? "PanelCategory" : "PanelName") &bull;
                     <strong>Drill-down:</strong> Top @(Model.IsNorthWestLab ? 5 : 3) PayerName_Raw by Unique ClaimID count &bull;
                     <strong>Columns:</strong> @(Model.UsesSpCollectionLogic ? "PaymentPostedDate" : "CheckDate") (Year, Month) — No. of Claims + Insurance Paid Amount &bull;
                     <strong>Sorted by:</strong> @(Model.IsWellHealthLab ? "Grand Total Insurance Payment DESC" : "Grand Total (Unique ClaimID count) DESC")

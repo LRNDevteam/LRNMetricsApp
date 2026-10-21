@@ -239,11 +239,15 @@
         @if (dateBasis is not null)
         {
             <span><strong>Date Range:</strong> @windowBasis @(result.WindowFrom?.ToString("MM/dd/yyyy")) &ndash; @(result.WindowTo?.ToString("MM/dd/yyyy")) (@(Model.UsesPanelAveragesTitles ? $"{months} months from the billed week-range end date" : $"last {months} calendar months up to the latest {windowBasis} on or before the billed week-range end")) &bull;</span>
-            @if (Model.UsesPanelAveragesTitles)
+            @if (Model.IsAugustusLab)
+            {
+                <span><strong>Filter:</strong> BillingStatus = Billed &bull;</span>
+            }
+            else if (Model.UsesPanelAveragesTitles)
             {
                 <span><strong>Filter:</strong> FirstBilledDate not blank &bull;</span>
             }
-            @if (Model.IsNorthWestLab)
+            @if (Model.IsNorthWestLab || Model.IsAugustusLab)
             {
                 <span><strong>Fully Paid / Adjudicated / 30 / 60 Days:</strong> ClaimStatus = Fully Paid / Adjudicated = Adjudicated / Bucket30 = 30 Bucket / Bucket60 = 60 Bucket &bull;</span>
             }
@@ -258,7 +262,7 @@
         }
         <strong>Panel totals:</strong> ALL payers &bull;
         <strong>Drill-down:</strong> Top 3 PayerName_Raw by claim count &bull;
-        <strong>Counts:</strong> @(Model.IsNorthWestLab ? "Count of unique ClaimID" : "Count(ClaimID) — not DISTINCT")
+        <strong>Counts:</strong> @(Model.IsNorthWestLab || Model.IsAugustusLab ? "Count of unique ClaimID" : "Count(ClaimID) — not DISTINCT")
     </div>
 }
 else

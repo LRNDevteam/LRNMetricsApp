@@ -33,6 +33,27 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
+            try
+            {
+                await using var cmd = new SqlCommand("dbo.usp_GetAug_ProductionFilterOptions_v3", conn)
+                {
+                    CommandType    = CommandType.StoredProcedure,
+                    CommandTimeout = 30,
+                };
+                await using var rdr = await cmd.ExecuteReaderAsync(ct);
+                var payers = new List<string>();
+                var panels = new List<string>();
+                while (await rdr.ReadAsync(ct))
+                    if (!rdr.IsDBNull(0)) payers.Add(rdr.GetString(0));
+                if (await rdr.NextResultAsync(ct))
+                    while (await rdr.ReadAsync(ct))
+                        if (!rdr.IsDBNull(0)) panels.Add(rdr.GetString(0));
+                return (payers, panels);
+            }
+            catch (SqlException ex)
+            {
+                _logger.LogWarning(ex, "usp_GetAug_ProductionFilterOptions_v3 failed; using snapshot filter lists.");
+            }
             return await ProductionFilterLookup.LoadFastAsync(conn, "Aug_", _logger, ct);
         }
         catch (Exception ex)
@@ -56,9 +77,8 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default)
     {
-        // Always route through dbo.usp_GetAug_MonthlyBilledProductionSummary so the SP
-        // owns the SQL surface. With all filter params NULL, the SP serves rows from the
-        // pre-aggregated dbo.Aug_MonthlyBilledProductionSummary snapshot table.
+        // dbo.usp_GetAug_MonthlyBilledProductionSummary_v3 (33_Augustus_ProductionSummary_ClientLogic.sql):
+        // FirstBilledDate is a date, PanelCategory + Top 3 PayerName_Raw, live from ClaimLevelData.
         // Output schema:
         //   PayerRank = 0  -> panel-level total across ALL payers (panel row).
         //   PayerRank 1..N -> ranked payer drill-down sub-rows.
@@ -66,7 +86,7 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand("dbo.usp_GetAug_MonthlyBilledProductionSummary", conn)
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_MonthlyBilledProductionSummary_v3", conn)
             {
                 CommandType    = CommandType.StoredProcedure,
                 CommandTimeout = 180,
@@ -195,13 +215,13 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default)
     {
-        // Always route through dbo.usp_GetAug_WeeklyBilledProductionSummary_v2
-        // (WeekFolder-anchored Mon-Sun weeks, live from ClaimLevelData).
+        // dbo.usp_GetAug_WeeklyBilledProductionSummary_v3: FirstBilledDate is a date,
+        // EnteredWeek not blank, one column per EnteredWeek label.
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand("dbo.usp_GetAug_WeeklyBilledProductionSummary_v2", conn)
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_WeeklyBilledProductionSummary_v3", conn)
             {
                 CommandType    = CommandType.StoredProcedure,
                 CommandTimeout = 180,
@@ -404,12 +424,12 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default)
     {
-        // Always route through dbo.usp_GetAug_PayerBreakdown.
+        // dbo.usp_GetAug_PayerBreakdown_v3: FirstBilledDate is a date, PayerName_Raw x ChargeEnteredDate month.
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand("dbo.usp_GetAug_PayerBreakdown_v2", conn)
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_PayerBreakdown_v3", conn)
             {
                 CommandType    = CommandType.StoredProcedure,
                 CommandTimeout = 180,
@@ -443,12 +463,12 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default)
     {
-        // Always route through dbo.usp_GetAug_PayerByPanel.
+        // dbo.usp_GetAug_PayerByPanel_v3: FirstBilledDate is a date, PayerName_Raw x PanelCategory.
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand("dbo.usp_GetAug_PayerByPanel", conn)
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_PayerByPanel_v3", conn)
             {
                 CommandType    = CommandType.StoredProcedure,
                 CommandTimeout = 180,
@@ -525,13 +545,13 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default)
     {
-        // Always route through dbo.usp_GetAug_UnbilledAging.
-        // SP returns: PanelName, AgingBucket, ClaimCount, TotalCharges.
+        // dbo.usp_GetAug_UnbilledAging_v3: ClaimStatus = Unbilled in Altumed.
+        // SP returns: PanelName (holds PayerName_Raw), AgingBucket, ClaimCount, TotalCharges.
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand("dbo.usp_GetAug_UnbilledAging", conn)
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_UnbilledAging_v3", conn)
             {
                 CommandType    = CommandType.StoredProcedure,
                 CommandTimeout = 180,
@@ -606,13 +626,13 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default)
     {
-        // Count of CPT (client report), not SUM(Units). CPTCount from the v2 SP
-        // is COUNT(*) of billed CPT line rows; use it for both Units and ClaimCount.
+        // dbo.usp_GetAug_CPTBreakdown_v3: CPTCount is the count of unique ClaimID per CPT and
+        // line [Date] month (FirstBilledDate is a date); use it for both Units and ClaimCount.
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand("dbo.usp_GetAug_CPTBreakdown_v2", conn)
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_CPTBreakdown_v3", conn)
             {
                 CommandType    = CommandType.StoredProcedure,
                 CommandTimeout = 180,
@@ -652,7 +672,7 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
             var grandByMonth = new Dictionary<string, CptBreakdownCell>();
             var cptRows      = new List<CptBreakdownRow>();
 
-            foreach (var (cpt, mm) in cptMonth.OrderBy(x => x.Key))
+            foreach (var (cpt, mm) in cptMonth.OrderByDescending(x => x.Value.Values.Sum(v => v.cnt)).ThenBy(x => x.Key))
             {
                 var byMonth = mm.ToDictionary(kv => kv.Key, kv => new CptBreakdownCell(kv.Value.u, kv.Value.ch, kv.Value.cnt));
                 var byYear  = years.ToDictionary(y => y, y =>
@@ -717,7 +737,7 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand("dbo.usp_GetAug_PanelBreakdown", conn)
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_PanelBreakdown_v3", conn)
             {
                 CommandType    = CommandType.StoredProcedure,
                 CommandTimeout = 180,

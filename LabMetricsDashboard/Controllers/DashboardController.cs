@@ -2580,7 +2580,8 @@ public class DashboardController : Controller
                 CptBreakdownGrandTotalClaims   = cptResult.GrandTotalClaims,
                 CptTotalsOnly                  = cptResult.TotalsOnly,
                 CptUnitsLabel                  = isAugustusLab
-                    || selectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
+                    ? "Claim Count"
+                    : selectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
                     ? "Count of CPT"
                     : genericSummaryRepo?.IsCertus == true ? "Billed Units" : "Count of CPT",
                 ReportWeekFolder               = null,
@@ -2821,7 +2822,8 @@ public class DashboardController : Controller
             FilterFirstBilledFrom = Q(q, "filterFirstBilledFrom"),
             FilterFirstBilledTo = Q(q, "filterFirstBilledTo"),
             CptUnitsLabel = isAugustusLab
-                || selectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
+                ? "Claim Count"
+                : selectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
                 ? "Count of CPT"
                 : genericSummaryRepo?.IsCertus == true ? "Billed Units" : "Count of CPT",
         };
@@ -3541,10 +3543,7 @@ public class DashboardController : Controller
                 CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
                 CptBreakdownGrandTotalClaims    = cptResult.GrandTotalClaims,
                 CptTotalsOnly                   = cptResult.TotalsOnly,
-                CptUnitsLabel                   = isAugustusLab
-                    || selectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
-                    ? "Count of CPT"
-                    : "Count of CPT",
+                CptUnitsLabel                   = isAugustusLab ? "Claim Count" : "Count of CPT",
                 PanelBreakdownMonths              = pnlResult.Months,
                 PanelBreakdownYears               = pnlResult.Years,
                 PanelBreakdownRows                = pnlResult.PayerRows,

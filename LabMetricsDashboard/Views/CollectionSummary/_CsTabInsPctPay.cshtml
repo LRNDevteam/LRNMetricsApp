@@ -199,7 +199,7 @@
                     <strong>Source:</strong> Claim Level Data &bull;
                     <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) — @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &bull;
                     <strong>Sorted by:</strong> @(Model.IsWellHealthLab ? "SUM(InsurancePayment) DESC" : Model.IsAugustusLab || isSpLogicPct || Model.IsNorthWestLab ? "Count of ClaimID DESC" : "SUM(InsurancePayment) DESC") &bull;
-                    @if (Model.IsWellHealthLab)
+                    @if (Model.IsWellHealthLab || Model.IsAugustusLab)
                     {
                         <span><strong>Filter:</strong> InsurancePayment &gt; 0 &bull; <strong>Payment %:</strong> Average of PaymentPercent</span>
                     }

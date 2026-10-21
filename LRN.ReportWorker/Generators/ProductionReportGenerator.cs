@@ -431,7 +431,7 @@ public sealed class ProductionReportGenerator : IReportGenerator
             CptBreakdownGrandByMonth        = cptResult.GrandTotalByMonth,
             CptBreakdownGrandTotalUnits     = cptResult.GrandTotalUnits,
             CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
-            CptUnitsLabel                   = "Count of CPT",
+            CptUnitsLabel                   = "Claim Count",
             ProductionSummaryRule           = "Rule3",
             PanelBreakdownMonths              = pnlResult.Months,
             PanelBreakdownYears               = pnlResult.Years,

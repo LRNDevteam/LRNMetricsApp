@@ -19,10 +19,12 @@
                 // group carrying its own totals. Labs whose SP returns no Source column keep the
                 // plain payer list.
                 var showSource = Model.InsuranceAging.Any(r => !string.IsNullOrWhiteSpace(r.Source));
-                var agingGroups = Model.InsuranceAging
-                    .GroupBy(r => r.Source ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+                var sourceGroups = Model.InsuranceAging
+                    .GroupBy(r => r.Source ?? string.Empty, StringComparer.OrdinalIgnoreCase);
+                // Augustus: the SP already orders sources and payers by claim count.
+                var agingGroups = Model.IsAugustusLab
+                    ? sourceGroups.ToList()
+                    : sourceGroups.OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase).ToList();
                 // Groups render expanded; the header row toggles them closed. The click handler
                 // lives in Index.cshtml (delegated from document) so it also works when this
                 // partial is injected by the lazy-tab loader.
@@ -217,6 +219,15 @@
                     <span><strong>Data:</strong> Claim Level Data &bull;
                     <strong>Filter:</strong> TotalInsuranceBalance &gt; 0 &bull;
                     <strong>Aging Buckets:</strong> AgingDOS (Current, 30+, 60+, 90+, 120+) &bull;
+                    <strong>Sorted by:</strong> Claim Count DESC &bull;
+                    <strong>Metric:</strong> Count of unique ClaimID, SUM(InsuranceBalance)</span>
+                }
+                else if (Model.IsAugustusLab)
+                {
+                    <span><strong>Data:</strong> Claim Level Data &bull;
+                    <strong>Filter:</strong> ClaimStatus = No Response &bull;
+                    <strong>Rows:</strong> Source &rarr; PayerName_Raw &bull;
+                    <strong>Aging Buckets:</strong> Aging (Current, 30+, 60+, 90+, 120+) &bull;
                     <strong>Sorted by:</strong> Claim Count DESC &bull;
                     <strong>Metric:</strong> Count of unique ClaimID, SUM(InsuranceBalance)</span>
                 }

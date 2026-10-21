@@ -1116,7 +1116,7 @@ public static partial class ProductionReportExcelExportBuilder
 
         // ?? Header Row 1 ??
         int hRow1 = row;
-        var rowHeader = vm.SelectedLab.Contains("Elixir", StringComparison.OrdinalIgnoreCase) || IsInHealthLab(vm)
+        var rowHeader = vm.SelectedLab.Contains("Elixir", StringComparison.OrdinalIgnoreCase) || IsInHealthLab(vm) || vm.IsAugustusLab
             ? "Payer Name"
             : "Unbilled x Aging";
         WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, rowHeader, ExcelTheme.InsightsHeaderBg);

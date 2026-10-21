@@ -110,14 +110,23 @@ public static class LabCollectionPrefix
     /// <c>usp_Get{prefix}_CS_AvgPayments_ClientLogic</c>, with "Last 3 Months" hidden.
     /// </summary>
     public static bool UsesAvgPaymentsByDateBasis(string? labName) =>
-        GetPrefix(labName) is "RT" or "BT" or "IHD" or "WH" or "NW";
+        GetPrefix(labName) is "RT" or "BT" or "IHD" or "WH" or "NW" or "Aug";
 
     /// <summary>
     /// Labs whose two date-basis Average Payments tabs / sheets are titled
     /// "Panel Averages - by DOS" and "Panel Averages - by Check Date".
     /// </summary>
     public static bool UsesPanelAveragesTitles(string? labName) =>
-        GetPrefix(labName) is "WH" or "NW";
+        GetPrefix(labName) is "WH" or "NW" or "Aug";
+
+    /// <summary>
+    /// Augustus client-logic Collection Summary (34_Augustus_CollectionSummary_ClientLogic.sql):
+    /// every tab reads its usp_GetAug_CS_*_v3 SP live, so the page never reads the Aug_CS_* snapshots.
+    /// </summary>
+    public static bool ReadsCollectionSpsLive(string? labName) => IsAugustus(labName);
+
+    public static bool IsAugustus(string? labName) =>
+        GetPrefix(labName) is "Aug";
 
     /// <summary>
     /// Labs with the Collection Summary "Avg Payments Last 3 Months" tab and Excel sheet.
@@ -171,7 +180,7 @@ public static class LabCollectionPrefix
     /// BilledCharges). NorthWest: PanelType x ChargeEnteredDate; Cove: Panelname x FirstBilledDate.
     /// </summary>
     public static bool UsesBilledPaidPanelPayment(string? labName) =>
-        GetPrefix(labName) is "NW" or "Cove";
+        GetPrefix(labName) is "NW" or "Cove" or "Aug";
 
     /// <summary>
     /// Claim / line column behind the Collection Summary "Posted Date" and its Check Date filter.
@@ -250,6 +259,8 @@ public static class LabCollectionPrefix
     public static string GetPanelColumn(string? labName)
     {
         if (string.IsNullOrWhiteSpace(labName)) return "PanelName";
+
+        if (GetPrefix(labName) is "Aug") return "PanelCategory";
 
         var normalized = labName.Replace("_", string.Empty).Replace(" ", string.Empty);
 

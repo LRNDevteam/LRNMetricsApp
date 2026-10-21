@@ -22,11 +22,18 @@ public static class LisSummaryAggregateLabs
         ["North West"] = "NW_",
         ["NorthWest_Labs"] = "NW_",
         ["NWL"] = "NW_",
+        ["Augustus"] = "Aug_",
+        ["Augustus_Labs"] = "Aug_",
+        ["Augustus Labs"] = "Aug_",
+        ["AugustusLabs"] = "Aug_",
+        ["Augustus_LRN"] = "Aug_",
     };
 
     private static readonly Dictionary<int, string> PrefixByLabId = new()
     {
+        [19] = "Aug_",
         [23] = "NW_",
+        [24] = "Aug_",
         [26] = "AnP_",
         [27] = "WH_",
     };

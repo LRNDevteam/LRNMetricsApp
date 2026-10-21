@@ -179,7 +179,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         string.Equals(prefix, "WH", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Augustus Collection Report client fixes live in *_v2 SPs so LIVE usp_GetAug_CS_* stay.
+    /// Augustus Collection Report client logic lives in *_v3 SPs
+    /// (34_Augustus_CollectionSummary_ClientLogic.sql) so LIVE usp_GetAug_CS_* / *_v2 stay.
     /// </summary>
     private static bool IsAugustusCollectionPrefix(string? prefix) =>
         string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase);
@@ -192,7 +193,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
 
     private static string CollectionGetSp(string prefix, string leaf) =>
         IsAugustusCollectionPrefix(prefix)
-            ? $"dbo.usp_Get{prefix}_{leaf}_v2"
+            ? $"dbo.usp_Get{prefix}_{leaf}_v3"
             : IsCoveCollectionPrefix(prefix) && leaf is "CS_InsuranceVsAging" or "CS_PanelAverages"
                 ? $"dbo.usp_Get{prefix}_{leaf}_ClientLogic"
                 : $"dbo.usp_Get{prefix}_{leaf}";
@@ -244,7 +245,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         DateOnly? filterCheckDateFrom, DateOnly? filterCheckDateTo,
         CancellationToken ct)
     {
-        var spName = $"dbo.usp_Get{prefix}_CS_MonthlyClaimVolume";
+        var spName = CollectionGetSp(prefix, "CS_MonthlyClaimVolume");
         var raw = new List<CollectionRawPivotRow>();
         var sw = Stopwatch.StartNew();
 
@@ -296,7 +297,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         DateOnly? filterCheckDateFrom, DateOnly? filterCheckDateTo,
         CancellationToken ct)
     {
-        var spName = $"dbo.usp_Get{prefix}_CS_WeeklyClaimVolume";
+        var spName = CollectionGetSp(prefix, "CS_WeeklyClaimVolume");
         var rows = new List<(string Panel, string Payer, byte PayerRank, byte Week, DateTime Start, DateTime End, int Claims, decimal Paid)>();
         var sw = Stopwatch.StartNew();
 

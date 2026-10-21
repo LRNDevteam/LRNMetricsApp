@@ -244,9 +244,16 @@ else if (rowsData.Count > 0)
             <strong>Sorted by:</strong> Count of ClaimID DESC &bull;
             <strong>Values:</strong> Count of unique ClaimID, Sum of InsurancePayment</span>
         }
+        else if (Model.IsAugustusLab)
+        {
+            <span><strong>Source:</strong> Claim Level Data &bull; <strong>Filter:</strong> InsurancePayment &gt; 0 &bull;
+            <strong>Rows:</strong> PayerName_Raw &bull; <strong>Columns:</strong> CheckDate month / year &bull;
+            <strong>Sorted by:</strong> Count of ClaimID DESC &bull;
+            <strong>Values:</strong> Count of unique ClaimID, Sum of InsurancePayment</span>
+        }
         else
         {
-            <strong>Source:</strong> @(Model.IsAugustusLab ? "Collection Claim Level Data (Posted Date)" : "Aggregate snapshot table") <code>@(Model.IsAugustusLab ? "usp_GetAug_CS_InsuranceVsPayment_v2" : "{prefix}_CS_InsuranceVsPayment")</code>
+            <span><strong>Source:</strong> Aggregate snapshot table <code>{prefix}_CS_InsuranceVsPayment</code></span>
         }
     </div>
 }

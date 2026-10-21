@@ -1252,13 +1252,23 @@ th.pr-month-data, td.pr-month-data {
                         <li>Rows: <code>PanelType</code> &nbsp;·&nbsp; Drill-down: Top 5 <code>PayerName_Raw</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
                         <li>Columns: Thursday–Wednesday week of <code>EnteredWeek</code></li>
                     }
+                    else if (Model.IsAugustusLab)
+                    {
+                        <li>Source: <code>ClaimLevelData</code></li>
+                        <li>Rows: <code>PanelCategory</code> &nbsp;·&nbsp; Drill-down: Top 3 <code>PayerName_Raw</code> by Claim Count</li>
+                        <li>Columns: <code>EnteredWeek</code> (range = that week's <code>ChargeEnteredDate</code> span)</li>
+                    }
                     else
                     {
                         <li>Source: <code>ClaimLevelData</code> · Last 4 complete <code>@weeklyActiveWeek</code> weeks</li>
                         <li>Rows: <code>PanelName</code> &nbsp;·&nbsp; Drill-down: Top 3 <code>PayerName</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
                         <li>Columns: Week of <code>@weeklyDateColumn</code></li>
                     }
-                    @if (weeklyIsRule5)
+                    @if (Model.IsAugustusLab)
+                    {
+                        <li>Filter: <code>FirstBilledDate</code> is a valid date &nbsp;·&nbsp; <code>EnteredWeek</code> is not blank</li>
+                    }
+                    else if (weeklyIsRule5)
                     {
                         <li>Filter: Exclude <code>PayerName_Raw</code> containing <code>None</code>, <code>Accu Labs</code>, <code>Client Bill</code>, <code>Client</code>, <code>Patient</code>, <code>Patient Pay</code> &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
                     }
@@ -1384,6 +1394,15 @@ th.pr-month-data, td.pr-month-data {
                             <span class="filter-key-2">BilledUnbilled</span> = Billed
                             &nbsp;·&nbsp; Rows: <span class="filter-key">PayerName_Raw</span>
                             &nbsp;·&nbsp; Columns: <span class="filter-key">ChargeEnteredDate</span> year total
+                            &nbsp;·&nbsp; Sorted by Claim Count</span>
+                        }
+                        else if (Model.IsAugustusLab)
+                        {
+                        <span><span class="filter-label">Filter:</span>
+                            <span class="filter-key-2">FirstBilledDate</span> is a valid date
+                            &nbsp;·&nbsp; Rows: <span class="filter-key">PayerName_Raw</span>
+                            &nbsp;·&nbsp; Columns: <span class="filter-key">ChargeEnteredDate</span> month / year
+                            &nbsp;·&nbsp; Values: Count of unique ClaimID, Sum of ChargeAmount
                             &nbsp;·&nbsp; Sorted by Claim Count</span>
                         }
                         else
@@ -1570,6 +1589,15 @@ th.pr-month-data, td.pr-month-data {
                             &nbsp;·&nbsp; Rows: <span class="filter-key">PayerName_Raw</span>
                             &nbsp;·&nbsp; Columns: <span class="filter-key">PanelNameBasedOnCPT</span></span>
                         }
+                        else if (Model.IsAugustusLab)
+                        {
+                        <span><span class="filter-label">Filter:</span>
+                            <span class="filter-key-2">FirstBilledDate</span> is a valid date
+                            &nbsp;·&nbsp; Rows: <span class="filter-key">PayerName_Raw</span>
+                            &nbsp;·&nbsp; Columns: <span class="filter-key">PanelCategory</span>
+                            &nbsp;·&nbsp; Values: Count of unique ClaimID, Sum of ChargeAmount
+                            &nbsp;·&nbsp; Sorted by Claim Count</span>
+                        }
                         else
                         {
                         <span><span class="filter-label">Filter:</span>
@@ -1699,6 +1727,15 @@ th.pr-month-data, td.pr-month-data {
                             &nbsp;·&nbsp; Columns: <span class="filter-key">Aging</span>
                             &nbsp;·&nbsp; Sorted by Claim Count</span>
                         }
+                        else if (Model.IsAugustusLab)
+                        {
+                        <span><span class="filter-label">Filter:</span>
+                            <span class="filter-key-2">ClaimStatus</span> = Unbilled in Altumed
+                            &nbsp;·&nbsp; Rows: <span class="filter-key">PayerName_Raw</span>
+                            &nbsp;·&nbsp; Columns: <span class="filter-key">Aging</span>
+                            &nbsp;·&nbsp; Values: Count of unique ClaimID, Sum of ChargeAmount
+                            &nbsp;·&nbsp; Sorted by Claim Count</span>
+                        }
                         else
                         {
                         <span><span class="filter-label">Filter:</span>
@@ -1723,7 +1760,7 @@ th.pr-month-data, td.pr-month-data {
                             </colgroup>
                             <thead>
                                 <tr>
-                                    <th rowspan="2">@(Model.SelectedLab.Contains("Elixir", StringComparison.OrdinalIgnoreCase) || Model.SelectedLab.Contains("InHealth", StringComparison.OrdinalIgnoreCase) ? "Payer Name" : "Unbilled x Aging")</th>
+                                    <th rowspan="2">@(Model.SelectedLab.Contains("Elixir", StringComparison.OrdinalIgnoreCase) || Model.SelectedLab.Contains("InHealth", StringComparison.OrdinalIgnoreCase) || Model.IsAugustusLab ? "Payer Name" : "Unbilled x Aging")</th>
                                     @foreach (var bk in agingBuckets)
                                     {
                                         <th colspan="2">@bk</th>
@@ -2143,6 +2180,14 @@ th.pr-month-data, td.pr-month-data {
                             <text><span class="filter-key-2">BilledUnbilled</span> = Billed
                             &nbsp;·&nbsp; Rows: <span class="filter-key-2">PanelType</span>
                             &nbsp;·&nbsp; Columns: <span class="filter-key-2">ChargeEnteredDate</span> year total
+                            &nbsp;·&nbsp; Sorted by Claim Count</text>
+                            }
+                            else if (Model.IsAugustusLab)
+                            {
+                            <text><span class="filter-key-2">FirstBilledDate</span> is a valid date
+                            &nbsp;·&nbsp; Rows: <span class="filter-key-2">PanelCategory</span> &gt; <span class="filter-key-2">PayerName_Raw</span>
+                            &nbsp;·&nbsp; Columns: <span class="filter-key-2">ChargeEnteredDate</span> month / year
+                            &nbsp;·&nbsp; Values: Count of unique ClaimID, Sum of ChargeAmount
                             &nbsp;·&nbsp; Sorted by Claim Count</text>
                             }
                             else

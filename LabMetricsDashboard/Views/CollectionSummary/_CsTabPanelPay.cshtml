@@ -165,6 +165,14 @@ else if (Model.UsesBilledPaidPanelPayment && hasMonthlyGrain)
         <strong>Billed:</strong> BilledUnbilled = Billed &mdash; Count of unique ClaimID, Sum of ChargeAmount &bull;
         <strong>Paid:</strong> InsurancePayment &gt; 0 &mdash; Count of unique ClaimID, Sum of InsurancePayment</span>
     }
+    else if (Model.IsAugustusLab)
+    {
+        <span><strong>Source:</strong> Claim Level Data &bull;
+        <strong>Rows:</strong> PanelCategory &bull; <strong>Columns:</strong> FirstBilledDate month &bull;
+        <strong>Sorted by:</strong> Billed Claim Count DESC &bull;
+        <strong>Billed:</strong> BillingStatus = Billed / Client Billing &mdash; Count of unique ClaimID, Sum of ChargeAmount &bull;
+        <strong>Paid:</strong> InsurancePayment &gt; 0 and CheckDate not blank &mdash; Count of unique ClaimID, Sum of InsurancePayment</span>
+    }
     else
     {
         <span><strong>Source:</strong> Claim Level Data &bull;
