@@ -9,7 +9,7 @@ namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// Executive Summary download for the labs with highlight tabs (NorthWest, Cove, Analyze
-/// Pathology, Augustus): appends the page's Production, Collection, LIMS and Denial Highlights
+/// Pathology, Augustus, WellHealth): appends the page's Production, Collection, LIMS and Denial Highlights
 /// tabs as extra sheets (Denial only where <see cref="ShowsDenialHighlights"/>). Each section reuses its own report's repository calls, Excel sheet builders
 /// and Key Insights block, so the numbers match the Production Summary, Collection Summary,
 /// LIS Summary and Denial Summary pages (unfiltered).
@@ -66,11 +66,11 @@ public sealed class ExecutiveSummaryHighlightsExcel
 
     /// <summary>Labs whose Executive Summary page shows the highlight tabs.</summary>
     public static bool AppliesTo(string? labName) =>
-        LabCollectionPrefix.GetPrefix(labName) is "NW" or "Cove" or "AnP" or "Aug";
+        LabCollectionPrefix.GetPrefix(labName) is "NW" or "Cove" or "AnP" or "Aug" or "WH";
 
     /// <summary>Labs among <see cref="AppliesTo"/> whose Denial Highlights tab is live.</summary>
     public static bool ShowsDenialHighlights(string? labName) =>
-        LabCollectionPrefix.GetPrefix(labName) is "NW" or "Cove" or "AnP" or "Aug";
+        LabCollectionPrefix.GetPrefix(labName) is "NW" or "Cove" or "AnP" or "Aug" or "WH";
 
     /// <summary>
     /// Returns the Executive Summary workbook with the highlight sheets appended.
@@ -302,7 +302,7 @@ public sealed class ExecutiveSummaryHighlightsExcel
 
     /// <summary>
     /// Monthly and Weekly Summary of the Denial Summary page: the lab's usp_Get{prefix}_Denial*
-    /// SPs (NorthWest, Analyze Pathology), else the inline ClaimLevelData summary (Cove).
+    /// SPs (NorthWest, Analyze Pathology, Augustus, WellHealth), else the inline ClaimLevelData summary (Cove).
     /// </summary>
     private async Task<XLWorkbook> BuildDenialAsync(string connStr, string labName, CancellationToken ct)
     {

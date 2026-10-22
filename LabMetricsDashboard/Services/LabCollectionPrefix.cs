@@ -201,6 +201,13 @@ public static class LabCollectionPrefix
         GetPrefix(labName) is "AnP" or "WH" or "NW" or "Aug";
 
     /// <summary>
+    /// Labs whose Executive Summary values open the "rows behind this value" popup, read from
+    /// <c>usp_Get{prefix}_ExecutiveSummaryCellRows</c> (same rules as the Executive Summary SPs).
+    /// </summary>
+    public static bool HasEsCellRows(string? labName) =>
+        GetPrefix(labName) is "WH";
+
+    /// <summary>
     /// What the Denial Summary Monthly / Weekly SPs rank insurances and their top denials by
     /// (shown in the grid caption).
     /// </summary>

@@ -17,6 +17,31 @@
                        || Model.SelectedLab.Equals("NorthWest_Labs", StringComparison.OrdinalIgnoreCase);
     bool showHighlightTabs = LabMetricsDashboard.Services.ExecutiveSummaryHighlightsExcel.AppliesTo(Model.SelectedLab);
     bool showDenialHighlights = LabMetricsDashboard.Services.ExecutiveSummaryHighlightsExcel.ShowsDenialHighlights(Model.SelectedLab);
+    // Every value opens the "rows behind this value" popup (usp_Get{prefix}_ExecutiveSummaryCellRows).
+    bool esCellRows = LabMetricsDashboard.Services.LabCollectionPrefix.HasEsCellRows(Model.SelectedLab);
+
+    // The page filters the popup re-applies, as query-string pairs.
+    string EsFilterQuery()
+    {
+        var parts = new List<string>();
+        void Add(string key, string? val)
+        {
+            if (!string.IsNullOrWhiteSpace(val)) parts.Add(key + "=" + Uri.EscapeDataString(val));
+        }
+        Add("yearFrom", Model.SelectedYearFrom?.ToString());
+        Add("yearTo", Model.SelectedYearTo?.ToString());
+        Add("monthFrom", Model.SelectedMonthFrom?.ToString());
+        Add("monthTo", Model.SelectedMonthTo?.ToString());
+        Add("dosFrom", Model.DosFrom?.ToString("yyyy-MM-dd"));
+        Add("dosTo", Model.DosTo?.ToString("yyyy-MM-dd"));
+        Add("billedFrom", Model.BilledFrom?.ToString("yyyy-MM-dd"));
+        Add("billedTo", Model.BilledTo?.ToString("yyyy-MM-dd"));
+        foreach (var v in Model.SelectedPanels) Add("panels", v);
+        foreach (var v in Model.SelectedClinics) Add("clinics", v);
+        foreach (var v in Model.SelectedProviders) Add("providers", v);
+        foreach (var v in Model.SelectedReps) Add("reps", v);
+        return string.Join("&", parts);
+    }
 
     static string MonthName(int m) => m == 0 ? "Total" :
         System.Globalization.CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedMonthName(m);
@@ -432,7 +457,7 @@
     </div>
 </div>
 
-@* Highlight tabs (NorthWest, Cove, Analyze Pathology, Augustus): each report loads in a frame on its first click. *@
+@* Highlight tabs (NorthWest, Cove, Analyze Pathology, Augustus, WellHealth): each report loads in a frame on its first click. *@
 if (showHighlightTabs)
 {
 <ul class="nav es-hl-tabs mb-3" id="esHlTabs" role="tablist">
@@ -946,7 +971,18 @@ if (showHighlightTabs)
             bool esUseBilled = (Model.BilledFrom.HasValue || Model.BilledTo.HasValue)
                                && !Model.DosFrom.HasValue && !Model.DosTo.HasValue;
             string esDateBasis = esUseBilled ? "Billed Date" : "DOS";
-            <div class="es-wrap m-2">
+            <div class="es-wrap m-2@(esCellRows ? " es-cellrows-on" : "")">
+                @if (esCellRows)
+                {
+                    <div id="esCellCtx" hidden
+                         data-lab="@Model.SelectedLab"
+                         data-filters="@EsFilterQuery()"
+                         data-rows-url="@Url.Action("CellRows", "ExecutiveSummary")"></div>
+                    <div class="esc-legend">
+                        <span><span class="esc-legend-swatch esc-legend-rows"></span>Value - opens the rows behind it</span>
+                        <span><span class="esc-legend-swatch esc-legend-drill"></span>Year / Grand Total - opens Insight Drill-Through</span>
+                    </div>
+                }
                 <div class="es-scroll">
                     <table class="es-table">
                         <colgroup>
@@ -1093,8 +1129,16 @@ if (showHighlightTabs)
                                                 row.ValuesByYearMonth.TryGetValue((year, m), out var v);
                                                 IHtmlContent cellVal = FmtCount(v, row.Category, row.RowCode);
                                                 // Monthly cells are display-only — drill links live on the
-                                                // Year Total / Grand Total cells of the two LIS rows only.
-                                                <td class="@(dollarRow ? "es-cell-dollar" : null)">@cellVal</td>
+                                                // Year Total / Grand Total cells of the two LIS rows only
+                                                // (except labs with the value popup).
+                                                if (esCellRows && v != 0)
+                                                {
+                                                    <td class="@(dollarRow ? "es-cell-dollar" : null)"><a href="#" class="es-cell-link" data-es-cat="@row.Category" data-es-row="@row.RowCode" data-es-title="@insightRowTitle" data-es-year="@year" data-es-month="@m">@cellVal</a></td>
+                                                }
+                                                else
+                                                {
+                                                    <td class="@(dollarRow ? "es-cell-dollar" : null)">@cellVal</td>
+                                                }
                                             }
                                             var yrTot = RowYearTotal(row, year);
                                             @* Prefer rowCode (lab-specific LisDrillRowDef) over generic
@@ -1124,6 +1168,10 @@ if (showHighlightTabs)
                                                 <td class="es-year-total@(dollarRow ? " es-cell-dollar" : "")">
                                                     <a href="@yrDrillUrl" class="es-drill-link">@FmtCount(yrTot, row.Category, row.RowCode)</a>
                                                 </td>
+                                            }
+                                            else if (esCellRows && yrTot != 0)
+                                            {
+                                                <td class="es-year-total@(dollarRow ? " es-cell-dollar" : "")"><a href="#" class="es-cell-link" data-es-cat="@row.Category" data-es-row="@row.RowCode" data-es-title="@insightRowTitle" data-es-year="@year" data-es-month="0">@FmtCount(yrTot, row.Category, row.RowCode)</a></td>
                                             }
                                             else
                                             {
@@ -1155,6 +1203,10 @@ if (showHighlightTabs)
                                             <td class="es-grand@(dollarRow ? " es-cell-dollar" : "")">
                                                 <a href="@gtDrillUrl" class="es-drill-link">@FmtCount(gTot, row.Category, row.RowCode)</a>
                                             </td>
+                                        }
+                                        else if (esCellRows && gTot != 0)
+                                        {
+                                            <td class="es-grand@(dollarRow ? " es-cell-dollar" : "")"><a href="#" class="es-cell-link" data-es-cat="@row.Category" data-es-row="@row.RowCode" data-es-title="@insightRowTitle" data-es-year="0" data-es-month="0">@FmtCount(gTot, row.Category, row.RowCode)</a></td>
                                         }
                                         else
                                         {
@@ -1267,6 +1319,45 @@ if (showHighlightTabs)
         });
     })();
 </script>
+}
+
+@if (!esTableOnly && esCellRows)
+{
+    <link rel="stylesheet" href="~/css/es-cell-rows.css" asp-append-version="true" />
+    <div class="modal fade" id="esCellModal" tabindex="-1" aria-labelledby="esCellModalTitle" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable esc-dialog">
+            <div class="modal-content esc-modal">
+                <div class="modal-header esc-head">
+                    <div class="esc-title-block">
+                        <div class="esc-title" id="esCellModalTitle">Value details</div>
+                        <div class="esc-sub" id="esCellModalSub"></div>
+                    </div>
+                    <div class="esc-value-badge" id="esCellModalValue"></div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body esc-body">
+                    <ul class="esc-rules" id="esCellRules" aria-label="How this value is calculated"></ul>
+                    <div class="esc-alert" id="esCellAlert" hidden></div>
+                    <div class="esc-summary" id="esCellSummary"></div>
+                    <div class="esc-grid-wrap" id="esCellGridWrap">
+                        <table class="esc-grid" id="esCellGrid"><thead></thead><tbody></tbody></table>
+                    </div>
+                    <div class="esc-loading" id="esCellLoading" hidden>
+                        <span class="spinner-border spinner-border-sm text-secondary me-2" role="status" aria-hidden="true"></span>
+                        Loading rows…
+                    </div>
+                </div>
+                <div class="modal-footer esc-foot">
+                    <div class="esc-pager" id="esCellPager"></div>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="esCellBack" hidden>
+                        <i class="bi bi-arrow-left"></i> Back to calculation
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="~/js/es-cell-rows.js" asp-append-version="true" nonce="@Context.Items["CspNonce"]"></script>
 }
 
 @if (!esTableOnly)

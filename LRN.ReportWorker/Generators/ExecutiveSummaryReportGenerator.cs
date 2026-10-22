@@ -100,7 +100,7 @@ public sealed class ExecutiveSummaryReportGenerator : IReportGenerator
         var bytes = new ExecutiveSummaryExcelBuilder().Build(vm);
         await Progress(75);
 
-        // NorthWest, Cove, Analyze Pathology, Augustus: Production / Collection / LIMS / Denial Highlights tabs of the page.
+        // NorthWest, Cove, Analyze Pathology, Augustus, WellHealth: Production / Collection / LIMS / Denial Highlights tabs of the page.
         if (ExecutiveSummaryHighlightsExcel.AppliesTo(job.LabName))
             bytes = await _highlights.AppendAsync(bytes, job.LabName, ct);
         await Progress(90);

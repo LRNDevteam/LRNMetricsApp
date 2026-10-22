@@ -5,7 +5,7 @@ using System.Globalization;
 
 namespace LabMetricsDashboard.Services;
 
-public sealed class SqlPhiExecutiveSummaryRepository
+public sealed partial class SqlPhiExecutiveSummaryRepository
 {
     private readonly ILogger<SqlPhiExecutiveSummaryRepository> _logger;
 

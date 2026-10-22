@@ -522,6 +522,101 @@ public sealed class ExecutiveSummaryController : Controller
     }
 
     /// <summary>
+    /// Value popup (labs with <see cref="LabCollectionPrefix.HasEsCellRows"/>): the source rows behind
+    /// one Executive Summary cell under the page's filters, plus the rules that select them.
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> CellRows(
+        string? lab, string category, string rowCode, int year = 0, int month = 0,
+        int page = 1, int pageSize = 100,
+        int? yearFrom = null, int? yearTo = null, int? monthFrom = null, int? monthTo = null,
+        DateTime? dosFrom = null, DateTime? dosTo = null, DateTime? billedFrom = null, DateTime? billedTo = null,
+        string[]? panels = null, string[]? clinics = null, string[]? providers = null, string[]? reps = null,
+        CancellationToken ct = default)
+    {
+        var (labName, connStr, prefix, error) = await ResolveCellRowsLabAsync(lab, ct);
+        if (error is not null) return BadRequest(new { error });
+
+        var req = BuildCellRowsRequest(category, rowCode, year, month, Math.Max(page, 1), Math.Clamp(pageSize, 10, 500),
+            yearFrom, yearTo, monthFrom, monthTo, dosFrom, dosTo, billedFrom, billedTo, panels, clinics, providers, reps);
+        try
+        {
+            var result = await _repo.GetCellRowsAsync(connStr!, prefix!, req, ct);
+            return Json(result);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Executive Summary cell rows failed for lab {Lab} {Category}/{RowCode} {Year}-{Month}.",
+                labName, category, rowCode, year, month);
+            return StatusCode(500, new { error = "The rows for this value could not be loaded." });
+        }
+    }
+
+    /// <summary>Excel download of every row behind one Executive Summary cell (see <see cref="CellRows"/>).</summary>
+    [HttpGet]
+    public async Task<IActionResult> CellRowsExport(
+        string? lab, string category, string rowCode, string? title, string? value, int year = 0, int month = 0,
+        int? yearFrom = null, int? yearTo = null, int? monthFrom = null, int? monthTo = null,
+        DateTime? dosFrom = null, DateTime? dosTo = null, DateTime? billedFrom = null, DateTime? billedTo = null,
+        string[]? panels = null, string[]? clinics = null, string[]? providers = null, string[]? reps = null,
+        CancellationToken ct = default)
+    {
+        var (labName, connStr, prefix, error) = await ResolveCellRowsLabAsync(lab, ct);
+        if (error is not null) return BadRequest(error);
+
+        var req = BuildCellRowsRequest(category, rowCode, year, month, 1, 0,
+            yearFrom, yearTo, monthFrom, monthTo, dosFrom, dosTo, billedFrom, billedTo, panels, clinics, providers, reps);
+        var result = await _repo.GetCellRowsAsync(connStr!, prefix!, req, ct);
+
+        var periodLabel = year == 0 ? "Grand Total"
+            : month == 0 ? $"{year} Total"
+            : new DateTime(year, month, 1).ToString("MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        var rowTitle = string.IsNullOrWhiteSpace(title) ? rowCode : title.Trim();
+        var bytes = ExecSummaryCellRowsExcelBuilder.Build(result, labName, rowTitle, periodLabel, value ?? string.Empty);
+        var safeTitle = string.Concat(rowTitle.Split(Path.GetInvalidFileNameChars())).Replace(' ', '_');
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"ExecutiveSummary_{labName}_{safeTitle}_{periodLabel.Replace(' ', '_')}_{DateTime.Now:yyyyMMdd}.xlsx");
+    }
+
+    private async Task<(string LabName, string? ConnStr, string? Prefix, string? Error)> ResolveCellRowsLabAsync(
+        string? lab, CancellationToken ct)
+    {
+        var labName = LabSelectionHelper.Resolve(HttpContext, lab, _labSettings.Labs.Keys.OrderBy(x => x).ToList());
+        if (!LabCollectionPrefix.HasEsCellRows(labName)
+            || !_labSettings.Labs.TryGetValue(labName, out var config)
+            || string.IsNullOrWhiteSpace(config.DbConnectionString)
+            || !LabPrefixMap.TryGetValue(labName, out var prefix))
+            return (labName, null, null, $"Value rows are not available for '{labName}'.");
+
+        if (!await _repo.StoredProcedureExistsAsync(config.DbConnectionString,
+                SqlPhiExecutiveSummaryRepository.ExecutiveSummaryCellRowsSpName(prefix), ct))
+            return (labName, null, null, "Value rows are not deployed for this lab yet.");
+
+        return (labName, config.DbConnectionString, prefix, null);
+    }
+
+    private static ExecSummaryCellRowsRequest BuildCellRowsRequest(
+        string category, string rowCode, int year, int month, int page, int pageSize,
+        int? yearFrom, int? yearTo, int? monthFrom, int? monthTo,
+        DateTime? dosFrom, DateTime? dosTo, DateTime? billedFrom, DateTime? billedTo,
+        string[]? panels, string[]? clinics, string[]? providers, string[]? reps)
+    {
+        static string? Join(string[]? v) => v is { Length: > 0 } ? string.Join(",", v) : null;
+        return new ExecSummaryCellRowsRequest
+        {
+            Category = category ?? string.Empty,
+            RowCode = rowCode ?? string.Empty,
+            Year = year,
+            Month = month,
+            YearFrom = yearFrom, YearTo = yearTo, MonthFrom = monthFrom, MonthTo = monthTo,
+            DosFrom = dosFrom, DosTo = dosTo, BilledFrom = billedFrom, BilledTo = billedTo,
+            Panels = Join(panels), Clinics = Join(clinics), Providers = Join(providers), Reps = Join(reps),
+            Page = page,
+            PageSize = pageSize,
+        };
+    }
+
+    /// <summary>
     /// Insight drill-through for LIS / PMS / Cash Breakdown rows — reachable from
     /// Grand Total / Year Total cells. Row filters from dbo.LisDrillRowDef;
     /// Cash uses dbo.usp_GetExecutiveSummaryDetail_CashDrill_Core (dollar SUM).
