@@ -11,11 +11,11 @@ namespace LabMetricsDashboard.Tests;
 /// <summary>Master Values > Fees Schedule Import: reading the CMS fee schedule and its variants.</summary>
 public class FeeScheduleWorkbookTests
 {
-    /// <summary>The file the business supplied (docs/ClinicalLaboratoryFeeSchedule_2026_Q1V1.xls), a legacy .xls.</summary>
+    /// <summary>The file the business supplied (docs/ar-workbench/ClinicalLaboratoryFeeSchedule_2026_Q1V1.xls), a legacy .xls.</summary>
     [Fact]
     public void The_CMS_2026_Q1_fee_schedule_xls_is_read_as_published()
     {
-        var path = FindDocsFile("ClinicalLaboratoryFeeSchedule_2026_Q1V1.xls");
+        var path = FindDocsFile(Path.Combine("ar-workbench", "ClinicalLaboratoryFeeSchedule_2026_Q1V1.xls"));
         if (path is null) return;   // docs not present on this machine
 
         using var stream = File.OpenRead(path);

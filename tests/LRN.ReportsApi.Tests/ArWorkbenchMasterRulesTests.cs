@@ -175,6 +175,16 @@ public class ArWorkbenchMasterRulesTests
     }
 
     [Fact]
+    public void Batch_criteria_action_counts_as_a_criterion_and_is_summarised()
+    {
+        var clean = new ArWorkbenchBatchCriteria { Action = [" Appealed ", "appealed"] }.Clean();
+        Assert.Equal(["Appealed"], clean.Action);
+        Assert.False(clean.IsEmpty);
+        Assert.Equal("Appealed", SqlArWorkbenchRepository.CriteriaSummary(clean));
+        Assert.Equal("no action", SqlArWorkbenchRepository.CriteriaSummary(new ArWorkbenchBatchCriteria { Action = [ArWorkbenchFilterValues.None] }));
+    }
+
+    [Fact]
     public void Parse_rejects_a_workbook_with_other_headers()
     {
         using var workbook = new XLWorkbook();

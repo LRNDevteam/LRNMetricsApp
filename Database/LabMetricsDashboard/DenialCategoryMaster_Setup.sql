@@ -1,6 +1,6 @@
 -- Denial Category Master and Non-Collectible Denial Master (LRNMaster), and the "Denial Category
 -- Master" screen (DenialCategoryMaster/Index) that imports both from
--- docs/Denial_Codes_And_Categorization_Master.xlsx:
+-- docs/denial-management/Denial_Codes_And_Categorization_Master.xlsx:
 --   sheet 1 "Denial Category Clasification" -> dbo.DenialCategoryMaster
 --            Denial Code, Denial Code Description, Denial Categorization (the action category)
 --   sheet 2 "Non-collectible Denials"        -> dbo.NonCollectibleDenialMaster

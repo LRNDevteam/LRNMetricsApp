@@ -17,21 +17,41 @@ a question.
 
 ```
 docs/
+├── ar-workbench/            Denial & AR Workbench: requirements, plan, test reports, mockup (was Denial_WorkFlow/)
 ├── beechtree-threepillar/   BeechTree three-pillar agent plan and costing
 ├── coding-validation/       Coding Validation output template and its deployment
 ├── cpt-panel-lookup/        Analytics > CPT & Panel Lookup
 ├── dashboard/               Revenue dashboard KPIs and Executive Summary drillthrough
-├── denial-management/       Denial dashboard, workflow, and the denial agent
+├── demo-lab/                LRNLabDemo de-identified demo lab
+├── denial-management/       Denial dashboard, workflow, the denial agent, denial masters
 ├── external-api/            Partner-facing API guide and internal onboarding
+├── master-file-processor/   Master file column / field mappings per lab
 ├── meeting-intelligence/    MeetingIQ prototype
-├── operations/              Runbooks: Key Vault, Master Values import
+├── operations/              Runbooks: Key Vault, Master Values import, Azure hosting, services audit
 ├── payer-master/            Payer master and the matching algorithm
+├── payer-policy-mapper/     Payer Policy AI design
 ├── reimbursement-agent/     Reimbursement Insights agent and its DAB bridge
-├── reports/                 Report queue, Production Summary, Report Control Board
+├── reports/                 Report queue, Production Summary, Report Control Board, report snapshots
 └── archive/                 Superseded — provenance only
 ```
 
 ---
+
+## Denial & AR Workbench — [`ar-workbench/`](ar-workbench/)
+
+The React app `LRN.ARWorkbench`, its API `/api/ar-workbench` in `LRN.ReportsApi`, and the SQL in
+[`Database/LRN.ReportsApi/ArWorkbench/`](../Database/LRN.ReportsApi/ArWorkbench/). Read the handoff first.
+
+| Document | Version | Status | Covers |
+|---|---|---|---|
+| [AR_Workbench_Developer_Handoff_Requirements_v1.1.docx](ar-workbench/AR_Workbench_Developer_Handoff_Requirements_v1.1.docx) | 1.1 | **Requirement** | Session decisions (Part A), FR-xx functional requirements (Part B), mockup rules (Part C), NFRs (Part E). The `.pdf` beside it is a rendition. |
+| [ARWorkflow_Redesign_Plan_v1.0_09.25.2026.xlsx](ar-workbench/ARWorkflow_Redesign_Plan_v1.0_09.25.2026.xlsx) | 1.0 | **Live tracker** | Task plan; sheet *Plan - Corrected Order* carries each task's Status. UAT fixes are module M29 (T083–T111). |
+| [AR_Workbench_Retest_Report_v1.4_2026-10-19.xlsx](ar-workbench/AR_Workbench_Retest_Report_v1.4_2026-10-19.xlsx) | 1.4 | **Current test report** | 19 Oct retest: Part A/B/C/E traceability, role workflows, defect log (DEF-01 – DEF-31), observations. DEF-22 – DEF-31 fixed as T101 – T110 on 21 Oct. |
+| [LRN_Denial_AR_Workbench_Demo_Account.html](ar-workbench/LRN_Denial_AR_Workbench_Demo_Account.html) | — | Approved mockup | The functional mockup the screens, icons and styles follow (referenced from code) |
+| [AR_Workbench_Build_Reference.pdf](ar-workbench/AR_Workbench_Build_Reference.pdf) | 23 Sep 2026 | Reference — input to the handoff | What the mockup does, per role and screen |
+| [AR_Workbench_Developer_Documentation.pdf](ar-workbench/AR_Workbench_Developer_Documentation.pdf) | 23 Sep 2026 (26 pp) | Reference | How the mockup's code is built (the full edition; the 19-page cut is archived) |
+| [AR_Workbench_Open_Items_And_Phases.md](ar-workbench/AR_Workbench_Open_Items_And_Phases.md) | 29 Sep 2026 | Historical — superseded by the plan workbook | The original gap analysis and phase order (referenced from `navigation.js`, `PlannedPage.jsx`) |
+| [ClinicalLaboratoryFeeSchedule_2026_Q1V1.xls](ar-workbench/ClinicalLaboratoryFeeSchedule_2026_Q1V1.xls) | 2026 Q1 | Source data | CMS fee schedule imported in LRN Metrics > Master Values > Fees Schedule Import; prices Revenue Expectation |
 
 ## CPT & Panel Lookup — [`cpt-panel-lookup/`](cpt-panel-lookup/)
 
@@ -56,6 +76,14 @@ The `Analytics > CPT & Panel Lookup` screen over `LRNMaster`: `CPTAverage`, `Pan
 | [Denial_Dashboard_Screens_Captures.docx](denial-management/Denial_Dashboard_Screens_Captures.docx) | — | Reference | Screenshots of the real screens |
 | [Denial_Dashboard_Screens_Mockup_v2.0.html](denial-management/Denial_Dashboard_Screens_Mockup_v2.0.html) | 2.0 | Mockup | Screen mockups under the Lab Revenue Navigator shell |
 | [Denial_Agent_Mockup_v1.0.html](denial-management/Denial_Agent_Mockup_v1.0.html) | 1.0 | Mockup | Denial Agent review/approval UI |
+| [Denial_Workflow_AR_Reporting_Requirements_v1.0.pdf](denial-management/Denial_Workflow_AR_Reporting_Requirements_v1.0.pdf) | 1.0 | Spec | AR Follow-up Reporting requirements (RPT-01 – RPT-09) |
+| [RPT01_Activity_Detail_Implementation.md](denial-management/RPT01_Activity_Detail_Implementation.md) | — | Implemented | RPT-01 AR Follow-up Activity Detail and the report catalog |
+| [RPT01_Test_Report_v1.0.html](denial-management/RPT01_Test_Report_v1.0.html) | 1.0 | Evidence | RPT-01 test report |
+| [Denial_AR_Reports_Data_Readiness_v1.0.html](denial-management/Denial_AR_Reports_Data_Readiness_v1.0.html) | 1.0 | Analysis | Data readiness of the denial AR reports |
+| [Denial_Workflow_Benchmark_And_Screens_v1.0.html](denial-management/Denial_Workflow_Benchmark_And_Screens_v1.0.html) | 1.0 | Analysis | Denial workflow benchmark and screens |
+| [Denial_Database_Worker_Requirements.md](denial-management/Denial_Database_Worker_Requirements.md) | — | As-built | `LRN.DenialDatabaseWorker` requirements, reverse-engineered from the code |
+| [Denial_Codes_And_Categorization_Master.xlsx](denial-management/Denial_Codes_And_Categorization_Master.xlsx) | 13 Oct 2026 | **Master data** | Denial code → description → categorization, and the non-collectible codes. Read by Denial Category Master (LRN Metrics); the AR Workbench Denial Code Master was seeded from its 6 Oct predecessor (archived). |
+| [DenialSummary_EditableColumns.xlsx](denial-management/DenialSummary_EditableColumns.xlsx) | — | Client sample | Which Denial Summary columns are editable, and the status banding |
 
 ## Payer Master & Matching — [`payer-master/`](payer-master/)
 
@@ -104,6 +132,8 @@ commands.
 | [PRODUCTION_SUMMARY_REPORT_STATUS.md](reports/PRODUCTION_SUMMARY_REPORT_STATUS.md) | — | Status | Where the Production Summary rollout stands *(was at the repository root)* |
 | [DEPLOYMENT_CHECKLIST_PRODUCTION_SUMMARY.md](reports/DEPLOYMENT_CHECKLIST_PRODUCTION_SUMMARY.md) | — | Checklist | Step-by-step deployment for the above *(was at the repository root)* |
 | [REPORT_CONTROL_BOARD.md](reports/REPORT_CONTROL_BOARD.md) | 1.0 | Implemented | The `/ReportBoard` landing page; how to add a report type |
+| [LRN_Report_Snapshots–Parquet_Storage_Implementation.pdf](reports/LRN_Report_Snapshots–Parquet_Storage_Implementation.pdf) | — | Design | Report snapshots stored as Parquet |
+| [LRN_Report_Snapshots_Implementation_Plan.xlsx](reports/LRN_Report_Snapshots_Implementation_Plan.xlsx) | — | Plan | Task split, test checklist and open questions for the above |
 | [CollectionReport_ClaimLine_Fields_Review.xlsx](reports/CollectionReport_ClaimLine_Fields_Review.xlsx) | — | Working data | Claim-line field review behind the Collection Report *(was at the repository root)* |
 
 The first two are **not** duplicates — one is on-demand queued generation, the other is
@@ -138,6 +168,29 @@ and are candidates for a merge.
 |---|---|---|---|
 | [MasterValuesImportProductionRemediation.md](operations/MasterValuesImportProductionRemediation.md) | 1.0 | Runbook | Teams webhook config; recovering a timed-out Master Values import |
 | [KeyVault_Secrets.md](operations/KeyVault_Secrets.md) | — | Reference | Key Vault secret naming and which apps read which secret |
+| [LRN Azure Hosting Guide.pdf](operations/LRN%20Azure%20Hosting%20Guide.pdf) | 23 Sep 2026 | Guide | Target Azure architecture and cost model |
+| [LRN_Azure_Hosting_Implementation_Plan.md](operations/LRN_Azure_Hosting_Implementation_Plan.md) | — | Plan + checklist | What the codebase needs for that hosting, and how to verify it |
+| [LRN_Services_Audit.docx](operations/LRN_Services_Audit.docx) | 2 | Audit | The Windows services on ReportEngine: usage, data flows, SharePoint folders, rationalisation |
+
+## Master File Processor — [`master-file-processor/`](master-file-processor/)
+
+| Document | Version | Status | Covers |
+|---|---|---|---|
+| [AveragesTable_AllAccounts_Field Mapping_V1.19.xlsx](master-file-processor/AveragesTable_AllAccounts_Field%20Mapping_V1.19.xlsx) | 1.19 | **Mapping** | Line / claim level fact-table columns per lab and the SharePoint paths (cited by name in `LRN.MasterFileProcessorWorker/Schemas/*.schema.json`) |
+| [VariantX_MasterFile_Column_Mapping.xlsx](master-file-processor/VariantX_MasterFile_Column_Mapping.xlsx) | — | Mapping | VariantX master file claim and line level columns |
+
+## Payer Policy Mapper — [`payer-policy-mapper/`](payer-policy-mapper/)
+
+| Document | Version | Status | Covers |
+|---|---|---|---|
+| [LRN_Payer_Policy_AI_Design_v4_final.pdf](payer-policy-mapper/LRN_Payer_Policy_AI_Design_v4_final.pdf) | 4 (final) | Design | Payer policy AI design behind `LRN.PayerPolicyMapper` |
+
+## Demo Lab — [`demo-lab/`](demo-lab/)
+
+| Document | Version | Status | Covers |
+|---|---|---|---|
+| [DemoLab_Setup.md](demo-lab/DemoLab_Setup.md) | — | Runbook | `LRNLabDemo` (LabId 99): cloned from PCRLabsofAmerica and de-identified |
+| [LRNLabDemo.json.template](demo-lab/LRNLabDemo.json.template) | — | Sample config | Lab config template for the above |
 
 ## BeechTree Three-Pillar — [`beechtree-threepillar/`](beechtree-threepillar/)
 
@@ -170,6 +223,13 @@ the same commit.
 | `external-api/ExternalApiAccess_Guide.md` | `LRN.ReportsApi/Program.cs`, `LRN.ReportsApi/appsettings.json` |
 | `payer-master/Payer_Master_Reference_Tables_v1.1.md` | `Database/LRN.ReportsApi/Payer_Matching_Reference_Tables_DDL_and_Seed.sql`, `Database/LRN.ReportsApi/Payer_Policy_Mapper_Consolidated.sql` |
 | `cpt-panel-lookup/LRNMaster.json` | `cpt-panel-lookup/CptPanelLookup_BackgroundExport.md` deployment steps |
+| `ar-workbench/LRN_Denial_AR_Workbench_Demo_Account.html` | `LRN.ARWorkbench/src` (styles.css, Icon.jsx, navigation.js, DashboardPage.jsx, ClaimDetailPage.jsx), `LRN.ReportsApi/Models/ArWorkbench*Models.cs` |
+| `ar-workbench/AR_Workbench_Open_Items_And_Phases.md` | `LRN.ARWorkbench/src/config/navigation.js`, `LRN.ARWorkbench/src/pages/PlannedPage.jsx`, `LRN.ARWorkbench/README.md` |
+| `ar-workbench/ClinicalLaboratoryFeeSchedule_2026_Q1V1.xls` | `tests/LabMetricsDashboard.Tests/FeeScheduleWorkbookTests.cs` (**loads it** — the test skips silently if it moves), `LabMetricsDashboard/Services/FeeScheduleWorkbook.cs`, `Database/LabMetricsDashboard/FeeSchedule_Setup.sql` |
+| `ar-workbench/ARWorkflow_Redesign_Plan_v1.0_09.25.2026.xlsx` | The AR Workbench task tracker kept up to date task by task |
+| `denial-management/Denial_Codes_And_Categorization_Master.xlsx` | `LabMetricsDashboard` DenialCategoryMaster controller / workbook, `Database/LabMetricsDashboard/DenialCategoryMaster_Setup.sql` |
+| `denial-management/DenialSummary_EditableColumns.xlsx` | `LabMetricsDashboard` DenialClaimReportController, DenialInsightStatus, `_DenialInsightPanel.cshtml`, `denial_claim_report.css` |
+| `master-file-processor/AveragesTable_AllAccounts_Field Mapping_V1.19.xlsx` | `LRN.MasterFileProcessorWorker/Schemas/*.schema.json` (by file name) |
 
 ## Where non-document files went
 
@@ -184,6 +244,12 @@ The 2026-08-27 cleanup emptied the repository root. Nothing was deleted.
 | `Deploy-LoadingOverlayFix.ps1`, `xlcheck.py` | `scripts/` |
 | `meetingiq_spec.js`, `docs/_gen_threepillar_*.py` | `scripts/doc-gen/` |
 | `build-*.txt`, `_build_*.txt`, `_drill_deploy/`, `_drill_verify/`, `_extract_parts/` | `_artifacts/` — throwaway run output, now gitignored. Safe to delete. |
+
+## 2026-10-21 reorganisation
+
+`Denial_WorkFlow/` became `ar-workbench/`, and the loose files at the `docs/` root went to their module
+folders (above). Superseded files went to `archive/` (see its README). Every inbound reference in code,
+SQL comments and tests was updated in the same change.
 
 ## Known gaps
 

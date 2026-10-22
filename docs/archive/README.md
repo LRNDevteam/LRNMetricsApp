@@ -14,10 +14,23 @@ Archived 2026-08-16 as part of a docs consolidation pass.
 | `LRN_Analytics_API_Guide_v1.0.docx` | Word rendition of the external API guide | [`../external-api/ExternalApiAccess_Guide.md`](../external-api/ExternalApiAccess_Guide.md) (source) and `../external-api/LRN_Analytics_API_Guide.pdf` (distributable) | Documents the identical endpoint set as the markdown — verified by comparing every path in both. An intermediate format with no unique content; keeping it invites the three copies to drift. |
 | `GlobalPayerID_Mapping_Manifest_v1.0.docx` | SharePoint folder manifest for *12.Insurance Masters* | [`../README.md`](../README.md) § Payer Master & Matching | It was an index of other documents rather than a document. Its content is now the payer section of the docs index. |
 
+Archived 2026-10-21 with the move of `Denial_WorkFlow/` to `ar-workbench/` (plain moves, as the 2026-08-27 pass):
+
+| Archived file | What it was | Replaced by | Why archived |
+|---|---|---|---|
+| `AR_Workbench_Test_Report_2026-10-15.xlsx` | First AR Workbench requirements test report (15 Oct, defects DEF-01 – DEF-20) | [`../ar-workbench/AR_Workbench_Retest_Report_v1.4_2026-10-19.xlsx`](../ar-workbench/AR_Workbench_Retest_Report_v1.4_2026-10-19.xlsx) | The retest re-runs every case and carries the 15 Oct status beside the new one. |
+| `AR_Workbench_Developer_Documentation_v2026-09-23_19p.pdf` | 19-page cut of the mockup's developer documentation (was `Denial_WorkFlow/AR_Workbench_Developer_Documentation.pdf`) | [`../ar-workbench/AR_Workbench_Developer_Documentation.pdf`](../ar-workbench/AR_Workbench_Developer_Documentation.pdf) (26 pp, was `…Documentation[1].pdf`) | Text comparison: every line of the 19-page cut is in the 26-page edition, which adds the claim detail, CIP lifecycle and remaining modules. |
+| `AR_Workbench_Open_Items_And_Phases.docx` | Word rendition of the open-items gap analysis | [`../ar-workbench/AR_Workbench_Open_Items_And_Phases.md`](../ar-workbench/AR_Workbench_Open_Items_And_Phases.md) | Same content as the markdown, which code comments cite. |
+| `DenialCodes&Categorization_Master_2026-10-06.xlsx` | Denial code categorization master as of 6 Oct (seed of the AR Workbench Denial Code Master, `LRNMaster_02`) | [`../denial-management/Denial_Codes_And_Categorization_Master.xlsx`](../denial-management/Denial_Codes_And_Categorization_Master.xlsx) (13 Oct) | Same sheets and rows; the 13 Oct copy fills the `#N/A` descriptions and corrects 22 rows. |
+| `Demo Tool - HTML Code.txt` | An e-mail attachment placeholder: "This attachment was removed because it contains data that could pose a security risk." | [`../ar-workbench/LRN_Denial_AR_Workbench_Demo_Account.html`](../ar-workbench/LRN_Denial_AR_Workbench_Demo_Account.html) | No content; the mockup itself is in `ar-workbench/`. |
+
+Removed, not archived: `Denial_WorkFlow/AR_Workbench_Developer_Handoff_Requirements_v1.1 1.docx` — a byte-identical
+(SHA-256) copy of `ar-workbench/AR_Workbench_Developer_Handoff_Requirements_v1.1.docx`.
+
 ## Recovering one
 
-These were moved with `git mv`, so full history follows the file (the 2026-08-27 pass that sorted
-`docs/` into module folders used plain moves — `--follow` still traces them):
+These were moved with `git mv`, so full history follows the file (the 2026-08-27 and 2026-10-21 passes
+used plain moves — `--follow` still traces them):
 
 ```sh
 git log --follow -- docs/archive/<file>

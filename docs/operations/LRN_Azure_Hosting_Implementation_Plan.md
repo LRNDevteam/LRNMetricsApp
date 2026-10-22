@@ -1,6 +1,6 @@
 ﻿# LRN Azure Hosting — Implementation Plan and Verification Checklist
 
-Companion to **`docs/LRN Azure Hosting Guide.pdf`** (16 pp, 23 Sep 2026).
+Companion to **`docs/operations/LRN Azure Hosting Guide.pdf`** (16 pp, 23 Sep 2026).
 
 The guide sets the target architecture and the cost model; both still hold. This
 document is the part the guide could not supply: what the LRN codebase actually

@@ -37,5 +37,18 @@ CREATE TABLE dbo.ARWB_ClientSettingHistory
 );
 GO
 
+/* Per-client configuration on the Client Management card (handoff FR-CM-03, retest DEF-31, 10/21/2026):
+   the SharePoint folder the weekly master files come from, the onboarding status and the primary account
+   manager. Added after the first release, so existing installs get the columns here. */
+IF COL_LENGTH(N'dbo.ARWB_ClientSetting', N'SharePointFolder') IS NULL   ALTER TABLE dbo.ARWB_ClientSetting ADD SharePointFolder nvarchar(1000) NULL;
+IF COL_LENGTH(N'dbo.ARWB_ClientSetting', N'OnboardingStatus') IS NULL   ALTER TABLE dbo.ARWB_ClientSetting ADD OnboardingStatus varchar(30) NULL;   -- Not Started | Onboarding | Live | On Hold
+IF COL_LENGTH(N'dbo.ARWB_ClientSetting', N'AccountManager') IS NULL     ALTER TABLE dbo.ARWB_ClientSetting ADD AccountManager nvarchar(256) NULL;
+IF COL_LENGTH(N'dbo.ARWB_ClientSetting', N'ConfigUpdatedBy') IS NULL    ALTER TABLE dbo.ARWB_ClientSetting ADD ConfigUpdatedBy nvarchar(256) NULL;
+IF COL_LENGTH(N'dbo.ARWB_ClientSetting', N'ConfigUpdatedOn') IS NULL    ALTER TABLE dbo.ARWB_ClientSetting ADD ConfigUpdatedOn datetime2(0) NULL;
+IF COL_LENGTH(N'dbo.ARWB_ClientSettingHistory', N'SharePointFolder') IS NULL ALTER TABLE dbo.ARWB_ClientSettingHistory ADD SharePointFolder nvarchar(1000) NULL;
+IF COL_LENGTH(N'dbo.ARWB_ClientSettingHistory', N'OnboardingStatus') IS NULL ALTER TABLE dbo.ARWB_ClientSettingHistory ADD OnboardingStatus varchar(30) NULL;
+IF COL_LENGTH(N'dbo.ARWB_ClientSettingHistory', N'AccountManager') IS NULL   ALTER TABLE dbo.ARWB_ClientSettingHistory ADD AccountManager nvarchar(256) NULL;
+GO
+
 PRINT 'AR Workbench client activation (dbo.ARWB_ClientSetting) ready.';
 GO

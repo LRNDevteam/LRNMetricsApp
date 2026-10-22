@@ -30,7 +30,9 @@ const MY_WORK_TILES = [
   ['cipResponse', 'CIP Response Received', 'cipResponseReceived', { queue: ['cipresponse'], status: ['Assigned'] }],
   ['awaitingPayer', 'Awaiting Payer Response', 'awaitingPayer', { awaitingPayerOnly: true, activeOnly: true }],
   ['submittedQA', 'Submitted for QA', 'submittedForQa', { status: ['Submitted for QA'] }],
-  ['rejectedQA', 'Rejected QA Items', 'qaRejected', { status: ['QA Rejected'] }]
+  ['rejectedQA', 'Rejected QA Items', 'qaRejected', { status: ['QA Rejected'] }],
+  ['pendingPosting', 'Approved Write-Offs – Pending Posting', 'pendingPosting', { queue: ['autoadj|autoadj_writeoff'] }],
+  ['newDenials', 'New Denials', 'newDenials', { newDenialOnly: true }]
 ];
 
 const FOLLOW_UP_TILES = [

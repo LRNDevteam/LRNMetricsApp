@@ -241,6 +241,25 @@ export default function MasterDataPage({ view = 'mapper' }) {
     }
   }
 
+  // FR-SET-01 CSV round trip (AR Workbench lists): the file replaces the list; values left out are deactivated.
+  async function uploadTemplate(file) {
+    if (!file) return;
+    setSaving(true);
+    setRowError('');
+    try {
+      await afterSave(await arWorkbenchService.uploadMasterTemplate(labId, list.type, file), 'List replaced from the file.');
+    } catch (e) {
+      setRowError(e.message || 'The file could not be uploaded.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function downloadTemplate() {
+    setRowError('');
+    try { await arWorkbenchService.downloadMasterTemplate(labId, list.type); } catch (e) { setRowError(e.message || 'The template could not be downloaded.'); }
+  }
+
   async function deleteValue(item) {
     setSaving(true);
     setDialogError('');
@@ -325,6 +344,20 @@ export default function MasterDataPage({ view = 'mapper' }) {
                   <div className="arwb-card-sub">{list.description}</div>
                 </div>
                 <div className="arwb-panel-head-actions">
+                  {list.source === 'workbench' && (
+                    <>
+                      <button type="button" className="arwb-btn arwb-btn-sm" onClick={downloadTemplate} disabled={saving}
+                        title="The list as it stands (Value, Sort Order, Active) - edit it and upload it back">
+                        <Icon name="download" size={15} /> Download Template (CSV)
+                      </button>
+                      <label className={`arwb-btn arwb-btn-sm${saving ? ' disabled' : ''}`}
+                        title="Replace the list with the file: new values are added, values left out of the file are deactivated (never deleted)">
+                        <Icon name="upload" size={15} /> Upload Template (CSV)
+                        <input type="file" accept=".csv,text/csv" hidden disabled={saving}
+                          onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; uploadTemplate(f); }} />
+                      </label>
+                    </>
+                  )}
                   <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" onClick={openAdd} disabled={saving}>
                     <Icon name="plus" size={15} /> Add value
                   </button>

@@ -286,6 +286,7 @@ export default function CipPage({ view = 'internal' }) {
           onPageSize={(pageSize) => setQuery((q) => ({ ...q, pageSize, page: 1 }))}
           onRowClick={client ? undefined : openClaim}
           selectable={!client}
+          isRowSelectable={(r) => r.caseStatus === 'Pending Approval' || r.caseStatus === 'Client Responded'}
           selectedKeys={selected}
           onSelectionChange={setSelected}
           toolbar={!client && (

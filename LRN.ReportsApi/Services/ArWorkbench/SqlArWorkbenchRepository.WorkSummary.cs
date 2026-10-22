@@ -33,7 +33,11 @@ SELECT
     CipResponseReceived = ISNULL(SUM(CASE WHEN w.ArQueueId = 'cipresponse' AND w.WorkflowStatus = 'Assigned' THEN 1 ELSE 0 END), 0),
     AwaitingPayer       = ISNULL(SUM(CASE WHEN w.FixResolution IN ({awaiting}) AND w.IsFinanciallyClosed = 0 THEN 1 ELSE 0 END), 0),
     SubmittedForQa      = ISNULL(SUM(CASE WHEN w.WorkflowStatus = 'Submitted for QA' THEN 1 ELSE 0 END), 0),
-    QaRejected          = ISNULL(SUM(CASE WHEN w.WorkflowStatus = 'QA Rejected' THEN 1 ELSE 0 END), 0)
+    QaRejected          = ISNULL(SUM(CASE WHEN w.WorkflowStatus = 'QA Rejected' THEN 1 ELSE 0 END), 0),
+    -- FR-MW-02 (N): write-offs QA approved, waiting for the agent to post them in the PMS
+    PendingPosting      = ISNULL(SUM(CASE WHEN w.ArQueueId = 'autoadj' AND w.ArSubQueueId = 'autoadj_writeoff' THEN 1 ELSE 0 END), 0),
+    -- worked claims that came back with a new denial on a sync and are not re-worked yet
+    NewDenials          = ISNULL(SUM(CASE WHEN w.NewDenialSinceWork = 1 THEN 1 ELSE 0 END), 0)
 FROM dbo.ARWB_Claim w
 WHERE w.AssignedAgentUser IS NOT NULL {scope};
 
@@ -59,6 +63,8 @@ WHERE w.IsFollowUpActionable = 1 {scope};";
             s.AwaitingPayer = r.GetInt32(6);
             s.SubmittedForQa = r.GetInt32(7);
             s.QaRejected = r.GetInt32(8);
+            s.PendingPosting = r.GetInt32(9);
+            s.NewDenials = r.GetInt32(10);
         }
         await r.NextResultAsync(ct);
         if (await r.ReadAsync(ct))

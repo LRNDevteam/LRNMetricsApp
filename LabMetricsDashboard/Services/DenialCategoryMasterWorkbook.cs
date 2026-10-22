@@ -4,7 +4,7 @@ using LabMetricsDashboard.Models;
 namespace LabMetricsDashboard.Services;
 
 /// <summary>
-/// Reads docs/Denial_Codes_And_Categorization_Master.xlsx:
+/// Reads docs/denial-management/Denial_Codes_And_Categorization_Master.xlsx:
 ///   "Denial Category Clasification" - Denial Code, Denial Code Description, Denial Categorization
 ///   "Non-collectible Denials"       - Denial Code, Denial Code Description
 /// Sheets are found by name (the categorization sheet by "categor", the other by "collectible"),

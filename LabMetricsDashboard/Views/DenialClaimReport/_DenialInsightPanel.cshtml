@@ -215,7 +215,7 @@
                                                href="@Url.Action("Index", new { lab = Model.CurrentLab, tab = "claims", denialCode = row.DenialCode })"
                                                title="Open Claim Level filtered to denial code @row.DenialCode">@row.DenialCode</a>
                                         </span>
-                                        @* Not editable (docs/DenialSummary_EditableColumns.xlsx): stays as text while the row is in edit. *@
+                                        @* Not editable (docs/denial-management/DenialSummary_EditableColumns.xlsx): stays as text while the row is in edit. *@
                                         @if (editable)
                                         {
                                             <span class="cell-edit cell-locked" title="Denial Codes cannot be edited">@row.DenialCode</span>

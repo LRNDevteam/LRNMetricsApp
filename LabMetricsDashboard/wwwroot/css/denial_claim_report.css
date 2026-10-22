@@ -274,7 +274,7 @@
    while the row is in edit, muted, so it is clear they are not part of the edit. */
 .dcr-page .insight-table .cell-locked { color: var(--ins-muted); font-style: italic; cursor: not-allowed; }
 
-/* ── Status banding (docs/DenialSummary_EditableColumns.xlsx; see DenialInsightStatus) ── */
+/* ── Status banding (docs/denial-management/DenialSummary_EditableColumns.xlsx; see DenialInsightStatus) ── */
 .dcr-page .status-pill {
     display: inline-block;
     padding: .2rem .5rem;

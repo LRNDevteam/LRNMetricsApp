@@ -1,6 +1,6 @@
 /* =========================================================
    LRN Denial & Insurance AR Workbench - design tokens & UI.
-   Values come from the approved mockup (docs/Denial_WorkFlow/
+   Values come from the approved mockup (docs/ar-workbench/
    LRN_Denial_AR_Workbench_Demo_Account.html). Classes carry an arwb- prefix because Bootstrap
    already owns .card / .btn / .badge; the second block retunes Bootstrap to the same tokens so the
    Bootstrap-built screens (Work Queue, Claim Workspace) match.
@@ -768,3 +768,6 @@ table.arwb-data-table tbody tr.row-selected { background: var(--accent-softer); 
 .arwb-client-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
 .arwb-client-stats > div { display: flex; flex-direction: column; gap: 2px; }
 .arwb-client-stats .mono { font-size: 17px; font-weight: 700; color: var(--ink); }
+.arwb-client-config { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
+.arwb-client-config dt { color: var(--ink-muted); font-weight: 600; }
+.arwb-client-config dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }

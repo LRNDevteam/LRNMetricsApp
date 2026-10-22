@@ -40,13 +40,56 @@ IF OBJECT_ID(N'dbo.ARWB_ClientSetting', N'U') IS NOT NULL
         var map = new Dictionary<int, ArWorkbenchClientStatus>();
         await using var master = new SqlConnection(_masterConnectionString);
         await master.OpenAsync(ct);
+        // The configuration columns (FR-CM-03) come with the re-run of LRNMaster_03; until then they read as blank.
         await using var cmd = new SqlCommand(@"
-IF OBJECT_ID(N'dbo.ARWB_ClientSetting', N'U') IS NOT NULL
-    SELECT LabId, IsActive, StatusNote, ChangedBy, ChangedOn FROM dbo.ARWB_ClientSetting;", master);
+IF OBJECT_ID(N'dbo.ARWB_ClientSetting', N'U') IS NULL RETURN;
+IF COL_LENGTH(N'dbo.ARWB_ClientSetting', N'ConfigUpdatedOn') IS NOT NULL
+    EXEC (N'SELECT LabId, IsActive, StatusNote, ChangedBy, ChangedOn, SharePointFolder, OnboardingStatus, AccountManager, ConfigUpdatedBy, ConfigUpdatedOn FROM dbo.ARWB_ClientSetting;');
+ELSE
+    SELECT LabId, IsActive, StatusNote, ChangedBy, ChangedOn, CAST(NULL AS nvarchar(1000)), CAST(NULL AS varchar(30)), CAST(NULL AS nvarchar(256)),
+           CAST(NULL AS nvarchar(256)), CAST(NULL AS datetime2(0))
+    FROM dbo.ARWB_ClientSetting;", master);
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
-            map[r.GetInt32(0)] = new ArWorkbenchClientStatus { IsActive = r.GetBoolean(1), StatusNote = Str(r, 2), ChangedBy = r.GetString(3), ChangedOn = r.GetDateTime(4) };
+            map[r.GetInt32(0)] = new ArWorkbenchClientStatus
+            {
+                IsActive = r.GetBoolean(1), StatusNote = Str(r, 2), ChangedBy = r.GetString(3), ChangedOn = r.GetDateTime(4),
+                Config = new ArWorkbenchClientConfig
+                {
+                    SharePointFolder = Str(r, 5), OnboardingStatus = Str(r, 6), AccountManager = Str(r, 7),
+                    UpdatedBy = Str(r, 8), UpdatedOn = r.IsDBNull(9) ? null : r.GetDateTime(9)
+                }
+            };
         return map;
+    }
+
+    /// <summary>FR-CM-03: saves one client's configuration; a lab with no row yet gets one (active). History keeps every change.</summary>
+    public async Task<ArWorkbenchSaveResult> SetClientConfigAsync(int labId, ArWorkbenchClientConfig config, string user, CancellationToken ct)
+    {
+        await using var master = new SqlConnection(_masterConnectionString);
+        await master.OpenAsync(ct);
+        await using var cmd = new SqlCommand(@"
+IF OBJECT_ID(N'dbo.ARWB_ClientSetting', N'U') IS NULL OR COL_LENGTH(N'dbo.ARWB_ClientSetting', N'ConfigUpdatedOn') IS NULL BEGIN SELECT 0; RETURN; END;
+EXEC sp_executesql N'
+MERGE dbo.ARWB_ClientSetting WITH (HOLDLOCK) AS t
+USING (SELECT @Lab AS LabId) AS s ON t.LabId = s.LabId
+WHEN MATCHED THEN UPDATE SET SharePointFolder = @Folder, OnboardingStatus = @Status, AccountManager = @Manager,
+                             ConfigUpdatedBy = @User, ConfigUpdatedOn = SYSUTCDATETIME()
+WHEN NOT MATCHED THEN INSERT (LabId, IsActive, ChangedBy, SharePointFolder, OnboardingStatus, AccountManager, ConfigUpdatedBy, ConfigUpdatedOn)
+                      VALUES (@Lab, 1, @User, @Folder, @Status, @Manager, @User, SYSUTCDATETIME());
+INSERT INTO dbo.ARWB_ClientSettingHistory (LabId, IsActive, StatusNote, ChangedBy, SharePointFolder, OnboardingStatus, AccountManager)
+SELECT LabId, IsActive, N''Configuration updated'', @User, SharePointFolder, OnboardingStatus, AccountManager FROM dbo.ARWB_ClientSetting WHERE LabId = @Lab;',
+    N'@Lab int, @Folder nvarchar(1000), @Status varchar(30), @Manager nvarchar(256), @User nvarchar(256)',
+    @Lab, @Folder, @Status, @Manager, @User;
+SELECT 1;", master);
+        cmd.Parameters.Add("@Lab", SqlDbType.Int).Value = labId;
+        cmd.Parameters.Add("@Folder", SqlDbType.NVarChar, 1000).Value = (object?)config.SharePointFolder ?? DBNull.Value;
+        cmd.Parameters.Add("@Status", SqlDbType.VarChar, 30).Value = (object?)config.OnboardingStatus ?? DBNull.Value;
+        cmd.Parameters.Add("@Manager", SqlDbType.NVarChar, 256).Value = (object?)config.AccountManager ?? DBNull.Value;
+        cmd.Parameters.Add("@User", SqlDbType.NVarChar, 256).Value = Truncate(user, 256);
+        if (Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)) != 1)
+            return ArWorkbenchSaveResult.Invalid("Client configuration is not installed. Re-run Database/LRN.ReportsApi/ArWorkbench/LRNMaster/LRNMaster_03_ARWB_ClientSetting.sql in LRNMaster.");
+        return ArWorkbenchSaveResult.Ok("Client configuration saved.");
     }
 
     public async Task<ArWorkbenchSaveResult> SetClientActiveAsync(int labId, bool isActive, string? note, string user, CancellationToken ct)

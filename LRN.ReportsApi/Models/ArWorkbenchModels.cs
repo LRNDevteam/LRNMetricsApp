@@ -83,7 +83,7 @@ public sealed class ArWorkbenchQueueSummary
 }
 
 // ============================================================================================
-// Dashboard - the mockup's System Administrator dashboard (docs/Denial_WorkFlow/
+// Dashboard - the mockup's System Administrator dashboard (docs/ar-workbench/
 // LRN_Denial_AR_Workbench_Demo_Account.html, App.views.dashboard), every figure computed in SQL
 // over the caller's scoped claims.
 // ============================================================================================
@@ -236,6 +236,18 @@ public sealed class ArWorkbenchClaimFilter
     public List<string> FixResolution { get; set; } = new();
     /// <summary>The ingested source claim status (Fully Denied / Partially Paid / ...).</summary>
     public List<string> SourceStatus { get; set; } = new();
+    /// <summary>Rendering provider (ARWB_Claim.BillingProvider, which the master file fills with the rendering physician).</summary>
+    public List<string> RenderingProvider { get; set; } = new();
+    /// <summary>A billed CPT on the claim contains this text (FR-WQ-03).</summary>
+    public string? CptCode { get; set; }
+    /// <summary>Insurance balance as shown (RemainingAR: 0 once nullified) at least / at most this amount.</summary>
+    public decimal? MinInsuranceBalance { get; set; }
+    public decimal? MaxInsuranceBalance { get; set; }
+    /// <summary>Next follow-up date on or after / on or before.</summary>
+    public DateTime? NextFollowUpFrom { get; set; }
+    public DateTime? NextFollowUpTo { get; set; }
+    /// <summary>Worked claims that got a new denial on a sync and have not been re-worked (NewDenialSinceWork).</summary>
+    public bool NewDenialOnly { get; set; }
     /// <summary>Only claims with no activity for at least this many days (never-touched claims count).</summary>
     public int? MinDaysUntouched { get; set; }
     public string? SortBy { get; set; }
@@ -323,6 +335,7 @@ public sealed class ArWorkbenchFilterOptions
     public List<ArWorkbenchFilterOption> AgingBuckets { get; set; } = new();
     public List<ArWorkbenchFilterOption> FixResolutions { get; set; } = new();
     public List<ArWorkbenchFilterOption> SourceStatuses { get; set; } = new();
+    public List<ArWorkbenchFilterOption> RenderingProviders { get; set; } = new();
     /// <summary>Denial classifications (central Denial Code Master) of the claims' primary denials.</summary>
     public List<ArWorkbenchFilterOption> Classifications { get; set; } = new();
 }
@@ -340,6 +353,8 @@ public sealed class ArWorkbenchWorkSummary
     public int AwaitingPayer { get; set; }
     public int SubmittedForQa { get; set; }
     public int QaRejected { get; set; }
+    public int PendingPosting { get; set; }
+    public int NewDenials { get; set; }
 
     // Follow-Up Management: claims waiting on the next touch
     public int ActionableAll { get; set; }

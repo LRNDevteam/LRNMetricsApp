@@ -128,4 +128,46 @@ DROP TABLE #k;";
         }
         return result;
     }
+
+    /// <summary>
+    /// FR-XL-03: the CPT lines of the exported claims (the "Line Items" sheet), per claim in line order.
+    /// The claim keys come from the scoped claims query, so the lines are scoped too. Source data only -
+    /// nothing internal to the AR team.
+    /// </summary>
+    public async Task<Dictionary<long, List<ArWorkbenchClaimLine>>> GetClaimLinesForExportAsync(int labId, IReadOnlyList<long> claimKeys, CancellationToken ct)
+    {
+        var result = new Dictionary<long, List<ArWorkbenchClaimLine>>();
+        var keys = claimKeys.Where(k => k > 0).Distinct().ToList();
+        if (keys.Count == 0) return result;
+
+        await using var connection = await OpenLabAsync(labId, ct);
+        await using (var create = new SqlCommand("CREATE TABLE #lk (ClaimKey bigint NOT NULL PRIMARY KEY);", connection))
+            await create.ExecuteNonQueryAsync(ct);
+        var table = new DataTable();
+        table.Columns.Add("ClaimKey", typeof(long));
+        foreach (var k in keys) table.Rows.Add(k);
+        using (var bulk = new SqlBulkCopy(connection) { DestinationTableName = "#lk", BulkCopyTimeout = 300, BatchSize = 10_000 })
+            await bulk.WriteToServerAsync(table, ct);
+
+        await using var cmd = new SqlCommand(@"
+SELECT l.ClaimKey, l.LineNumber, l.CPTCode, l.Units, l.Modifier, l.ChargeAmount, l.AllowedAmount, l.InsurancePayment, l.InsuranceAdjustments,
+       l.InsuranceBalance, l.PatientBalance, l.LineClaimStatus, l.PayStatus, l.DenialCode, l.DenialDate, l.ICDCode, l.RevenueExpectation
+FROM #lk k
+INNER JOIN dbo.ARWB_ClaimLine l ON l.ClaimKey = k.ClaimKey
+ORDER BY l.ClaimKey, l.LineNumber;", connection) { CommandTimeout = 600 };
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            var key = r.GetInt64(0);
+            if (!result.TryGetValue(key, out var lines)) result[key] = lines = new List<ArWorkbenchClaimLine>();
+            lines.Add(new ArWorkbenchClaimLine
+            {
+                LineNumber = r.GetInt32(1), CPTCode = Str(r, 2), Units = r.IsDBNull(3) ? null : r.GetDecimal(3), Modifier = Str(r, 4),
+                ChargeAmount = r.GetDecimal(5), AllowedAmount = r.GetDecimal(6), InsurancePayment = r.GetDecimal(7), InsuranceAdjustments = r.GetDecimal(8),
+                InsuranceBalance = r.GetDecimal(9), PatientBalance = r.GetDecimal(10), LineClaimStatus = Str(r, 11), PayStatus = Str(r, 12),
+                DenialCode = Str(r, 13), DenialDate = Date(r, 14), ICDCode = Str(r, 15), RevenueExpectation = r.GetDecimal(16)
+            });
+        }
+        return result;
+    }
 }

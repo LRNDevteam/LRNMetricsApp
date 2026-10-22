@@ -40,6 +40,7 @@ public sealed partial class SqlArWorkbenchRepository
         Priority = c?.Priority ?? [],
         Clinic = c?.Clinic ?? [],
         Aging = c?.Aging ?? [],
+        FixResolution = c?.Action ?? [],
         TflRiskOnly = c?.TflRiskOnly ?? false
     };
 
@@ -167,7 +168,9 @@ ORDER BY p.Ord;
 SELECT m.ItemValue, ISNULL(c.Claims, 0)
 FROM dbo.ARWB_MasterListItem m
 OUTER APPLY (SELECT Claims = COUNT(*) FROM dbo.ARWB_Claim w WHERE w.AgingBucket = m.ItemValue AND {pool} {scope}) c
-WHERE m.ListType = 'AGING_BUCKET' AND m.IsActive = 1 ORDER BY m.SortOrder;";
+WHERE m.ListType = 'AGING_BUCKET' AND m.IsActive = 1 ORDER BY m.SortOrder;
+-- 11. Action / Task: the last follow-up's fix / resolution (FR-ASG-02 session request)
+SELECT w.FixResolution,  COUNT(*) FROM dbo.ARWB_Claim w WHERE {pool} {scope} GROUP BY w.FixResolution  ORDER BY w.FixResolution;";
 
         var overview = new ArWorkbenchAssignmentOverview();
         var workload = new Dictionary<string, (int Open, decimal Ar, int Qa, int Total)>(StringComparer.OrdinalIgnoreCase);
@@ -214,6 +217,7 @@ WHERE m.ListType = 'AGING_BUCKET' AND m.IsActive = 1 ORDER BY m.SortOrder;";
             overview.PoolOptions.Clinics = await OptionsAsync("(No clinic)");
             overview.PoolOptions.Priorities = await OptionsAsync(null);
             overview.PoolOptions.AgingBuckets = await OptionsAsync(null);
+            overview.PoolOptions.FixResolutions = await OptionsAsync("(No action yet)");
         }
 
         foreach (var a in agents)
@@ -675,6 +679,7 @@ SELECT @@ROWCOUNT, (SELECT BatchNumber FROM dbo.ARWB_AssignmentBatch WHERE Assig
             Part(c.Clinic, "clinic", "clinics"),
             Part(c.Priority, "priority", "priorities"),
             Part(c.Aging, "aging bucket", "aging buckets"),
+            Part(c.Action, "action", "actions"),
             c.TflRiskOnly ? "TFL at risk" : ""
         }.Where(p => p.Length > 0).ToList();
         return parts.Count == 0 ? "All unassigned" : string.Join(" · ", parts);

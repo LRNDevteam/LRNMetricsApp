@@ -203,6 +203,53 @@ WHERE ListType = @Type AND ItemValue = @Original;", connection, tx))
         return ArWorkbenchSaveResult.Ok($"\"{existing.Value}\" deleted from {type.Label}.{AppliesOnSync(type)}");
     }
 
+    /// <summary>
+    /// Upload Template (CSV): the list becomes the file (ArWorkbenchMasterListCsv.Plan) in one transaction
+    /// under the list's update lock. Values left out are deactivated, never deleted.
+    /// </summary>
+    public async Task<ArWorkbenchSaveResult> ReplaceMasterListAsync(int labId, ArWorkbenchMasterType type, IReadOnlyList<ArWorkbenchMasterValidated> uploaded, string user, CancellationToken ct)
+    {
+        await using var connection = await OpenLabAsync(labId, ct);
+        await using var tx = (SqlTransaction)await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+
+        var rows = await LockListAsync(connection, tx, type.Key, ct);
+        var plan = ArWorkbenchMasterListCsv.Plan(type, rows.Select(r => new ArWorkbenchMasterValidated(r.Value, r.SortOrder, r.IsActive)).ToList(), uploaded);
+        if (plan.Error is not null) return ArWorkbenchSaveResult.Conflict(plan.Error);
+        if (!plan.HasChanges) return ArWorkbenchSaveResult.Ok($"The file matches {type.Label} - nothing to change.");
+
+        async Task RunAsync(string sql, string value, int? sort, bool active)
+        {
+            await using var cmd = new SqlCommand(sql, connection, tx);
+            cmd.Parameters.Add("@Type", SqlDbType.VarChar, 50).Value = type.Key;
+            cmd.Parameters.Add("@Value", SqlDbType.NVarChar, 400).Value = value;
+            cmd.Parameters.Add("@Sort", SqlDbType.Int).Value = (object?)sort ?? DBNull.Value;
+            cmd.Parameters.Add("@Active", SqlDbType.Bit).Value = active;
+            cmd.Parameters.Add("@User", SqlDbType.NVarChar, 256).Value = Truncate(user, 256);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+
+        foreach (var a in plan.Adds)
+            await RunAsync(@"INSERT INTO dbo.ARWB_MasterListItem (ListType, ItemValue, SortOrder, IsActive, CreatedBy, UpdatedOn, UpdatedBy)
+VALUES (@Type, @Value, @Sort, @Active, @User, SYSUTCDATETIME(), @User);", a.Value, a.SortOrder, a.IsActive);
+        foreach (var u in plan.Updates)
+            await RunAsync(@"UPDATE dbo.ARWB_MasterListItem SET SortOrder = @Sort, IsActive = @Active, UpdatedOn = SYSUTCDATETIME(), UpdatedBy = @User
+WHERE ListType = @Type AND ItemValue = @Value;", u.Value, u.SortOrder, u.IsActive);
+        foreach (var d in plan.Deactivations)
+            await RunAsync(@"UPDATE dbo.ARWB_MasterListItem SET IsActive = @Active, UpdatedOn = SYSUTCDATETIME(), UpdatedBy = @User
+WHERE ListType = @Type AND ItemValue = @Value;", d, null, false);
+
+        await tx.CommitAsync(ct);
+
+        var parts = new List<string>();
+        if (plan.Adds.Count > 0) parts.Add($"{plan.Adds.Count} added");
+        if (plan.Updates.Count > 0) parts.Add($"{plan.Updates.Count} updated");
+        if (plan.Deactivations.Count > 0) parts.Add($"{plan.Deactivations.Count} not in the file deactivated");
+        var message = $"{type.Label} replaced from the file: {string.Join(", ", parts)}.";
+        if (plan.KeptReserved.Count > 0)
+            message += $" Kept active because the AR Workbench's own rules use {(plan.KeptReserved.Count == 1 ? "it" : "them")}: {string.Join(", ", plan.KeptReserved)}.";
+        return ArWorkbenchSaveResult.Ok(message + AppliesOnSync(type));
+    }
+
     /// <summary>The list under an update lock held to the end of the transaction.</summary>
     private static async Task<List<ListRow>> LockListAsync(SqlConnection connection, SqlTransaction tx, string listType, CancellationToken ct)
     {

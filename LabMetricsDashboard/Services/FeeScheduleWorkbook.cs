@@ -7,7 +7,7 @@ namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// Reads a fee schedule file for the "Fees Schedule Import" screen: the Medicare Clinical Laboratory
-/// Fee Schedule as CMS publishes it (docs/ClinicalLaboratoryFeeSchedule_2026_Q1V1.xls - a legacy
+/// Fee Schedule as CMS publishes it (docs/ar-workbench/ClinicalLaboratoryFeeSchedule_2026_Q1V1.xls - a legacy
 /// .xls), or the same columns as .xlsx or .csv.
 /// <list type="bullet">
 ///   <item>Mandatory columns: <b>HCPCS</b> (the CPT code on the claim lines) and <b>RATE</b>.</item>

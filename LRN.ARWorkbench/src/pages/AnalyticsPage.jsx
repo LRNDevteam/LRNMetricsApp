@@ -11,14 +11,17 @@ import { arWorkbenchService } from '../services/arWorkbenchService';
 import { downloadText, fmt, toCsv } from '../utils/format';
 
 // The mockup's FU_BREAKDOWN_DIMS: each a field of the Comments Framework follow-up note; id is the
-// /analytics property holding its rows.
+// /analytics property holding its rows. The reason tabs (FR-AN-04) count escalation / reassignment
+// requests instead of notes and are internal only.
 const BREAKDOWNS = [
-  { id: 'byClaimStatus', label: 'Claim Status' },
-  { id: 'byFixResolution', label: 'Fix / Resolution' },
-  { id: 'byDenialRootCause', label: 'Denial Root Cause' }
+  { id: 'byClaimStatus', label: 'Claim Status', countLabel: '# Follow-Up Notes' },
+  { id: 'byFixResolution', label: 'Fix / Resolution', countLabel: '# Follow-Up Notes' },
+  { id: 'byDenialRootCause', label: 'Denial Root Cause', countLabel: '# Follow-Up Notes' },
+  { id: 'byEscalationReason', label: 'Escalation Reason', countLabel: '# Escalations', internal: true, empty: 'No escalations to a supervisor raised yet in the current scope.' },
+  { id: 'byReassignmentReason', label: 'Reassignment Reason', countLabel: '# Reassignment Requests', internal: true, empty: 'No reassignment requests raised yet in the current scope.' }
 ];
 
-function BreakdownTable({ label, rows: all }) {
+function BreakdownTable({ label, countLabel, rows: all }) {
   const { rows, th } = useTableSort(all, { label: (r) => r.label, notes: (r) => r.notes, claims: (r) => r.claims, balance: (r) => r.balance });
   return (
     <div className="arwb-table-wrap">
@@ -26,7 +29,7 @@ function BreakdownTable({ label, rows: all }) {
         <thead>
           <tr>
             {th('label', label)}
-            {th('notes', '# Follow-Up Notes', { className: 'num' })}
+            {th('notes', countLabel, { className: 'num' })}
             {th('claims', '# Claims', { className: 'num' })}
             {th('balance', 'Outstanding Balance', { className: 'num' })}
           </tr>
@@ -76,6 +79,7 @@ export default function AnalyticsPage() {
 
   const isViewer = user?.roleCode === 'viewer' && !user?.siteAdmin;
   const canDrill = canOpen(user, 'workqueue');
+  const breakdowns = BREAKDOWNS.filter((b) => !b.internal || !isViewer);
 
   // param: the Work Queue's URL filter for this dimension; a row with no key (rolled up) does not drill.
   const bars = (rows, param) => rows.map((r) => ({
@@ -90,12 +94,12 @@ export default function AnalyticsPage() {
   const breakdown = d[dim.id] || [];
   const breakdownColumns = [
     { key: 'label', label: dim.label },
-    { key: 'notes', label: '# Follow-Up Notes' },
+    { key: 'notes', label: dim.countLabel },
     { key: 'claims', label: '# Claims' },
     { key: 'balance', label: 'Outstanding Balance', csv: (r) => Number(r.balance).toFixed(2) }
   ];
   const exportBreakdown = () => downloadText(
-    `ARWorkbench_FollowUpBreakdown_${dim.label.replace(/[^A-Za-z]+/g, '')}_${new Date().toISOString().slice(0, 10)}.csv`,
+    `ARWorkbench_${dim.internal ? 'RequestBreakdown' : 'FollowUpBreakdown'}_${dim.label.replace(/[^A-Za-z]+/g, '')}_${new Date().toISOString().slice(0, 10)}.csv`,
     toCsv(breakdownColumns, breakdown));
 
   return (
@@ -134,20 +138,22 @@ export default function AnalyticsPage() {
         <ComparisonBars items={bars(d.byQueue, 'queue')} />
       </Card>
 
-      <Card title="Follow-Up Comments Breakdown" sub="Claim Status, Fix / Resolution & Denial Root Cause, rolled up from every logged follow-up note" flush
+      <Card title="Follow-Up Comments Breakdown"
+        sub={isViewer ? 'Claim Status, Fix / Resolution & Denial Root Cause, rolled up from every logged follow-up note'
+          : 'Claim Status, Fix / Resolution & Denial Root Cause from every logged follow-up note; escalation & reassignment requests by reason'} flush
         action={(
           <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-ghost" onClick={exportBreakdown} disabled={!breakdown.length}>
             <Icon name="doc" size={15} /> Export
           </button>
         )}>
         <div className="arwb-tabs" role="tablist">
-          {BREAKDOWNS.map((b) => (
+          {breakdowns.map((b) => (
             <button key={b.id} type="button" role="tab" aria-selected={b.id === dim.id}
               className={`arwb-tab-btn ${b.id === dim.id ? 'active' : ''}`} onClick={() => setDim(b)}>By {b.label}</button>
           ))}
         </div>
-        {breakdown.length ? <BreakdownTable label={dim.label} rows={breakdown} /> : (
-          <div className="arwb-empty-state">No follow-up notes logged with a {dim.label} yet in the current scope.</div>
+        {breakdown.length ? <BreakdownTable label={dim.label} countLabel={dim.countLabel} rows={breakdown} /> : (
+          <div className="arwb-empty-state">{dim.empty || `No follow-up notes logged with a ${dim.label} yet in the current scope.`}</div>
         )}
       </Card>
     </>

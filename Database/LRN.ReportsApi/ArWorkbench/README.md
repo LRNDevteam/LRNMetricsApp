@@ -111,7 +111,7 @@ Non-collectible means the **primary** code is on `NON_COLLECTIBLE_CODE`. `ARWB_A
 |---|---|
 | `RevenueExpectation` | Sum of line `RevenueExpectation`, which is the `ARWB_CptFeeSchedule` rate × units. 0 when there is no rate; `IsRevenueRateMissing` flags it. |
 | `PotentialRecovery` | Revenue Expectation − (insurance payment + patient payment + patient balance), floor 0 |
-| `RecoveryStatus` | `No Recovery` (financially closed with nothing paid; interim definition), `In Progress` (all three 0), `Fully Recovered` (total ≥ Revenue Expectation), otherwise `Partially Recovered` |
+| `RecoveryStatus` | `No Recovery` (financially closed, insurance payment, patient payment and patient balance all 0; interim definition), `In Progress` (all three 0), `Fully Recovered` (insurance + patient payment ≥ Revenue Expectation), otherwise `Partially Recovered` (including Patient AR claims that only carry a patient balance) |
 | `RecoveredAmount` | Insurance payments on lines whose payment date (`CheckDate`, else `PostingDate`) is after the claim's denial date. For claims without a denial, it counts from the date the claim entered the workbench. |
 | `RemainingAR` | Insurance balance, or 0 once auto-adjusted or write-off approved |
 

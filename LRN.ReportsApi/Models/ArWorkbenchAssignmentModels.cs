@@ -31,9 +31,11 @@ public sealed class ArWorkbenchBatchCriteria
     public List<string> Priority { get; set; } = new();
     public List<string> Clinic { get; set; } = new();
     public List<string> Aging { get; set; } = new();
+    /// <summary>Action / Task: the fix / resolution of the claim's last follow-up note ("__none" = never worked).</summary>
+    public List<string> Action { get; set; } = new();
     public bool TflRiskOnly { get; set; }
 
-    public bool IsEmpty => Category.Count + Payer.Count + Panel.Count + Priority.Count + Clinic.Count + Aging.Count == 0 && !TflRiskOnly;
+    public bool IsEmpty => Category.Count + Payer.Count + Panel.Count + Priority.Count + Clinic.Count + Aging.Count + Action.Count == 0 && !TflRiskOnly;
 
     /// <summary>Lists bound as null become empty; values are trimmed, de-duplicated and capped.</summary>
     public ArWorkbenchBatchCriteria Clean()
@@ -44,7 +46,7 @@ public sealed class ArWorkbenchBatchCriteria
         return new ArWorkbenchBatchCriteria
         {
             Category = C(Category), Payer = C(Payer), Panel = C(Panel), Priority = C(Priority), Clinic = C(Clinic), Aging = C(Aging),
-            TflRiskOnly = TflRiskOnly
+            Action = C(Action), TflRiskOnly = TflRiskOnly
         };
     }
 }
