@@ -13,6 +13,8 @@ export const arWorkbenchService = {
   // Client Management (ARWorkbench.ViewClientMgmt)
   clients: (labId) => api(`clients${qs({ labId })}`),
   setClientActive: (labId, targetLabId, isActive, note) => api(`clients/${targetLabId}/active${qs({ labId })}`, json('POST', { isActive, note })),
+  // FR-CM-03: { sharePointFolder, onboardingStatus, accountManager }
+  setClientConfig: (labId, targetLabId, config) => api(`clients/${targetLabId}/config${qs({ labId })}`, json('PUT', config)),
 
   // Audit Logs (ARWorkbench.ViewAudit)
   auditLog: (filter, signal) => api(`audit${qs(filter)}`, { signal }),
@@ -150,6 +152,13 @@ export const arWorkbenchService = {
   addMasterValue: (labId, type, body) => api(`masters/${encodeURIComponent(type)}${qs({ labId })}`, json('POST', body)),
   updateMasterValue: (labId, type, body) => api(`masters/${encodeURIComponent(type)}${qs({ labId })}`, json('PUT', body)),
   deleteMasterValue: (labId, type, value) => api(`masters/${encodeURIComponent(type)}${qs({ labId, value })}`, { method: 'DELETE' }),
+  // Download Template (CSV) = the list as it stands; Upload Template (CSV) replaces the list (FR-SET-01)
+  downloadMasterTemplate: (labId, type) => downloadFile(`masters/${encodeURIComponent(type)}/template${qs({ labId })}`, `ARWorkbench_${type}.csv`),
+  uploadMasterTemplate: (labId, type, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api(`masters/${encodeURIComponent(type)}/template${qs({ labId })}`, { method: 'POST', body: form });
+  },
 
   denialCodes: (query, signal) => api(`denial-codes${qs(query)}`, { signal }),
   unmappedDenialCodes: (labId) => api(`denial-codes/unmapped${qs({ labId })}`),
@@ -189,6 +198,8 @@ export const arWorkbenchService = {
   changeOwnPassword: (labId, body) => api(`me/password${qs({ labId })}`, json('POST', body)),
   queues: (labId, signal) => api(`queues${qs({ labId })}`, { signal }),
   dashboard: (labId, signal) => api(`dashboard${qs({ labId })}`, { signal }),
+  // FR-DASH-02 / 03: Control Plan + SLA attainment and Appeal Success Rate (loaded after the dashboard)
+  controlPlan: (labId, signal) => api(`dashboard/control-plan${qs({ labId })}`, { signal }),
   analytics: (labId, signal) => api(`analytics${qs({ labId })}`, { signal }),
   // Reports (T073 / T074): catalog, one report as a table, the same table as Excel
   // range: { from, to } (yyyy-mm-dd) for the event reports; ignored by the others

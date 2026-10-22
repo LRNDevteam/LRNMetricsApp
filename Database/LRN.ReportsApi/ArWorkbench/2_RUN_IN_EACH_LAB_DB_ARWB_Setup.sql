@@ -1681,10 +1681,12 @@ GO
                           so a line keeps counting after the sync that shows it paid. A claim that has never
                           had a denied line is priced on all its billed lines. 0 when no rate.
      PotentialRecovery    RevenueExpectation - (InsurancePayment + PatientPayment + PatientBalance), floor 0
-     RecoveryStatus       No Recovery          financially closed with no insurance or patient payment (interim definition - open item)
-                          In Progress          nothing paid yet (insurance payment + patient payment = 0)
-                          Fully Recovered      total paid (insurance + patient payment) >= RevenueExpectation (> 0)
-                          Partially Recovered  otherwise, including a paid claim with no fee-schedule rate
+     RecoveryStatus       No Recovery          financially closed, insurance payment + patient payment + patient balance = 0
+                                               (interim definition - open item)
+                          In Progress          insurance payment, patient payment and patient balance all 0 (section 7)
+                          Fully Recovered      paid (insurance + patient payment) >= RevenueExpectation (> 0) (T085)
+                          Partially Recovered  otherwise, including a Patient AR claim with only a patient balance
+                                               (DEF-22) and a paid claim with no fee-schedule rate
      RecoveredAmount      insurance payments on lines whose payment date is after the denial date
                           (claims with no denial: after the claim entered the workbench). Payments only.
 
@@ -1794,11 +1796,14 @@ BEGIN
         c.PotentialRecovery    = p.PotentialRecovery,
         c.IsAppealRequired     = CASE WHEN p.UnderpaymentAmount > @Eps
                                         OR (q.SubQueueId = 'denied_collectible' AND c.WorkflowStatus <> 'Completed') THEN 1 ELSE 0 END,
+        -- In Progress / No Recovery test Collected (insurance payment + patient payment + patient balance all 0,
+        -- section 7), so a Patient AR claim with only a patient balance is Partially Recovered (DEF-22).
+        -- Fully Recovered still needs what was actually PAID to reach the expectation (T085).
         c.RecoveryStatus       = CASE
-                                     WHEN s.IsFinanciallyClosed = 1 AND f.Paid <= @Eps THEN 'No Recovery'
-                                     WHEN f.Paid <= @Eps                          THEN 'In Progress'
+                                     WHEN s.IsFinanciallyClosed = 1 AND f.Collected <= @Eps THEN 'No Recovery'
+                                     WHEN f.Collected <= @Eps                          THEN 'In Progress'
                                      WHEN f.RevenueExpectation > @Eps
-                                      AND f.Paid >= f.RevenueExpectation          THEN 'Fully Recovered'
+                                      AND f.Paid >= f.RevenueExpectation               THEN 'Fully Recovered'
                                      ELSE 'Partially Recovered'
                                  END,
         -- Lifecycle flags
@@ -1878,7 +1883,6 @@ BEGIN
             RevenueExpectation   = CONVERT(decimal(18,2), ISNULL(la.LineRevenue, 0)),
             IsRevenueRateMissing = CASE WHEN ISNULL(la.BasisLines, 0) = 0 OR la.UnpricedLines > 0 THEN 1 ELSE 0 END,
             Collected            = c.InsurancePayment + c.PatientPayment + c.PatientBalance,
-            -- Recovery Status compares what has actually been PAID with the expectation.
             Paid                 = c.InsurancePayment + c.PatientPayment
     ) f
     -- Revenue expectation vs actual

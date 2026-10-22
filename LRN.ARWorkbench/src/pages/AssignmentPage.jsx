@@ -22,12 +22,14 @@ import { fmt } from '../utils/format';
 // Every rule (the pool, status moves, ad-hoc assignment, resolving reassignment requests, scope)
 // lives in the API (SqlArWorkbenchRepository.Assignment.cs); this screen only collects choices.
 
-const BLANK_CRITERIA = { category: [], payer: [], panel: [], priority: [] };
+const BLANK_CRITERIA = { category: [], payer: [], panel: [], priority: [], action: [] };
+// Action / Task = the fix / resolution of the claim's last follow-up note (FR-ASG-02 session request).
 const CRITERIA_FIELDS = [
   ['category', 'Denial Category', 'categories'],
   ['payer', 'Payer', 'payers'],
   ['panel', 'Panel Type', 'panels'],
-  ['priority', 'Priority', 'priorities']
+  ['priority', 'Priority', 'priorities'],
+  ['action', 'Action / Task', 'fixResolutions']
 ];
 // Unassigned Claims filters. Classification is the central Denial Code Master's classification of
 // the claim's primary denial code.

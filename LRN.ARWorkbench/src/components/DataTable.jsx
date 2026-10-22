@@ -18,8 +18,9 @@ export function withSortKeys(columns, sortKeys) {
   return columns.map((c) => (c.sortKey || !sortKeys[c.key] ? c : { ...c, sortKey: sortKeys[c.key] }));
 }
 
-// Every table offers the same page sizes; screens default to 50.
-export const PAGE_SIZES = [50, 100, 500, 1000];
+// Every table offers the same page sizes (FR-UI-01's 10 / 25 / 50 / 100, plus 500 / 1,000 for bulk work);
+// screens default to 50.
+export const PAGE_SIZES = [10, 25, 50, 100, 500, 1000];
 export const DEFAULT_PAGE_SIZE = 50;
 
 /**
@@ -31,6 +32,8 @@ export const DEFAULT_PAGE_SIZE = 50;
  *
  * Selection (opt-in): selectable + selectedKeys (a Set of rowKey values, kept by the caller so a
  * selection survives paging) + onSelectionChange(nextSet). The header box selects this page.
+ * isRowSelectable(row) is the eligibility predicate: an ineligible row renders no checkbox and is left
+ * out of the header's select-all (FR-UI-01).
  */
 function SelectAll({ checked, indeterminate, onChange, disabled }) {
   const ref = useRef(null);
@@ -42,7 +45,7 @@ export default function DataTable({
   tableId, columns, rows, totalCount, page, pageSize, sortBy, sortDesc,
   onSort, onPage, onPageSize, onRowClick, loading, emptyText = 'No records match the current filters.',
   exportName = 'export', toolbar, rowKey = (r, i) => r.claimKey ?? i,
-  selectable = false, selectedKeys, onSelectionChange
+  selectable = false, selectedKeys, onSelectionChange, isRowSelectable
 }) {
   const storageKey = `lrn.arwb.cols.${tableId}`;
   const [hidden, setHidden] = useState(() => {
@@ -73,7 +76,8 @@ export default function DataTable({
   }
 
   const selected = selectedKeys || new Set();
-  const pageKeys = rows.map((r, i) => rowKey(r, i));
+  const canSelect = (row) => !isRowSelectable || isRowSelectable(row);
+  const pageKeys = rows.flatMap((r, i) => (canSelect(r) ? [rowKey(r, i)] : []));
   const pageSelected = pageKeys.filter((k) => selected.has(k)).length;
   const colCount = visible.length + (selectable ? 1 : 0);
 
@@ -166,7 +170,7 @@ export default function DataTable({
                 className={[onRowClick ? 'clickable' : '', isSelected ? 'selected' : ''].join(' ').trim() || undefined}>
                 {selectable && (
                   <td className="arwb-select-col" onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" aria-label={`Select row ${i + 1}`} checked={isSelected} onChange={() => toggleRow(key)} />
+                    {canSelect(row) && <input type="checkbox" aria-label={`Select row ${i + 1}`} checked={isSelected} onChange={() => toggleRow(key)} />}
                   </td>
                 )}
                 {visible.map((c) => (

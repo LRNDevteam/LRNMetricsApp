@@ -5,7 +5,7 @@ using Xunit;
 namespace LRN.ReportsApi.Tests;
 
 /// <summary>
-/// Fixes from docs/AR_Workbench_Test_Report_2026-10-15.xlsx that are decided in code rather than SQL.
+/// Fixes from docs/archive/AR_Workbench_Test_Report_2026-10-15.xlsx (retest: docs/ar-workbench/AR_Workbench_Retest_Report_v1.4_2026-10-19.xlsx) that are decided in code rather than SQL.
 /// </summary>
 public class ArWorkbenchTestReportFixTests
 {
@@ -90,6 +90,24 @@ public class ArWorkbenchTestReportFixTests
         Assert.Contains("Claim ID", client);
         Assert.Contains("DenialCode", client);
         Assert.Contains("Ins. Balance", client);
+    }
+
+    [Fact]
+    public void Claims_export_with_lines_adds_a_line_items_sheet_with_one_row_per_cpt()
+    {
+        var claim = new ArWorkbenchClaimRow { ClaimKey = 7, ClaimID = "19448764" };
+        var lines = new Dictionary<long, List<ArWorkbenchClaimLine>>
+        {
+            [7] = [new() { LineNumber = 1, CPTCode = "87481", DenialCode = "CO11" }, new() { LineNumber = 2, CPTCode = "87640" }]
+        };
+        var bytes = ArWorkbenchClaimExcel.Build([claim], new Dictionary<long, ArWorkbenchClaimExportDetail>(), "t", false, clientView: true, lines);
+
+        using var workbook = new ClosedXML.Excel.XLWorkbook(new MemoryStream(bytes));
+        var sheet = workbook.Worksheet("Line Items");
+        Assert.Equal("CPT", sheet.Cell(2, ArWorkbenchClaimExcel.LineHeaders().ToList().IndexOf("CPT") + 1).GetString());
+        Assert.Equal("19448764", sheet.Cell(3, 1).GetString());
+        Assert.Equal("87640", sheet.Cell(4, ArWorkbenchClaimExcel.LineHeaders().ToList().IndexOf("CPT") + 1).GetString());
+        Assert.True(sheet.Cell(5, 1).IsEmpty());
     }
 
     [Fact]

@@ -30,6 +30,40 @@ const LIST_FILTERS = [
   { param: 'queue', api: 'queue', label: 'AR Queue', options: 'queues' }
 ];
 
+// More filters (FR-WQ-03): the same URL pattern; the panel opens by itself when one is in use.
+const MORE_LIST_FILTERS = [
+  { param: 'cstatus', api: 'sourceStatus', label: 'Claim Status', options: 'sourceStatuses' },
+  { param: 'provider', api: 'renderingProvider', label: 'Rendering Provider', options: 'renderingProviders' },
+  { param: 'fix', api: 'fixResolution', label: 'Fix / Resolution', options: 'fixResolutions' }
+];
+const MORE_VALUE_FILTERS = [
+  { param: 'cpt', api: 'cptCode', label: 'CPT code contains', type: 'text', chip: 'CPT contains' },
+  { param: 'balmin', api: 'minInsuranceBalance', label: 'Ins. Balance ≥', type: 'number', chip: 'Ins. Balance ≥' },
+  { param: 'balmax', api: 'maxInsuranceBalance', label: 'Ins. Balance ≤', type: 'number', chip: 'Ins. Balance ≤' },
+  { param: 'fufrom', api: 'nextFollowUpFrom', label: 'Next Follow-Up From', type: 'date', chip: 'Next Follow-Up from' },
+  { param: 'futo', api: 'nextFollowUpTo', label: 'Next Follow-Up To', type: 'date', chip: 'Next Follow-Up to' }
+];
+const MORE_PARAMS = [...MORE_LIST_FILTERS, ...MORE_VALUE_FILTERS].map((f) => f.param);
+
+// A text / number / date box that writes to the URL once typing pauses, not on every keystroke.
+function ValueFilter({ def, value, onCommit }) {
+  const [text, setText] = useState(value);
+  useEffect(() => { setText(value); }, [value]);
+  useEffect(() => {
+    if (text === value) return undefined;
+    const t = setTimeout(() => onCommit(text.trim()), def.type === 'date' ? 0 : 500);
+    return () => clearTimeout(t);
+  }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="arwb-field">
+      <label htmlFor={`wq-${def.param}`}>{def.label}</label>
+      <input id={`wq-${def.param}`} type={def.type} className="arwb-input" value={text}
+        maxLength={def.type === 'text' ? 50 : undefined} min={def.type === 'number' ? 0 : undefined} step={def.type === 'number' ? '0.01' : undefined}
+        onChange={(e) => setText(e.target.value)} />
+    </div>
+  );
+}
+
 function NextFollowUp({ date }) {
   if (!date) return '—';
   const days = fmt.daysUntil(date);
@@ -127,6 +161,9 @@ export default function WorkQueuePage() {
     }
   }
   const [searchText, setSearchText] = useState(params.get('q') || '');
+  const moreActive = MORE_PARAMS.some((p) => params.get(p));
+  const [moreOpen, setMoreOpen] = useState(moreActive);
+  useEffect(() => { if (moreActive) setMoreOpen(true); }, [moreActive]);
 
   const pageSize = Number(params.get('size')) || DEFAULT_PAGE_SIZE;
   const filter = useMemo(() => {
@@ -145,7 +182,8 @@ export default function WorkQueuePage() {
       // ?primary=1 (Route to Work Queue from an insight): the PRIMARY denial only, as insights count (OBS-02).
       primaryDenialOnly: params.get('primary') === '1'
     };
-    LIST_FILTERS.forEach((lf) => { f[lf.api] = params.getAll(lf.param); });
+    [...LIST_FILTERS, ...MORE_LIST_FILTERS].forEach((lf) => { f[lf.api] = params.getAll(lf.param); });
+    MORE_VALUE_FILTERS.forEach((vf) => { f[vf.api] = params.get(vf.param) || ''; });
     return f;
   }, [labId, params, pageSize]);
 
@@ -218,10 +256,15 @@ export default function WorkQueuePage() {
       key: `code:${v}`, text: `${params.get('primary') === '1' ? 'Primary Denial' : 'Denial Code'}: ${v}`,
       remove: () => update({ code: params.getAll('code').filter((x) => x !== v), ...(params.getAll('code').length <= 1 ? { primary: '' } : {}) })
     })),
-    ...LIST_FILTERS.flatMap((lf) => params.getAll(lf.param).map((v) => {
+    ...[...LIST_FILTERS, ...MORE_LIST_FILTERS].flatMap((lf) => params.getAll(lf.param).map((v) => {
       const label = options?.[lf.options]?.find((o) => o.value === v)?.label ?? v;
       return { key: `${lf.param}:${v}`, text: `${lf.label}: ${label}`, remove: () => update({ [lf.param]: params.getAll(lf.param).filter((x) => x !== v) }) };
-    }))
+    })),
+    ...MORE_VALUE_FILTERS.filter((vf) => params.get(vf.param)).map((vf) => {
+      const v = params.get(vf.param);
+      const text = vf.type === 'number' ? fmt.money(Number(v)) : vf.type === 'date' ? fmt.date(v) : v;
+      return { key: vf.param, text: `${vf.chip}: ${text}`, remove: () => update({ [vf.param]: '' }) };
+    })
   ];
 
   return (
@@ -251,9 +294,23 @@ export default function WorkQueuePage() {
             <input id="wq-nc" type="checkbox" checked={filter.nonCollectibleOnly} onChange={(e) => update({ nc: e.target.checked ? '1' : '' })} />
             <label htmlFor="wq-nc" title="Any denial code on the claim is on the Non-Collectible list">Non-collectible only</label>
           </div>
+          <button type="button" className="arwb-btn arwb-btn-sm" aria-expanded={moreOpen} onClick={() => setMoreOpen((v) => !v)}>{moreOpen ? 'Fewer filters' : 'More filters'}</button>
           <SavedViews viewKey="workqueue" getState={viewState} onApply={applyView} applyDefault={!openedWithFilters} />
           <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-ghost" onClick={clearFilters}>Clear Filters</button>
         </div>
+        {moreOpen && (
+          <div className="arwb-filter-bar" style={{ borderTop: '1px solid var(--border-soft)' }}>
+            {MORE_LIST_FILTERS.map((lf) => (
+              <MultiSelect key={lf.param} id={`wq-${lf.param}`} label={lf.label}
+                options={options?.[lf.options] || []}
+                selected={filter[lf.api]}
+                onChange={(values) => update({ [lf.param]: values })} />
+            ))}
+            {MORE_VALUE_FILTERS.map((vf) => (
+              <ValueFilter key={vf.param} def={vf} value={params.get(vf.param) || ''} onCommit={(v) => update({ [vf.param]: v })} />
+            ))}
+          </div>
+        )}
         {activeChips.length > 0 && (
           <div className="arwb-filter-chip-row">
             {activeChips.map((c) => (

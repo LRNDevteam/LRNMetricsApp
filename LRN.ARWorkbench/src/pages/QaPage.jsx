@@ -178,8 +178,9 @@ export default function QaPage() {
           onPageSize={(pageSize) => setQuery((q) => ({ ...q, pageSize, page: 1 }))}
           onRowClick={openClaim}
           selectable
+          isRowSelectable={decidable}
           selectedKeys={selected}
-          onSelectionChange={(keys) => setSelected(new Set([...keys].filter((k) => { const r = rows.find((x) => x.claimKey === k); return !r || decidable(r); })))}
+          onSelectionChange={setSelected}
           toolbar={(
             <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" disabled={!selected.size} onClick={() => setBulkConfirm(true)}>
               <Icon name="check" size={15} /> Approve Selected{selected.size ? ` (${fmt.count(selected.size)})` : ''}

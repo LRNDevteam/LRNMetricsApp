@@ -1,6 +1,6 @@
 -- Fee Schedule (LRNMaster) and the "Fees Schedule Import" screen (FeeSchedule/Index) under
 -- Master Values. Imports the Medicare Clinical Laboratory Fee Schedule
--- (docs/ClinicalLaboratoryFeeSchedule_2026_Q1V1.xls, or the .xlsx / .csv of a later quarter):
+-- (docs/ar-workbench/ClinicalLaboratoryFeeSchedule_2026_Q1V1.xls, or the .xlsx / .csv of a later quarter):
 --   mandatory columns  HCPCS (= the CPT code on the claim lines), RATE
 --   optional columns   MOD, YEAR, EFF_DATE, INDICATOR, SHORTDESC
 --

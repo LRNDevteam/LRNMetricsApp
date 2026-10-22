@@ -199,7 +199,7 @@ export default function AgentRequestsPage() {
         page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }}
         sortBy={sort.by} sortDesc={sort.desc} onSort={(by, desc) => setSort({ by, desc })}
         rowKey={(r) => r.agentRequestId} onRowClick={openClaim}
-        selectable selectedKeys={selected} onSelectionChange={setSelected}
+        selectable isRowSelectable={(r) => r.requestStatus === 'Pending'} selectedKeys={selected} onSelectionChange={setSelected}
         emptyText="No requests match these filters."
         toolbar={(
           <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-primary" disabled={!selectedPending.length} onClick={() => setBulkResolving(true)}>

@@ -29,7 +29,7 @@ function Delta({ tone = 'flat', children }) {
 }
 
 /**
- * The mockup's System Administrator dashboard (docs/Denial_WorkFlow/LRN_Denial_AR_Workbench_Demo_Account.html):
+ * The mockup's System Administrator dashboard (docs/ar-workbench/LRN_Denial_AR_Workbench_Demo_Account.html):
  * 10 KPI tiles, Latest Denial Analysis Report insights, AR Collections Progress, Claim Queue
  * Volumes, the four distribution charts and Agent Productivity. Every figure comes from
  * /dashboard, already limited to the caller's scope; the role only decides which cards show,
@@ -41,6 +41,9 @@ export default function DashboardPage() {
   const [d, setD] = useState(null);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
+  // Control Plan and SLA tiles: their own request, so the rest of the dashboard never waits on them.
+  const [plan, setPlan] = useState(null);
+  const [planError, setPlanError] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -49,6 +52,16 @@ export default function DashboardPage() {
     arWorkbenchService.dashboard(labId, controller.signal)
       .then(setD)
       .catch((e) => { if (e.name !== 'AbortError') setError(e.message); });
+    return () => controller.abort();
+  }, [labId, reload]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setPlan(null);
+    setPlanError('');
+    arWorkbenchService.controlPlan(labId, controller.signal)
+      .then(setPlan)
+      .catch((e) => { if (e.name !== 'AbortError') setPlanError(e.message); });
     return () => controller.abort();
   }, [labId, reload]);
 
@@ -83,6 +96,19 @@ export default function DashboardPage() {
     { label: 'Overdue Follow-Ups', value: fmt.count(d.overdueFollowUps),
       delta: d.overdueFollowUps > 0 ? <Delta tone="down">{d.overdueFollowUps} past due</Delta> : <Delta tone="up">on schedule</Delta> }
   ];
+  // FR-DASH-03: SLA attainment (Operational SLA milestones, last 30 days) and Appeal Success Rate - AR team only.
+  if (!isViewer) {
+    const sla = plan?.sla;
+    const ap = plan?.appeals;
+    kpis.push(
+      { label: `SLA Attainment (${sla?.days || 30} days)`,
+        value: !plan ? '…' : sla?.attainmentPct != null ? fmt.pct(sla.attainmentPct) : '—',
+        delta: sla ? <Delta tone={sla.targetsConfirmed ? 'flat' : 'down'}>{sla.measured ? `${fmt.count(sla.measured)} milestones measured` : 'nothing measured yet'}{sla.targetsConfirmed ? '' : ' · draft targets'}</Delta> : null },
+      { label: 'Appeal Success Rate',
+        value: !plan ? '…' : ap?.successRate != null ? fmt.pct(ap.successRate) : '—',
+        delta: ap ? <Delta>{`${fmt.count(ap.won)} paid of ${fmt.count(ap.decided)} decided · ${fmt.count(ap.appealed)} appealed`}</Delta> : null }
+    );
+  }
 
   const ramp = sequentialRamp(d.agingBuckets.length);
   const recoveryPct = d.totalInitialAR > 0 ? d.totalRecovered / d.totalInitialAR : 0;
@@ -121,6 +147,10 @@ export default function DashboardPage() {
           {`Across all ${fmt.count(d.totalClaims)} claims, total revenue expectation stands at ${fmt.money(arExpectation)}, with ${fmt.money(d.totalRecovered)} collected so far — an overall ${pct0(arExpectation > 0 ? d.totalRecovered / arExpectation : 0)} realization rate.`}
         </div>
       </Card>
+
+      <ControlPlan plan={plan} error={planError} showActions={!isViewer}
+        onAction={canDrill ? (key) => openQueue({ fix: key }) : null}
+        slaAction={canOpen(user, 'reports') && <GoTo onClick={() => navigate('/reports?report=operational-sla')}>Operational SLA</GoTo>} />
 
       {canSeeAllQueues && (
         <Card icon="inbox" title="Claim Queue Volumes" sub="workable AR Queue leaves with an open insurance balance — assign volumes to agents from here"
@@ -163,6 +193,80 @@ export default function DashboardPage() {
         </Card>
       )}
     </>
+  );
+}
+
+/**
+ * FR-DASH-02 Control Plan: claims and outstanding balance per denial classification, or per action / task
+ * (the last follow-up's fix / resolution), split into Open (unassigned), In Progress (with an agent) and
+ * Closed (financially closed or completed). An action row opens its claims in the Work Queue.
+ */
+function ControlPlan({ plan, error, showActions, onAction, slaAction }) {
+  const [view, setView] = useState('classification');
+  const rows = (view === 'action' ? plan?.byAction : plan?.byClassification) || [];
+  const total = (r) => r.openCount + r.inProgressCount + r.closedCount;
+  const { rows: sorted, th } = useTableSort(rows, {
+    label: (r) => r.label, open: (r) => r.openCount, progress: (r) => r.inProgressCount, closed: (r) => r.closedCount, total
+  });
+  const cell = (count, amount) => (
+    <><span className="mono">{fmt.count(count)}</span><div className="arwb-hint mono">{fmt.money(amount)}</div></>
+  );
+  return (
+    <Card icon="target" title="Control Plan" flush
+      sub="claims and outstanding balance — Open (unassigned) · In Progress (with an agent) · Closed (closed or completed)"
+      action={(
+        <>
+          {showActions && (
+            <div className="arwb-tabs" role="tablist" style={{ margin: 0 }}>
+              {[['classification', 'By Classification'], ['action', 'By Action / Task']].map(([id, label]) => (
+                <button key={id} type="button" role="tab" aria-selected={view === id} className={`arwb-tab-btn ${view === id ? 'active' : ''}`}
+                  onClick={() => setView(id)}>{label}</button>
+              ))}
+            </div>
+          )}
+          {slaAction}
+        </>
+      )}>
+      {error ? <div className="arwb-panel-pad"><ErrorBox message={error} /></div> : !plan ? <Loading /> : !rows.length ? (
+        <div className="arwb-empty-state">No claims in the current scope.</div>
+      ) : (
+        <div className="arwb-table-wrap">
+          <table className="arwb-data-table">
+            <thead>
+              <tr>
+                {th('label', view === 'action' ? 'Action / Task (last Fix / Resolution)' : 'Denial Classification')}
+                {th('open', 'Open', { className: 'num' })}
+                {th('progress', 'In Progress', { className: 'num' })}
+                {th('closed', 'Closed', { className: 'num' })}
+                {th('total', 'Total', { className: 'num' })}
+                {view === 'action' && onAction && <th scope="col" className="num"><span className="visually-hidden">Open claims</span></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((r) => (
+                <tr key={r.label}>
+                  <td className="wrap">{r.label}</td>
+                  <td className="num">{cell(r.openCount, r.openAmount)}</td>
+                  <td className="num">{cell(r.inProgressCount, r.inProgressAmount)}</td>
+                  <td className="num">{cell(r.closedCount, r.closedAmount)}</td>
+                  <td className="num">{cell(total(r), r.openAmount + r.inProgressAmount + r.closedAmount)}</td>
+                  {view === 'action' && onAction && (
+                    <td className="num">{r.key && <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => onAction(r.key)}>Open claims</button>}</td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {plan?.sla?.milestones?.length > 0 && showActions && (
+        <div className="arwb-panel-pad arwb-hint">
+          SLA attainment by milestone (last {plan.sla.days} days):{' '}
+          {plan.sla.milestones.map((m) => `${m.label} ${m.attainmentPct != null ? fmt.pct(m.attainmentPct) : '—'}`).join(' · ')}.
+          {' '}Per-action targets for Appeals, Rebills and Write-offs are added once their turnaround times are agreed (plan D-11).
+        </div>
+      )}
+    </Card>
   );
 }
 

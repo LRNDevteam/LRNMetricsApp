@@ -14,7 +14,7 @@ import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
 import { arQueueBadgeClass, fmt } from '../utils/format';
 
-// Layout and styling follow the mockup's claim workspace (docs/Denial_WorkFlow/
+// Layout and styling follow the mockup's claim workspace (docs/ar-workbench/
 // LRN_Denial_AR_Workbench_Demo_Account.html, claimdetail.js). The claim record arrives as a
 // dictionary of dbo.ARWB_vw_ClaimWorklist columns (PascalCase keys).
 const PHASES = ['Identified', 'Assigned', 'QA Verification', 'Completed'];

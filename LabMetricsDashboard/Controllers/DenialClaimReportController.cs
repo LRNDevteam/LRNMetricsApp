@@ -726,7 +726,7 @@ public sealed class DenialClaimReportController : Controller
     /// Saves one row from the grid's row-level Edit. Only Current Week is editable.
     /// </summary>
     /// <remarks>
-    /// Editable / non-editable follows docs/DenialSummary_EditableColumns.xlsx. Denial Codes and
+    /// Editable / non-editable follows docs/denial-management/DenialSummary_EditableColumns.xlsx. Denial Codes and
     /// Highest Impact - Insurance are not editable: they are the row's identity (and the claim
     /// drill-through), so they are taken from the stored row and anything posted for them is
     /// ignored. Data is marked Remove - it is not on the grid and keeps what the import stored.

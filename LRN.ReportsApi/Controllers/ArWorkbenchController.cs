@@ -123,6 +123,29 @@ public sealed class ArWorkbenchController : ControllerBase
     }
 
     /// <summary>
+    /// FR-DASH-02 / FR-DASH-03 (DEF-23): the Control Plan (Open / In Progress / Closed by denial classification
+    /// and by action / task) and the SLA attainment and Appeal Success Rate tiles. Separate from GET dashboard so
+    /// the main dashboard stays fast. Client users get the classification view only.
+    /// </summary>
+    [HttpGet("dashboard/control-plan")]
+    public async Task<ActionResult<ArWorkbenchControlPlan>> DashboardControlPlan([FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        var plan = await _repository.GetControlPlanAsync(labId, user!, ct);
+        if (!ArWorkbenchClientVisibility.IsClientUser(user!))
+        {
+            const int slaDays = 30;
+            var today = DateTime.UtcNow.Date;
+            var (range, _) = ArWorkbenchReportRules.ResolveRange(today.AddDays(-(slaDays - 1)), today, today);
+            var report = range is null ? null : await _repository.GetReportAsync(labId, ArWorkbenchReportRules.OperationalSla, range, user!, ct);
+            if (report is not null)
+                plan.Sla = ArWorkbenchControlPlanRules.SlaSummary(report, slaDays, (await _repository.GetSlaSettingsAsync(labId, ct)).Confirmed);
+        }
+        return Ok(plan);
+    }
+
+    /// <summary>
     /// T071 Recovery &amp; Financial Analytics: recovered vs outstanding by client, payer, panel,
     /// denial category, agent and AR queue, plus the Follow-Up Comments Breakdown. Every role opens
     /// it; the figures are limited to the caller's scope in SQL.
@@ -547,7 +570,7 @@ public sealed class ArWorkbenchController : ControllerBase
             cards.Add(new ArWorkbenchClientCard
             {
                 LabId = lab.LabId, LabName = lab.LabName, IsActive = status?.IsActive ?? true, StatusNote = status?.StatusNote,
-                ChangedBy = status?.ChangedBy, ChangedOn = status?.ChangedOn,
+                ChangedBy = status?.ChangedBy, ChangedOn = status?.ChangedOn, Config = status?.Config ?? new(),
                 Stats = await _repository.GetClientStatsAsync(lab.LabId, ct)
             });
         }
@@ -568,6 +591,39 @@ public sealed class ArWorkbenchController : ControllerBase
         var result = await _repository.SetClientActiveAsync(targetLabId, request.IsActive, note, user.UserName, ct);
         if (result.Status == ArWorkbenchSaveStatus.Ok)
             _logger.LogWarning("AR Workbench client lab {Target} {State} by {User}: {Note}", targetLabId, request.IsActive ? "reactivated" : "deactivated", user.UserName, note);
+        return ToResult(result);
+    }
+
+    /// <summary>FR-CM-03: SharePoint source folder, onboarding status and primary account manager of one client.</summary>
+    [HttpPut("clients/{targetLabId:int}/config")]
+    public async Task<ActionResult> SetClientConfig([FromRoute] int targetLabId, [FromQuery] int labId, [FromBody] ArWorkbenchClientConfig? request, CancellationToken ct)
+    {
+        var (user, labs, denied) = await ResolveClientAdminAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!user!.SiteAdmin && !user.Permissions.ManageSettings) return Forbidden("Only an administrator can change a client's configuration.");
+        if (!labs.Any(l => l.LabId == targetLabId)) return Forbidden("You can only change clients you manage.");
+        if (request is null) return BadRequest(new { message = "Send the configuration." });
+
+        static string? Clean(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();
+        var config = new ArWorkbenchClientConfig
+        {
+            SharePointFolder = Clean(request.SharePointFolder),
+            OnboardingStatus = Clean(request.OnboardingStatus),
+            AccountManager = Clean(request.AccountManager)
+        };
+        if (config.SharePointFolder is { Length: > 1000 }) return BadRequest(new { message = "The SharePoint folder must be 1,000 characters or fewer." });
+        if (config.AccountManager is { Length: > 256 }) return BadRequest(new { message = "The account manager must be 256 characters or fewer." });
+        if ((config.SharePointFolder + config.AccountManager)?.Any(char.IsControl) == true) return BadRequest(new { message = "Remove line breaks from the folder and account manager." });
+        if (config.OnboardingStatus is { } s)
+        {
+            var match = ArWorkbenchClientConfig.OnboardingStatuses.FirstOrDefault(x => string.Equals(x, s, StringComparison.OrdinalIgnoreCase));
+            if (match is null) return BadRequest(new { message = $"Onboarding status must be one of: {string.Join(", ", ArWorkbenchClientConfig.OnboardingStatuses)}." });
+            config.OnboardingStatus = match;
+        }
+
+        var result = await _repository.SetClientConfigAsync(targetLabId, config, user.UserName, ct);
+        if (result.Status == ArWorkbenchSaveStatus.Ok)
+            _logger.LogInformation("AR Workbench client lab {Target} configuration updated by {User}", targetLabId, user.UserName);
         return ToResult(result);
     }
 
@@ -1776,7 +1832,8 @@ public sealed class ArWorkbenchController : ControllerBase
     private async Task<string> LabNameAsync(int labId, CancellationToken ct) =>
         (await _workflowService.GetLabsForUserAsync(CurrentUserName(), ct)).FirstOrDefault(l => l.LabId == labId)?.LabName ?? $"Lab {labId}";
 
-    private static async Task<ArWorkbenchExportOutput> BuildClaimsExportAsync(IArWorkbenchRepository repository, ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, string labName, CancellationToken ct)
+    private static async Task<ArWorkbenchExportOutput> BuildClaimsExportAsync(IArWorkbenchRepository repository, ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, string labName, CancellationToken ct,
+        bool includeLines = false)
     {
         // One query for every row (up to MaxRows), not 500-row pages.
         var result = await repository.GetClaimsForExportAsync(filter, user, ArWorkbenchClaimExcel.MaxRows, ct);
@@ -1788,7 +1845,9 @@ public sealed class ArWorkbenchController : ControllerBase
         // by calling the API directly even though no client screen offers it.
         var clientView = ArWorkbenchClientVisibility.IsClientUser(user);
         var details = await repository.GetClaimExportDetailsAsync(filter.LabId, rows.Select(r => r.ClaimKey).ToList(), ct);
-        var bytes = ArWorkbenchClaimExcel.Build(rows, details, $"AR Workbench claims — {labName} — {DateTime.Now:MM/dd/yyyy HH:mm}", total > rows.Count, clientView);
+        // FR-XL-03: a "Line Items" sheet with each claim's CPT lines (the client portal's export asks for it).
+        var lines = includeLines ? await repository.GetClaimLinesForExportAsync(filter.LabId, rows.Select(r => r.ClaimKey).ToList(), ct) : null;
+        var bytes = ArWorkbenchClaimExcel.Build(rows, details, $"AR Workbench claims — {labName} — {DateTime.Now:MM/dd/yyyy HH:mm}", total > rows.Count, clientView, lines);
         return new ArWorkbenchExportOutput(bytes, rows.Count);
     }
 
@@ -1797,8 +1856,9 @@ public sealed class ArWorkbenchController : ControllerBase
     // downloaded when it is ready. The direct GET exports above stay for older clients.
 
     /// <param name="exportScope">The screen / button the export came from, e.g. "Work Queue - Filtered". Names the file.</param>
+    /// <param name="includeLines">Add the "Line Items" sheet (one row per CPT line).</param>
     [HttpPost("exports/claims")]
-    public async Task<ActionResult<ArWorkbenchExportJob>> StartClaimsExport([FromQuery] ArWorkbenchClaimFilter filter, [FromQuery] string? exportScope, CancellationToken ct)
+    public async Task<ActionResult<ArWorkbenchExportJob>> StartClaimsExport([FromQuery] ArWorkbenchClaimFilter filter, [FromQuery] string? exportScope, [FromQuery] bool includeLines, CancellationToken ct)
     {
         var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
         if (denied is not null) return denied;
@@ -1807,7 +1867,7 @@ public sealed class ArWorkbenchController : ControllerBase
         var labName = await LabNameAsync(filter.LabId, ct);
         var scope = ExportScope(exportScope, "Claims");
         return StartExport("claims", scope, filter.LabId, user!, $"ARWorkbench_{FilePart(scope)}_{FilePart(labName)}_{DateTime.Now:yyyyMMdd_HHmm}.xlsx",
-            (services, token) => BuildClaimsExportAsync(services.GetRequiredService<IArWorkbenchRepository>(), filter, user!, labName, token));
+            (services, token) => BuildClaimsExportAsync(services.GetRequiredService<IArWorkbenchRepository>(), filter, user!, labName, token, includeLines));
     }
 
     [HttpPost("exports/audit")]
@@ -2247,6 +2307,49 @@ public sealed class ArWorkbenchController : ControllerBase
         if (master is null) return UnknownList(type);
         if (string.IsNullOrWhiteSpace(value)) return BadRequest(new { message = "No value was specified to delete." });
         return ToResult(await _repository.DeleteMasterValueAsync(labId, master, value, ct));
+    }
+
+    /// <summary>FR-SET-01 Download Template (CSV): the list as it stands - Value, Sort Order, Active.</summary>
+    [HttpGet("masters/{type}/template")]
+    public async Task<ActionResult> MasterListTemplate([FromRoute] string type, [FromQuery] int labId, CancellationToken ct)
+    {
+        var (_, denied) = await ResolveMasterListUserAsync(labId, type, ct);
+        if (denied is not null) return denied;
+        var master = ArWorkbenchMasterRules.Find(type);
+        if (master is null) return UnknownList(type);
+        var list = (await _repository.GetMasterValuesAsync(labId, ct)).Lists.First(l => string.Equals(l.Type, master.Key, StringComparison.OrdinalIgnoreCase));
+        var csv = ArWorkbenchMasterListCsv.Template(list.Values);
+        var name = new string(master.Label.Where(char.IsLetterOrDigit).ToArray());
+        return File(System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(csv)).ToArray(), "text/csv", $"ARWorkbench_{name}_{DateTime.Now:yyyyMMdd}.csv");
+    }
+
+    /// <summary>
+    /// FR-SET-01 Upload Template (CSV): bulk replace. Every row is validated first - one bad row rejects
+    /// the file with every problem listed; values left out of the file are deactivated, not deleted.
+    /// </summary>
+    [HttpPost("masters/{type}/template")]
+    [RequestSizeLimit(2_000_000)]
+    public async Task<ActionResult> MasterListUpload([FromRoute] string type, [FromQuery] int labId, [FromForm] DenialCodeMasterImportRequest request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveMasterListUserAsync(labId, type, ct);
+        if (denied is not null) return denied;
+        var master = ArWorkbenchMasterRules.Find(type);
+        if (master is null) return UnknownList(type);
+        if (!string.Equals(Path.GetExtension(request.File?.FileName), ".csv", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { message = "Upload the list as a .csv file (Download Template gives the format)." });
+        var uploadError = await FileUploadGuard.ValidateCsvOrExcelAsync(request.File, 1024 * 1024, ct);
+        if (uploadError != null) return BadRequest(new { message = uploadError });
+
+        string text;
+        using (var reader = new StreamReader(request.File!.OpenReadStream(), System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+            text = await reader.ReadToEndAsync(ct);
+        var (rows, errors) = ArWorkbenchMasterListCsv.Parse(master, text);
+        if (errors.Count > 0)
+            return BadRequest(new { message = $"Nothing was changed - fix the file and upload it again. {string.Join(" ", errors.Take(20))}{(errors.Count > 20 ? $" (+{errors.Count - 20} more)" : "")}", errors });
+
+        var result = await _repository.ReplaceMasterListAsync(labId, master, rows, user!.UserName, ct);
+        _logger.LogInformation("AR Workbench master list {Type} replaced from CSV in lab {LabId} by {User}: {Message}", master.Key, labId, user.UserName, result.Message);
+        return ToResult(result);
     }
 
     [HttpGet("denial-codes")]

@@ -1,4 +1,4 @@
-// The mockup's stroke icon set (App.ICONS in docs/Denial_WorkFlow/LRN_Denial_AR_Workbench_Demo_Account.html),
+// The mockup's stroke icon set (App.ICONS in docs/ar-workbench/LRN_Denial_AR_Workbench_Demo_Account.html),
 // so the sidebar and cards use the same glyphs as the approved design.
 const PATHS = {
   dashboard: <><rect x="2.5" y="2.5" width="6.2" height="6.2" rx="1.2" /><rect x="11.3" y="2.5" width="6.2" height="6.2" rx="1.2" /><rect x="2.5" y="11.3" width="6.2" height="6.2" rx="1.2" /><rect x="11.3" y="11.3" width="6.2" height="6.2" rx="1.2" /></>,

@@ -13,6 +13,7 @@ public interface IArWorkbenchRepository
     Task<ArWorkbenchUserContext?> GetUserContextAsync(int labId, string userName, string? siteAdminRole, CancellationToken ct);
     Task<ArWorkbenchQueueSummary> GetQueueSummaryAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchDashboard> GetDashboardAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
+    Task<ArWorkbenchControlPlan> GetControlPlanAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchPagedResult<ArWorkbenchClaimRow>> GetClaimsAsync(ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchPagedResult<ArWorkbenchClaimRow>> GetClaimsForExportAsync(ArWorkbenchClaimFilter filter, ArWorkbenchUserContext user, int maxRows, CancellationToken ct);
     /// <param name="context">The page's current filters: lists cascade (each counted over the other filters). Null = lab-wide.</param>
@@ -37,6 +38,7 @@ public interface IArWorkbenchRepository
     Task<IReadOnlySet<int>> GetInactiveClientLabIdsAsync(CancellationToken ct);
     Task<Dictionary<int, ArWorkbenchClientStatus>> GetClientStatusesAsync(CancellationToken ct);
     Task<ArWorkbenchSaveResult> SetClientActiveAsync(int labId, bool isActive, string? note, string user, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> SetClientConfigAsync(int labId, ArWorkbenchClientConfig config, string user, CancellationToken ct);
     Task<ArWorkbenchClientStats?> GetClientStatsAsync(int labId, CancellationToken ct);
 
     // Escalation & Reassignment Requests (SqlArWorkbenchRepository.AgentRequests.cs)
@@ -77,6 +79,7 @@ public interface IArWorkbenchRepository
     Task<int> MarkNotificationsReadAsync(int labId, IReadOnlyList<long> notificationIds, bool all, ArWorkbenchUserContext user, CancellationToken ct);
     /// <summary>Claims export: assignment, latest follow-up note, QA review and status verification per claim (keys already scope-checked).</summary>
     Task<Dictionary<long, ArWorkbenchClaimExportDetail>> GetClaimExportDetailsAsync(int labId, IReadOnlyList<long> claimKeys, CancellationToken ct);
+    Task<Dictionary<long, List<ArWorkbenchClaimLine>>> GetClaimLinesForExportAsync(int labId, IReadOnlyList<long> claimKeys, CancellationToken ct);
 
     // QA Verification (SqlArWorkbenchRepository.Qa.cs)
     Task<ArWorkbenchQaQueue> GetQaQueueAsync(ArWorkbenchQaFilter filter, ArWorkbenchUserContext user, CancellationToken ct);
@@ -155,6 +158,7 @@ public interface IArWorkbenchRepository
     Task<ArWorkbenchSaveResult> AddMasterValueAsync(int labId, ArWorkbenchMasterType type, ArWorkbenchMasterValidated value, string user, CancellationToken ct);
     Task<ArWorkbenchSaveResult> UpdateMasterValueAsync(int labId, ArWorkbenchMasterType type, string originalValue, ArWorkbenchMasterValidated value, string user, CancellationToken ct);
     Task<ArWorkbenchSaveResult> DeleteMasterValueAsync(int labId, ArWorkbenchMasterType type, string value, CancellationToken ct);
+    Task<ArWorkbenchSaveResult> ReplaceMasterListAsync(int labId, ArWorkbenchMasterType type, IReadOnlyList<ArWorkbenchMasterValidated> uploaded, string user, CancellationToken ct);
 
     Task<ArWorkbenchPagedResult<ArWorkbenchDenialCodeRow>> GetDenialCodesAsync(ArWorkbenchDenialCodeQuery query, CancellationToken ct);
     Task<IReadOnlyList<ArWorkbenchDenialCodeRow>> GetAllDenialCodesAsync(int labId, CancellationToken ct);
@@ -1166,6 +1170,34 @@ ORDER BY pg.Seq;";
         }
         AddIn("w.FixResolution", "Fx", filter.FixResolution, 200, ArWorkbenchFilterValues.None);
         AddIn("w.SourceClaimStatus", "Ss", filter.SourceStatus, 200, ArWorkbenchFilterValues.None);
+        AddIn("w.BillingProvider", "Rp", filter.RenderingProvider, 500, ArWorkbenchFilterValues.None);
+        if (filter.NewDenialOnly) where.Add("w.NewDenialSinceWork = 1");
+        if (!string.IsNullOrWhiteSpace(filter.CptCode))
+        {
+            where.Add("EXISTS (SELECT 1 FROM dbo.ARWB_ClaimLine cl WHERE cl.ClaimKey = w.ClaimKey AND cl.CPTCode LIKE @Cpt)");
+            var cpt = filter.CptCode.Trim();
+            cmd.Parameters.Add("@Cpt", SqlDbType.NVarChar, 60).Value = "%" + (cpt.Length > 50 ? cpt[..50] : cpt).Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + "%";
+        }
+        if (filter.MinInsuranceBalance is { } minBal)
+        {
+            where.Add("w.RemainingAR >= @MinBal");
+            cmd.Parameters.Add(new SqlParameter("@MinBal", SqlDbType.Decimal) { Precision = 18, Scale = 2, Value = minBal });
+        }
+        if (filter.MaxInsuranceBalance is { } maxBal)
+        {
+            where.Add("w.RemainingAR <= @MaxBal");
+            cmd.Parameters.Add(new SqlParameter("@MaxBal", SqlDbType.Decimal) { Precision = 18, Scale = 2, Value = maxBal });
+        }
+        if (filter.NextFollowUpFrom is { } fuFrom)
+        {
+            where.Add("w.NextFollowUpDate >= @FuFrom");
+            cmd.Parameters.Add("@FuFrom", SqlDbType.Date).Value = fuFrom.Date;
+        }
+        if (filter.NextFollowUpTo is { } fuTo)
+        {
+            where.Add("w.NextFollowUpDate <= @FuTo");
+            cmd.Parameters.Add("@FuTo", SqlDbType.Date).Value = fuTo.Date;
+        }
         if (filter.MinDaysUntouched is > 0)
         {
             where.Add($"{UntouchedSinceSql()} <= DATEADD(day, -@MinUntouched, SYSUTCDATETIME())");
@@ -1352,7 +1384,8 @@ OUTER APPLY (SELECT Claims = COUNT(*) FROM dbo.ARWB_Claim w WHERE w.AgingBucket 
 WHERE m.ListType = 'AGING_BUCKET' AND m.IsActive = 1 ORDER BY m.SortOrder;", context.Aging, keepZero: true),
             // Last note's fix / resolution, and the ingested source claim status
             FixResolutions = await FacetAsync(f => { f.FixResolution = new(); return f; }, w => Distinct("w.FixResolution", w), context.FixResolution, ArWorkbenchFilterValues.None, "(No follow-up yet)"),
-            SourceStatuses = await FacetAsync(f => { f.SourceStatus = new(); return f; }, w => Distinct("w.SourceClaimStatus", w), context.SourceStatus, ArWorkbenchFilterValues.None, "(No status)")
+            SourceStatuses = await FacetAsync(f => { f.SourceStatus = new(); return f; }, w => Distinct("w.SourceClaimStatus", w), context.SourceStatus, ArWorkbenchFilterValues.None, "(No status)"),
+            RenderingProviders = await FacetAsync(f => { f.RenderingProvider = new(); return f; }, w => Distinct("w.BillingProvider", w), context.RenderingProvider, ArWorkbenchFilterValues.None, "(No provider)")
         };
 
         // Denial classification: claims counted by primary code (over every other filter), then summed

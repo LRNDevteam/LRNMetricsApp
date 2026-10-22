@@ -8,6 +8,58 @@ import { fmt } from '../utils/format';
 // Client Management (mockup App.views.clients): one card per client (lab) with its eligible claims,
 // outstanding AR and recovered amount, and Deactivate / Reactivate. A deactivated client is hidden
 // from non-admins and skipped by the nightly snapshot; its claims and history are kept.
+// FR-CM-03: each card also carries the client's SharePoint source folder, onboarding status and
+// primary account manager (Edit Configuration).
+
+const ONBOARDING = ['Not Started', 'Onboarding', 'Live', 'On Hold'];
+const ONBOARDING_BADGE = { 'Not Started': 'arwb-badge-neutral', Onboarding: 'arwb-badge-warning', Live: 'arwb-badge-good', 'On Hold': 'arwb-badge-critical' };
+
+function ConfigModal({ labId, card, onClose, onDone }) {
+  const [form, setForm] = useState({
+    sharePointFolder: card.config?.sharePointFolder || '',
+    onboardingStatus: card.config?.onboardingStatus || '',
+    accountManager: card.config?.accountManager || ''
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  async function save() {
+    setBusy(true);
+    setError('');
+    try {
+      const r = await arWorkbenchService.setClientConfig(labId, card.labId, form);
+      onDone(r?.message || 'Saved.');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title={`Configuration — ${card.labName}`} busy={busy} submitLabel="Save" onClose={onClose} onSubmit={save}>
+      <ErrorBox message={error} />
+      <div className="arwb-field">
+        <label htmlFor="cc-folder">SharePoint source folder</label>
+        <input id="cc-folder" className="arwb-input" maxLength={1000} placeholder="e.g. /sites/LRN/Shared Documents/Inhealth/Weekly"
+          value={form.sharePointFolder} onChange={set('sharePointFolder')} />
+        <span className="arwb-hint">Where the client&rsquo;s weekly master files are picked up from.</span>
+      </div>
+      <div className="arwb-field">
+        <label htmlFor="cc-status">Onboarding status</label>
+        <select id="cc-status" className="arwb-select" value={form.onboardingStatus} onChange={set('onboardingStatus')}>
+          <option value="">Not set</option>
+          {ONBOARDING.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+      <div className="arwb-field">
+        <label htmlFor="cc-am">Primary account manager</label>
+        <input id="cc-am" className="arwb-input" maxLength={256} placeholder="Name or email" value={form.accountManager} onChange={set('accountManager')} />
+      </div>
+    </Modal>
+  );
+}
 
 export default function ClientsPage() {
   const { labId, user, can } = useWorkbench();
@@ -19,6 +71,7 @@ export default function ClientsPage() {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [dialogError, setDialogError] = useState('');
+  const [configuring, setConfiguring] = useState(null); // card
 
   const load = useCallback(() => {
     setError('');
@@ -69,16 +122,32 @@ export default function ClientsPage() {
               </>
             ) : <div className="arwb-hint">The AR Workbench is not set up for this lab yet (run the lab setup scripts, then Data Processing).</div>}
             {!c.isActive && c.statusNote && <div className="arwb-hint">Deactivated by {c.changedBy} on {fmt.date(c.changedOn)}: {c.statusNote}</div>}
+            <dl className="arwb-client-config">
+              <dt>Onboarding</dt>
+              <dd>{c.config?.onboardingStatus ? <Badge className={ONBOARDING_BADGE[c.config.onboardingStatus]}>{c.config.onboardingStatus}</Badge> : <span className="text-muted-ink">Not set</span>}</dd>
+              <dt>Account manager</dt>
+              <dd>{c.config?.accountManager || <span className="text-muted-ink">Not set</span>}</dd>
+              <dt>SharePoint folder</dt>
+              <dd className="wrap" title={c.config?.sharePointFolder || undefined}>{c.config?.sharePointFolder || <span className="text-muted-ink">Not set</span>}</dd>
+            </dl>
             {canToggle && (
-              <button type="button" className={`arwb-btn arwb-btn-sm${c.isActive ? '' : ' arwb-btn-primary'}`} style={{ marginTop: 'auto' }}
-                onClick={() => { setNote(''); setDialogError(''); setToggling(c); }}>
-                {c.isActive ? 'Deactivate Client' : 'Reactivate Client'}
-              </button>
+              <div className="arwb-row-actions" style={{ marginTop: 'auto' }}>
+                <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => setConfiguring(c)}>Edit Configuration</button>
+                <button type="button" className={`arwb-btn arwb-btn-sm${c.isActive ? '' : ' arwb-btn-primary'}`}
+                  onClick={() => { setNote(''); setDialogError(''); setToggling(c); }}>
+                  {c.isActive ? 'Deactivate Client' : 'Reactivate Client'}
+                </button>
+              </div>
             )}
           </div>
         ))}
         {cards?.length === 0 && <div className="arwb-empty-state">No AR Workbench clients are assigned to you.</div>}
       </div>
+
+      {configuring && (
+        <ConfigModal labId={labId} card={configuring} onClose={() => setConfiguring(null)}
+          onDone={(message) => { setNotice({ kind: 'good', text: `${configuring.labName}: ${message}` }); setConfiguring(null); load(); }} />
+      )}
 
       {toggling && (
         <Modal title={`${toggling.isActive ? 'Deactivate' : 'Reactivate'} ${toggling.labName}`} busy={busy}

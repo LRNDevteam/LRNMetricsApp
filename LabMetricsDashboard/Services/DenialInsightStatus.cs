@@ -2,7 +2,7 @@ namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// The Denial Insight <c>Status</c> column: its allowed values and their colour bands, from the
-/// client's sample (docs/DenialSummary_EditableColumns.xlsx). Shared by the page and the Excel
+/// client's sample (docs/denial-management/DenialSummary_EditableColumns.xlsx). Shared by the page and the Excel
 /// download so a status reads the same colour in both.
 /// </summary>
 public static class DenialInsightStatus

@@ -143,7 +143,42 @@ internal static class ArWorkbenchClaimExcel
     private static (string Header, Func<ArWorkbenchClaimRow, ArWorkbenchClaimExportDetail?, object?> Value, string? Format)[] ColumnsFor(bool clientView) =>
         clientView ? AllColumns.Where(c => !ArWorkbenchClientVisibility.InternalExportColumns.Contains(c.Header)).ToArray() : AllColumns;
 
-    public static byte[] Build(IReadOnlyList<ArWorkbenchClaimRow> rows, IReadOnlyDictionary<long, ArWorkbenchClaimExportDetail> details, string title, bool truncated, bool clientView = false)
+    /// <summary>The "Line Items" sheet (FR-XL-03): one row per CPT line, source data only.</summary>
+    private static readonly (string Header, Func<ArWorkbenchClaimRow, ArWorkbenchClaimLine, object?> Value, string? Format)[] LineColumns =
+    [
+        ("Claim ID", (r, l) => r.ClaimID, null),
+        ("Patient Acct", (r, l) => r.PatientID, null),
+        ("PatientName", (r, l) => r.PatientName, null),
+        ("DOS", (r, l) => r.DateOfService, "mm/dd/yyyy"),
+        ("Payer", (r, l) => r.PayerName, null),
+        ("Clinic", (r, l) => r.ClinicName, null),
+        ("Panel Type", (r, l) => r.PanelName, null),
+        ("Claim Status", (r, l) => r.SourceClaimStatus, null),
+        ("Line #", (r, l) => l.LineNumber, "0"),
+        ("CPT", (r, l) => l.CPTCode, null),
+        ("Units", (r, l) => l.Units, "0.##"),
+        ("Modifier", (r, l) => l.Modifier, null),
+        ("ICDCode", (r, l) => l.ICDCode, null),
+        ("Charge", (r, l) => l.ChargeAmount, DenialExcelTheme.AccountingNumberFormat2),
+        ("Allowed", (r, l) => l.AllowedAmount, DenialExcelTheme.AccountingNumberFormat2),
+        ("Insurance Payment", (r, l) => l.InsurancePayment, DenialExcelTheme.AccountingNumberFormat2),
+        ("Insurance Adjustments", (r, l) => l.InsuranceAdjustments, DenialExcelTheme.AccountingNumberFormat2),
+        ("Ins. Balance", (r, l) => l.InsuranceBalance, DenialExcelTheme.AccountingNumberFormat2),
+        ("Patient Balance", (r, l) => l.PatientBalance, DenialExcelTheme.AccountingNumberFormat2),
+        ("Revenue Expectation", (r, l) => l.RevenueExpectation, DenialExcelTheme.AccountingNumberFormat2),
+        ("Line Status", (r, l) => l.LineClaimStatus, null),
+        ("Pay Status", (r, l) => l.PayStatus, null),
+        ("Line Denial Code", (r, l) => l.DenialCode, null),
+        ("Denial Date", (r, l) => l.DenialDate, "mm/dd/yyyy")
+    ];
+
+    /// <summary>Line rows past this are left out (the title says so); Excel's own limit is 1,048,576.</summary>
+    public const int MaxLineRows = 500_000;
+
+    internal static IReadOnlyList<string> LineHeaders() => LineColumns.Select(c => c.Header).ToList();
+
+    public static byte[] Build(IReadOnlyList<ArWorkbenchClaimRow> rows, IReadOnlyDictionary<long, ArWorkbenchClaimExportDetail> details, string title, bool truncated, bool clientView = false,
+        IReadOnlyDictionary<long, List<ArWorkbenchClaimLine>>? lines = null)
     {
         var columns = ColumnsFor(clientView);
         using var workbook = new XLWorkbook();
@@ -187,8 +222,54 @@ internal static class ArWorkbenchClaimExcel
         if (rows.Count > 0) sheet.Range(2, 1, row - 1, columns.Length).SetAutoFilter();
         sheet.Columns().AdjustToContents(2, Math.Min(row, 300));
 
+        if (lines is not null) AddLineSheet(workbook, rows, lines, title);
+
         using var stream = new MemoryStream();
         workbook.SaveAs(stream);
         return stream.ToArray();
+    }
+
+    private static void AddLineSheet(XLWorkbook workbook, IReadOnlyList<ArWorkbenchClaimRow> rows, IReadOnlyDictionary<long, List<ArWorkbenchClaimLine>> lines, string title)
+    {
+        var sheet = workbook.Worksheets.Add("Line Items");
+        DenialExcelTheme.ApplyDefaults(sheet);
+        sheet.TabColor = DenialExcelTheme.TabGreen;
+
+        var total = rows.Sum(r => lines.TryGetValue(r.ClaimKey, out var l) ? l.Count : 0);
+        sheet.Cell(1, 1).Value = title + " — CPT line items" + (total > MaxLineRows ? $" — first {MaxLineRows:N0} lines" : "");
+        var titleRange = sheet.Range(1, 1, 1, LineColumns.Length).Merge();
+        titleRange.Style.Font.SetBold().Font.SetFontColor(XLColor.White).Font.SetFontSize(DenialExcelTheme.FontSizeTitle);
+        titleRange.Style.Fill.SetBackgroundColor(DenialExcelTheme.TitleBg);
+        for (var c = 0; c < LineColumns.Length; c++)
+            DenialExcelTheme.StyleHeaderCell(sheet.Cell(2, c + 1).SetValue(LineColumns[c].Header));
+
+        var row = 3;
+        foreach (var r in rows)
+        {
+            if (!lines.TryGetValue(r.ClaimKey, out var claimLines)) continue;
+            foreach (var l in claimLines)
+            {
+                if (row - 3 >= MaxLineRows) break;
+                for (var c = 0; c < LineColumns.Length; c++)
+                {
+                    sheet.Cell(row, c + 1).Value = LineColumns[c].Value(r, l) switch
+                    {
+                        null => Blank.Value,
+                        DateTime d => d,
+                        decimal m => m,
+                        int i => i,
+                        var o => o.ToString()
+                    };
+                }
+                row++;
+            }
+        }
+
+        for (var c = 0; c < LineColumns.Length; c++)
+            if (LineColumns[c].Format is { } fmt && row > 3)
+                sheet.Range(3, c + 1, row - 1, c + 1).Style.NumberFormat.Format = fmt;
+        sheet.SheetView.FreezeRows(2);
+        if (row > 3) sheet.Range(2, 1, row - 1, LineColumns.Length).SetAutoFilter();
+        sheet.Columns().AdjustToContents(2, Math.Min(row, 300));
     }
 }

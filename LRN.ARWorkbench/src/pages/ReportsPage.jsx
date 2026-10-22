@@ -85,6 +85,19 @@ export default function ReportsPage() {
         </div>
       ))}
 
+      {/* FR-XL-03: every claim in the caller's scope with its CPT line items and status (read-only). A client
+          user's file leaves out the AR team's internal columns (the API enforces it). */}
+      <div className="arwb-panel arwb-panel-pad arwb-section arwb-report-card">
+        <div className="arwb-report-card-head"><h3>Claims &amp; Line Items</h3><Icon name="doc" /></div>
+        <div className="arwb-hint">
+          Every claim you can see, with its status and balances, plus a Line Items sheet with each CPT line — units, charge, payment,
+          balance, line status and denial code. Built in the background; it appears in My Downloads.
+        </div>
+        <ExportButton scope="Claims & Line Items" label="Export Claims & Line Items" className="arwb-btn arwb-btn-sm arwb-btn-primary"
+          title="Excel: a Claims sheet and a Line Items sheet, for every claim in your scope"
+          start={() => arWorkbenchService.startClaimsExport({ labId, includeLines: true, sortBy: 'claimId', sortDesc: false }, 'Claims & Line Items')} />
+      </div>
+
       <div className="arwb-grid-2 arwb-section">
         {others.map((r) => (
           <div key={r.id} className="arwb-panel arwb-panel-pad arwb-report-card">

@@ -2,7 +2,7 @@ namespace LRN.ReportsApi.Models;
 
 // ============================================================================================
 // Recovery & Financial Analytics (T071) - the mockup's App.views.analytics
-// (docs/Denial_WorkFlow/LRN_Denial_AR_Workbench_Demo_Account.html), every figure computed in SQL
+// (docs/ar-workbench/LRN_Denial_AR_Workbench_Demo_Account.html), every figure computed in SQL
 // over the caller's scoped claims.
 // ============================================================================================
 
@@ -29,6 +29,9 @@ public sealed class ArWorkbenchAnalytics
     public List<ArWorkbenchFollowUpBreakdownRow> ByClaimStatus { get; set; } = new();
     public List<ArWorkbenchFollowUpBreakdownRow> ByFixResolution { get; set; } = new();
     public List<ArWorkbenchFollowUpBreakdownRow> ByDenialRootCause { get; set; } = new();
+    /// <summary>FR-AN-04: escalation / reassignment requests per reason category (Notes = requests). Empty for client users.</summary>
+    public List<ArWorkbenchFollowUpBreakdownRow> ByEscalationReason { get; set; } = new();
+    public List<ArWorkbenchFollowUpBreakdownRow> ByReassignmentReason { get; set; } = new();
 }
 
 /// <summary>

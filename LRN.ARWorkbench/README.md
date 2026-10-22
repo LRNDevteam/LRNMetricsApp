@@ -4,7 +4,7 @@ The new denial application. It is a React app, built with Vite, React 19, React 
 
 It replaces the old Denial Workflow React app (`LRN.WebUI`). LabMetricsDashboard's Denial Workflow menu link and post-login redirect (`DenialWorkflowReactUrl`) now open this app. The `dbo.Denial*` tables are unchanged.
 
-The requirement is in `docs/Denial_WorkFlow/` (Build Reference, Developer Documentation, Open Items and Phases).
+The requirement is in `docs/ar-workbench/` (Build Reference, Developer Documentation, Open Items and Phases).
 
 ## Setup
 

@@ -40,6 +40,22 @@ FROM
 GROUP BY x.Val
 ORDER BY SUM(x.Notes) DESC, x.Val;";
 
+        // FR-AN-04: escalation / reassignment requests per reason category - requests, distinct claims,
+        // their claims' remaining AR (once per claim). Internal work: never shown to client users.
+        var clientUser = ArWorkbenchClientVisibility.IsClientUser(user);
+        string ReasonBreakdown(string requestType) => $@"
+SELECT x.Val, SUM(x.Requests), COUNT(*), ISNULL(SUM(x.RemainingAR), 0)
+FROM
+(
+    SELECT q.ReasonCategory AS Val, w.ClaimKey, COUNT(*) AS Requests, MAX(w.RemainingAR) AS RemainingAR
+    FROM dbo.ARWB_AgentRequest q
+    INNER JOIN dbo.ARWB_Claim w ON w.ClaimKey = q.ClaimKey
+    WHERE q.RequestType = '{requestType}' AND {(clientUser ? "1 = 0" : "1 = 1")} {scope}
+    GROUP BY q.ReasonCategory, w.ClaimKey
+) x
+GROUP BY x.Val
+ORDER BY SUM(x.Requests) DESC, x.Val;";
+
         cmd.CommandText = $@"
 -- 0. Totals (recovery rate numerator: only claims with a non-zero initial balance)
 SELECT COUNT(*), ISNULL(SUM(w.InitialInsuranceAR), 0), ISNULL(SUM(w.RecoveredAmount), 0), ISNULL(SUM(w.RemainingAR), 0),
@@ -68,7 +84,11 @@ ORDER BY t.SortOrder;
 -- 8..10. Follow-Up Comments Breakdown
 {Breakdown("FollowUpClaimStatus")}
 {Breakdown("FixResolution")}
-{Breakdown("DenialRootCause")}";
+{Breakdown("DenialRootCause")}
+
+-- 11..12. Escalation / reassignment reason categories
+{ReasonBreakdown("Escalation to Supervisor")}
+{ReasonBreakdown("Reassignment Request")}";
 
         var a = new ArWorkbenchAnalytics();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -139,6 +159,8 @@ ORDER BY t.SortOrder;
         a.ByClaimStatus = await ReadBreakdown();
         a.ByFixResolution = await ReadBreakdown();
         a.ByDenialRootCause = await ReadBreakdown();
+        a.ByEscalationReason = await ReadBreakdown();
+        a.ByReassignmentReason = await ReadBreakdown();
         await reader.DisposeAsync();
 
         // Agent bars read "First Last"; the key stays the user name the Work Queue filters on.

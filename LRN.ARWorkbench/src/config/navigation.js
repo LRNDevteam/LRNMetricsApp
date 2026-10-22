@@ -2,10 +2,10 @@
 // visible menu and its enforced access can never drift apart. Roles are the workbench role code the
 // API derives from the user's LRNMaster role permissions (dbo.RoleFeatureAccess 'ARWorkbench.*').
 //
-// phase: the build phase from docs/Denial_WorkFlow/AR_Workbench_Open_Items_And_Phases.md.
+// phase: the build phase from docs/ar-workbench/AR_Workbench_Open_Items_And_Phases.md.
 // built: false renders the "planned" page for that route instead of a screen.
 // Order, labels, icons (components/Icon) and subtitles follow the mockup's App.NAV / VIEW_META
-// (docs/Denial_WorkFlow/LRN_Denial_AR_Workbench_Demo_Account.html); the subtitle shows in the topbar.
+// (docs/ar-workbench/LRN_Denial_AR_Workbench_Demo_Account.html); the subtitle shows in the topbar.
 export const ALL_ROLES = ['admin', 'manager', 'lead', 'agent', 'qa', 'viewer'];
 
 export const NAV = [

@@ -10,7 +10,7 @@ namespace LabMetricsDashboard.Controllers;
 
 /// <summary>
 /// Denial Category Master and Non-Collectible Denial Master (LRNMaster): view both, import them
-/// from the denial codes workbook (docs/Denial_Codes_And_Categorization_Master.xlsx) and download
+/// from the denial codes workbook (docs/denial-management/Denial_Codes_And_Categorization_Master.xlsx) and download
 /// them back in the same layout. Viewing follows Role Menu Mapping; importing replaces the
 /// masters, so it is Admin / Super Admin / LRN Admin only.
 /// </summary>
