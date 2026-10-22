@@ -1086,6 +1086,18 @@ public sealed class ClaimLineDbService
         ]);
 
     /// <summary>
+    /// Refreshes the Augustus Denial Summary aggregates (Monthly / Weekly Denial Analysis,
+    /// Denial List, Denial List - Plan Type) from dbo.ClaimLevelData.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshAugustusDenialReports()
+        => RunProductionReportSPs([
+            "dbo.usp_RefreshAug_DenialMonthly",
+            "dbo.usp_RefreshAug_DenialWeekly",
+            "dbo.usp_RefreshAug_DenialList",
+            "dbo.usp_RefreshAug_DenialPlanType",
+        ]);
+
+    /// <summary>
     /// Refreshes the NorthWest Denial Summary aggregates (Monthly / Weekly, Denial List,
     /// Plan Type, Payor vs Payer, Facility wise, Denial vs Facility %) from dbo.ClaimLevelData.
     /// Run after <c>usp_UpdateNW_ClaimLevelData_BilledUnbilled</c> so Facility % sees Billed.

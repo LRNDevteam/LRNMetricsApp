@@ -976,6 +976,29 @@ foreach (var lab in labConfigs)
             }
 
             collSummaryResults = RunCollectionSummary(log, db, "Aug CS", db.RefreshAugustusCollectionReports);
+
+            log.Info($"  [Aug Denial] Running Augustus Denial Summary SPs…");
+            try
+            {
+                var denialResults = db.RefreshAugustusDenialReports();
+                foreach (var (spName, elapsedMs, error) in denialResults)
+                {
+                    if (error is null)
+                        log.Info($"  [Aug Denial] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [Aug Denial] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+
+                var dFailed = denialResults.Count(r => r.Error is not null);
+                var dPassed = denialResults.Count(r => r.Error is null);
+                log.Info($"  [Aug Denial] {dPassed}/{denialResults.Count} SP(s) succeeded.");
+                if (dFailed > 0)
+                    log.Warn($"  [Aug Denial] {dFailed} SP(s) failed — see errors above.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [Aug Denial] Unexpected error running Augustus Denial Summary SPs: {ex.Message}");
+            }
         }
 
         // ── Certus Labs production report aggregates ─────────────────────────

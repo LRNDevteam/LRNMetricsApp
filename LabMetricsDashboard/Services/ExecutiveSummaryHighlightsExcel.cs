@@ -9,8 +9,8 @@ namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// Executive Summary download for the labs with highlight tabs (NorthWest, Cove, Analyze
-/// Pathology): appends the page's Production, Collection, LIMS and Denial Highlights tabs as
-/// extra sheets. Each section reuses its own report's repository calls, Excel sheet builders
+/// Pathology, Augustus): appends the page's Production, Collection, LIMS and Denial Highlights
+/// tabs as extra sheets (Denial only where <see cref="ShowsDenialHighlights"/>). Each section reuses its own report's repository calls, Excel sheet builders
 /// and Key Insights block, so the numbers match the Production Summary, Collection Summary,
 /// LIS Summary and Denial Summary pages (unfiltered).
 /// Shared by ExecutiveSummaryController (export=excel) and LRN.ReportWorker's
@@ -31,6 +31,7 @@ public sealed class ExecutiveSummaryHighlightsExcel
 
     private readonly LabSettings _labSettings;
     private readonly INorthWestProductionSummaryRepository _production;
+    private readonly IAugustusProductionSummaryRepository _augProduction;
     private readonly IReadOnlyDictionary<string, ILabProductionSummaryRepository> _labProduction;
     private readonly ICollectionSummaryRepository _collection;
     private readonly ILisSummaryRepository _lis;
@@ -42,6 +43,7 @@ public sealed class ExecutiveSummaryHighlightsExcel
     public ExecutiveSummaryHighlightsExcel(
         LabSettings labSettings,
         INorthWestProductionSummaryRepository production,
+        IAugustusProductionSummaryRepository augProduction,
         IReadOnlyDictionary<string, ILabProductionSummaryRepository> labProduction,
         ICollectionSummaryRepository collection,
         ILisSummaryRepository lis,
@@ -52,6 +54,7 @@ public sealed class ExecutiveSummaryHighlightsExcel
     {
         _labSettings   = labSettings;
         _production    = production;
+        _augProduction = augProduction;
         _labProduction = labProduction;
         _collection    = collection;
         _lis           = lis;
@@ -63,7 +66,11 @@ public sealed class ExecutiveSummaryHighlightsExcel
 
     /// <summary>Labs whose Executive Summary page shows the highlight tabs.</summary>
     public static bool AppliesTo(string? labName) =>
-        LabCollectionPrefix.GetPrefix(labName) is "NW" or "Cove" or "AnP";
+        LabCollectionPrefix.GetPrefix(labName) is "NW" or "Cove" or "AnP" or "Aug";
+
+    /// <summary>Labs among <see cref="AppliesTo"/> whose Denial Highlights tab is live.</summary>
+    public static bool ShowsDenialHighlights(string? labName) =>
+        LabCollectionPrefix.GetPrefix(labName) is "NW" or "Cove" or "AnP" or "Aug";
 
     /// <summary>
     /// Returns the Executive Summary workbook with the highlight sheets appended.
@@ -84,9 +91,10 @@ public sealed class ExecutiveSummaryHighlightsExcel
             () => BuildCollectionAsync(connStr, labName, config, ct));
         var lisTask = TryBuildAsync("LIMS Highlights", labName,
             () => BuildLisAsync(connStr, labName, ct));
-        var denialTask = TryBuildAsync("Denial Highlights", labName,
-            () => BuildDenialAsync(connStr, labName, ct));
-        await Task.WhenAll(productionTask, collectionTask, lisTask, denialTask);
+        var denialTask = ShowsDenialHighlights(labName)
+            ? TryBuildAsync("Denial Highlights", labName, () => BuildDenialAsync(connStr, labName, ct))
+            : null;
+        await Task.WhenAll(new[] { productionTask, collectionTask, lisTask, denialTask }.OfType<Task<XLWorkbook>>());
 
         using var target = new XLWorkbook(new MemoryStream(executiveSummaryXlsx));
 
@@ -109,11 +117,14 @@ public sealed class ExecutiveSummaryHighlightsExcel
                     ? "LIMS Key Insights" : null);
         }
 
-        using (var denial = denialTask.Result)
+        if (denialTask is not null)
+        {
+            using var denial = denialTask.Result;
             CopySheets(denial, target, "Denial Highlights",
                 name => DenialSheetNames.GetValueOrDefault(name)
                     ?? (name.Equals(InsightsExcelBuilder.SheetName, StringComparison.OrdinalIgnoreCase)
                         ? "Denial Highlights" : null));
+        }
 
         using var ms = new MemoryStream();
         target.SaveAs(ms);
@@ -124,16 +135,21 @@ public sealed class ExecutiveSummaryHighlightsExcel
         string connStr, string labName, LabCsvConfig config, CancellationToken ct)
     {
         var isNorthWest = LabCollectionPrefix.IsNorthWest(labName);
+        var isAugustus  = LabCollectionPrefix.IsAugustus(labName);
         ILabProductionSummaryRepository? labRepo = null;
-        if (!isNorthWest && !_labProduction.TryGetValue(labName, out labRepo))
+        if (!isNorthWest && !isAugustus && !_labProduction.TryGetValue(labName, out labRepo))
             throw new InvalidOperationException($"No Production Summary repository is registered for '{labName}'.");
 
         var monthlyTask = isNorthWest
             ? _production.GetMonthlyAsync(connStr, null, null, null, null, null, null, null, null, ct)
-            : labRepo!.GetMonthlyAsync(connStr, null, null, null, null, null, null, null, null, ct);
+            : isAugustus
+                ? _augProduction.GetMonthlyAsync(connStr, null, null, null, null, null, null, null, null, ct)
+                : labRepo!.GetMonthlyAsync(connStr, null, null, null, null, null, null, null, null, ct);
         var weeklyTask = isNorthWest
             ? _production.GetWeeklyAsync(connStr, null, null, null, null, null, null, null, null, ct)
-            : labRepo!.GetWeeklyAsync(connStr, null, null, null, null, null, null, null, null, ct);
+            : isAugustus
+                ? _augProduction.GetWeeklyAsync(connStr, null, null, null, null, null, null, null, null, ct)
+                : labRepo!.GetWeeklyAsync(connStr, null, null, null, null, null, null, null, null, ct);
         await Task.WhenAll(monthlyTask, weeklyTask);
         var monthly = monthlyTask.Result;
         var weekly  = weeklyTask.Result;

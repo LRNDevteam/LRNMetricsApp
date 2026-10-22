@@ -198,7 +198,7 @@ public static class LabCollectionPrefix
     /// <c>{prefix}_Denial*</c> aggregate tables refreshed at claim-file ingest.
     /// </summary>
     public static bool HasDenialSummary(string? labName) =>
-        GetPrefix(labName) is "AnP" or "WH" or "NW";
+        GetPrefix(labName) is "AnP" or "WH" or "NW" or "Aug";
 
     /// <summary>
     /// What the Denial Summary Monthly / Weekly SPs rank insurances and their top denials by

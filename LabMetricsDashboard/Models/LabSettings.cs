@@ -32,7 +32,7 @@ public sealed class LabConfigOptions
     /// <summary>
     /// Denial Summary (Denial Claim Report) week per lab: lab name -> "Mon to Sun" / "Tue to Mon" /
     /// "Wed to Tue" / "Thu to Wed" / "Fri to Thu". Sourced from <c>LabConfig:DenialSummaryWeekRange</c>.
-    /// Labs not listed keep the report's default Wednesday-to-Tuesday week.
+    /// Labs not listed keep the report's default Wednesday-to-Tuesday week (Augustus: Mon to Sun).
     /// </summary>
     public Dictionary<string, string> DenialSummaryWeekRange { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -58,13 +58,13 @@ public sealed class LabConfigOptions
                 _ => null
             };
         }
-        return null;
+        return Services.LabCollectionPrefix.IsAugustus(labName) ? DayOfWeek.Monday : null;
     }
 
     /// <summary>
     /// Denial Summary date column per lab: lab name -> a ClaimLevelData column ("CheckDate") whose
     /// date places each denied claim in a Monthly / Weekly column. Sourced from
-    /// <c>LabConfig:DenialSummaryDateColumn</c>. Labs not listed keep the Denial Date.
+    /// <c>LabConfig:DenialSummaryDateColumn</c>. Labs not listed keep the Denial Date (Augustus: CheckDate).
     /// </summary>
     public Dictionary<string, string> DenialSummaryDateColumn { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -78,7 +78,7 @@ public sealed class LabConfigOptions
         {
             if (Key(lab) == wanted && !string.IsNullOrWhiteSpace(column)) return column.Trim();
         }
-        return null;
+        return Services.LabCollectionPrefix.IsAugustus(labName) ? "CheckDate" : null;
     }
 
     /// <summary>
@@ -105,7 +105,9 @@ public sealed class LabConfigOptions
         {
             if (Key(lab) == wanted && !string.IsNullOrWhiteSpace(column)) return column.Trim();
         }
-        return Services.LabCollectionPrefix.HasDenialSummary(labName) ? "TotalInsuranceBalance" : null;
+        // Augustus has no TotalInsuranceBalance column; its SPs measure InsuranceBalance.
+        return Services.LabCollectionPrefix.HasDenialSummary(labName) && !Services.LabCollectionPrefix.IsAugustus(labName)
+            ? "TotalInsuranceBalance" : null;
     }
 
     /// <summary>

@@ -16,6 +16,7 @@
                        || Model.SelectedLab.Equals("NWL", StringComparison.OrdinalIgnoreCase)
                        || Model.SelectedLab.Equals("NorthWest_Labs", StringComparison.OrdinalIgnoreCase);
     bool showHighlightTabs = LabMetricsDashboard.Services.ExecutiveSummaryHighlightsExcel.AppliesTo(Model.SelectedLab);
+    bool showDenialHighlights = LabMetricsDashboard.Services.ExecutiveSummaryHighlightsExcel.ShowsDenialHighlights(Model.SelectedLab);
 
     static string MonthName(int m) => m == 0 ? "Total" :
         System.Globalization.CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedMonthName(m);
@@ -431,7 +432,7 @@
     </div>
 </div>
 
-@* Highlight tabs (NorthWest, Cove, Analyze Pathology): each report loads in a frame on its first click. *@
+@* Highlight tabs (NorthWest, Cove, Analyze Pathology, Augustus): each report loads in a frame on its first click. *@
 if (showHighlightTabs)
 {
 <ul class="nav es-hl-tabs mb-3" id="esHlTabs" role="tablist">
@@ -460,10 +461,20 @@ if (showHighlightTabs)
         </button>
     </li>
     <li class="nav-item" role="presentation">
-        <button class="nav-link" id="es-denial-tab" data-bs-toggle="tab" data-bs-target="#es-denial-pane"
-                type="button" role="tab" aria-controls="es-denial-pane" aria-selected="false">
-            <i class="bi bi-shield-exclamation"></i> 5. Denial Highlights
-        </button>
+        @if (showDenialHighlights)
+        {
+            <button class="nav-link" id="es-denial-tab" data-bs-toggle="tab" data-bs-target="#es-denial-pane"
+                    type="button" role="tab" aria-controls="es-denial-pane" aria-selected="false">
+                <i class="bi bi-shield-exclamation"></i> 5. Denial Highlights
+            </button>
+        }
+        else
+        {
+            <button class="nav-link disabled" id="es-denial-tab" type="button" role="tab"
+                    aria-selected="false" aria-disabled="true" tabindex="-1">
+                <i class="bi bi-shield-exclamation"></i> 5. Denial Highlights
+            </button>
+        }
     </li>
 </ul>
 @Html.Raw("<div class=\"tab-content\" id=\"esHlTabContent\"><div class=\"tab-pane fade show active\" id=\"es-main-pane\" role=\"tabpanel\" aria-labelledby=\"es-main-tab\">")
@@ -1163,9 +1174,9 @@ if (showHighlightTabs)
 
 @if (!esTableOnly && showHighlightTabs)
 {
-    // Only NorthWest has the date-basis Average Payments tabs (Panel Averages by DOS / Check Date);
+    // NorthWest and Augustus have the date-basis Average Payments tabs (Panel Averages by DOS / Check Date);
     // the others show Average Payments and, where the lab has it, Last 3 Months.
-    var collectionTabs = isNorthWestLab
+    var collectionTabs = LabMetricsDashboard.Services.LabCollectionPrefix.UsesAvgPaymentsByDateBasis(Model.SelectedLab)
         ? "mcv-pane,wcv-pane,top5grid-pane,avgpaydos-pane,avgpay-pane"
         : "mcv-pane,wcv-pane,top5grid-pane,avgpay-pane,avgpay3-pane";
     var hlFrames = new List<(string Pane, string Tab, string Title, string? Src)>
@@ -1178,10 +1189,11 @@ if (showHighlightTabs)
                 new { lab = Model.SelectedLab, embed = 1, embedTabs = collectionTabs })),
         (Pane: "es-lims-pane", Tab: "es-lims-tab", Title: "LIMS Highlights",
             Src: Url.Action("Index", "LisSummary", new { lab = Model.SelectedLab, embed = 1 })),
-        (Pane: "es-denial-pane", Tab: "es-denial-tab", Title: "Denial Highlights",
-            Src: Url.Action("Index", "DenialClaimReport",
-                new { lab = Model.SelectedLab, embed = 1, embedTabs = "dcr-monthly,dcr-weekly" })),
     };
+    if (showDenialHighlights)
+        hlFrames.Add((Pane: "es-denial-pane", Tab: "es-denial-tab", Title: "Denial Highlights",
+            Src: Url.Action("Index", "DenialClaimReport",
+                new { lab = Model.SelectedLab, embed = 1, embedTabs = "dcr-monthly,dcr-weekly" })));
     @Html.Raw("</div>")
     foreach (var f in hlFrames)
     {
