@@ -602,7 +602,12 @@ public sealed class LimsMasterBulkImporter
 		if (string.IsNullOrWhiteSpace(value))
 			return null;
 
-		value = value.Trim();
+		// Trim() leaves zero-width characters, which are not whitespace in .NET. CoreBio's LIMS export
+		// prefixes text dates with one ("​02/02/1992"), so the date would not parse and load NULL.
+		value = value.Replace("​", "").Replace("﻿", "").Trim();
+		if (value.Length == 0)
+			return null;
+
 		var type = destinationColumn.SqlTypeName.ToLowerInvariant();
 
 		try

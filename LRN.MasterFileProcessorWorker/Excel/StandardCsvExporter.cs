@@ -1323,6 +1323,22 @@ public static class StandardCsvExporter
 
 			var normalizedSourceHeader = NormKey(sourceHeader);
 
+			// A KeepRaw header that NO common column consumed, yet whose spelling is a COMMON column name.
+			// CoreBio line level reads DenialCode from "Original Denial Code" through a composite, so its
+			// "Denial Code" (the updated code) is free - but it normalizes to "DenialCode" and the check
+			// below would drop it as "already a standard column". Keep it under the lab's own name.
+			if (!string.IsNullOrWhiteSpace(normalizedSourceHeader) &&
+				commonTargetNorms.Contains(normalizedSourceHeader) &&
+				labOv.KeepRawOutputByNorm.TryGetValue(normalizedSourceHeader, out var keepFreeAs))
+			{
+				var existing = extras.FirstOrDefault(e => e.OutputName.Equals(keepFreeAs, StringComparison.OrdinalIgnoreCase));
+				if (existing is null)
+					extras.Add(new ExtraSourceColumn(keepFreeAs, new List<int> { i }));
+				else if (!existing.SourceIndexes.Contains(i))
+					existing.SourceIndexes.Add(i);
+				continue;
+			}
+
 			// If source header itself is already a standard/common output column, do not append it again.
 			if (!string.IsNullOrWhiteSpace(normalizedSourceHeader) && commonTargetNorms.Contains(normalizedSourceHeader))
 				continue;
@@ -1997,6 +2013,7 @@ public static class StandardCsvExporter
 		[NormKey("NorthWest")] = "NWL",
 		[NormKey("Analyze Pathology")] = "ANP",
 		[NormKey("WellHealth")] = "WHL",
+		[NormKey("CoreBio")] = "CBL",
 	};
 
 	/// <summary>

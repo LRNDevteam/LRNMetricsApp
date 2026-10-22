@@ -2718,7 +2718,9 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			// Configured as "Analyze_Pathology" (the name becomes file and folder names), so match either spelling.
 			|| labName.Replace('_', ' ').Contains("Analyze Pathology", StringComparison.OrdinalIgnoreCase)
 			// Well Health's Line Level sheet has no Claim Status either. Configured as "WellHealth".
-			|| labName.Replace(" ", "").Contains("WellHealth", StringComparison.OrdinalIgnoreCase);
+			|| labName.Replace(" ", "").Contains("WellHealth", StringComparison.OrdinalIgnoreCase)
+			// CoreBio's "Line Level File" sheet has no Claim Status either. Configured as "CoreBio".
+			|| labName.Replace(" ", "").Contains("CoreBio", StringComparison.OrdinalIgnoreCase);
 	}
 
 	/// <summary>

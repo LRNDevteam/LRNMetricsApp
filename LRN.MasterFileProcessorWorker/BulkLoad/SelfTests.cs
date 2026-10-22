@@ -57,6 +57,7 @@ public static class SelfTests
         VariantXLinePhysicianNamesSurviveRepeatedHeader();
         VariantXClaimProvidersAreDistinct();
         AnalyzePathologyBillDatesModifiersAndIcd();
+        CoreBioDenialAndIcdSources();
         RelativeCsvLogFolderResolvesAgainstServiceDirectory();
         EmptyRowsAreNotImported();
         RowsWithoutIdentityAreImportedAndCounted();
@@ -2208,6 +2209,113 @@ public static class SelfTests
 
             Check("Other labs: ICD filtering is unchanged", StandardCsvExporter.ExtractIcdCodes("ZZZ12345 F10.21") == "F10.21",
                 StandardCsvExporter.ExtractIcdCodes("ZZZ12345 F10.21"));
+        }
+        finally
+        {
+            TryDelete(folder);
+        }
+    }
+
+    /// <summary>
+    /// CoreBio, shipped schemas and mapping (V1.20). The sheets carry four denial columns and two ICD
+    /// columns whose names are COMMON aliases, so each must land in its own CSV column:
+    /// line DenialCode = "Original Denial Code" (no fallback), line "Denial Code" kept as "Updated Denial",
+    /// claim DenialCode = "Denial Code", and ICDCode = "Claim ICD List" rather than "Claim Level ICD".
+    /// </summary>
+    private static void CoreBioDenialAndIcdSources()
+    {
+        var schemas = Path.Combine(AppContext.BaseDirectory, "Schemas");
+        var paths = new[]
+        {
+            Path.Combine(schemas, "ClaimLevel.schema.json"),
+            Path.Combine(schemas, "CoreBio_ClaimLevel.schema.json"),
+            Path.Combine(schemas, "LineLevel.schema.json"),
+            Path.Combine(schemas, "CoreBio_LineLevel.schema.json"),
+        };
+
+        if (paths.Any(p => !File.Exists(p)))
+        {
+            Check("CoreBio schemas are deployed next to the service", false, schemas);
+            return;
+        }
+
+        var folder = TempFolder();
+        try
+        {
+            var loader = new LRN.MasterFileProcessorWorker.ExcelValidation.JsonColumnSchemaLoader();
+
+            string Run(string sourceCsv, string commonPath, string labPath, string name)
+            {
+                var source = Path.Combine(folder, name + "_src.csv");
+                File.WriteAllText(source, sourceCsv);
+                var outPath = Path.Combine(folder, name + "_out.csv");
+
+                StandardCsvExporter.Generate(
+                    sourceCsvPath: source,
+                    headerRow: 1,
+                    outputCsvPath: outPath,
+                    commonSchema: loader.LoadFromFile(commonPath),
+                    labId: 28,
+                    labName: "CoreBio",
+                    sourceFileName: name + "_src.csv",
+                    ingestedOnLocal: DateTime.Now,
+                    labSchema: loader.LoadFromFile(labPath),
+                    appendUnmappedSourceColumns: true);
+
+                return outPath;
+            }
+
+            const string header = "Charge Claim ID,Claim Reference #,Charge From Date,Facility Name,Claim ICD List,Claim Level ICD," +
+                                  "Original Denial Code,Denial Code,Line Level Denial Code,Claim Level Denial Code";
+
+            var lineOut = Run(header + ",Charge CPT Code,Charge Units\r\n" +
+                "C-1,RCBL1,01/02/2025,CMCD INC,N39.0,N39.0 R30.0,CO45,CO97,CO45-L,CO45-C,87801,1\r\n" +
+                "C-2,RCBL2,01/02/2025,CMCD INC,I10,I10,,CO16,,,85025,1\r\n",
+                paths[2], paths[3], "line");
+
+            var claimOut = Run(header + ",Claim Status\r\n" +
+                "C-1,RCBL1,01/02/2025,CMCD INC,N39.0,N39.0 R30.0,CO45,CO97,CO45-L,CO45-C,Denied\r\n",
+                paths[0], paths[1], "claim");
+
+            string[] Header(string path) => SplitCsv(File.ReadAllLines(path)[0]);
+            string Val(string path, int rowIndex, string column)
+            {
+                var lines = File.ReadAllLines(path);
+                var h = SplitCsv(lines[0]);
+                var i = Array.FindIndex(h, x => x.Equals(column, StringComparison.OrdinalIgnoreCase));
+                return i < 0 ? $"<no column '{column}'>" : SplitCsv(lines[rowIndex + 1])[i];
+            }
+
+            Check("CoreBio line: DenialCode is the Original Denial Code", Val(lineOut, 0, "DenialCode") == "CO45", Val(lineOut, 0, "DenialCode"));
+            Check("CoreBio line: a blank Original Denial Code does not fall back to Denial Code",
+                Val(lineOut, 1, "DenialCode") == "", Val(lineOut, 1, "DenialCode"));
+            Check("CoreBio line: Denial Code is kept as Updated Denial", Val(lineOut, 0, "Updated Denial") == "CO97", Val(lineOut, 0, "Updated Denial"));
+            Check("CoreBio line: Updated Denial on a row with no original", Val(lineOut, 1, "Updated Denial") == "CO16", Val(lineOut, 1, "Updated Denial"));
+            Check("CoreBio line: Line Level Denial Code is appended", Val(lineOut, 0, "Line Level Denial Code") == "CO45-L", Val(lineOut, 0, "Line Level Denial Code"));
+            Check("CoreBio line: Claim Level Denial Code fills its COMMON column", Val(lineOut, 0, "Claim Level Denial Code") == "CO45-C", Val(lineOut, 0, "Claim Level Denial Code"));
+            Check("CoreBio line: ICDCode is the Claim ICD List", Val(lineOut, 0, "ICDCode") == "N39.0", Val(lineOut, 0, "ICDCode"));
+            Check("CoreBio line: Claim Level ICD fills its COMMON column", Val(lineOut, 0, "Claim Level ICD") == "N39.0 R30.0", Val(lineOut, 0, "Claim Level ICD"));
+            Check("CoreBio line: Facility Name feeds ClinicName and is kept raw",
+                Val(lineOut, 0, "ClinicName") == "CMCD INC" && Val(lineOut, 0, "Facility Name") == "CMCD INC",
+                $"ClinicName='{Val(lineOut, 0, "ClinicName")}', Facility Name='{Val(lineOut, 0, "Facility Name")}'");
+
+            Check("CoreBio claim: DenialCode is the Denial Code", Val(claimOut, 0, "DenialCode") == "CO97", Val(claimOut, 0, "DenialCode"));
+            Check("CoreBio claim: Original Denial Code is appended", Val(claimOut, 0, "Original Denial Code") == "CO45", Val(claimOut, 0, "Original Denial Code"));
+            Check("CoreBio claim: Claim Level Denial Code fills its COMMON column", Val(claimOut, 0, "Claim Level Denial Code") == "CO45-C", Val(claimOut, 0, "Claim Level Denial Code"));
+            Check("CoreBio claim: ICDCode is the Claim ICD List", Val(claimOut, 0, "ICDCode") == "N39.0", Val(claimOut, 0, "ICDCode"));
+            Check("CoreBio claim: Claim Level ICD is appended", Val(claimOut, 0, "Claim Level ICD") == "N39.0 R30.0", Val(claimOut, 0, "Claim Level ICD"));
+
+            using var mapping = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(schemas, "LabMappings", "CoreBioFieldMappings.json")));
+            foreach (var (level, csv) in new[] { ("LineLevel", lineOut), ("ClaimLevel", claimOut) })
+            {
+                var csvHeaders = Header(csv);
+                var wanted = new[] { "DenialCode", "Updated Denial", "Original Denial Code", "Line Level Denial Code", "Claim Level Denial Code", "Claim Level ICD" };
+                var missing = mapping.RootElement.GetProperty(level).GetProperty("Fields").EnumerateArray()
+                    .Select(f => f.GetProperty("CsvHeader").GetString()!)
+                    .Where(h => wanted.Contains(h, StringComparer.OrdinalIgnoreCase) && !csvHeaders.Contains(h, StringComparer.OrdinalIgnoreCase))
+                    .ToList();
+                Check($"CoreBio {level}: every mapped denial/ICD header is a CSV column", missing.Count == 0, string.Join(",", missing));
+            }
         }
         finally
         {
