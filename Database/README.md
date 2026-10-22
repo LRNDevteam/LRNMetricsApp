@@ -9,7 +9,7 @@ Every SQL script in the repository lives here, in one folder per project. The pr
 | `LabMetricsDashboard\` | `LabMetricsDashboard\Sql\` and `LabMetricsDashboard\SqlScripts\` | Dashboard procedures, menus, denial category master, demo lab; `ClaimLineDetails_SPs\`, `LIMSScript\`, `Select_Script\` |
 | `LRN.AveragesImport\` | `LRN.AveragesImport\Database\` | Averages import tables and report-type rows |
 | `LRN.DenialDatabaseWorker\` | `LRN.DenialDatabaseWorker\Sql\` | Denial worker re-run requests, notification and mail queues |
-| `LRN.MasterFileProcessorWorker\` | `LRN.MasterFileProcessorWorker\sql\` and `Sample\SelectScript\` | Process logs, file status, LIMS master, re-run requests; per-lab setup (`AnalyzePathology\`, `WellHealth\`, `CoreBio\`); `SelectScript\` reference queries |
+| `LRN.MasterFileProcessorWorker\` | `LRN.MasterFileProcessorWorker\sql\` and `Sample\SelectScript\` | Process logs, file status, LIMS master, re-run requests; per-lab setup (`AnalyzePathology\`, `WellHealth\`, `CoreBio\`, `TexasDiagnostic\`); `SelectScript\` reference queries |
 | `LRN.ProductionReports\` | `LRN.ProductionReports\Sql\` | Production report procedures |
 | `LRN.ReportsApi\` | `LRN.ReportsApi\Sql\` | Denial Workflow, Denial Mapper, Payer Master, user mail, menus; `ArReports\`, `DenialChanges\`, and `ArWorkbench\` (see below) |
 | `PredictionAnalysisApp\` | `PredictionAnalysisApp\Database\` | Prediction tables and procedures |

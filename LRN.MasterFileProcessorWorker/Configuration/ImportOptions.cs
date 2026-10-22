@@ -163,6 +163,16 @@ public sealed class LabFileMap
 	public string? LimsMasterFilePattern { get; set; }
 	public string? ClientPaidFileNamePattern { get; set; }
 
+	// Every lab: when the week folder has no file matching SharePointFilePattern, its subfolders are
+	// searched (two levels down) and the files are taken from there; LIMS / Client Paid siblings are
+	// looked for next to the master, then anywhere in the week folder. A file directly in the week
+	// folder still wins, so weeks without subfolders run exactly as before.
+	//
+	// Optional: a subfolder INSIDE each week folder to search FIRST, ahead of the week folder itself,
+	// e.g. "Master Files" for ".../10.09.2026 - 10.15.2026/Master Files". "A/B" descends two levels;
+	// matched case-insensitively. Not needed for subfolders to be found - only to prefer one.
+	public string? WeekFolderSubPath { get; set; }
+
 	// Comma-separated line-level sheet names for labs whose line-level data spans multiple sheets (e.g. NWL).
 	// When set, overrides the global SheetName for this lab. Multiple entries trigger a combined export
 	// with an added "Source" column; the value per row is the sheet name with " Line Level" suffix stripped.

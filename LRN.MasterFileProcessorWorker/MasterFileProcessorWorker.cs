@@ -2720,7 +2720,9 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			// Well Health's Line Level sheet has no Claim Status either. Configured as "WellHealth".
 			|| labName.Replace(" ", "").Contains("WellHealth", StringComparison.OrdinalIgnoreCase)
 			// CoreBio's "Line Level File" sheet has no Claim Status either. Configured as "CoreBio".
-			|| labName.Replace(" ", "").Contains("CoreBio", StringComparison.OrdinalIgnoreCase);
+			|| labName.Replace(" ", "").Contains("CoreBio", StringComparison.OrdinalIgnoreCase)
+			// Texas Diagnostic's "Line Level" sheet has no Claim Status either. Configured as "TexasDiagnostic".
+			|| labName.Replace(" ", "").Contains("TexasDiagnostic", StringComparison.OrdinalIgnoreCase);
 	}
 
 	/// <summary>

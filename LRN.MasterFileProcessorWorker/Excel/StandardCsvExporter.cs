@@ -2014,6 +2014,7 @@ public static class StandardCsvExporter
 		[NormKey("Analyze Pathology")] = "ANP",
 		[NormKey("WellHealth")] = "WHL",
 		[NormKey("CoreBio")] = "CBL",
+		[NormKey("TexasDiagnostic")] = "TXD",
 	};
 
 	/// <summary>
