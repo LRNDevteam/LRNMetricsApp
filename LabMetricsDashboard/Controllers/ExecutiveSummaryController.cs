@@ -72,6 +72,9 @@ public sealed class ExecutiveSummaryController : Controller
             ["WellHealth"]       = "WH",
             ["Well_Health"]      = "WH",
             ["Well Health"]      = "WH",
+            ["CoreBio"]          = "CB",
+            ["Core_Bio"]         = "CB",
+            ["Core Bio"]         = "CB",
         };
 
     public ExecutiveSummaryController(

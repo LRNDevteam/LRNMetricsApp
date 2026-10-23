@@ -162,7 +162,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "Cert", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "AnP", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(prefix, "WH", StringComparison.OrdinalIgnoreCase);
+        string.Equals(prefix, "WH", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "CB", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Labs whose live/filter Top5 Payments path prefers
@@ -176,7 +177,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "AnP", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(prefix, "WH", StringComparison.OrdinalIgnoreCase);
+        string.Equals(prefix, "WH", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "CB", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Augustus Collection Report client logic lives in *_v3 SPs

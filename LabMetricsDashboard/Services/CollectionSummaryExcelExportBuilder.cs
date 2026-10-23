@@ -59,21 +59,25 @@ public static partial class CollectionSummaryExcelExportBuilder
         if (vm.ShowAvgPaymentsByDateBasis)
         {
             BuildAvgPaymentsSheet(wb, vm.AvgPaymentsDos, lastMonths: 6,
-                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab ? PanelAveragesDosSheetName : AvgPaymentsDosSheetName,
+                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab || vm.IsCoreBioLab ? PanelAveragesDosSheetName : AvgPaymentsDosSheetName,
                 basisLabel: "Date of Service");
             BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6,
-                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab ? PanelAveragesCheckDateSheetName : AvgPaymentsCheckDateSheetName,
+                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab || vm.IsCoreBioLab ? PanelAveragesCheckDateSheetName : AvgPaymentsCheckDateSheetName,
                 basisLabel: "Check Date");
         }
         else
         {
             BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6);
         }
-        BuildStatusSummarySheet(wb, vm.StatusSummary, labName);
+        if (vm.ShowStatusProviderSummaries)
+            BuildStatusSummarySheet(wb, vm.StatusSummary, labName);
         if (vm.ShowGeneticsVsIdAvg)
             BuildGeneticsVsIdAvgSheet(wb, vm.GeneticsVsIdAvg, labName);
-        BuildRepVsPaymentSheet(wb, vm.RepPayments, labName);
-        BuildProviderSummarySheet(wb, vm.ProviderSummary, labName);
+        if (vm.ShowStatusProviderSummaries)
+        {
+            BuildRepVsPaymentSheet(wb, vm.RepPayments, labName);
+            BuildProviderSummarySheet(wb, vm.ProviderSummary, labName);
+        }
         if (vm.IsNorthWestLab)
             BuildWomensHealthBreakdownSheet(wb, vm.WomensHealthBreakdown);
 
@@ -114,10 +118,10 @@ public static partial class CollectionSummaryExcelExportBuilder
         if (vm.ShowAvgPaymentsByDateBasis)
         {
             BuildAvgPaymentsSheet(wb, vm.AvgPaymentsDos, lastMonths: 6,
-                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab ? PanelAveragesDosSheetName : AvgPaymentsDosSheetName,
+                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab || vm.IsCoreBioLab ? PanelAveragesDosSheetName : AvgPaymentsDosSheetName,
                 basisLabel: "Date of Service");
             BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6,
-                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab ? PanelAveragesCheckDateSheetName : AvgPaymentsCheckDateSheetName,
+                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab || vm.IsCoreBioLab ? PanelAveragesCheckDateSheetName : AvgPaymentsCheckDateSheetName,
                 basisLabel: "Check Date");
         }
         else
@@ -600,7 +604,8 @@ public static partial class CollectionSummaryExcelExportBuilder
     {
         if (TryBuildInsuranceAgingPivot(wb, rows, labName)) return;
 
-        var agingTitle = LabCollectionPrefix.UsesSpCollectionLogic(labName) || LabCollectionPrefix.IsNorthWest(labName)
+        var agingTitle = !LabCollectionPrefix.IsCoreBio(labName)
+            && (LabCollectionPrefix.UsesSpCollectionLogic(labName) || LabCollectionPrefix.IsNorthWest(labName))
             ? "Insurance Vs Aging" : "No Response Vs Aging";
         var ws = wb.AddWorksheet(agingTitle);
         ws.TabColor = ExcelTheme.Collection.TabYellow;
@@ -1105,6 +1110,12 @@ public static partial class CollectionSummaryExcelExportBuilder
             return;
         }
 
+        if (LabCollectionPrefix.IsCoreBio(labName))
+        {
+            WriteCptUnitsAndPayments(ws, rows, labName);
+            return;
+        }
+
         var isNorthWest = LabCollectionPrefix.IsNorthWest(labName);
         string[] headers = LabCollectionPrefix.IsInHealthDtr(labName) || isNorthWest
             ? ["CPT Code", "Count of ClaimID", "Average of PaymentPercent"]
@@ -1139,6 +1150,32 @@ public static partial class CollectionSummaryExcelExportBuilder
 
         AutoFitColumns(ws);
         ws.SheetView.FreezeRows(3);
+    }
+
+    /// <summary>CoreBio: CPT Code | Sum of Units | Sum of InsurancePayment, in SP order (units DESC).</summary>
+    private static void WriteCptUnitsAndPayments(IXLWorksheet ws, List<CptPaymentPctRow> rows, string labName)
+    {
+        string[] headers = ["CPT Code", "Sum of Units", "Sum of InsurancePayment"];
+        int row = 1;
+        ExcelTheme.Collection.WriteTitleBar(ws, row, headers.Length, $"CPT vs Payment \u2014 {labName}");
+        row++;
+        ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ColHeader);
+        row++;
+
+        foreach (var r in rows)
+        {
+            WriteCell(ws, row, 1, r.CptCode, XLColor.White, isText: true);
+            WriteCell(ws, row, 2, r.SumServiceUnits, XLColor.White);
+            WriteCell(ws, row, 3, r.PaidInsurancePayment, XLColor.White, isCurrency: true);
+            row++;
+        }
+
+        WriteCell(ws, row, 1, "Grand Total", ColTotal, isText: true, bold: true);
+        WriteCell(ws, row, 2, rows.Sum(r => r.SumServiceUnits), ColTotal, bold: true);
+        WriteCell(ws, row, 3, rows.Sum(r => r.PaidInsurancePayment), ColTotal, isCurrency: true, bold: true);
+
+        AutoFitColumns(ws);
+        ws.SheetView.FreezeRows(2);
     }
 
     /// <summary>Panel -> CPT rows in SP order; each panel is a collapsible group over its CPT codes.</summary>

@@ -27,6 +27,9 @@ public static class LisSummaryAggregateLabs
         ["Augustus Labs"] = "Aug_",
         ["AugustusLabs"] = "Aug_",
         ["Augustus_LRN"] = "Aug_",
+        ["CoreBio"] = "CB_",
+        ["Core_Bio"] = "CB_",
+        ["Core Bio"] = "CB_",
     };
 
     private static readonly Dictionary<int, string> PrefixByLabId = new()
@@ -36,6 +39,7 @@ public static class LisSummaryAggregateLabs
         [24] = "Aug_",
         [26] = "AnP_",
         [27] = "WH_",
+        [28] = "CB_",
     };
 
     public static bool TryGetTablePrefix(string? labName, int? labId, out string prefix)

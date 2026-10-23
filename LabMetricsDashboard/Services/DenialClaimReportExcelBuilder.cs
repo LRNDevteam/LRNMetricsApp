@@ -73,8 +73,10 @@ public static class DenialClaimReportExcelBuilder
             var lists = new SqlDenialSummaryRepository();
             var prefix = LabCollectionPrefix.GetPrefix(labName);
             model.HasDenialLists = true;
+            model.HasDenialPlanType = LabCollectionPrefix.HasDenialPlanType(labName);
             model.DenialList = await lists.GetDenialListAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
-            model.PlanType = await lists.GetPlanTypeAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
+            if (model.HasDenialPlanType)
+                model.PlanType = await lists.GetPlanTypeAsync(connectionString, prefix, new DenialSummaryFilters(), ct);
 
             if (LabCollectionPrefix.HasDenialFacilityTabs(labName))
             {
@@ -154,8 +156,9 @@ public static class DenialClaimReportExcelBuilder
         if (model.HasDenialLists)
         {
             WriteDenialList(workbook.Worksheets.Add("Denial List"), model.DenialList, model.CurrentLab, model.HasDenialFacilityTabs);
-            WritePlanType(workbook.Worksheets.Add(model.HasDenialFacilityTabs ? "Plan Type" : "Denial List - Plan Type"),
-                model.PlanType, model.CurrentLab, model.HasDenialFacilityTabs);
+            if (model.HasDenialPlanType)
+                WritePlanType(workbook.Worksheets.Add(model.HasDenialFacilityTabs ? "Plan Type" : "Denial List - Plan Type"),
+                    model.PlanType, model.CurrentLab, model.HasDenialFacilityTabs);
         }
         if (model.HasDenialFacilityTabs)
         {

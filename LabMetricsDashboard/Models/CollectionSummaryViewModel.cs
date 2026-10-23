@@ -110,6 +110,12 @@ public sealed class CollectionSummaryViewModel
     /// <summary>WellHealth: SP-only logic with its own filters, sorts and labels.</summary>
     public bool IsWellHealthLab => LabCollectionPrefix.IsWellHealth(SelectedLab);
 
+    /// <summary>CoreBio: SP-only logic with the CoreBio sheet's filters and labels.</summary>
+    public bool IsCoreBioLab => LabCollectionPrefix.IsCoreBio(SelectedLab);
+
+    /// <summary>Status Summary, Provider and Rep Vs Payment tabs / sheets.</summary>
+    public bool ShowStatusProviderSummaries => LabCollectionPrefix.ShowsStatusProviderSummaries(SelectedLab);
+
     /// <summary>NorthWest: client-logic labels, claim-count sorts and the Women's Health Panel breakdown.</summary>
     public bool IsNorthWestLab => LabCollectionPrefix.IsNorthWest(SelectedLab);
 

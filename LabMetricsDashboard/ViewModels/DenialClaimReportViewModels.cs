@@ -26,6 +26,9 @@ public sealed class DenialClaimReportViewModel
     /// </summary>
     public bool HasDenialLists { get; set; }
 
+    /// <summary>Denial List - Plan Type tab and sheet, shown with the Denial List (not CoreBio).</summary>
+    public bool HasDenialPlanType { get; set; } = true;
+
     /// <summary>NorthWest: Payor vs Payer, Facility wise, Denial vs Facility % tabs.</summary>
     public bool HasDenialFacilityTabs { get; set; }
 

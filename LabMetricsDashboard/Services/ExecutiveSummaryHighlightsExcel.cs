@@ -66,11 +66,11 @@ public sealed class ExecutiveSummaryHighlightsExcel
 
     /// <summary>Labs whose Executive Summary page shows the highlight tabs.</summary>
     public static bool AppliesTo(string? labName) =>
-        LabCollectionPrefix.GetPrefix(labName) is "NW" or "Cove" or "AnP" or "Aug" or "WH";
+        LabCollectionPrefix.GetPrefix(labName) is "NW" or "Cove" or "AnP" or "Aug" or "WH" or "CB";
 
     /// <summary>Labs among <see cref="AppliesTo"/> whose Denial Highlights tab is live.</summary>
     public static bool ShowsDenialHighlights(string? labName) =>
-        LabCollectionPrefix.GetPrefix(labName) is "NW" or "Cove" or "AnP" or "Aug" or "WH";
+        LabCollectionPrefix.GetPrefix(labName) is "NW" or "Cove" or "AnP" or "Aug" or "WH" or "CB";
 
     /// <summary>
     /// Returns the Executive Summary workbook with the highlight sheets appended.

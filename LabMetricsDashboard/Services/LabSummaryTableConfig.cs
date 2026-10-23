@@ -102,6 +102,15 @@ public record LabSummaryTableConfig(
         new("WH_",   "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
         { SupportsFilteredMonthlyWeeklySp = true, CptTotalsOnly = true };
 
+    /// <summary>
+    /// CoreBio — prefix <c>CB_</c>. Billed = BilledStatus Billed. Monthly excludes three payers.
+    /// Weekly is Wednesday–Tuesday where BilledWeek is filled. Unbilled rows are payers.
+    /// CPT is totals only (claim count, units, charges). No coding tables.
+    /// </summary>
+    public static readonly LabSummaryTableConfig CoreBio =
+        new("CB_",   "PayerName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: false)
+        { SupportsFilteredMonthlyWeeklySp = true, CptTotalsOnly = true };
+
     /// <summary>PCR Labs of America � prefix <c>PCR_</c>. Monthly/Weekly read SPs accept filter parameters.</summary>
     public static readonly LabSummaryTableConfig PCRLabsofAmerica =
         new("PCR_",  "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)

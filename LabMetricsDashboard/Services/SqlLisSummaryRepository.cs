@@ -2214,9 +2214,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private static string? ResolveConfiguredDateColumn(string logicSheet, string dateType)
 		=> (logicSheet, dateType) switch
 		{
-			("PhiLife", "Collected") or ("Beech Tree", "Collected") or ("Rising Tides", "Collected") or ("PCRLOA", "Collected") or ("WellHealth", "Collected") => "RequestCollectDate",
-			("PhiLife", "Received") or ("Beech Tree", "Received") or ("Rising Tides", "Received") or ("PCRLOA", "Received") or ("WellHealth", "Received") => "ReqReceivedDate",
-			("PhiLife", "Resulted") or ("Beech Tree", "Resulted") or ("Rising Tides", "Resulted") or ("WellHealth", "Resulted") => "ReqReportedDate",
+			("PhiLife", "Collected") or ("Beech Tree", "Collected") or ("Rising Tides", "Collected") or ("PCRLOA", "Collected") or ("WellHealth", "Collected") or ("CoreBio", "Collected") => "RequestCollectDate",
+			("PhiLife", "Received") or ("Beech Tree", "Received") or ("Rising Tides", "Received") or ("PCRLOA", "Received") or ("WellHealth", "Received") or ("CoreBio", "Received") => "ReqReceivedDate",
+			("PhiLife", "Resulted") or ("Beech Tree", "Resulted") or ("Rising Tides", "Resulted") or ("WellHealth", "Resulted") or ("CoreBio", "Resulted") => "ReqReportedDate",
 			("PCRLOA", "Resulted") => "ReqResultedDate",
 			("Cove", "Collected") or ("Elixir", "Collected") => "DateOfCollection",
 			("Cove", "Received") or ("Elixir", "Received") => "ReceivedDate",
@@ -2259,6 +2259,13 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			"PCRLOA" => new FilterColumnProfile(
 				ExpressionForColumn(FirstExisting(columns, "PanelCategory")),
 				null, null, null, null),
+			// Must match the dimensions stored by dbo.usp_RefreshCB_LISSummary.
+			// PanelName / Collector are empty on CoreBio; TestCategory and ClinicName are populated.
+			"CoreBio" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "TestCategory", "PanelName")),
+				ExpressionForColumn(FirstExisting(columns, "ClinicName", "Facility")),
+				ExpressionForColumn(FirstExisting(columns, "DoctorFullName", "Provider")),
+				null, null),
 			// Must match the dimensions stored by dbo.usp_RefreshWH_LISSummary.
 			"WellHealth" => new FilterColumnProfile(
 				ExpressionForColumn(FirstExisting(columns, "TestCategory")),
@@ -2446,6 +2453,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			? StandardOrderLineDataColumns(columns)
 			: logicSheetName.Equals("WellHealth", StringComparison.OrdinalIgnoreCase)
 			? WellHealthLineDataColumns(columns)
+			: logicSheetName.Equals("CoreBio", StringComparison.OrdinalIgnoreCase)
+			? CoreBioLineDataColumns(columns)
 			: GenericLineDataColumns(columns);
 
 		return AvailableLineDataColumns(specs);
@@ -2816,6 +2825,37 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			TextColumn(columns, "ICD10Codes", "ICD-10 Codes", "ICD10Codes"),
 			TextColumn(columns, "Tests", "Tests", "Tests"),
 			TextColumn(columns, "PanelCategory", "PanelCategory", "PanelCategory")
+		};
+
+	/// <summary>
+	/// CoreBio LIMS columns that are actually populated. The shared LIMSMaster shape also has
+	/// PanelName / PanelCategory / Collector / BillingStatus; PanelName and Collector are empty,
+	/// so the generic list would hide Test Category and show a blank panel.
+	/// </summary>
+	private static List<LineDataColumnSpec> CoreBioLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "Accession", "Accession", "Accession"),
+			TextColumn(columns, "OrderID", "Order Id", "OrderID", "OrderId"),
+			TextColumn(columns, "TestCategory", "Test Category", "TestCategory"),
+			TextColumn(columns, "ClinicName", "Clinic", "ClinicName"),
+			TextColumn(columns, "Facility", "Facility", "Facility"),
+			TextColumn(columns, "DoctorFullName", "Physician", "DoctorFullName"),
+			DateColumn(columns, "RequestCollectDate", "Collection Date", "RequestCollectDate"),
+			DateColumn(columns, "ReqReceivedDate", "Received Date", "ReqReceivedDate"),
+			DateColumn(columns, "ReqReportedDate", "Reported Date", "ReqReportedDate"),
+			TextColumn(columns, "NewStatus", "New Status", "NewStatus"),
+			TextColumn(columns, "BillCategory", "Bill Category", "BillCategory"),
+			TextColumn(columns, "BillingStatus", "Billing Status", "BillingStatus"),
+			TextColumn(columns, "SubStatus", "Sub Status", "SubStatus"),
+			TextColumn(columns, "PatientFullName", "Patient", "PatientFullName"),
+			DateColumn(columns, "PatientDateofBirth", "DOB", "PatientDateOfBirth", "PatientDateofBirth"),
+			TextColumn(columns, "PrimaryInsurance", "Primary Insurance", "PrimaryInsurance"),
+			TextColumn(columns, "Tests", "Tests", "Tests"),
+			TextColumn(columns, "ResultStatus", "Result Status", "ResultStatus", "RessultedStatus"),
+			DateColumn(columns, "BilledDate", "Billed Date", "BilledDate"),
+			TextColumn(columns, "TimetoResult", "Time to Result", "TimetoResult", "TimeToResult"),
+			TextColumn(columns, "TimetoBill", "Time to Bill", "TimetoBill", "TimeToBill")
 		};
 
 	/// <summary>
@@ -3777,6 +3817,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				// SubStatus fill Cove's Final Status / Billed-Not / Sub Status ("Unbilled" matches "Not Billed").
 				26 => "Cove",
 				27 => "WellHealth",
+				// CoreBio rows come from dbo.usp_GetCB_LISSummary. This sheet maps dates and filters.
+				28 => "CoreBio",
 				// LRNLabDemo: its LIMSMaster is Cove's (RunIds read R...COV..., and Cove's DateOfCollection /
 				// NewStatus shape - PCRLOA's RequestCollectDate is absent), so it reports on Cove's sheet.
 				// Unmapped, it fell to "Dynamic", whose rows all repeated the Total.
@@ -3804,6 +3846,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		if (n.Contains("ANALYZEPATHOLOGY")) return "Cove";
 		// WellHealth: rows come from dbo.usp_GetWH_LISSummary; this sheet only maps dates and filters.
 		if (n.Contains("WELLHEALTH")) return "WellHealth";
+		if (n.Contains("COREBIO")) return "CoreBio";
 		if (n.Contains("COVE")) return "Cove";
 		if (n.Contains("ELIXIR")) return "Elixir";
 		if (n.Contains("INHEALTH")) return "InHealth";

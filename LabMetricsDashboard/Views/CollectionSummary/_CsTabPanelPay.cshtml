@@ -165,6 +165,14 @@ else if (Model.UsesBilledPaidPanelPayment && hasMonthlyGrain)
         <strong>Billed:</strong> BilledUnbilled = Billed &mdash; Count of unique ClaimID, Sum of ChargeAmount &bull;
         <strong>Paid:</strong> InsurancePayment &gt; 0 &mdash; Count of unique ClaimID, Sum of InsurancePayment</span>
     }
+    else if (Model.IsCoreBioLab)
+    {
+        <span><strong>Source:</strong> Claim Level Data &bull;
+        <strong>Rows:</strong> Panelname &bull; <strong>Columns:</strong> ChargeEnteredDate month &bull;
+        <strong>Sorted by:</strong> Billed Claim Count DESC &bull;
+        <strong>Billed:</strong> BilledStatus = Billed, PayerName_Raw not UHP MANAGEMENT / PERENNIAL ADVANTAGE OF OHIO (MEDICARE) / NORTH CAROLINA BLUE SHIELD &mdash; Count of unique ClaimID, Sum of ChargeAmount &bull;
+        <strong>Paid:</strong> InsurancePayment &gt; 0 &mdash; Count of unique ClaimID, Sum of InsurancePayment</span>
+    }
     else if (Model.IsAugustusLab)
     {
         <span><strong>Source:</strong> Claim Level Data &bull;

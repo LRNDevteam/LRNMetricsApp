@@ -51,6 +51,47 @@
                     <strong>Values:</strong> Count of unique ClaimID, Average of PaymentPercent
                 </div>
             }
+            else if (Model.CptPaymentPct.Count > 0 && Model.IsCoreBioLab)
+            {
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                <tr>
+                                    <th>CPT Code</th>
+                                    <th>Sum of Units</th>
+                                    <th>Sum of InsurancePayment</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in Model.CptPaymentPct)
+                                {
+                                    <tr>
+                                        <td style="text-align:left;font-weight:600">@row.CptCode</td>
+                                        <td style="text-align:right">@row.SumServiceUnits.N0OrDash()</td>
+                                        <td style="text-align:right">@Acct2(row.PaidInsurancePayment)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                    <td style="text-align:right;color:#fff">@Model.CptPaymentPct.Sum(r => r.SumServiceUnits).N0OrDash()</td>
+                                    <td style="text-align:right;color:#fff">@Acct2(Model.CptPaymentPct.Sum(r => r.PaidInsurancePayment))</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> Line Level Data &bull;
+                    <strong>Filter:</strong> InsurancePayment &gt; 0 &bull;
+                    <strong>Rows:</strong> CPT Code &bull;
+                    <strong>Values:</strong> Sum of Units, Sum of InsurancePayment &bull;
+                    <strong>Sorted by:</strong> Sum of Units DESC
+                </div>
+            }
             else if (Model.CptPaymentPct.Count > 0)
             {
                 var cptGrandUnits   = Model.CptPaymentPct.Sum(r => r.SumServiceUnits);

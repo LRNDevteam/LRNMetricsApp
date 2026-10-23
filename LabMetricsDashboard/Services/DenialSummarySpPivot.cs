@@ -101,6 +101,11 @@ public static class DenialSummarySpPivot
         model.Weekly = ToPivot(weeklyTask.Result, weekly: true);
         model.Monthly.TopPayerRankBasis = model.Weekly.TopPayerRankBasis =
             LabCollectionPrefix.DenialSummaryRankBasis(model.CurrentLab);
+        if (LabCollectionPrefix.IsCoreBio(model.CurrentLab))
+        {
+            model.Monthly.HeaderTitle = model.Monthly.HeaderTitle.Replace("Denial Posted Date", "Check Date");
+            model.Weekly.HeaderTitle = model.Weekly.HeaderTitle.Replace("Denial Posted Date", "Check Date (Wednesday - Tuesday)");
+        }
     }
 
     private static BreakdownPivotCell Cell(DenialPeriodRow? row) => new()

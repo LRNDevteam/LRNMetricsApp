@@ -1157,15 +1157,19 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
             var rows = new List<CptBreakdownRow>();
             int grandClaims = 0;
             decimal grandCharges = 0m;
+            decimal grandUnits = 0m;
             while (await rdr.ReadAsync(ct))
             {
                 var rowType = rdr.IsDBNull(0) ? "D" : rdr.GetString(0);
                 var claims  = rdr.IsDBNull(2) ? 0 : Convert.ToInt32(rdr.GetValue(2));
                 var charges = rdr.IsDBNull(3) ? 0m : Convert.ToDecimal(rdr.GetValue(3));
+                // CoreBio appends SUM(Units) after SortOrder. Other totals-only labs omit it.
+                var units = rdr.FieldCount > 5 && !rdr.IsDBNull(5) ? Convert.ToDecimal(rdr.GetValue(5)) : 0m;
                 if (string.Equals(rowType, "T", StringComparison.OrdinalIgnoreCase))
                 {
                     grandClaims  = claims;
                     grandCharges = charges;
+                    grandUnits   = units;
                     continue;
                 }
                 rows.Add(new CptBreakdownRow
@@ -1173,12 +1177,13 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                     CptCode           = rdr.IsDBNull(1) ? string.Empty : rdr.GetString(1),
                     GrandTotalClaims  = claims,
                     GrandTotalCharges = charges,
+                    GrandTotalUnits   = units,
                 });
             }
 
             return new SharedCptBreakdownResult(
                 [], [], rows, new Dictionary<string, CptBreakdownCell>(),
-                0m, grandCharges, grandClaims, TotalsOnly: true);
+                grandUnits, grandCharges, grandClaims, TotalsOnly: true);
         }
         catch (Exception ex)
         {

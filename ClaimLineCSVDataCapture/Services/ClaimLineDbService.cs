@@ -535,6 +535,26 @@ public sealed class ClaimLineDbService
     }
 
     /// <summary>
+    /// Runs CoreBio production report stored procedures after ingestion.
+    /// Prefix CB_. Logic is the CoreBio Production Summary sheet (BilledStatus, Wednesday–Tuesday weeks).
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshCoreBioProductionReports()
+    {
+        string[] procedures =
+        [
+            "dbo.usp_RefreshCB_MonthlyBilledProductionSummary",
+            "dbo.usp_RefreshCB_WeeklyBilledProductionSummary",
+            "dbo.usp_RefreshCB_PayerBreakdown",
+            "dbo.usp_RefreshCB_PayerByPanel",
+            "dbo.usp_RefreshCB_PanelBreakdownWithPayers",
+            "dbo.usp_RefreshCB_UnbilledAging",
+            "dbo.usp_RefreshCB_CPTBreakdown",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>
     /// Runs all WellHealth production report stored procedures after ingestion.
     /// Prefix WH_. Same shape as Analyze Pathology, but billed = First Billed Date not blank
     /// and unbilled = First Billed Date blank (Mon–Sun weeks).
@@ -792,6 +812,9 @@ public sealed class ClaimLineDbService
             ["WellHealth"]       = "WH",
             ["Well_Health"]      = "WH",
             ["Well Health"]      = "WH",
+            ["CoreBio"]          = "CB",
+            ["Core_Bio"]         = "CB",
+            ["Core Bio"]         = "CB",
         };
 
     /// <summary>
@@ -1062,6 +1085,23 @@ public sealed class ClaimLineDbService
         ]);
 
     /// <summary>
+    /// Refreshes the CoreBio Collection Summary snapshots (Database\ClaimLineCSVDataCapture\CoreBio\12_CoreBio_CollectionSummary.sql).
+    /// Panel Averages by DOS / Check Date are computed live, so there is no snapshot for them.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshCoreBioCollectionReports()
+        => RunProductionReportSPs([
+            "dbo.usp_RefreshCB_CS_MonthlyClaimVolume",
+            "dbo.usp_RefreshCB_CS_WeeklyClaimVolume",
+            "dbo.usp_RefreshCB_CS_Top5ReimbursementPct",
+            "dbo.usp_RefreshCB_CS_Top5ReimbursementPay",
+            "dbo.usp_RefreshCB_CS_InsuranceVsAging",
+            "dbo.usp_RefreshCB_CS_InsuranceVsPaymentPct",
+            "dbo.usp_RefreshCB_CS_PanelVsPayment",
+            "dbo.usp_RefreshCB_CS_InsuranceVsPayment",
+            "dbo.usp_RefreshCB_CS_CptVsPaymentPct",
+        ]);
+
+    /// <summary>
     /// Refreshes the Analyze Pathology Denial Summary aggregates (Monthly / Weekly Denial
     /// Analysis, Denial List, Denial List - Plan Type) from dbo.ClaimLevelData.
     /// </summary>
@@ -1083,6 +1123,17 @@ public sealed class ClaimLineDbService
             "dbo.usp_RefreshWH_DenialWeekly",
             "dbo.usp_RefreshWH_DenialList",
             "dbo.usp_RefreshWH_DenialPlanType",
+        ]);
+
+    /// <summary>
+    /// Refreshes the CoreBio Denial Summary aggregates (Monthly / Weekly Denial Analysis by Check Date,
+    /// Denial List) from dbo.ClaimLevelData. CoreBio has no Plan Type tab.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshCoreBioDenialReports()
+        => RunProductionReportSPs([
+            "dbo.usp_RefreshCB_DenialMonthly",
+            "dbo.usp_RefreshCB_DenialWeekly",
+            "dbo.usp_RefreshCB_DenialList",
         ]);
 
     /// <summary>

@@ -42,6 +42,9 @@ public static class LabCollectionPrefix
         // WellHealth: Analyze Pathology SP-only Collection Summary pattern. Prefix WH_*.
         ["WellHealth"]         = "WH",
         ["Well_Health"]        = "WH",
+        // CoreBio: WellHealth SP-only pattern with the CoreBio Collection sheet. Prefix CB_CS_*.
+        ["CoreBio"]            = "CB",
+        ["Core_Bio"]           = "CB",
         ["PhiLife"]            = "Phi",
         ["Phi_Life"]           = "Phi",
         ["PCRLabsofAmerica"]   = "PCR",
@@ -110,14 +113,14 @@ public static class LabCollectionPrefix
     /// <c>usp_Get{prefix}_CS_AvgPayments_ClientLogic</c>, with "Last 3 Months" hidden.
     /// </summary>
     public static bool UsesAvgPaymentsByDateBasis(string? labName) =>
-        GetPrefix(labName) is "RT" or "BT" or "IHD" or "WH" or "NW" or "Aug";
+        GetPrefix(labName) is "RT" or "BT" or "IHD" or "WH" or "NW" or "Aug" or "CB";
 
     /// <summary>
     /// Labs whose two date-basis Average Payments tabs / sheets are titled
     /// "Panel Averages - by DOS" and "Panel Averages - by Check Date".
     /// </summary>
     public static bool UsesPanelAveragesTitles(string? labName) =>
-        GetPrefix(labName) is "WH" or "NW" or "Aug";
+        GetPrefix(labName) is "WH" or "NW" or "Aug" or "CB";
 
     /// <summary>
     /// Augustus client-logic Collection Summary (34_Augustus_CollectionSummary_ClientLogic.sql):
@@ -148,7 +151,7 @@ public static class LabCollectionPrefix
     /// and Excel never read the <c>{prefix}_CS_*</c> tables directly and keep the SP row order.
     /// </summary>
     public static bool UsesSpCollectionLogic(string? labName) =>
-        GetPrefix(labName) is "AnP" or "WH";
+        GetPrefix(labName) is "AnP" or "WH" or "CB";
 
     /// <summary>
     /// Labs with the Collection Summary "Panel Average" tab and Excel sheet.
@@ -166,6 +169,18 @@ public static class LabCollectionPrefix
         GetPrefix(labName) is "WH";
 
     /// <summary>
+    /// CoreBio client sheet: CheckDate months / Wednesday–Tuesday weeks, No Response Vs Aging,
+    /// Panel Vs Payment by ChargeEnteredDate, line-level CPT units and insurance payment.
+    /// </summary>
+    public static bool IsCoreBio(string? labName) =>
+        GetPrefix(labName) is "CB";
+
+    /// <summary>
+    /// Status Summary, Provider and Rep Vs Payment tabs / sheets. CoreBio's sheet does not include them.
+    /// </summary>
+    public static bool ShowsStatusProviderSummaries(string? labName) => !IsCoreBio(labName);
+
+    /// <summary>
     /// NorthWest client-logic Collection Summary: payment-percent tabs show Average of PaymentPercent,
     /// Status Summary / Provider show Sum of ChargeAmount, insurance pivots sort by claim count,
     /// "Payer vs Payment" replaces Insurance Vs Payment, plus the Women's Health Panel breakdown
@@ -180,7 +195,7 @@ public static class LabCollectionPrefix
     /// BilledCharges). NorthWest: PanelType x ChargeEnteredDate; Cove: Panelname x FirstBilledDate.
     /// </summary>
     public static bool UsesBilledPaidPanelPayment(string? labName) =>
-        GetPrefix(labName) is "NW" or "Cove" or "Aug";
+        GetPrefix(labName) is "NW" or "Cove" or "Aug" or "CB";
 
     /// <summary>
     /// Claim / line column behind the Collection Summary "Posted Date" and its Check Date filter.
@@ -198,21 +213,36 @@ public static class LabCollectionPrefix
     /// <c>{prefix}_Denial*</c> aggregate tables refreshed at claim-file ingest.
     /// </summary>
     public static bool HasDenialSummary(string? labName) =>
-        GetPrefix(labName) is "AnP" or "WH" or "NW" or "Aug";
+        GetPrefix(labName) is "AnP" or "WH" or "NW" or "Aug" or "CB";
+
+    /// <summary>
+    /// Denial List - Plan Type tab and sheet (<c>usp_Get{prefix}_DenialPlanType</c>).
+    /// CoreBio's Denial Summary sheet has no Plan Type.
+    /// </summary>
+    public static bool HasDenialPlanType(string? labName) =>
+        HasDenialSummary(labName) && !IsCoreBio(labName);
 
     /// <summary>
     /// Labs whose Executive Summary values open the "rows behind this value" popup, read from
     /// <c>usp_Get{prefix}_ExecutiveSummaryCellRows</c> (same rules as the Executive Summary SPs).
     /// </summary>
     public static bool HasEsCellRows(string? labName) =>
-        GetPrefix(labName) is "WH";
+        GetPrefix(labName) is "WH" or "CB";
+
+    /// <summary>
+    /// Labs whose Executive Summary Year Total / Grand Total cells also open the value popup instead
+    /// of the LisDrill page. CoreBio's LIS Billed / Unbilled rules (BillCategory OR BillingStatus)
+    /// and its Adjustments formula cannot be expressed as dbo.LisDrillRowDef conditions.
+    /// </summary>
+    public static bool EsTotalsUseCellRows(string? labName) =>
+        GetPrefix(labName) is "CB";
 
     /// <summary>
     /// What the Denial Summary Monthly / Weekly SPs rank insurances and their top denials by
     /// (shown in the grid caption).
     /// </summary>
     public static string DenialSummaryRankBasis(string? labName) =>
-        GetPrefix(labName) is "WH" ? "Total Insurance Balance" : "claim count";
+        GetPrefix(labName) is "WH" or "CB" ? "Total Insurance Balance" : "claim count";
 
     /// <summary>
     /// NorthWest Denial Summary adds Payor vs Payer, Facility wise Denial Breakdown, and

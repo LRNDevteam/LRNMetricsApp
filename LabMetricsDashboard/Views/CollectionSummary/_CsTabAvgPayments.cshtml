@@ -243,11 +243,15 @@
             {
                 <span><strong>Filter:</strong> BillingStatus = Billed &bull;</span>
             }
+            else if (Model.IsCoreBioLab)
+            {
+                <span><strong>Filter:</strong> BilledStatus = Billed &bull;</span>
+            }
             else if (Model.UsesPanelAveragesTitles)
             {
                 <span><strong>Filter:</strong> FirstBilledDate not blank &bull;</span>
             }
-            @if (Model.IsNorthWestLab || Model.IsAugustusLab)
+            @if (Model.IsNorthWestLab || Model.IsAugustusLab || Model.IsCoreBioLab)
             {
                 <span><strong>Fully Paid / Adjudicated / 30 / 60 Days:</strong> ClaimStatus = Fully Paid / Adjudicated = Adjudicated / Bucket30 = 30 Bucket / Bucket60 = 60 Bucket &bull;</span>
             }
@@ -262,7 +266,7 @@
         }
         <strong>Panel totals:</strong> ALL payers &bull;
         <strong>Drill-down:</strong> Top 3 PayerName_Raw by claim count &bull;
-        <strong>Counts:</strong> @(Model.IsNorthWestLab || Model.IsAugustusLab ? "Count of unique ClaimID" : "Count(ClaimID) — not DISTINCT")
+        <strong>Counts:</strong> @(Model.IsNorthWestLab || Model.IsAugustusLab || Model.IsCoreBioLab ? "Count of unique ClaimID" : "Count(ClaimID) — not DISTINCT")
     </div>
 }
 else

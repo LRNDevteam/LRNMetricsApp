@@ -30,6 +30,9 @@
         !string.IsNullOrEmpty(m) && m.Length >= 4
         && int.TryParse(m.AsSpan(0, 4), out var y) && y > 1900;
 
+    var isCoreBio = (Model.SelectedLab ?? "").Replace(" ", "").Replace("_", "")
+        .Contains("CoreBio", StringComparison.OrdinalIgnoreCase);
+
     var validYears  = Model.Years.Where(y => y > 1900).ToList();
     var validMonths = Model.Months.Where(IsYm).ToList();
 
@@ -43,7 +46,9 @@
         || string.Equals(Model.ProductionSummaryRule, "Rule2", StringComparison.OrdinalIgnoreCase)
         || string.Equals(Model.ProductionSummaryRule, "Rule3", StringComparison.OrdinalIgnoreCase)
         || string.Equals(Model.ProductionSummaryRule, "Rule4", StringComparison.OrdinalIgnoreCase);
-    var monthlyDateBasis = monthlyUsesChargeEntered ? "Charge Entered Date" : "Billed Date";
+    var monthlyDateBasis = isCoreBio
+        ? "First Billed Date"
+        : monthlyUsesChargeEntered ? "Charge Entered Date" : "Billed Date";
 
     string MonthLabel(string ym)
     {
@@ -775,6 +780,8 @@ th.pr-month-data, td.pr-month-data {
                 <i class="bi bi-calendar-week"></i> Weekly Claim Volume
             </button>
         </li>
+        @if (!isCoreBio)
+        {
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="coding-tab" data-bs-toggle="pill"
                     data-bs-target="#coding-pane" type="button" role="tab"
@@ -782,6 +789,7 @@ th.pr-month-data, td.pr-month-data {
                 <i class="bi bi-code-square"></i> Coding
             </button>
         </li>
+        }
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="payer-breakdown-tab" data-bs-toggle="pill"
                     data-bs-target="#payer-breakdown-pane" type="button" role="tab"
@@ -1127,7 +1135,9 @@ th.pr-month-data, td.pr-month-data {
                                     <th colspan="@(weeks.Count * 2)">
                                         @(Model.IsNorthWestLab
                                             ? "Thursday – Wednesday (EnteredWeek)"
-                                            : $"Data based on Last 4 Week [{headerDateLabel}]")
+                                            : isCoreBio
+                                                ? "Wednesday – Tuesday (FirstBilledDate)"
+                                                : $"Data based on Last 4 Week [{headerDateLabel}]")
                                     </th>
                                     <th colspan="2" rowspan="2" class="pr-grand-total">Grand Total</th>
                                 </tr>
@@ -1258,25 +1268,32 @@ th.pr-month-data, td.pr-month-data {
                         <li>Rows: <code>PanelCategory</code> &nbsp;·&nbsp; Drill-down: Top 3 <code>PayerName_Raw</code> by Claim Count</li>
                         <li>Columns: <code>EnteredWeek</code> (range = that week's <code>ChargeEnteredDate</code> span)</li>
                     }
+                    else if (isCoreBio)
+                    {
+                        <li>Source: <code>ClaimLevelData</code> · <code>BilledStatus</code> = Billed · <code>BilledWeek</code> is not blank</li>
+                        <li>Rows: <code>Panelname</code> · Top 3 <code>PayerName_Raw</code> by claim count</li>
+                        <li>Columns: last four Wednesday–Tuesday weeks of <code>FirstBilledDate</code></li>
+                        <li>Values: Count of unique Claim ID, Sum of Charge Amount · Sorted by claim count</li>
+                    }
                     else
                     {
                         <li>Source: <code>ClaimLevelData</code> · Last 4 complete <code>@weeklyActiveWeek</code> weeks</li>
                         <li>Rows: <code>PanelName</code> &nbsp;·&nbsp; Drill-down: Top 3 <code>PayerName</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
                         <li>Columns: Week of <code>@weeklyDateColumn</code></li>
                     }
-                    @if (Model.IsAugustusLab)
+                    @if (!isCoreBio && Model.IsAugustusLab)
                     {
                         <li>Filter: <code>FirstBilledDate</code> is a valid date &nbsp;·&nbsp; <code>EnteredWeek</code> is not blank</li>
                     }
-                    else if (weeklyIsRule5)
+                    else if (!isCoreBio && weeklyIsRule5)
                     {
                         <li>Filter: Exclude <code>PayerName_Raw</code> containing <code>None</code>, <code>Accu Labs</code>, <code>Client Bill</code>, <code>Client</code>, <code>Patient</code>, <code>Patient Pay</code> &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
                     }
-                    else if (weeklyIsRule34)
+                    else if (!isCoreBio && weeklyIsRule34)
                     {
                         <li>Filter: <code>PayerName</code> not blank &nbsp;·&nbsp; <code>ChargeEnteredDate</code> is a valid date &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
                     }
-                    else
+                    else if (!isCoreBio)
                     {
                         <li>Filter: <code>PayerName</code> not blank &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
                     }
@@ -1289,7 +1306,7 @@ th.pr-month-data, td.pr-month-data {
         }
 
         <!-- ??? Coding tab pane ?????????????????????????????????? -->
-        @if (prChrome || PrShow("coding-pane"))
+        @if (!isCoreBio && (prChrome || PrShow("coding-pane")))
         {
         <div class="tab-pane fade" id="coding-pane" role="tabpanel" aria-labelledby="coding-tab" data-pr-lazy="coding-pane">
             @if (PrShow("coding-pane"))
@@ -1379,7 +1396,7 @@ th.pr-month-data, td.pr-month-data {
                             var pbDateColLocal = pbUsesChargeLocal ? "ChargeEnteredDate" : "FirstBilledDate";
                         }
                         <span class="filter-dot">•</span>
-                        @if (LabCollectionPrefix.UsesSpCollectionLogic(Model.SelectedLab))
+                        @if (!isCoreBio && LabCollectionPrefix.UsesSpCollectionLogic(Model.SelectedLab))
                         {
                             <span><span class="filter-label">Filter:</span>
                                 <span class="filter-key-2">Bill Status</span> not in (Unbilled, Unbilled - Self Pay)
@@ -1404,6 +1421,15 @@ th.pr-month-data, td.pr-month-data {
                             &nbsp;·&nbsp; Columns: <span class="filter-key">ChargeEnteredDate</span> month / year
                             &nbsp;·&nbsp; Values: Count of unique ClaimID, Sum of ChargeAmount
                             &nbsp;·&nbsp; Sorted by Claim Count</span>
+                        }
+                        else if (isCoreBio)
+                        {
+                        <span><span class="filter-label">Filter:</span>
+                            <span class="filter-key-2">BilledStatus</span> = Billed
+                            &nbsp;·&nbsp; Rows: <span class="filter-key">PayerName_Raw</span>
+                            &nbsp;·&nbsp; Columns: <span class="filter-key">FirstBilledDate</span> month / year
+                            &nbsp;·&nbsp; Values: Count of unique Claim ID, Sum of Charge Amount
+                            &nbsp;·&nbsp; Sorted by claim count</span>
                         }
                         else
                         {
@@ -1598,6 +1624,15 @@ th.pr-month-data, td.pr-month-data {
                             &nbsp;·&nbsp; Values: Count of unique ClaimID, Sum of ChargeAmount
                             &nbsp;·&nbsp; Sorted by Claim Count</span>
                         }
+                        else if (isCoreBio)
+                        {
+                        <span><span class="filter-label">Filter:</span>
+                            none
+                            &nbsp;·&nbsp; Rows: <span class="filter-key">PayerName_Raw</span>
+                            &nbsp;·&nbsp; Columns: <span class="filter-key">Panelname</span>
+                            &nbsp;·&nbsp; Values: Count of unique Claim ID, Sum of Charge Amount
+                            &nbsp;·&nbsp; Sorted by claim count</span>
+                        }
                         else
                         {
                         <span><span class="filter-label">Filter:</span>
@@ -1712,7 +1747,15 @@ th.pr-month-data, td.pr-month-data {
                             var uaDateColLocal = uaUsesChargeLocal ? "ChargeEnteredDate" : "FirstBilledDate";
                         }
                         <span class="filter-dot">•</span>
-                        @if (Model.SelectedLab.Contains("InHealth", StringComparison.OrdinalIgnoreCase))
+                        @if (isCoreBio)
+                        {
+                        <span><span class="filter-label">Filter:</span>
+                            <span class="filter-key">BilledStatus</span> = Unbilled
+                            &nbsp;·&nbsp; Rows: <span class="filter-key">PayerName_Raw</span>
+                            &nbsp;·&nbsp; Columns: <span class="filter-key">AgingDOS</span>
+                            &nbsp;·&nbsp; Sorted by claim count</span>
+                        }
+                        else if (Model.SelectedLab.Contains("InHealth", StringComparison.OrdinalIgnoreCase))
                         {
                         <span><span class="filter-label">Filter:</span>
                             <span class="filter-key">BillStatus</span> = Unbilled
@@ -1760,7 +1803,7 @@ th.pr-month-data, td.pr-month-data {
                             </colgroup>
                             <thead>
                                 <tr>
-                                    <th rowspan="2">@(Model.SelectedLab.Contains("Elixir", StringComparison.OrdinalIgnoreCase) || Model.SelectedLab.Contains("InHealth", StringComparison.OrdinalIgnoreCase) || Model.IsAugustusLab ? "Payer Name" : "Unbilled x Aging")</th>
+                                    <th rowspan="2">@(isCoreBio || Model.SelectedLab.Contains("Elixir", StringComparison.OrdinalIgnoreCase) || Model.SelectedLab.Contains("InHealth", StringComparison.OrdinalIgnoreCase) || Model.IsAugustusLab ? "Payer Name" : "Unbilled x Aging")</th>
                                     @foreach (var bk in agingBuckets)
                                     {
                                         <th colspan="2">@bk</th>
@@ -1997,12 +2040,20 @@ th.pr-month-data, td.pr-month-data {
                             <colgroup>
                                 <col style="width:160px" />
                                 <col style="width:110px" />
+                                @if (isCoreBio)
+                                {
+                                    <col style="width:110px" />
+                                }
                                 <col style="width:140px" />
                             </colgroup>
                             <thead>
                                 <tr>
                                     <th>@(Model.CptTotalsOnly ? "CPT Code" : "CPT Codes")</th>
                                     <th class="pr-grand-total">@(Model.CptTotalsOnly ? "Claim Count" : cptUnitsHeader)</th>
+                                    @if (isCoreBio)
+                                    {
+                                        <th class="pr-grand-total">Units</th>
+                                    }
                                     <th class="pr-grand-total">@(Model.CptTotalsOnly ? "Charge Amount" : "Total Charge")</th>
                                 </tr>
                             </thead>
@@ -2012,6 +2063,10 @@ th.pr-month-data, td.pr-month-data {
                                     <tr class="pr-panel-row">
                                         <td>@row.CptCode</td>
                                         <td class="pr-grand-total">@row.GrandTotalClaims.N0OrDash()</td>
+                                        @if (isCoreBio)
+                                        {
+                                            <td class="pr-grand-total">@row.GrandTotalUnits.N0OrDash()</td>
+                                        }
                                         <td class="pr-grand-total">@Acct(row.GrandTotalCharges)</td>
                                     </tr>
                                 }
@@ -2022,6 +2077,10 @@ th.pr-month-data, td.pr-month-data {
                                     @if (Model.CptTotalsOnly)
                                     {
                                         <td class="pr-grand-total">@Model.CptBreakdownGrandTotalClaims.N0OrDash()</td>
+                                        @if (isCoreBio)
+                                        {
+                                            <td class="pr-grand-total">@Model.CptBreakdownGrandTotalUnits.N0OrDash()</td>
+                                        }
                                         <td class="pr-grand-total">@Acct(Model.CptBreakdownGrandTotalCharges)</td>
                                     }
                                     else
@@ -2039,7 +2098,7 @@ th.pr-month-data, td.pr-month-data {
                     <div class="pr-filter-summary">
                         <strong>Source:</strong> Line Level Data &bull;
                         <strong>Rows:</strong> CPT Code &bull;
-                        <strong>Values:</strong> Claim Count = Count of unique Claim ID, Charge Amount = Sum of Charge Amount &bull;
+                        <strong>Values:</strong> @(isCoreBio ? "Claim Count = Count of unique Claim ID, Units = Sum of Units, Charge Amount = Sum of Charge Amount" : "Claim Count = Count of unique Claim ID, Charge Amount = Sum of Charge Amount") &bull;
                         <strong>Sorted by:</strong> Claim Count DESC &bull;
                         Grand Total claim count = sum of the CPT code claim counts
                     </div>
@@ -2189,6 +2248,14 @@ th.pr-month-data, td.pr-month-data {
                             &nbsp;·&nbsp; Columns: <span class="filter-key-2">ChargeEnteredDate</span> month / year
                             &nbsp;·&nbsp; Values: Count of unique ClaimID, Sum of ChargeAmount
                             &nbsp;·&nbsp; Sorted by Claim Count</text>
+                            }
+                            else if (isCoreBio)
+                            {
+                            <text><span class="filter-key-2">BilledStatus</span> = Billed
+                            &nbsp;·&nbsp; Rows: <span class="filter-key-2">Panelname</span> &gt; <span class="filter-key-2">PayerName_Raw</span>
+                            &nbsp;·&nbsp; Columns: <span class="filter-key-2">FirstBilledDate</span> month / year
+                            &nbsp;·&nbsp; Values: Count of unique Claim ID, Sum of Charge Amount
+                            &nbsp;·&nbsp; Sorted by claim count</text>
                             }
                             else
                             {

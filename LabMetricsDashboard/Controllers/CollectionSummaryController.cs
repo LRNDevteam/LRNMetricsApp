@@ -649,15 +649,22 @@ public class CollectionSummaryController : Controller
             ? _repo.GetAvgPaymentsByDateBasisAsync(connStr, AvgPaymentsDateBasis.DateOfService,
                 payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
             : Task.FromResult(new PanelAveragesResult([]));
-        var statusSummaryTask = _repo.GetStatusSummaryAsync(
-            connStr, payerFilter, panelFilter,
-            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-        var providerSummaryTask = _repo.GetProviderSummaryAsync(
-            connStr, payerFilter, panelFilter,
-            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-        var repPaymentTask = _repo.GetRepPaymentAsync(
-            connStr, payerFilter, panelFilter,
-            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var showStatusProvider = LabCollectionPrefix.ShowsStatusProviderSummaries(selectedLab);
+        var statusSummaryTask = showStatusProvider
+            ? _repo.GetStatusSummaryAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
+            : Task.FromResult(StatusSummaryResult.Empty);
+        var providerSummaryTask = showStatusProvider
+            ? _repo.GetProviderSummaryAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
+            : Task.FromResult(ProviderSummaryResult.Empty);
+        var repPaymentTask = showStatusProvider
+            ? _repo.GetRepPaymentAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
+            : Task.FromResult(new RepPaymentResult([]));
         var insuranceVsPaymentTask = _repo.GetInsuranceVsPaymentAsync(
             connStr, payerFilter, panelFilter,
             fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);

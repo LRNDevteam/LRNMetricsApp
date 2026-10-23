@@ -19,6 +19,7 @@
     bool showDenialHighlights = LabMetricsDashboard.Services.ExecutiveSummaryHighlightsExcel.ShowsDenialHighlights(Model.SelectedLab);
     // Every value opens the "rows behind this value" popup (usp_Get{prefix}_ExecutiveSummaryCellRows).
     bool esCellRows = LabMetricsDashboard.Services.LabCollectionPrefix.HasEsCellRows(Model.SelectedLab);
+    bool esLisDrill = !LabMetricsDashboard.Services.LabCollectionPrefix.EsTotalsUseCellRows(Model.SelectedLab);
 
     // The page filters the popup re-applies, as query-string pairs.
     string EsFilterQuery()
@@ -1143,7 +1144,7 @@ if (showHighlightTabs)
                                             var yrTot = RowYearTotal(row, year);
                                             @* Prefer rowCode (lab-specific LisDrillRowDef) over generic
                                                metric=Billable — Inhealth Billable is RowCode B, not L_A. *@
-                                            @if (!isPanelSpecificRow && (row.Category == "LIS" || row.Category == "PMS" || row.Category == "Cash") && !string.IsNullOrEmpty(row.RowCode) && yrTot != 0)
+                                            @if (esLisDrill && !isPanelSpecificRow && (row.Category == "LIS" || row.Category == "PMS" || row.Category == "Cash") && !string.IsNullOrEmpty(row.RowCode) && yrTot != 0)
                                             {
                                                 string yrRowUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
                                                     lab      = Model.SelectedLab,
@@ -1157,7 +1158,7 @@ if (showHighlightTabs)
                                                     <a href="@yrRowUrl" class="es-drill-link">@FmtCount(yrTot, row.Category, row.RowCode)</a>
                                                 </td>
                                             }
-                                            else if (!isPanelSpecificRow && lisDrillMetric != null && yrTot != 0)
+                                            else if (esLisDrill && !isPanelSpecificRow && lisDrillMetric != null && yrTot != 0)
                                             {
                                                 string yrDrillUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
                                                     lab    = Model.SelectedLab,
@@ -1178,7 +1179,7 @@ if (showHighlightTabs)
                                                 <td class="es-year-total@(dollarRow ? " es-cell-dollar" : "")">@FmtCount(yrTot, row.Category, row.RowCode)</td>
                                             }
                                         }
-                                        @if (!isPanelSpecificRow && (row.Category == "LIS" || row.Category == "PMS" || row.Category == "Cash") && !string.IsNullOrEmpty(row.RowCode) && gTot != 0)
+                                        @if (esLisDrill && !isPanelSpecificRow && (row.Category == "LIS" || row.Category == "PMS" || row.Category == "Cash") && !string.IsNullOrEmpty(row.RowCode) && gTot != 0)
                                         {
                                             string gtRowUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
                                                 lab      = Model.SelectedLab,
@@ -1192,7 +1193,7 @@ if (showHighlightTabs)
                                                 <a href="@gtRowUrl" class="es-drill-link">@FmtCount(gTot, row.Category, row.RowCode)</a>
                                             </td>
                                         }
-                                        else if (!isPanelSpecificRow && lisDrillMetric != null && gTot != 0)
+                                        else if (esLisDrill && !isPanelSpecificRow && lisDrillMetric != null && gTot != 0)
                                         {
                                             string gtDrillUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
                                                 lab    = Model.SelectedLab,

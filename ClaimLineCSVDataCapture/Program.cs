@@ -1238,6 +1238,60 @@ foreach (var lab in labConfigs)
             }
         }
 
+        // ── CoreBio production report aggregates ─────────────────────────────────
+        if (lab.LabName.Equals("CoreBio", StringComparison.OrdinalIgnoreCase)
+            || lab.LabName.Equals("Core_Bio", StringComparison.OrdinalIgnoreCase))
+        {
+            log.Info($"  [CB Reports] Running CoreBio production report SPs…");
+            try
+            {
+                var cbResults = db.RefreshCoreBioProductionReports();
+                prodSummaryResults = cbResults;
+                foreach (var (spName, elapsedMs, error) in cbResults)
+                {
+                    if (error is null)
+                        log.Info($"  [CB Reports] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [CB Reports] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+
+                var failed = cbResults.Count(r => r.Error is not null);
+                var passed = cbResults.Count(r => r.Error is null);
+                log.Info($"  [CB Reports] {passed}/{cbResults.Count} SP(s) succeeded.");
+                if (failed > 0)
+                    log.Warn($"  [CB Reports] {failed} SP(s) failed — see errors above.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [CB Reports] Unexpected error running CoreBio production report SPs: {ex.Message}");
+            }
+
+            collSummaryResults = RunCollectionSummary(log, db, "CB CS", db.RefreshCoreBioCollectionReports);
+
+            log.Info($"  [CB Denial] Running CoreBio Denial Summary SPs…");
+            try
+            {
+                var denialResults = db.RefreshCoreBioDenialReports();
+                foreach (var (spName, elapsedMs, error) in denialResults)
+                {
+                    if (error is null)
+                        log.Info($"  [CB Denial] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [CB Denial] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+
+                var failed = denialResults.Count(r => r.Error is not null);
+                var passed = denialResults.Count(r => r.Error is null);
+                log.Info($"  [CB Denial] {passed}/{denialResults.Count} SP(s) succeeded.");
+                if (failed > 0)
+                    log.Warn($"  [CB Denial] {failed} SP(s) failed — see errors above.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [CB Denial] Unexpected error running CoreBio Denial Summary SPs: {ex.Message}");
+            }
+        }
+
         // ── PCRLabsofAmerica production report aggregates ─────────────────────
         // Matches "PCRLAPSOfAmerica" or "PCRLabsofAmerica" lab name.
         // Rule1 variant: ChargeEnteredDate columns, Thu–Wed week, coding = billed.
@@ -2302,6 +2356,8 @@ static string? GetCollectionSummarySpPrefix(ClaimLineCSVDataCapture.Models.LabCo
     if (name.Equals("AnalyzePathology", StringComparison.OrdinalIgnoreCase)) return "AnP";
     if (name.Equals("WellHealth",       StringComparison.OrdinalIgnoreCase) ||
         name.Equals("Well_Health",       StringComparison.OrdinalIgnoreCase)) return "WH";
+    if (name.Equals("CoreBio",          StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("Core_Bio",          StringComparison.OrdinalIgnoreCase)) return "CB";
     if (name.Equals("PCRLabsofAmerica", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("PCR_Labs_of_America", StringComparison.OrdinalIgnoreCase)) return "PCR";
     if (name.Equals("PhiLife",          StringComparison.OrdinalIgnoreCase) ||

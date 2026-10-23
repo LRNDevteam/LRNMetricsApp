@@ -1197,7 +1197,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             <button class="nav-link active" id="mcv-tab" data-bs-toggle="pill"
                     data-bs-target="#mcv-pane" type="button" role="tab"
                     aria-controls="mcv-pane" aria-selected="true">
-                <i class="bi bi-calendar-month"></i> Monthly Claim Volume <span class="text-white-50 fw-normal" style="font-size:.7em">(Posted Date)</span>
+                <i class="bi bi-calendar-month"></i> Monthly Claim Volume <span class="text-white-50 fw-normal" style="font-size:.7em">(@(Model.IsCoreBioLab ? "Check Date" : "Posted Date"))</span>
             </button>
         </li>
         <li class="nav-item" role="presentation">
@@ -1258,7 +1258,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             <button class="nav-link" id="aging-tab" data-bs-toggle="pill"
                     data-bs-target="#aging-pane" type="button" role="tab"
                     aria-controls="aging-pane" aria-selected="false">
-                <i class="bi bi-hourglass-split"></i> @(Model.IsAugustusLab ? "No Response vs Aging" : "Insurance vs Aging")
+                <i class="bi bi-hourglass-split"></i> @(Model.IsAugustusLab || Model.IsCoreBioLab ? "No Response vs Aging" : "Insurance vs Aging")
             </button>
         </li>
         <li class="nav-item" role="presentation">
@@ -1289,9 +1289,11 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             <button class="nav-link" id="cptpctpay-tab" data-bs-toggle="pill"
                     data-bs-target="#cptpctpay-pane" type="button" role="tab"
                     aria-controls="cptpctpay-pane" aria-selected="false">
-                <i class="bi bi-list-ol"></i> CPT vs Payment %
+                <i class="bi bi-list-ol"></i> @(Model.IsCoreBioLab ? "CPT vs Payment" : "CPT vs Payment %")
             </button>
         </li>
+            @if (Model.ShowStatusProviderSummaries)
+            {
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="statussummary-tab" data-bs-toggle="pill"
                         data-bs-target="#statussummary-pane" type="button" role="tab"
@@ -1299,6 +1301,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     <i class="bi bi-card-checklist"></i> Status Summary
                 </button>
             </li>
+            }
             @if (Model.IsNorthWestLab)
             {
                 <li class="nav-item" role="presentation">
@@ -1319,6 +1322,8 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     </button>
                 </li>
             }
+            @if (Model.ShowStatusProviderSummaries)
+            {
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="provider-tab" data-bs-toggle="pill"
                         data-bs-target="#provider-pane" type="button" role="tab"
@@ -1326,6 +1331,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     <i class="bi bi-person-badge"></i> Provider
                 </button>
             </li>
+            }
     </ul>
 
     <div id="csTabLoading" class="cs-tab-loading" aria-hidden="true">
@@ -1391,7 +1397,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                                     @foreach (var year in mcvYears)
                                     {
                                         var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
-                                        <th colspan="@(monthsInYear.Count * 2 + 2)">Data based on Posted Date &mdash; @year</th>
+                                        <th colspan="@(monthsInYear.Count * 2 + 2)">Data based on @(Model.IsCoreBioLab ? "Check Date" : "Posted Date") &mdash; @year</th>
                                     }
                                     <th colspan="2" rowspan="2" class="cs-pr-grand">Grand Total</th>
                                 </tr>
@@ -1497,6 +1503,19 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     </div>
                 </div>
 
+                @if (Model.IsCoreBioLab)
+                {
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> Claim Level Data &bull;
+                    <strong>Filter:</strong> InsurancePayment &gt; 0 &nbsp;·&nbsp; CheckDate in @(DateTime.Today.Year - 1) &amp; @DateTime.Today.Year &bull;
+                    <strong>Rows:</strong> Panelname &rarr; Top 3 PayerName_Raw by Claim Count &bull;
+                    <strong>Columns:</strong> CheckDate month / year / total &bull;
+                    <strong>Values:</strong> Count of unique ClaimID, Sum of InsurancePayment &bull;
+                    <strong>Sorted by:</strong> Claim Count DESC
+                </div>
+                }
+                else
+                {
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> ClaimLevelData (all rows) &bull;
                     <strong>Filter (base):</strong> @(Model.UsesSpCollectionLogic ? "InsurancePayment ≠ 0" : "InsurancePayment > 0") &nbsp;·&nbsp; @(Model.UsesSpCollectionLogic ? "PaymentPostedDate" : "CheckDate") not blank/invalid &bull;
@@ -1506,6 +1525,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     <strong>Columns:</strong> @(Model.UsesSpCollectionLogic ? "PaymentPostedDate" : "CheckDate") (Year, Month) — No. of Claims + Insurance Paid Amount &bull;
                     <strong>Sorted by:</strong> @(Model.IsWellHealthLab ? "Grand Total Insurance Payment DESC" : "Grand Total (Unique ClaimID count) DESC")
                 </div>
+                }
             }
             else
             {
@@ -1558,8 +1578,11 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         }
         <!-- CPT vs Payment % tab -->
         <div class="tab-pane fade" id="cptpctpay-pane"     role="tabpanel" aria-labelledby="cptpctpay-tab"     data-cs-tab="cptpctpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabCptPctPay",    Model) } else { <div class="cs-lazy-pane" data-lazy-tab="cptpctpay"></div> }</div>
+        @if (Model.ShowStatusProviderSummaries)
+        {
         <!-- Status Summary tab -->
         <div class="tab-pane fade" id="statussummary-pane" role="tabpanel" aria-labelledby="statussummary-tab" data-cs-tab="statussummary">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabStatusSummary", Model) } else { <div class="cs-lazy-pane" data-lazy-tab="statussummary"></div> }</div>
+        }
         @if (Model.IsNorthWestLab)
         {
             <!-- Women's Health Panel breakdown tab (NorthWest, live SP) -->
@@ -1570,8 +1593,11 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             <!-- Genetics vs ID Avg tab (Rising Tides) -->
             <div class="tab-pane fade" id="genidavg-pane"  role="tabpanel" aria-labelledby="genidavg-tab"     data-cs-tab="genidavg"><div class="cs-lazy-pane" data-lazy-tab="genidavg"></div></div>
         }
+        @if (Model.ShowStatusProviderSummaries)
+        {
         <!-- Provider tab -->
         <div class="tab-pane fade" id="provider-pane"      role="tabpanel" aria-labelledby="provider-tab"      data-cs-tab="provider">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabProvider",     Model) } else { <div class="cs-lazy-pane" data-lazy-tab="provider"></div> }</div>
+        }
         }
     </div>
 }

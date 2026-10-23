@@ -134,12 +134,15 @@
                     <i class="bi bi-list-ol me-2"></i>Denial List
                 </button>
             </li>
+            @if (Model.HasDenialPlanType)
+            {
             <li class="nav-item" role="presentation">
                 <button class="nav-link @(tab == "plantype" ? "active" : "")" data-bs-toggle="pill"
                         data-bs-target="#dcr-plantype" type="button" data-tab-key="plantype">
                     <i class="bi bi-diagram-3 me-2"></i>@(Model.HasDenialFacilityTabs ? "Plan Type" : "Denial List - Plan Type")
                 </button>
             </li>
+            }
             @if (Model.HasDenialFacilityTabs)
             {
                 <li class="nav-item" role="presentation">
@@ -268,6 +271,8 @@
                 </div>
             </div>
 
+            @if (Model.HasDenialPlanType)
+            {
             <div class="tab-pane fade @(tab == "plantype" ? "show active" : "")" id="dcr-plantype">
                 <div class="card border-0 shadow-sm">
                     <div class="card-body">
@@ -275,6 +280,7 @@
                     </div>
                 </div>
             </div>
+            }
             @if (Model.HasDenialFacilityTabs)
             {
                 <div class="tab-pane fade @(tab == "payor" ? "show active" : "")" id="dcr-payor">

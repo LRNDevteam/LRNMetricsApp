@@ -78,7 +78,8 @@ public sealed class LabConfigOptions
         {
             if (Key(lab) == wanted && !string.IsNullOrWhiteSpace(column)) return column.Trim();
         }
-        return Services.LabCollectionPrefix.IsAugustus(labName) ? "CheckDate" : null;
+        return Services.LabCollectionPrefix.IsAugustus(labName) || Services.LabCollectionPrefix.IsCoreBio(labName)
+            ? "CheckDate" : null;
     }
 
     /// <summary>
@@ -105,8 +106,10 @@ public sealed class LabConfigOptions
         {
             if (Key(lab) == wanted && !string.IsNullOrWhiteSpace(column)) return column.Trim();
         }
-        // Augustus has no TotalInsuranceBalance column; its SPs measure InsuranceBalance.
-        return Services.LabCollectionPrefix.HasDenialSummary(labName) && !Services.LabCollectionPrefix.IsAugustus(labName)
+        // Augustus has no TotalInsuranceBalance column and CoreBio's is empty; their SPs measure InsuranceBalance.
+        return Services.LabCollectionPrefix.HasDenialSummary(labName)
+               && !Services.LabCollectionPrefix.IsAugustus(labName)
+               && !Services.LabCollectionPrefix.IsCoreBio(labName)
             ? "TotalInsuranceBalance" : null;
     }
 

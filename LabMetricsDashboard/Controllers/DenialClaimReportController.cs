@@ -291,6 +291,7 @@ public sealed class DenialClaimReportController : Controller
         if (LabCollectionPrefix.HasDenialSummary(labName))
         {
             model.HasDenialLists = true;
+            model.HasDenialPlanType = LabCollectionPrefix.HasDenialPlanType(labName);
             model.HasDenialFacilityTabs = LabCollectionPrefix.HasDenialFacilityTabs(labName);
             model.DenialListSearch = string.IsNullOrWhiteSpace(listCode) ? null : listCode.Trim();
             try
@@ -302,7 +303,9 @@ public sealed class DenialClaimReportController : Controller
                     ? allListTask
                     : _denialLists.GetDenialListAsync(connectionString, prefix,
                         new DenialSummaryFilters { DenialCodeSearch = model.DenialListSearch }, ct);
-                var planTask = _denialLists.GetPlanTypeAsync(connectionString, prefix, noFilters, ct);
+                var planTask = model.HasDenialPlanType
+                    ? _denialLists.GetPlanTypeAsync(connectionString, prefix, noFilters, ct)
+                    : Task.FromResult<IReadOnlyList<DenialPlanTypeRow>>([]);
                 Task<IReadOnlyList<DenialPayorVsPayerRow>>? payorTask = null;
                 Task<IReadOnlyList<DenialFacilityRow>>? facilityTask = null;
                 Task<IReadOnlyList<DenialFacilityPctRow>>? facilityPctTask = null;
@@ -339,6 +342,8 @@ public sealed class DenialClaimReportController : Controller
         {
             model.ActiveTab = "monthly";
         }
+        if (model.ActiveTab == "plantype" && !model.HasDenialPlanType)
+            model.ActiveTab = "monthly";
 
         try
         {
