@@ -251,24 +251,44 @@ public sealed class SharePointDownloader
 		bool isCurrentWeek,
 		CancellationToken ct)
 	{
-		var fileChildren = await ListChildrenPagedAsync(driveId, weekFolder.Id, ct);
+		// Files normally sit directly in the week folder, but any lab may sometimes put them in a
+		// subfolder ("<week>/Master Files"). The week folder itself is searched first, exactly as
+		// before; subfolders are only searched when it has no matching file. An optional
+		// WeekFolderSubPath is a preferred subfolder, searched before everything else.
+		string? preferredFolderId = null;
+		var preferredSubPath = string.Empty;
 
-		var matchingFiles = fileChildren
-			.Where(x => !x.IsFolder && WildcardMatch(x.Name, lab.SharePointFilePattern))
-			.OrderByDescending(x => x.LastModifiedUtc ?? DateTimeOffset.MinValue)
-			.ThenByDescending(x => x.Name)
-			.ToList();
+		if (!string.IsNullOrWhiteSpace(lab.WeekFolderSubPath))
+		{
+			var sub = await TryResolveSubFolderAsync(driveId, weekFolder.Id, lab.WeekFolderSubPath, ct);
+			if (sub.HasValue)
+			{
+				preferredFolderId = sub.Value.Id;
+				preferredSubPath = sub.Value.Path;
+			}
+			else
+			{
+				_logger.LogInformation(
+					"Lab {LabId}: week folder '{WeekFolder}' has no '{SubPath}' folder; searching the week folder and its subfolders.",
+					lab.LabId, weekFolder.Name, lab.WeekFolderSubPath);
+			}
+		}
+
+		var masterHit = await FindInWeekFolderTreeAsync(
+			driveId, weekFolder.Id, lab.SharePointFilePattern, excludeName: null,
+			preferredFolderId, preferredSubPath, skipFolderId: null, ct);
 
 		_logger.LogInformation(
-			"Lab {LabId}: {FolderKind} week folder '{WeekFolder}'. MatchingFiles={Count}, Pattern='{Pattern}', LimsPattern='{LimsPattern}'.",
+			"Lab {LabId}: {FolderKind} week folder '{WeekFolder}'. MatchingFiles={Count}, Folder='{SubFolder}', Pattern='{Pattern}', LimsPattern='{LimsPattern}'.",
 			lab.LabId,
 			isCurrentWeek ? "Current" : "Latest available",
 			weekFolder.Name,
-			matchingFiles.Count,
+			masterHit?.MatchCount ?? 0,
+			string.IsNullOrEmpty(masterHit?.SubPath) ? "(week folder)" : masterHit!.SubPath,
 			lab.SharePointFilePattern,
 			lab.LimsMasterFilePattern);
 
-		if (matchingFiles.Count == 0)
+		if (masterHit == null)
 		{
 			return new LatestFileLookupResult(
 				File: null,
@@ -278,11 +298,18 @@ public sealed class SharePointDownloader
 				YearFolderName: yearFolderName,
 				MonthFolderName: monthFolderName,
 				WeekFolderName: weekFolder.Name,
-				Message: $"No matching file found in week folder '{weekFolder.Name}'.");
+				Message: $"No matching file found in week folder '{weekFolder.Name}' or its subfolders.");
 		}
 
-		var file = matchingFiles.First();
-		var limsFile = FindRequiredLimsFile(fileChildren, file, lab.LimsMasterFilePattern);
+		var file = masterHit.File;
+		var filesSubPath = masterHit.SubPath;
+
+		// The LIMS master is looked for next to the master file first, then anywhere in the week folder.
+		var limsFile = string.IsNullOrWhiteSpace(lab.LimsMasterFilePattern)
+			? null
+			: (await FindInWeekFolderTreeAsync(
+				driveId, weekFolder.Id, lab.LimsMasterFilePattern, excludeName: file.Name,
+				masterHit.FolderId, masterHit.SubPath, skipFolderId: null, ct))?.File;
 		if (limsFile == null)
 		{
 			return new LatestFileLookupResult(
@@ -309,7 +336,12 @@ public sealed class SharePointDownloader
 			spYearSegment,
 			monthFolderName,
 			weekFolder.Name,
+			filesSubPath,
 			file.Name);
+
+		// Remember the week folder, so the later sibling lookups (LIMS, Client Paid) can widen their
+		// search to it when the sibling is not in the master file's own folder.
+		WeekFolderByMasterItemId[file.Id] = (weekFolder.Id, BuildSpPath(lab.SharePointRootPath, spYearSegment, monthFolderName, weekFolder.Name));
 
 		return new LatestFileLookupResult(
 			File: new SelectedFile(
@@ -736,7 +768,7 @@ public sealed class SharePointDownloader
 
 	// ---------------- Children listing (paged) ----------------
 
-	private sealed record DriveChild(string Id, string Name, bool IsFolder, DateTimeOffset? LastModifiedUtc, string? ETag, string? QuickXorHash);
+	internal sealed record DriveChild(string Id, string Name, bool IsFolder, DateTimeOffset? LastModifiedUtc, string? ETag, string? QuickXorHash);
 
 	// Change-detection key for a file. Prefers the Graph content hash (quickXorHash), which only
 	// changes when the file BYTES change, over the eTag, which SharePoint also bumps for
@@ -990,21 +1022,142 @@ public sealed class SharePointDownloader
 		return string.Join('/', parts.Select(p => p.Trim().Trim('/')).Where(p => !string.IsNullOrWhiteSpace(p)));
 	}
 
-	private static DriveChild? FindRequiredLimsFile(
-		IEnumerable<DriveChild> children,
-		DriveChild masterFile,
-		string? limsPattern)
+	/// <summary>
+	/// Walks <paramref name="subPath"/> ("Master Files", or "A/B") down from a folder, matching each
+	/// segment against the child folder names case-insensitively. Returns the folder id and the path
+	/// as SharePoint spells it, or null when any segment is missing.
+	/// </summary>
+	private async Task<(string Id, string Path)?> TryResolveSubFolderAsync(string driveId, string parentId, string subPath, CancellationToken ct)
 	{
-		if (string.IsNullOrWhiteSpace(limsPattern))
+		var currentId = parentId;
+		var actualNames = new List<string>();
+
+		foreach (var segment in subPath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+		{
+			var wanted = NormalizeFileMatchText(segment);
+			var child = (await ListChildrenPagedAsync(driveId, currentId, ct))
+				.FirstOrDefault(x => x.IsFolder && string.Equals(NormalizeFileMatchText(x.Name), wanted, StringComparison.OrdinalIgnoreCase));
+
+			if (child == null)
+				return null;
+
+			currentId = child.Id;
+			actualNames.Add(child.Name);
+		}
+
+		return actualNames.Count == 0 ? null : (currentId, string.Join('/', actualNames));
+	}
+
+	// How deep below the week folder files are looked for: "<week>/Master Files" is 1,
+	// "<week>/Master Files/Final" is 2.
+	private const int WeekFolderSearchDepth = 2;
+
+	/// <summary>Where a file was found inside a week folder.</summary>
+	/// <param name="SubPath">Path below the week folder ("" = the week folder itself).</param>
+	/// <param name="MatchCount">How many files matched in that folder (for the log).</param>
+	internal sealed record WeekFolderHit(DriveChild File, string FolderId, string SubPath, int MatchCount);
+
+	/// <summary>
+	/// Master file item id -> its week folder, recorded when the master is selected, so the sibling
+	/// lookups (LIMS, Client Paid) can widen their search when the sibling is not next to the master.
+	/// Static: the downloader's DI lifetime must not decide whether the fallback works.
+	/// </summary>
+	private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string FolderId, string Path)> WeekFolderByMasterItemId = new();
+
+	/// <summary>
+	/// Finds the newest file matching <paramref name="pattern"/> under a week folder. Search order:
+	/// <paramref name="preferredFolderId"/> (when given), then the week folder itself, then its
+	/// subfolders one level at a time down to <see cref="WeekFolderSearchDepth"/>. The first folder
+	/// level with any match wins, so a file directly in the week folder is always chosen exactly as it
+	/// was before subfolders were searched. <paramref name="skipFolderId"/> is a folder the caller has
+	/// already searched.
+	/// </summary>
+	private Task<WeekFolderHit?> FindInWeekFolderTreeAsync(
+		string driveId,
+		string weekFolderId,
+		string pattern,
+		string? excludeName,
+		string? preferredFolderId,
+		string preferredSubPath,
+		string? skipFolderId,
+		CancellationToken ct)
+		=> SearchWeekFolderTreeAsync(
+			folderId => ListChildrenPagedAsync(driveId, folderId, ct),
+			weekFolderId, pattern, excludeName, preferredFolderId, preferredSubPath, skipFolderId,
+			(subPath, file) => _logger.LogInformation("Week folder subfolder '{SubPath}' holds '{File}' (pattern '{Pattern}').", subPath, file, pattern));
+
+	/// <summary>The search behind <see cref="FindInWeekFolderTreeAsync"/>, with the folder listing passed in so it can be tested.</summary>
+	internal static async Task<WeekFolderHit?> SearchWeekFolderTreeAsync(
+		Func<string, Task<List<DriveChild>>> listChildren,
+		string weekFolderId,
+		string pattern,
+		string? excludeName,
+		string? preferredFolderId,
+		string preferredSubPath,
+		string? skipFolderId,
+		Action<string, string>? logSubfolderHit = null)
+	{
+		if (string.IsNullOrWhiteSpace(pattern))
 			return null;
 
-		return children
+		List<DriveChild> Matches(IEnumerable<DriveChild> children) => children
 			.Where(x => !x.IsFolder)
-			.Where(x => !string.Equals(x.Name, masterFile.Name, StringComparison.OrdinalIgnoreCase))
-			.Where(x => WildcardMatch(x.Name, limsPattern))
+			.Where(x => excludeName == null || !string.Equals(x.Name, excludeName, StringComparison.OrdinalIgnoreCase))
+			.Where(x => WildcardMatch(x.Name, pattern))
 			.OrderByDescending(x => x.LastModifiedUtc ?? DateTimeOffset.MinValue)
 			.ThenByDescending(x => x.Name)
-			.FirstOrDefault();
+			.ToList();
+
+		var searched = new HashSet<string>(StringComparer.Ordinal);
+		if (!string.IsNullOrEmpty(skipFolderId))
+			searched.Add(skipFolderId);
+
+		if (!string.IsNullOrEmpty(preferredFolderId) && searched.Add(preferredFolderId))
+		{
+			var preferred = Matches(await listChildren(preferredFolderId));
+			if (preferred.Count > 0)
+				return new WeekFolderHit(preferred[0], preferredFolderId, preferredSubPath, preferred.Count);
+		}
+
+		var level = new List<(string Id, string SubPath)> { (weekFolderId, string.Empty) };
+
+		for (var depth = 0; depth <= WeekFolderSearchDepth && level.Count > 0; depth++)
+		{
+			var next = new List<(string Id, string SubPath)>();
+			var hits = new List<(DriveChild File, string FolderId, string SubPath, int Count)>();
+
+			foreach (var (folderId, subPath) in level)
+			{
+				var children = await listChildren(folderId);
+
+				foreach (var sub in children.Where(x => x.IsFolder).OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
+					next.Add((sub.Id, string.IsNullOrEmpty(subPath) ? sub.Name : subPath + "/" + sub.Name));
+
+				if (!searched.Add(folderId))
+					continue;
+
+				var found = Matches(children);
+				if (found.Count > 0)
+					hits.Add((found[0], folderId, subPath, found.Count));
+			}
+
+			if (hits.Count > 0)
+			{
+				var best = hits
+					.OrderByDescending(h => h.File.LastModifiedUtc ?? DateTimeOffset.MinValue)
+					.ThenByDescending(h => h.File.Name)
+					.First();
+
+				if (!string.IsNullOrEmpty(best.SubPath))
+					logSubfolderHit?.Invoke(best.SubPath, best.File.Name);
+
+				return new WeekFolderHit(best.File, best.FolderId, best.SubPath, best.Count);
+			}
+
+			level = next;
+		}
+
+		return null;
 	}
 
 	public async Task<SelectedFile?> TryGetSiblingFileByPatternAsync(SelectedFile currentFile, string filePattern, CancellationToken ct)
@@ -1026,10 +1179,27 @@ public sealed class SharePointDownloader
 			.ThenByDescending(x => x.Name)
 			.FirstOrDefault();
 
-		if (match == null)
+		if (match != null)
+			return new SelectedFile(currentFile.LabId, currentFile.DriveId, match.Id, match.Name, BuildChangeKey(match), match.LastModifiedUtc, BuildSpPath(folderPath, match.Name));
+
+		// Not next to the master: the master and its siblings may be split between the week folder and
+		// one of its subfolders. Only reached when the old same-folder lookup found nothing.
+		if (!WeekFolderByMasterItemId.TryGetValue(currentFile.ItemId, out var week))
 			return null;
 
-		return new SelectedFile(currentFile.LabId, currentFile.DriveId, match.Id, match.Name, BuildChangeKey(match), match.LastModifiedUtc, BuildSpPath(folderPath, match.Name));
+		var hit = await FindInWeekFolderTreeAsync(
+			currentFile.DriveId, week.FolderId, filePattern, excludeName: currentFile.Name,
+			preferredFolderId: null, preferredSubPath: string.Empty, skipFolderId: folderId, ct);
+
+		if (hit == null)
+			return null;
+
+		_logger.LogInformation(
+			"Lab {LabId}: sibling '{File}' found in week folder '{WeekPath}' under '{SubPath}', not next to '{Master}'.",
+			currentFile.LabId, hit.File.Name, week.Path, string.IsNullOrEmpty(hit.SubPath) ? "(week folder)" : hit.SubPath, currentFile.Name);
+
+		return new SelectedFile(currentFile.LabId, currentFile.DriveId, hit.File.Id, hit.File.Name, BuildChangeKey(hit.File), hit.File.LastModifiedUtc,
+			BuildSpPath(week.Path, hit.SubPath, hit.File.Name));
 	}
 
 	private static string GetFolderPath(string sharePointPath)

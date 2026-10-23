@@ -1,5 +1,6 @@
 ﻿using System.Text;
 using LRN.MasterFileProcessorWorker.ExcelValidation;
+using SPD = LRN.MasterFileProcessorWorker.SharePoint.SharePointDownloader;
 
 namespace LRN.MasterFileProcessorWorker.BulkLoad;
 
@@ -57,6 +58,9 @@ public static class SelfTests
         VariantXLinePhysicianNamesSurviveRepeatedHeader();
         VariantXClaimProvidersAreDistinct();
         AnalyzePathologyBillDatesModifiersAndIcd();
+        CoreBioDenialAndIcdSources();
+        TexasDiagnosticDenialIcdAndDateSources();
+        WeekFolderFilesAreFoundInSubfolders();
         RelativeCsvLogFolderResolvesAgainstServiceDirectory();
         EmptyRowsAreNotImported();
         RowsWithoutIdentityAreImportedAndCounted();
@@ -2208,6 +2212,282 @@ public static class SelfTests
 
             Check("Other labs: ICD filtering is unchanged", StandardCsvExporter.ExtractIcdCodes("ZZZ12345 F10.21") == "F10.21",
                 StandardCsvExporter.ExtractIcdCodes("ZZZ12345 F10.21"));
+        }
+        finally
+        {
+            TryDelete(folder);
+        }
+    }
+
+    /// <summary>
+    /// CoreBio, shipped schemas and mapping (V1.20). The sheets carry four denial columns and two ICD
+    /// columns whose names are COMMON aliases, so each must land in its own CSV column:
+    /// line DenialCode = "Original Denial Code" (no fallback), line "Denial Code" kept as "Updated Denial",
+    /// claim DenialCode = "Denial Code", and ICDCode = "Claim ICD List" rather than "Claim Level ICD".
+    /// </summary>
+    private static void CoreBioDenialAndIcdSources()
+    {
+        var schemas = Path.Combine(AppContext.BaseDirectory, "Schemas");
+        var paths = new[]
+        {
+            Path.Combine(schemas, "ClaimLevel.schema.json"),
+            Path.Combine(schemas, "CoreBio_ClaimLevel.schema.json"),
+            Path.Combine(schemas, "LineLevel.schema.json"),
+            Path.Combine(schemas, "CoreBio_LineLevel.schema.json"),
+        };
+
+        if (paths.Any(p => !File.Exists(p)))
+        {
+            Check("CoreBio schemas are deployed next to the service", false, schemas);
+            return;
+        }
+
+        var folder = TempFolder();
+        try
+        {
+            var loader = new LRN.MasterFileProcessorWorker.ExcelValidation.JsonColumnSchemaLoader();
+
+            string Run(string sourceCsv, string commonPath, string labPath, string name)
+            {
+                var source = Path.Combine(folder, name + "_src.csv");
+                File.WriteAllText(source, sourceCsv);
+                var outPath = Path.Combine(folder, name + "_out.csv");
+
+                StandardCsvExporter.Generate(
+                    sourceCsvPath: source,
+                    headerRow: 1,
+                    outputCsvPath: outPath,
+                    commonSchema: loader.LoadFromFile(commonPath),
+                    labId: 28,
+                    labName: "CoreBio",
+                    sourceFileName: name + "_src.csv",
+                    ingestedOnLocal: DateTime.Now,
+                    labSchema: loader.LoadFromFile(labPath),
+                    appendUnmappedSourceColumns: true);
+
+                return outPath;
+            }
+
+            const string header = "Charge Claim ID,Claim Reference #,Charge From Date,Facility Name,Claim ICD List,Claim Level ICD," +
+                                  "Original Denial Code,Denial Code,Line Level Denial Code,Claim Level Denial Code";
+
+            var lineOut = Run(header + ",Charge CPT Code,Charge Units\r\n" +
+                "C-1,RCBL1,01/02/2025,CMCD INC,N39.0,N39.0 R30.0,CO45,CO97,CO45-L,CO45-C,87801,1\r\n" +
+                "C-2,RCBL2,01/02/2025,CMCD INC,I10,I10,,CO16,,,85025,1\r\n",
+                paths[2], paths[3], "line");
+
+            var claimOut = Run(header + ",Claim Status\r\n" +
+                "C-1,RCBL1,01/02/2025,CMCD INC,N39.0,N39.0 R30.0,CO45,CO97,CO45-L,CO45-C,Denied\r\n",
+                paths[0], paths[1], "claim");
+
+            string[] Header(string path) => SplitCsv(File.ReadAllLines(path)[0]);
+            string Val(string path, int rowIndex, string column)
+            {
+                var lines = File.ReadAllLines(path);
+                var h = SplitCsv(lines[0]);
+                var i = Array.FindIndex(h, x => x.Equals(column, StringComparison.OrdinalIgnoreCase));
+                return i < 0 ? $"<no column '{column}'>" : SplitCsv(lines[rowIndex + 1])[i];
+            }
+
+            Check("CoreBio line: DenialCode is the Original Denial Code", Val(lineOut, 0, "DenialCode") == "CO45", Val(lineOut, 0, "DenialCode"));
+            Check("CoreBio line: a blank Original Denial Code does not fall back to Denial Code",
+                Val(lineOut, 1, "DenialCode") == "", Val(lineOut, 1, "DenialCode"));
+            Check("CoreBio line: Denial Code is kept as Updated Denial", Val(lineOut, 0, "Updated Denial") == "CO97", Val(lineOut, 0, "Updated Denial"));
+            Check("CoreBio line: Updated Denial on a row with no original", Val(lineOut, 1, "Updated Denial") == "CO16", Val(lineOut, 1, "Updated Denial"));
+            Check("CoreBio line: Line Level Denial Code is appended", Val(lineOut, 0, "Line Level Denial Code") == "CO45-L", Val(lineOut, 0, "Line Level Denial Code"));
+            Check("CoreBio line: Claim Level Denial Code fills its COMMON column", Val(lineOut, 0, "Claim Level Denial Code") == "CO45-C", Val(lineOut, 0, "Claim Level Denial Code"));
+            Check("CoreBio line: ICDCode is the Claim ICD List", Val(lineOut, 0, "ICDCode") == "N39.0", Val(lineOut, 0, "ICDCode"));
+            Check("CoreBio line: Claim Level ICD fills its COMMON column", Val(lineOut, 0, "Claim Level ICD") == "N39.0 R30.0", Val(lineOut, 0, "Claim Level ICD"));
+            Check("CoreBio line: Facility Name feeds ClinicName and is kept raw",
+                Val(lineOut, 0, "ClinicName") == "CMCD INC" && Val(lineOut, 0, "Facility Name") == "CMCD INC",
+                $"ClinicName='{Val(lineOut, 0, "ClinicName")}', Facility Name='{Val(lineOut, 0, "Facility Name")}'");
+
+            Check("CoreBio claim: DenialCode is the Denial Code", Val(claimOut, 0, "DenialCode") == "CO97", Val(claimOut, 0, "DenialCode"));
+            Check("CoreBio claim: Original Denial Code is appended", Val(claimOut, 0, "Original Denial Code") == "CO45", Val(claimOut, 0, "Original Denial Code"));
+            Check("CoreBio claim: Claim Level Denial Code fills its COMMON column", Val(claimOut, 0, "Claim Level Denial Code") == "CO45-C", Val(claimOut, 0, "Claim Level Denial Code"));
+            Check("CoreBio claim: ICDCode is the Claim ICD List", Val(claimOut, 0, "ICDCode") == "N39.0", Val(claimOut, 0, "ICDCode"));
+            Check("CoreBio claim: Claim Level ICD is appended", Val(claimOut, 0, "Claim Level ICD") == "N39.0 R30.0", Val(claimOut, 0, "Claim Level ICD"));
+
+            using var mapping = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(schemas, "LabMappings", "CoreBioFieldMappings.json")));
+            foreach (var (level, csv) in new[] { ("LineLevel", lineOut), ("ClaimLevel", claimOut) })
+            {
+                var csvHeaders = Header(csv);
+                var wanted = new[] { "DenialCode", "Updated Denial", "Original Denial Code", "Line Level Denial Code", "Claim Level Denial Code", "Claim Level ICD" };
+                var missing = mapping.RootElement.GetProperty(level).GetProperty("Fields").EnumerateArray()
+                    .Select(f => f.GetProperty("CsvHeader").GetString()!)
+                    .Where(h => wanted.Contains(h, StringComparer.OrdinalIgnoreCase) && !csvHeaders.Contains(h, StringComparer.OrdinalIgnoreCase))
+                    .ToList();
+                Check($"CoreBio {level}: every mapped denial/ICD header is a CSV column", missing.Count == 0, string.Join(",", missing));
+            }
+        }
+        finally
+        {
+            TryDelete(folder);
+        }
+    }
+
+    /// <summary>
+    /// The week-folder search, against an in-memory folder tree. A file directly in the week folder
+    /// must win exactly as before subfolders were searched; a subfolder is only used when the week
+    /// folder has no match, and a sibling (LIMS) is found wherever it sits in the week folder.
+    /// </summary>
+    private static void WeekFolderFilesAreFoundInSubfolders()
+    {
+        static SPD.DriveChild F(string id, string name, int day) => new(id, name, false, new DateTimeOffset(2026, 10, day, 0, 0, 0, TimeSpan.Zero), null, null);
+        static SPD.DriveChild D(string id, string name) => new(id, name, true, null, null, null);
+
+        string? Find(Dictionary<string, List<SPD.DriveChild>> tree, string pattern, string? exclude = null,
+            string? preferred = null, string preferredSubPath = "", string? skip = null)
+        {
+            var hit = SPD.SearchWeekFolderTreeAsync(
+                id => Task.FromResult(tree.TryGetValue(id, out var c) ? c : new List<SPD.DriveChild>()),
+                "week", pattern, exclude, preferred, preferredSubPath, skip).GetAwaiter().GetResult();
+            return hit == null ? null : (hit.SubPath == "" ? "" : hit.SubPath + "/") + hit.File.Name;
+        }
+
+        // Old layout: both files in the week folder, plus an unrelated subfolder holding a NEWER copy.
+        var flat = new Dictionary<string, List<SPD.DriveChild>>
+        {
+            ["week"] = new() { F("m1", "Lab_Master File_A.xlsx", 10), F("l1", "Lab_LIMS Master File_A.xlsx", 10), D("old", "Archive") },
+            ["old"] = new() { F("m2", "Lab_Master File_B.xlsx", 20) },
+        };
+        Check("Week folder: a file directly in the week folder wins, even over a newer one in a subfolder",
+            Find(flat, "*Lab_Master File*.xlsx") == "Lab_Master File_A.xlsx", Find(flat, "*Lab_Master File*.xlsx"));
+        Check("Week folder: LIMS next to the master is used as before",
+            Find(flat, "*LIMS*", "Lab_Master File_A.xlsx", preferred: "week") == "Lab_LIMS Master File_A.xlsx",
+            Find(flat, "*LIMS*", "Lab_Master File_A.xlsx", preferred: "week"));
+
+        // New layout: both files in "<week>/Master Files".
+        var nested = new Dictionary<string, List<SPD.DriveChild>>
+        {
+            ["week"] = new() { D("mf", "Master Files") },
+            ["mf"] = new() { F("m1", "Texas_Master File_1.xlsx", 9), F("l1", "Texas_LIMS Master File_1.xlsx", 9) },
+        };
+        Check("Week folder: master is found in a subfolder", Find(nested, "*Texas_Master File*.xlsx") == "Master Files/Texas_Master File_1.xlsx",
+            Find(nested, "*Texas_Master File*.xlsx"));
+        Check("Week folder: LIMS is found in the same subfolder", Find(nested, "*LIMS*", "Texas_Master File_1.xlsx") == "Master Files/Texas_LIMS Master File_1.xlsx",
+            Find(nested, "*LIMS*", "Texas_Master File_1.xlsx"));
+
+        // Mixed: master in a subfolder, LIMS in the week folder; sibling lookup skips the master's folder.
+        var mixed = new Dictionary<string, List<SPD.DriveChild>>
+        {
+            ["week"] = new() { F("l1", "Texas_LIMS Master File_1.xlsx", 9), D("mf", "Master Files") },
+            ["mf"] = new() { F("m1", "Texas_Master File_1.xlsx", 9) },
+        };
+        Check("Week folder: LIMS in the week folder is found for a master in a subfolder",
+            Find(mixed, "*LIMS*", "Texas_Master File_1.xlsx", skip: "mf") == "Texas_LIMS Master File_1.xlsx",
+            Find(mixed, "*LIMS*", "Texas_Master File_1.xlsx", skip: "mf"));
+
+        // Preferred subfolder wins over a match in the week folder itself.
+        var preferredTree = new Dictionary<string, List<SPD.DriveChild>>
+        {
+            ["week"] = new() { F("m0", "Texas_Master File_old.xlsx", 20), D("mf", "Master Files") },
+            ["mf"] = new() { F("m1", "Texas_Master File_1.xlsx", 9) },
+        };
+        Check("Week folder: the configured WeekFolderSubPath is searched first",
+            Find(preferredTree, "*Texas_Master File*.xlsx", preferred: "mf", preferredSubPath: "Master Files") == "Master Files/Texas_Master File_1.xlsx",
+            Find(preferredTree, "*Texas_Master File*.xlsx", preferred: "mf", preferredSubPath: "Master Files"));
+
+        // Depth limit: three levels down is not searched.
+        var deep = new Dictionary<string, List<SPD.DriveChild>>
+        {
+            ["week"] = new() { D("a", "A") }, ["a"] = new() { D("b", "B") }, ["b"] = new() { D("c", "C") },
+            ["c"] = new() { F("m1", "Lab_Master File.xlsx", 9) },
+        };
+        Check("Week folder: nothing below the search depth is picked up", Find(deep, "*Master File*.xlsx") == null, Find(deep, "*Master File*.xlsx"));
+        Check("Week folder: no match anywhere returns nothing", Find(nested, "*Nope*.xlsx") == null, Find(nested, "*Nope*.xlsx"));
+    }
+
+    /// <summary>
+    /// Texas Diagnostic, shipped schemas (V1.20). Claim DenialCode/ICDCode come from the claim-level
+    /// columns and line DenialCode/ICDCode from the line-level ones, with no fallback when blank; the
+    /// sheets' "Denial Code" is kept as "Original Denial Code"; a blank Deposit Date does not take the
+    /// Posted Date.
+    /// </summary>
+    private static void TexasDiagnosticDenialIcdAndDateSources()
+    {
+        var schemas = Path.Combine(AppContext.BaseDirectory, "Schemas");
+        var paths = new[]
+        {
+            Path.Combine(schemas, "ClaimLevel.schema.json"),
+            Path.Combine(schemas, "TexasDiagnostic_ClaimLevel.schema.json"),
+            Path.Combine(schemas, "LineLevel.schema.json"),
+            Path.Combine(schemas, "TexasDiagnostic_LineLevel.schema.json"),
+        };
+
+        if (paths.Any(p => !File.Exists(p)))
+        {
+            Check("Texas Diagnostic schemas are deployed next to the service", false, schemas);
+            return;
+        }
+
+        var folder = TempFolder();
+        try
+        {
+            var loader = new LRN.MasterFileProcessorWorker.ExcelValidation.JsonColumnSchemaLoader();
+
+            string Run(string sourceCsv, string commonPath, string labPath, string name)
+            {
+                var source = Path.Combine(folder, name + "_src.csv");
+                File.WriteAllText(source, sourceCsv);
+                var outPath = Path.Combine(folder, name + "_out.csv");
+
+                StandardCsvExporter.Generate(
+                    sourceCsvPath: source,
+                    headerRow: 1,
+                    outputCsvPath: outPath,
+                    commonSchema: loader.LoadFromFile(commonPath),
+                    labId: 29,
+                    labName: "TexasDiagnostic",
+                    sourceFileName: name + "_src.csv",
+                    ingestedOnLocal: DateTime.Now,
+                    labSchema: loader.LoadFromFile(labPath),
+                    appendUnmappedSourceColumns: true);
+
+                return outPath;
+            }
+
+            const string header = "VisitNum,Accession,BeginDOS,CPT,Units,Claim Level CPT,Posted Date,Deposit Date,Denial Date," +
+                                  "Denial Code,Line Level Denial Code,Claim Level Denial Code,Line Level ICD,Claim Level ICD";
+
+            var lineOut = Run(header + "\r\n" +
+                "1,TD1,01/08/2026,87486,1,87486*1,10/05/2026,10/04/2026,10/05/2026,CO-197,CO-45,CO-197,J06.9,J06.9 R05.9\r\n" +
+                "2,TD2,01/08/2026,87500,1,87500*1,10/05/2026,,,CO-16,,CO-16,,E55.9\r\n",
+                paths[2], paths[3], "line");
+
+            var claimOut = Run(header + ",Claim Status\r\n" +
+                "1,TD1,01/08/2026,87486,1,87486*1,10/05/2026,10/04/2026,10/05/2026,CO-197,CO-45,CO-197,J06.9,J06.9 R05.9,Denied\r\n" +
+                "2,TD2,01/08/2026,87500,1,87500*1,10/05/2026,,,CO-16,CO-16,,E55.9,,Denied\r\n",
+                paths[0], paths[1], "claim");
+
+            string Val(string path, int rowIndex, string column)
+            {
+                var lines = File.ReadAllLines(path);
+                var h = SplitCsv(lines[0]);
+                var i = Array.FindIndex(h, x => x.Equals(column, StringComparison.OrdinalIgnoreCase));
+                return i < 0 ? $"<no column '{column}'>" : SplitCsv(lines[rowIndex + 1])[i];
+            }
+
+            Check("Texas line: DenialCode is the Line Level Denial Code", Val(lineOut, 0, "DenialCode") == "CO-45", Val(lineOut, 0, "DenialCode"));
+            Check("Texas line: a blank Line Level Denial Code stays blank", Val(lineOut, 1, "DenialCode") == "", Val(lineOut, 1, "DenialCode"));
+            Check("Texas line: Denial Code is kept as Original Denial Code", Val(lineOut, 0, "Original Denial Code") == "CO-197", Val(lineOut, 0, "Original Denial Code"));
+            Check("Texas line: ICDCode is the Line Level ICD", Val(lineOut, 0, "ICDCode") == "J06.9", Val(lineOut, 0, "ICDCode"));
+            Check("Texas line: a blank Line Level ICD stays blank", Val(lineOut, 1, "ICDCode") == "", Val(lineOut, 1, "ICDCode"));
+            Check("Texas line: Claim Level ICD fills its COMMON column", Val(lineOut, 0, "Claim Level ICD") == "J06.9 R05.9", Val(lineOut, 0, "Claim Level ICD"));
+            Check("Texas line: CPTCode is CPT", Val(lineOut, 0, "CPTCode") == "87486", Val(lineOut, 0, "CPTCode"));
+
+            Check("Texas claim: DenialCode is the Claim Level Denial Code", Val(claimOut, 0, "DenialCode") == "CO-197", Val(claimOut, 0, "DenialCode"));
+            Check("Texas claim: a blank Claim Level Denial Code stays blank", Val(claimOut, 1, "DenialCode") == "", Val(claimOut, 1, "DenialCode"));
+            Check("Texas claim: Denial Code is kept as Original Denial Code", Val(claimOut, 1, "Original Denial Code") == "CO-16", Val(claimOut, 1, "Original Denial Code"));
+            Check("Texas claim: Line Level Denial Code is appended", Val(claimOut, 0, "Line Level Denial Code") == "CO-45", Val(claimOut, 0, "Line Level Denial Code"));
+            Check("Texas claim: ICDCode is the Claim Level ICD", Val(claimOut, 0, "ICDCode") == "J06.9,R05.9", Val(claimOut, 0, "ICDCode"));
+            Check("Texas claim: Line Level ICD is appended", Val(claimOut, 1, "Line Level ICD") == "E55.9", Val(claimOut, 1, "Line Level ICD"));
+            Check("Texas claim: CheckDate is the Deposit Date", Val(claimOut, 0, "CheckDate") == "10/04/2026", Val(claimOut, 0, "CheckDate"));
+            Check("Texas claim: a blank Deposit Date does not fall back to Posted Date",
+                Val(claimOut, 1, "CheckDate") == "" && Val(claimOut, 1, "Payment Posted Date") == "10/05/2026",
+                $"CheckDate='{Val(claimOut, 1, "CheckDate")}', Payment Posted Date='{Val(claimOut, 1, "Payment Posted Date")}'");
+            Check("Texas claim: CPT summary source is Claim Level CPT",
+                Val(claimOut, 0, "CPT Code X Units X Modifier Orginal") == "87486*1", Val(claimOut, 0, "CPT Code X Units X Modifier Orginal"));
         }
         finally
         {
