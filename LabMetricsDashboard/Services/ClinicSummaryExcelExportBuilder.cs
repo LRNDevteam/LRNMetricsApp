@@ -30,7 +30,9 @@ public static class ClinicSummaryExcelExportBuilder
         IReadOnlyList<(string Label, IReadOnlyList<string>? Values)>? activeFilters = null,
         ClinicPaymentBilledViewModel? paymentBilled = null,
         NwByFacilityViewModel? byFacility = null,
-        NwFacilityPaymentPctViewModel? facilityPaymentPct = null)
+        NwFacilityPaymentPctViewModel? facilityPaymentPct = null,
+        ClinicFacilityPivotViewModel? facilityProduction = null,
+        ClinicFacilityPivotViewModel? facilityCollection = null)
     {
         var wb = new XLWorkbook();
 
@@ -57,6 +59,12 @@ public static class ClinicSummaryExcelExportBuilder
 
         if (facilityPaymentPct is { Rows.Count: > 0 })
             BuildFacilityPaymentPctSheet(wb, facilityPaymentPct);
+
+        if (facilityProduction is { Clinics.Count: > 0 })
+            BuildFacilityPivotSheet(wb, facilityProduction);
+
+        if (facilityCollection is { Clinics.Count: > 0 })
+            BuildFacilityPivotSheet(wb, facilityCollection);
 
         if (activeFilters is { Count: > 0 })
         {
@@ -593,6 +601,103 @@ public static class ClinicSummaryExcelExportBuilder
         ws.SheetView.FreezeRows(3);
         ws.SheetView.FreezeColumns(1);
         ExcelTheme.AutoFitColumns(ws, lastCol, minWidth: 12, firstColMinWidth: 30);
+    }
+
+    // ?? Facility Production / Facility Collection sheets (Texas Diagnostic) ??
+
+    private static void BuildFacilityPivotSheet(XLWorkbook wb, ClinicFacilityPivotViewModel vm)
+    {
+        var monthNames = new[] { "", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+        string[] metrics = ["Count of Unique ClaimID", vm.AmountLabel];
+
+        var ws = wb.AddWorksheet(vm.Title);
+        ws.TabColor = ExcelTheme.TabGreen;
+        ExcelTheme.ApplyDefaults(ws);
+
+        void WriteGroupHeader(int firstRow, int lastRow, int col, string label)
+        {
+            ExcelTheme.WriteHeaderRow(ws, firstRow, col, [label]);
+            ws.Range(firstRow, col, lastRow, col + 1).Merge();
+        }
+
+        ExcelTheme.WriteHeaderRow(ws, 1, 1, [vm.HasPanelRows ? "Clinic Name / Panel Name" : "Clinic Name"]);
+        ws.Range(1, 1, 3, 1).Merge();
+
+        int col = 2;
+        foreach (var year in vm.Years)
+        {
+            var monthsInYear = vm.Columns.Where(c => c.Year == year).ToList();
+            ExcelTheme.WriteHeaderRow(ws, 1, col, [$"{vm.DateBasisLabel} {year}"]);
+            ws.Range(1, col, 1, col + monthsInYear.Count * 2 - 1).Merge();
+            foreach (var (_, month) in monthsInYear)
+            {
+                WriteGroupHeader(2, 2, col, monthNames[month]);
+                ExcelTheme.WriteHeaderRow(ws, 3, col, metrics);
+                col += 2;
+            }
+
+            WriteGroupHeader(1, 2, col, $"{year} Total");
+            ExcelTheme.WriteHeaderRow(ws, 3, col, metrics);
+            col += 2;
+        }
+
+        WriteGroupHeader(1, 2, col, "Grand Total");
+        ExcelTheme.WriteHeaderRow(ws, 3, col, metrics);
+        int lastCol = col + 1;
+
+        void WriteCells(int row, int startCol, ClinicFacilityPivotCell? cell, XLColor bg, bool bold)
+        {
+            ws.Cell(row, startCol).Value = cell?.ClaimCount ?? 0;
+            ws.Cell(row, startCol + 1).Value = cell?.Amount ?? 0m;
+            ws.Cell(row, startCol).Style.NumberFormat.Format = "#,##0";
+            ws.Cell(row, startCol + 1).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat2;
+            for (int c = startCol; c <= startCol + 1; c++)
+            {
+                ExcelTheme.StyleDataCell(ws.Cell(row, c), bg);
+                if (bold) ws.Cell(row, c).Style.Font.SetBold(true);
+            }
+        }
+
+        void WriteRow(int row, string label, ClinicFacilityPivotRow? data, XLColor bg, bool bold, int indent = 0)
+        {
+            ws.Cell(row, 1).Value = label;
+            ExcelTheme.StyleDataCell(ws.Cell(row, 1), bg);
+            if (bold) ws.Cell(row, 1).Style.Font.SetBold(true);
+            if (indent > 0) ws.Cell(row, 1).Style.Alignment.SetIndent(indent);
+
+            int c = 2;
+            foreach (var year in vm.Years)
+            {
+                foreach (var (y, m) in vm.Columns.Where(x => x.Year == year))
+                {
+                    var key = ClinicFacilityPivotViewModel.ColKey(y, m);
+                    WriteCells(row, c, data is null ? vm.ColumnTotals.GetValueOrDefault(key) : data.Months.GetValueOrDefault(key), bg, bold);
+                    c += 2;
+                }
+                WriteCells(row, c, data is null ? vm.YearTotals.GetValueOrDefault(year) : data.Years.GetValueOrDefault(year), bg, bold: true);
+                c += 2;
+            }
+            WriteCells(row, c, data is null ? vm.GrandTotal : data.Total, bg, bold: true);
+        }
+
+        int rowNum = 4;
+        for (int i = 0; i < vm.Clinics.Count; i++)
+        {
+            var clinic = vm.Clinics[i];
+            var bg = ExcelTheme.GetRowBg(i);
+            WriteRow(rowNum++, clinic.Name, clinic, bg, bold: vm.HasPanelRows);
+            foreach (var panel in clinic.Children)
+                WriteRow(rowNum++, panel.Name, panel, bg, bold: false, indent: 2);
+        }
+
+        WriteRow(rowNum++, "Grand Total", null, ExcelTheme.TotalRowBg, bold: true);
+
+        ws.Cell(rowNum + 1, 1).Value = vm.Note;
+        ws.Cell(rowNum + 1, 1).Style.Font.SetItalic(true);
+
+        ws.SheetView.FreezeRows(3);
+        ws.SheetView.FreezeColumns(1);
+        ExcelTheme.AutoFitColumns(ws, lastCol, minWidth: 12, firstColMinWidth: 34);
     }
 
     // ?? Clinic Panel Status sheet ?????????????????????????????????????

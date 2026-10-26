@@ -539,6 +539,15 @@
             <i class="bi bi-percent"></i>Facility vs Payment (%)
         </div>
     }
+    @if (LabCollectionPrefix.HasClinicFacilityProductionTabs(Model.SelectedLab))
+    {
+        <div class="cs-tab" data-cs-tab="tabFacilityProduction">
+            <i class="bi bi-building"></i>Facility Production
+        </div>
+        <div class="cs-tab" data-cs-tab="tabFacilityCollection">
+            <i class="bi bi-cash-coin"></i>Facility Collection
+        </div>
+    }
 </div>
 
 <!-- ── Tab: Clinic Summary (main data table) ─────────────────────── -->
@@ -930,6 +939,23 @@ else
     </div>
 }
 
+@if (LabCollectionPrefix.HasClinicFacilityProductionTabs(Model.SelectedLab))
+{
+    <!-- ── Tab: Facility Production (AJAX-loaded) ─────────────────────── -->
+    <div class="cs-tab-panel" id="tabFacilityProduction">
+        <div id="cfprPanelContent" class="text-center py-4 text-muted" style="font-size:.85rem">
+            <i class="bi bi-arrow-clockwise spin-slow"></i> Loading Facility Production…
+        </div>
+    </div>
+
+    <!-- ── Tab: Facility Collection (AJAX-loaded) ─────────────────────── -->
+    <div class="cs-tab-panel" id="tabFacilityCollection">
+        <div id="cfcPanelContent" class="text-center py-4 text-muted" style="font-size:.85rem">
+            <i class="bi bi-arrow-clockwise spin-slow"></i> Loading Facility Collection…
+        </div>
+    </div>
+}
+
 <!-- Ranking grids remain visible below every Clinic Summary analysis tab. -->
 <div id="topBreakdownHost"></div>
 
@@ -1095,6 +1121,8 @@ else
     var paymentBilledLoaded = false;
     var byFacilityLoaded = false;
     var facilityPaymentPctLoaded = false;
+    var facilityProductionLoaded = false;
+    var facilityCollectionLoaded = false;
     var cbfData = null;
 
     function cbfAcct(v) {
@@ -1248,6 +1276,19 @@ else
             }
         }
 
+        var cfxRow = e.target.closest('.cfx-clinic-row[data-cfx-toggle]');
+        if (cfxRow) {
+            var cfxTable = cfxRow.closest('.cfx-table');
+            if (cfxTable) {
+                var cfxId = cfxRow.getAttribute('data-cfx-toggle');
+                var cfxOpen = cfxRow.classList.toggle('cfx-expanded');
+                cfxTable.querySelectorAll('tr.cfx-panel-row[data-cfx-parent="' + cfxId + '"]').forEach(function (row) {
+                    row.classList.toggle('cfx-open', cfxOpen);
+                });
+                return;
+            }
+        }
+
         var cpsRow = e.target.closest('.cps-clinic-row[data-cps-toggle]');
         if (cpsRow) {
             var cpsTable = cpsRow.closest('.cps-table') || cpsRow.closest('#cpsPanelContent');
@@ -1285,6 +1326,16 @@ else
             if (target === 'tabFacilityPaymentPct' && !facilityPaymentPctLoaded) {
                 facilityPaymentPctLoaded = true;
                 loadAndInject('@Url.Action("ClinicFacilityPaymentPct", "Dashboard")' + '?' + getFilterParams(), 'cfpPanelContent', false);
+            }
+
+            if (target === 'tabFacilityProduction' && !facilityProductionLoaded) {
+                facilityProductionLoaded = true;
+                loadAndInject('@Url.Action("ClinicFacilityProduction", "Dashboard")' + '?' + getFilterParams(), 'cfprPanelContent', false);
+            }
+
+            if (target === 'tabFacilityCollection' && !facilityCollectionLoaded) {
+                facilityCollectionLoaded = true;
+                loadAndInject('@Url.Action("ClinicFacilityCollection", "Dashboard")' + '?' + getFilterParams(), 'cfcPanelContent', false);
             }
 
             if (target === 'tabPaymentBilled' && !paymentBilledLoaded) {

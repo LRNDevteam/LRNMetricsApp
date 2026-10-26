@@ -215,6 +215,15 @@
                     <strong>Sorted by:</strong> Claim Count DESC &bull;
                     <strong>Metric:</strong> Count of unique ClaimID, SUM(InsuranceBalance)</span>
                 }
+                else if (Model.IsTexasDiagnosticLab)
+                {
+                    <span><strong>Data:</strong> Claim Level Data &bull;
+                    <strong>Filter:</strong> ClaimStatus = No Response &bull;
+                    <strong>Rows:</strong> PayerName_Raw &bull;
+                    <strong>Aging Buckets:</strong> Aging (AgingDOS when Aging is blank; Current, 30+, 60+, 90+, 120+) &bull;
+                    <strong>Sorted by:</strong> Claim Count DESC &bull;
+                    <strong>Metric:</strong> Count of unique ClaimID, SUM(InsuranceBalance)</span>
+                }
                 else if (Model.IsWellHealthLab)
                 {
                     <span><strong>Data:</strong> Claim Level Data &bull;
@@ -264,6 +273,6 @@
                 <div class="text-center py-5 text-muted">
                     <div style="font-size:2rem;opacity:.4">&#9203;</div>
                     <div class="fw-semibold mt-2">No aging data available</div>
-                    <div class="small mt-1">@(Model.UsesSpCollectionLogic && !Model.IsCoreBioLab ? "No claims with an insurance balance found." : "No claims with \"No Response\" status found.") Try adjusting your filters.</div>
+                    <div class="small mt-1">@(Model.UsesSpCollectionLogic && !Model.UsesCoreBioCollectionLayout ? "No claims with an insurance balance found." : "No claims with \"No Response\" status found.") Try adjusting your filters.</div>
                 </div>
             }

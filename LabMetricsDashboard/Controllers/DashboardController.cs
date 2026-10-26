@@ -1519,6 +1519,99 @@ public class DashboardController : Controller
         }
     }
 
+    /// <summary>Texas Diagnostic "Facility Production" pivot as a partial view (AJAX tab).</summary>
+    public Task<IActionResult> ClinicFacilityProduction(
+        string? lab,
+        List<string>? filterClinicNames,
+        List<string>? filterSalesRepNames,
+        List<string>? filterPayerNames,
+        List<string>? filterPanelNames,
+        string? filterDosFrom,
+        string? filterDosTo,
+        string? filterFirstBillFrom,
+        string? filterFirstBillTo,
+        CancellationToken ct = default)
+        => ClinicFacilityPivotPartialAsync(ClinicFacilityPivotKind.Production, lab,
+            filterClinicNames, filterSalesRepNames, filterPayerNames, filterPanelNames,
+            filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, ct);
+
+    /// <summary>Texas Diagnostic "Facility Collection" pivot (Clinic &gt; Panel) as a partial view (AJAX tab).</summary>
+    public Task<IActionResult> ClinicFacilityCollection(
+        string? lab,
+        List<string>? filterClinicNames,
+        List<string>? filterSalesRepNames,
+        List<string>? filterPayerNames,
+        List<string>? filterPanelNames,
+        string? filterDosFrom,
+        string? filterDosTo,
+        string? filterFirstBillFrom,
+        string? filterFirstBillTo,
+        CancellationToken ct = default)
+        => ClinicFacilityPivotPartialAsync(ClinicFacilityPivotKind.Collection, lab,
+            filterClinicNames, filterSalesRepNames, filterPayerNames, filterPanelNames,
+            filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, ct);
+
+    private async Task<IActionResult> ClinicFacilityPivotPartialAsync(
+        ClinicFacilityPivotKind kind,
+        string? lab,
+        List<string>? filterClinicNames,
+        List<string>? filterSalesRepNames,
+        List<string>? filterPayerNames,
+        List<string>? filterPanelNames,
+        string? filterDosFrom,
+        string? filterDosTo,
+        string? filterFirstBillFrom,
+        string? filterFirstBillTo,
+        CancellationToken ct)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+        var title = kind == ClinicFacilityPivotKind.Collection ? "Facility Collection" : "Facility Production";
+
+        if (string.IsNullOrWhiteSpace(selectedLab)
+            || !_labSettings.Labs.TryGetValue(selectedLab, out var config)
+            || !config.LineClaimEnable
+            || !LabCollectionPrefix.HasClinicFacilityProductionTabs(selectedLab))
+        {
+            return PartialView("_ClinicFacilityPivot", new ClinicFacilityPivotViewModel
+            {
+                SelectedLab  = selectedLab ?? string.Empty,
+                ErrorMessage = $"{title} is not available for this lab.",
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(config.DbConnectionString))
+        {
+            return PartialView("_ClinicFacilityPivot", new ClinicFacilityPivotViewModel
+            {
+                SelectedLab  = selectedLab,
+                ErrorMessage = "No connection string configured.",
+            });
+        }
+
+        var dbLabName = string.IsNullOrWhiteSpace(config.DbLabName) ? selectedLab : config.DbLabName;
+        var (cn, sr, pn, pl, dosF, dosT, fbF, fbT) = NormalizeFilters(
+            filterClinicNames, filterSalesRepNames, filterPayerNames, filterPanelNames,
+            filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo);
+
+        try
+        {
+            var vm = await _clinicSummaryRepo.GetFacilityPivotAsync(
+                config.DbConnectionString, dbLabName, LabCollectionPrefix.GetPrefix(selectedLab)!, kind,
+                cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct);
+            return PartialView("_ClinicFacilityPivot", vm);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "{Title} query failed for lab '{LabName}'.", title, selectedLab);
+            return PartialView("_ClinicFacilityPivot", new ClinicFacilityPivotViewModel
+            {
+                SelectedLab  = selectedLab,
+                ErrorMessage = $"Failed to load: {ex.Message}",
+            });
+        }
+    }
+
     /// <summary>
     /// NorthWest "By Facility" tree (Clinic &gt; Payer &gt; Referring Provider) as a partial view (AJAX tab).
     /// </summary>
@@ -1727,6 +1820,19 @@ public class DashboardController : Controller
                     connStr, dbLabName, cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct)
                 : null;
 
+            var hasFacilityProductionTabs = LabCollectionPrefix.HasClinicFacilityProductionTabs(selectedLab);
+            var facilityPrefix = LabCollectionPrefix.GetPrefix(selectedLab);
+            var facilityProductionVm = hasFacilityProductionTabs
+                ? await _clinicSummaryRepo.GetFacilityPivotAsync(
+                    connStr, dbLabName, facilityPrefix!, ClinicFacilityPivotKind.Production,
+                    cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct)
+                : null;
+            var facilityCollectionVm = hasFacilityProductionTabs
+                ? await _clinicSummaryRepo.GetFacilityPivotAsync(
+                    connStr, dbLabName, facilityPrefix!, ClinicFacilityPivotKind.Collection,
+                    cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct)
+                : null;
+
             using var workbook = ClinicSummaryExcelExportBuilder.CreateWorkbook(
                 rows, totals,
                 result.TopCollectedClinics, result.TopCollectedSalesReps,
@@ -1740,6 +1846,8 @@ public class DashboardController : Controller
                 paymentBilled: paymentBilledVm,
                 byFacility: byFacilityVm,
                 facilityPaymentPct: facilityPaymentPctVm,
+                facilityProduction: facilityProductionVm,
+                facilityCollection: facilityCollectionVm,
                 activeFilters: new List<(string, IReadOnlyList<string>?)>
                 {
                     ("Clinic", filterClinicNames is { Count: > 0 } ? filterClinicNames : null),
@@ -2579,7 +2687,7 @@ public class DashboardController : Controller
                 CptBreakdownGrandTotalCharges  = cptResult.GrandTotalCharges,
                 CptBreakdownGrandTotalClaims   = cptResult.GrandTotalClaims,
                 CptTotalsOnly                  = cptResult.TotalsOnly,
-                CptUnitsLabel                  = isAugustusLab
+                CptUnitsLabel                  = isAugustusLab || IsTexasDiagnosticLab(selectedLab)
                     ? "Claim Count"
                     : selectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
                     ? "Count of CPT"
@@ -2821,7 +2929,7 @@ public class DashboardController : Controller
             FilterFirstBillTo = Q(q, "filterFirstBillTo"),
             FilterFirstBilledFrom = Q(q, "filterFirstBilledFrom"),
             FilterFirstBilledTo = Q(q, "filterFirstBilledTo"),
-            CptUnitsLabel = isAugustusLab
+            CptUnitsLabel = isAugustusLab || IsTexasDiagnosticLab(selectedLab)
                 ? "Claim Count"
                 : selectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
                 ? "Count of CPT"
@@ -2863,6 +2971,9 @@ public class DashboardController : Controller
 
         return result;
     }
+
+    private static bool IsTexasDiagnosticLab(string? lab) =>
+        (lab ?? "").Replace("_", "").Replace(" ", "").Contains("TexasDiagnostic", StringComparison.OrdinalIgnoreCase);
 
     private async Task EnsureProductionPaneAsync(CachedProductionReport entry, string pane, CancellationToken ct)
     {
@@ -3543,7 +3654,7 @@ public class DashboardController : Controller
                 CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
                 CptBreakdownGrandTotalClaims    = cptResult.GrandTotalClaims,
                 CptTotalsOnly                   = cptResult.TotalsOnly,
-                CptUnitsLabel                   = isAugustusLab ? "Claim Count" : "Count of CPT",
+                CptUnitsLabel                   = isAugustusLab || IsTexasDiagnosticLab(selectedLab) ? "Claim Count" : "Count of CPT",
                 PanelBreakdownMonths              = pnlResult.Months,
                 PanelBreakdownYears               = pnlResult.Years,
                 PanelBreakdownRows                = pnlResult.PayerRows,

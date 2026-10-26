@@ -126,6 +126,25 @@ public interface IClinicSummaryRepository
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Texas Diagnostic "Facility Production" / "Facility Collection" via
+    /// <c>dbo.usp_Get{prefix}_CLS_FacilityProduction</c> / <c>_FacilityCollection</c>.
+    /// </summary>
+    Task<ClinicFacilityPivotViewModel> GetFacilityPivotAsync(
+        string connectionString,
+        string labName,
+        string prefix,
+        ClinicFacilityPivotKind kind,
+        List<string>? filterClinicNames = null,
+        List<string>? filterSalesRepNames = null,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default);
 }
 
 /// <summary>Result container for clinic summary query including filter option lists.</summary>

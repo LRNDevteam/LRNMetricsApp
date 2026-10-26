@@ -75,6 +75,9 @@ public sealed class ExecutiveSummaryController : Controller
             ["CoreBio"]          = "CB",
             ["Core_Bio"]         = "CB",
             ["Core Bio"]         = "CB",
+            ["TexasDiagnostic"]  = "TD",
+            ["Texas_Diagnostic"] = "TD",
+            ["Texas Diagnostic"] = "TD",
         };
 
     public ExecutiveSummaryController(

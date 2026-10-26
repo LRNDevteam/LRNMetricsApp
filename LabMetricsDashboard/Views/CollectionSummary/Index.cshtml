@@ -1197,7 +1197,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             <button class="nav-link active" id="mcv-tab" data-bs-toggle="pill"
                     data-bs-target="#mcv-pane" type="button" role="tab"
                     aria-controls="mcv-pane" aria-selected="true">
-                <i class="bi bi-calendar-month"></i> Monthly Claim Volume <span class="text-white-50 fw-normal" style="font-size:.7em">(@(Model.IsCoreBioLab ? "Check Date" : "Posted Date"))</span>
+                <i class="bi bi-calendar-month"></i> Monthly Claim Volume <span class="text-white-50 fw-normal" style="font-size:.7em">(@(Model.UsesCoreBioCollectionLayout ? "Check Date" : "Posted Date"))</span>
             </button>
         </li>
         <li class="nav-item" role="presentation">
@@ -1258,7 +1258,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             <button class="nav-link" id="aging-tab" data-bs-toggle="pill"
                     data-bs-target="#aging-pane" type="button" role="tab"
                     aria-controls="aging-pane" aria-selected="false">
-                <i class="bi bi-hourglass-split"></i> @(Model.IsAugustusLab || Model.IsCoreBioLab ? "No Response vs Aging" : "Insurance vs Aging")
+                <i class="bi bi-hourglass-split"></i> @(Model.IsAugustusLab || Model.UsesCoreBioCollectionLayout ? "No Response vs Aging" : "Insurance vs Aging")
             </button>
         </li>
         <li class="nav-item" role="presentation">
@@ -1289,7 +1289,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             <button class="nav-link" id="cptpctpay-tab" data-bs-toggle="pill"
                     data-bs-target="#cptpctpay-pane" type="button" role="tab"
                     aria-controls="cptpctpay-pane" aria-selected="false">
-                <i class="bi bi-list-ol"></i> @(Model.IsCoreBioLab ? "CPT vs Payment" : "CPT vs Payment %")
+                <i class="bi bi-list-ol"></i> @(Model.UsesCoreBioCollectionLayout ? "CPT vs Payment" : "CPT vs Payment %")
             </button>
         </li>
             @if (Model.ShowStatusProviderSummaries)
@@ -1397,7 +1397,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                                     @foreach (var year in mcvYears)
                                     {
                                         var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
-                                        <th colspan="@(monthsInYear.Count * 2 + 2)">Data based on @(Model.IsCoreBioLab ? "Check Date" : "Posted Date") &mdash; @year</th>
+                                        <th colspan="@(monthsInYear.Count * 2 + 2)">Data based on @(Model.UsesCoreBioCollectionLayout ? "Check Date" : "Posted Date") &mdash; @year</th>
                                     }
                                     <th colspan="2" rowspan="2" class="cs-pr-grand">Grand Total</th>
                                 </tr>
@@ -1503,12 +1503,12 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                     </div>
                 </div>
 
-                @if (Model.IsCoreBioLab)
+                @if (Model.UsesCoreBioCollectionLayout)
                 {
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> Claim Level Data &bull;
                     <strong>Filter:</strong> InsurancePayment &gt; 0 &nbsp;·&nbsp; CheckDate in @(DateTime.Today.Year - 1) &amp; @DateTime.Today.Year &bull;
-                    <strong>Rows:</strong> Panelname &rarr; Top 3 PayerName_Raw by Claim Count &bull;
+                    <strong>Rows:</strong> Panelname &rarr; Top @(Model.IsTexasDiagnosticLab ? 5 : 3) PayerName_Raw by Claim Count &bull;
                     <strong>Columns:</strong> CheckDate month / year / total &bull;
                     <strong>Values:</strong> Count of unique ClaimID, Sum of InsurancePayment &bull;
                     <strong>Sorted by:</strong> Claim Count DESC

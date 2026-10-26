@@ -1,4 +1,4 @@
-using ClosedXML.Excel;
+﻿using ClosedXML.Excel;
 using LabMetricsDashboard.Models;
 
 namespace LabMetricsDashboard.Services;
@@ -59,10 +59,10 @@ public static partial class CollectionSummaryExcelExportBuilder
         if (vm.ShowAvgPaymentsByDateBasis)
         {
             BuildAvgPaymentsSheet(wb, vm.AvgPaymentsDos, lastMonths: 6,
-                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab || vm.IsCoreBioLab ? PanelAveragesDosSheetName : AvgPaymentsDosSheetName,
+                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab || vm.UsesCoreBioCollectionLayout ? PanelAveragesDosSheetName : AvgPaymentsDosSheetName,
                 basisLabel: "Date of Service");
             BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6,
-                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab || vm.IsCoreBioLab ? PanelAveragesCheckDateSheetName : AvgPaymentsCheckDateSheetName,
+                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab || vm.UsesCoreBioCollectionLayout ? PanelAveragesCheckDateSheetName : AvgPaymentsCheckDateSheetName,
                 basisLabel: "Check Date");
         }
         else
@@ -118,10 +118,10 @@ public static partial class CollectionSummaryExcelExportBuilder
         if (vm.ShowAvgPaymentsByDateBasis)
         {
             BuildAvgPaymentsSheet(wb, vm.AvgPaymentsDos, lastMonths: 6,
-                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab || vm.IsCoreBioLab ? PanelAveragesDosSheetName : AvgPaymentsDosSheetName,
+                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab || vm.UsesCoreBioCollectionLayout ? PanelAveragesDosSheetName : AvgPaymentsDosSheetName,
                 basisLabel: "Date of Service");
             BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6,
-                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab || vm.IsCoreBioLab ? PanelAveragesCheckDateSheetName : AvgPaymentsCheckDateSheetName,
+                sheetName: vm.IsNorthWestLab || vm.IsAugustusLab || vm.UsesCoreBioCollectionLayout ? PanelAveragesCheckDateSheetName : AvgPaymentsCheckDateSheetName,
                 basisLabel: "Check Date");
         }
         else
@@ -604,7 +604,7 @@ public static partial class CollectionSummaryExcelExportBuilder
     {
         if (TryBuildInsuranceAgingPivot(wb, rows, labName)) return;
 
-        var agingTitle = !LabCollectionPrefix.IsCoreBio(labName)
+        var agingTitle = !LabCollectionPrefix.UsesCoreBioCollectionLayout(labName)
             && (LabCollectionPrefix.UsesSpCollectionLogic(labName) || LabCollectionPrefix.IsNorthWest(labName))
             ? "Insurance Vs Aging" : "No Response Vs Aging";
         var ws = wb.AddWorksheet(agingTitle);
@@ -1110,7 +1110,7 @@ public static partial class CollectionSummaryExcelExportBuilder
             return;
         }
 
-        if (LabCollectionPrefix.IsCoreBio(labName))
+        if (LabCollectionPrefix.UsesCoreBioCollectionLayout(labName))
         {
             WriteCptUnitsAndPayments(ws, rows, labName);
             return;

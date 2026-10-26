@@ -2214,9 +2214,10 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private static string? ResolveConfiguredDateColumn(string logicSheet, string dateType)
 		=> (logicSheet, dateType) switch
 		{
-			("PhiLife", "Collected") or ("Beech Tree", "Collected") or ("Rising Tides", "Collected") or ("PCRLOA", "Collected") or ("WellHealth", "Collected") or ("CoreBio", "Collected") => "RequestCollectDate",
-			("PhiLife", "Received") or ("Beech Tree", "Received") or ("Rising Tides", "Received") or ("PCRLOA", "Received") or ("WellHealth", "Received") or ("CoreBio", "Received") => "ReqReceivedDate",
+			("PhiLife", "Collected") or ("Beech Tree", "Collected") or ("Rising Tides", "Collected") or ("PCRLOA", "Collected") or ("WellHealth", "Collected") or ("CoreBio", "Collected") or ("TexasDiagnostic", "Collected") => "RequestCollectDate",
+			("PhiLife", "Received") or ("Beech Tree", "Received") or ("Rising Tides", "Received") or ("PCRLOA", "Received") or ("WellHealth", "Received") or ("CoreBio", "Received") or ("TexasDiagnostic", "Received") => "ReqReceivedDate",
 			("PhiLife", "Resulted") or ("Beech Tree", "Resulted") or ("Rising Tides", "Resulted") or ("WellHealth", "Resulted") or ("CoreBio", "Resulted") => "ReqReportedDate",
+			("TexasDiagnostic", "Resulted") => "ResultedDate",
 			("PCRLOA", "Resulted") => "ReqResultedDate",
 			("Cove", "Collected") or ("Elixir", "Collected") => "DateOfCollection",
 			("Cove", "Received") or ("Elixir", "Received") => "ReceivedDate",
@@ -2266,6 +2267,13 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				ExpressionForColumn(FirstExisting(columns, "ClinicName", "Facility")),
 				ExpressionForColumn(FirstExisting(columns, "DoctorFullName", "Provider")),
 				null, null),
+			// Must match the dimensions stored by dbo.usp_RefreshTD_LISSummary. Collector is empty on Texas.
+			"TexasDiagnostic" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "PanelName", "TestCategory")),
+				ExpressionForColumn(FirstExisting(columns, "ClinicName")),
+				ExpressionForColumn(FirstExisting(columns, "DoctorFullName")),
+				ExpressionForColumn(FirstExisting(columns, "SalesRepName")),
+				null),
 			// Must match the dimensions stored by dbo.usp_RefreshWH_LISSummary.
 			"WellHealth" => new FilterColumnProfile(
 				ExpressionForColumn(FirstExisting(columns, "TestCategory")),
@@ -2455,6 +2463,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			? WellHealthLineDataColumns(columns)
 			: logicSheetName.Equals("CoreBio", StringComparison.OrdinalIgnoreCase)
 			? CoreBioLineDataColumns(columns)
+			: logicSheetName.Equals("TexasDiagnostic", StringComparison.OrdinalIgnoreCase)
+			? TexasDiagnosticLineDataColumns(columns)
 			: GenericLineDataColumns(columns);
 
 		return AvailableLineDataColumns(specs);
@@ -2853,6 +2863,49 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			TextColumn(columns, "PrimaryInsurance", "Primary Insurance", "PrimaryInsurance"),
 			TextColumn(columns, "Tests", "Tests", "Tests"),
 			TextColumn(columns, "ResultStatus", "Result Status", "ResultStatus", "RessultedStatus"),
+			DateColumn(columns, "BilledDate", "Billed Date", "BilledDate"),
+			TextColumn(columns, "TimetoResult", "Time to Result", "TimetoResult", "TimeToResult"),
+			TextColumn(columns, "TimetoBill", "Time to Bill", "TimetoBill", "TimeToBill")
+		};
+
+	/// <summary>
+	/// Texas Diagnostic's LIMS sheet, in sheet order with the sheet's headers
+	/// (Schemas/TexasDiagnostic_LIMS_Schema.json in the worker). The shared OrderID / PanelCategory /
+	/// Collector / BillingStatus columns are never filled on Texas, so the generic list would show blanks.
+	/// </summary>
+	private static List<LineDataColumnSpec> TexasDiagnosticLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "Accession", "Sample IDs", "Accession"),
+			TextColumn(columns, "Requisition", "Requisition ID", "Requisition"),
+			TextColumn(columns, "TrueFalse", "T/F", "TrueFalse"),
+			TextColumn(columns, "PatientFullName", "Patient Name", "PatientFullName"),
+			TextColumn(columns, "Gender", "Gender", "Gender"),
+			TextColumn(columns, "State", "State", "State"),
+			DateColumn(columns, "PatientDateofBirth", "DOB", "PatientDateOfBirth", "PatientDateofBirth"),
+			TextColumn(columns, "PatientCode", "Patient ID", "PatientCode"),
+			DateColumn(columns, "ReqReceivedDate", "Accession Date", "ReqReceivedDate"),
+			TextColumn(columns, "ICD10Codes", "ICD codes", "ICD10Codes"),
+			TextColumn(columns, "PrimaryInsurance", "Primary Insurance", "PrimaryInsurance"),
+			TextColumn(columns, "PrimaryInsuranceID", "Primary policyId", "PrimaryInsuranceID"),
+			TextColumn(columns, "DoctorFullName", "Provider Name", "DoctorFullName"),
+			TextColumn(columns, "DoctorNPI", "Provider NPI", "DoctorNPI"),
+			TextColumn(columns, "SalesRepName", "Sales Representatives", "SalesRepName"),
+			TextColumn(columns, "CRN", "CRN", "CRN"),
+			TextColumn(columns, "TestCategory", "Category", "TestCategory"),
+			TextColumn(columns, "Tests", "Panels", "Tests"),
+			TextColumn(columns, "PanelName", "Panel Name", "PanelName"),
+			DateColumn(columns, "RequestCollectDate", "Collection Date", "RequestCollectDate"),
+			TextColumn(columns, "CollectionWeek", "Collection Week", "CollectionWeek"),
+			DateColumn(columns, "ResultedDate", "Resulted Date", "ResultedDate"),
+			DateColumn(columns, "ReqReportedDate", "Report Date", "ReqReportedDate"),
+			TextColumn(columns, "ResultStatus", "Result Status", "ResultStatus"),
+			TextColumn(columns, "ClinicName", "Client", "ClinicName"),
+			TextColumn(columns, "PaymentMethod", "Payment status", "PaymentMethod"),
+			TextColumn(columns, "OrderStatus", "Order status", "OrderStatus"),
+			TextColumn(columns, "NewStatus", "New Status", "NewStatus"),
+			TextColumn(columns, "BillCategory", "Bill Category", "BillCategory"),
+			TextColumn(columns, "SubStatus", "Sub Status", "SubStatus"),
 			DateColumn(columns, "BilledDate", "Billed Date", "BilledDate"),
 			TextColumn(columns, "TimetoResult", "Time to Result", "TimetoResult", "TimeToResult"),
 			TextColumn(columns, "TimetoBill", "Time to Bill", "TimetoBill", "TimeToBill")
@@ -3819,6 +3872,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				27 => "WellHealth",
 				// CoreBio rows come from dbo.usp_GetCB_LISSummary. This sheet maps dates and filters.
 				28 => "CoreBio",
+				// TexasDiagnostic rows come from dbo.usp_GetTD_LISSummary. This sheet maps dates and filters.
+				29 => "TexasDiagnostic",
 				// LRNLabDemo: its LIMSMaster is Cove's (RunIds read R...COV..., and Cove's DateOfCollection /
 				// NewStatus shape - PCRLOA's RequestCollectDate is absent), so it reports on Cove's sheet.
 				// Unmapped, it fell to "Dynamic", whose rows all repeated the Total.
@@ -3847,6 +3902,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		// WellHealth: rows come from dbo.usp_GetWH_LISSummary; this sheet only maps dates and filters.
 		if (n.Contains("WELLHEALTH")) return "WellHealth";
 		if (n.Contains("COREBIO")) return "CoreBio";
+		if (n.Contains("TEXASDIAGNOSTIC") || n.Contains("TEXASDX")) return "TexasDiagnostic";
 		if (n.Contains("COVE")) return "Cove";
 		if (n.Contains("ELIXIR")) return "Elixir";
 		if (n.Contains("INHEALTH")) return "InHealth";

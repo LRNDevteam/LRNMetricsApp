@@ -195,13 +195,13 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                     else grandByMonth[mk] = new ProductionMonthCell(g.ClaimCount + cell.ClaimCount, g.BilledCharges + cell.BilledCharges);
                 }
 
-                // Top 3 payers ranked by total claim count (or charges when SortByCharges) across all months.
+                // Top payers ranked by total claim count (or charges when SortByCharges) across all months.
                 var topPayers = payerMonthMap.TryGetValue(panel, out var payM)
                     ? payM
                         .Select(kv => (Payer: kv.Key, ByMonth: kv.Value, Total: kv.Value.Values.Sum(v => v.c)))
                         .OrderByDescending(x => RankKey(x.ByMonth.Values))
                         .ThenByDescending(x => x.Total)
-                        .Take(3)
+                        .Take(_cfg.TopPayerCount)
                         .Select(x => new ProductionPayerDrillDown
                         {
                             PayerName    = x.Payer,
@@ -342,13 +342,13 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                     else grandByWeek[wk] = new ProductionMonthCell(g.ClaimCount + cell.ClaimCount, g.BilledCharges + cell.BilledCharges);
                 }
 
-                // Top 3 payers ranked by total claim count (or charges when SortByCharges) across all 4 weeks.
+                // Top payers ranked by total claim count (or charges when SortByCharges) across all 4 weeks.
                 var topPayers = payerWeekMap.TryGetValue(panel, out var payW)
                     ? payW
                         .Select(kv => (Payer: kv.Key, ByWeek: kv.Value, Total: kv.Value.Values.Sum(v => v.c)))
                         .OrderByDescending(x => RankKey(x.ByWeek.Values))
                         .ThenByDescending(x => x.Total)
-                        .Take(3)
+                        .Take(_cfg.TopPayerCount)
                         .Select(x => new WeeklyPayerDrillDown
                         {
                             PayerName    = x.Payer,

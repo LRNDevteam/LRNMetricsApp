@@ -70,6 +70,12 @@ public record LabSummaryTableConfig(
     /// </summary>
     public bool CptSortByCount { get; init; }
 
+    /// <summary>
+    /// Payers shown under each panel in the Monthly / Weekly Production Summary.
+    /// The lab's read SPs must return at least this many ranked payers per panel.
+    /// </summary>
+    public int TopPayerCount { get; init; } = 3;
+
     // ?? Static per-lab configs ????????????????????????????????????????????
 
     /// <summary>Certus Labs � prefix <c>Cert_</c>. Row key = PayerName. Supports coding tables/read SPs.</summary>
@@ -110,6 +116,15 @@ public record LabSummaryTableConfig(
     public static readonly LabSummaryTableConfig CoreBio =
         new("CB_",   "PayerName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: false)
         { SupportsFilteredMonthlyWeeklySp = true, CptTotalsOnly = true };
+
+    /// <summary>
+    /// Texas Diagnostic — prefix <c>TD_</c>. Billed = FirstBilledDate is a date; columns by
+    /// ChargeEnteredDate. Weekly is Friday–Thursday where EntryWeek is filled. Top 5 payers per panel.
+    /// Unbilled = ClaimStatus Unbilled, rows are payers. CPT by month, Count of ClaimID. No coding tables.
+    /// </summary>
+    public static readonly LabSummaryTableConfig TexasDiagnostic =
+        new("TD_",   "PayerName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: false)
+        { SupportsFilteredMonthlyWeeklySp = true, CptSortByCount = true, TopPayerCount = 5 };
 
     /// <summary>PCR Labs of America � prefix <c>PCR_</c>. Monthly/Weekly read SPs accept filter parameters.</summary>
     public static readonly LabSummaryTableConfig PCRLabsofAmerica =

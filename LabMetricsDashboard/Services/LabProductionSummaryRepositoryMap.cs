@@ -22,6 +22,7 @@ public static class LabProductionSummaryRepositoryMap
         var analyzePathology = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.AnalyzePathology);
         var wellHealth = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.WellHealth);
         var coreBio = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.CoreBio);
+        var texasDiagnostic = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.TexasDiagnostic);
         return new Dictionary<string, ILabProductionSummaryRepository>(StringComparer.OrdinalIgnoreCase)
         {
             ["Certus"]           = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Certus),
@@ -37,6 +38,9 @@ public static class LabProductionSummaryRepositoryMap
             ["CoreBio"]          = coreBio,
             ["Core_Bio"]         = coreBio,
             ["Core Bio"]         = coreBio,
+            ["TexasDiagnostic"]  = texasDiagnostic,
+            ["Texas_Diagnostic"] = texasDiagnostic,
+            ["Texas Diagnostic"] = texasDiagnostic,
             ["PCRLabsofAmerica"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PCRLabsofAmerica),
             ["Beech_Tree"]       = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.BeechTree),
             ["Rising_Tides"]     = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.RisingTides),

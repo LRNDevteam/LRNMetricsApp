@@ -1238,6 +1238,60 @@ foreach (var lab in labConfigs)
             }
         }
 
+        // ── Texas Diagnostic production report aggregates ────────────────────────
+        if (lab.LabName.Equals("TexasDiagnostic", StringComparison.OrdinalIgnoreCase)
+            || lab.LabName.Equals("Texas_Diagnostic", StringComparison.OrdinalIgnoreCase))
+        {
+            log.Info($"  [TD Reports] Running Texas Diagnostic production report SPs…");
+            try
+            {
+                var tdResults = db.RefreshTexasDiagnosticProductionReports();
+                prodSummaryResults = tdResults;
+                foreach (var (spName, elapsedMs, error) in tdResults)
+                {
+                    if (error is null)
+                        log.Info($"  [TD Reports] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [TD Reports] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+
+                var failed = tdResults.Count(r => r.Error is not null);
+                var passed = tdResults.Count(r => r.Error is null);
+                log.Info($"  [TD Reports] {passed}/{tdResults.Count} SP(s) succeeded.");
+                if (failed > 0)
+                    log.Warn($"  [TD Reports] {failed} SP(s) failed — see errors above.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [TD Reports] Unexpected error running Texas Diagnostic production report SPs: {ex.Message}");
+            }
+
+            collSummaryResults = RunCollectionSummary(log, db, "TD CS", db.RefreshTexasDiagnosticCollectionReports);
+
+            log.Info($"  [TD Denial] Running Texas Diagnostic Denial Summary SPs…");
+            try
+            {
+                var denialResults = db.RefreshTexasDiagnosticDenialReports();
+                foreach (var (spName, elapsedMs, error) in denialResults)
+                {
+                    if (error is null)
+                        log.Info($"  [TD Denial] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [TD Denial] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+
+                var failed = denialResults.Count(r => r.Error is not null);
+                var passed = denialResults.Count(r => r.Error is null);
+                log.Info($"  [TD Denial] {passed}/{denialResults.Count} SP(s) succeeded.");
+                if (failed > 0)
+                    log.Warn($"  [TD Denial] {failed} SP(s) failed — see errors above.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [TD Denial] Unexpected error running Texas Diagnostic Denial Summary SPs: {ex.Message}");
+            }
+        }
+
         // ── CoreBio production report aggregates ─────────────────────────────────
         if (lab.LabName.Equals("CoreBio", StringComparison.OrdinalIgnoreCase)
             || lab.LabName.Equals("Core_Bio", StringComparison.OrdinalIgnoreCase))
@@ -2358,6 +2412,8 @@ static string? GetCollectionSummarySpPrefix(ClaimLineCSVDataCapture.Models.LabCo
         name.Equals("Well_Health",       StringComparison.OrdinalIgnoreCase)) return "WH";
     if (name.Equals("CoreBio",          StringComparison.OrdinalIgnoreCase) ||
         name.Equals("Core_Bio",          StringComparison.OrdinalIgnoreCase)) return "CB";
+    if (name.Equals("TexasDiagnostic",  StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("Texas_Diagnostic",  StringComparison.OrdinalIgnoreCase)) return "TD";
     if (name.Equals("PCRLabsofAmerica", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("PCR_Labs_of_America", StringComparison.OrdinalIgnoreCase)) return "PCR";
     if (name.Equals("PhiLife",          StringComparison.OrdinalIgnoreCase) ||

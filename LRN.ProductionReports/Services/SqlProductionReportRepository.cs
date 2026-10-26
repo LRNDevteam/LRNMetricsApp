@@ -26,6 +26,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
     private const string AnalyzePathologyPrefix = "AnP_";
     private const string WellHealthPrefix = "WH_";
     private const string CoreBioPrefix = "CB_";
+    private const string TexasDiagnosticPrefix = "TD_";
     private const string AugustusPrefix = "Aug_";
     private const string NorthWestPrefix = "NW_";
     private const string PcrPrefix = "PCR_";
@@ -4378,6 +4379,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             "WellHealth_LRN" => WellHealthPrefix,
             "CoreBio" => CoreBioPrefix,
             "CoreBio_LRN" => CoreBioPrefix,
+            "TexasDiagnostic" => TexasDiagnosticPrefix,
+            "TexasDiagnostic_LRN" => TexasDiagnosticPrefix,
             "Certus_LRN" => CertusPrefix,
             "Augustus_LRN" => AugustusPrefix,
             "NWL" => NorthWestPrefix,

@@ -58,7 +58,9 @@ public sealed class LabConfigOptions
                 _ => null
             };
         }
-        return Services.LabCollectionPrefix.IsAugustus(labName) ? DayOfWeek.Monday : null;
+        return Services.LabCollectionPrefix.IsAugustus(labName) ? DayOfWeek.Monday
+            : Services.LabCollectionPrefix.IsTexasDiagnostic(labName) ? DayOfWeek.Friday
+            : null;
     }
 
     /// <summary>
@@ -106,10 +108,12 @@ public sealed class LabConfigOptions
         {
             if (Key(lab) == wanted && !string.IsNullOrWhiteSpace(column)) return column.Trim();
         }
-        // Augustus has no TotalInsuranceBalance column and CoreBio's is empty; their SPs measure InsuranceBalance.
+        // Augustus has no TotalInsuranceBalance column and CoreBio's is empty; their SPs, like
+        // Texas Diagnostic's (client sheet), measure InsuranceBalance.
         return Services.LabCollectionPrefix.HasDenialSummary(labName)
                && !Services.LabCollectionPrefix.IsAugustus(labName)
                && !Services.LabCollectionPrefix.IsCoreBio(labName)
+               && !Services.LabCollectionPrefix.IsTexasDiagnostic(labName)
             ? "TotalInsuranceBalance" : null;
     }
 

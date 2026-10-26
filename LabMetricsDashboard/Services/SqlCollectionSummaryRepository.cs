@@ -163,7 +163,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         string.Equals(prefix, "Cert", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "AnP", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "WH", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(prefix, "CB", StringComparison.OrdinalIgnoreCase);
+        string.Equals(prefix, "CB", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "TD", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Labs whose live/filter Top5 Payments path prefers
@@ -178,7 +179,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "AnP", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "WH", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(prefix, "CB", StringComparison.OrdinalIgnoreCase);
+        string.Equals(prefix, "CB", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "TD", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Augustus Collection Report client logic lives in *_v3 SPs
@@ -359,9 +361,10 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         return BuildWeeklyVolumePivotFromAggregate(rows, keepSourceOrder: spOrdered, topPayerCount: CollectionTopPayerCount(prefix));
     }
 
-    // NorthWest client sheet: Monthly / Weekly drill-down shows the Top 5 payers; other labs keep 3.
+    // NorthWest and Texas Diagnostic client sheets: Monthly / Weekly drill-down shows the Top 5 payers; other labs keep 3.
     private static int CollectionTopPayerCount(string prefix) =>
-        string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ? 5 : 3;
+        string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(prefix, "TD", StringComparison.OrdinalIgnoreCase) ? 5 : 3;
 
     // ── NW SP helpers for the remaining 9 tabs ─────────────────────────────
     // Each follows the same pattern as GetCollectionMonthlyVolumeViaSpAsync:

@@ -555,6 +555,26 @@ public sealed class ClaimLineDbService
     }
 
     /// <summary>
+    /// Runs Texas Diagnostic production report stored procedures after ingestion.
+    /// Prefix TD_. Billed = FirstBilledDate is a date, columns by ChargeEnteredDate, Friday–Thursday weeks.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshTexasDiagnosticProductionReports()
+    {
+        string[] procedures =
+        [
+            "dbo.usp_RefreshTD_MonthlyBilledProductionSummary",
+            "dbo.usp_RefreshTD_WeeklyBilledProductionSummary",
+            "dbo.usp_RefreshTD_PayerBreakdown",
+            "dbo.usp_RefreshTD_PayerByPanel",
+            "dbo.usp_RefreshTD_PanelBreakdownWithPayers",
+            "dbo.usp_RefreshTD_UnbilledAging",
+            "dbo.usp_RefreshTD_CPTBreakdown",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>
     /// Runs all WellHealth production report stored procedures after ingestion.
     /// Prefix WH_. Same shape as Analyze Pathology, but billed = First Billed Date not blank
     /// and unbilled = First Billed Date blank (Mon–Sun weeks).
@@ -815,6 +835,9 @@ public sealed class ClaimLineDbService
             ["CoreBio"]          = "CB",
             ["Core_Bio"]         = "CB",
             ["Core Bio"]         = "CB",
+            ["TexasDiagnostic"]  = "TD",
+            ["Texas_Diagnostic"] = "TD",
+            ["Texas Diagnostic"] = "TD",
         };
 
     /// <summary>
@@ -1102,6 +1125,24 @@ public sealed class ClaimLineDbService
         ]);
 
     /// <summary>
+    /// Refreshes the Texas Diagnostic Collection Summary snapshots
+    /// (Database\ClaimLineCSVDataCapture\TexasDiagnostic\12_TexasDiagnostic_CollectionSummary.sql).
+    /// Panel Averages by DOS / Check Date are computed live, so there is no snapshot for them.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshTexasDiagnosticCollectionReports()
+        => RunProductionReportSPs([
+            "dbo.usp_RefreshTD_CS_MonthlyClaimVolume",
+            "dbo.usp_RefreshTD_CS_WeeklyClaimVolume",
+            "dbo.usp_RefreshTD_CS_Top5ReimbursementPct",
+            "dbo.usp_RefreshTD_CS_Top5ReimbursementPay",
+            "dbo.usp_RefreshTD_CS_InsuranceVsAging",
+            "dbo.usp_RefreshTD_CS_InsuranceVsPaymentPct",
+            "dbo.usp_RefreshTD_CS_PanelVsPayment",
+            "dbo.usp_RefreshTD_CS_InsuranceVsPayment",
+            "dbo.usp_RefreshTD_CS_CptVsPaymentPct",
+        ]);
+
+    /// <summary>
     /// Refreshes the Analyze Pathology Denial Summary aggregates (Monthly / Weekly Denial
     /// Analysis, Denial List, Denial List - Plan Type) from dbo.ClaimLevelData.
     /// </summary>
@@ -1134,6 +1175,17 @@ public sealed class ClaimLineDbService
             "dbo.usp_RefreshCB_DenialMonthly",
             "dbo.usp_RefreshCB_DenialWeekly",
             "dbo.usp_RefreshCB_DenialList",
+        ]);
+
+    /// <summary>
+    /// Refreshes the Texas Diagnostic Denial Summary aggregates (Monthly / Weekly Denial Analysis by
+    /// Denial Date, Denial List) from dbo.ClaimLevelData. Texas has no Plan Type tab.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshTexasDiagnosticDenialReports()
+        => RunProductionReportSPs([
+            "dbo.usp_RefreshTD_DenialMonthly",
+            "dbo.usp_RefreshTD_DenialWeekly",
+            "dbo.usp_RefreshTD_DenialList",
         ]);
 
     /// <summary>

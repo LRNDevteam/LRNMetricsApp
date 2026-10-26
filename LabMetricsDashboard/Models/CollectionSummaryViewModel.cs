@@ -113,6 +113,12 @@ public sealed class CollectionSummaryViewModel
     /// <summary>CoreBio: SP-only logic with the CoreBio sheet's filters and labels.</summary>
     public bool IsCoreBioLab => LabCollectionPrefix.IsCoreBio(SelectedLab);
 
+    /// <summary>Texas Diagnostic: CoreBio Collection layout with the Texas sheet's filters and labels.</summary>
+    public bool IsTexasDiagnosticLab => LabCollectionPrefix.IsTexasDiagnostic(SelectedLab);
+
+    /// <summary>CoreBio or Texas Diagnostic: CheckDate months, No Response Vs Aging, line-level CPT units.</summary>
+    public bool UsesCoreBioCollectionLayout => LabCollectionPrefix.UsesCoreBioCollectionLayout(SelectedLab);
+
     /// <summary>Status Summary, Provider and Rep Vs Payment tabs / sheets.</summary>
     public bool ShowStatusProviderSummaries => LabCollectionPrefix.ShowsStatusProviderSummaries(SelectedLab);
 

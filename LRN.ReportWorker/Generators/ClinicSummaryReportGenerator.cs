@@ -106,6 +106,19 @@ public sealed class ClinicSummaryReportGenerator : IReportGenerator
             ? await _repo.GetNwFacilityPaymentPctAsync(
                 connStr, dbLabName, clinics, reps, payers, panels, dosFrom, dosTo, fbFrom, fbTo, ct)
             : null;
+
+        var hasFacilityProductionTabs = LabCollectionPrefix.HasClinicFacilityProductionTabs(job.LabName);
+        var facilityPrefix = LabCollectionPrefix.GetPrefix(job.LabName);
+        var facilityProductionVm = hasFacilityProductionTabs
+            ? await _repo.GetFacilityPivotAsync(
+                connStr, dbLabName, facilityPrefix!, ClinicFacilityPivotKind.Production,
+                clinics, reps, payers, panels, dosFrom, dosTo, fbFrom, fbTo, ct)
+            : null;
+        var facilityCollectionVm = hasFacilityProductionTabs
+            ? await _repo.GetFacilityPivotAsync(
+                connStr, dbLabName, facilityPrefix!, ClinicFacilityPivotKind.Collection,
+                clinics, reps, payers, panels, dosFrom, dosTo, fbFrom, fbTo, ct)
+            : null;
         await Progress(80);
 
         using var workbook = ClinicSummaryExcelExportBuilder.CreateWorkbook(
@@ -121,6 +134,8 @@ public sealed class ClinicSummaryReportGenerator : IReportGenerator
             paymentBilled: paymentBilledVm,
             byFacility: byFacilityVm,
             facilityPaymentPct: facilityPaymentPctVm,
+            facilityProduction: facilityProductionVm,
+            facilityCollection: facilityCollectionVm,
             activeFilters: new List<(string, IReadOnlyList<string>?)>
             {
                 ("Clinic", clinics),

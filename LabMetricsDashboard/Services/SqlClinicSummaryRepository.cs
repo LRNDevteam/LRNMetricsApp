@@ -1361,6 +1361,132 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
         };
     }
 
+    /// <inheritdoc />
+    public async Task<ClinicFacilityPivotViewModel> GetFacilityPivotAsync(
+        string connectionString,
+        string labName,
+        string prefix,
+        ClinicFacilityPivotKind kind,
+        List<string>? filterClinicNames = null,
+        List<string>? filterSalesRepNames = null,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
+
+        var isCollection = kind == ClinicFacilityPivotKind.Collection;
+        var spName = $"dbo.usp_Get{prefix}_CLS_{(isCollection ? "FacilityCollection" : "FacilityProduction")}";
+
+        // SP row order: clinics by claim count, then panels by claim count, then year / month.
+        var rawRows = new List<(string Clinic, string Panel, int Year, int Month, ClinicFacilityPivotCell Cell)>();
+        await using (var conn = new SqlConnection(connectionString))
+        {
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand(spName, conn)
+            {
+                CommandType = CommandType.StoredProcedure,
+                CommandTimeout = 300,
+            };
+            cmd.Parameters.AddRange(BuildNwClinicSpParameters(
+                filterClinicNames, filterSalesRepNames, filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo));
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                rawRows.Add((
+                    reader.GetString("ClinicName"),
+                    reader.GetString("PanelName"),
+                    Convert.ToInt32(reader["DateYear"]),
+                    Convert.ToInt32(reader["DateMonth"]),
+                    new ClinicFacilityPivotCell
+                    {
+                        ClaimCount = GetInt32Safe(reader, "ClaimCount"),
+                        Amount     = GetDecimalSafe(reader, "Amount"),
+                    }));
+            }
+        }
+
+        static void AddTo(ClinicFacilityPivotRow row, int year, int month, ClinicFacilityPivotCell cell)
+        {
+            var key = ClinicFacilityPivotViewModel.ColKey(year, month);
+            if (!row.Months.TryGetValue(key, out var monthCell))
+                row.Months[key] = monthCell = new ClinicFacilityPivotCell();
+            monthCell.Add(cell);
+            if (!row.Years.TryGetValue(year, out var yearCell))
+                row.Years[year] = yearCell = new ClinicFacilityPivotCell();
+            yearCell.Add(cell);
+            row.Total.Add(cell);
+        }
+
+        var clinics = new List<ClinicFacilityPivotRow>();
+        var clinicByName = new Dictionary<string, ClinicFacilityPivotRow>(StringComparer.OrdinalIgnoreCase);
+        var panelByKey = new Dictionary<(string, string), ClinicFacilityPivotRow>();
+        var columnTotals = new Dictionary<string, ClinicFacilityPivotCell>();
+        var yearTotals = new Dictionary<int, ClinicFacilityPivotCell>();
+        var grandTotal = new ClinicFacilityPivotCell();
+
+        foreach (var (clinicName, panelName, year, month, cell) in rawRows)
+        {
+            if (!clinicByName.TryGetValue(clinicName, out var clinic))
+            {
+                clinicByName[clinicName] = clinic = new ClinicFacilityPivotRow { Name = clinicName };
+                clinics.Add(clinic);
+            }
+            AddTo(clinic, year, month, cell);
+
+            if (isCollection)
+            {
+                var panelKey = (clinicName.ToUpperInvariant(), panelName.ToUpperInvariant());
+                if (!panelByKey.TryGetValue(panelKey, out var panel))
+                {
+                    panelByKey[panelKey] = panel = new ClinicFacilityPivotRow { Name = panelName };
+                    clinic.Children.Add(panel);
+                }
+                AddTo(panel, year, month, cell);
+            }
+
+            var colKey = ClinicFacilityPivotViewModel.ColKey(year, month);
+            if (!columnTotals.TryGetValue(colKey, out var colCell))
+                columnTotals[colKey] = colCell = new ClinicFacilityPivotCell();
+            colCell.Add(cell);
+            if (!yearTotals.TryGetValue(year, out var yearCell))
+                yearTotals[year] = yearCell = new ClinicFacilityPivotCell();
+            yearCell.Add(cell);
+            grandTotal.Add(cell);
+        }
+
+        var columns = rawRows
+            .Select(r => (r.Year, r.Month))
+            .Distinct()
+            .OrderBy(c => c.Year).ThenBy(c => c.Month)
+            .ToList();
+
+        return new ClinicFacilityPivotViewModel
+        {
+            SelectedLab    = labName,
+            Title          = isCollection ? "Facility Collection" : "Facility Production",
+            DateBasisLabel = isCollection ? "PostedDate" : "ChargeEnteredDate",
+            AmountLabel    = isCollection ? "Sum of InsurancePayment" : "Sum of ChargeAmount",
+            Note = isCollection
+                ? "Source: Claim Level Data · Filter: InsurancePayment > 0, PostedDate (PaymentPostedDate) is a date · Rows: ClinicName > Panelname · Columns: PostedDate month / year · Values: Count of unique ClaimID, Sum of InsurancePayment · Sorted by claim count"
+                : "Source: Claim Level Data · Filter: FirstBilledDate is a date · Rows: ClinicName · Columns: ChargeEnteredDate month / year · Values: Count of unique ClaimID, Sum of ChargeAmount · Sorted by claim count",
+            HasPanelRows   = isCollection,
+            Years          = columns.Select(c => c.Year).Distinct().ToList(),
+            Columns        = columns,
+            Clinics        = clinics,
+            ColumnTotals   = columnTotals,
+            YearTotals     = yearTotals,
+            GrandTotal     = grandTotal,
+        };
+    }
+
     private static SqlParameter[] BuildNwClinicSpParameters(
         List<string>? clinics, List<string>? salesReps, List<string>? payers, List<string>? panels,
         DateOnly? dosFrom, DateOnly? dosTo, DateOnly? firstBillFrom, DateOnly? firstBillTo)
