@@ -32,6 +32,7 @@ docs/
 ├── payer-policy-mapper/     Payer Policy AI design
 ├── reimbursement-agent/     Reimbursement Insights agent and its DAB bridge
 ├── reports/                 Report queue, Production Summary, Report Control Board, report snapshots
+├── security/                HIPAA implementation across all projects (PHI storage, access, audit)
 └── archive/                 Superseded — provenance only
 ```
 
@@ -52,6 +53,12 @@ The React app `LRN.ARWorkbench`, its API `/api/ar-workbench` in `LRN.ReportsApi`
 | [AR_Workbench_Developer_Documentation.pdf](ar-workbench/AR_Workbench_Developer_Documentation.pdf) | 23 Sep 2026 (26 pp) | Reference | How the mockup's code is built (the full edition; the 19-page cut is archived) |
 | [AR_Workbench_Open_Items_And_Phases.md](ar-workbench/AR_Workbench_Open_Items_And_Phases.md) | 29 Sep 2026 | Historical — superseded by the plan workbook | The original gap analysis and phase order (referenced from `navigation.js`, `PlannedPage.jsx`) |
 | [ClinicalLaboratoryFeeSchedule_2026_Q1V1.xls](ar-workbench/ClinicalLaboratoryFeeSchedule_2026_Q1V1.xls) | 2026 Q1 | Source data | CMS fee schedule imported in LRN Metrics > Master Values > Fees Schedule Import; prices Revenue Expectation |
+
+## Security & HIPAA — [`security/`](security/)
+
+| Document | Version | Status | Covers |
+|---|---|---|---|
+| [LRN_HIPAA_Platform_Implementation.md](security/LRN_HIPAA_Platform_Implementation.md) | 2.0 | **Plan + spec** — Wave 1 (AR Workbench) implemented, Waves 0, 2–6 open | Which projects hold PHI and where; HIPAA rule mapping; gaps G1–G20; the shared storage/audit standard; per-wave tasks, tests and rollout. Supersedes the AR Workbench-only v1.0. |
 
 ## CPT & Panel Lookup — [`cpt-panel-lookup/`](cpt-panel-lookup/)
 

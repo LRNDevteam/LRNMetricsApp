@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text.Json;
 using LRN.ReportsApi.Models;
 using LRN.ReportsApi.Security;
@@ -7,6 +8,7 @@ using LRN.ReportsApi.Services.ArWorkbench;
 using LRN.ReportsApi.Services.UserMail;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Options;
 
 namespace LRN.ReportsApi.Controllers;
 
@@ -724,7 +726,7 @@ public sealed class ArWorkbenchController : ControllerBase
         {
             var ext = Path.GetExtension(f.FileName).TrimStart('.').ToLowerInvariant();
             if (!allowed.Contains(ext)) return BadRequest(new { message = $"{Path.GetFileName(f.FileName)}: file type .{ext} is not allowed ({string.Join(", ", allowed)})." });
-            var error = await FileUploadGuard.ValidateDocumentAsync(f, maxBytes, ct);
+            var error = await FileUploadGuard.ValidateArWorkbenchDocumentAsync(f, maxBytes, ct);
             if (error is not null) return BadRequest(new { message = $"{Path.GetFileName(f.FileName)}: {error}" });
         }
 
@@ -738,9 +740,9 @@ public sealed class ArWorkbenchController : ControllerBase
                 stored.Add((Path.GetFileName(f.FileName), f.ContentType, await store.SaveAsync(labId, s, Path.GetExtension(f.FileName), ct)));
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            foreach (var s in stored) store.Delete(s.Stored.Container, s.Stored.Path);
+            foreach (var s in stored) await store.DeleteAsync(s.Stored.Container, s.Stored.Path, CancellationToken.None);
             _logger.LogError(ex, "AR Workbench attachment storage failed for lab {LabId}", labId);
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "The attachments could not be stored. Please contact support." });
         }
@@ -748,7 +750,7 @@ public sealed class ArWorkbenchController : ControllerBase
         var (outcome, caseNumber, status) = await _repository.CipActionAsync(labId, caseId, ArWorkbenchCipAction.Respond, note!.Trim(), user!, null, ct);
         if (outcome != "ok")
         {
-            foreach (var s in stored) store.Delete(s.Stored.Container, s.Stored.Path);
+            foreach (var s in stored) await store.DeleteAsync(s.Stored.Container, s.Stored.Path, CancellationToken.None);
             return outcome == "notfound"
                 ? NotFound(new { message = "That escalation was not found or is outside your access." })
                 : Conflict(new { message = $"{caseNumber} is {status}; it is no longer waiting for your response." });
@@ -819,7 +821,7 @@ public sealed class ArWorkbenchController : ControllerBase
                 return BadRequest(new { message = $"{name}: the notes must be {MaxDocumentDescriptionLength} characters or fewer." });
             var ext = Path.GetExtension(f.FileName).TrimStart('.').ToLowerInvariant();
             if (!allowed.Contains(ext)) return BadRequest(new { message = $"{name}: file type .{ext} is not allowed ({string.Join(", ", allowed)})." });
-            var error = await FileUploadGuard.ValidateDocumentAsync(f, maxBytes, ct);
+            var error = await FileUploadGuard.ValidateArWorkbenchDocumentAsync(f, maxBytes, ct);
             if (error is not null) return BadRequest(new { message = $"{name}: {error}" });
             checkedUploads.Add((f, chosen, string.IsNullOrWhiteSpace(description) ? null : description));
         }
@@ -834,9 +836,9 @@ public sealed class ArWorkbenchController : ControllerBase
                     await store.SaveAsync(labId, s, Path.GetExtension(f.FileName), ct), chosen, description));
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            foreach (var s in stored) store.Delete(s.Stored.Container, s.Stored.Path);
+            foreach (var s in stored) await store.DeleteAsync(s.Stored.Container, s.Stored.Path, CancellationToken.None);
             _logger.LogError(ex, "AR Workbench attachment storage failed for lab {LabId}", labId);
             return StatusCode(StatusCodes.Status500InternalServerError, new { message = "The attachments could not be stored. Please contact support." });
         }
@@ -844,7 +846,7 @@ public sealed class ArWorkbenchController : ControllerBase
         var ids = await _repository.AddClaimDocumentsAsync(labId, claimKey, followUpId, stored, user, HttpContext.Connection.RemoteIpAddress?.ToString(), ct);
         if (ids.Count == 0)
         {
-            foreach (var s in stored) store.Delete(s.Stored.Container, s.Stored.Path);
+            foreach (var s in stored) await store.DeleteAsync(s.Stored.Container, s.Stored.Path, CancellationToken.None);
             return NotFound(new { message = "Claim not found, or the follow-up note is not on this claim." });
         }
         _logger.LogInformation("AR Workbench: {Count} document(s) attached to claim {ClaimKey} (lab {LabId}) by {User}", ids.Count, claimKey, labId, user.UserName);
@@ -871,17 +873,141 @@ public sealed class ArWorkbenchController : ControllerBase
         return Ok(await _repository.SearchDocumentsAsync(filter, user!, ct));
     }
 
-    /// <summary>Download an attachment (scope-checked, logged). Clients reach only CIP responses.</summary>
+    /// <summary>
+    /// Document Vault search with the filter in the body: the search accepts patient names, which must
+    /// not end up in a URL (IIS / proxy logs, browser history). GET documents stays for compatibility.
+    /// </summary>
+    [HttpPost("documents/search")]
+    public async Task<ActionResult<ArWorkbenchPagedResult<ArWorkbenchDocumentRow>>> SearchDocuments([FromBody] ArWorkbenchDocumentFilter? filter, CancellationToken ct)
+    {
+        if (filter is null) return BadRequest(new { message = "The search could not be read." });
+        var (user, denied) = await ResolveUserAsync(filter.LabId, ct);
+        if (denied is not null) return denied;
+        if ((filter.Search?.Length ?? 0) > 200) return BadRequest(new { message = "Search must be 200 characters or fewer." });
+        Response.Headers.CacheControl = "no-store";
+        return Ok(await _repository.SearchDocumentsAsync(filter, user!, ct));
+    }
+
+    /// <summary>
+    /// Download an attachment (scope-checked, logged). Clients reach only CIP responses. A Blob file must
+    /// have a clean Defender scan, and the SHA-256 recorded at upload is checked again; every refusal after
+    /// the scope check is logged as Blocked. The response is never cached.
+    /// </summary>
     [HttpGet("documents/{documentId:long}")]
-    public async Task<ActionResult> DownloadDocument([FromRoute] long documentId, [FromQuery] int labId, [FromServices] IArWorkbenchDocumentStore store, CancellationToken ct)
+    public async Task<ActionResult> DownloadDocument([FromRoute] long documentId, [FromQuery] int labId, [FromServices] IArWorkbenchDocumentStore store,
+        [FromServices] IOptions<ArWorkbenchDocumentStorageOptions> storageOptions, CancellationToken ct)
     {
         var (user, denied) = await ResolveUserAsync(labId, ct);
         if (denied is not null) return denied;
-        var doc = await _repository.GetDocumentForDownloadAsync(labId, documentId, user!, HttpContext.Connection.RemoteIpAddress?.ToString(), ct);
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var doc = await _repository.GetDocumentForDownloadAsync(labId, documentId, user!, ip, ct);
         if (doc is null) return NotFound(new { message = "Document not found." });
-        var stream = store.OpenRead(doc.Value.Container, doc.Value.Path);
+        var (info, container, path, sha256) = doc.Value;
+        var options = storageOptions.Value;
+
+        var scan = await store.GetScanResultAsync(container, path, ct);
+        if (scan is not (DocumentScanResult.NotApplicable or DocumentScanResult.Clean) && (options.RequireCleanMalwareScan || scan == DocumentScanResult.Malicious))
+        {
+            await BlockDocumentAsync(labId, documentId, scan switch
+            {
+                DocumentScanResult.Pending => "Malware scan pending",
+                DocumentScanResult.Malicious => "Malware scan: malicious",
+                _ => "Malware scan result unavailable"
+            }, user!, ip, ct);
+            return scan == DocumentScanResult.Pending
+                ? Conflict(new { message = "This document is still being scanned for viruses. Try again in a minute." })
+                : StatusCode(StatusCodes.Status423Locked, new { message = "This document was blocked by the virus scan and cannot be downloaded. Contact support." });
+        }
+
+        var stream = await store.OpenReadAsync(container, path, ct);
         if (stream is null) return NotFound(new { message = "The file is no longer in storage." });
-        return File(stream, string.IsNullOrWhiteSpace(doc.Value.Info.ContentType) ? "application/octet-stream" : doc.Value.Info.ContentType!, doc.Value.Info.FileName);
+
+        Response.Headers.CacheControl = "no-store, no-cache, must-revalidate, private";
+        Response.Headers.Pragma = "no-cache";
+        var contentType = string.IsNullOrWhiteSpace(info.ContentType) ? "application/octet-stream" : info.ContentType!;
+
+        if (options.VerifyHashOnDownload && !string.IsNullOrWhiteSpace(sha256) && info.SizeBytes <= options.MaxVerifiedDownloadBytes)
+        {
+            byte[] bytes;
+            await using (stream)
+            {
+                using var buffer = new MemoryStream((int)Math.Clamp(info.SizeBytes, 0, int.MaxValue));
+                await stream.CopyToAsync(buffer, ct);
+                bytes = buffer.ToArray();
+            }
+            var actual = Convert.ToHexString(SHA256.HashData(bytes));
+            if (!string.Equals(actual, sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogCritical("AR Workbench integrity check failed (SHA-256 mismatch): document {DocumentId}, lab {LabId}.", documentId, labId);
+                await BlockDocumentAsync(labId, documentId, "Integrity check failed (SHA-256 mismatch)", user!, ip, ct);
+                return Conflict(new { message = "This document failed an integrity check and cannot be opened. Support has been notified." });
+            }
+            return File(bytes, contentType, info.FileName);
+        }
+        return File(stream, contentType, info.FileName);
+    }
+
+    // Blocked access-log row for a refused download. False from the repository usually means script 10
+    // (LabDatabase/10_ARWB_Document_Blob_HIPAA.sql) has not been run, so the CHECK refuses 'Blocked'.
+    private async Task BlockDocumentAsync(int labId, long documentId, string reason, ArWorkbenchUserContext user, string? ip, CancellationToken ct)
+    {
+        if (!await _repository.LogDocumentAccessAsync(labId, documentId, "Blocked", reason, user, ip, ct))
+            _logger.LogError("AR Workbench: could not log Blocked for document {DocumentId} in lab {LabId} ({Reason}). Run LabDatabase/10_ARWB_Document_Blob_HIPAA.sql in that lab database.",
+                documentId, labId, reason);
+    }
+
+    /// <summary>
+    /// Site admins: moves a batch of a lab's 'local' documents to Blob. Each file is re-hashed against the
+    /// SHA-256 recorded at upload first; a mismatch or missing file is skipped and reported. dryRun (default)
+    /// only checks. The local file is never deleted here - the secure wipe is a separate, signed-off step.
+    /// </summary>
+    [HttpPost("documents/admin/migrate-to-blob")]
+    public async Task<ActionResult> MigrateDocumentsToBlob([FromQuery] int labId, [FromServices] RoutingArWorkbenchDocumentStore store,
+        CancellationToken ct, [FromQuery] int batchSize = 200, [FromQuery] bool dryRun = true)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!user!.SiteAdmin) return Forbidden("Only a site administrator can migrate documents.");
+        if (store.Blob is null)
+            return BadRequest(new { message = "Azure Blob storage is not configured. Set ArWorkbenchDocuments:Provider = AzureBlob and ArWorkbenchDocuments:BlobServiceUri, then restart the API." });
+
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var rows = await _repository.GetLocalDocumentsAsync(labId, batchSize, ct);
+        int moved = 0, missingOnDisk = 0, hashMismatch = 0, failed = 0;
+        var problems = new List<long>();
+        foreach (var (documentId, path, sha256) in rows)
+        {
+            StoredDocument? saved = null;
+            try
+            {
+                await using var local = await store.OpenReadAsync(LocalArWorkbenchDocumentStore.ContainerName, path, ct);
+                if (local is null) { missingOnDisk++; problems.Add(documentId); continue; }
+                var actual = Convert.ToHexString(await SHA256.HashDataAsync(local, ct));
+                if (!string.IsNullOrWhiteSpace(sha256) && !string.Equals(actual, sha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    hashMismatch++; problems.Add(documentId); continue;
+                }
+                if (dryRun) { moved++; continue; }
+
+                local.Position = 0;
+                saved = await store.Blob.SaveAsync(labId, local, Path.GetExtension(path), ct);
+                if (await _repository.MoveDocumentToBlobAsync(labId, documentId, saved, user, ip, ct)) moved++;
+                else
+                {
+                    await store.Blob.DeleteAsync(saved.Container, saved.Path, CancellationToken.None);
+                    failed++; problems.Add(documentId);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                if (saved is not null) await store.Blob.DeleteAsync(saved.Container, saved.Path, CancellationToken.None);
+                _logger.LogWarning(ex, "AR Workbench migration: document {DocumentId} in lab {LabId} failed.", documentId, labId);
+                failed++; problems.Add(documentId);
+            }
+        }
+        _logger.LogInformation("AR Workbench migration lab {LabId} (dry run {DryRun}) by {User}: examined {Examined}, moved {Moved}, missing {Missing}, hash mismatch {Mismatch}, failed {Failed}.",
+            labId, dryRun, user.UserName, rows.Count, moved, missingOnDisk, hashMismatch, failed);
+        return Ok(new { labId, dryRun, examined = rows.Count, moved, missingOnDisk, hashMismatch, failed, problemDocumentIds = problems });
     }
 
     private static readonly string[] CipTemplateHeaders =

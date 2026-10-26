@@ -46,7 +46,8 @@ export const arWorkbenchService = {
     return api(`claims/${claimKey}/documents${qs({ labId })}`, { method: 'POST', body: form });
   },
   claimDocuments: (labId, claimKey) => api(`claims/${claimKey}/documents${qs({ labId })}`),
-  documentVault: (filter, signal) => api(`documents${qs(filter)}`, { signal }),
+  // POST, not GET: the search takes patient names, and PHI must never be in a URL (server/proxy logs, history).
+  documentVault: (filter, signal) => api('documents/search', { method: 'POST', body: JSON.stringify(filter || {}), signal }),
   convertLegacyCip: (labId, preview) => api(`cip/convert-legacy${qs({ labId, preview })}`, { method: 'POST' }),
   cipBulk: (labId, caseIds, decision, note) => api(`cip/bulk${qs({ labId })}`, json('POST', { caseIds, decision, note })),
 

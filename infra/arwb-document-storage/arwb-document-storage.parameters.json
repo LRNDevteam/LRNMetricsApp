@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": { "value": "eastus" },
+    "storageAccountName": { "value": "stlrnarwbphi" },
+    "containerName": { "value": "arwb-documents" },
+    "keyVaultName": { "value": "kv-lrnmetrics-prod" },
+    "cmkKeyName": { "value": "cmk-arwb-documents" },
+    "privateEndpointSubnetId": { "value": "/subscriptions/<subscription-id>/resourceGroups/<vnet-rg>/providers/Microsoft.Network/virtualNetworks/<api-vnet>/subnets/<pe-subnet>" },
+    "blobPrivateDnsZoneId": { "value": "/subscriptions/<subscription-id>/resourceGroups/<dns-rg>/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net" },
+    "logAnalyticsWorkspaceId": { "value": "/subscriptions/<subscription-id>/resourceGroups/<log-rg>/providers/Microsoft.OperationalInsights/workspaces/reimbursement-agent-logs" },
+    "apiPrincipalId": { "value": "<object id of the API managed identity>" },
+    "retentionDays": { "value": 3650 },
+    "malwareScanCapGbPerMonth": { "value": 1000 }
+  }
+}

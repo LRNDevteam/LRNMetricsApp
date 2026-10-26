@@ -97,8 +97,9 @@ builder.Services.AddScoped<LRN.ReportsApi.Services.ArReports.IArActivityReportRe
 // AR Workbench (new denial application; [arwb] schema per lab, React app LRN.ARWorkbench).
 builder.Services.AddScoped<LRN.ReportsApi.Services.ArWorkbench.IArWorkbenchRepository,
                            LRN.ReportsApi.Services.ArWorkbench.SqlArWorkbenchRepository>();
-// AR Workbench attachments (CIP responses): local-disk store until Azure Blob is provisioned.
-builder.Services.AddSingleton<LRN.ReportsApi.Services.ArWorkbench.IArWorkbenchDocumentStore, LRN.ReportsApi.Services.ArWorkbench.LocalArWorkbenchDocumentStore>();
+// AR Workbench attachments (PHI): ArWorkbenchDocuments:Provider = AzureBlob sends new files to the private,
+// encrypted Blob account via the managed identity; "local" rows are still read from disk until migrated.
+LRN.ReportsApi.Services.ArWorkbench.ArWorkbenchDocumentStorageExtensions.AddArWorkbenchDocumentStorage(builder.Services, builder.Configuration);
 // AR Workbench Export buttons run as background jobs (the Denial Workflow Overall Download pattern).
 builder.Services.AddSingleton<LRN.ReportsApi.Services.ArWorkbench.IArWorkbenchExportJobService, LRN.ReportsApi.Services.ArWorkbench.ArWorkbenchExportJobService>();
 // AR Workbench nightly queue snapshot (T038): recalculate + snapshot each lab once a day.
