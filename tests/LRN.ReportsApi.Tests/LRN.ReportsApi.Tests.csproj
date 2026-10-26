@@ -29,5 +29,8 @@
     <None Include="..\..\Database\LRN.ReportsApi\DenialWorkflow_MasterValues_Setup.sql"
           Link="Sql\DenialWorkflow_MasterValues_Setup.sql"
           CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Database\LRN.ReportsApi\ArWorkbench\LabDatabase\10_ARWB_Document_Blob_HIPAA.sql"
+          Link="Sql\10_ARWB_Document_Blob_HIPAA.sql"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

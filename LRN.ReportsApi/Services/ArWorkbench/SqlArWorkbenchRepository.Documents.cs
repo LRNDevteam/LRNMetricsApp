@@ -97,7 +97,7 @@ ORDER BY d.UploadedOn, d.DocumentId;", connection);
     /// A document the caller may download (claim scope; a client only CIP responses), with the
     /// download logged. Null when not found or not allowed.
     /// </summary>
-    public async Task<(ArWorkbenchDocumentInfo Info, string Container, string Path)?> GetDocumentForDownloadAsync(int labId, long documentId,
+    public async Task<(ArWorkbenchDocumentInfo Info, string Container, string Path, string? Sha256)?> GetDocumentForDownloadAsync(int labId, long documentId,
         ArWorkbenchUserContext user, string? clientIp, CancellationToken ct)
     {
         await using var connection = await OpenLabAsync(labId, ct);
@@ -115,7 +115,7 @@ IF EXISTS (SELECT 1 FROM dbo.ARWB_Document d INNER JOIN dbo.ARWB_Claim w ON w.Cl
            WHERE d.DocumentId = @Id AND d.IsDeleted = 0 AND (@ClientOnly = 0 OR d.DocumentSource = 'CipResponse') {scope})
 BEGIN
     INSERT INTO dbo.ARWB_DocumentAccessLog (DocumentId, AccessType, UserName, RoleCode, ClientIp) VALUES (@Id, 'Download', @User, @Role, @Ip);
-    SELECT d.DocumentId, d.FileName, d.ContentType, d.SizeBytes, d.CipRoundNumber, d.UploadedBy, d.UploadedOn, d.BlobContainer, d.BlobPath
+    SELECT d.DocumentId, d.FileName, d.ContentType, d.SizeBytes, d.CipRoundNumber, d.UploadedBy, d.UploadedOn, d.BlobContainer, d.BlobPath, d.ContentSha256
     FROM dbo.ARWB_Document d WHERE d.DocumentId = @Id;
 END;";
         await using var r = await cmd.ExecuteReaderAsync(ct);
@@ -125,7 +125,80 @@ END;";
             DocumentId = r.GetInt64(0), FileName = r.GetString(1), ContentType = Str(r, 2), SizeBytes = r.GetInt64(3),
             RoundNumber = r.IsDBNull(4) ? null : r.GetInt32(4), UploadedBy = r.GetString(5), UploadedOn = r.GetDateTime(6)
         };
-        return (info, r.GetString(7), r.GetString(8));
+        return (info, r.GetString(7), r.GetString(8), Str(r, 9));
+    }
+
+    /// <summary>
+    /// Appends one access-log row (Blocked, Migrate, ...). Detail is written only once script 10 has added
+    /// the column, and must never hold file or patient names. A failed insert (e.g. script 10 not run, so
+    /// the CHECK refuses 'Blocked') returns false for the caller to log.
+    /// </summary>
+    public async Task<bool> LogDocumentAccessAsync(int labId, long documentId, string accessType, string? detail, ArWorkbenchUserContext user, string? clientIp, CancellationToken ct)
+    {
+        try
+        {
+            await using var connection = await OpenLabAsync(labId, ct);
+            // Detail is named only inside sp_executesql: a missing column would otherwise fail the whole batch at compile time.
+            await using var cmd = new SqlCommand(@"
+IF COL_LENGTH(N'dbo.ARWB_DocumentAccessLog', N'Detail') IS NULL
+    INSERT INTO dbo.ARWB_DocumentAccessLog (DocumentId, AccessType, UserName, RoleCode, ClientIp) VALUES (@Id, @Access, @User, @Role, @Ip);
+ELSE
+    EXEC sp_executesql N'INSERT INTO dbo.ARWB_DocumentAccessLog (DocumentId, AccessType, UserName, RoleCode, ClientIp, Detail) VALUES (@Id, @Access, @User, @Role, @Ip, @Detail);',
+        N'@Id bigint, @Access varchar(20), @User nvarchar(256), @Role varchar(20), @Ip varchar(64), @Detail nvarchar(200)',
+        @Id, @Access, @User, @Role, @Ip, @Detail;", connection);
+            cmd.Parameters.Add("@Id", SqlDbType.BigInt).Value = documentId;
+            cmd.Parameters.Add("@Access", SqlDbType.VarChar, 20).Value = Truncate(accessType, 20);
+            cmd.Parameters.Add("@User", SqlDbType.NVarChar, 256).Value = Truncate(user.UserName, 256);
+            cmd.Parameters.Add("@Role", SqlDbType.VarChar, 20).Value = Truncate(user.RoleCode, 20);
+            cmd.Parameters.Add("@Ip", SqlDbType.VarChar, 64).Value = (object?)clientIp ?? DBNull.Value;
+            cmd.Parameters.Add("@Detail", SqlDbType.NVarChar, 200).Value = string.IsNullOrWhiteSpace(detail) ? DBNull.Value : (object)Truncate(detail.Trim(), 200);
+            await cmd.ExecuteNonQueryAsync(ct);
+            return true;
+        }
+        catch (SqlException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The next documents still on local disk, oldest first; soft-deleted rows too (retention applies to them).</summary>
+    public async Task<IReadOnlyList<(long DocumentId, string Path, string? Sha256)>> GetLocalDocumentsAsync(int labId, int batchSize, CancellationToken ct)
+    {
+        await using var connection = await OpenLabAsync(labId, ct);
+        await using var cmd = new SqlCommand(@"
+SELECT TOP (@Batch) d.DocumentId, d.BlobPath, d.ContentSha256
+FROM dbo.ARWB_Document d
+WHERE d.BlobContainer = 'local'
+ORDER BY d.DocumentId;", connection);
+        cmd.Parameters.Add("@Batch", SqlDbType.Int).Value = Math.Clamp(batchSize, 1, 1000);
+        var rows = new List<(long, string, string?)>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct)) rows.Add((r.GetInt64(0), r.GetString(1), Str(r, 2)));
+        return rows;
+    }
+
+    /// <summary>Repoints a 'local' document at its blob and logs Migrate, in one transaction. False when the row had already moved.</summary>
+    public async Task<bool> MoveDocumentToBlobAsync(int labId, long documentId, StoredDocument stored, ArWorkbenchUserContext user, string? clientIp, CancellationToken ct)
+    {
+        await using var connection = await OpenLabAsync(labId, ct);
+        await using var cmd = new SqlCommand(@"
+SET XACT_ABORT ON;
+BEGIN TRANSACTION;
+UPDATE dbo.ARWB_Document SET BlobContainer = @Container, BlobPath = @Path, ContentSha256 = @Sha
+WHERE DocumentId = @Id AND BlobContainer = 'local';
+DECLARE @Changed int = @@ROWCOUNT;
+IF @Changed = 1
+    INSERT INTO dbo.ARWB_DocumentAccessLog (DocumentId, AccessType, UserName, RoleCode, ClientIp) VALUES (@Id, 'Migrate', @User, @Role, @Ip);
+COMMIT TRANSACTION;
+SELECT @Changed;", connection);
+        cmd.Parameters.Add("@Id", SqlDbType.BigInt).Value = documentId;
+        cmd.Parameters.Add("@Container", SqlDbType.NVarChar, 100).Value = stored.Container;
+        cmd.Parameters.Add("@Path", SqlDbType.NVarChar, 1024).Value = stored.Path;
+        cmd.Parameters.Add("@Sha", SqlDbType.VarChar, 64).Value = stored.Sha256;
+        cmd.Parameters.Add("@User", SqlDbType.NVarChar, 256).Value = Truncate(user.UserName, 256);
+        cmd.Parameters.Add("@Role", SqlDbType.VarChar, 20).Value = Truncate(user.RoleCode, 20);
+        cmd.Parameters.Add("@Ip", SqlDbType.VarChar, 64).Value = (object?)clientIp ?? DBNull.Value;
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)) == 1;
     }
 
     /// <summary>

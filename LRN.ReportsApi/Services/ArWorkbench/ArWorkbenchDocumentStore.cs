@@ -5,17 +5,23 @@ namespace LRN.ReportsApi.Services.ArWorkbench;
 
 /// <summary>
 /// Where AR Workbench attachments live. dbo.ARWB_Document keeps only the metadata (BlobContainer /
-/// BlobPath); this store holds the bytes. The handoff targets Azure Blob Storage; until that is
-/// provisioned the local-disk store below is used (container "local"), and a blob implementation
-/// can replace it behind this interface without touching the callers or the table.
+/// BlobPath); this store holds the bytes. Registered as <see cref="RoutingArWorkbenchDocumentStore"/>:
+/// new files go to Azure Blob Storage when configured (AzureBlobArWorkbenchDocumentStore.cs), and
+/// rows with container "local" are still read from disk until they are migrated.
 /// </summary>
 public interface IArWorkbenchDocumentStore
 {
     /// <summary>Saves the stream; returns the container, the path inside it, the size and the SHA-256.</summary>
     Task<StoredDocument> SaveAsync(int labId, Stream content, string extension, CancellationToken ct);
-    Stream? OpenRead(string container, string path);
-    void Delete(string container, string path);
+    /// <summary>The stored bytes, or null when the container/path is not this store's or the file is gone.</summary>
+    Task<Stream?> OpenReadAsync(string container, string path, CancellationToken ct);
+    /// <summary>Removes a file that was stored but never recorded (refused or failed upload).</summary>
+    Task DeleteAsync(string container, string path, CancellationToken ct);
+    /// <summary>Malware scan state (Defender for Storage on Blob; NotApplicable on local disk).</summary>
+    Task<DocumentScanResult> GetScanResultAsync(string container, string path, CancellationToken ct);
 }
+
+public enum DocumentScanResult { NotApplicable, Pending, Clean, Malicious, Unknown }
 
 public sealed record StoredDocument(string Container, string Path, long SizeBytes, string Sha256);
 
@@ -25,6 +31,9 @@ public sealed record ArWorkbenchClaimUpload(string FileName, string? ContentType
 /// <summary>
 /// Disk store under ArWorkbenchDocuments:RootPath (default: the Denial Workflow upload root +
 /// \ARWorkbench). Files are named by a GUID - never by the uploaded name - in lab\yyyy\MM folders.
+/// Legacy: with ArWorkbenchDocuments:Provider = AzureBlob new files go to Blob, and the "local" rows
+/// are read from here until POST documents/admin/migrate-to-blob moves them. It only takes new files
+/// when Provider = Local (development, or the rollback when Blob is unreachable).
 /// </summary>
 public sealed class LocalArWorkbenchDocumentStore : IArWorkbenchDocumentStore
 {
@@ -57,18 +66,23 @@ public sealed class LocalArWorkbenchDocumentStore : IArWorkbenchDocumentStore
         return new StoredDocument(ContainerName, relative.Replace('\\', '/'), size, Convert.ToHexString(sha.Hash!).ToLowerInvariant());
     }
 
-    public Stream? OpenRead(string container, string path)
+    public Task<Stream?> OpenReadAsync(string container, string path, CancellationToken ct)
     {
-        if (container != ContainerName) return null;
+        if (container != ContainerName) return Task.FromResult<Stream?>(null);
         var full = FullPath(path);
-        return File.Exists(full) ? File.OpenRead(full) : null;
+        return Task.FromResult<Stream?>(File.Exists(full) ? File.OpenRead(full) : null);
     }
 
-    public void Delete(string container, string path)
+    public Task DeleteAsync(string container, string path, CancellationToken ct)
     {
-        if (container != ContainerName) return;
+        if (container != ContainerName) return Task.CompletedTask;
         try { var full = FullPath(path); if (File.Exists(full)) File.Delete(full); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        return Task.CompletedTask;
     }
+
+    /// <summary>Files on disk are not scanned by Defender for Storage.</summary>
+    public Task<DocumentScanResult> GetScanResultAsync(string container, string path, CancellationToken ct)
+        => Task.FromResult(DocumentScanResult.NotApplicable);
 
     // The stored path is ours, but resolve defensively: it must stay inside the root.
     private string FullPath(string relative)
@@ -79,7 +93,8 @@ public sealed class LocalArWorkbenchDocumentStore : IArWorkbenchDocumentStore
         return full;
     }
 
-    private static string SafeExtension(string extension)
+    // Shared with the Blob store so both name files the same way.
+    internal static string SafeExtension(string extension)
     {
         var ext = (extension ?? string.Empty).Trim().ToLowerInvariant();
         if (!ext.StartsWith('.')) ext = "." + ext;
