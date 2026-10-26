@@ -13,7 +13,9 @@
     }
     var el = function (id) { return document.getElementById(id); };
     var MONTHS = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    var MONEY_COLS = { Amount: 1, ChargeAmount: 1, InsurancePayment: 1, PatientPayment: 1, PatientBalance: 1, TotalAdjustments: 1, TotalInsuranceBalance: 1 };
+    var MONEY_COLS = { Amount: 1, ChargeAmount: 1, InsurancePayment: 1, PatientPayment: 1, PatientBalance: 1, TotalAdjustments: 1, TotalInsuranceBalance: 1,
+                       InsuranceAdjustments: 1, PatientAdjustments: 1, InsuranceBalance: 1, ExpectedPayment: 1, TotalPayments: 1,
+                       TotalCharge: 1, CarrierPayment: 1 };
     var PAGE_SIZE = 100;
     var current = null;
     var requestSeq = 0;

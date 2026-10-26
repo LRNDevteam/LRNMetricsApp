@@ -244,7 +244,7 @@ public static class LabCollectionPrefix
     /// <c>usp_Get{prefix}_ExecutiveSummaryCellRows</c> (same rules as the Executive Summary SPs).
     /// </summary>
     public static bool HasEsCellRows(string? labName) =>
-        GetPrefix(labName) is "WH" or "CB" or "TD";
+        GetPrefix(labName) is "WH" or "CB" or "TD" or "Elix" or "IHD" or "RT" or "BT";
 
     /// <summary>
     /// Labs whose Executive Summary Year Total / Grand Total cells also open the value popup instead

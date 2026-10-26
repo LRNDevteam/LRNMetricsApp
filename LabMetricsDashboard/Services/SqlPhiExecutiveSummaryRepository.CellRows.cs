@@ -26,7 +26,8 @@ public sealed partial class SqlPhiExecutiveSummaryRepository
             CommandTimeout = 300,
         };
         cmd.Parameters.Add("@Category", SqlDbType.VarChar, 10).Value = req.Category;
-        cmd.Parameters.Add("@RowCode", SqlDbType.NVarChar, 20).Value = req.RowCode;
+        // Elixir LIS panel rows are "B." + the panel name (Elix_ES_LIS.RoleID is NVARCHAR(420)).
+        cmd.Parameters.Add("@RowCode", SqlDbType.NVarChar, 420).Value = req.RowCode;
         cmd.Parameters.Add("@Year", SqlDbType.Int).Value = req.Year;
         cmd.Parameters.Add("@Month", SqlDbType.Int).Value = req.Month;
         cmd.Parameters.Add("@YearFrom", SqlDbType.Int).Value = (object?)req.YearFrom ?? DBNull.Value;

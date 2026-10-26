@@ -8,7 +8,8 @@
      Balance     = ClaimLevelData.InsuranceBalance (TotalInsuranceBalance is empty on
                    this file); shown as Total Insurance Balance.
      1. Monthly
-          Filter  : Denial Code not blank and not CO-109 / PI-149 / PR-51;
+          Filter  : Denial Code not blank and not OA-102 / PI-148 / PR-51
+                    (client logic change 2026-10-26; was CO-109 / PI-149 / PR-51);
                     Insurance Balance > 0
           Columns : Denial Month = CheckDate month, every month up to the end of the
                     newest ClaimLevelData WeekFolder, a "yyyy | Total" per year, Grand Total
@@ -85,7 +86,7 @@ GO
 
 /* ---------------------------------------------------------------------------
    Monthly / Weekly / tiles claim rows: one row per claim with a Denial Code other
-   than CO-109 / PI-149 / PR-51 and Insurance Balance > 0. Denial Date = CheckDate.
+   than OA-102 / PI-148 / PR-51 and Insurance Balance > 0. Denial Date = CheckDate.
    --------------------------------------------------------------------------- */
 CREATE OR ALTER FUNCTION dbo.fn_CB_DenialSummaryClaims()
 RETURNS TABLE
@@ -102,7 +103,7 @@ RETURN
     CROSS  APPLY (SELECT TRY_CONVERT(DECIMAL(18,2),
                          REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.InsuranceBalance))), N'$', N''), N',', N'')) AS Bal) b
     WHERE  LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(400), c.DenialCode), N''))) <> N''
-      AND  UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.DenialCode)))) NOT IN (N'CO-109', N'PI-149', N'PR-51')
+      AND  UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.DenialCode)))) NOT IN (N'OA-102', N'PI-148', N'PR-51')
       AND  ISNULL(b.Bal, 0) > 0;
 GO
 
