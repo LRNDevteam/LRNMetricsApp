@@ -8,6 +8,11 @@ public static class FileUploadGuard
     {
         ".pdf", ".png", ".jpg", ".jpeg", ".txt", ".csv", ".xlsx", ".xls", ".docx", ".doc"
     };
+    // AR Workbench claim attachments also take scanned images (its AttachmentAllowedTypes default lists them).
+    private static readonly HashSet<string> ArWorkbenchDocumentExtensions = new(DocumentExtensions, StringComparer.OrdinalIgnoreCase)
+    {
+        ".tif", ".tiff", ".gif"
+    };
 
     public static async Task<string?> ValidateExcelAsync(IFormFile? file, long maxBytes, CancellationToken ct)
         => await ValidateAsync(file, maxBytes, ExcelExtensions, ct);
@@ -17,6 +22,10 @@ public static class FileUploadGuard
 
     public static async Task<string?> ValidateDocumentAsync(IFormFile? file, long maxBytes, CancellationToken ct)
         => await ValidateAsync(file, maxBytes, DocumentExtensions, ct);
+
+    /// <summary>AR Workbench attachments: the document types plus .tif / .tiff / .gif.</summary>
+    public static async Task<string?> ValidateArWorkbenchDocumentAsync(IFormFile? file, long maxBytes, CancellationToken ct)
+        => await ValidateAsync(file, maxBytes, ArWorkbenchDocumentExtensions, ct);
 
     private static async Task<string?> ValidateAsync(IFormFile? file, long maxBytes, IReadOnlySet<string> allowedExtensions, CancellationToken ct)
     {
@@ -51,6 +60,8 @@ public static class FileUploadGuard
             ".pdf" => StartsWith(header, 0x25, 0x50, 0x44, 0x46),
             ".png" => StartsWith(header, 0x89, 0x50, 0x4E, 0x47),
             ".jpg" or ".jpeg" => StartsWith(header, 0xFF, 0xD8, 0xFF),
+            ".tif" or ".tiff" => StartsWith(header, 0x49, 0x49, 0x2A, 0x00) || StartsWith(header, 0x4D, 0x4D, 0x00, 0x2A),
+            ".gif" => StartsWith(header, 0x47, 0x49, 0x46, 0x38),
             ".csv" or ".txt" => !header.Contains((byte)0),
             _ => false
         };

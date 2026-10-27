@@ -15,7 +15,12 @@ export function Attachments({ labId, files }) {
     <span className="arwb-attach-list">
       {files.map((f) => (
         <button key={f.documentId} type="button" className="arwb-link-btn" title={`${f.fileName} · ${fmt.count(Math.ceil(f.sizeBytes / 1024))} KB`}
-          onClick={(e) => { e.stopPropagation(); arWorkbenchService.downloadDocument(labId, f.documentId, f.fileName); }}>
+          onClick={(e) => {
+            e.stopPropagation();
+            // A refused download (still being scanned, blocked, integrity failure) must not fail silently.
+            arWorkbenchService.downloadDocument(labId, f.documentId, f.fileName)
+              .catch((err) => window.alert(err?.message || 'The document could not be downloaded.'));
+          }}>
           <Icon name="doc" size={13} /> {f.fileName}
         </button>
       ))}

@@ -3,7 +3,7 @@
   LRNMaster\ and LabDatabase\ sub-folders. Run them in this order:
 
     1_RUN_IN_LRNMASTER_ARWB_Setup.sql      run ONCE in LRNMaster          = LRNMaster\LRNMaster_01, _02, _03, _04
-    2_RUN_IN_EACH_LAB_DB_ARWB_Setup.sql    run in EACH LAB database       = LabDatabase\01, 02, 03, 04, 05, 06, 07, 09
+    2_RUN_IN_EACH_LAB_DB_ARWB_Setup.sql    run in EACH LAB database       = LabDatabase\01, 02, 03, 04, 05, 06, 07, 09, 10
 
   Left out on purpose (run them on their own when needed):
     LabDatabase\00_ARWB_Drop_Existing_Objects.sql   destructive - drops every workbench object and its data
@@ -56,7 +56,8 @@ Build-Merged '1_RUN_IN_LRNMASTER_ARWB_Setup.sql' @(
 Build-Merged '2_RUN_IN_EACH_LAB_DB_ARWB_Setup.sql' @(
     'LabDatabase\01_ARWB_Tables.sql', 'LabDatabase\02_ARWB_Functions.sql', 'LabDatabase\03_ARWB_MasterData_Seed.sql',
     'LabDatabase\04_ARWB_ClaimState_Procedure.sql', 'LabDatabase\05_ARWB_LoadFromSource_Procedure.sql',
-    'LabDatabase\06_ARWB_Workflow_Procedures.sql', 'LabDatabase\07_ARWB_Views.sql', 'LabDatabase\09_ARWB_Legacy_Cip_Conversion.sql'
+    'LabDatabase\06_ARWB_Workflow_Procedures.sql', 'LabDatabase\07_ARWB_Views.sql', 'LabDatabase\09_ARWB_Legacy_Cip_Conversion.sql',
+    'LabDatabase\10_ARWB_Document_Blob_HIPAA.sql'
 ) 'LAB DATABASE SETUP' 'each LAB database (the one holding dbo.ClaimLevelData / dbo.LineLevelData).' (
     "Run 1_RUN_IN_LRNMASTER_ARWB_Setup.sql in LRNMaster first (roles, users' scope, denial code master, client activation, document types).`n" +
     "To rebuild from clean, run LabDatabase\00_ARWB_Drop_Existing_Objects.sql first (it deletes all workbench data).`n" +
