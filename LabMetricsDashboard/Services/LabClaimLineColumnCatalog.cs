@@ -43,6 +43,8 @@ public static class LabClaimLineColumnCatalog
         ["WellHealth"] = "WellHealth",
         ["Well_Health"] = "WellHealth",
         ["Well Health"] = "WellHealth",
+        ["CoreBio"] = "CoreBio",
+        ["Core_Bio"] = "CoreBio",
     };
 
     private static readonly string[] DefaultClaim =
@@ -345,6 +347,23 @@ public static class LabClaimLineColumnCatalog
                 "PaymentPercent", "FullyPaidCount", "FullyPaidAmount", "Adjudicated", "AdjudicatedAmount", "Bucket30",
                 "Bucket30Amount", "Bucket60", "Bucket60Amount", "Facility", "ClaimUID", "DaystoDOS",
                 "RollingDays", "DaystoBill", "DaystoPost", "InsertedDateTime"
+            ],
+        // Matches Database/LabMetricsDashboard/ClaimLineDetails_SPs/CoreBio_Details.sql.
+        ["CoreBio"] =
+            [
+                "LabID", "LabName", "ClaimID", "AccessionNumber", "PayerName_Raw", "PayerName",
+                "PayerType", "ReferringProvider", "BillingProvider", "ClinicName", "SalesRepname", "PatientID",
+                "PatientName", "PatientDOB", "SubscriberId", "DateofService", "ChargeEnteredDate", "FirstBilledDate",
+                "LastBilledDate", "BilledWeek", "BilledStatus", "Panelname", "CPTCodeXUnitsXModifier", "CPTCodeList",
+                "UnitsList", "ModifierList", "CptWithUnits", "Modifier", "POS", "ChargeAmount",
+                "InsurancePayment", "PatientPayment", "TotalPayments", "InsuranceAdjustments", "PatientAdjustments", "TotalAdjustments",
+                "InsuranceBalance", "PatientBalance", "TotalBalance", "TotalInsuranceBalance", "OtherBalance", "ChargeToDate",
+                "ChargeTotalPayments", "ChargeTotalAdjustments", "CheckDate", "PaymentPostedDate", "PostedWeek", "ClaimStatus",
+                "DenialCode", "ClaimLevelDenialCode", "DenialCodeNormalized", "DenialDescription", "DenialDate", "ICDCode",
+                "ICDPointer", "AgingDOS", "PaymentPercent", "FullyPaidCount", "FullyPaidAmount", "Adjudicated",
+                "AdjudicatedAmount", "Bucket30", "Bucket30Amount", "Bucket60", "Bucket60Amount", "Facility",
+                "OrderingProviderID", "ClaimUID", "DaystoDOS", "RollingDays", "DaystoBill", "DaystoPost",
+                "InsertedDateTime"
             ],
     };
 

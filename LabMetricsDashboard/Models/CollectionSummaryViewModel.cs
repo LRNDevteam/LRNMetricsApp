@@ -479,7 +479,9 @@ public sealed record CptPaymentPctRow(
     string? PanelName = null,
     bool IsPanelRow = false,
     bool SnapshotPctIsPoints = false,
-    decimal? TotalPaymentPctFromSp = null)
+    decimal? TotalPaymentPctFromSp = null,
+    // Panel -> CPT hierarchy: the SP returns Sum of InsurancePayment (held in PaidInsurancePayment).
+    bool HasInsurancePayment = false)
 {
     /// <summary>
     /// Payment % = SUM(InsurancePayment) / SUM(ChargeAmount) × 100.

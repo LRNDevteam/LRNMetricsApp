@@ -4,13 +4,10 @@
    Database : NWL_LRN
 
    BilledUnbilled (NVARCHAR(250) NULL):
-     1. FirstBilledDate is a date
-        AND ClaimType NOT IN ('Unbilled in Daqbilling','Unbilled in Webpm') -> 'Billed'
-     2. FirstBilledDate blank and EmedixSubmissionDate is a date
-        AND ClaimType NOT IN ('Unbilled in Daqbilling','Unbilled in Webpm') -> 'Billed'
-     3. FirstBilledDate blank and EmedixSubmissionDate blank                 -> 'UnBilled'
-     A row whose ClaimType is one of those two values is UnBilled even when
-     a billed date is present. Any other value (non-date text) is UnBilled.
+     1. FirstBilledDate is a date                                   -> 'Billed'
+     2. FirstBilledDate blank and EmedixSubmissionDate is a date    -> 'Billed'
+     3. FirstBilledDate blank and EmedixSubmissionDate blank        -> 'UnBilled'
+     ClaimType does not affect the value. Any other value (non-date text) is UnBilled.
      Stored text stays 'UnBilled' so existing filters keep matching.
 
    DeniedStatus (NVARCHAR(500) NULL), set by the same procedure:
@@ -89,25 +86,19 @@ BEGIN
             SELECT
                 cl.BilledUnbilled,
                 NewValue = CASE
-                    WHEN d.FirstBilled IS NOT NULL AND st.Excluded = 0
+                    WHEN d.FirstBilled IS NOT NULL
                         THEN N'Billed'
-                    WHEN d.FirstBilled IS NULL AND d.Emedix IS NOT NULL AND st.Excluded = 0
+                    WHEN d.FirstBilled IS NULL AND d.Emedix IS NOT NULL
                         THEN N'Billed'
                     ELSE N'UnBilled'
                 END
             FROM dbo.ClaimLevelData cl
             CROSS APPLY (SELECT
                 FirstRaw = NULLIF(LTRIM(RTRIM(cl.FirstBilledDate)), N''),
-                EmedixRaw = NULLIF(LTRIM(RTRIM(cl.EmedixSubmissionDate)), N''),
-                Ct = LTRIM(RTRIM(ISNULL(cl.ClaimType, N'')))) r
+                EmedixRaw = NULLIF(LTRIM(RTRIM(cl.EmedixSubmissionDate)), N'')) r
             CROSS APPLY (SELECT
                 FirstBilled = TRY_CAST(r.FirstRaw AS DATE),
                 Emedix      = TRY_CAST(r.EmedixRaw AS DATE)) d
-            CROSS APPLY (SELECT
-                Excluded = CASE WHEN r.Ct IN (
-                    N'Unbilled in Daqbilling',
-                    N'Unbilled in Webpm'
-                ) THEN 1 ELSE 0 END) st
         )
         UPDATE Src
         SET    BilledUnbilled = NewValue
@@ -135,22 +126,16 @@ BEGIN
         DECLARE @Total INT, @B1 INT, @B2 INT, @U3 INT, @UX INT;
         SELECT
             @Total = COUNT(*),
-            @B1 = SUM(CASE WHEN d.FirstBilled IS NOT NULL AND st.Excluded = 0 THEN 1 ELSE 0 END),
-            @B2 = SUM(CASE WHEN d.FirstBilled IS NULL AND d.Emedix IS NOT NULL AND st.Excluded = 0 THEN 1 ELSE 0 END),
+            @B1 = SUM(CASE WHEN d.FirstBilled IS NOT NULL THEN 1 ELSE 0 END),
+            @B2 = SUM(CASE WHEN d.FirstBilled IS NULL AND d.Emedix IS NOT NULL THEN 1 ELSE 0 END),
             @U3 = SUM(CASE WHEN r.FirstRaw IS NULL AND r.EmedixRaw IS NULL THEN 1 ELSE 0 END)
         FROM dbo.ClaimLevelData cl
         CROSS APPLY (SELECT
             FirstRaw = NULLIF(LTRIM(RTRIM(cl.FirstBilledDate)), N''),
-            EmedixRaw = NULLIF(LTRIM(RTRIM(cl.EmedixSubmissionDate)), N''),
-            Ct = LTRIM(RTRIM(ISNULL(cl.ClaimType, N'')))) r
+            EmedixRaw = NULLIF(LTRIM(RTRIM(cl.EmedixSubmissionDate)), N'')) r
         CROSS APPLY (SELECT
             FirstBilled = TRY_CAST(r.FirstRaw AS DATE),
-            Emedix      = TRY_CAST(r.EmedixRaw AS DATE)) d
-        CROSS APPLY (SELECT
-            Excluded = CASE WHEN r.Ct IN (
-                N'Unbilled in Daqbilling',
-                N'Unbilled in Webpm'
-            ) THEN 1 ELSE 0 END) st;
+            Emedix      = TRY_CAST(r.EmedixRaw AS DATE)) d;
         SET @UX = @Total - ISNULL(@B1, 0) - ISNULL(@B2, 0) - ISNULL(@U3, 0);
 
         UPDATE dbo.NW_BilledUnbilled_UpdateLog

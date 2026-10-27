@@ -7,13 +7,15 @@
                PMS / Cash -> ClaimLevelData.DateofService  (billed-date mode: FirstBilledDate)
    Counting: LIS = count of non-blank Accession (Sample IDs). PMS = count of Claim ID.
 
-   Rows marked PROVISIONAL are "Logic Doubt" on the client sheet; they use the rule
-   noted here until the client confirms it. Change them in usp_TD_ES_Compute.
+   Duplicate (PMS / Cash): claims sharing an AccessionNumber keep the latest claim (highest
+   ClaimID); every other claim on that AccessionNumber is Duplicate = TRUE. Every PMS / Cash
+   row except H counts Duplicate = FALSE claims only.
+   Billed claim = ClaimStatus NOT IN (Unbilled, Unbilled - Patient Balance).
 
    LIS Breakdown (LIMSMaster; same NewStatus / BillCategory / SubStatus values as the LIS Summary)
      A   Total Samples              every sample
      B   Billable Samples           NewStatus = Billable
-     B1-B9 Toxicology, Blood, Urinalysis, Wound, PGX, UTI, STI, RPP, GI
+     B1-B10 Toxicology, Blood, Urinalysis, STI, Wound, PGX, UTI, RPP, GI, UTI + Urinalysis
                                     Billable AND PanelName = the panel
      C   Billed                     Billable AND BillCategory = Billed
      D   Unbilled                   Billable AND BillCategory = Unbilled
@@ -24,45 +26,45 @@
      E4 System Test  E5 Self Pay  E6 CIP/Pending
 
    Billable Samples - PMS Breakdown (ClaimLevelData)
-     F   No. of Billed Claims               BilledStatus = Billed                          PROVISIONAL
-     G   Billed Mismatches - Duplicates     F minus LIS C                                  PROVISIONAL
-     H   Duplicate Claims                   billed claims whose AccessionNumber is already
-                                            on another claim (every claim after the first) PROVISIONAL
-     I   No. of UnBilled Claims             BilledStatus = Unbilled
-     J   No. of Fully Paid Claims           ClaimStatus = Fully Paid                       PROVISIONAL
-     K   No. of Partially Paid Claims       ClaimStatus = Partially Paid                   PROVISIONAL
+     F   No. of Billed Claims               billed claims
+     G   Billed Mismatches - Duplicates     F minus LIS C
+     H   Duplicate Claims                   Duplicate = TRUE (any ClaimStatus)
+     I   No. of UnBilled Claims             ClaimStatus IN (Unbilled, Unbilled - Patient Balance)
+     J   No. of Fully Paid Claims           ClaimStatus = Fully Paid
+     K   No. of Partially Paid Claims       ClaimStatus = Partially Paid
      L   No. of Patient Responsibility      ClaimStatus = Patient Responsibility
-     M   No. of Fully Adjusted Claims       ClaimStatus = Fully Adjusted                   PROVISIONAL
+     M   No. of Fully Adjusted Claims       ClaimStatus = Fully Adjusted
      N   No. of Partially Adjusted Claims   ClaimStatus = Partially Adjusted
-     O   No. of Insurance Balance Claims    O1 + O2 + O3                                   PROVISIONAL
-     O1    Fully Denied                     ClaimStatus IN (Denied, Fully Denied)          PROVISIONAL
+     O   No. of Insurance Balance Claims    O1 + O2 + O3
+     O1    Fully Denied                     ClaimStatus = Fully Denied
      O2    Partially Denied                 ClaimStatus = Partially Denied
-     O3    No Response from Payor           ClaimStatus = No Response                      PROVISIONAL
+     O3    No Response from Payor           ClaimStatus = No Response
 
-   Cash Breakdown (BilledStatus = Billed)                                                  all PROVISIONAL
-     P   Total Billed ($)                   SUM(ChargeAmount)
-     Q   Expected Payment ($)               SUM(ExpectedPayment)
+   Cash Breakdown
+     P   Total Billed ($)                   SUM(ChargeAmount)         billed claims
+     Q   Expected Payment ($)               SUM(ExpectedPayment)      billed claims
      Q1-Q9 by Panelname (Toxicology, Blood, PGX, Wound, RPP, UTI, STI, GI, Urinalysis)
-     Q10   Panel Not Listed                 any other Panelname
-     R   Insurance Payment ($)              SUM(InsurancePayment) AND ClaimStatus = Fully Paid
-     S   Partially Paid ($)                 SUM(InsurancePayment) AND ClaimStatus = Partially Paid
-     T   Total Payments ($)                 SUM(TotalPayments)
-     U   Total Adjustments ($)              SUM(TotalAdjustments)
-     V   Contractual Obligation W/O         SUM(InsuranceAdjustments)
-     W   Total Patient Responsibility       SUM(PatientBalance)
-     X   Total Insurance Balance ($)        SUM(InsuranceBalance)
-     X1    Denials                          X AND ClaimStatus IN (Denied, Fully Denied)
-     X2    Partially Denied                 X AND ClaimStatus = Partially Denied
-     X3    No Response from Payor           X AND ClaimStatus = No Response
+     R   Insurance Payment ($)              SUM(InsurancePayment)     ClaimStatus = Fully Paid
+     S   Partially Paid ($)                 SUM(InsurancePayment)     ClaimStatus = Partially Paid
+     T   Total Payments ($)                 SUM(InsurancePayment)     ClaimStatus IN (Fully Paid, Partially Paid)
+     U   Total Adjustments ($)              SUM(InsuranceAdjustments) ClaimStatus = Fully Adjusted
+     V   Contractual Obligation W/O         SUM(TotalAdjustments)     ClaimStatus NOT IN (Fully Adjusted, Unbilled,
+                                                                                         Unbilled - Patient Balance)
+     W   Total Patient Responsibility       SUM(PatientBalance)       billed claims
+     X   Total Insurance Balance ($)        X1 + X2 + X3
+     X1    Denials                          SUM(TotalBalance)         ClaimStatus = Fully Denied
+     X2    Partially Denied                 SUM(InsuranceBalance)     ClaimStatus IN (Partially Adjusted, Partially Paid,
+                                                                                     Partially Denied)
+     X3    No Response from Payor           SUM(InsuranceBalance)     ClaimStatus = No Response
 
    Expected Payment Per Claim (end of the Cash section; the Averages section holds only Z / AA / AB)
-                                                                                           PROVISIONAL
      Y   Average Expected Payment ($)       Q / F
-     Y1-Y9 per panel                        panel Expected Payment / panel billed claims
-   Average Payment Per Claim                                                               PROVISIONAL
+     Y1-Y9 per panel                        panel Expected Payment (Q1-Q9) / LIS Billable Samples of
+                                            the same panel (B1-B9)
+   Average Payment Per Claim
      Z   Total Pay / Billed Claims          T / F
-     AA  Total Pay / Paid Claims            (R + S) / (J + K)
-     AB  Total Pay / Adjudicated Claims     (R + S) / (J + K + L + M + N + O1 + O2)
+     AA  Total Pay / Paid Claims            R / J
+     AB  Total Pay / Adjudicated Claims     T / (J + K + L + M + N + O1 + O2)
    ============================================================================= */
 SET NOCOUNT ON;
 GO
@@ -206,8 +208,8 @@ BEGIN
                    WHEN p.SS = N'READY TO BILL' THEN 'READY'
                    WHEN p.SS = N'MISSING INSURANCE INFO' THEN 'MISSINS'
                    ELSE '' END AS VARCHAR(10)) AS Sub,
-               CAST(CASE WHEN p.PN IN (N'TOXICOLOGY', N'BLOOD', N'URINALYSIS', N'WOUND', N'PGX',
-                                       N'UTI', N'STI', N'RPP', N'GI') THEN p.PN ELSE N'' END AS NVARCHAR(20)) AS Panel
+               CAST(CASE WHEN p.PN IN (N'TOXICOLOGY', N'BLOOD', N'URINALYSIS', N'STI', N'WOUND', N'PGX',
+                                       N'UTI', N'RPP', N'GI', N'UTI + URINALYSIS') THEN p.PN ELSE N'' END AS NVARCHAR(20)) AS Panel
     ) k
     WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(500), l.Accession))), N'') IS NOT NULL
       AND p.Dos IS NOT NULL
@@ -230,27 +232,26 @@ BEGIN
     ;WITH c AS
     (
         SELECT
-            UPPER(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), c.BilledStatus), N'')))) AS BillStatus,
             UPPER(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), c.ClaimStatus), N''))))  AS ClaimStatus,
             CAST(CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(500), c.Panelname), N''))))
                            IN (N'TOXICOLOGY', N'BLOOD', N'URINALYSIS', N'WOUND', N'PGX', N'UTI', N'STI', N'RPP', N'GI')
                       THEN UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(500), c.Panelname)))) ELSE N'' END AS NVARCHAR(20)) AS Panel,
-            -- Every claim after the first one carrying the same AccessionNumber.
-            CASE WHEN NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(1000), c.AccessionNumber))), N'') IS NOT NULL
+            -- Every claim but the latest (highest ClaimID) carrying the same AccessionNumber.
+            CAST(CASE WHEN NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(1000), c.AccessionNumber))), N'') IS NOT NULL
                       AND ROW_NUMBER() OVER (PARTITION BY LTRIM(RTRIM(CONVERT(NVARCHAR(1000), c.AccessionNumber)))
-                                             ORDER BY c.ClaimID, c.RecordId) > 1
-                 THEN 1 ELSE 0 END AS IsDup,
+                                             ORDER BY TRY_CAST(c.ClaimID AS BIGINT) DESC, c.ClaimID DESC, c.RecordId DESC) > 1
+                 THEN 1 ELSE 0 END AS BIT) AS IsDup,
             COALESCE(TRY_CONVERT(DATE, c.DateofService, 101), TRY_CAST(c.DateofService AS DATE)) AS Dos,
             CASE WHEN @UseBilledDate = 1
                  THEN COALESCE(TRY_CONVERT(DATE, c.FirstBilledDate, 101), TRY_CAST(c.FirstBilledDate AS DATE))
                  ELSE COALESCE(TRY_CONVERT(DATE, c.DateofService, 101), TRY_CAST(c.DateofService AS DATE)) END AS PeriodDate,
             ISNULL(TRY_CONVERT(DECIMAL(18,2), REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.ChargeAmount))), N'$', N''), N',', N'')), 0)         AS ChargeAmount,
             ISNULL(TRY_CONVERT(DECIMAL(18,2), REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.InsurancePayment))), N'$', N''), N',', N'')), 0)     AS InsurancePayment,
-            ISNULL(TRY_CONVERT(DECIMAL(18,2), REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.TotalPayments))), N'$', N''), N',', N'')), 0)        AS TotalPayments,
             ISNULL(TRY_CONVERT(DECIMAL(18,2), REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.TotalAdjustments))), N'$', N''), N',', N'')), 0)     AS TotalAdjustments,
             ISNULL(TRY_CONVERT(DECIMAL(18,2), REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.InsuranceAdjustments))), N'$', N''), N',', N'')), 0) AS InsuranceAdjustments,
             ISNULL(TRY_CONVERT(DECIMAL(18,2), REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.PatientBalance))), N'$', N''), N',', N'')), 0)       AS PatientBalance,
             ISNULL(TRY_CONVERT(DECIMAL(18,2), REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.InsuranceBalance))), N'$', N''), N',', N'')), 0)     AS InsuranceBalance,
+            ISNULL(TRY_CONVERT(DECIMAL(18,2), REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.TotalBalance))), N'$', N''), N',', N'')), 0)         AS TotalBalance,
             ISNULL(TRY_CONVERT(DECIMAL(18,2), REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.ExpectedPayment))), N'$', N''), N',', N'')), 0)      AS ExpectedPayment,
             LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), c.Panelname), N'')))         AS PanelFilter,
             LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), c.ClinicName), N'')))        AS ClinicFilter,
@@ -260,13 +261,14 @@ BEGIN
         WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(255), c.ClaimID))), N'') IS NOT NULL
     )
     INSERT INTO #EsClaims
-        (ESYear, ESMonth, BillStatus, ClaimStatus, Panel, ClaimCnt, DupCnt, ChargeAmount, InsurancePayment,
-         TotalPayments, TotalAdjustments, InsuranceAdjustments, PatientBalance, InsuranceBalance, ExpectedPayment)
-    SELECT YEAR(n.PeriodDate), MONTH(n.PeriodDate), n.BillStatus, n.ClaimStatus, n.Panel,
-           COUNT(*), SUM(n.IsDup),
-           SUM(n.ChargeAmount), SUM(n.InsurancePayment), SUM(n.TotalPayments), SUM(n.TotalAdjustments),
-           SUM(n.InsuranceAdjustments), SUM(n.PatientBalance), SUM(n.InsuranceBalance), SUM(n.ExpectedPayment)
+        (ESYear, ESMonth, IsDup, IsBilled, ClaimStatus, Panel, ClaimCnt, ChargeAmount, InsurancePayment,
+         TotalAdjustments, InsuranceAdjustments, PatientBalance, InsuranceBalance, TotalBalance, ExpectedPayment)
+    SELECT YEAR(n.PeriodDate), MONTH(n.PeriodDate), n.IsDup, b.IsBilled, n.ClaimStatus, n.Panel,
+           COUNT(*),
+           SUM(n.ChargeAmount), SUM(n.InsurancePayment), SUM(n.TotalAdjustments),
+           SUM(n.InsuranceAdjustments), SUM(n.PatientBalance), SUM(n.InsuranceBalance), SUM(n.TotalBalance), SUM(n.ExpectedPayment)
     FROM c n
+    CROSS APPLY (SELECT CAST(CASE WHEN n.ClaimStatus IN (N'UNBILLED', N'UNBILLED - PATIENT BALANCE') THEN 0 ELSE 1 END AS BIT) AS IsBilled) b
     WHERE n.Dos IS NOT NULL
       AND YEAR(n.Dos) > 1900
       AND n.PeriodDate IS NOT NULL
@@ -280,7 +282,7 @@ BEGIN
       AND (@HasClinic   = 0 OR n.ClinicFilter   IN (SELECT Val FROM #Filters WHERE Dim = 'Clinic'))
       AND (@HasProvider = 0 OR n.ProviderFilter IN (SELECT Val FROM #Filters WHERE Dim = 'Provider'))
       AND (@HasRep      = 0 OR n.RepFilter      IN (SELECT Val FROM #Filters WHERE Dim = 'Rep'))
-    GROUP BY YEAR(n.PeriodDate), MONTH(n.PeriodDate), n.BillStatus, n.ClaimStatus, n.Panel
+    GROUP BY YEAR(n.PeriodDate), MONTH(n.PeriodDate), n.IsDup, b.IsBilled, n.ClaimStatus, n.Panel
     OPTION (RECOMPILE);
 END;
 GO
@@ -302,12 +304,13 @@ BEGIN
         ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'TOXICOLOGY' THEN Cnt END), 0) AS L_B1,
         ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'BLOOD'      THEN Cnt END), 0) AS L_B2,
         ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'URINALYSIS' THEN Cnt END), 0) AS L_B3,
-        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'WOUND'      THEN Cnt END), 0) AS L_B4,
-        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'PGX'        THEN Cnt END), 0) AS L_B5,
-        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'UTI'        THEN Cnt END), 0) AS L_B6,
-        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'STI'        THEN Cnt END), 0) AS L_B7,
+        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'STI'        THEN Cnt END), 0) AS L_B4,
+        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'WOUND'      THEN Cnt END), 0) AS L_B5,
+        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'PGX'        THEN Cnt END), 0) AS L_B6,
+        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'UTI'        THEN Cnt END), 0) AS L_B7,
         ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'RPP'        THEN Cnt END), 0) AS L_B8,
         ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'GI'         THEN Cnt END), 0) AS L_B9,
+        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'UTI + URINALYSIS' THEN Cnt END), 0) AS L_B10,
         ISNULL(SUM(CASE WHEN St = 'INS' AND Bill = 'B' THEN Cnt END), 0) AS L_C,
         ISNULL(SUM(CASE WHEN St = 'INS' AND Bill = 'U' THEN Cnt END), 0) AS L_D,
         ISNULL(SUM(CASE WHEN St = 'INS' AND Bill = 'U' AND Sub = 'READY'   THEN Cnt END), 0) AS L_D1,
@@ -327,48 +330,37 @@ BEGIN
     SELECT
         ISNULL(ESYear, 0) AS Y,
         CASE WHEN GROUPING(ESMonth) = 1 THEN 0 ELSE ESMonth END AS M,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' THEN ClaimCnt END), 0) AS P_F,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' THEN DupCnt END), 0) AS P_H,
-        ISNULL(SUM(CASE WHEN BillStatus = N'UNBILLED' THEN ClaimCnt END), 0) AS P_I,
-        ISNULL(SUM(CASE WHEN ClaimStatus = N'FULLY PAID' THEN ClaimCnt END), 0) AS P_J,
-        ISNULL(SUM(CASE WHEN ClaimStatus = N'PARTIALLY PAID' THEN ClaimCnt END), 0) AS P_K,
-        ISNULL(SUM(CASE WHEN ClaimStatus = N'PATIENT RESPONSIBILITY' THEN ClaimCnt END), 0) AS P_L,
-        ISNULL(SUM(CASE WHEN ClaimStatus = N'FULLY ADJUSTED' THEN ClaimCnt END), 0) AS P_M,
-        ISNULL(SUM(CASE WHEN ClaimStatus = N'PARTIALLY ADJUSTED' THEN ClaimCnt END), 0) AS P_N,
-        ISNULL(SUM(CASE WHEN ClaimStatus IN (N'DENIED', N'FULLY DENIED') THEN ClaimCnt END), 0) AS P_O1,
-        ISNULL(SUM(CASE WHEN ClaimStatus = N'PARTIALLY DENIED' THEN ClaimCnt END), 0) AS P_O2,
-        ISNULL(SUM(CASE WHEN ClaimStatus = N'NO RESPONSE' THEN ClaimCnt END), 0) AS P_O3,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' THEN ChargeAmount END), 0) AS C_P,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' THEN ExpectedPayment END), 0) AS C_Q,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'TOXICOLOGY' THEN ExpectedPayment END), 0) AS C_Q1,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'BLOOD'      THEN ExpectedPayment END), 0) AS C_Q2,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'PGX'        THEN ExpectedPayment END), 0) AS C_Q3,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'WOUND'      THEN ExpectedPayment END), 0) AS C_Q4,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'RPP'        THEN ExpectedPayment END), 0) AS C_Q5,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'UTI'        THEN ExpectedPayment END), 0) AS C_Q6,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'STI'        THEN ExpectedPayment END), 0) AS C_Q7,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'GI'         THEN ExpectedPayment END), 0) AS C_Q8,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'URINALYSIS' THEN ExpectedPayment END), 0) AS C_Q9,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N''           THEN ExpectedPayment END), 0) AS C_Q10,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'TOXICOLOGY' THEN ClaimCnt END), 0) AS F1,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'BLOOD'      THEN ClaimCnt END), 0) AS F2,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'PGX'        THEN ClaimCnt END), 0) AS F3,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'WOUND'      THEN ClaimCnt END), 0) AS F4,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'RPP'        THEN ClaimCnt END), 0) AS F5,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'UTI'        THEN ClaimCnt END), 0) AS F6,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'STI'        THEN ClaimCnt END), 0) AS F7,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'GI'         THEN ClaimCnt END), 0) AS F8,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND Panel = N'URINALYSIS' THEN ClaimCnt END), 0) AS F9,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND ClaimStatus = N'FULLY PAID' THEN InsurancePayment END), 0) AS C_R,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND ClaimStatus = N'PARTIALLY PAID' THEN InsurancePayment END), 0) AS C_S,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' THEN TotalPayments END), 0) AS C_T,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' THEN TotalAdjustments END), 0) AS C_U,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' THEN InsuranceAdjustments END), 0) AS C_V,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' THEN PatientBalance END), 0) AS C_W,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' THEN InsuranceBalance END), 0) AS C_X,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND ClaimStatus IN (N'DENIED', N'FULLY DENIED') THEN InsuranceBalance END), 0) AS C_X1,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND ClaimStatus = N'PARTIALLY DENIED' THEN InsuranceBalance END), 0) AS C_X2,
-        ISNULL(SUM(CASE WHEN BillStatus = N'BILLED' AND ClaimStatus = N'NO RESPONSE' THEN InsuranceBalance END), 0) AS C_X3
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 THEN ClaimCnt END), 0) AS P_F,
+        ISNULL(SUM(CASE WHEN IsDup = 1 THEN ClaimCnt END), 0) AS P_H,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 0 THEN ClaimCnt END), 0) AS P_I,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus = N'FULLY PAID' THEN ClaimCnt END), 0) AS P_J,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus = N'PARTIALLY PAID' THEN ClaimCnt END), 0) AS P_K,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus = N'PATIENT RESPONSIBILITY' THEN ClaimCnt END), 0) AS P_L,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus = N'FULLY ADJUSTED' THEN ClaimCnt END), 0) AS P_M,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus = N'PARTIALLY ADJUSTED' THEN ClaimCnt END), 0) AS P_N,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus = N'FULLY DENIED' THEN ClaimCnt END), 0) AS P_O1,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus = N'PARTIALLY DENIED' THEN ClaimCnt END), 0) AS P_O2,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus = N'NO RESPONSE' THEN ClaimCnt END), 0) AS P_O3,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 THEN ChargeAmount END), 0) AS C_P,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 THEN ExpectedPayment END), 0) AS C_Q,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'TOXICOLOGY' THEN ExpectedPayment END), 0) AS C_Q1,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'BLOOD'      THEN ExpectedPayment END), 0) AS C_Q2,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'PGX'        THEN ExpectedPayment END), 0) AS C_Q3,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'WOUND'      THEN ExpectedPayment END), 0) AS C_Q4,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'RPP'        THEN ExpectedPayment END), 0) AS C_Q5,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'UTI'        THEN ExpectedPayment END), 0) AS C_Q6,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'STI'        THEN ExpectedPayment END), 0) AS C_Q7,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'GI'         THEN ExpectedPayment END), 0) AS C_Q8,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'URINALYSIS' THEN ExpectedPayment END), 0) AS C_Q9,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus = N'FULLY PAID' THEN InsurancePayment END), 0) AS C_R,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus = N'PARTIALLY PAID' THEN InsurancePayment END), 0) AS C_S,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus IN (N'FULLY PAID', N'PARTIALLY PAID') THEN InsurancePayment END), 0) AS C_T,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus = N'FULLY ADJUSTED' THEN InsuranceAdjustments END), 0) AS C_U,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND ClaimStatus <> N'FULLY ADJUSTED' THEN TotalAdjustments END), 0) AS C_V,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 THEN PatientBalance END), 0) AS C_W,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus = N'FULLY DENIED' THEN TotalBalance END), 0) AS C_X1,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus IN (N'PARTIALLY ADJUSTED', N'PARTIALLY PAID', N'PARTIALLY DENIED') THEN InsuranceBalance END), 0) AS C_X2,
+        ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus = N'NO RESPONSE' THEN InsuranceBalance END), 0) AS C_X3
     INTO #ClmM
     FROM #EsClaims
     GROUP BY GROUPING SETS ((ESYear, ESMonth), (ESYear), ());
@@ -377,7 +369,7 @@ BEGIN
     SELECT COALESCE(l.Y, c.Y) AS Y, COALESCE(l.M, c.M) AS M,
            ISNULL(l.L_A, 0) L_A, ISNULL(l.L_B, 0) L_B,
            ISNULL(l.L_B1, 0) L_B1, ISNULL(l.L_B2, 0) L_B2, ISNULL(l.L_B3, 0) L_B3, ISNULL(l.L_B4, 0) L_B4, ISNULL(l.L_B5, 0) L_B5,
-           ISNULL(l.L_B6, 0) L_B6, ISNULL(l.L_B7, 0) L_B7, ISNULL(l.L_B8, 0) L_B8, ISNULL(l.L_B9, 0) L_B9,
+           ISNULL(l.L_B6, 0) L_B6, ISNULL(l.L_B7, 0) L_B7, ISNULL(l.L_B8, 0) L_B8, ISNULL(l.L_B9, 0) L_B9, ISNULL(l.L_B10, 0) L_B10,
            ISNULL(l.L_C, 0) L_C, ISNULL(l.L_D, 0) L_D, ISNULL(l.L_D1, 0) L_D1, ISNULL(l.L_D2, 0) L_D2,
            ISNULL(l.L_E, 0) L_E, ISNULL(l.L_E1, 0) L_E1, ISNULL(l.L_E2, 0) L_E2, ISNULL(l.L_E3, 0) L_E3,
            ISNULL(l.L_E4, 0) L_E4, ISNULL(l.L_E5, 0) L_E5, ISNULL(l.L_E6, 0) L_E6,
@@ -386,11 +378,10 @@ BEGIN
            ISNULL(c.P_O1, 0) P_O1, ISNULL(c.P_O2, 0) P_O2, ISNULL(c.P_O3, 0) P_O3,
            ISNULL(c.C_P, 0) C_P, ISNULL(c.C_Q, 0) C_Q,
            ISNULL(c.C_Q1, 0) C_Q1, ISNULL(c.C_Q2, 0) C_Q2, ISNULL(c.C_Q3, 0) C_Q3, ISNULL(c.C_Q4, 0) C_Q4, ISNULL(c.C_Q5, 0) C_Q5,
-           ISNULL(c.C_Q6, 0) C_Q6, ISNULL(c.C_Q7, 0) C_Q7, ISNULL(c.C_Q8, 0) C_Q8, ISNULL(c.C_Q9, 0) C_Q9, ISNULL(c.C_Q10, 0) C_Q10,
-           ISNULL(c.F1, 0) F1, ISNULL(c.F2, 0) F2, ISNULL(c.F3, 0) F3, ISNULL(c.F4, 0) F4, ISNULL(c.F5, 0) F5,
-           ISNULL(c.F6, 0) F6, ISNULL(c.F7, 0) F7, ISNULL(c.F8, 0) F8, ISNULL(c.F9, 0) F9,
+           ISNULL(c.C_Q6, 0) C_Q6, ISNULL(c.C_Q7, 0) C_Q7, ISNULL(c.C_Q8, 0) C_Q8, ISNULL(c.C_Q9, 0) C_Q9,
            ISNULL(c.C_R, 0) C_R, ISNULL(c.C_S, 0) C_S, ISNULL(c.C_T, 0) C_T, ISNULL(c.C_U, 0) C_U, ISNULL(c.C_V, 0) C_V,
-           ISNULL(c.C_W, 0) C_W, ISNULL(c.C_X, 0) C_X, ISNULL(c.C_X1, 0) C_X1, ISNULL(c.C_X2, 0) C_X2, ISNULL(c.C_X3, 0) C_X3
+           ISNULL(c.C_W, 0) C_W, ISNULL(c.C_X1, 0) + ISNULL(c.C_X2, 0) + ISNULL(c.C_X3, 0) C_X,
+           ISNULL(c.C_X1, 0) C_X1, ISNULL(c.C_X2, 0) C_X2, ISNULL(c.C_X3, 0) C_X3
     INTO #Per
     FROM #LisM l
     FULL OUTER JOIN #ClmM c ON c.Y = l.Y AND c.M = l.M;
@@ -400,9 +391,7 @@ BEGIN
            CAST(r.MetricValue AS DECIMAL(18,2)), r.ClaimCount
     FROM #Per p
     CROSS APPLY (
-        SELECT CAST(p.C_R + p.C_S AS DECIMAL(38,6)) AS PayPaid,
-               CAST(p.P_J + p.P_K AS DECIMAL(38,6)) AS PaidClaims,
-               CAST(p.P_J + p.P_K + p.P_L + p.P_M + p.P_N + p.P_O1 + p.P_O2 AS DECIMAL(38,6)) AS AdjudicatedClaims
+        SELECT CAST(p.P_J + p.P_K + p.P_L + p.P_M + p.P_N + p.P_O1 + p.P_O2 AS DECIMAL(38,6)) AS AdjudicatedClaims
     ) d
     CROSS APPLY (VALUES
         ('LIS', 'A',   N'Total Samples',                10, CAST(p.L_A AS DECIMAL(38,6)), p.L_A),
@@ -410,12 +399,13 @@ BEGIN
         ('LIS', 'B1',  N'  Toxicology',                 21, CAST(p.L_B1 AS DECIMAL(38,6)), p.L_B1),
         ('LIS', 'B2',  N'  Blood',                      22, CAST(p.L_B2 AS DECIMAL(38,6)), p.L_B2),
         ('LIS', 'B3',  N'  Urinalysis',                 23, CAST(p.L_B3 AS DECIMAL(38,6)), p.L_B3),
-        ('LIS', 'B4',  N'  Wound',                      24, CAST(p.L_B4 AS DECIMAL(38,6)), p.L_B4),
-        ('LIS', 'B5',  N'  PGX',                        25, CAST(p.L_B5 AS DECIMAL(38,6)), p.L_B5),
-        ('LIS', 'B6',  N'  UTI',                        26, CAST(p.L_B6 AS DECIMAL(38,6)), p.L_B6),
-        ('LIS', 'B7',  N'  STI',                        27, CAST(p.L_B7 AS DECIMAL(38,6)), p.L_B7),
+        ('LIS', 'B4',  N'  STI',                        24, CAST(p.L_B4 AS DECIMAL(38,6)), p.L_B4),
+        ('LIS', 'B5',  N'  Wound',                      25, CAST(p.L_B5 AS DECIMAL(38,6)), p.L_B5),
+        ('LIS', 'B6',  N'  PGX',                        26, CAST(p.L_B6 AS DECIMAL(38,6)), p.L_B6),
+        ('LIS', 'B7',  N'  UTI',                        27, CAST(p.L_B7 AS DECIMAL(38,6)), p.L_B7),
         ('LIS', 'B8',  N'  RPP',                        28, CAST(p.L_B8 AS DECIMAL(38,6)), p.L_B8),
         ('LIS', 'B9',  N'  GI',                         29, CAST(p.L_B9 AS DECIMAL(38,6)), p.L_B9),
+        ('LIS', 'B10', N'  UTI + Urinalysis',           30, CAST(p.L_B10 AS DECIMAL(38,6)), p.L_B10),
         ('LIS', 'C',   N'Billed',                       40, CAST(p.L_C AS DECIMAL(38,6)), p.L_C),
         ('LIS', 'D',   N'Unbilled',                     50, CAST(p.L_D AS DECIMAL(38,6)), p.L_D),
         ('LIS', 'D1',  N'  Ready to Bill',              60, CAST(p.L_D1 AS DECIMAL(38,6)), p.L_D1),
@@ -453,7 +443,6 @@ BEGIN
         ('Cash', 'Q7',  N'  STI',                                           427, p.C_Q7, 0),
         ('Cash', 'Q8',  N'  GI',                                            428, p.C_Q8, 0),
         ('Cash', 'Q9',  N'  Urinalysis',                                    429, p.C_Q9, 0),
-        ('Cash', 'Q10', N'  Panel Not Listed',                              430, p.C_Q10, 0),
         ('Cash', 'R',   N'Insurance Payment ($)',                           440, p.C_R, 0),
         ('Cash', 'S',   N'Partially Paid ($)',                              450, p.C_S, 0),
         ('Cash', 'T',   N'Total Payments ($)',                              460, p.C_T, 0),
@@ -465,23 +454,23 @@ BEGIN
         ('Cash', 'X2',  N'  Partially Denied',                              520, p.C_X2, 0),
         ('Cash', 'X3',  N'  No Response from Payor',                        530, p.C_X3, 0),
 
-        ('Cash', 'Y',   N'Average Expected Payment ($) - Expected Pay/Billed Claims', 610,
+        ('Cash', 'Y',   N'Average Expected Payment ($) - Expected Pay/Billable Claims', 610,
             ISNULL(ROUND(CAST(p.C_Q AS DECIMAL(38,6)) / NULLIF(CAST(p.P_F AS DECIMAL(38,6)), 0), 2), 0), p.P_F),
-        ('Cash', 'Y1',  N'  Toxicology', 611, ISNULL(ROUND(CAST(p.C_Q1 AS DECIMAL(38,6)) / NULLIF(CAST(p.F1 AS DECIMAL(38,6)), 0), 2), 0), p.F1),
-        ('Cash', 'Y2',  N'  Blood',      612, ISNULL(ROUND(CAST(p.C_Q2 AS DECIMAL(38,6)) / NULLIF(CAST(p.F2 AS DECIMAL(38,6)), 0), 2), 0), p.F2),
-        ('Cash', 'Y3',  N'  PGX',        613, ISNULL(ROUND(CAST(p.C_Q3 AS DECIMAL(38,6)) / NULLIF(CAST(p.F3 AS DECIMAL(38,6)), 0), 2), 0), p.F3),
-        ('Cash', 'Y4',  N'  Wound',      614, ISNULL(ROUND(CAST(p.C_Q4 AS DECIMAL(38,6)) / NULLIF(CAST(p.F4 AS DECIMAL(38,6)), 0), 2), 0), p.F4),
-        ('Cash', 'Y5',  N'  RPP',        615, ISNULL(ROUND(CAST(p.C_Q5 AS DECIMAL(38,6)) / NULLIF(CAST(p.F5 AS DECIMAL(38,6)), 0), 2), 0), p.F5),
-        ('Cash', 'Y6',  N'  UTI',        616, ISNULL(ROUND(CAST(p.C_Q6 AS DECIMAL(38,6)) / NULLIF(CAST(p.F6 AS DECIMAL(38,6)), 0), 2), 0), p.F6),
-        ('Cash', 'Y7',  N'  STI',        617, ISNULL(ROUND(CAST(p.C_Q7 AS DECIMAL(38,6)) / NULLIF(CAST(p.F7 AS DECIMAL(38,6)), 0), 2), 0), p.F7),
-        ('Cash', 'Y8',  N'  GI',         618, ISNULL(ROUND(CAST(p.C_Q8 AS DECIMAL(38,6)) / NULLIF(CAST(p.F8 AS DECIMAL(38,6)), 0), 2), 0), p.F8),
-        ('Cash', 'Y9',  N'  Urinalysis', 619, ISNULL(ROUND(CAST(p.C_Q9 AS DECIMAL(38,6)) / NULLIF(CAST(p.F9 AS DECIMAL(38,6)), 0), 2), 0), p.F9),
+        ('Cash', 'Y1',  N'  Toxicology', 611, ISNULL(ROUND(CAST(p.C_Q1 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B1 AS DECIMAL(38,6)), 0), 2), 0), p.L_B1),
+        ('Cash', 'Y2',  N'  Blood',      612, ISNULL(ROUND(CAST(p.C_Q2 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B2 AS DECIMAL(38,6)), 0), 2), 0), p.L_B2),
+        ('Cash', 'Y3',  N'  PGX',        613, ISNULL(ROUND(CAST(p.C_Q3 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B6 AS DECIMAL(38,6)), 0), 2), 0), p.L_B6),
+        ('Cash', 'Y4',  N'  Wound',      614, ISNULL(ROUND(CAST(p.C_Q4 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B5 AS DECIMAL(38,6)), 0), 2), 0), p.L_B5),
+        ('Cash', 'Y5',  N'  RPP',        615, ISNULL(ROUND(CAST(p.C_Q5 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B8 AS DECIMAL(38,6)), 0), 2), 0), p.L_B8),
+        ('Cash', 'Y6',  N'  UTI',        616, ISNULL(ROUND(CAST(p.C_Q6 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B7 AS DECIMAL(38,6)), 0), 2), 0), p.L_B7),
+        ('Cash', 'Y7',  N'  STI',        617, ISNULL(ROUND(CAST(p.C_Q7 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B4 AS DECIMAL(38,6)), 0), 2), 0), p.L_B4),
+        ('Cash', 'Y8',  N'  GI',         618, ISNULL(ROUND(CAST(p.C_Q8 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B9 AS DECIMAL(38,6)), 0), 2), 0), p.L_B9),
+        ('Cash', 'Y9',  N'  Urinalysis', 619, ISNULL(ROUND(CAST(p.C_Q9 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B3 AS DECIMAL(38,6)), 0), 2), 0), p.L_B3),
         ('Avg', 'Z',   N'Average Payment ($) - Total Pay/Billed Claims',      710,
             ISNULL(ROUND(CAST(p.C_T AS DECIMAL(38,6)) / NULLIF(CAST(p.P_F AS DECIMAL(38,6)), 0), 2), 0), p.P_F),
         ('Avg', 'AA',  N'Average Payment ($) - Total Pay/Paid Claims',        720,
-            ISNULL(ROUND(d.PayPaid / NULLIF(d.PaidClaims, 0), 2), 0), CAST(d.PaidClaims AS INT)),
+            ISNULL(ROUND(CAST(p.C_R AS DECIMAL(38,6)) / NULLIF(CAST(p.P_J AS DECIMAL(38,6)), 0), 2), 0), p.P_J),
         ('Avg', 'AB',  N'Average Payment ($) - Total Pay/Adjudicated Claims', 730,
-            ISNULL(ROUND(d.PayPaid / NULLIF(d.AdjudicatedClaims, 0), 2), 0), CAST(d.AdjudicatedClaims AS INT))
+            ISNULL(ROUND(CAST(p.C_T AS DECIMAL(38,6)) / NULLIF(d.AdjudicatedClaims, 0), 2), 0), CAST(d.AdjudicatedClaims AS INT))
     ) r(Category, RowCode, Description, SortOrder, MetricValue, ClaimCount);
 END;
 GO
@@ -502,14 +491,14 @@ BEGIN
     CREATE TABLE #EsClaims
     (
         ESYear INT NOT NULL, ESMonth INT NOT NULL,
-        BillStatus NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL,
+        IsDup BIT NOT NULL, IsBilled BIT NOT NULL,
         ClaimStatus NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL,
         Panel NVARCHAR(20) COLLATE DATABASE_DEFAULT NOT NULL,
-        ClaimCnt INT NOT NULL, DupCnt INT NOT NULL,
+        ClaimCnt INT NOT NULL,
         ChargeAmount DECIMAL(18,2) NOT NULL, InsurancePayment DECIMAL(18,2) NOT NULL,
-        TotalPayments DECIMAL(18,2) NOT NULL, TotalAdjustments DECIMAL(18,2) NOT NULL,
-        InsuranceAdjustments DECIMAL(18,2) NOT NULL, PatientBalance DECIMAL(18,2) NOT NULL,
-        InsuranceBalance DECIMAL(18,2) NOT NULL, ExpectedPayment DECIMAL(18,2) NOT NULL
+        TotalAdjustments DECIMAL(18,2) NOT NULL, InsuranceAdjustments DECIMAL(18,2) NOT NULL,
+        PatientBalance DECIMAL(18,2) NOT NULL, InsuranceBalance DECIMAL(18,2) NOT NULL,
+        TotalBalance DECIMAL(18,2) NOT NULL, ExpectedPayment DECIMAL(18,2) NOT NULL
     );
     CREATE TABLE #EsOut
     (
@@ -616,14 +605,14 @@ BEGIN
     CREATE TABLE #EsClaims
     (
         ESYear INT NOT NULL, ESMonth INT NOT NULL,
-        BillStatus NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL,
+        IsDup BIT NOT NULL, IsBilled BIT NOT NULL,
         ClaimStatus NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL,
         Panel NVARCHAR(20) COLLATE DATABASE_DEFAULT NOT NULL,
-        ClaimCnt INT NOT NULL, DupCnt INT NOT NULL,
+        ClaimCnt INT NOT NULL,
         ChargeAmount DECIMAL(18,2) NOT NULL, InsurancePayment DECIMAL(18,2) NOT NULL,
-        TotalPayments DECIMAL(18,2) NOT NULL, TotalAdjustments DECIMAL(18,2) NOT NULL,
-        InsuranceAdjustments DECIMAL(18,2) NOT NULL, PatientBalance DECIMAL(18,2) NOT NULL,
-        InsuranceBalance DECIMAL(18,2) NOT NULL, ExpectedPayment DECIMAL(18,2) NOT NULL
+        TotalAdjustments DECIMAL(18,2) NOT NULL, InsuranceAdjustments DECIMAL(18,2) NOT NULL,
+        PatientBalance DECIMAL(18,2) NOT NULL, InsuranceBalance DECIMAL(18,2) NOT NULL,
+        TotalBalance DECIMAL(18,2) NOT NULL, ExpectedPayment DECIMAL(18,2) NOT NULL
     );
     CREATE TABLE #EsOut
     (

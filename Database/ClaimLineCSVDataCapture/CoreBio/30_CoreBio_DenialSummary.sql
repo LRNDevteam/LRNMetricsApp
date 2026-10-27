@@ -4,7 +4,8 @@
    Source   : dbo.ClaimLevelData (Claim Level)
 
    Client sheet (CoreBio Denial Summary):
-     Denial Code = ClaimLevelData.DenialCode as written ("PR-197", "PR-197, CO-279").
+     Denial Code = ClaimLevelData.ClaimLevelDenialCode as written ("PR-197", "CO-279, PR-197")
+                   (client logic change 2026-10-27; was DenialCode, see script 31).
      Balance     = ClaimLevelData.InsuranceBalance (TotalInsuranceBalance is empty on
                    this file); shown as Total Insurance Balance.
      1. Monthly
@@ -52,7 +53,7 @@ SELECT
     CAST(NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(255), c.ClaimID))), '') AS NVARCHAR(200))            AS ClaimID,
     CAST(ISNULL(NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(500), c.PayerName_Raw))), ''), 'Unknown') AS NVARCHAR(500)) AS PayerName,
     CAST(ISNULL(NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(200), c.PayerType))), ''), 'Unknown') AS NVARCHAR(200))     AS PayerType,
-    CAST(NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.DenialCode))), '') AS NVARCHAR(400))        AS DenialCode,
+    CAST(NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.ClaimLevelDenialCode))), '') AS NVARCHAR(400)) AS DenialCode,
     COALESCE(TRY_CONVERT(DATE, c.CheckDate, 101), TRY_CAST(c.CheckDate AS DATE))                  AS DenialDate,
     ISNULL(TRY_CONVERT(DECIMAL(18,2),
                        REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.InsuranceBalance))), '$', ''), ',', '')), 0)
@@ -95,15 +96,15 @@ RETURN
     SELECT NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(255), c.ClaimID))), N'')                AS ClaimKey,
            CAST(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(500), c.PayerName_Raw), N''))) AS NVARCHAR(500)) AS PayerName,
            CAST(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), c.PayerType), N''))) AS NVARCHAR(200))     AS PayerType,
-           CAST(LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.DenialCode))) AS NVARCHAR(400))   AS DenialCode,
+           CAST(LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.ClaimLevelDenialCode))) AS NVARCHAR(400)) AS DenialCode,
            LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(4000), c.DenialDescription), N'')))     AS DenialDescription,
            COALESCE(TRY_CONVERT(DATE, c.CheckDate, 101), TRY_CAST(c.CheckDate AS DATE)) AS DenialDate,
            ISNULL(b.Bal, 0)                                                             AS Bal
     FROM   dbo.ClaimLevelData c
     CROSS  APPLY (SELECT TRY_CONVERT(DECIMAL(18,2),
                          REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.InsuranceBalance))), N'$', N''), N',', N'')) AS Bal) b
-    WHERE  LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(400), c.DenialCode), N''))) <> N''
-      AND  UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.DenialCode)))) NOT IN (N'OA-102', N'PI-148', N'PR-51')
+    WHERE  LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(400), c.ClaimLevelDenialCode), N''))) <> N''
+      AND  UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.ClaimLevelDenialCode)))) NOT IN (N'OA-102', N'PI-148', N'PR-51')
       AND  ISNULL(b.Bal, 0) > 0;
 GO
 

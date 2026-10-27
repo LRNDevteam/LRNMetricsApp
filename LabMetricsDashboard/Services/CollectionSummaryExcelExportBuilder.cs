@@ -1181,7 +1181,11 @@ public static partial class CollectionSummaryExcelExportBuilder
     /// <summary>Panel -> CPT rows in SP order; each panel is a collapsible group over its CPT codes.</summary>
     private static void WriteCptPanelHierarchy(IXLWorksheet ws, List<CptPaymentPctRow> rows, string labName)
     {
-        string[] headers = ["Panel name / CPT Code", "Claim Count", "Average Payment %"];
+        var showsPay = rows[0].HasInsurancePayment;
+        string[] headers = showsPay
+            ? ["Panel name / CPT Code", "Claim Count", "Insurance Payments", "Average Payment %"]
+            : ["Panel name / CPT Code", "Claim Count", "Average Payment %"];
+        var pctCol = showsPay ? 4 : 3;
         int row = 1;
         ExcelTheme.Collection.WriteTitleBar(ws, row, headers.Length, $"CPT vs Payment % \u2014 {labName}");
         row++;
@@ -1204,14 +1208,16 @@ public static partial class CollectionSummaryExcelExportBuilder
                 CloseGroup(row - 1);
                 WriteCell(ws, row, 1, r.CptCode, XLColor.White, isText: true, bold: true);
                 WriteCell(ws, row, 2, (int)r.SumServiceUnits, XLColor.White, bold: true);
-                WriteCell(ws, row, 3, r.PaymentPct, XLColor.White, isPct: true, bold: true);
+                if (showsPay) WriteCell(ws, row, 3, r.PaidInsurancePayment, XLColor.White, isCurrency: true, bold: true);
+                WriteCell(ws, row, pctCol, r.PaymentPct, XLColor.White, isPct: true, bold: true);
                 firstChild = row + 1;
             }
             else
             {
                 WriteCell(ws, row, 1, $"  {r.CptCode}", ColChild, isText: true);
                 WriteCell(ws, row, 2, (int)r.SumServiceUnits, ColChild);
-                WriteCell(ws, row, 3, r.PaymentPct, ColChild, isPct: true);
+                if (showsPay) WriteCell(ws, row, 3, r.PaidInsurancePayment, ColChild, isCurrency: true);
+                WriteCell(ws, row, pctCol, r.PaymentPct, ColChild, isPct: true);
             }
             row++;
         }
@@ -1219,7 +1225,9 @@ public static partial class CollectionSummaryExcelExportBuilder
 
         WriteCell(ws, row, 1, "Grand Total", ColTotal, isText: true, bold: true);
         WriteCell(ws, row, 2, (int)rows.Where(r => r.IsPanelRow).Sum(r => r.SumServiceUnits), ColTotal, bold: true);
-        WriteCell(ws, row, 3, rows[0].TotalPaymentPctFromSp ?? 0m, ColTotal, isPct: true, bold: true);
+        if (showsPay)
+            WriteCell(ws, row, 3, rows.Where(r => r.IsPanelRow).Sum(r => r.PaidInsurancePayment), ColTotal, isCurrency: true, bold: true);
+        WriteCell(ws, row, pctCol, rows[0].TotalPaymentPctFromSp ?? 0m, ColTotal, isPct: true, bold: true);
 
         AutoFitColumns(ws);
         ws.SheetView.FreezeRows(3);

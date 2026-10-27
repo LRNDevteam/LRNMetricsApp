@@ -911,6 +911,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         // Panel -> CPT hierarchy (Analyze Pathology): RowType P/C, claim counts, Average(PaymentPercent).
         if (HasColumn(r, "RowType"))
         {
+            var hasInsPay = HasColumn(r, "InsurancePayment");
             while (await r.ReadAsync(ct))
             {
                 var isPanel = string.Equals(GetStringOrEmpty(r, "RowType"), "P", StringComparison.OrdinalIgnoreCase);
@@ -918,13 +919,14 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 rows.Add(new CptPaymentPctRow(
                     CptCode:              isPanel ? panel : GetStringOrEmpty(r, "CPTCode"),
                     SumServiceUnits:      GetInt32OrDefault(r, "NoOfClaims"),
-                    PaidInsurancePayment: 0m,
+                    PaidInsurancePayment: hasInsPay ? GetDecimalOrDefault(r, "InsurancePayment") : 0m,
                     PaidChargeAmount:     0m,
                     SnapshotPaymentPct:   GetDecimalOrNull(r, "AvgPaymentPct") ?? 0m,
                     PanelName:            panel,
                     IsPanelRow:           isPanel,
                     SnapshotPctIsPoints:  true,
-                    TotalPaymentPctFromSp: GetDecimalOrNull(r, "TotalPaymentPct")));
+                    TotalPaymentPctFromSp: GetDecimalOrNull(r, "TotalPaymentPct"),
+                    HasInsurancePayment:  hasInsPay));
             }
             _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
             return new CptPaymentPctResult(rows);

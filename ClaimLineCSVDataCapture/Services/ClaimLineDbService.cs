@@ -1095,7 +1095,10 @@ public sealed class ClaimLineDbService
 
     /// <summary>Refreshes the Analyze Pathology Collection Summary aggregates (VariantX logic).</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshAnalyzePathologyCollectionReports()
-        => RunProductionReportSPs(BuildCollectionSummarySpList("AnP"));
+        => RunProductionReportSPs([
+            ..BuildCollectionSummarySpList("AnP"),
+            "dbo.usp_RefreshAnP_CS_InsuranceVsPayment",
+        ]);
 
     /// <summary>
     /// Refreshes the WellHealth Collection Summary snapshots (Database\ClaimLineCSVDataCapture\WellHealth\12_WellHealth_CollectionSummary.sql).
