@@ -110,6 +110,9 @@ public sealed class CollectionSummaryViewModel
     /// <summary>WellHealth: SP-only logic with its own filters, sorts and labels.</summary>
     public bool IsWellHealthLab => LabCollectionPrefix.IsWellHealth(SelectedLab);
 
+    /// <summary>Analyze Pathology: CPT vs Payment % on Line Level Data (Sum of Units, Average Payment %).</summary>
+    public bool IsAnalyzePathologyLab => LabCollectionPrefix.IsAnalyzePathology(SelectedLab);
+
     /// <summary>CoreBio: SP-only logic with the CoreBio sheet's filters and labels.</summary>
     public bool IsCoreBioLab => LabCollectionPrefix.IsCoreBio(SelectedLab);
 
@@ -132,7 +135,7 @@ public sealed class CollectionSummaryViewModel
     public bool UsesPanelAveragesTitles => LabCollectionPrefix.UsesPanelAveragesTitles(SelectedLab);
 
     /// <summary>Insurance pivots (Insurance / Payer Vs Payment, Panel Vs Payment) sorted by claim count.</summary>
-    public bool SortsPaymentPivotsByClaims => IsAugustusLab || IsNorthWestLab;
+    public bool SortsPaymentPivotsByClaims => IsAugustusLab || IsNorthWestLab || IsTexasDiagnosticLab;
 
     /// <summary>Women's Health Panel breakdown (NorthWest).</summary>
     public WomensHealthBreakdownResult WomensHealthBreakdown { get; set; } = WomensHealthBreakdownResult.Empty;

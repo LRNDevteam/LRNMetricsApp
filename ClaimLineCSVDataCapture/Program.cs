@@ -802,10 +802,13 @@ foreach (var lab in labConfigs)
     {
         log.Info($"  [NW BilledUnbilled] Running usp_UpdateNW_ClaimLevelData_BilledUnbilled…");
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var (buTotal, buBilled, buUnBilled, buUpdated, buError) = db.UpdateNorthWestBilledUnbilled(latestRunId);
+        var (buTotal, buBilled, buUnBilled, buUpdated, pdCollection, pdDenial, pdUpdated, buError) = db.UpdateNorthWestBilledUnbilled(latestRunId);
         sw.Stop();
         if (buError is null)
+        {
             log.Info($"  [NW BilledUnbilled] OK ({sw.ElapsedMilliseconds} ms) — {buTotal} row(s): Billed {buBilled}, UnBilled {buUnBilled}; {buUpdated} row(s) updated.");
+            log.Info($"  [NW PostedDates] NWLCollectionPostedDate {pdCollection}, NWLDenialPostedDate {pdDenial}; {pdUpdated} row(s) updated.");
+        }
         else
             log.Error($"  [NW BilledUnbilled] FAILED ({sw.ElapsedMilliseconds} ms): {buError}");
     }

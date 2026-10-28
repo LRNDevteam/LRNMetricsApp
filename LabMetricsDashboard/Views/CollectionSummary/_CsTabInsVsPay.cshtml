@@ -9,7 +9,8 @@
     var isSpLogic = Model.UsesSpCollectionLogic;
     // WellHealth "Total Insurance Payment": Sum of TotalPayments + Average Payment %.
     var isWellHealth = Model.IsWellHealthLab;
-    var usePayerFlat = Model.IsCoveLab || isInHealth || isSpLogic;
+    // Texas Diagnostic: payer x CheckDate month / year, like the Augustus / NorthWest pivot.
+    var usePayerFlat = Model.IsCoveLab || isInHealth || (isSpLogic && !Model.IsTexasDiagnosticLab);
 
     var flatGroups = rowsData
         .GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
@@ -239,12 +240,12 @@ else if (rowsData.Count > 0)
     <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
         @if (Model.IsNorthWestLab)
         {
-            <span><strong>Source:</strong> Claim Level Data &bull; <strong>Filter:</strong> InsurancePayment &gt; 0 &bull;
-            <strong>Rows:</strong> PayerName_Raw &bull; <strong>Columns:</strong> CheckDate Year Total &bull;
+            <span><strong>Source:</strong> Claim Level Data &bull; <strong>Filter:</strong> InsurancePayment &gt; 0, NWLCollectionPostedDate is a date &bull;
+            <strong>Rows:</strong> PayerName_Raw &bull; <strong>Columns:</strong> NWLCollectionPostedDate Year Total &bull;
             <strong>Sorted by:</strong> Count of ClaimID DESC &bull;
             <strong>Values:</strong> Count of unique ClaimID, Sum of InsurancePayment</span>
         }
-        else if (Model.IsAugustusLab)
+        else if (Model.IsAugustusLab || Model.IsTexasDiagnosticLab)
         {
             <span><strong>Source:</strong> Claim Level Data &bull; <strong>Filter:</strong> InsurancePayment &gt; 0 &bull;
             <strong>Rows:</strong> PayerName_Raw &bull; <strong>Columns:</strong> CheckDate month / year &bull;

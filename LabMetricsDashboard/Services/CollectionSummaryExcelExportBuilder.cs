@@ -1182,9 +1182,11 @@ public static partial class CollectionSummaryExcelExportBuilder
     private static void WriteCptPanelHierarchy(IXLWorksheet ws, List<CptPaymentPctRow> rows, string labName)
     {
         var showsPay = rows[0].HasInsurancePayment;
+        // Analyze Pathology: Line Level Data, the count column holds Sum of Units.
+        var countHeader = LabCollectionPrefix.IsAnalyzePathology(labName) ? "Sum of Units" : "Claim Count";
         string[] headers = showsPay
-            ? ["Panel name / CPT Code", "Claim Count", "Insurance Payments", "Average Payment %"]
-            : ["Panel name / CPT Code", "Claim Count", "Average Payment %"];
+            ? ["Panel name / CPT Code", countHeader, "Insurance Payments", "Average Payment %"]
+            : ["Panel name / CPT Code", countHeader, "Average Payment %"];
         var pctCol = showsPay ? 4 : 3;
         int row = 1;
         ExcelTheme.Collection.WriteTitleBar(ws, row, headers.Length, $"CPT vs Payment % \u2014 {labName}");

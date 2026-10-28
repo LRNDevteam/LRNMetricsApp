@@ -12,7 +12,7 @@ public static class ExecSummaryCellRowsExcelBuilder
     private static readonly HashSet<string> AmountColumns = new(StringComparer.OrdinalIgnoreCase)
     {
         "Amount", "ChargeAmount", "InsurancePayment", "PatientPayment", "PatientBalance",
-        "TotalAdjustments", "TotalInsuranceBalance",
+        "TotalAdjustments", "TotalInsuranceBalance", "InsuranceBalance", "ActualPayment", "DuplicatePayment",
     };
 
     public static byte[] Build(ExecSummaryCellRowsResult result, string labName, string title, string periodLabel, string valueText)

@@ -908,17 +908,19 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         int paymentPctOrdinal = -1;
         try { paymentPctOrdinal = r.GetOrdinal("PaymentPct"); } catch { /* column absent in older SPs */ }
 
-        // Panel -> CPT hierarchy (Analyze Pathology): RowType P/C, claim counts, Average(PaymentPercent).
+        // RowType P/C rows: Panel -> CPT hierarchy (WellHealth) or flat CPT rows (NorthWest, Analyze
+        // Pathology), claim counts - or Sum of Units when the SP returns SumUnits - and Average Payment %.
         if (HasColumn(r, "RowType"))
         {
             var hasInsPay = HasColumn(r, "InsurancePayment");
+            var hasSumUnits = HasColumn(r, "SumUnits");
             while (await r.ReadAsync(ct))
             {
                 var isPanel = string.Equals(GetStringOrEmpty(r, "RowType"), "P", StringComparison.OrdinalIgnoreCase);
                 var panel = GetStringOrEmpty(r, "PanelName");
                 rows.Add(new CptPaymentPctRow(
                     CptCode:              isPanel ? panel : GetStringOrEmpty(r, "CPTCode"),
-                    SumServiceUnits:      GetInt32OrDefault(r, "NoOfClaims"),
+                    SumServiceUnits:      hasSumUnits ? GetDecimalOrDefault(r, "SumUnits") : GetInt32OrDefault(r, "NoOfClaims"),
                     PaidInsurancePayment: hasInsPay ? GetDecimalOrDefault(r, "InsurancePayment") : 0m,
                     PaidChargeAmount:     0m,
                     SnapshotPaymentPct:   GetDecimalOrNull(r, "AvgPaymentPct") ?? 0m,

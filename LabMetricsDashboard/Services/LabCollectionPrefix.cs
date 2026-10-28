@@ -171,6 +171,10 @@ public static class LabCollectionPrefix
     public static bool IsWellHealth(string? labName) =>
         GetPrefix(labName) is "WH";
 
+    /// <summary>Analyze Pathology (prefix AnP).</summary>
+    public static bool IsAnalyzePathology(string? labName) =>
+        GetPrefix(labName) is "AnP";
+
     /// <summary>
     /// CoreBio client sheet: CheckDate months / Wednesday–Tuesday weeks, No Response Vs Aging,
     /// Panel Vs Payment by ChargeEnteredDate, line-level CPT units and insurance payment.
@@ -244,16 +248,19 @@ public static class LabCollectionPrefix
     /// <c>usp_Get{prefix}_ExecutiveSummaryCellRows</c> (same rules as the Executive Summary SPs).
     /// </summary>
     public static bool HasEsCellRows(string? labName) =>
-        GetPrefix(labName) is "WH" or "CB" or "TD" or "Elix" or "IHD" or "RT" or "BT";
+        GetPrefix(labName) is "WH" or "CB" or "TD" or "Elix" or "IHD" or "RT" or "BT" or "NW" or "AnP" or "Cove";
 
     /// <summary>
     /// Labs whose Executive Summary Year Total / Grand Total cells also open the value popup instead
     /// of the LisDrill page. CoreBio's LIS Billed / Unbilled rules (BillCategory OR BillingStatus)
     /// and its Adjustments formula cannot be expressed as dbo.LisDrillRowDef conditions; Texas
-    /// Diagnostic has no dbo.LisDrillRowDef rows.
+    /// Diagnostic has no dbo.LisDrillRowDef rows; NorthWest's rows (BilledUnbilled, Claim Type,
+    /// Aria windows) are defined by fn_NW_ES_LisRowCodes / fn_NW_ES_ClaimRowCodes, not LisDrillRowDef;
+    /// Analyze Pathology's rows (usp_AnP_ES_Compute) changed after its LisDrillRowDef rows were written;
+    /// Cove's grid has two rule sets (snapshot vs filtered) that one LisDrillRowDef row cannot express.
     /// </summary>
     public static bool EsTotalsUseCellRows(string? labName) =>
-        GetPrefix(labName) is "CB" or "TD";
+        GetPrefix(labName) is "CB" or "TD" or "NW" or "AnP" or "Cove";
 
     /// <summary>
     /// What the Denial Summary Monthly / Weekly SPs rank insurances and their top denials by

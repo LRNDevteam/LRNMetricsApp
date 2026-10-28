@@ -407,11 +407,12 @@ public sealed class ClaimLineDbService
     }
 
     /// <summary>
-    /// Sets ClaimLevelData.BilledUnbilled for NorthWest via
-    /// <c>dbo.usp_UpdateNW_ClaimLevelData_BilledUnbilled</c>. The SP writes its own
-    /// row to <c>dbo.NW_BilledUnbilled_UpdateLog</c>; the counts are returned for the job log.
+    /// Sets ClaimLevelData.BilledUnbilled, NWLCollectionPostedDate and NWLDenialPostedDate
+    /// for NorthWest via <c>dbo.usp_UpdateNW_ClaimLevelData_BilledUnbilled</c>. The SP writes
+    /// its own row to <c>dbo.NW_BilledUnbilled_UpdateLog</c>; the counts are returned for the job log.
     /// </summary>
-    public (int TotalRows, int Billed, int UnBilled, int RowsUpdated, string? Error) UpdateNorthWestBilledUnbilled(string? runId)
+    public (int TotalRows, int Billed, int UnBilled, int RowsUpdated,
+            int CollectionPosted, int DenialPosted, int PostedRowsUpdated, string? Error) UpdateNorthWestBilledUnbilled(string? runId)
     {
         try
         {
@@ -426,18 +427,21 @@ public sealed class ClaimLineDbService
             cmd.Parameters.Add("@TriggeredBy", SqlDbType.NVarChar, 100).Value = "ClaimLineCSVDataCapture";
             using var reader = cmd.ExecuteReader();
             if (!reader.Read())
-                return (0, 0, 0, 0, null);
+                return (0, 0, 0, 0, 0, 0, 0, null);
 
             int Int(string name) => reader[name] is int v ? v : 0;
             return (Int("TotalRows"),
                     Int("BilledFirstBilled") + Int("BilledEmedix"),
                     Int("UnBilledBlank") + Int("UnBilledOther"),
                     Int("RowsUpdated"),
+                    Int("CollectionPostedCheckDate") + Int("CollectionPostedChargeEntered"),
+                    Int("DenialPostedCheckDate") + Int("DenialPostedLastActivity") + Int("DenialPostedFirstBilled"),
+                    Int("PostedDatesRowsUpdated"),
                     null);
         }
         catch (Exception ex)
         {
-            return (0, 0, 0, 0, ex.Message);
+            return (0, 0, 0, 0, 0, 0, 0, ex.Message);
         }
     }
 

@@ -104,8 +104,10 @@ public static partial class CollectionSummaryExcelExportBuilder
     private static void BuildInsuranceVsPaymentFlatSheet(
         XLWorkbook wb, List<InsuranceVsPaymentRow> rows, string labName)
     {
-        var isSpLogic = LabCollectionPrefix.UsesSpCollectionLogic(labName);
+        var isTexas = LabCollectionPrefix.IsTexasDiagnostic(labName);
+        var isSpLogic = LabCollectionPrefix.UsesSpCollectionLogic(labName) && !isTexas;
         // Analyze Pathology: payer-flat Count + Sum like Cove, rows in SP order (claim count).
+        // Texas Diagnostic: payer x CheckDate month / year grid below.
         var isCove = isSpLogic
             || labName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
             || labName.Contains("Cove", StringComparison.OrdinalIgnoreCase);
@@ -228,7 +230,7 @@ public static partial class CollectionSummaryExcelExportBuilder
         var isAugustus = labName.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
             || labName.Equals("Augustus", StringComparison.OrdinalIgnoreCase);
         var isNorthWest = LabCollectionPrefix.IsNorthWest(labName);
-        var sortByClaims = isAugustus || isNorthWest;
+        var sortByClaims = isAugustus || isNorthWest || isTexas;
         var sheetTitle = isNorthWest || isAugustus ? "Payer vs Payment" : "Insurance Vs Payments";
         // NorthWest client sheet: CheckDate Year Total columns only.
         var showMonths = !isNorthWest;

@@ -1817,6 +1817,16 @@ th.pr-month-data, td.pr-month-data {
                             &nbsp;·&nbsp; Values: Count of unique ClaimID, Sum of ChargeAmount
                             &nbsp;·&nbsp; Sorted by Claim Count</span>
                         }
+                        else if (LabCollectionPrefix.IsAnalyzePathology(Model.SelectedLab))
+                        {
+                        <span><span class="filter-label">Filter:</span>
+                            <span class="filter-key-2">Bill Status</span> in (Unbilled, Unbilled - Self Pay)
+                            AND <span class="filter-key-2">ClaimStatus</span> &ne; 0 Billed Amount
+                            &nbsp;·&nbsp; Rows: <span class="filter-key">Panel Name</span>
+                            &nbsp;·&nbsp; Columns: <span class="filter-key">AgingDOS</span>
+                            &nbsp;·&nbsp; Values: Count of unique ClaimID, Sum of ChargeAmount
+                            &nbsp;·&nbsp; Sorted by Claim Count</span>
+                        }
                         else
                         {
                         <span><span class="filter-label">Filter:</span>

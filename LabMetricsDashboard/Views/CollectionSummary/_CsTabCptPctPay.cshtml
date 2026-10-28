@@ -8,13 +8,15 @@
                 var hierMaxPct = hierRows.Max(r => r.PaymentPct);
                 var hierShowsPay = hierRows[0].HasInsurancePayment;
                 var hierGrandPay = hierRows.Where(r => r.IsPanelRow).Sum(r => r.PaidInsurancePayment);
+                // Analyze Pathology: Line Level Data, the count column holds Sum of Units.
+                var hierIsAnP = Model.IsAnalyzePathologyLab;
                 <div class="cs-rpt-wrap">
                     <div class="cs-rpt-scroll">
                         <table class="cs-rpt-table">
                             <thead>
                                 <tr>
                                     <th>Panel name / CPT Code</th>
-                                    <th>Claim Count</th>
+                                    <th>@(hierIsAnP ? "Sum of Units" : "Claim Count")</th>
                                     @if (hierShowsPay)
                                     {
                                         <th>Insurance Payments</th>
@@ -75,10 +77,17 @@
                 </div>
 
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
-                    <strong>Source:</strong> Claim Level Data &bull;
+                    <strong>Source:</strong> @(hierIsAnP ? "Line Level Data (panel from the line's claim)" : "Claim Level Data") &bull;
                     <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &bull;
-                    <strong>Rows:</strong> Panel name &rarr; CPT Code &bull; <strong>Sorted by:</strong> Claim Count DESC &bull;
-                    <strong>Values:</strong> Count of unique ClaimID, @(hierShowsPay ? "Sum of InsurancePayment, " : "")Average of PaymentPercent
+                    <strong>Rows:</strong> Panel name &rarr; CPT Code &bull; <strong>Sorted by:</strong> Claim Count (unique ClaimID) DESC &bull;
+                    @if (hierIsAnP)
+                    {
+                        <span><strong>Values:</strong> Sum of Units, Average Payment % (line InsurancePayment / ChargeAmount × 100, lines with ChargeAmount &gt; 0)</span>
+                    }
+                    else
+                    {
+                        <span><strong>Values:</strong> Count of unique ClaimID, @(hierShowsPay ? "Sum of InsurancePayment, " : "")Average of PaymentPercent</span>
+                    }
                 </div>
             }
             else if (Model.CptPaymentPct.Count > 0 && Model.UsesCoreBioCollectionLayout)
@@ -190,8 +199,7 @@
                     @if (Model.IsNorthWestLab)
                     {
                         <span><strong>Filter:</strong> CPTCode not blank &bull; <strong>Rows:</strong> CPTCode &bull; <strong>Sorted by:</strong> Count of ClaimID DESC &bull; <strong>Payment %:</strong> Average of line InsurancePayment / ChargeAmount × 100</span>
-                    }
-                    else if (isInHealthCpt)
+                    }                    else if (isInHealthCpt)
                     {
                         <span><strong>Rows:</strong> CPTCode &bull; <strong>Sorted by:</strong> Count of ClaimID DESC &bull; <strong>Payment %:</strong> Average of PaymentPercent</span>
                     }

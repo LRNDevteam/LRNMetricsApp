@@ -1518,11 +1518,11 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 {
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> ClaimLevelData (all rows) &bull;
-                    <strong>Filter (base):</strong> @(Model.UsesSpCollectionLogic ? "InsurancePayment ≠ 0" : "InsurancePayment > 0") &nbsp;·&nbsp; @(Model.UsesSpCollectionLogic ? "PaymentPostedDate" : "CheckDate") not blank/invalid &bull;
+                    <strong>Filter (base):</strong> @(Model.UsesSpCollectionLogic ? "InsurancePayment ≠ 0" : "InsurancePayment > 0") &nbsp;·&nbsp; @(Model.UsesSpCollectionLogic ? "PaymentPostedDate" : Model.IsNorthWestLab ? "NWLCollectionPostedDate" : "CheckDate") not blank/invalid &bull;
                     <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) – @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &nbsp;|&nbsp; DOS: @(string.IsNullOrWhiteSpace(Model.FilterDosFrom) ? "-" : Model.FilterDosFrom) – @(string.IsNullOrWhiteSpace(Model.FilterDosTo) ? "-" : Model.FilterDosTo) &nbsp;|&nbsp; @Model.PostedDateLabel: @(string.IsNullOrWhiteSpace(Model.FilterCheckDateFrom) ? "-" : Model.FilterCheckDateFrom) – @(string.IsNullOrWhiteSpace(Model.FilterCheckDateTo) ? "-" : Model.FilterCheckDateTo) &bull;
                     <strong>Rows:</strong> @(Model.IsAugustusLab ? "PanelCategory" : "PanelName") &bull;
                     <strong>Drill-down:</strong> Top @(Model.IsNorthWestLab ? 5 : 3) PayerName_Raw by Unique ClaimID count &bull;
-                    <strong>Columns:</strong> @(Model.UsesSpCollectionLogic ? "PaymentPostedDate" : "CheckDate") (Year, Month) — No. of Claims + Insurance Paid Amount &bull;
+                    <strong>Columns:</strong> @(Model.UsesSpCollectionLogic ? "PaymentPostedDate" : Model.IsNorthWestLab ? "NWLCollectionPostedDate" : "CheckDate") (Year, Month) — No. of Claims + Insurance Paid Amount &bull;
                     <strong>Sorted by:</strong> @(Model.IsWellHealthLab ? "Grand Total Insurance Payment DESC" : "Grand Total (Unique ClaimID count) DESC")
                 </div>
                 }
