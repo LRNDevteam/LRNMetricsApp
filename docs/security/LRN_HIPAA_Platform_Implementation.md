@@ -128,7 +128,7 @@ Every project that stores a PHI file follows this pattern. Wave 1 is the referen
 | --- | --- | --- |
 | Store abstraction | Metadata in SQL; bytes behind an async store interface: `SaveAsync`, `OpenReadAsync`, `DeleteAsync`, `GetScanResultAsync` | `IArWorkbenchDocumentStore` in `LRN.ReportsApi/Services/ArWorkbench/ArWorkbenchDocumentStore.cs` |
 | Routing | `container == "local"` → legacy disk store (read-only until migrated); otherwise Blob | `RoutingArWorkbenchDocumentStore` |
-| Blob names | One folder per lab, named as in `LabConfig:LabsID` (letters, digits, `-`, `_`; `lab-{labId}` when the lab has no name there): `{LabName}/{yyyy}/{MM}/{Guid:N}{ext}`. A module that shares a container prefixes the folder (`dwf/{LabName}/…`). Extension sanitised; metadata `labid`, `sha256` only; `If-None-Match: *` | `AzureBlobArWorkbenchDocumentStore.SaveAsync` |
+| Blob names | One folder per lab, named as in `LabConfig:LabsID` (letters, digits, `-`, `_`; `lab-{labId}` when the lab has no name there): `{LabName}/{yyyy}/{MM}/{dd}/{Guid:N}{ext}` (UTC upload date; no claim folder — the claim ID is an identifier, and `dbo.ARWB_Document` maps claim → blob). A module that shares a container prefixes the folder (`dwf/{LabName}/…`). Extension sanitised; metadata `labid`, `sha256` only; `If-None-Match: *` | `AzureBlobArWorkbenchDocumentStore.SaveAsync` |
 | Authentication | `DefaultAzureCredential` with `ManagedIdentityClientId`; https URI required; exponential retry ×3 | `AddArWorkbenchDocumentStorage` |
 | Upload | Validate scope, count, type, size, magic bytes → store → SQL row + `Upload` log in one transaction → delete the blob if the row is refused | `UploadClaimDocuments`, `CipRespond` |
 | Download | Scope check + `Download` log → scan tag (409 pending / 423 blocked) → read → SHA-256 check (409) → file with `Cache-Control: no-store, no-cache, must-revalidate, private` and `Pragma: no-cache`; every refusal writes `Blocked` | `DownloadDocument`, `BlockDocumentAsync` |
@@ -159,7 +159,7 @@ Branch `feature/arwb-hipaa-blob-documents`. Tasks T1–T10 of v1.0 are implement
 | --- | --- | --- |
 | T1 NuGet | `LRN.ReportsApi.csproj` — `Azure.Storage.Blobs` 12.24.0 | Done; restore succeeds |
 | T2 Async store | `Services/ArWorkbench/ArWorkbenchDocumentStore.cs` | Done; `SafeExtension` made `internal` so Blob and disk name files the same way |
-| T3 Blob + routing + DI | `Services/ArWorkbench/AzureBlobArWorkbenchDocumentStore.cs`, `Program.cs` | Done. **Change from v1.0:** blobs go to one folder per lab named after the lab (`PCRLabsofAmerica/2026/10/{guid}.pdf`), not `lab-{labId}/…`. The name comes from `LabConfig:LabsID`, the list that already picks each lab's database. |
+| T3 Blob + routing + DI | `Services/ArWorkbench/AzureBlobArWorkbenchDocumentStore.cs`, `Program.cs` | Done. **Change from v1.0:** blobs go to one folder per lab named after the lab (`PCRLabsofAmerica/2026/10/27/{guid}.pdf`), not `lab-{labId}/…`. The name comes from `LabConfig:LabsID`, the list that already picks each lab's database. |
 | T4 Repository | `SqlArWorkbenchRepository.cs`, `SqlArWorkbenchRepository.Documents.cs` | Done; `MoveDocumentToBlobAsync` updates the row and writes `Migrate` in one transaction (`XACT_ABORT`) |
 | T5 Controller | `Controllers/ArWorkbenchController.cs` | Done: uploads, `POST documents/search`, download, `POST documents/admin/migrate-to-blob` |
 | T6 File guard | `Security/FileUploadGuard.cs` | Done; `ValidateDocumentAsync` (Denial Workflow) unchanged |

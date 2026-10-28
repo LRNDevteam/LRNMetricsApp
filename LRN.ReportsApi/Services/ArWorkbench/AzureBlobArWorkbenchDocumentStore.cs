@@ -37,8 +37,10 @@ public sealed class ArWorkbenchDocumentStorageOptions
 
 /// <summary>
 /// Azure Blob store: private account (private endpoint, CMK, versioning, soft delete), blobs written
-/// once under {LabName}/{yyyy}/{MM}/{guid}{ext} - one folder per lab, named as in LabConfig:LabsID (the
-/// list that also picks the lab's database). Names, metadata and tags never carry PHI - no claim ID,
+/// once under {LabName}/{yyyy}/{MM}/{dd}/{guid}{ext} - one folder per lab, named as in LabConfig:LabsID (the
+/// list that also picks the lab's database), then the UTC upload date. There is deliberately no claim
+/// folder: a claim ID is an identifier, and the claim's files are found through dbo.ARWB_Document.
+/// Names, metadata and tags never carry PHI - no claim ID,
 /// patient name or uploaded file name; those stay in dbo.ARWB_Document. Each row stores its full
 /// BlobPath, so renaming a lab later only changes where new files go.
 /// </summary>
@@ -94,7 +96,7 @@ public sealed class AzureBlobArWorkbenchDocumentStore : IArWorkbenchDocumentStor
             source.Position = start;
 
             var now = DateTime.UtcNow;
-            var path = $"{LabFolder(labId)}/{now:yyyy}/{now:MM}/{Guid.NewGuid():N}{LocalArWorkbenchDocumentStore.SafeExtension(extension)}";
+            var path = $"{LabFolder(labId)}/{now:yyyy}/{now:MM}/{now:dd}/{Guid.NewGuid():N}{LocalArWorkbenchDocumentStore.SafeExtension(extension)}";
             await _container.GetBlobClient(path).UploadAsync(source, new BlobUploadOptions
             {
                 HttpHeaders = new BlobHttpHeaders { ContentType = "application/octet-stream", ContentDisposition = "attachment" },
