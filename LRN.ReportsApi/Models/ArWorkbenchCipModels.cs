@@ -60,6 +60,8 @@ public sealed class ArWorkbenchDocumentInfo
     public int? RoundNumber { get; set; }
     public string UploadedBy { get; set; } = string.Empty;
     public DateTime UploadedOn { get; set; }
+    /// <summary>Pending | Clean | Malicious | NotScanned (lab script 11); null before it is installed.</summary>
+    public string? ScanStatus { get; set; }
 }
 
 /// <summary>
@@ -92,7 +94,12 @@ public sealed class ArWorkbenchDocumentRow
     public long SizeBytes { get; set; }
     public string UploadedBy { get; set; } = string.Empty;
     public DateTime UploadedOn { get; set; }
+    /// <summary>Pending | Clean | Malicious | NotScanned (lab script 11); null before it is installed. Malicious = quarantined, no download.</summary>
+    public string? ScanStatus { get; set; }
 }
+
+/// <summary>A document waiting for its malware scan verdict.</summary>
+public sealed record ArWorkbenchPendingScanDocument(long DocumentId, string Container, string Path, DateTime UploadedOn);
 
 /// <summary>The document type and notes of one uploaded file (claim document upload, same order as the files).</summary>
 public sealed class ArWorkbenchDocumentUploadInfo

@@ -47,7 +47,7 @@ public static class ImportDiagnostics
         var vaultUri = configuration["KeyVault:VaultUri"];
         Report("KeyVault:VaultUri", !string.IsNullOrWhiteSpace(vaultUri),
             string.IsNullOrWhiteSpace(vaultUri)
-                ? "not set - secrets must come from appsettings.Secrets.json or environment variables"
+                ? "not set - secrets must come from environment variables"
                 : vaultUri!);
 
         var sp = importOptions.SharePoint;
@@ -158,10 +158,9 @@ public static class ImportDiagnostics
                 }
             }
 
-            // connection: same precedence the worker uses
-            var labConn = FirstNonBlank(
-                GetLabValue(configuration, lab, "LabDbConnectionString"),
-                configuration.GetConnectionString(GetLabValue(configuration, lab, "LabDbConnectionKey") ?? ""));
+            // connection: same resolution the worker uses - the vault secret named by LabDbConnectionKey
+            var labKey = GetLabValue(configuration, lab, "LabDbConnectionKey");
+            var labConn = FirstNonBlank(configuration.GetConnectionString(labKey ?? ""));
 
             if (hasLabsTable)
             {
@@ -173,7 +172,10 @@ public static class ImportDiagnostics
                     labConn = configuration.GetConnectionString(labMasterKey!);
             }
 
-            Report("  lab connection string", !string.IsNullOrWhiteSpace(labConn), Mask(labConn));
+            Report("  lab connection string", !string.IsNullOrWhiteSpace(labConn),
+                !string.IsNullOrWhiteSpace(labConn) ? Mask(labConn)
+                : string.IsNullOrWhiteSpace(labKey) ? "no LabDbConnectionKey on this lab"
+                : $"missing - create the Key Vault secret 'ConnectionStrings--{labKey}'");
 
             if (string.IsNullOrWhiteSpace(labConn)) continue;
 
@@ -273,7 +275,7 @@ public static class ImportDiagnostics
 
     /// <summary>
     /// Reads a per-lab setting straight from configuration, the same way the worker's own
-    /// GetLabConfigValue does. LabFileMap does not declare LabDbConnectionString as a property, so
+    /// GetLabConfigValue does. LabFileMap does not declare LabDbConnectionKey as a property, so
     /// reflection over the bound object finds nothing - the value only exists in the raw config.
     /// </summary>
     private static string? GetLabValue(IConfiguration configuration, LabFileMap lab, string key)

@@ -53,10 +53,10 @@ ORDER BY LabId;";
     /// resolved, so a lab that is not set up never stops the rest of the run.
     /// </summary>
     /// <param name="labConnectionStringOverride">
-    /// The lab's connection string as the worker already resolves it from
-    /// <c>MasterFileProcessor:Labs[].LabDbConnectionString</c>. This takes precedence over
-    /// Labs.ConnectionKey, because that is where per-lab connection strings actually live in
-    /// this repo - dbo.Labs is authoritative for WHICH labs are active, not for how to reach them.
+    /// The lab's connection string as the worker already resolves it: the Key Vault secret
+    /// <c>ConnectionStrings--&lt;LabDbConnectionKey&gt;</c> named on its <c>MasterFileProcessor:Labs[]</c>
+    /// entry. This takes precedence over Labs.ConnectionKey - dbo.Labs is authoritative for WHICH
+    /// labs are active, not for how to reach them.
     /// </param>
     public async Task<ResolvedLab?> TryResolveLabAsync(
         int labId,
@@ -95,8 +95,8 @@ ORDER BY LabId;";
         if (string.IsNullOrWhiteSpace(connectionString))
         {
             _logger.LogWarning(
-                "Lab {LabId} '{LabName}': no connection string. Set MasterFileProcessor:Labs[].LabDbConnectionString " +
-                "for this lab, or add a ConnectionStrings entry matching Labs.ConnectionKey. Bulk copy skipped.",
+                "Lab {LabId} '{LabName}': no connection string. Set LabDbConnectionKey on its MasterFileProcessor:Labs[] " +
+                "entry and add the Key Vault secret ConnectionStrings--<that key>. Bulk copy skipped.",
                 labId, mapping.LabName ?? active?.LabName ?? "");
             return null;
         }

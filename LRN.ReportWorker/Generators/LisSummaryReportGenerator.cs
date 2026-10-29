@@ -19,9 +19,10 @@ namespace LRN.ReportWorker.Generators;
 /// discovers the key set across the whole filtered range and selects each one with
 /// JSON_VALUE, so the JSON blob arrives as real columns rather than raw text.
 /// </summary>
-public sealed class LisSummaryReportGenerator : IReportGenerator
+public sealed class LisSummaryReportGenerator : IReportGenerator, IReportSnapshotSource
 {
     public string ReportType => ReportTypes.LisSummary;
+    public string SnapshotReportCode => ReportSnapshotCodes.LisSummary;
 
     /// <summary>Sheet the line-level rows land on — same tab name the page's export used.</summary>
     private const string LineSheetName = "LIMS Master";
@@ -58,22 +59,14 @@ public sealed class LisSummaryReportGenerator : IReportGenerator
         var connStr = labConfig.DbConnectionString;
         var f = LisSummaryReportFilters.FromJson(job.FilterDetailsJson);
 
-        // Same date semantics as the page: InHealth only tracks the collected date.
-        var dateType = job.LabName.Contains("InHealth", StringComparison.OrdinalIgnoreCase)
-            ? "Collected"
-            : f.EffectiveDateType;
-        var dateFrom = ParseDate(f.DateFrom);
-        var dateTo   = ParseDate(f.DateTo);
+        var (dateType, dateFrom, dateTo) = DateWindow(job.LabName, f);
 
         async Task Progress(byte pct)
         {
             if (reportProgressAsync is not null) await reportProgressAsync(pct);
         }
 
-        var summary = await _repo.GetLisSummaryAsync(
-            connStr, job.LabName, f.LabId, dateType, dateFrom, dateTo,
-            f.Panel, f.Clinic, f.RefPhy, f.SalesRep, f.Collector, ct,
-            includeKeyMetrics: true);
+        var summary = await LoadSummaryAsync(connStr, job.LabName, f, ct);
         await Progress(10);
 
         // Resolves the line-level SELECT + the AdditionalFields columns; the key
@@ -120,6 +113,32 @@ public sealed class LisSummaryReportGenerator : IReportGenerator
 
         return new GeneratedReportFile(fileName, targetPath, size, lineRows);
     }
+
+    /// <summary>
+    /// The LIS Summary pivot only: the line-level LIMS Master extract is already snapshotted by the
+    /// master file processor (ReportCode LIMS).
+    /// </summary>
+    public async Task<object?> LoadUnfilteredAsync(string labName, CancellationToken ct)
+    {
+        if (!_labSettings.Labs.TryGetValue(labName, out var labConfig)
+            || !labConfig.LineClaimEnable || string.IsNullOrWhiteSpace(labConfig.DbConnectionString))
+            return null;
+        return await LoadSummaryAsync(labConfig.DbConnectionString, labName, LisSummaryReportFilters.FromJson(null), ct);
+    }
+
+    private Task<LisSummaryResult> LoadSummaryAsync(string connStr, string labName, LisSummaryReportFilters f, CancellationToken ct)
+    {
+        var (dateType, dateFrom, dateTo) = DateWindow(labName, f);
+        return _repo.GetLisSummaryAsync(
+            connStr, labName, f.LabId, dateType, dateFrom, dateTo,
+            f.Panel, f.Clinic, f.RefPhy, f.SalesRep, f.Collector, ct,
+            includeKeyMetrics: true);
+    }
+
+    /// <summary>Same date semantics as the page: InHealth only tracks the collected date.</summary>
+    private static (string DateType, DateOnly? From, DateOnly? To) DateWindow(string labName, LisSummaryReportFilters f) =>
+        (labName.Contains("InHealth", StringComparison.OrdinalIgnoreCase) ? "Collected" : f.EffectiveDateType,
+         ParseDate(f.DateFrom), ParseDate(f.DateTo));
 
     /// <summary>
     /// Writes the workbook with ONLY the "LIS Summary" tab. The builder's own

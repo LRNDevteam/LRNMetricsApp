@@ -441,6 +441,11 @@ table.arwb-data-table th.sortable:focus-visible { outline: 2px solid var(--accen
 .arwb-pagination { flex-wrap: wrap; }
 table.arwb-data-table tbody tr.clickable { cursor: pointer; }
 table.arwb-data-table tbody tr.row-selected { background: var(--accent-softer); }
+/* A document quarantined by the virus scan: red, no download (Documents.jsx / CipShared.jsx). */
+table.arwb-data-table tbody tr.arwb-row-quarantined,
+table.arwb-data-table tbody tr.arwb-row-quarantined:hover { background: var(--critical-soft); box-shadow: inset 3px 0 0 var(--critical); }
+table.arwb-data-table tbody tr.arwb-row-quarantined td { color: var(--critical); }
+.arwb-quarantine-label { display: inline-flex; align-items: center; gap: 4px; color: var(--critical); font-weight: 700; font-size: 12px; cursor: not-allowed; }
 .arwb-table-card .arwb-table-wrap { border-top: 1px solid var(--border-soft); }
 .arwb-pagination { display: flex; align-items: center; gap: 10px; padding: 12px 16px; font-size: 12.5px; color: var(--ink-2); flex-wrap: wrap; }
 .arwb-pagination .arwb-btn { padding: 5px 10px; }

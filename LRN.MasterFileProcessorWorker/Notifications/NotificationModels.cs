@@ -41,8 +41,8 @@ public sealed class TeamsWebhookOptions
 	public bool Enabled { get; set; } = false;
 
 	/// <summary>
-	/// Incoming-webhook URL. Supplied from appsettings.Secrets.json, not Key Vault - the URL is
-	/// longer than the 256-character limit on the vault tags these settings are managed through.
+	/// Incoming-webhook URL. Supplied from the Key Vault secret Notifications--Teams--WebhookUrl
+	/// (a secret value may be up to 25 KB; the 256-character limit applied only to vault tags).
 	/// </summary>
 	public string WebhookUrl { get; set; } = "";
 }

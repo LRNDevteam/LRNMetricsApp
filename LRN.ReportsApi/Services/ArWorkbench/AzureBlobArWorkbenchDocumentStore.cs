@@ -33,6 +33,11 @@ public sealed class ArWorkbenchDocumentStorageOptions
     public bool VerifyHashOnDownload { get; set; } = true;
     /// <summary>Files above this size stream without the hash check (it needs the whole file in memory).</summary>
     public long MaxVerifiedDownloadBytes { get; set; } = 52_428_800;
+    /// <summary>Background check of Pending documents' Defender verdict (lab script 11): quarantines and notifies on a virus.</summary>
+    public bool ScanMonitorEnabled { get; set; } = true;
+    public int ScanCheckIntervalSeconds { get; set; } = 60;
+    /// <summary>A document still without a verdict after this long is logged as an error (Defender off, or the tag not readable).</summary>
+    public int ScanOverdueMinutes { get; set; } = 60;
 }
 
 /// <summary>
@@ -145,13 +150,28 @@ public sealed class AzureBlobArWorkbenchDocumentStore : IArWorkbenchDocumentStor
         try
         {
             var tags = (await _container.GetBlobClient(path).GetTagsAsync(cancellationToken: ct)).Value.Tags;
-            if (!tags.TryGetValue(ScanResultTag, out var result)) return DocumentScanResult.Pending;
-            return result switch
+            return FromTags(tags);
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            // Defender's "soft delete malicious blobs" removes an infected file right after the scan.
+            // Every recorded document is write-once and never deleted by the API, so a missing blob is
+            // looked up among the soft-deleted ones, whose tags still carry the verdict.
+            try
             {
-                "No threats found" => DocumentScanResult.Clean,
-                "Malicious" => DocumentScanResult.Malicious,
-                _ => DocumentScanResult.Unknown
-            };
+                await foreach (var item in _container.GetBlobsAsync(BlobTraits.Tags, BlobStates.Deleted, prefix: path, cancellationToken: ct))
+                {
+                    if (item.Name == path && item.Deleted && item.Tags is not null)
+                        return FromTags(item.Tags);
+                }
+            }
+            catch (RequestFailedException listEx)
+            {
+                _logger.LogWarning("AR Workbench: soft-deleted blob {Container}/{Path} could not be listed (status {Status}, {Code}).",
+                    container, path, listEx.Status, listEx.ErrorCode);
+            }
+            _logger.LogWarning("AR Workbench: blob {Container}/{Path} is missing and has no scan verdict.", container, path);
+            return DocumentScanResult.Unknown;
         }
         catch (RequestFailedException ex)
         {
@@ -159,6 +179,17 @@ public sealed class AzureBlobArWorkbenchDocumentStore : IArWorkbenchDocumentStor
                 container, path, ex.Status, ex.ErrorCode);
             return DocumentScanResult.Unknown;
         }
+    }
+
+    internal static DocumentScanResult FromTags(IDictionary<string, string> tags)
+    {
+        if (!tags.TryGetValue(ScanResultTag, out var result)) return DocumentScanResult.Pending;
+        return result switch
+        {
+            "No threats found" => DocumentScanResult.Clean,
+            "Malicious" => DocumentScanResult.Malicious,
+            _ => DocumentScanResult.Unknown
+        };
     }
 }
 
@@ -234,6 +265,7 @@ public static class ArWorkbenchDocumentStorageExtensions
             services.AddSingleton(sp => new RoutingArWorkbenchDocumentStore(sp.GetRequiredService<LocalArWorkbenchDocumentStore>()));
         }
         services.AddSingleton<IArWorkbenchDocumentStore>(sp => sp.GetRequiredService<RoutingArWorkbenchDocumentStore>());
+        services.AddHostedService<ArWorkbenchMalwareScanMonitor>();
         return services;
     }
 }

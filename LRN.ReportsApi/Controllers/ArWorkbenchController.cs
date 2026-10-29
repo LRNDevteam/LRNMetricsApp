@@ -905,7 +905,17 @@ public sealed class ArWorkbenchController : ControllerBase
         var (info, container, path, sha256) = doc.Value;
         var options = storageOptions.Value;
 
+        // Quarantined (virus found, lab script 11): never served, and storage is not even asked.
+        if (info.ScanStatus == "Malicious")
+        {
+            await BlockDocumentAsync(labId, documentId, "Quarantined: virus detected", user!, ip, ct);
+            return StatusCode(StatusCodes.Status423Locked, new { message = "This document contains a virus and has been quarantined. It cannot be downloaded." });
+        }
+
         var scan = await store.GetScanResultAsync(container, path, ct);
+        // The monitor may not have reached it yet: quarantine now, so the list turns red and people are notified.
+        if (scan == DocumentScanResult.Malicious && info.ScanStatus == "Pending")
+            await _repository.RecordDocumentScanResultAsync(labId, documentId, "Malicious", ct);
         if (scan is not (DocumentScanResult.NotApplicable or DocumentScanResult.Clean) && (options.RequireCleanMalwareScan || scan == DocumentScanResult.Malicious))
         {
             await BlockDocumentAsync(labId, documentId, scan switch
@@ -916,7 +926,9 @@ public sealed class ArWorkbenchController : ControllerBase
             }, user!, ip, ct);
             return scan == DocumentScanResult.Pending
                 ? Conflict(new { message = "This document is still being scanned for viruses. Try again in a minute." })
-                : StatusCode(StatusCodes.Status423Locked, new { message = "This document was blocked by the virus scan and cannot be downloaded. Contact support." });
+                : scan == DocumentScanResult.Malicious
+                    ? StatusCode(StatusCodes.Status423Locked, new { message = "This document contains a virus and has been quarantined. It cannot be downloaded." })
+                    : StatusCode(StatusCodes.Status423Locked, new { message = "This document was blocked by the virus scan and cannot be downloaded. Contact support." });
         }
 
         var stream = await store.OpenReadAsync(container, path, ct);

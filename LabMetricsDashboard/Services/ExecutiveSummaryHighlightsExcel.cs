@@ -73,6 +73,37 @@ public sealed class ExecutiveSummaryHighlightsExcel
         LabCollectionPrefix.GetPrefix(labName) is "NW" or "Cove" or "Elix" or "IHD" or "RT" or "BT" or "AnP" or "Aug" or "WH" or "CB" or "TD";
 
     /// <summary>
+    /// One highlight tab of the Executive Summary page: another report's page, unfiltered, showing only
+    /// <paramref name="EmbedTabs"/> (null = all of its tabs). <paramref name="Report"/> is Production,
+    /// Collection, Lims or Denial.
+    /// </summary>
+    public sealed record HighlightTab(string Report, string Title, string? EmbedTabs);
+
+    /// <summary>
+    /// The page's highlight tabs for a lab, in order; empty when the lab has none. The page builds its
+    /// frames from this, and LRN.SnapshotGenerator captures the same reports with an Executive Summary snapshot.
+    /// </summary>
+    public static IReadOnlyList<HighlightTab> HighlightTabs(string? labName)
+    {
+        if (!AppliesTo(labName)) return [];
+
+        // NorthWest and Augustus have the date-basis Average Payments tabs (Panel Averages by DOS / Check Date);
+        // the others show Average Payments and, where the lab has it, Last 3 Months.
+        var collectionTabs = LabCollectionPrefix.UsesAvgPaymentsByDateBasis(labName)
+            ? "mcv-pane,wcv-pane,top5grid-pane,avgpaydos-pane,avgpay-pane"
+            : "mcv-pane,wcv-pane,top5grid-pane,avgpay-pane,avgpay3-pane";
+        var tabs = new List<HighlightTab>
+        {
+            new("Production", "Production Highlights", "monthly-pane,weekly-pane"),
+            new("Collection", "Collection Highlights", collectionTabs),
+            new("Lims", "LIMS Highlights", null),
+        };
+        if (ShowsDenialHighlights(labName))
+            tabs.Add(new("Denial", "Denial Highlights", "dcr-monthly,dcr-weekly"));
+        return tabs;
+    }
+
+    /// <summary>
     /// Returns the Executive Summary workbook with the highlight sheets appended.
     /// A section that fails to load gets a one-line notice sheet instead of failing the download.
     /// </summary>

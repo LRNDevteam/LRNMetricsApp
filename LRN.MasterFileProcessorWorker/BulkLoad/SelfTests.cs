@@ -78,6 +78,12 @@ public static class SelfTests
         DenialCodeDescriptions();
         DenialDescriptionCascade();
         DatedMonthFolderYears();
+        SnapshotWeekAsOfDates();
+        SnapshotPathsAreDeterministic();
+        SnapshotRetentionKeepsLatestRunOfRecentWeeks();
+        SnapshotRetentionKeepsMonthEnds();
+        ParquetSnapshotRoundTrip();
+        LocalFolderSnapshotStoreUploadAndPrune();
 
         Console.WriteLine(new string('-', 70));
 
@@ -2555,6 +2561,196 @@ public static class SelfTests
             Check("VariantX claim: ReferringProviderFirstName still loads", Loads("ReferringProviderFirstName") == "LISA", Loads("ReferringProviderFirstName"));
             Check("VariantX claim: ReferringProviderLastName still loads", Loads("ReferringProviderLastName") == "LEESE", Loads("ReferringProviderLastName"));
             Check("VariantX claim: RendPhyLastName still loads", Loads("RendPhyLastName") == "DIAGNOSTICS LLC", Loads("RendPhyLastName"));
+        }
+        finally
+        {
+            TryDelete(folder);
+        }
+    }
+
+    // ---------------- Master data snapshots (step 88) ----------------
+
+    private static void SnapshotWeekAsOfDates()
+    {
+        static DateTime? AsOf(string? folder) => LRN.MasterFileProcessorWorker.Snapshots.SnapshotWeek.AsOfDate(folder);
+
+        Check("Snapshot week: as-of is the end date", AsOf("02.06.2026 - 02.12.2026") == new DateTime(2026, 2, 12));
+        Check("Snapshot week: end year omitted takes the start year", AsOf("02.06.2026 - 02.12") == new DateTime(2026, 2, 12));
+        Check("Snapshot week: end year omitted across new year rolls over", AsOf("12.29.2025 - 01.04") == new DateTime(2026, 1, 4));
+        Check("Snapshot week: single date", AsOf("10.12.2026") == new DateTime(2026, 10, 12));
+        Check("Snapshot week: no date -> null", AsOf("UnknownDate") is null && AsOf(null) is null);
+        Check("Snapshot week: impossible date -> null", AsOf("02.06.2026 - 02.31.2026") is null);
+    }
+
+    private static void SnapshotPathsAreDeterministic()
+    {
+        var prefix = LRN.MasterFileProcessorWorker.Snapshots.SnapshotPaths.RunPrefix(
+            "Beech_Tree", "02.06.2026 - 02.12.2026", "R20260213BTL0001");
+        var file = LRN.MasterFileProcessorWorker.Snapshots.SnapshotPaths.FilePath(prefix, "LINELEVEL");
+
+        Check("Snapshot path: run prefix", prefix == "Beech_Tree/R20260213BTL0001_02.06.2026-02.12.2026_", prefix);
+        Check("Snapshot path: file is <Lab>/<RunId>_<WeekRange>_<CODE>.parquet",
+            file == "Beech_Tree/R20260213BTL0001_02.06.2026-02.12.2026_LINELEVEL.parquet", file);
+
+        var hostile = LRN.MasterFileProcessorWorker.Snapshots.SnapshotPaths.RunPrefix("../Lab", "../..\\x", "..");
+        Check("Snapshot path: a lab or week name never adds or climbs a level",
+            hostile.Split('/').Length == 2 && !hostile.Split('/').Contains(".."), hostile);
+    }
+
+    private static LRN.MasterFileProcessorWorker.Snapshots.SnapshotRunRow SnapRun(
+        long id, DateTime asOf, string status = "Success", DateTime? createdUtc = null, string? week = null) =>
+        new(id, $"R{id}", week ?? asOf.ToString("MM.dd.yyyy", System.Globalization.CultureInfo.InvariantCulture),
+            asOf, status, createdUtc ?? asOf.AddDays(1), $"Lab/{asOf.Year}/{id}/");
+
+    private static void SnapshotRetentionKeepsLatestRunOfRecentWeeks()
+    {
+        var now = new DateTime(2026, 10, 28, 12, 0, 0, DateTimeKind.Utc);
+        var w = Enumerable.Range(0, 7).Select(i => new DateTime(2026, 9, 10).AddDays(7 * i)).ToArray(); // 7 weeks, w[6] newest
+
+        var runs = new List<LRN.MasterFileProcessorWorker.Snapshots.SnapshotRunRow>();
+        for (int i = 0; i < 7; i++) runs.Add(SnapRun(i + 1, w[i]));
+
+        runs.Add(SnapRun(20, w[6], createdUtc: w[6].AddHours(1)));                  // earlier run of the newest week, superseded by run 7
+        runs.Add(SnapRun(21, w[1], status: "Failed", createdUtc: now.AddDays(-30)));   // stale failure
+        runs.Add(SnapRun(22, w[6], status: "Failed", createdUtc: now.AddHours(-2)));   // recent failure, maybe still in flight
+
+        var expired = LRN.MasterFileProcessorWorker.Snapshots.SnapshotRetention
+            .SelectExpired(runs, keepWeeks: 5, keepMonthEnd: 0, currentSnapshotRunId: 7, utcNow: now)
+            .Select(r => r.SnapshotRunId).OrderBy(x => x).ToList();
+
+        Check("Snapshot retention: keeps the 5 newest weeks, drops the 2 oldest, the superseded re-run and the stale failure",
+            expired.SequenceEqual(new long[] { 1, 2, 20, 21 }), string.Join(",", expired));
+
+        var keepOne = LRN.MasterFileProcessorWorker.Snapshots.SnapshotRetention
+            .SelectExpired(runs, keepWeeks: 0, keepMonthEnd: 0, currentSnapshotRunId: 7, utcNow: now)
+            .Select(r => r.SnapshotRunId).ToList();
+        Check("Snapshot retention: KeepWeeks below 1 still keeps the current run", !keepOne.Contains(7) && keepOne.Contains(6));
+    }
+
+    private static void SnapshotRetentionKeepsMonthEnds()
+    {
+        var now = new DateTime(2026, 10, 28, 12, 0, 0, DateTimeKind.Utc);
+        var runs = new[]
+        {
+            SnapRun(1, new DateTime(2026, 7, 23)), SnapRun(2, new DateTime(2026, 7, 30)),
+            SnapRun(3, new DateTime(2026, 8, 20)), SnapRun(4, new DateTime(2026, 8, 27)),
+            SnapRun(5, new DateTime(2026, 9, 24)), SnapRun(6, new DateTime(2026, 10, 1)),
+            SnapRun(7, new DateTime(2026, 10, 8)),
+        };
+
+        var expired = LRN.MasterFileProcessorWorker.Snapshots.SnapshotRetention
+            .SelectExpired(runs, keepWeeks: 2, keepMonthEnd: 3, currentSnapshotRunId: 7, utcNow: now)
+            .Select(r => r.SnapshotRunId).OrderBy(x => x).ToList();
+
+        // Weeks keep 6, 7; month-ends keep Oct (7), Sep (5), Aug (4).
+        Check("Snapshot retention: month-ends survive past the weekly window",
+            expired.SequenceEqual(new long[] { 1, 2, 3 }), string.Join(",", expired));
+    }
+
+    private static void ParquetSnapshotRoundTrip()
+    {
+        var folder = TempFolder();
+        try
+        {
+            var table = new System.Data.DataTable();
+            table.Columns.Add("ClaimID", typeof(string));
+            table.Columns.Add("Units", typeof(int));
+            table.Columns.Add("RowId", typeof(long));
+            table.Columns.Add("ChargeAmount", typeof(decimal));
+            table.Columns.Add("DateofService", typeof(DateTime));
+            table.Columns.Add("IsDenied", typeof(bool));
+            table.Columns.Add("Ratio", typeof(double));
+            table.Columns.Add("Uid", typeof(Guid));
+            table.Columns.Add("RowVer", typeof(byte[]));
+
+            table.Rows.Add("C-1", 1, 10L, 1200.5000m, new DateTime(2026, 3, 1, 10, 30, 0), true, 0.25, Guid.NewGuid(), new byte[] { 1, 2 });
+            table.Rows.Add("C-2", DBNull.Value, 11L, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value);
+            table.Rows.Add(DBNull.Value, 3, 12L, 300.2500m, new DateTime(2026, 3, 3), false, 1.5, Guid.NewGuid(), new byte[] { 3 });
+            table.Rows.Add("C-4", 4, 13L, 0.0001m, new DateTime(2026, 3, 4), true, -2.0, Guid.NewGuid(), new byte[] { 4 });
+            table.Rows.Add("C-5", 5, 14L, 99999.9999m, new DateTime(2026, 3, 5), false, 3.0, Guid.NewGuid(), new byte[] { 5 });
+
+            var path = Path.Combine(folder, "Data.v1.parquet");
+            using (var reader = table.CreateDataReader())
+            {
+                var result = LRN.MasterFileProcessorWorker.Snapshots.ParquetSnapshotWriter
+                    .WriteAsync(reader, path, rowGroupSize: 2, Parquet.CompressionMethod.Snappy, CancellationToken.None)
+                    .GetAwaiter().GetResult();
+
+                Check("Parquet snapshot: rows written", result.RowCount == 5, result.RowCount.ToString());
+                Check("Parquet snapshot: every column written", result.ColumnCount == 9);
+                Check("Parquet snapshot: schema JSON names the source columns", result.SchemaJson.Contains("\"ChargeAmount\""));
+            }
+
+            Check("Parquet snapshot: footer row count read back",
+                LRN.MasterFileProcessorWorker.Snapshots.ParquetSnapshotWriter.ReadRowCountAsync(path, CancellationToken.None).GetAwaiter().GetResult() == 5);
+
+            using (var stream = File.OpenRead(path))
+            {
+                var pr = Parquet.ParquetReader.CreateAsync(stream).GetAwaiter().GetResult();
+                Check("Parquet snapshot: one row group per 2 rows", pr.RowGroupCount == 3, pr.RowGroupCount.ToString());
+
+                var amount = pr.Schema.DataFields.First(f => f.Name == "ChargeAmount");
+                var claim = pr.Schema.DataFields.First(f => f.Name == "ClaimID");
+                var values = new decimal?[2];
+                var claims = new string?[2];
+                using (var group = pr.OpenRowGroupReader(0))
+                {
+                    group.ReadAsync<decimal>(amount, values.AsMemory(), null, CancellationToken.None).GetAwaiter().GetResult();
+                    group.ReadAsync(claim, claims.AsMemory()!, null, CancellationToken.None).GetAwaiter().GetResult();
+                }
+
+                Check("Parquet snapshot: decimal kept exactly", values[0] == 1200.5000m, values[0]?.ToString());
+                Check("Parquet snapshot: NULL decimal stays NULL", values[1] is null);
+                Check("Parquet snapshot: strings kept", claims[0] == "C-1" && claims[1] == "C-2");
+                pr.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+
+            var emptyPath = Path.Combine(folder, "Empty.parquet");
+            using (var reader = table.Clone().CreateDataReader())
+            {
+                var empty = LRN.MasterFileProcessorWorker.Snapshots.ParquetSnapshotWriter
+                    .WriteAsync(reader, emptyPath, 100, Parquet.CompressionMethod.Snappy, CancellationToken.None)
+                    .GetAwaiter().GetResult();
+                Check("Parquet snapshot: an empty table still produces a valid file",
+                    empty.RowCount == 0 && LRN.MasterFileProcessorWorker.Snapshots.ParquetSnapshotWriter
+                        .ReadRowCountAsync(emptyPath, CancellationToken.None).GetAwaiter().GetResult() == 0);
+            }
+        }
+        catch (Exception ex)
+        {
+            Check("Parquet snapshot: round trip ran without throwing", false, ex.Message);
+        }
+        finally
+        {
+            TryDelete(folder);
+        }
+    }
+
+    private static void LocalFolderSnapshotStoreUploadAndPrune()
+    {
+        var folder = TempFolder();
+        try
+        {
+            var store = new LRN.MasterFileProcessorWorker.Snapshots.LocalFolderSnapshotStore(Path.Combine(folder, "store"));
+            var source = Path.Combine(folder, "x.parquet");
+            File.WriteAllText(source, "PAR1");
+
+            store.UploadAsync(source, "Lab/R1_W1_LINELEVEL.parquet", "ABC", CancellationToken.None).GetAwaiter().GetResult();
+            store.UploadAsync(source, "Lab/R1_W1_LIMS.parquet", "ABC", CancellationToken.None).GetAwaiter().GetResult();
+            store.UploadAsync(source, "Lab/R10_W2_LIMS.parquet", "ABC", CancellationToken.None).GetAwaiter().GetResult();
+            store.UploadAsync(source, "Other/R1_W1_LIMS.parquet", "ABC", CancellationToken.None).GetAwaiter().GetResult();
+
+            var removed = store.DeletePrefixAsync("Lab/R1_W1_", CancellationToken.None).GetAwaiter().GetResult();
+
+            Check("Snapshot store: prefix delete removes exactly that run's files", removed == 2, removed.ToString());
+            Check("Snapshot store: other runs and labs untouched",
+                File.Exists(Path.Combine(folder, "store", "Lab", "R10_W2_LIMS.parquet")) &&
+                File.Exists(Path.Combine(folder, "store", "Other", "R1_W1_LIMS.parquet")));
+
+            bool refused;
+            try { store.UploadAsync(source, "../escape.parquet", "ABC", CancellationToken.None).GetAwaiter().GetResult(); refused = false; }
+            catch (InvalidOperationException) { refused = true; }
+            Check("Snapshot store: a path outside the root is refused", refused);
         }
         finally
         {

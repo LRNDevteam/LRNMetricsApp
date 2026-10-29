@@ -1,0 +1,276 @@
+@model LabMetricsDashboard.Models.MasterValuesPageViewModel
+@{
+    ViewData["Title"] = "Master Data Snapshots";
+}
+
+<style>
+    .mv-shell { display: flex; flex-direction: column; gap: 1rem; }
+    .mv-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+    .mv-title h2 { margin: 0; font-size: 1.45rem; font-weight: 800; color: #162033; }
+    .mv-title small { color: #64748b; font-weight: 600; }
+    .mv-card { background: #fff; border: 1px solid #d9e2ef; border-radius: 8px; box-shadow: 0 6px 18px rgba(15, 23, 42, .06); }
+    .mv-filters { display: flex; gap: .6rem; align-items: flex-end; flex-wrap: wrap; padding: .75rem 1rem; border-bottom: 1px solid #e2e8f0; }
+    .mv-filters label { display: block; font-size: .7rem; font-weight: 800; text-transform: uppercase; letter-spacing: .02em; color: #64748b; margin-bottom: .15rem; }
+    .mv-filters .form-control, .mv-filters .form-select { font-size: .8rem; }
+    .mv-grid-wrap { position: relative; }
+    .mv-grid-scroll { overflow: auto; max-height: calc(100vh - 300px); min-height: 300px; }
+    .mv-table { font-size: .8rem; margin-bottom: 0; }
+    .mv-table th, .mv-table td { border: 1px solid #d8e1ee; white-space: nowrap; vertical-align: middle; }
+    .mv-table thead th { position: sticky; top: 0; z-index: 2; background: #f8fafc; color: #0f172a; font-size: .7rem; text-transform: uppercase; letter-spacing: .02em; }
+    .mv-table td.num, .mv-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .mv-info-banner { background: #E8F1F9; border: 1px solid #C6DCEE; color: #1F3B57; padding: .55rem .75rem; border-radius: 6px; font-size: .8rem; }
+    .mv-loader { display: none; position: absolute; inset: 0; z-index: 5; align-items: center; justify-content: center; background: rgba(248, 250, 252, .74); }
+    .mv-loader.active { display: flex; }
+    .mv-loader-box { background: #0f172a; color: #fff; border-radius: 8px; padding: .75rem 1rem; display: inline-flex; gap: .7rem; align-items: center; }
+    .mv-footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem 1rem; border-top: 1px solid #e2e8f0; flex-wrap: wrap; }
+
+    /* Lab group header: click to fold its runs. */
+    .sn-lab td { background: #eef4fb; font-weight: 800; color: #1F3B57; cursor: pointer; user-select: none; }
+    .sn-lab:hover td { background: #e2edf8; }
+    .sn-lab .sn-chev { display: inline-block; width: 1rem; transition: transform .15s; }
+    .sn-lab.collapsed .sn-chev { transform: rotate(-90deg); }
+    .sn-lab small { font-weight: 600; color: #64748b; margin-left: .6rem; }
+    .sn-run td:first-child { padding-left: 2rem; }
+    .sn-run:hover td { background: #f8fbff; }
+    .sn-run.open td { background: #f1f7fe; }
+    .sn-runid { font-family: Consolas, monospace; font-size: .76rem; color: #2E5C8A; cursor: pointer; text-decoration: underline dotted; background: none; border: 0; padding: 0; }
+    .sn-runid:hover { color: #0b5ed7; }
+    .sn-code { display: inline-flex; border-radius: 4px; padding: .05rem .4rem; font-size: .68rem; font-weight: 800; background: #E5EEF7; color: #2E5C8A; margin-right: .2rem; }
+    .sn-st { display: inline-flex; border-radius: 999px; padding: .1rem .5rem; font-size: .7rem; font-weight: 800; }
+    .sn-st.Success { background: #dcfce7; color: #166534; }
+    .sn-st.Failed { background: #FBEAE9; color: #B3261E; }
+    .sn-st.InProgress { background: #FDF3E3; color: #B7791F; }
+    .sn-latest { font-size: .66rem; font-weight: 800; color: #166534; margin-left: .35rem; }
+
+    /* Drill-down: the run's Parquet files. */
+    .sn-detail > td { background: #fbfdff !important; padding: .6rem 1rem .8rem 2rem !important; white-space: normal !important; }
+    .sn-files { font-size: .78rem; margin: 0; background: #fff; }
+    .sn-files th { background: #f8fafc; font-size: .68rem; text-transform: uppercase; letter-spacing: .02em; color: #475569; position: static !important; }
+    .sn-path { font-family: Consolas, monospace; font-size: .74rem; word-break: break-all; white-space: normal !important; }
+    .sn-copy { border: 0; background: none; color: #64748b; padding: 0 .2rem; }
+    .sn-copy:hover { color: #0b5ed7; }
+    .sn-err { color: #B3261E; font-size: .78rem; white-space: pre-wrap; word-break: break-word; margin-bottom: .5rem; }
+</style>
+
+<div class="mv-shell">
+    <div class="mv-header">
+        <div class="mv-title">
+            <h2>Master Data Snapshots</h2>
+        </div>
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-secondary" id="expandBtn"><i class="bi bi-arrows-expand"></i> Expand all</button>
+            <button type="button" class="btn btn-outline-secondary" id="collapseBtn"><i class="bi bi-arrows-collapse"></i> Collapse all</button>
+            <button type="button" class="btn btn-outline-secondary" id="refreshBtn"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+        </div>
+    </div>
+
+    <div class="mv-info-banner" id="errorBanner" style="display:none;"></div>
+
+    <div class="mv-card">
+        <div class="mv-filters">
+            <div style="width:200px;">
+                <label for="fLab">Lab</label>
+                <select class="form-select form-select-sm" id="fLab"><option value="">All labs</option></select>
+            </div>
+            <div style="width:220px;">
+                <label for="fSearch">Run ID / Week</label>
+                <input type="text" class="form-control form-control-sm" id="fSearch" placeholder="e.g. R20261028TXD0377 or 10.16.2026" />
+            </div>
+            <div style="width:170px;">
+                <label for="fStatus">Status</label>
+                <select class="form-select form-select-sm" id="fStatus">
+                    <option value="Success">Available (Success)</option>
+                    <option value="">All attempts</option>
+                    <option value="Failed">Failed only</option>
+                </select>
+            </div>
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="clearBtn">Clear</button>
+            </div>
+        </div>
+
+        <div class="mv-grid-wrap">
+            <div class="mv-loader" id="gridLoader"><div class="mv-loader-box"><span class="spinner-border spinner-border-sm"></span><span>Loading snapshots...</span></div></div>
+            <div class="mv-grid-scroll">
+                <table class="table table-sm align-middle mv-table">
+                    <thead><tr>
+                        <th>Run ID</th>
+                        <th>Week Range</th>
+                        <th>Data As Of</th>
+                        <th>Status</th>
+                        <th>Snapshots</th>
+                        <th>Taken (UTC)</th>
+                    </tr></thead>
+                    <tbody id="rows"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script nonce='@Context.Items["CspNonce"]'>
+(function(){
+const urls={
+  runs:'@Url.Action("MasterDataSnapshotRuns","MasterValues")',
+  files:'@Url.Action("MasterDataSnapshotFiles","MasterValues")'
+};
+const COLS=6;
+const CODE_LABEL={LINELEVEL:'Line Level',CLAIMLEVEL:'Claim Level',LIMS:'LIMS',
+  EXECSUMMARY:'Executive Summary',LISSUMMARY:'LIS Summary',PRODSUMMARY:'Production Summary',
+  COLLSUMMARY:'Collection Summary',DENIALSUMMARY:'Denial Summary',DENIALINSIGHT:'Denial Insight (uploaded)'};
+// A report's display copy: the page's view model, with the trigger and how the report logic changed since last week.
+function pageModelNote(f){
+  if(f.resultSetName!=='PageModel') return '';
+  let h=`<div class="text-muted" style="font-size:.72rem;">Display copy (page model)${f.trigger?' · '+esc(f.trigger):''}`+
+    (f.logicObjects!=null?` · ${n(f.logicObjects)} report object(s)`:'')+'</div>';
+  if((f.logicChanges||[]).length)
+    h+=`<div class="text-warning-emphasis" style="font-size:.72rem;"><i class="bi bi-exclamation-triangle"></i> Report logic changed since the previous snapshot: `+
+      f.logicChanges.map(esc).join('; ')+'</div>';
+  return h;
+}
+let allRuns=[],collapsed=new Set(),openRuns=new Set(),fileCache=new Map();
+const el=id=>document.getElementById(id);
+function esc(v){return (v??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function banner(message){
+  const b=el('errorBanner');
+  if(!message){b.style.display='none';b.textContent='';return;}
+  b.textContent=message;b.style.display='';
+}
+function n(v){return (v??0).toLocaleString();}
+function size(bytes){
+  if(bytes==null)return '—';
+  if(bytes<1024)return bytes+' B';
+  if(bytes<1048576)return (bytes/1024).toFixed(0)+' KB';
+  if(bytes<1073741824)return (bytes/1048576).toFixed(1)+' MB';
+  return (bytes/1073741824).toFixed(2)+' GB';
+}
+// The API sends SQL datetimes without an offset; they are UTC (SYSUTCDATETIME), so read them as UTC
+// and print them in UTC - letting the browser treat them as local would shift the day.
+function utc(v){if(!v)return null;const s=String(v);const d=new Date(/[zZ]|[+-]\d\d:\d\d$/.test(s)?s:s+'Z');return isNaN(d)?null:d;}
+function day(v){const d=utc(v);return d?d.toLocaleDateString(undefined,{timeZone:'UTC'}):'—';}
+function when(v){const d=utc(v);return d?d.toLocaleDateString(undefined,{timeZone:'UTC'})+' '+d.toLocaleTimeString(undefined,{timeZone:'UTC',hour:'2-digit',minute:'2-digit'}):'—';}
+
+// ── filters ────────────────────────────────────────────────────────────────
+function filtered(){
+  const lab=el('fLab').value,status=el('fStatus').value,term=el('fSearch').value.trim().toLowerCase();
+  return allRuns.filter(r=>
+    (!lab||r.labName===lab)&&
+    (!status||r.status===status)&&
+    (!term||(r.runId+' '+r.weekFolder).toLowerCase().includes(term)));
+}
+function groupByLab(list){
+  const map=new Map();
+  for(const r of list){
+    if(!map.has(r.labName))map.set(r.labName,[]);
+    map.get(r.labName).push(r);
+  }
+  return [...map.entries()].sort((a,b)=>a[0].localeCompare(b[0]));
+}
+
+// ── grid ───────────────────────────────────────────────────────────────────
+function runRow(r,isLatest){
+  const codes=(r.reportCodes||[]).map(c=>`<span class="sn-code" title="${esc(CODE_LABEL[c]||c)}">${esc(c)}</span>`).join('')||'<span class="text-muted">none</span>';
+  return `<tr class="sn-run${openRuns.has(r.snapshotRunId)?' open':''}" data-run="${r.snapshotRunId}">`+
+    `<td><button type="button" class="sn-runid" data-open="${r.snapshotRunId}" title="Show this run's snapshot files">${esc(r.runId)}</button>`+
+      (isLatest?'<span class="sn-latest">LATEST</span>':'')+`</td>`+
+    `<td>${esc(r.weekFolder)}</td>`+
+    `<td>${esc(day(r.snapshotDate))}</td>`+
+    `<td><span class="sn-st ${esc(r.status)}">${esc(r.status)}</span></td>`+
+    `<td>${codes}</td>`+
+    `<td>${esc(when(r.completedOn||r.createdOn))}</td></tr>`+
+    (openRuns.has(r.snapshotRunId)?`<tr class="sn-detail" data-detail="${r.snapshotRunId}"><td colspan="${COLS}">${detailHtml(r)}</td></tr>`:'');
+}
+function detailHtml(r){
+  const files=fileCache.get(r.snapshotRunId);
+  const err=r.errorMessage?`<div class="sn-err"><b>Error:</b> ${esc(r.errorMessage)}</div>`:'';
+  if(files===undefined)return err+'<span class="text-muted"><span class="spinner-border spinner-border-sm"></span> Loading files…</span>';
+  if(files===null)return err+'<span class="text-danger">The files could not be loaded.</span>';
+  if(!files.length)return err+'<span class="text-muted">No snapshot files were written for this run.</span>';
+  return err+'<table class="table table-sm table-bordered sn-files"><thead><tr>'+
+    '<th>Snapshot</th><th>File (in the snapshot container)</th><th class="num">Rows</th><th class="num">Columns</th><th class="num">Size</th><th>Created (UTC)</th>'+
+    '</tr></thead><tbody>'+
+    files.map(f=>`<tr><td><span class="sn-code">${esc(f.reportCode)}</span> ${esc(CODE_LABEL[f.reportCode]||'')}`+
+      (f.resultSetName==='PageModel'?pageModelNote(f)
+        :f.resultSetName&&f.resultSetName!=='Data'?`<div class="text-muted" style="font-size:.72rem;">${esc(f.resultSetName)}</div>`:'')+`</td>`+
+      `<td class="sn-path">${esc(f.blobPath)} <button type="button" class="sn-copy" data-copy="${esc(f.blobPath)}" title="Copy path"><i class="bi bi-clipboard"></i></button></td>`+
+      `<td class="num">${n(f.rowCount)}</td><td class="num">${f.columns??'—'}</td><td class="num">${size(f.sizeBytes)}</td>`+
+      `<td>${esc(when(f.createdOn))}</td></tr>`).join('')+
+    '</tbody></table>';
+}
+function render(){
+  const list=filtered();
+  const groups=groupByLab(list);
+  el('rows').innerHTML=groups.map(([lab,runs])=>{
+    const isCollapsed=collapsed.has(lab);
+    const ok=runs.filter(r=>r.status==='Success');
+    const latestId=ok.length?ok[0].snapshotRunId:null;   // runs arrive newest first per lab
+    const head=`<tr class="sn-lab${isCollapsed?' collapsed':''}" data-lab="${esc(lab)}"><td colspan="${COLS}">`+
+      `<span class="sn-chev"><i class="bi bi-chevron-down"></i></span> ${esc(lab)}`+
+      `<small>${runs.length} run${runs.length===1?'':'s'}${ok.length?' · latest '+esc(ok[0].weekFolder):''}</small></td></tr>`;
+    return head+(isCollapsed?'':runs.map(r=>runRow(r,r.snapshotRunId===latestId)).join(''));
+  }).join('')||`<tr><td colspan="${COLS}" class="text-center text-muted py-4">No snapshots match these filters.</td></tr>`;
+}
+function fillLabs(){
+  const current=el('fLab').value;
+  const labs=[...new Set(allRuns.map(r=>r.labName))].sort((a,b)=>a.localeCompare(b));
+  el('fLab').innerHTML='<option value="">All labs</option>'+labs.map(l=>`<option value="${esc(l)}">${esc(l)}</option>`).join('');
+  if(labs.includes(current))el('fLab').value=current;
+}
+async function load(){
+  el('gridLoader').classList.add('active');
+  banner('');
+  try{
+    const r=await fetch(urls.runs);
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.message||'Unable to load the snapshots.');
+    if(!d.installed)banner('Snapshots are not set up in LRNMaster yet: run Database/LRN.MasterFileProcessorWorker/Create_ReportSnapshots.sql, then enable MasterDataSnapshot in the master file processor.');
+    allRuns=d.runs||[];
+    fileCache.clear();
+    openRuns.forEach(id=>{if(allRuns.some(x=>x.snapshotRunId===id))loadFiles(id);else openRuns.delete(id);});
+    fillLabs();
+    render();
+  }catch(e){
+    allRuns=[];render();
+    banner(e.message||'Unable to load the snapshots.');
+  }finally{el('gridLoader').classList.remove('active');}
+}
+async function loadFiles(id){
+  try{
+    const r=await fetch(urls.files+'?snapshotRunId='+encodeURIComponent(id));
+    const d=await r.json().catch(()=>null);
+    if(!r.ok)throw new Error();
+    fileCache.set(id,Array.isArray(d)?d:[]);
+  }catch{fileCache.set(id,null);}
+  render();
+}
+
+// ── interactions ───────────────────────────────────────────────────────────
+el('rows').addEventListener('click',e=>{
+  const copy=e.target.closest('[data-copy]');
+  if(copy){navigator.clipboard?.writeText(copy.dataset.copy);return;}
+  const open=e.target.closest('[data-open]');
+  if(open){
+    const id=Number(open.dataset.open);
+    if(openRuns.has(id))openRuns.delete(id);
+    else{openRuns.add(id);if(!fileCache.has(id))loadFiles(id);}
+    render();return;
+  }
+  const lab=e.target.closest('tr.sn-lab');
+  if(lab){
+    const name=lab.dataset.lab;
+    if(collapsed.has(name))collapsed.delete(name);else collapsed.add(name);
+    render();
+  }
+});
+el('expandBtn').onclick=()=>{collapsed.clear();render();};
+el('collapseBtn').onclick=()=>{allRuns.forEach(r=>collapsed.add(r.labName));render();};
+el('refreshBtn').onclick=()=>load();
+el('fLab').addEventListener('change',render);
+el('fStatus').addEventListener('change',render);
+el('fSearch').addEventListener('input',render);
+el('clearBtn').onclick=()=>{el('fLab').value='';el('fSearch').value='';el('fStatus').value='Success';render();};
+load();
+})();
+</script>
+}

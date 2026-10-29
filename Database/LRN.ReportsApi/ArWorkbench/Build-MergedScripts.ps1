@@ -57,7 +57,7 @@ Build-Merged '2_RUN_IN_EACH_LAB_DB_ARWB_Setup.sql' @(
     'LabDatabase\01_ARWB_Tables.sql', 'LabDatabase\02_ARWB_Functions.sql', 'LabDatabase\03_ARWB_MasterData_Seed.sql',
     'LabDatabase\04_ARWB_ClaimState_Procedure.sql', 'LabDatabase\05_ARWB_LoadFromSource_Procedure.sql',
     'LabDatabase\06_ARWB_Workflow_Procedures.sql', 'LabDatabase\07_ARWB_Views.sql', 'LabDatabase\09_ARWB_Legacy_Cip_Conversion.sql',
-    'LabDatabase\10_ARWB_Document_Blob_HIPAA.sql'
+    'LabDatabase\10_ARWB_Document_Blob_HIPAA.sql', 'LabDatabase\11_ARWB_Document_MalwareScan.sql'
 ) 'LAB DATABASE SETUP' 'each LAB database (the one holding dbo.ClaimLevelData / dbo.LineLevelData).' (
     "Run 1_RUN_IN_LRNMASTER_ARWB_Setup.sql in LRNMaster first (roles, users' scope, denial code master, client activation, document types).`n" +
     "To rebuild from clean, run LabDatabase\00_ARWB_Drop_Existing_Objects.sql first (it deletes all workbench data).`n" +

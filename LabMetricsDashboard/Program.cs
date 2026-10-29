@@ -657,6 +657,10 @@ builder.Services.AddScoped<IDenialCategoryMasterRepository, SqlDenialCategoryMas
 // Master Values > Fees Schedule Import (LRNMaster.dbo.FeeSchedule): the AR Workbench's Revenue Expectation rates.
 builder.Services.AddScoped<IFeeScheduleRepository, SqlFeeScheduleRepository>();
 builder.Services.AddScoped<IDenialDatabaseRerunRepository, SqlDenialDatabaseRerunRepository>();
+// Master Values > Master Data Snapshots: the weekly Parquet snapshot index (LRNMaster.dbo.ReportSnapshotRun / File).
+builder.Services.AddScoped<IMasterDataSnapshotRepository, SqlMasterDataSnapshotRepository>();
+// Denial Insight upload / edit -> LRN.SnapshotGenerator snapshots the tab (LRNMaster.dbo.ReportSnapshotRequest).
+builder.Services.AddSingleton<IReportSnapshotRequestQueue, SqlReportSnapshotRequestQueue>();
 
 // ── Reimbursement Insights chat (Foundry agent via the ReimbursementAgentProxy App Service) ──
 // The browser posts to ReimbursementChatController on this origin and this app calls the proxy,

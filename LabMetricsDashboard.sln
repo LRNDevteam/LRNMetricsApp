@@ -63,6 +63,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LRN.DenialDatabaseWorker.Te
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LRN.CpuMonitor", "Services\LRN.CpuMonitor\LRN.CpuMonitor.csproj", "{B7396DFC-5630-4A3A-A8E9-B3E445BD1287}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LRN.SnapshotGenerator", "LRN.SnapshotGenerator\LRN.SnapshotGenerator.csproj", "{79A124D3-1975-40E6-8E90-062D3F44C066}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -409,6 +411,18 @@ Global
 		{B7396DFC-5630-4A3A-A8E9-B3E445BD1287}.Release|x64.Build.0 = Release|Any CPU
 		{B7396DFC-5630-4A3A-A8E9-B3E445BD1287}.Release|x86.ActiveCfg = Release|Any CPU
 		{B7396DFC-5630-4A3A-A8E9-B3E445BD1287}.Release|x86.Build.0 = Release|Any CPU
+		{79A124D3-1975-40E6-8E90-062D3F44C066}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{79A124D3-1975-40E6-8E90-062D3F44C066}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{79A124D3-1975-40E6-8E90-062D3F44C066}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{79A124D3-1975-40E6-8E90-062D3F44C066}.Debug|x64.Build.0 = Debug|Any CPU
+		{79A124D3-1975-40E6-8E90-062D3F44C066}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{79A124D3-1975-40E6-8E90-062D3F44C066}.Debug|x86.Build.0 = Debug|Any CPU
+		{79A124D3-1975-40E6-8E90-062D3F44C066}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{79A124D3-1975-40E6-8E90-062D3F44C066}.Release|Any CPU.Build.0 = Release|Any CPU
+		{79A124D3-1975-40E6-8E90-062D3F44C066}.Release|x64.ActiveCfg = Release|Any CPU
+		{79A124D3-1975-40E6-8E90-062D3F44C066}.Release|x64.Build.0 = Release|Any CPU
+		{79A124D3-1975-40E6-8E90-062D3F44C066}.Release|x86.ActiveCfg = Release|Any CPU
+		{79A124D3-1975-40E6-8E90-062D3F44C066}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

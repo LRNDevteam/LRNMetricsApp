@@ -19,18 +19,21 @@ var host = Host.CreateDefaultBuilder(args)
 	.UseWindowsService(o => o.ServiceName = "LRN - Master File Processor")
 	.ConfigureAppConfiguration(config =>
 	{
-		// Every secret - the SharePoint app registration and all SQL connection strings - lives in
-		// Azure Key Vault, never in a file in this repo. Secret names use "--" where the
-		// configuration key uses ":", so "ConnectionStrings--DefaultConnection" in the vault binds
-		// to ConnectionStrings:DefaultConnection here.
+		// Every secret - LRNMaster and every lab's SQL connection string, the SharePoint client
+		// secret, the Teams webhook URL and the snapshot storage settings - lives in Azure Key
+		// Vault, never in a file. Secret names use "--" where the configuration key uses ":", so
+		// "ConnectionStrings--DefaultConnection" in the vault binds to
+		// ConnectionStrings:DefaultConnection here, and a lab's LabDbConnectionKey "CoveConnection"
+		// reads the secret "ConnectionStrings--CoveConnection".
 		//
-		// This provider is added LAST, so vault values win over appsettings.json. Authentication is
-		// DefaultAzureCredential: the service's managed identity on the server, and the developer's
-		// az-cli / Visual Studio sign-in locally. Either identity needs the "Key Vault Secrets User"
-		// role on the vault, which has RBAC authorization enabled.
+		// KeyVault:VaultUri picks the vault: kv-lrnmetrics-prod in appsettings.json, lrn-testapp-kv
+		// in appsettings.Test.json (DOTNET_ENVIRONMENT=Test). This provider is added LAST, so vault
+		// values win over every file. Authentication is DefaultAzureCredential: the service's
+		// managed identity on the server, and the developer's az-cli / Visual Studio sign-in
+		// locally. Either identity needs the "Key Vault Secrets User" role on the vault (RBAC).
 		//
-		// Set KeyVault:VaultUri to "" to skip the vault entirely (offline work); configuration then
-		// falls back to appsettings.json and environment variables.
+		// Set KeyVault:VaultUri to "" to skip the vault entirely (offline work); the same keys must
+		// then come from environment variables (ConnectionStrings__DefaultConnection, ...).
 		//
 		// The builder is built here rather than reading HostBuilderContext.Configuration, which at
 		// this point still only holds host configuration - appsettings.json is not visible on it
@@ -38,12 +41,6 @@ var host = Host.CreateDefaultBuilder(args)
 		var vaultUri = config.Build()["KeyVault:VaultUri"];
 		if (!string.IsNullOrWhiteSpace(vaultUri))
 			config.AddAzureKeyVault(new Uri(vaultUri), new DefaultAzureCredential());
-
-		// Narrow escape hatch for the few secrets the vault cannot hold - today just the Teams
-		// incoming-webhook URL, which exceeds the 256-character limit on the vault tags these
-		// settings are managed through. Gitignored, and loaded after the vault so it wins.
-		// See appsettings.Secrets.example.json for the expected shape.
-		config.AddJsonFile("appsettings.Secrets.json", optional: true, reloadOnChange: true);
 	})
 	.ConfigureLogging((context, logging) =>
 	{
@@ -98,6 +95,14 @@ var host = Host.CreateDefaultBuilder(args)
 		services.Configure<LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncOptions>(
 			context.Configuration.GetSection(LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncOptions.SectionName));
 		services.AddSingleton<LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncService>();
+
+		// Step 88: weekly Parquet snapshots of the Line Level, Claim Level and LIMS tables, kept for
+		// MasterDataSnapshot:KeepWeeks weeks. Off until MasterDataSnapshot:Enabled is true.
+		services.Configure<LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotOptions>(
+			context.Configuration.GetSection(LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotOptions.SectionName));
+		services.AddSingleton<LRN.MasterFileProcessorWorker.Snapshots.SnapshotStoreFactory>();
+		services.AddSingleton<LRN.MasterFileProcessorWorker.Snapshots.ReportSnapshotRepository>();
+		services.AddSingleton<LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotService>();
 
 		services.AddHostedService<MasterFileProcessorWorker>();
 	})

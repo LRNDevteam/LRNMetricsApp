@@ -107,12 +107,16 @@ public static class ReportCatalog
 
     /// <summary>
     /// Report types the board never shows as a column, even though dbo.ReportTypeMaster returns
-    /// them: run artifacts (Error Log) and inputs the pipeline consumes rather than reports anyone
-    /// opens (CPT / Panel Averages, which feed Collection Summary).
+    /// them: run artifacts (Error Log, Report Snapshot - LRN.SnapshotGenerator's weekly archive of the
+    /// pages) and inputs the pipeline consumes rather than reports anyone opens (CPT / Panel Averages,
+    /// which feed Collection Summary).
     /// Matched on a normalised key, so spacing and casing in ReportTypeMaster cannot un-hide one.
     /// </summary>
     private static readonly HashSet<string> Hidden =
-        new(StringComparer.Ordinal) { HiddenKey("Error Log"), HiddenKey("CPT Averages"), HiddenKey("Panel Averages") };
+        new(StringComparer.Ordinal)
+        {
+            HiddenKey("Error Log"), HiddenKey("CPT Averages"), HiddenKey("Panel Averages"), HiddenKey("Report Snapshot")
+        };
 
     /// <summary>Letters and digits only — "CPT Averages", "CPT  averages" and "CPTAverages" all match.</summary>
     private static string HiddenKey(string? value)

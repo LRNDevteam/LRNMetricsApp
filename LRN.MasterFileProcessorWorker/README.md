@@ -33,6 +33,7 @@ dotnet publish  services/LRN.MasterFileProcessorWorker -c Release
 | `Excel/` | Raw and standardized CSV export, the insurance master reader, XLSX sanity check. |
 | `BulkLoad/` | Line-level / claim-level `SqlBulkCopy` pipeline, lab mappings, LIMS master import, self-tests. |
 | `ModeMedian/` | Mode / median payment report: repositories, workbook writer, publisher. |
+| `Snapshots/` | Step 88: weekly Parquet snapshots of the Line Level, Claim Level and LIMS tables, their LRNMaster index, and retention. |
 | `ProcessLogging/` | `LRN_Run_Log` / `LRN_Step_Log` / `LRN_Error_Log` writers (SQL, CSV, daily workbook) and file-status tracking. |
 | `Logging/` | log4net-backed `ILoggerService`, the application log file that only carries our own messages. |
 | `Notifications/` | Teams webhook and Graph email notifiers. |
@@ -47,11 +48,12 @@ namespace, which is the convention this project already used; the rest are names
 ## Configuration and secrets
 
 `appsettings.json` holds **no secrets** and is safe to commit. Every secret comes from Azure Key
-Vault at run time:
+Vault at run time. There is no secrets file: `appsettings.Secrets.json` is no longer read.
 
-```
-https://kv-lrnmetrics-prod.vault.azure.net/
-```
+| Server | `DOTNET_ENVIRONMENT` | Vault (`KeyVault:VaultUri`) |
+| --- | --- | --- |
+| Production | unset | `https://kv-lrnmetrics-prod.vault.azure.net/` (`appsettings.json`) |
+| Test | `Test` (machine environment variable) | `https://lrn-testapp-kv.vault.azure.net/` (`appsettings.Test.json`) |
 
 Key Vault secret names cannot contain `:`, so they use `--` instead. The configuration provider maps
 them back, which means a vault secret binds straight onto a configuration key:
@@ -63,24 +65,21 @@ them back, which means a vault secret binds straight onto a configuration key:
 | `MasterFileProcessor--SharePoint--TenantId` | `MasterFileProcessor:SharePoint:TenantId` |
 | `MasterFileProcessor--SharePoint--ClientId` | `MasterFileProcessor:SharePoint:ClientId` |
 | `MasterFileProcessor--SharePoint--ClientSecret` | `MasterFileProcessor:SharePoint:ClientSecret` |
+| `ConnectionStrings--<LabDbConnectionKey>` | each lab's own database (table below) |
+| `Notifications--Teams--WebhookUrl` | `Notifications:Teams:WebhookUrl` |
+| `MasterDataSnapshot--BlobServiceUri` | `MasterDataSnapshot:BlobServiceUri` (snapshot storage account URL) |
+| `MasterDataSnapshot--ContainerName` | `MasterDataSnapshot:ContainerName` (snapshot container) |
 
 The vault provider is added after `appsettings.json`, so a vault value always wins over it.
-
-### The one secret that is not in the vault
-
-The Teams incoming-webhook URL is longer than the 256-character limit on the vault tags these
-settings are managed through, so it lives in `appsettings.Secrets.json` instead. That file is
-gitignored and is loaded **after** the vault, so anything in it wins.
-
-Copy [`appsettings.Secrets.example.json`](appsettings.Secrets.example.json) to
-`appsettings.Secrets.json` and fill in the URL. Nothing else belongs in that file - every other
-secret comes from the vault.
 
 ### Per-lab databases
 
 `ConnectionStrings:DefaultConnection` is the `LRNMaster` database. Each lab additionally names the
 vault secret holding its own database, via `LabDbConnectionKey` in its `MasterFileProcessor:Labs[]`
-entry:
+entry - `"LabDbConnectionKey": "CoveConnection"` reads the secret `ConnectionStrings--CoveConnection`.
+Every step (LIMS import, line/claim bulk copy, AR Workbench sync, snapshots) resolves the lab's
+database this one way, and a missing secret fails that lab with a message naming the secret - it
+never falls back to LRNMaster:
 
 | Lab | `LabDbConnectionKey` | Database |
 | --- | --- | --- |
@@ -92,6 +91,7 @@ entry:
 | 10 Beech Tree | `BeechTreeConnStr` | `BeechTree_LRN` |
 | 12 Phi Life | `PhiLifeConnStr` | `PhiLife_LRN` |
 | 13 PCR Labs of America | `PCRLOAConnStr` | `PCRLOA_LRN` |
+| 25 VariantX | `VariantXConnection` | |
 | 16 Elixir | `ElixirConnection` | `Elixir_LRN` |
 | 18 Certus | `CertusConnection` | `Certus_LRN` |
 | 23 NorthWest | `NWLConnection` | `NWL_LRN` |
@@ -101,8 +101,7 @@ entry:
 | 28 CoreBio | `CoreBioConnStr` | `CoreBio_LRN` (tables: `Database/LRN.MasterFileProcessorWorker/CoreBio/`) |
 | 29 TexasDiagnostic | `TexasDiagnosticConnStr` | `TexasDiagnostic_LRN` (tables: `Database/LRN.MasterFileProcessorWorker/TexasDiagnostic/`) |
 
-A lab may instead carry a literal `LabDbConnectionString`, which takes precedence - use that only
-for a throwaway local override, never in a committed file.
+A literal `LabDbConnectionString` / `LimsDbConnectionString` on a lab is no longer read.
 
 ### Authenticating to the vault
 
@@ -111,8 +110,9 @@ Access uses `DefaultAzureCredential`:
 * **On the server** - the service's managed identity.
 * **Locally** - your `az login` / Visual Studio sign-in.
 
-The vault has RBAC authorization enabled, so that identity needs the **Key Vault Secrets User** role
-on `kv-lrnmetrics-prod`. Without it, startup fails when the first secret is read.
+The vaults have RBAC authorization enabled, so that identity needs the **Key Vault Secrets User**
+role on `kv-lrnmetrics-prod` (production) or `lrn-testapp-kv` (test). Without it, startup fails when
+the first secret is read.
 
 ### Running without the vault
 
@@ -147,13 +147,53 @@ Columns the file marks **Unmapped / N/A / Not Required** (for example `ClinicNam
 `ClaimUID`, `TotalWO`, `T_F`, `PlanName`, the deposit dates, `Created/Updated On/By`) are still
 loaded on purpose: Clinic Summary, Sales Rep Summary, the Denial worker and the dashboards read them.
 
+## Master data snapshots (step 88)
+
+Design: [`docs/master-file-processor/LRN_Report_Snapshots_Parquet_Storage_Implementation.pdf`](../docs/master-file-processor/LRN_Report_Snapshots_Parquet_Storage_Implementation.pdf).
+
+After a lab's weekly run has loaded its tables (step 20 LIMS, step 85 line/claim, step 87 AR
+Workbench), step 88 writes each table that **loaded in this run** to one Parquet file:
+
+```
+<container>/<LabName>/<RunId>_<WeekRange>_LINELEVEL.parquet
+                     /<RunId>_<WeekRange>_CLAIMLEVEL.parquet
+                     /<RunId>_<WeekRange>_LIMS.parquet
+e.g. report-snapshots/Beech_Tree/R20260213BTL0001_02.06.2026-02.12.2026_LINELEVEL.parquet
+```
+
+`LabName` is the lab's configured name with spaces as underscores (the same prefix the line/claim
+CSVs use), and `WeekRange` is the week folder with its spaces removed.
+
+Each file is checked (footer row count = rows read), hashed (SHA-256), uploaded, and recorded in
+`LRNMaster.dbo.ReportSnapshotRun` / `dbo.ReportSnapshotFile`. Then retention keeps the latest
+successful run of each of the last `KeepWeeks` week folders (plus the last run of each of the last
+`KeepMonthEnd` months, if set) and deletes the rest, files first, then rows. A re-run of a week
+replaces that week's snapshot. A level that skipped or failed is not snapshotted, because its table
+still holds last week's rows. A snapshot failure is a WARNING (`SNAPSHOT_FAILED` in
+`LRN_Error_Log`) and never fails the run. To retry, re-run the lab.
+
+To turn it on:
+
+1. Run `Database/LRN.MasterFileProcessorWorker/Create_ReportSnapshots.sql` in LRNMaster.
+2. Create a storage account with a **private** container, and give the service's managed identity
+   **Storage Blob Data Contributor**. (Or set `Storage` to `LocalFolder` to write to a disk or share.)
+3. Add the vault secrets `MasterDataSnapshot--BlobServiceUri` (e.g.
+   `https://<account>.blob.core.windows.net`) and `MasterDataSnapshot--ContainerName` (e.g.
+   `report-snapshots`). Both are left blank in `appsettings.json` on purpose.
+4. Under `MasterDataSnapshot` in `appsettings.json`, set `KeepWeeks` and `Enabled: true`.
+5. For each lab to snapshot, set `"MasterDataSnapshotEnabled": true` in its `MasterFileProcessor:Labs`
+   entry. Every lab carries the key, set to `false`; a lab without it is treated as `false`.
+
+To inspect a file, download it with Azure Storage Explorer and open it with DuckDB:
+`SELECT * FROM 'R20260213BTL0001_02.06.2026-02.12.2026_LINELEVEL.parquet' LIMIT 20;`
+
 ## Notifications
 
 Both channels are **off**. Each has exactly one switch in `appsettings.json`:
 
 | Channel | Switch | State | Notes |
 | --- | --- | --- | --- |
-| Teams | `Notifications:Teams:Enabled` | `false` | Webhook URL comes from `appsettings.Secrets.json`. |
+| Teams | `Notifications:Teams:Enabled` | `true` | Webhook URL comes from the vault secret `Notifications--Teams--WebhookUrl`. |
 | Email | `Notifications:Email:Enabled` | `false` | Graph `sendMail`; the send is not implemented yet. |
 
 SMTP has been removed - `MailKit` is gone and so is `SmtpEmailNotifier`, because the tenant is

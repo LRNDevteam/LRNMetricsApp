@@ -12,6 +12,16 @@ import useTableSort from './useTableSort';
 
 const SOURCE_LABEL = { FollowUp: 'Follow-up', CipResponse: 'CIP response', Other: 'Other' };
 
+// Defender for Storage verdict (API scan monitor). Malicious = quarantined: red row, no download.
+export const isQuarantined = (d) => d?.scanStatus === 'Malicious';
+const QUARANTINE_TITLE = 'Virus detected - this document is quarantined and cannot be downloaded.';
+
+function ScanBadge({ status }) {
+  if (status === 'Malicious') return <Badge className="arwb-badge-critical" title={QUARANTINE_TITLE}><Icon name="warn" size={12} /> Virus detected</Badge>;
+  if (status === 'Pending') return <Badge className="arwb-badge-neutral" title="Being scanned for viruses; it can be downloaded once the scan is clean.">Scanning…</Badge>;
+  return null;
+}
+
 function size(bytes) {
   if (!bytes && bytes !== 0) return '—';
   if (bytes < 1024) return `${bytes} B`;
@@ -49,9 +59,12 @@ export function DocumentTable({ rows: all, showClaim = false, onOpenClaim }) {
           </thead>
           <tbody>
             {rows.map((d) => (
-              <tr key={d.documentId}>
+              <tr key={d.documentId} className={isQuarantined(d) ? 'arwb-row-quarantined' : undefined} title={isQuarantined(d) ? QUARANTINE_TITLE : undefined}>
                 <td>{fmt.dateTime(d.uploadedOn)}</td>
-                <td className="wrap">{d.fileName}{d.description ? <div className="arwb-hint">{d.description}</div> : null}</td>
+                <td className="wrap">
+                  {d.fileName} <ScanBadge status={d.scanStatus} />
+                  {d.description ? <div className="arwb-hint">{d.description}</div> : null}
+                </td>
                 <td className="wrap">{d.documentTypeName || '—'}</td>
                 <td><Badge className="arwb-badge-accent">{d.documentCategory}</Badge></td>
                 <td>{SOURCE_LABEL[d.documentSource] || d.documentSource}{d.roundNumber ? ` · round ${d.roundNumber}` : ''}</td>
@@ -69,7 +82,9 @@ export function DocumentTable({ rows: all, showClaim = false, onOpenClaim }) {
                 <td>{d.uploadedBy}</td>
                 <td className="num">{size(d.sizeBytes)}</td>
                 <td className="num">
-                  <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => download(d)}><Icon name="download" size={14} /> Download</button>
+                  {isQuarantined(d)
+                    ? <span className="arwb-quarantine-label"><Icon name="warn" size={14} /> Quarantined</span>
+                    : <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => download(d)}><Icon name="download" size={14} /> Download</button>}
                 </td>
               </tr>
             ))}

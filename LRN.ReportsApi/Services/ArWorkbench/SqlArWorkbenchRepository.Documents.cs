@@ -72,8 +72,8 @@ SELECT @Id;", connection, tx);
         var result = new Dictionary<long, List<ArWorkbenchDocumentInfo>>();
         if (caseIds.Count == 0) return result;
         await using var connection = await OpenLabAsync(labId, ct);
-        await using var cmd = new SqlCommand(@"
-SELECT d.CipCaseId, d.DocumentId, d.FileName, d.ContentType, d.SizeBytes, d.CipRoundNumber, d.UploadedBy, d.UploadedOn
+        await using var cmd = new SqlCommand($@"
+SELECT d.CipCaseId, d.DocumentId, d.FileName, d.ContentType, d.SizeBytes, d.CipRoundNumber, d.UploadedBy, d.UploadedOn, {await ScanStatusColumnAsync(connection, ct)}
 FROM dbo.ARWB_Document d
 WHERE d.IsDeleted = 0 AND d.DocumentSource = 'CipResponse'
   AND d.CipCaseId IN (SELECT k.ClaimKey FROM dbo.ARWB_tvf_ParseKeyList(@Ids) k)
@@ -87,10 +87,21 @@ ORDER BY d.UploadedOn, d.DocumentId;", connection);
             list.Add(new ArWorkbenchDocumentInfo
             {
                 DocumentId = r.GetInt64(1), FileName = r.GetString(2), ContentType = Str(r, 3), SizeBytes = r.GetInt64(4),
-                RoundNumber = r.IsDBNull(5) ? null : r.GetInt32(5), UploadedBy = r.GetString(6), UploadedOn = r.GetDateTime(7)
+                RoundNumber = r.IsDBNull(5) ? null : r.GetInt32(5), UploadedBy = r.GetString(6), UploadedOn = r.GetDateTime(7),
+                ScanStatus = Str(r, 8)
             });
         }
         return result;
+    }
+
+    /// <summary>
+    /// "d.ScanStatus" once lab script 11 has added the column, else a NULL placeholder - so the document
+    /// lists keep working in a lab database that has not been upgraded yet.
+    /// </summary>
+    private static async Task<string> ScanStatusColumnAsync(SqlConnection connection, CancellationToken ct)
+    {
+        await using var cmd = new SqlCommand("SELECT CASE WHEN COL_LENGTH(N'dbo.ARWB_Document', N'ScanStatus') IS NULL THEN 0 ELSE 1 END;", connection);
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)) == 1 ? "d.ScanStatus" : "CAST(NULL AS varchar(20))";
     }
 
     /// <summary>
@@ -101,6 +112,7 @@ ORDER BY d.UploadedOn, d.DocumentId;", connection);
         ArWorkbenchUserContext user, string? clientIp, CancellationToken ct)
     {
         await using var connection = await OpenLabAsync(labId, ct);
+        var scanStatus = await ScanStatusColumnAsync(connection, ct);
         await using var cmd = connection.CreateCommand();
         var scope = AppendScope(cmd, user);
         cmd.Parameters.Add("@Id", SqlDbType.BigInt).Value = documentId;
@@ -115,7 +127,8 @@ IF EXISTS (SELECT 1 FROM dbo.ARWB_Document d INNER JOIN dbo.ARWB_Claim w ON w.Cl
            WHERE d.DocumentId = @Id AND d.IsDeleted = 0 AND (@ClientOnly = 0 OR d.DocumentSource = 'CipResponse') {scope})
 BEGIN
     INSERT INTO dbo.ARWB_DocumentAccessLog (DocumentId, AccessType, UserName, RoleCode, ClientIp) VALUES (@Id, 'Download', @User, @Role, @Ip);
-    SELECT d.DocumentId, d.FileName, d.ContentType, d.SizeBytes, d.CipRoundNumber, d.UploadedBy, d.UploadedOn, d.BlobContainer, d.BlobPath, d.ContentSha256
+    SELECT d.DocumentId, d.FileName, d.ContentType, d.SizeBytes, d.CipRoundNumber, d.UploadedBy, d.UploadedOn, d.BlobContainer, d.BlobPath, d.ContentSha256,
+           {scanStatus}
     FROM dbo.ARWB_Document d WHERE d.DocumentId = @Id;
 END;";
         await using var r = await cmd.ExecuteReaderAsync(ct);
@@ -123,7 +136,8 @@ END;";
         var info = new ArWorkbenchDocumentInfo
         {
             DocumentId = r.GetInt64(0), FileName = r.GetString(1), ContentType = Str(r, 2), SizeBytes = r.GetInt64(3),
-            RoundNumber = r.IsDBNull(4) ? null : r.GetInt32(4), UploadedBy = r.GetString(5), UploadedOn = r.GetDateTime(6)
+            RoundNumber = r.IsDBNull(4) ? null : r.GetInt32(4), UploadedBy = r.GetString(5), UploadedOn = r.GetDateTime(6),
+            ScanStatus = Str(r, 10)
         };
         return (info, r.GetString(7), r.GetString(8), Str(r, 9));
     }
@@ -201,6 +215,73 @@ SELECT @Changed;", connection);
         return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)) == 1;
     }
 
+    /// <summary>The oldest documents still waiting for their malware scan verdict (script 11), soft-deleted ones too.</summary>
+    public async Task<IReadOnlyList<ArWorkbenchPendingScanDocument>> GetPendingScanDocumentsAsync(int labId, int batchSize, CancellationToken ct)
+    {
+        await using var connection = await OpenLabAsync(labId, ct);
+        if (await ScanStatusColumnAsync(connection, ct) != "d.ScanStatus") return [];
+        // ScanStatus is named only inside sp_executesql, so this batch compiles even on a lab without it.
+        await using var cmd = new SqlCommand(@"
+EXEC sp_executesql N'SELECT TOP (@Batch) d.DocumentId, d.BlobContainer, d.BlobPath, d.UploadedOn
+FROM dbo.ARWB_Document d WHERE d.ScanStatus = ''Pending'' ORDER BY d.DocumentId;', N'@Batch int', @Batch;", connection);
+        cmd.Parameters.Add("@Batch", SqlDbType.Int).Value = Math.Clamp(batchSize, 1, 1000);
+        var rows = new List<ArWorkbenchPendingScanDocument>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct)) rows.Add(new(r.GetInt64(0), r.GetString(1), r.GetString(2), r.GetDateTime(3)));
+        return rows;
+    }
+
+    public async Task<bool> RecordDocumentScanResultAsync(int labId, long documentId, string scanStatus, CancellationToken ct)
+    {
+        if (scanStatus is not ("Clean" or "Malicious" or "NotScanned"))
+            throw new ArgumentOutOfRangeException(nameof(scanStatus), scanStatus, "Clean, Malicious or NotScanned.");
+        await using var connection = await OpenLabAsync(labId, ct);
+        if (await ScanStatusColumnAsync(connection, ct) != "d.ScanStatus") return false;
+
+        // One transaction: the status, and for a virus the audit row, claim activity and notifications.
+        // Messages carry the claim ID only - never the file or patient name.
+        await using var cmd = new SqlCommand(@"
+EXEC sp_executesql N'
+SET XACT_ABORT ON;
+BEGIN TRANSACTION;
+DECLARE @Now datetime2(0) = SYSUTCDATETIME();
+UPDATE dbo.ARWB_Document
+SET ScanStatus = @Status, ScanCheckedOn = @Now, ScanDetectedOn = CASE WHEN @Status = ''Malicious'' THEN @Now END
+WHERE DocumentId = @Id AND ScanStatus = ''Pending'';
+DECLARE @Changed int = @@ROWCOUNT;
+IF @Changed = 1 AND @Status = ''Malicious''
+BEGIN
+    DECLARE @ClaimKey bigint, @ClaimId nvarchar(100), @Uploader nvarchar(256);
+    SELECT @ClaimKey = d.ClaimKey, @ClaimId = w.ClaimID, @Uploader = d.UploadedBy
+    FROM dbo.ARWB_Document d LEFT JOIN dbo.ARWB_Claim w ON w.ClaimKey = d.ClaimKey
+    WHERE d.DocumentId = @Id;
+
+    INSERT INTO dbo.ARWB_DocumentAccessLog (DocumentId, AccessType, UserName, RoleCode, ClientIp, Detail)
+    VALUES (@Id, ''Malware'', N''System / Defender for Storage'', ''Automation'', NULL, N''Virus detected by Defender for Storage - document quarantined'');
+
+    IF @ClaimKey IS NOT NULL
+        INSERT INTO dbo.ARWB_ClaimActivity (ClaimKey, ActivityOn, ActionType, Detail, UserName, RoleCode, IsSystem)
+        VALUES (@ClaimKey, @Now, N''Document Quarantined'',
+                CONCAT(N''Virus detected in document #'', @Id, N'' (uploaded by '', @Uploader, N''). It is quarantined and cannot be downloaded.''),
+                N''System / Defender for Storage'', ''Automation'', 1);
+
+    INSERT INTO dbo.ARWB_Notification (ClaimKey, RecipientUser, NotificationType, Message, CreatedOn, RelatedEntityType, RelatedEntityId)
+    VALUES (@ClaimKey, @Uploader, ''DocumentMalware'',
+            CONCAT(N''A virus was found in the document you uploaded'', N'' to claim '' + @ClaimId, N''. It has been quarantined and cannot be downloaded. Upload a clean copy if it is still needed.''),
+            @Now, ''Document'', @Id);
+    INSERT INTO dbo.ARWB_Notification (ClaimKey, RecipientRole, NotificationType, Message, CreatedOn, RelatedEntityType, RelatedEntityId)
+    VALUES (@ClaimKey, ''admin'', ''DocumentMalware'',
+            CONCAT(N''Virus detected: document #'', @Id, N'' uploaded by '', @Uploader, N'' to claim '' + @ClaimId, N'' was quarantined.''),
+            @Now, ''Document'', @Id);
+END;
+COMMIT TRANSACTION;
+SELECT @Changed;',
+    N'@Id bigint, @Status varchar(20)', @Id, @Status;", connection);
+        cmd.Parameters.Add("@Id", SqlDbType.BigInt).Value = documentId;
+        cmd.Parameters.Add("@Status", SqlDbType.VarChar, 20).Value = scanStatus;
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)) == 1;
+    }
+
     /// <summary>
     /// Follow-up attachments (handoff §8.2, DEF-13): files an AR user attaches to a claim - optionally to
     /// one of its follow-up notes - each with its own document type (LRNMaster dbo.ARDocumentTypeMaster; its
@@ -266,6 +347,7 @@ SELECT @Id;";
         var page = Math.Max(1, filter.Page);
         var pageSize = Math.Clamp(filter.PageSize <= 0 ? 50 : filter.PageSize, 1, 500);
         await using var connection = await OpenLabAsync(filter.LabId, ct);
+        var scanStatus = await ScanStatusColumnAsync(connection, ct);
         await using var cmd = connection.CreateCommand();
         cmd.CommandTimeout = 60;
         var scope = AppendScope(cmd, user);
@@ -310,7 +392,7 @@ SELECT @Id;";
 SELECT COUNT(*) FROM dbo.ARWB_Document d INNER JOIN dbo.ARWB_Claim w ON w.ClaimKey = d.ClaimKey WHERE {filterSql};
 SELECT d.DocumentId, d.ClaimKey, w.ClaimID, w.AccessionNumber, w.PatientName, w.PatientID, w.DateOfService, w.PayerName,
        d.DocumentSource, d.DocumentCategory, d.FollowUpId, d.CipCaseId, d.CipRoundNumber, d.FileName, d.ContentType, d.SizeBytes,
-       d.UploadedBy, d.UploadedOn, d.Description, d.DocumentTypeName, d.DocumentTypeCode
+       d.UploadedBy, d.UploadedOn, d.Description, d.DocumentTypeName, d.DocumentTypeCode, {scanStatus}
 FROM dbo.ARWB_Document d INNER JOIN dbo.ARWB_Claim w ON w.ClaimKey = d.ClaimKey
 WHERE {filterSql}
 ORDER BY d.UploadedOn DESC, d.DocumentId DESC
@@ -344,7 +426,8 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
                 UploadedOn = r.GetDateTime(17),
                 Description = Str(r, 18),
                 DocumentTypeName = Str(r, 19),
-                DocumentTypeCode = Str(r, 20)
+                DocumentTypeCode = Str(r, 20),
+                ScanStatus = Str(r, 21)
             });
         }
         return result;
