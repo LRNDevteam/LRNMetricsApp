@@ -1,6 +1,7 @@
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using System.Diagnostics;
 
@@ -24,6 +25,7 @@ public sealed class ExecutiveSummaryController : Controller
     private readonly ILogger<ExecutiveSummaryController> _logger;
     private readonly BeechTreeRevenuePipelineLisService _pipelineLis;
     private readonly ExecutiveSummaryHighlightsExcel _highlights;
+    private readonly IMemoryCache _cache;
 
     // Maps LabSettings key → SP prefix used to build "dbo.usp_Get{prefix}_ExecutiveSummary".
     // Keep aligned with PhiExecutiveSummaryController.LabPrefixMap.
@@ -88,8 +90,10 @@ public sealed class ExecutiveSummaryController : Controller
         IConfiguration config,
         ILogger<ExecutiveSummaryController> logger,
         BeechTreeRevenuePipelineLisService pipelineLis,
-        ExecutiveSummaryHighlightsExcel highlights)
+        ExecutiveSummaryHighlightsExcel highlights,
+        IMemoryCache cache)
     {
+        _cache = cache;
         _labSettings = labSettings;
         _repo        = repo;
         _analysisRange = analysisRange;
@@ -252,7 +256,7 @@ public sealed class ExecutiveSummaryController : Controller
                 availableLabs, labName, prefix, config.DbConnectionString, spName, emptyVm,
                 yearFrom, yearTo, monthFrom, monthTo,
                 dosFrom, dosTo, billedFrom, billedTo,
-                panels, clinics, providers, reps, ct);
+                panels, clinics, providers, reps, ct, tableOnly: true);
             FirstPaintLog.Write(_logger, "Executive", labName, "tab-table", tabSw.ElapsedMilliseconds);
             ViewData["EsTableOnly"] = true;
             return PartialView("Index", vm);
@@ -280,7 +284,7 @@ public sealed class ExecutiveSummaryController : Controller
         int? yearFrom, int? yearTo, int? monthFrom, int? monthTo,
         DateTime? dosFrom, DateTime? dosTo, DateTime? billedFrom, DateTime? billedTo,
         string[]? panels, string[]? clinics, string[]? providers, string[]? reps,
-        CancellationToken ct)
+        CancellationToken ct, bool tableOnly = false)
     {
         bool spExists = await _repo.StoredProcedureExistsAsync(connStr, spName, ct);
         if (!spExists)
@@ -295,10 +299,12 @@ public sealed class ExecutiveSummaryController : Controller
         var providersStr = providers is { Length: > 0 } ? string.Join(",", providers) : null;
         var repsStr      = reps      is { Length: > 0 } ? string.Join(",", reps)      : null;
 
-        var availableYears = await _repo.GetAvailableYearsAsync(connStr, ct);
-        // Well Health Executive Summary excludes Date of Service after 2026.
-        if (string.Equals(prefix, "WH", StringComparison.OrdinalIgnoreCase))
-            availableYears = availableYears.Where(y => y <= 2026).ToList();
+        // The table request (GetTable) only needs the grid: the page shows the banner and fills the
+        // filter lists from FilterOptions, and keeps nothing but the table card from this response.
+        // The Excel export also needs the run info and filter lists, read alongside the grid.
+        var analysisTask = tableOnly ? null : _analysisRange.GetAsync(connStr, ct);
+        var runInfoTask  = tableOnly ? null : _repo.GetRunInfoAsync(connStr, ct);
+        var filterTask   = tableOnly ? null : GetFilterOptionsCachedAsync(labName, prefix, connStr, ct);
 
         var vm = await _repo.GetExecutiveSummaryAsync(
             connStr, spName, availableLabs, labName,
@@ -314,27 +320,32 @@ public sealed class ExecutiveSummaryController : Controller
             reps:         repsStr,
             ct: ct);
 
+        // The grid's own rows carry its years; the ClaimLevelData scan is only a fallback for an empty grid.
         if (vm.AvailableYears.Count == 0)
+        {
+            var availableYears = await _repo.GetAvailableYearsAsync(connStr, ct);
+            // Well Health Executive Summary excludes Date of Service after 2026.
+            if (string.Equals(prefix, "WH", StringComparison.OrdinalIgnoreCase))
+                availableYears = availableYears.Where(y => y <= 2026).ToList();
             vm.AvailableYears = availableYears;
+        }
 
         vm.SelectedPanels    = panels    is null ? [] : [.. panels];
         vm.SelectedClinics   = clinics   is null ? [] : [.. clinics];
         vm.SelectedProviders = providers is null ? [] : [.. providers];
         vm.SelectedReps      = reps      is null ? [] : [.. reps];
 
-        var analysisRange = await _analysisRange.GetAsync(connStr, ct);
-        var (_, _, limsRunId) = await _repo.GetRunInfoAsync(connStr, ct);
-        vm.ReportWeekFolder        = analysisRange.WeekFolder;
-        vm.ReportRunId             = analysisRange.RunId;
-        vm.ReportInsertedDateTime  = analysisRange.InsertedDateTime;
-        vm.LimsRunId               = limsRunId;
-        ViewData["AnalysisRange"]  = analysisRange;
-
-        var filterSpName = $"dbo.usp_Get{prefix}_ExecutiveSummary_FilterOptions";
-        bool filterSpExists = await _repo.StoredProcedureExistsAsync(connStr, filterSpName, ct);
-        if (filterSpExists)
+        if (!tableOnly)
         {
-            var filterOptions = await _repo.GetFilterOptionsAsync(connStr, filterSpName, ct);
+            var analysisRange = await analysisTask!;
+            var (_, _, limsRunId) = await runInfoTask!;
+            vm.ReportWeekFolder        = analysisRange.WeekFolder;
+            vm.ReportRunId             = analysisRange.RunId;
+            vm.ReportInsertedDateTime  = analysisRange.InsertedDateTime;
+            vm.LimsRunId               = limsRunId;
+            ViewData["AnalysisRange"]  = analysisRange;
+
+            var filterOptions = await filterTask!;
             vm.AvailablePanels    = filterOptions.GetValueOrDefault("Panel",    []);
             vm.AvailableClinics   = filterOptions.GetValueOrDefault("Clinic",   []);
             vm.AvailableProviders = filterOptions.GetValueOrDefault("Provider", []);
@@ -345,6 +356,30 @@ public sealed class ExecutiveSummaryController : Controller
             "ExecutiveSummary ready to render for lab='{Lab}' SP='{Sp}' rows={Rows} cols={Cols}",
             labName, spName, vm.Rows.Count, vm.YearMonthColumns.Count);
         return vm;
+    }
+
+    /// <summary>
+    /// Panel / Clinic / Provider / Rep lists from <c>usp_Get{prefix}_ExecutiveSummary_FilterOptions</c>,
+    /// which scans the raw claim / LIS tables (seconds on large labs). Kept per lab until a new claim
+    /// file is loaded (LineClaimFileLogs RunId / InsertedDateTime) and at most one hour.
+    /// </summary>
+    private async Task<Dictionary<string, List<string>>> GetFilterOptionsCachedAsync(
+        string labName, string prefix, string connStr, CancellationToken ct, AnalysisRangeInfo? analysis = null)
+    {
+        analysis ??= await _analysisRange.GetAsync(connStr, ct);
+        var key = $"es-filter-options|{labName}|{analysis.RunId}|{analysis.InsertedDateTime:O}";
+        if (_cache.TryGetValue(key, out Dictionary<string, List<string>>? cached) && cached is not null)
+            return cached;
+
+        var spName = $"dbo.usp_Get{prefix}_ExecutiveSummary_FilterOptions";
+        if (!await _repo.StoredProcedureExistsAsync(connStr, spName, ct))
+            return new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+        var options = await _repo.GetFilterOptionsAsync(connStr, spName, ct);
+        // An error comes back as empty lists; don't keep that.
+        if (options.Values.Any(v => v.Count > 0))
+            _cache.Set(key, options, TimeSpan.FromHours(1));
+        return options;
     }
 
     /// <summary>
@@ -369,14 +404,10 @@ public sealed class ExecutiveSummaryController : Controller
 
         try
         {
-            var filterSpName = $"dbo.usp_Get{prefix}_ExecutiveSummary_FilterOptions";
-            bool filterSpExists = await _repo.StoredProcedureExistsAsync(config.DbConnectionString, filterSpName, ct);
-            if (!filterSpExists)
-                return Json(new { years = Array.Empty<string>(), panels = Array.Empty<string>(), clinics = Array.Empty<string>(), providers = Array.Empty<string>(), reps = Array.Empty<string>() });
-
-            var options = await _repo.GetFilterOptionsAsync(config.DbConnectionString, filterSpName, ct);
+            var sw = Stopwatch.StartNew();
             var analysis = await _analysisRange.GetAsync(config.DbConnectionString, ct);
-            FirstPaintLog.Write(_logger, "Executive", labName, "meta", 0);
+            var options = await GetFilterOptionsCachedAsync(labName, prefix, config.DbConnectionString, ct, analysis);
+            FirstPaintLog.Write(_logger, "Executive", labName, "meta", sw.ElapsedMilliseconds);
             return Json(new
             {
                 years     = options.GetValueOrDefault("Year",     []),
@@ -572,16 +603,86 @@ public sealed class ExecutiveSummaryController : Controller
 
         var req = BuildCellRowsRequest(category, rowCode, year, month, 1, 0,
             yearFrom, yearTo, monthFrom, monthTo, dosFrom, dosTo, billedFrom, billedTo, panels, clinics, providers, reps);
-        var result = await _repo.GetCellRowsAsync(connStr!, prefix!, req, ct);
+        var analysis = await _analysisRange.GetAsync(connStr!, ct);
 
         var periodLabel = year == 0 ? "Grand Total"
             : month == 0 ? $"{year} Total"
             : new DateTime(year, month, 1).ToString("MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
         var rowTitle = string.IsNullOrWhiteSpace(title) ? rowCode : title.Trim();
-        var bytes = ExecSummaryCellRowsExcelBuilder.Build(result, labName, rowTitle, periodLabel, value ?? string.Empty);
+        var (generatedAt, zoneLabel) = CentralEuropeanNow();
+        var reportInfo = new List<(string, string)>
+        {
+            ("Lab", labName),
+            ("Report generated", $"{generatedAt:dd-MMM-yyyy HH:mm} {zoneLabel}"),
+            ("Week Range", string.IsNullOrWhiteSpace(analysis.WeekFolder) ? "-" : analysis.WeekFolder.Trim()),
+            ("Filters used", DescribeCellRowsFilters(yearFrom, yearTo, monthFrom, monthTo, dosFrom, dosTo,
+                billedFrom, billedTo, panels, clinics, providers, reps)),
+            ("Value", $"{category} - {rowTitle} - {periodLabel}: {value}"),
+        };
+        // Streamed to a temp file that deletes itself once the response has been sent.
+        var file = new FileStream(Path.Combine(Path.GetTempPath(), $"es-cellrows-{Guid.NewGuid():N}.xlsx"),
+            FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose);
+        try
+        {
+            await _repo.ExportCellRowsAsync(connStr!, prefix!, req,
+                (head, rows) => ExecSummaryCellRowsExcelBuilder.Write(file, head, rows, labName, rowTitle, periodLabel,
+                    value ?? string.Empty, reportInfo), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await file.DisposeAsync();
+            _logger.LogError(ex, "Executive Summary cell rows export failed for lab {Lab} {Category}/{RowCode} {Year}-{Month}.",
+                labName, category, rowCode, year, month);
+            return StatusCode(500, "The Excel file could not be created.");
+        }
+        catch
+        {
+            await file.DisposeAsync();
+            throw;
+        }
+        file.Position = 0;
+
         var safeTitle = string.Concat(rowTitle.Split(Path.GetInvalidFileNameChars())).Replace(' ', '_');
-        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            $"ExecutiveSummary_{labName}_{safeTitle}_{periodLabel.Replace(' ', '_')}_{DateTime.Now:yyyyMMdd}.xlsx");
+        return File(file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"ExecutiveSummary_{labName}_{safeTitle}_{periodLabel.Replace(' ', '_')}_{generatedAt:yyyyMMdd_HHmm}.xlsx");
+    }
+
+    /// <summary>Current time in Central European time (CET, or CEST in summer).</summary>
+    private static (DateTime Time, string Label) CentralEuropeanNow()
+    {
+        TimeZoneInfo? zone = null;
+        foreach (var id in new[] { "Central European Standard Time", "Europe/Berlin" })
+        {
+            try { zone = TimeZoneInfo.FindSystemTimeZoneById(id); break; }
+            catch (TimeZoneNotFoundException) { }
+            catch (InvalidTimeZoneException) { }
+        }
+        if (zone is null)
+            return (DateTime.UtcNow.AddHours(1), "CET");
+        var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, zone);
+        return (now, zone.IsDaylightSavingTime(now) ? "CEST" : "CET");
+    }
+
+    private static string DescribeCellRowsFilters(
+        int? yearFrom, int? yearTo, int? monthFrom, int? monthTo,
+        DateTime? dosFrom, DateTime? dosTo, DateTime? billedFrom, DateTime? billedTo,
+        string[]? panels, string[]? clinics, string[]? providers, string[]? reps)
+    {
+        static string D(DateTime? d) => d?.ToString("MM/dd/yyyy", System.Globalization.CultureInfo.InvariantCulture) ?? "(any)";
+        static string? List(string name, string[]? v) =>
+            v is { Length: > 0 } && v.Any(x => !string.IsNullOrWhiteSpace(x))
+                ? $"{name}: {string.Join(", ", v.Where(x => !string.IsNullOrWhiteSpace(x)))}" : null;
+
+        var parts = new List<string?>
+        {
+            dosFrom.HasValue || dosTo.HasValue ? $"DOS: {D(dosFrom)} - {D(dosTo)}" : null,
+            billedFrom.HasValue || billedTo.HasValue ? $"Billed Date: {D(billedFrom)} - {D(billedTo)}" : null,
+            yearFrom.HasValue || yearTo.HasValue ? $"Year: {yearFrom?.ToString() ?? "(any)"} - {yearTo?.ToString() ?? "(any)"}" : null,
+            monthFrom.HasValue || monthTo.HasValue ? $"Month: {monthFrom?.ToString() ?? "(any)"} - {monthTo?.ToString() ?? "(any)"}" : null,
+            List("Panels", panels), List("Clinics", clinics), List("Providers", providers), List("Sales Reps", reps),
+        };
+        var used = parts.Where(p => p is not null).ToList();
+        return used.Count == 0 ? "None" : string.Join(" | ", used);
     }
 
     private async Task<(string LabName, string? ConnStr, string? Prefix, string? Error)> ResolveCellRowsLabAsync(

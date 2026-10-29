@@ -146,6 +146,21 @@ public sealed class CollectionSummaryViewModel
     /// <summary>"Posted Date" (Analyze Pathology, PaymentPostedDate) or "Check Date".</summary>
     public string PostedDateLabel => LabCollectionPrefix.CollectionPostedDateLabel(SelectedLab);
 
+    /// <summary>Base filter of the Monthly Claim Volume tab (its footer), shown when the tab has no rows.</summary>
+    public string MonthlyClaimVolumeFilterText =>
+        UsesCoreBioCollectionLayout ? $"InsurancePayment > 0 \u00B7 CheckDate in {DateTime.Today.Year - 1} or {DateTime.Today.Year}"
+        : UsesSpCollectionLogic ? "InsurancePayment \u2260 0 \u00B7 PaymentPostedDate is a valid date"
+        : IsNorthWestLab ? "InsurancePayment > 0 \u00B7 NWLCollectionPostedDate is a valid date"
+        : "InsurancePayment > 0 \u00B7 CheckDate is a valid date";
+
+    /// <summary>Base filter of the Weekly Claim Volume tab (its footer), shown when the tab has no rows.</summary>
+    public string WeeklyClaimVolumeFilterText =>
+        IsNorthWestLab ? "InsurancePayment > 0 \u00B7 PostedWeek, else Check Date, in the last 4 Thursday\u2013Wednesday weeks"
+        : IsAugustusLab ? "InsurancePayment > 0 \u00B7 PostedWeek not blank"
+        : UsesCoreBioCollectionLayout ? "InsurancePayment > 0 \u00B7 DepositWeek not blank"
+        : UsesSpCollectionLogic ? "InsurancePayment \u2260 0 \u00B7 PaymentPostedDate in the last 4 completed Monday\u2013Sunday weeks"
+        : "InsurancePayment > 0 \u00B7 ClaimStatus IN (Fully Paid, Partially Paid, Paid-Client) \u00B7 PostingDate in the last 4 weeks";
+
     // ?? CPT vs Payment % ???????????????????????????????????????
     public List<CptPaymentPctRow> CptPaymentPct { get; set; } = [];
 

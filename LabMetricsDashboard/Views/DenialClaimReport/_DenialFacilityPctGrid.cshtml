@@ -12,7 +12,7 @@ else
                 <thead>
                     <tr>
                         <th>Clinic Name</th>
-                        <th>No. of Claims Billed</th>
+                        <th>No. of Claims Count</th>
                         <th>No. of Adjudicated Claims</th>
                         <th>No. of Denied Claims</th>
                         <th class="pr-grand-total">Denied %</th>
@@ -47,8 +47,9 @@ else
     </div>
 }
 <div class="dcr-pr-note">
-    <strong>Source:</strong> Claim Level &nbsp;|&nbsp; <strong>Filter:</strong> BilledUnbilled = Billed
+    <strong>Source:</strong> Claim Level &nbsp;|&nbsp; <strong>Filter:</strong> none
     &nbsp;|&nbsp; <strong>Rows:</strong> ClinicName
+    &nbsp;|&nbsp; <strong>Adjudicated:</strong> Adjudicated = Adjudicated &nbsp;|&nbsp; <strong>Denied:</strong> DeniedStatus = Denied
     &nbsp;|&nbsp; <strong>Denied %:</strong> Denied Claims / Adjudicated Claims
-    &nbsp;|&nbsp; <strong>Sorted by:</strong> No. of Claims Billed DESC
+    &nbsp;|&nbsp; <strong>Sorted by:</strong> No. of Claims DESC
 </div>

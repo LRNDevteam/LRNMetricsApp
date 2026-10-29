@@ -21,10 +21,10 @@
      otherwise NULL.
 
    NWLDenialPostedDate (NVARCHAR(500) NULL, MM/dd/yyyy like CheckDate):
-     1. CheckDate is a date                                         -> CheckDate (every row)
+     1. DenialCode has a code and CheckDate is a date               -> CheckDate
      2. DenialCode has a code and CheckDate blank                   -> LastActivityDate
      3. DenialCode has a code, CheckDate blank, LastActivityDate blank -> FirstBilledDate
-     otherwise NULL. The 12/31/1899 placeholder counts as blank.
+     otherwise NULL (no DenialCode -> NULL). The 12/31/1899 placeholder counts as blank.
 
    dbo.usp_UpdateNW_ClaimLevelData_BilledUnbilled recalculates every row and
    writes only rows whose value changed, so FirstBilledDate / EmedixSubmissionDate
@@ -169,7 +169,7 @@ BEGIN
                         THEN CONVERT(NVARCHAR(10), d.ChargeEnteredDt, 101)
                 END,
                 NewDenial = CASE
-                    WHEN p.CheckDt IS NOT NULL
+                    WHEN r.DenialRaw IS NOT NULL AND p.CheckDt IS NOT NULL
                         THEN CONVERT(NVARCHAR(10), p.CheckDt, 101)
                     WHEN r.DenialRaw IS NOT NULL AND p.CheckDt IS NULL
                         THEN CONVERT(NVARCHAR(10), COALESCE(p.LastActivityDt, p.FirstBilledDt), 101)
@@ -207,7 +207,7 @@ BEGIN
             @U3 = SUM(CASE WHEN r.FirstRaw IS NULL AND r.EmedixRaw IS NULL THEN 1 ELSE 0 END),
             @C1 = SUM(CASE WHEN d.InsPay > 0 AND d.CheckDt IS NOT NULL THEN 1 ELSE 0 END),
             @C2 = SUM(CASE WHEN d.InsPay > 0 AND r.CheckRaw IS NULL AND d.ChargeEnteredDt IS NOT NULL THEN 1 ELSE 0 END),
-            @D0 = SUM(CASE WHEN p.CheckDt IS NOT NULL THEN 1 ELSE 0 END),
+            @D0 = SUM(CASE WHEN r.DenialRaw IS NOT NULL AND p.CheckDt IS NOT NULL THEN 1 ELSE 0 END),
             @D1 = SUM(CASE WHEN r.DenialRaw IS NOT NULL AND p.CheckDt IS NULL AND p.LastActivityDt IS NOT NULL THEN 1 ELSE 0 END),
             @D2 = SUM(CASE WHEN r.DenialRaw IS NOT NULL AND p.CheckDt IS NULL AND p.LastActivityDt IS NULL
                             AND p.FirstBilledDt IS NOT NULL THEN 1 ELSE 0 END)

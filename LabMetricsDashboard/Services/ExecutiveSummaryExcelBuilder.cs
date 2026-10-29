@@ -361,7 +361,7 @@ public sealed class ExecutiveSummaryExcelBuilder
     private void SetNumberFormat(IXLCell cell, ExecSummaryRow row)
     {
         cell.Style.NumberFormat.Format = IsAriaPctRow(row.RowCode)
-            ? "0.0000"
+            ? "0.00%"
             : IsDollar(row.Category)
                 ? ExcelTheme.Collection.AccountingNumberFormat
                 : ExcelTheme.Collection.CountNumberFormat;

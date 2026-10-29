@@ -51,12 +51,11 @@
         rowCode is "S.1.AP" or "S.3.AP" or "AC.1.AP" or "AC.3.AP";
 
     // PMS/LIS counts: integer. Cash/Avg: currency.
-    // Aria % rows store Submitted/NotSubmitted as a decimal ratio in MetricValue
-    // (e.g. 0.1409). Casting to long truncates every month to 0 — that was why
-    // "% of the claim submitted in the last 30 Days" showed all zeros.
+    // Aria % rows store the ratio (e.g. 0.1516) in MetricValue; shown as a percentage.
+    // Casting to long would truncate every month to 0.
     IHtmlContent FmtCount(decimal v, string cat, string? rowCode = null) =>
         IsAriaPctRow(rowCode)
-            ? new HtmlString(v == 0m ? "-" : v.ToString("0.####"))
+            ? new HtmlString(v == 0m ? "-" : v.ToString("0.00%", System.Globalization.CultureInfo.InvariantCulture))
             : (cat == "Cash" || cat == "Avg")
                 ? Acct(v)
                 : new HtmlString(v is >= long.MinValue and <= long.MaxValue
@@ -978,7 +977,8 @@ if (showHighlightTabs)
                     <div id="esCellCtx" hidden
                          data-lab="@Model.SelectedLab"
                          data-filters="@EsFilterQuery()"
-                         data-rows-url="@Url.Action("CellRows", "ExecutiveSummary")"></div>
+                         data-rows-url="@Url.Action("CellRows", "ExecutiveSummary")"
+                         data-export-url="@Url.Action("CellRowsExport", "ExecutiveSummary")"></div>
                     <div class="esc-legend">
                         <span><span class="esc-legend-swatch esc-legend-rows"></span>Value - opens the rows behind it</span>
                         <span><span class="esc-legend-swatch esc-legend-drill"></span>Year / Grand Total - opens Insight Drill-Through</span>
@@ -1352,6 +1352,9 @@ if (showHighlightTabs)
                     <div class="esc-pager" id="esCellPager"></div>
                     <button type="button" class="btn btn-sm btn-outline-primary" id="esCellBack" hidden>
                         <i class="bi bi-arrow-left"></i> Back to calculation
+                    </button>
+                    <button type="button" class="btn btn-sm btn-success" id="esCellExport" title="Download every row behind this value (Excel)">
+                        <i class="bi bi-file-earmark-excel"></i> Download Excel
                     </button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Close</button>
                 </div>

@@ -2,7 +2,7 @@
    NorthWest - Executive Summary cell rows (value click -> popup grid)
    File     : 50_NW_ExecutiveSummary_CellRows.sql
    Database : NWL_LRN
-   Requires : 44_NW_ExecutiveSummary_BilledUnbilled.sql
+   Requires : 44_NW_ExecutiveSummary_BilledUnbilled.sql, 52_NW_ExecutiveSummary_Validation1029.sql
    Object   : dbo.usp_GetNW_ExecutiveSummaryCellRows
 
    Returns the source rows behind one Executive Summary cell. Rows are selected with the
@@ -21,9 +21,10 @@
      1. Rules   : RuleOrder, RuleGroup, RuleText
      2. Summary : SourceTable, Measure, AmountColumn, TotalRows, TotalAmount, IsFormula
      3. Rows    : one page of source rows (Amount = the row's measured value for $ rows)
-   Aria rows (S.1/S.3 .A1/.A2, AC.1/AC.3 .A1/.A2): the Fully Denied (PMS S.1) / No Response
-   (PMS S.3) claims of the period, split on FirstBilledDate within 30 days of the latest
-   FirstBilledDate of that cohort in the period (as usp_NW_ES_Build).
+   Aria rows (S.1/S.3 .A1/.A2, AC.1/AC.3 .A1/.A2): the parent row's claims of the period (PMS S.1
+   Fully Denied / S.3 No Response, Cash AC.1 Denials / AC.3 No Response), split on Last Billed Date
+   (FirstBilledDate) within 30 days of fn_NW_ES_AriaAsOf - the latest billed date in the data
+   (as usp_NW_ES_Build, 52_NW_ExecutiveSummary_Validation1029.sql). Aria % = A1 / parent.
    Formula rows (PMS I, Cash Z, Avg AD / AE / AF, Aria %) return the formula and calculation in
    Rules, IsFormula = 1, TotalAmount = the grid value, and result set 3 = the components
    (Section, Operator, Component, Category, RowCode, Value, IsMoney, IsTotal) from the
@@ -198,11 +199,9 @@ BEGIN
     DECLARE @IsLis     BIT = IIF(@Category = 'LIS', 1, 0);
     DECLARE @IsAriaPct BIT = IIF(@RowCode LIKE N'%.AP', 1, 0);
     DECLARE @IsFormula BIT = IIF(@IsAriaPct = 1 OR @RowCode IN (N'I', N'Z', N'AD', N'AE', N'AF'), 1, 0);
-    -- Aria A1 / A2: cohort PMS S.1 (Fully Denied) or S.3 (No Response); 1 = submitted in the last 30 days
+    -- Aria A1 / A2: the parent row (S.1, S.3, AC.1, AC.3); 1 = billed in the last 30 days
     DECLARE @AriaPart INT = CASE WHEN @RowCode LIKE N'%.A1' THEN 1 WHEN @RowCode LIKE N'%.A2' THEN 2 END;
-    DECLARE @AriaCohort NVARCHAR(10) =
-        CASE WHEN @RowCode LIKE N'S.1.%' OR @RowCode LIKE N'AC.1.%' THEN N'S.1'
-             WHEN @RowCode LIKE N'S.3.%' OR @RowCode LIKE N'AC.3.%' THEN N'S.3' END;
+    DECLARE @AriaParent NVARCHAR(10) = CASE WHEN @AriaPart IS NOT NULL THEN LEFT(@RowCode, LEN(@RowCode) - 3) END;
 
     /* ---- Row rules (as fn_NW_ES_LisRowCodes / fn_NW_ES_ClaimRowCodes) -------- */
     DECLARE @Ok   NVARCHAR(100) = N'Incorrect DOS is blank';
@@ -210,11 +209,14 @@ BEGIN
     DECLARE @C    NVARCHAR(300) = @Ins + N' AND Bill Status = Billed';
     DECLARE @D    NVARCHAR(300) = @Ins + N' AND Bill Status = Unbilled';
     DECLARE @Std  NVARCHAR(200) = N'Claim Type NOT IN (ADCS - Invoice, Test Patient Entries)';
-    DECLARE @Bs   NVARCHAR(300) = N'BilledUnbilled = Billed AND Claim Type IN (Claim Submitted in Webpm, Claim Submitted in Daqbilling, Manually Pushed in Emedix)';
+    DECLARE @Bs   NVARCHAR(300) = N'BilledUnbilled = Billed AND ' + @Std;
     DECLARE @G    NVARCHAR(400) = @Bs + N' AND Claim Status <> Billed Amount 0';
     DECLARE @H    NVARCHAR(400) = @Std + N' AND Claim Status IN (Billed Amount 0, Unbilled in Daq, Unbilled in Daq PR, Unbilled in Webpm, Unbilled in Webpm PR)';
-    DECLARE @GSrc NVARCHAR(300) = N'BilledUnbilled = Billed AND Claim Status <> Billed Amount 0 AND Claim Type = ';
-    DECLARE @Aria NVARCHAR(300) = N' - split on FirstBilledDate within 30 days of the latest FirstBilledDate of these claims in the period';
+    DECLARE @GSrc NVARCHAR(300) = @G + N' AND Claim Type ';
+    DECLARE @AsOf DATE = (SELECT AsOf FROM dbo.fn_NW_ES_AriaAsOf());
+    DECLARE @AsOfText NVARCHAR(10) = ISNULL(CONVERT(NVARCHAR(10), @AsOf, 101), N'(none)');
+    DECLARE @AriaIn  NVARCHAR(300) = N' AND Last Billed Date (FirstBilledDate) within 30 days of ' + @AsOfText + N' (latest billed date in the data)';
+    DECLARE @AriaOut NVARCHAR(300) = N' AND Last Billed Date (FirstBilledDate) blank or more than 30 days before ' + @AsOfText + N' (latest billed date in the data)';
 
     DECLARE @Def TABLE (Category VARCHAR(10), RowCode NVARCHAR(20), RuleText NVARCHAR(1000), AmountCol NVARCHAR(100));
     INSERT INTO @Def (Category, RowCode, RuleText, AmountCol) VALUES
@@ -247,9 +249,9 @@ BEGIN
         ('LIS', N'F.5',    @Ok + N' AND Bill To = System Test', NULL),
 
         ('PMS', N'G',      @G, NULL),
-        ('PMS', N'G.1',    @GSrc + N'Claim Submitted in Webpm', NULL),
-        ('PMS', N'G.2',    @GSrc + N'Claim Submitted in Daqbilling', NULL),
-        ('PMS', N'G.3',    @GSrc + N'Manually Pushed in Emedix', NULL),
+        ('PMS', N'G.1',    @GSrc + N'contains Webpm (Claim Submitted in Webpm, Unbilled in Webpm)', NULL),
+        ('PMS', N'G.2',    @GSrc + N'contains Daq (Claim Submitted in Daqbilling, Unbilled in Daqbilling)', NULL),
+        ('PMS', N'G.3',    @GSrc + N'contains Emedix (Manually Pushed in Emedix)', NULL),
         ('PMS', N'H',      @H, NULL),
         ('PMS', N'H.1',    @Std + N' AND Claim Status = Unbilled in Webpm PR', NULL),
         ('PMS', N'H.2',    @Std + N' AND Claim Status = Unbilled in Webpm', NULL),
@@ -267,19 +269,19 @@ BEGIN
         ('PMS', N'R',      @Std + N' AND Claim Status = Patient Paid', NULL),
         ('PMS', N'S',      @Std + N' AND Claim Status IN (Fully Denied, Partially Denied, No Response)', NULL),
         ('PMS', N'S.1',    @Std + N' AND Claim Status = Fully Denied', NULL),
-        ('PMS', N'S.1.A1', @Std + N' AND Claim Status = Fully Denied' + @Aria + N': billed within the 30 days', NULL),
-        ('PMS', N'S.1.A2', @Std + N' AND Claim Status = Fully Denied' + @Aria + N': not billed within the 30 days', NULL),
-        ('PMS', N'S.1.AP', N'Formula: Aria submitted in the last 30 days (PMS S.1.A1) / not submitted (PMS S.1.A2)', NULL),
+        ('PMS', N'S.1.A1', @Std + N' AND Claim Status = Fully Denied' + @AriaIn, NULL),
+        ('PMS', N'S.1.A2', @Std + N' AND Claim Status = Fully Denied' + @AriaOut, NULL),
+        ('PMS', N'S.1.AP', N'Formula: Aria submitted in the last 30 days (PMS S.1.A1) / No. of Fully Denied Claims (PMS S.1)', NULL),
         ('PMS', N'S.2',    @Std + N' AND Claim Status = Partially Denied', NULL),
         ('PMS', N'S.3',    @Std + N' AND Claim Status = No Response', NULL),
-        ('PMS', N'S.3.A1', @Std + N' AND Claim Status = No Response' + @Aria + N': billed within the 30 days', NULL),
-        ('PMS', N'S.3.A2', @Std + N' AND Claim Status = No Response' + @Aria + N': not billed within the 30 days', NULL),
-        ('PMS', N'S.3.AP', N'Formula: Claims filed by ARIA in the last 30 days (PMS S.3.A1) / not filed (PMS S.3.A2)', NULL),
+        ('PMS', N'S.3.A1', @Std + N' AND Claim Status = No Response' + @AriaIn, NULL),
+        ('PMS', N'S.3.A2', @Std + N' AND Claim Status = No Response' + @AriaOut, NULL),
+        ('PMS', N'S.3.AP', N'Formula: Claims filed by ARIA in the last 30 days (PMS S.3.A1) / No. of No Response from Payor Claims (PMS S.3)', NULL),
 
         ('Cash', N'T',       @G, N'ChargeAmount'),
-        ('Cash', N'T.1',     @GSrc + N'Claim Submitted in Webpm', N'ChargeAmount'),
-        ('Cash', N'T.2',     @GSrc + N'Claim Submitted in Daqbilling', N'ChargeAmount'),
-        ('Cash', N'T.3',     @GSrc + N'Manually Pushed in Emedix', N'ChargeAmount'),
+        ('Cash', N'T.1',     @GSrc + N'contains Webpm (Claim Submitted in Webpm, Unbilled in Webpm)', N'ChargeAmount'),
+        ('Cash', N'T.2',     @GSrc + N'contains Daq (Claim Submitted in Daqbilling, Unbilled in Daqbilling)', N'ChargeAmount'),
+        ('Cash', N'T.3',     @GSrc + N'contains Emedix (Manually Pushed in Emedix)', N'ChargeAmount'),
         ('Cash', N'U',       @H, N'ChargeAmount'),
         ('Cash', N'U.1',     @Std + N' AND Claim Status = Unbilled in Webpm PR', N'ChargeAmount'),
         ('Cash', N'U.2',     @Std + N' AND Claim Status = Unbilled in Webpm', N'ChargeAmount'),
@@ -290,7 +292,7 @@ BEGIN
         ('Cash', N'X',       @Std + N' AND Claim Status = Fully Paid', N'InsurancePayment'),
         ('Cash', N'X.1',     @Std + N' AND Claim Status = Fully Paid', N'ActualPayment'),
         ('Cash', N'X.2',     @Std + N' AND Claim Status = Fully Paid', N'DuplicatePayment'),
-        ('Cash', N'Y',       @Bs, N'PatientBalance'),
+        ('Cash', N'Y',       @G, N'PatientBalance'),
         ('Cash', N'Z',       N'Formula: Total Billed (T) - Insurance Payment (X) - Partially Paid (AA) - Patient Paid (AB) - Patient Responsibility (Y) - Insurance Balance (AC)', NULL),
         ('Cash', N'AA',      @Bs + N' AND Claim Status = Partially Paid', N'InsurancePayment'),
         ('Cash', N'AA.1',    @Bs + N' AND Claim Status = Partially Paid', N'ActualPayment (InsurancePayment when ActualPayment is 0)'),
@@ -298,18 +300,18 @@ BEGIN
         ('Cash', N'AB',      @Bs, N'PatientPayment'),
         ('Cash', N'AC',      @Bs, N'InsuranceBalance'),
         ('Cash', N'AC.1',    @Bs + N' AND Claim Status = Fully Denied', N'InsuranceBalance'),
-        ('Cash', N'AC.1.A1', @Std + N' AND Claim Status = Fully Denied' + @Aria + N': billed within the 30 days', N'InsuranceBalance'),
-        ('Cash', N'AC.1.A2', @Std + N' AND Claim Status = Fully Denied' + @Aria + N': not billed within the 30 days', N'InsuranceBalance'),
-        ('Cash', N'AC.1.AP', N'Formula: Insurance Balance of claims filed by ARIA in the last 30 days (Cash AC.1.A1) / not filed (Cash AC.1.A2)', NULL),
+        ('Cash', N'AC.1.A1', @Bs + N' AND Claim Status = Fully Denied' + @AriaIn, N'InsuranceBalance'),
+        ('Cash', N'AC.1.A2', @Bs + N' AND Claim Status = Fully Denied' + @AriaOut, N'InsuranceBalance'),
+        ('Cash', N'AC.1.AP', N'Formula: Claims filed by ARIA in the last 30 days (Cash AC.1.A1) / Denials (Cash AC.1)', NULL),
         ('Cash', N'AC.2',    @Bs + N' AND Claim Status NOT IN (Fully Denied, No Response)', N'InsuranceBalance'),
         ('Cash', N'AC.3',    @Bs + N' AND Claim Status = No Response', N'InsuranceBalance'),
-        ('Cash', N'AC.3.A1', @Std + N' AND Claim Status = No Response' + @Aria + N': billed within the 30 days', N'InsuranceBalance'),
-        ('Cash', N'AC.3.A2', @Std + N' AND Claim Status = No Response' + @Aria + N': not billed within the 30 days', N'InsuranceBalance'),
-        ('Cash', N'AC.3.AP', N'Formula: Insurance Balance of claims filed by ARIA in the last 30 days (Cash AC.3.A1) / not filed (Cash AC.3.A2)', NULL),
+        ('Cash', N'AC.3.A1', @Bs + N' AND Claim Status = No Response' + @AriaIn, N'InsuranceBalance'),
+        ('Cash', N'AC.3.A2', @Bs + N' AND Claim Status = No Response' + @AriaOut, N'InsuranceBalance'),
+        ('Cash', N'AC.3.AP', N'Formula: Claims filed by ARIA in the last 30 days (Cash AC.3.A1) / No Response from Payor (Cash AC.3)', NULL),
 
-        ('Avg', N'AD', N'Formula: (Insurance Payment $ + Partially Paid $ + Patient Paid $) / No. of Billed Claims (PMS G)', NULL),
-        ('Avg', N'AE', N'Formula: (Insurance Payment $ + Partially Paid $ + Patient Paid $) / (Fully Paid + Partially Paid + Patient Paid claims)', NULL),
-        ('Avg', N'AF', N'Formula: (Insurance Payment $ + Partially Paid $) / (Fully Paid + Adjusted + Fully Denied + Partially Denied + Partially Paid + Partially Adjusted + Patient Paid + Patient Responsibility claims)', NULL);
+        ('Avg', N'AD', N'Formula: (Insurance Payment $ + Partially Paid $) / No. of Billed Claims (PMS G)', NULL),
+        ('Avg', N'AE', N'Formula: (Insurance Payment $ + Partially Paid $) / (Fully Paid + Partially Paid claims)', NULL),
+        ('Avg', N'AF', N'Formula: (Insurance Payment $ + Partially Paid $) / (ADCS + Fully Paid + Patient Responsibility + Adjusted + Partially Adjusted + Patient Paid + Partially Paid + Fully Denied + Partially Denied claims)', NULL);
 
     DECLARE @RuleText NVARCHAR(1000), @AmountCol NVARCHAR(100);
     SELECT @RuleText = RuleText, @AmountCol = AmountCol FROM @Def WHERE Category = @Category AND RowCode = @RowCode;
@@ -390,36 +392,34 @@ BEGIN
                 (9, N'Result',      N'=', 'Cash', N'Z',  NULL, 1, 1);
         ELSE IF @IsAriaPct = 1
             INSERT INTO @Comp VALUES
-                (1, N'Calculation', N'',  @Category, @AriaBase + N'A1', NULL, IIF(@Category = 'Cash', 1, 0), 0),
-                (2, N'Calculation', N'/', @Category, @AriaBase + N'A2', NULL, IIF(@Category = 'Cash', 1, 0), 0),
-                (9, N'Result',      N'=', @Category, @RowCode,          NULL, 0, 1);
+                (1, N'Calculation', N'',  @Category, @AriaBase + N'A1',                    NULL, IIF(@Category = 'Cash', 1, 0), 0),
+                (2, N'Calculation', N'/', @Category, LEFT(@AriaBase, LEN(@AriaBase) - 1), NULL, IIF(@Category = 'Cash', 1, 0), 0),
+                (9, N'Result',      N'=', @Category, @RowCode,                             NULL, 0, 1);
         ELSE
         BEGIN
             INSERT INTO @Comp VALUES
                 (1, N'Numerator', N'',  'Cash', N'X',  NULL, 1, 0),
-                (2, N'Numerator', N'+', 'Cash', N'AA', NULL, 1, 0);
-            IF @RowCode <> N'AF'
-                INSERT INTO @Comp VALUES (3, N'Numerator', N'+', 'Cash', N'AB', NULL, 1, 0);
-            INSERT INTO @Comp VALUES (4, N'Numerator', N'=', NULL, NULL, N'Total Payments ($)', 1, 1);
+                (2, N'Numerator', N'+', 'Cash', N'AA', NULL, 1, 0),
+                (4, N'Numerator', N'=', NULL, NULL, N'Total Payments ($)', 1, 1);
             IF @RowCode = N'AD'
                 INSERT INTO @Comp VALUES (11, N'Denominator', N'', 'PMS', N'G', NULL, 0, 0);
             ELSE IF @RowCode = N'AE'
                 INSERT INTO @Comp VALUES
                     (11, N'Denominator', N'',  'PMS', N'M', NULL, 0, 0),
-                    (12, N'Denominator', N'+', 'PMS', N'Q', NULL, 0, 0),
-                    (13, N'Denominator', N'+', 'PMS', N'R', NULL, 0, 0);
+                    (12, N'Denominator', N'+', 'PMS', N'Q', NULL, 0, 0);
             ELSE
                 INSERT INTO @Comp VALUES
-                    (11, N'Denominator', N'',  'PMS', N'M',   NULL, 0, 0),
-                    (12, N'Denominator', N'+', 'PMS', N'O',   NULL, 0, 0),
-                    (13, N'Denominator', N'+', 'PMS', N'S.1', NULL, 0, 0),
-                    (14, N'Denominator', N'+', 'PMS', N'S.2', NULL, 0, 0),
-                    (15, N'Denominator', N'+', 'PMS', N'Q',   NULL, 0, 0),
-                    (16, N'Denominator', N'+', 'PMS', N'P',   NULL, 0, 0),
-                    (17, N'Denominator', N'+', 'PMS', N'R',   NULL, 0, 0),
-                    (18, N'Denominator', N'+', 'PMS', N'N',   NULL, 0, 0);
+                    (11, N'Denominator', N'',  'PMS', N'K',   NULL, 0, 0),
+                    (12, N'Denominator', N'+', 'PMS', N'M',   NULL, 0, 0),
+                    (13, N'Denominator', N'+', 'PMS', N'N',   NULL, 0, 0),
+                    (14, N'Denominator', N'+', 'PMS', N'O',   NULL, 0, 0),
+                    (15, N'Denominator', N'+', 'PMS', N'P',   NULL, 0, 0),
+                    (16, N'Denominator', N'+', 'PMS', N'R',   NULL, 0, 0),
+                    (17, N'Denominator', N'+', 'PMS', N'Q',   NULL, 0, 0),
+                    (18, N'Denominator', N'+', 'PMS', N'S.1', NULL, 0, 0),
+                    (19, N'Denominator', N'+', 'PMS', N'S.2', NULL, 0, 0);
             IF @RowCode <> N'AD'
-                INSERT INTO @Comp VALUES (19, N'Denominator', N'=', NULL, NULL,
+                INSERT INTO @Comp VALUES (20, N'Denominator', N'=', NULL, NULL,
                     IIF(@RowCode = N'AE', N'Paid claims', N'Adjudicated claims'), 0, 1);
             INSERT INTO @Comp VALUES (29, N'Result', N'=', 'Avg', @RowCode, NULL, 1, 1);
         END;
@@ -492,7 +492,7 @@ BEGIN
 
         UPDATE #CompV SET Value = ISNULL(Value, 0);
 
-        -- Aria %: A1 / A2 (the snapshot keeps the ratio with 2 decimals only).
+        -- Aria %: A1 / parent (the snapshot keeps the ratio with 2 decimals only).
         IF @IsAriaPct = 1
             UPDATE r SET Value = ISNULL(a1.Value / NULLIF(a2.Value, 0), 0)
             FROM #CompV r
@@ -519,7 +519,7 @@ BEGIN
                          + N' / '
                          + IIF(@Category = 'Cash', N'$' + FORMAT(MAX(CASE WHEN Seq = 2 THEN Value END), 'N2'),
                                                    FORMAT(MAX(CASE WHEN Seq = 2 THEN Value END), 'N0'))
-                         + N' = ' + FORMAT(@Result, '0.####')
+                         + N' = ' + FORMAT(@Result * 100, 'N2') + N'%'
             FROM #CompV;
         ELSE
             SELECT @Calc = N'$' + FORMAT(MAX(CASE WHEN Section = N'Numerator' AND IsTotal = 1 THEN Value END), 'N2') + N' / '
@@ -571,8 +571,7 @@ BEGIN
     END;
 
     /* ---- Claims (PMS / Cash) ------------------------------------------------ */
-    DECLARE @Code NVARCHAR(20) = ISNULL(@AriaCohort, @RowCode);
-    DECLARE @CodeCategory VARCHAR(10) = IIF(@AriaCohort IS NOT NULL, 'PMS', @Category);
+    DECLARE @Code NVARCHAR(20) = ISNULL(@AriaParent, @RowCode);
 
     -- Period claims first, then the row rules (one statement is several times slower).
     SELECT *
@@ -585,7 +584,7 @@ BEGIN
 
     SELECT c.ClaimID, c.AccessionNumber, c.DateofService, c.FirstBilledDate, c.PayerName_Raw, c.PanelType,
            c.ClinicName, c.ReferringProvider, c.SalesRepname, c.BilledUnbilled, c.ClaimType, c.ClaimStatus,
-           Amount = CASE WHEN @AriaCohort IS NOT NULL THEN c.InsuranceBalance ELSE r.Value END,
+           Amount = r.Value,
            c.ChargeAmount, c.InsurancePayment, c.ActualPayment, c.DuplicatePayment, c.PatientPayment,
            c.InsuranceBalance, c.PatientBalance
     INTO #C
@@ -594,18 +593,13 @@ BEGIN
                                            c.ChargeAmount, c.InsurancePayment, c.ActualPayment,
                                            c.DuplicatePayment, c.PatientPayment,
                                            c.InsuranceBalance, c.PatientBalance) r
-    WHERE r.Category = @CodeCategory
+    WHERE r.Category = @Category
       AND r.RowCode  = @Code;
 
     IF @AriaPart IS NOT NULL
-    BEGIN
-        DECLARE @AsOf DATE = (SELECT MAX(FirstBilledDate) FROM #C);
         DELETE FROM #C
         WHERE (@AriaPart = 1 AND NOT (ISNULL(DATEDIFF(DAY, FirstBilledDate, @AsOf), -1) BETWEEN 0 AND 30))
            OR (@AriaPart = 2 AND ISNULL(DATEDIFF(DAY, FirstBilledDate, @AsOf), -1) BETWEEN 0 AND 30);
-        INSERT INTO @Rules (RuleGroup, RuleText) VALUES (N'Calculation', N'Latest FirstBilledDate of the cohort: '
-            + ISNULL(CONVERT(NVARCHAR(10), @AsOf, 101), N'(none)'));
-    END;
 
     SELECT RuleOrder, RuleGroup, RuleText FROM @Rules ORDER BY RuleOrder;
 

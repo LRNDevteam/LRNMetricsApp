@@ -869,7 +869,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                                 <span class="cs-rpt-ms-count" style="display:none">0</span>
                             </div>
                             <div class="cs-rpt-ms-panel">
-                                <input type="text" class="cs-rpt-ms-search" placeholder="Search payers�" autocomplete="off" />
+                                <input type="text" class="cs-rpt-ms-search" placeholder="Search payers…" autocomplete="off" />
                                 <div class="cs-rpt-ms-list" id="csPayerList">
                                     @foreach (var pn in Model.PayerNames)
                                     {
@@ -890,7 +890,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                                 <span class="cs-rpt-ms-count" style="display:none">0</span>
                             </div>
                             <div class="cs-rpt-ms-panel">
-                                <input type="text" class="cs-rpt-ms-search" placeholder="Search panels�" autocomplete="off" />
+                                <input type="text" class="cs-rpt-ms-search" placeholder="Search panels…" autocomplete="off" />
                                 <div class="cs-rpt-ms-list" id="csPanelList">
                                     @foreach (var pl in Model.PanelNames)
                                     {
@@ -956,7 +956,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             <i class="bi bi-file-earmark-excel"></i>
         </div>
         <div class="cs-export-title">Generating Excel Report</div>
-        <div class="cs-export-sub" id="csExportStatus">Fetching data and building workbook�</div>
+        <div class="cs-export-sub" id="csExportStatus">Fetching data and building workbook…</div>
         <div class="cs-export-bar-bg">
             <div class="cs-export-bar-fill" id="csExportBar" style="width:0%"></div>
         </div>
@@ -1529,7 +1529,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             }
             else
             {
-                var mcvReason = "No rows match: InsurancePayment > 0 � CheckDate is a valid date";
+                var mcvReason = "No rows match: " + Model.MonthlyClaimVolumeFilterText;
                 <div class="text-center py-5 text-muted">
                     <div style="font-size:2rem;opacity:.4">&#128202;</div>
                     <div class="fw-semibold mt-2">No monthly claim volume data available</div>
@@ -1851,7 +1851,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
     /*
      * shown.bs.tab fires AFTER the new pane has fully faded in.
      * Bootstrap has removed .active from the old pane by now,
-     * so we can safely restore its inline styles � Bootstrap's own
+     * so we can safely restore its inline styles — Bootstrap's own
      * display:none rule for inactive panes takes over.
      */
     tabList.addEventListener('shown.bs.tab', function (e) {
@@ -1935,7 +1935,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
 <script nonce='@Context.Items["CspNonce"]'>
 (function () {
     'use strict';
-    // Base URL for lazy tab AJAX calls � carries all current filter params.
+    // Base URL for lazy tab AJAX calls — carries all current filter params.
     var baseParams = (function () {
         var qs = window.location.search;
         return qs ? qs.substring(1) : '';

@@ -211,14 +211,14 @@ public static class DenialClaimReportExcelBuilder
             .ToList();
         var total = rows.FirstOrDefault(r => r.RowType == "T");
         WriteSimpleList(ws, $"{lab} — Facility wise Denial Breakdown",
-            $"{DenialFilterCaption(true)} | ClinicName, drill down to DenialCodeNormalized | Sorted by Claim Count DESC",
+            $"{DenialFilterCaption(true)} and ClinicName not blank | ClinicName, drill down to DenialCodeNormalized | Sorted by Claim Count DESC",
             "Clinic Name / Denial Code", data, total?.ClaimCount ?? 0, total?.TotalInsuranceBalance ?? 0m);
     }
 
     private static void WriteFacilityPct(IXLWorksheet ws, IReadOnlyList<DenialFacilityPctRow> rows, string lab)
     {
         WriteTitle(ws, $"{lab} — Denial vs Facility %",
-            "BilledUnbilled = Billed | ClinicName | Denied % = Denied Claims / Adjudicated Claims | Sorted by No. of Claims Billed DESC");
+            "No filter | ClinicName | Denied % = Denied Claims / Adjudicated Claims | Sorted by No. of Claims DESC");
 
         var data = rows.Where(r => r.RowType != "T").OrderBy(r => r.SortOrder).ToList();
         if (data.Count == 0)
@@ -228,7 +228,7 @@ public static class DenialClaimReportExcelBuilder
         }
 
         const int headerRow = 4;
-        string[] headers = ["Clinic Name", "No. of Claims Billed", "No. of Adjudicated Claims", "No. of Denied Claims", "Denied %"];
+        string[] headers = ["Clinic Name", "No. of Claims Count", "No. of Adjudicated Claims", "No. of Denied Claims", "Denied %"];
         for (var c = 0; c < headers.Length; c++)
             ws.Cell(headerRow, c + 1).Value = headers[c];
         StyleHeader(ws.Range(headerRow, 1, headerRow, headers.Length));

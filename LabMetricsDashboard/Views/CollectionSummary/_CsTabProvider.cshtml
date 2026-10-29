@@ -54,7 +54,7 @@
                 </tbody>
                 <tfoot>
                     <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:800">
-                        <td style="text-align:center;color:#fff">�</td>
+                        <td style="text-align:center;color:#fff">—</td>
                         <td style="text-align:left;color:#fff">Grand Total</td>
                         <td style="text-align:right;color:#fff">@ps.GrandNoClaims.N0OrDash()</td>
                         @if (psCharge) { <td style="text-align:right;color:#fff">@Acct2(ps.GrandChargeAmount)</td> }
@@ -73,7 +73,7 @@
         <strong>Rows:</strong> ReferringProvider &bull;
         <strong>Metrics:</strong> @(psCharge ? "COUNT(ClaimID) \u00B7 SUM(ChargeAmount)" : "COUNT(DISTINCT ClaimID)") &middot; SUM(InsurancePayment) &middot; SUM(InsuranceBalance) &middot; SUM(PatientBalance) &bull;
         <strong>Sorted by:</strong> No. of Claims DESC &bull;
-        <strong>Claim Share:</strong> Row claims / Grand Total claims � 100
+        <strong>Claim Share:</strong> Row claims / Grand Total claims × 100
     </div>
 }
 else

@@ -31,6 +31,11 @@
         return v < 0 ? '($' + s + ')' : '$' + s;
     }
     function count(n) { return Number(n || 0).toLocaleString('en-US'); }
+    function pct(n) {
+        return (Number(n || 0) * 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+    }
+    // Aria "% of the claim submitted in the last 30 Days" rows hold a ratio shown as a percentage.
+    function isPctRow(rowCode) { return /\.AP$/.test(String(rowCode || '')); }
     function periodLabel(y, m) {
         if (!y) return 'Grand Total';
         if (!m) return y + ' Total';
@@ -89,7 +94,9 @@
 
     function gridNumber() {
         var t = (current.valueText || '').trim();
-        return Number(t.replace(/[$,\s]/g, '').replace(/^\((.*)\)$/, '-$1'));
+        var isPct = /%$/.test(t);
+        var n = Number(t.replace(/[$,%\s]/g, '').replace(/^\((.*)\)$/, '-$1'));
+        return isPct ? n / 100 : n;
     }
 
     function renderSummary(res) {
@@ -97,11 +104,13 @@
         var gridText = (current.valueText || '').trim();
         if (res.isFormula) {
             var isMoneyResult = current.cat === 'Avg';
-            var ok = Math.abs(gridNumber() - Number(res.totalAmount)) < 0.005;
+            var isPctResult = isPctRow(current.row);
+            // The grid shows a % with 2 decimals, i.e. the ratio to 4 decimals.
+            var ok = Math.abs(gridNumber() - Number(res.totalAmount)) < (isPctResult ? 0.00005 : 0.005);
             box.className = 'esc-summary ' + (ok ? 'esc-summary-ok' : 'esc-summary-warn');
             box.innerHTML =
                 '<span><i class="bi bi-calculator"></i> Calculated from the rows below</span>' +
-                '<span>Result: <strong>' + (isMoneyResult ? money(res.totalAmount) : count(res.totalAmount)) + '</strong></span>' +
+                '<span>Result: <strong>' + (isMoneyResult ? money(res.totalAmount) : isPctResult ? pct(res.totalAmount) : count(res.totalAmount)) + '</strong></span>' +
                 '<span>Grid value: <strong>' + esc(gridText) + '</strong></span>' +
                 '<span class="esc-match">' + (ok
                     ? '<i class="bi bi-check-circle-fill"></i> Calculation equals the grid value'
@@ -143,8 +152,10 @@
             var section = get(r, 'Section');
             var isTotal = !!get(r, 'IsTotal');
             var isResult = section === 'Result';
-            var val = get(r, 'IsMoney') ? money(get(r, 'Value')) : count(get(r, 'Value'));
             var rowCode = get(r, 'RowCode');
+            var val = get(r, 'IsMoney') ? money(get(r, 'Value'))
+                : isPctRow(rowCode) ? pct(get(r, 'Value'))
+                : count(get(r, 'Value'));
             var cat = get(r, 'Category');
             var canOpen = rowCode && !isResult && cat !== 'Avg';
             var head = '';
@@ -226,6 +237,7 @@
             })
             .then(function (res) {
                 if (seq !== requestSeq) return;
+                current.totalRows = res.isFormula ? 0 : (res.totalRows || 0);
                 renderRules(res.rules);
                 renderSummary(res);
                 renderGrid(res);
@@ -240,6 +252,45 @@
                 el('esCellLoading').hidden = true;
                 el('esCellGridWrap').classList.remove('esc-dim');
             });
+    }
+
+    // Excel of every row behind the open value (same filters), downloaded straight from the server.
+    function fileNameFrom(res) {
+        var cd = res.headers.get('Content-Disposition') || '';
+        var m = /filename\*=UTF-8''([^;]+)/i.exec(cd) || /filename="?([^";]+)"?/i.exec(cd);
+        return m ? decodeURIComponent(m[1]) : 'ExecutiveSummary_Rows.xlsx';
+    }
+
+    function exportExcel() {
+        var ctx = el('esCellCtx');
+        var btn = el('esCellExport');
+        if (!ctx || !current || !btn || btn.disabled) return;
+        var label = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>' +
+            (current.totalRows > 50000
+                ? 'Preparing Excel (' + count(current.totalRows) + ' rows, may take a few minutes)…'
+                : 'Preparing Excel…');
+        showAlert('');
+        var url = ctx.dataset.exportUrl + '?' + query({
+            category: current.cat, rowCode: current.row, year: current.year, month: current.month,
+            title: current.title, value: (current.valueText || '').trim()
+        });
+        fetch(url, { credentials: 'same-origin' })
+            .then(function (r) {
+                if (!r.ok) return r.text().then(function (t) { throw new Error(t || ('Download failed (' + r.status + ').')); });
+                return r.blob().then(function (b) { return { blob: b, name: fileNameFrom(r) }; });
+            })
+            .then(function (f) {
+                var a = document.createElement('a');
+                a.href = URL.createObjectURL(f.blob);
+                a.download = f.name;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+            })
+            .catch(function (err) { showAlert(err.message || 'The Excel file could not be created.'); })
+            .finally(function () { btn.disabled = false; btn.innerHTML = label; });
     }
 
     // Views opened from a formula breakdown, so Back returns to the formula.
@@ -288,6 +339,11 @@
             e.preventDefault();
             backStack.push(current);
             open(cellFromLink(comp));
+            return;
+        }
+        if (e.target.closest && e.target.closest('#esCellExport')) {
+            e.preventDefault();
+            exportExcel();
             return;
         }
         if (e.target.closest && e.target.closest('#esCellBack')) {
