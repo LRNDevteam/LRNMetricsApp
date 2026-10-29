@@ -1227,26 +1227,26 @@ if (showHighlightTabs)
 
 @if (!esTableOnly && showHighlightTabs)
 {
-    // NorthWest and Augustus have the date-basis Average Payments tabs (Panel Averages by DOS / Check Date);
-    // the others show Average Payments and, where the lab has it, Last 3 Months.
-    var collectionTabs = LabMetricsDashboard.Services.LabCollectionPrefix.UsesAvgPaymentsByDateBasis(Model.SelectedLab)
-        ? "mcv-pane,wcv-pane,top5grid-pane,avgpaydos-pane,avgpay-pane"
-        : "mcv-pane,wcv-pane,top5grid-pane,avgpay-pane,avgpay3-pane";
-    var hlFrames = new List<(string Pane, string Tab, string Title, string? Src)>
+    // The tab list (and each report's embedded tabs) is shared with LRN.SnapshotGenerator, which captures
+    // the same reports with the Executive Summary snapshot.
+    var hlFrames = new List<(string Pane, string Tab, string Title, string? Src)>();
+    foreach (var hl in LabMetricsDashboard.Services.ExecutiveSummaryHighlightsExcel.HighlightTabs(Model.SelectedLab))
     {
-        (Pane: "es-prod-pane", Tab: "es-prod-tab", Title: "Production Highlights",
-            Src: Url.Action("ProductionSummaryReport", "Dashboard",
-                new { lab = Model.SelectedLab, embed = 1, embedTabs = "monthly-pane,weekly-pane" })),
-        (Pane: "es-coll-pane", Tab: "es-coll-tab", Title: "Collection Highlights",
-            Src: Url.Action("Index", "CollectionSummary",
-                new { lab = Model.SelectedLab, embed = 1, embedTabs = collectionTabs })),
-        (Pane: "es-lims-pane", Tab: "es-lims-tab", Title: "LIMS Highlights",
-            Src: Url.Action("Index", "LisSummary", new { lab = Model.SelectedLab, embed = 1 })),
-    };
-    if (showDenialHighlights)
-        hlFrames.Add((Pane: "es-denial-pane", Tab: "es-denial-tab", Title: "Denial Highlights",
-            Src: Url.Action("Index", "DenialClaimReport",
-                new { lab = Model.SelectedLab, embed = 1, embedTabs = "dcr-monthly,dcr-weekly" })));
+        hlFrames.Add(hl.Report switch
+        {
+            "Production" => (Pane: "es-prod-pane", Tab: "es-prod-tab", Title: hl.Title,
+                Src: Url.Action("ProductionSummaryReport", "Dashboard",
+                    new { lab = Model.SelectedLab, embed = 1, embedTabs = hl.EmbedTabs })),
+            "Collection" => (Pane: "es-coll-pane", Tab: "es-coll-tab", Title: hl.Title,
+                Src: Url.Action("Index", "CollectionSummary",
+                    new { lab = Model.SelectedLab, embed = 1, embedTabs = hl.EmbedTabs })),
+            "Lims" => (Pane: "es-lims-pane", Tab: "es-lims-tab", Title: hl.Title,
+                Src: Url.Action("Index", "LisSummary", new { lab = Model.SelectedLab, embed = 1 })),
+            _ => (Pane: "es-denial-pane", Tab: "es-denial-tab", Title: hl.Title,
+                Src: Url.Action("Index", "DenialClaimReport",
+                    new { lab = Model.SelectedLab, embed = 1, embedTabs = hl.EmbedTabs })),
+        });
+    }
     @Html.Raw("</div>")
     foreach (var f in hlFrames)
     {

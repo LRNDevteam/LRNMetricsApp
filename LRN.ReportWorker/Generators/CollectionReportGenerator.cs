@@ -24,9 +24,10 @@ namespace LRN.ReportWorker.Generators;
 /// sync export), split into sheets every 300K rows. Rows never sit in a giant
 /// list, so 700K+ row tables export fine.
 /// </summary>
-public sealed class CollectionReportGenerator : IReportGenerator
+public sealed class CollectionReportGenerator : IReportGenerator, IReportSnapshotSource
 {
     public string ReportType => ReportTypes.CollectionReport;
+    public string SnapshotReportCode => ReportSnapshotCodes.CollectionSummary;
 
     private readonly IServiceProvider _services;
     private readonly LabSettings _labSettings;
@@ -85,15 +86,7 @@ public sealed class CollectionReportGenerator : IReportGenerator
             connStr, payerFilter, panelFilter, fbFrom, fbTo, dosFrom, dosTo, cdFrom, cdTo, job.LabName, ct);
         await Progress(5);
 
-        var showTotalPayments = !labConfig.DisableShowTop5TotalPayments;
-        var useLineEncounters = !string.IsNullOrWhiteSpace(labConfig.CollectionOutput)
-            && string.Equals(labConfig.CollectionOutput, "table1", StringComparison.OrdinalIgnoreCase);
-
-        var controller = _services.GetRequiredService<CollectionSummaryController>();
-        controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
-
-        var vm = await controller.BuildCollectionExportViewModelAsync(
-            job.LabName, connStr, useLineEncounters, showTotalPayments,
+        var vm = await BuildViewModelAsync(job.LabName, labConfig, connStr,
             payerFilter, panelFilter, fbFrom, fbTo, dosFrom, dosTo, cdFrom, cdTo, ct);
         await Progress(15);
 
@@ -120,6 +113,35 @@ public sealed class CollectionReportGenerator : IReportGenerator
             job.ReportId, job.LabName, claimCount, lineCount, size, targetPath);
 
         return new GeneratedReportFile(fileName, targetPath, size, totalRows);
+    }
+
+    /// <summary>The Collection Summary page's tabs with no filters - the summary sheets only, not the raw claim/line extracts.</summary>
+    public async Task<object?> LoadUnfilteredAsync(string labName, CancellationToken ct)
+    {
+        if (!_labSettings.Labs.TryGetValue(labName, out var labConfig)
+            || !labConfig.LineClaimEnable || string.IsNullOrWhiteSpace(labConfig.DbConnectionString))
+            return null;
+        return await BuildViewModelAsync(labName, labConfig, labConfig.DbConnectionString,
+            null, null, null, null, null, null, null, null, ct);
+    }
+
+    /// <summary>The summary sheets' view model: the controller's own builder, so the export and the page agree.</summary>
+    private Task<CollectionSummaryViewModel> BuildViewModelAsync(
+        string labName, LabCsvConfig labConfig, string connStr,
+        List<string>? payerFilter, List<string>? panelFilter,
+        DateOnly? fbFrom, DateOnly? fbTo, DateOnly? dosFrom, DateOnly? dosTo, DateOnly? cdFrom, DateOnly? cdTo,
+        CancellationToken ct)
+    {
+        var showTotalPayments = !labConfig.DisableShowTop5TotalPayments;
+        var useLineEncounters = !string.IsNullOrWhiteSpace(labConfig.CollectionOutput)
+            && string.Equals(labConfig.CollectionOutput, "table1", StringComparison.OrdinalIgnoreCase);
+
+        var controller = _services.GetRequiredService<CollectionSummaryController>();
+        controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+
+        return controller.BuildCollectionExportViewModelAsync(
+            labName, connStr, useLineEncounters, showTotalPayments,
+            payerFilter, panelFilter, fbFrom, fbTo, dosFrom, dosTo, cdFrom, cdTo, ct);
     }
 
     private async Task<int> WriteWorkbookAsync(

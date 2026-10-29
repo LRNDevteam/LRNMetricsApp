@@ -1,0 +1,70 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>LRN.SnapshotGenerator</RootNamespace>
+    <UserSecretsId>lrn-snapshot-generator</UserSecretsId>
+    <!-- Same as LRN.ReportWorker: the Service Control Manager needs a GUI-subsystem exe (Error 1053). -->
+    <OutputType>WinExe</OutputType>
+    <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.Extensions.AspNetCore.Configuration.Secrets" Version="1.4.0" />
+    <PackageReference Include="Azure.Identity" Version="1.13.2" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.24.1" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.15" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.15" />
+    <PackageReference Include="Parquet.Net" Version="6.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The report generators (and through them the LRN Metrics pages' repositories and per-lab
+         rules): a snapshot is the same view model the page renders and the Excel export is built from. -->
+    <ProjectReference Include="..\LRN.ReportWorker\LRN.ReportWorker.csproj" />
+  </ItemGroup>
+
+  <!-- The snapshot core is the master file processor's (Parquet writer, Blob / folder store, retention,
+       LRNMaster index), compiled in rather than referenced: that worker is self-contained on purpose,
+       and linking keeps one copy of the code with both services writing the same layout and index. -->
+  <ItemGroup>
+    <Compile Include="..\LRN.MasterFileProcessorWorker\Snapshots\ParquetSnapshotWriter.cs" Link="Snapshots\ParquetSnapshotWriter.cs" />
+    <Compile Include="..\LRN.MasterFileProcessorWorker\Snapshots\SnapshotStore.cs" Link="Snapshots\SnapshotStore.cs" />
+    <Compile Include="..\LRN.MasterFileProcessorWorker\Snapshots\SnapshotRetention.cs" Link="Snapshots\SnapshotRetention.cs" />
+    <Compile Include="..\LRN.MasterFileProcessorWorker\Snapshots\ReportSnapshotRepository.cs" Link="Snapshots\ReportSnapshotRepository.cs" />
+    <Compile Include="..\LRN.MasterFileProcessorWorker\Snapshots\MasterDataSnapshotOptions.cs" Link="Snapshots\MasterDataSnapshotOptions.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="appsettings.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Update="appsettings.Test.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <None Update="Labs\*.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- The referenced worker / web / API projects carry their own appsettings.json and web.config; this
+       service's own must win in the publish folder (NETSDK1152). Same rule as LRN.ReportWorker. -->
+  <Target Name="ExcludeReferencedContentFromPublish" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="( $([System.String]::Copy('%(ResolvedFileToPublish.FullPath)').Contains('LabMetricsDashboard'))
+                                          OR $([System.String]::Copy('%(ResolvedFileToPublish.FullPath)').Contains('LRN.ReportsApi'))
+                                          OR $([System.String]::Copy('%(ResolvedFileToPublish.FullPath)').Contains('LRN.ReportWorker')) )
+                                        AND (
+                                          '%(Filename)%(Extension)' == 'appsettings.json'
+                                          OR '%(Filename)%(Extension)' == 'appsettings.Development.json'
+                                          OR '%(Filename)%(Extension)' == 'web.config'
+                                          OR '%(Filename)%(Extension)' == 'PCRLabsofAmerica.json'
+                                        )" />
+    </ItemGroup>
+  </Target>
+
+</Project>

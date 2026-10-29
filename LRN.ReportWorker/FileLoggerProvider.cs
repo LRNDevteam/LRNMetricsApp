@@ -12,6 +12,9 @@ public sealed class FileLoggerOptions
     public string LogDirectory { get; set; } = "Logs";
     public LogLevel MinLevel { get; set; } = LogLevel.Information;
     public int RetainDays { get; set; } = 30;
+
+    /// <summary>File name start: <c>{FilePrefix}-YYYY-MM-DD.log</c>. LRN.SnapshotGenerator uses its own.</summary>
+    public string FilePrefix { get; set; } = "reportworker";
 }
 
 public sealed class FileLoggerProvider : ILoggerProvider
@@ -28,7 +31,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
             ? options.LogDirectory
             : Path.Combine(AppContext.BaseDirectory, options.LogDirectory);
         Directory.CreateDirectory(ResolvedLogDirectory);
-        _writer = new FileLogWriter(ResolvedLogDirectory, options.RetainDays);
+        _writer = new FileLogWriter(ResolvedLogDirectory, options.RetainDays, options.FilePrefix);
         _minLevel = options.MinLevel;
     }
 
@@ -69,17 +72,19 @@ internal sealed class FileLogWriter : IDisposable
     private readonly string _directory;
     private readonly object _lock = new();
     private StreamWriter? _writer;
+    private readonly string _prefix;
     private string _date = string.Empty;
 
-    public FileLogWriter(string directory, int retainDays)
+    public FileLogWriter(string directory, int retainDays, string prefix)
     {
         _directory = directory;
+        _prefix = string.IsNullOrWhiteSpace(prefix) ? "reportworker" : prefix;
         if (retainDays <= 0) return;
 
         try
         {
             var cutoff = DateTime.Now.AddDays(-retainDays);
-            foreach (var file in Directory.GetFiles(directory, "reportworker-*.log"))
+            foreach (var file in Directory.GetFiles(directory, $"{_prefix}-*.log"))
             {
                 if (File.GetLastWriteTime(file) < cutoff)
                     File.Delete(file);
@@ -101,7 +106,7 @@ internal sealed class FileLogWriter : IDisposable
                 _writer?.Dispose();
                 _writer = new StreamWriter(
                     new FileStream(
-                        Path.Combine(_directory, $"reportworker-{today}.log"),
+                        Path.Combine(_directory, $"{_prefix}-{today}.log"),
                         FileMode.Append,
                         FileAccess.Write,
                         FileShare.ReadWrite),

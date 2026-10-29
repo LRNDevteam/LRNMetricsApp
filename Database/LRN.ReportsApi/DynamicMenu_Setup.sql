@@ -206,6 +206,18 @@ BEGIN
     PRINT 'Added Master Values > Report Audit Log menu item';
 END
 
+/* ── 3c-1. Master Values: Master Data Snapshots (idempotent add) ──────────
+   Weekly Parquet snapshots of Line Level / Claim Level / LIMS per lab
+   (LRNMaster.dbo.ReportSnapshotRun / ReportSnapshotFile), by lab and Run ID. */
+IF @MasterValuesId IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM dbo.MenuItems
+                   WHERE ParentMenuItemId = @MasterValuesId AND MenuName = N'Master Data Snapshots' AND IsDeleted = 0)
+BEGIN
+    INSERT dbo.MenuItems (ParentMenuItemId, MenuName, ControllerName, ActionName, IconClass, MenuOrder, IsDisabled, CreatedBy)
+    VALUES (@MasterValuesId, N'Master Data Snapshots', N'MasterValues', N'MasterDataSnapshots', N'bi-archive', 7, 0, N'system');
+    PRINT 'Added Master Values > Master Data Snapshots menu item';
+END
+
 /* ── 3c-2. Denial Workflow (idempotent add) ───────────────────────────────
    The screen itself is the separate React app; the menu row exists so the
    link can be granted per role in Admin > Role Menu Mapping and so it stops

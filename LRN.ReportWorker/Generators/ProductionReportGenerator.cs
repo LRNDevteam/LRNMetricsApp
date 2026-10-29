@@ -23,9 +23,42 @@ namespace LRN.ReportWorker.Generators;
 /// the standard Excel builder + claim/line streaming; every other lab uses
 /// IProductionReportRepository + the standard builder.
 /// </summary>
-public sealed class ProductionReportGenerator : IReportGenerator
+public sealed class ProductionReportGenerator : IReportGenerator, IReportSnapshotSource
 {
     public string ReportType => ReportTypes.ProductionReport;
+    public string SnapshotReportCode => ReportSnapshotCodes.ProductionSummary;
+
+    private static bool IsNorthWest(string labName) =>
+        labName.Equals("NorthWest", StringComparison.OrdinalIgnoreCase)
+        || labName.Equals("NWL", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsAugustus(string labName) =>
+        labName.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
+        || labName.Equals("Augustus", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The Production Summary page's tables with no filters, through the same per-lab path the export
+    /// takes (NorthWest / Augustus / the lab's own SPs / the shared rules) - summaries only, no raw sheets.
+    /// </summary>
+    public async Task<object?> LoadUnfilteredAsync(string labName, CancellationToken ct)
+    {
+        if (!_labSettings.Labs.TryGetValue(labName, out var config)
+            || !config.EnableProductionReport || !config.LineClaimEnable
+            || string.IsNullOrWhiteSpace(config.DbConnectionString))
+            return null;
+
+        var connStr = config.DbConnectionString;
+        var job = new ClaimedReport(0, ReportType, labName, "LRN.SnapshotGenerator", null, 0);
+        var f = ProductionReportFilters.FromJson(null);
+        static Task NoProgress(byte _) => Task.CompletedTask;
+
+        var (_, vm) = IsNorthWest(labName)
+            ? await BuildNorthWestAsync(connStr, job, f, null, null, null, null, null, null, null, null, "", NoProgress, ct, loadOnly: true)
+            : IsAugustus(labName)
+                ? await BuildAugustusAsync(connStr, job, f, null, null, null, null, null, null, null, null, "", NoProgress, ct, loadOnly: true)
+                : await BuildStandardAsync(connStr, config, job, f, null, null, null, null, null, null, null, null, "", NoProgress, ct, loadOnly: true);
+        return vm;
+    }
 
     private readonly LabSettings _labSettings;
     private readonly IProductionReportRepository _repo;
@@ -102,15 +135,13 @@ public sealed class ProductionReportGenerator : IReportGenerator
                 "ProductionReport {ReportId} [{Lab}]: no filters — building live full workbook (snapshot copy disabled).",
                 job.ReportId, job.LabName);
 
-        var isNorthWest = job.LabName.Equals("NorthWest", StringComparison.OrdinalIgnoreCase)
-                       || job.LabName.Equals("NWL",       StringComparison.OrdinalIgnoreCase);
-        var isAugustus = job.LabName.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
-                      || job.LabName.Equals("Augustus",      StringComparison.OrdinalIgnoreCase);
+        var isNorthWest = IsNorthWest(job.LabName);
+        var isAugustus = IsAugustus(job.LabName);
 
         var tempPath = targetPath + ".tmp";
         try
         {
-            var totalRows = isNorthWest
+            var (totalRows, _) = isNorthWest
                 ? await BuildNorthWestAsync(connStr, job, f, payerArg, panelArg,
                     dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, tempPath, Progress, ct)
                 : isAugustus
@@ -135,12 +166,12 @@ public sealed class ProductionReportGenerator : IReportGenerator
     }
 
     // ── Standard labs — mirrors ExportProductionReportExcel ────────────────────
-    private async Task<int> BuildStandardAsync(
+    private async Task<(int Rows, ProductionReportViewModel Vm)> BuildStandardAsync(
         string connStr, LabCsvConfig config, ClaimedReport job, ProductionReportFilters f,
         List<string>? payerArg, List<string>? panelArg,
         DateOnly? dosFrom, DateOnly? dosTo, DateOnly? fbFrom, DateOnly? fbTo,
         DateOnly? fbldFrom, DateOnly? fbldTo,
-        string tempPath, Func<byte, Task> progress, CancellationToken ct)
+        string tempPath, Func<byte, Task> progress, CancellationToken ct, bool loadOnly = false)
     {
         // Per-lab Production Summary rules (identical to the controller).
         var productionRule = config.ProductionSummary?.Rule;
@@ -299,6 +330,9 @@ public sealed class ProductionReportGenerator : IReportGenerator
             PanelBreakdownGrandTotalCharges   = pnlResult.GrandTotalCharges,
         };
 
+        // Snapshot: the summary view model is all it needs - no workbook, no raw claim/line sheets.
+        if (loadOnly) return (0, vm);
+
         var (weekFolder, runId) = runInfoTask.Result;
         using (var workbook = ProductionReportExcelExportBuilder.CreateWorkbookSummaryOnly(
             vm, job.LabName, weekFolder, runId))
@@ -333,16 +367,16 @@ public sealed class ProductionReportGenerator : IReportGenerator
             ct: ct);
         await progress(95);
 
-        return claimRows + lineRows;
+        return (claimRows + lineRows, vm);
     }
 
     // ── Augustus — summaries via usp_GetAug_*; claim/line via standard SP stream ─
-    private async Task<int> BuildAugustusAsync(
+    private async Task<(int Rows, ProductionReportViewModel Vm)> BuildAugustusAsync(
         string connStr, ClaimedReport job, ProductionReportFilters f,
         List<string>? payerArg, List<string>? panelArg,
         DateOnly? dosFrom, DateOnly? dosTo, DateOnly? fbFrom, DateOnly? fbTo,
         DateOnly? fbldFrom, DateOnly? fbldTo,
-        string tempPath, Func<byte, Task> progress, CancellationToken ct)
+        string tempPath, Func<byte, Task> progress, CancellationToken ct, bool loadOnly = false)
     {
         // Phase 1 — 7 summary queries via Augustus SPs (usp_GetAug_*), never NW_*/Rule path.
         var monthlyTask = _augRepo.GetMonthlyAsync(
@@ -442,6 +476,9 @@ public sealed class ProductionReportGenerator : IReportGenerator
             PanelBreakdownGrandTotalCharges   = pnlResult.GrandTotalCharges,
         };
 
+        // Snapshot: the summary view model is all it needs - no workbook, no raw claim/line sheets.
+        if (loadOnly) return (0, vm);
+
         var (weekFolder, runId) = runInfoTask.Result;
         using (var workbook = ProductionReportExcelExportBuilder.CreateWorkbookSummaryOnly(
             vm, job.LabName, weekFolder, runId))
@@ -476,16 +513,16 @@ public sealed class ProductionReportGenerator : IReportGenerator
             ct: ct);
         await progress(95);
 
-        return claimRows + lineRows;
+        return (claimRows + lineRows, vm);
     }
 
     // ── NorthWest — mirrors ExportNorthWestProductionReportExcel ───────────────
-    private async Task<int> BuildNorthWestAsync(
+    private async Task<(int Rows, ProductionReportViewModel Vm)> BuildNorthWestAsync(
         string connStr, ClaimedReport job, ProductionReportFilters f,
         List<string>? payerArg, List<string>? panelArg,
         DateOnly? dosFrom, DateOnly? dosTo, DateOnly? fbFrom, DateOnly? fbTo,
         DateOnly? fbldFrom, DateOnly? fbldTo,
-        string tempPath, Func<byte, Task> progress, CancellationToken ct)
+        string tempPath, Func<byte, Task> progress, CancellationToken ct, bool loadOnly = false)
     {
         var t1 = _nwRepo.GetMonthlyAsync(connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
         var t2 = _nwRepo.GetWeeklyAsync(connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
@@ -582,6 +619,9 @@ public sealed class ProductionReportGenerator : IReportGenerator
             CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
         };
 
+        // Snapshot: the summary view model is all it needs - no workbook, no raw claim/line sheets.
+        if (loadOnly) return (0, vm);
+
         using (var workbook = NorthWestProductionSummaryExcelExportBuilder.CreateWorkbook(vm, job.LabName))
         {
             await InsightsSheetInjector.InsertAsync(
@@ -605,7 +645,7 @@ public sealed class ProductionReportGenerator : IReportGenerator
         _logger.LogInformation(
             "ProductionReport {ReportId} [{Lab}]: NW workbook saved with streamed Claim/Line sheets ({Raw:N0} raw rows).",
             job.ReportId, job.LabName, rawRows);
-        return rawRows;
+        return (rawRows, vm);
     }
 
     private static DateOnly? ParseDate(string? value) =>

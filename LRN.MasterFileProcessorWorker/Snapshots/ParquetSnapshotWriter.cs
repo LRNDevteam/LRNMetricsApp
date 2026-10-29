@@ -143,8 +143,11 @@ public static class ParquetSnapshotWriter
             if (type == typeof(decimal))
             {
                 // money/smallmoney report a scale of 255; System.Decimal tops out at 28 digits of scale.
+                // No scale at all = not a SQL column (an in-memory table, e.g. a page snapshot's
+                // percentages): 10 places, so a computed ratio is not rounded to 4.
                 int p = col.NumericPrecision is > 0 and <= 38 ? col.NumericPrecision.Value : 38;
-                int s = col.NumericScale is >= 0 && col.NumericScale <= p && col.NumericScale <= 28 ? col.NumericScale.Value : 4;
+                int s = col.NumericScale is null ? 10
+                    : col.NumericScale >= 0 && col.NumericScale <= p && col.NumericScale <= 28 ? col.NumericScale.Value : 4;
                 var field = new DecimalDataField(name, p, s, forceByteArrayEncoding: false, isNullable: true);
                 return new ValueSink<decimal>(field, size, v => Convert.ToDecimal(v, CultureInfo.InvariantCulture), p, s);
             }

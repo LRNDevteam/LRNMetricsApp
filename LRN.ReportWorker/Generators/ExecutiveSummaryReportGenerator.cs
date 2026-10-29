@@ -14,9 +14,10 @@ namespace LRN.ReportWorker.Generators;
 /// the two paths can never drift. Well Health is prefix WH
 /// (dbo.usp_GetWH_ExecutiveSummary).
 /// </summary>
-public sealed class ExecutiveSummaryReportGenerator : IReportGenerator
+public sealed class ExecutiveSummaryReportGenerator : IReportGenerator, IReportSnapshotSource
 {
     public string ReportType => ReportTypes.ExecutiveSummary;
+    public string SnapshotReportCode => ReportSnapshotCodes.ExecutiveSummary;
 
     private readonly LabSettings _labSettings;
     private readonly SqlPhiExecutiveSummaryRepository _repo;
@@ -39,15 +40,6 @@ public sealed class ExecutiveSummaryReportGenerator : IReportGenerator
         LabDbConfig lab, ClaimedReport job, string fileName, string targetPath,
         Func<byte, Task>? reportProgressAsync, CancellationToken ct)
     {
-        if (!_labSettings.Labs.TryGetValue(job.LabName, out var labConfig)
-            || string.IsNullOrWhiteSpace(labConfig.DbConnectionString))
-            throw new InvalidOperationException($"Executive Summary is not available for '{job.LabName}'.");
-
-        if (!ExecutiveSummaryController.LabPrefixMap.TryGetValue(job.LabName, out var prefix))
-            throw new InvalidOperationException($"Executive Summary has no SP prefix mapping for '{job.LabName}'.");
-
-        var connStr = labConfig.DbConnectionString;
-        var spName  = SqlPhiExecutiveSummaryRepository.ExecutiveSummaryGetSpName(prefix);
         var f = ExecutiveSummaryFilters.FromJson(job.FilterDetailsJson);
 
         async Task Progress(byte pct)
@@ -55,47 +47,7 @@ public sealed class ExecutiveSummaryReportGenerator : IReportGenerator
             if (reportProgressAsync is not null) await reportProgressAsync(pct);
         }
 
-        if (!await _repo.StoredProcedureExistsAsync(connStr, spName, ct))
-            throw new InvalidOperationException(
-                $"Data not generated for '{job.LabName}': stored procedure '{spName}' does not exist.");
-        await Progress(10);
-
-        // Same argument shaping as ExecutiveSummaryController.Index.
-        var panelsStr    = Join(f.Panels);
-        var clinicsStr   = Join(f.Clinics);
-        var providersStr = Join(f.Providers);
-        var repsStr      = Join(f.Reps);
-
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
-
-        var vm = await _repo.GetExecutiveSummaryAsync(
-            connStr, spName, availableLabs, job.LabName,
-            f.YearFrom, f.YearTo, f.MonthFrom, f.MonthTo,
-            useExtendedFilters: true,
-            dosFrom:    ParseDate(f.DosFrom),
-            dosTo:      ParseDate(f.DosTo),
-            billedFrom: ParseDate(f.BilledFrom),
-            billedTo:   ParseDate(f.BilledTo),
-            panels:     panelsStr,
-            clinics:    clinicsStr,
-            providers:  providersStr,
-            reps:       repsStr,
-            ct: ct);
-        await Progress(60);
-
-        // Restore true selections (repository re-splits comma-joined strings, which
-        // corrupts values containing commas) — same fix as the controller applies.
-        vm.SelectedPanels    = f.Panels    ?? [];
-        vm.SelectedClinics   = f.Clinics   ?? [];
-        vm.SelectedProviders = f.Providers ?? [];
-        vm.SelectedReps      = f.Reps      ?? [];
-
-        // Run / analysis-range banner (mirrors the page header).
-        var (weekFolder, claimRunId, limsRunId) = await _repo.GetRunInfoAsync(connStr, ct);
-        vm.ReportWeekFolder = weekFolder;
-        vm.ReportRunId      = claimRunId;
-        vm.LimsRunId        = limsRunId;
-        await Progress(70);
+        var vm = await LoadViewModelAsync(job.LabName, f, Progress, ct);
 
         var bytes = new ExecutiveSummaryExcelBuilder().Build(vm);
         await Progress(75);
@@ -125,6 +77,73 @@ public sealed class ExecutiveSummaryReportGenerator : IReportGenerator
         await Progress(100);
 
         return new GeneratedReportFile(fileName, targetPath, size, vm.Rows.Count);
+    }
+
+    public async Task<object?> LoadUnfilteredAsync(string labName, CancellationToken ct)
+    {
+        if (!_labSettings.Labs.TryGetValue(labName, out var labConfig)
+            || string.IsNullOrWhiteSpace(labConfig.DbConnectionString)
+            || !ExecutiveSummaryController.LabPrefixMap.ContainsKey(labName))
+            return null;
+        return await LoadViewModelAsync(labName, ExecutiveSummaryFilters.FromJson(null), _ => Task.CompletedTask, ct);
+    }
+
+    /// <summary>The page's view model for these filters: the grid plus the run / analysis-range banner.</summary>
+    private async Task<PhiExecutiveSummaryViewModel> LoadViewModelAsync(
+        string labName, ExecutiveSummaryFilters f, Func<byte, Task> Progress, CancellationToken ct)
+    {
+        if (!_labSettings.Labs.TryGetValue(labName, out var labConfig)
+            || string.IsNullOrWhiteSpace(labConfig.DbConnectionString))
+            throw new InvalidOperationException($"Executive Summary is not available for '{labName}'.");
+
+        if (!ExecutiveSummaryController.LabPrefixMap.TryGetValue(labName, out var prefix))
+            throw new InvalidOperationException($"Executive Summary has no SP prefix mapping for '{labName}'.");
+
+        var connStr = labConfig.DbConnectionString;
+        var spName  = SqlPhiExecutiveSummaryRepository.ExecutiveSummaryGetSpName(prefix);
+
+        if (!await _repo.StoredProcedureExistsAsync(connStr, spName, ct))
+            throw new InvalidOperationException(
+                $"Data not generated for '{labName}': stored procedure '{spName}' does not exist.");
+        await Progress(10);
+
+        // Same argument shaping as ExecutiveSummaryController.Index.
+        var panelsStr    = Join(f.Panels);
+        var clinicsStr   = Join(f.Clinics);
+        var providersStr = Join(f.Providers);
+        var repsStr      = Join(f.Reps);
+
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+
+        var vm = await _repo.GetExecutiveSummaryAsync(
+            connStr, spName, availableLabs, labName,
+            f.YearFrom, f.YearTo, f.MonthFrom, f.MonthTo,
+            useExtendedFilters: true,
+            dosFrom:    ParseDate(f.DosFrom),
+            dosTo:      ParseDate(f.DosTo),
+            billedFrom: ParseDate(f.BilledFrom),
+            billedTo:   ParseDate(f.BilledTo),
+            panels:     panelsStr,
+            clinics:    clinicsStr,
+            providers:  providersStr,
+            reps:       repsStr,
+            ct: ct);
+        await Progress(60);
+
+        // Restore true selections (repository re-splits comma-joined strings, which
+        // corrupts values containing commas) — same fix as the controller applies.
+        vm.SelectedPanels    = f.Panels    ?? [];
+        vm.SelectedClinics   = f.Clinics   ?? [];
+        vm.SelectedProviders = f.Providers ?? [];
+        vm.SelectedReps      = f.Reps      ?? [];
+
+        // Run / analysis-range banner (mirrors the page header).
+        var (weekFolder, claimRunId, limsRunId) = await _repo.GetRunInfoAsync(connStr, ct);
+        vm.ReportWeekFolder = weekFolder;
+        vm.ReportRunId      = claimRunId;
+        vm.LimsRunId        = limsRunId;
+        await Progress(70);
+        return vm;
     }
 
     private static string? Join(List<string>? values) =>

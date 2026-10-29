@@ -1,0 +1,19 @@
+{
+  // Report snapshots for this lab. LabId = LRNMaster LabId (ReportsWorkflowTracker / LRN_Run_Log);
+  // LabKey = the lab's LRN Metrics key (ReportWorker:Labs / its per-lab config JSON).
+  // Each report is captured when its TrackerReportName shows Success for a RunId. The stored procedures
+  // a report runs are the page's own for this lab - nothing to list here. A report the lab does not have
+  // in LRN Metrics is logged as "not available"; set its Enabled to false to stop checking it.
+  // DenialInsight has no tracker report: the client uploads it, and it is captured after each upload or edit.
+  "LabId": 23,
+  "LabKey": "NorthWest",
+  "Enabled": false,
+  "Reports": {
+    "ExecutiveSummary":  { "Enabled": true, "TrackerReportName": "Executive Summary" },
+    "LisSummary":        { "Enabled": true, "TrackerReportName": "LIS Summary" },
+    "ProductionSummary": { "Enabled": true, "TrackerReportName": "Production Summary" },
+    "CollectionSummary": { "Enabled": true, "TrackerReportName": "Collection Summary" },
+    "DenialSummary":     { "Enabled": true, "TrackerReportName": "Denial Report" },
+    "DenialInsight":     { "Enabled": true }
+  }
+}

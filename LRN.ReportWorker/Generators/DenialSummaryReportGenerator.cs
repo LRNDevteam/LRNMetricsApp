@@ -15,24 +15,52 @@ namespace LRN.ReportWorker.Generators;
 ///     lab's claim-level columns including DenialCodeNormalized and DenialDescription, streamed
 ///     row-by-row with OpenXml so a large lab does not have to fit in memory.
 /// </summary>
-public sealed class DenialSummaryReportGenerator : IReportGenerator
+public sealed class DenialSummaryReportGenerator : IReportGenerator, IReportSnapshotSource
 {
     public string ReportType => ReportTypes.DenialSummary;
+    public string SnapshotReportCode => ReportSnapshotCodes.DenialSummary;
+
+    /// <summary>
+    /// The page's generated tabs - tiles, Monthly, Weekly, Denial List / Plan Type / Facility - with the
+    /// lab's own week start, date and balance columns (LabConfig:DenialSummary*), as the page reads them.
+    /// The Denial Insight rows are left out: the client uploads them, so they are snapshotted on their
+    /// own upload (DENIALINSIGHT), not when the claim data is generated.
+    /// </summary>
+    public async Task<object?> LoadUnfilteredAsync(string labName, CancellationToken ct)
+    {
+        if (!_labSettings.Labs.TryGetValue(labName, out var labConfig)
+            || string.IsNullOrWhiteSpace(labConfig.DbConnectionString))
+            return null;
+        var model = await DenialClaimReportExcelBuilder.LoadAsync(
+            _repo, labConfig.DbConnectionString, labName, bucket: null,
+            _labConfig?.GetDenialSummaryWeekStart(labName) ?? SqlDenialClaimReportRepository.DefaultWeekStartsOn,
+            _labConfig?.GetDenialSummaryDateColumn(labName),
+            _labConfig?.GetDenialSummaryBalanceColumn(labName), ct);
+        model.Insight.Rows = [];
+        return model;
+    }
 
     private readonly LabSettings _labSettings;
     private readonly SqlDenialClaimReportRepository _repo;
     private readonly ReportStorageOptions _storage;
+    private readonly LabConfigOptions? _labConfig;
     private readonly ILogger<DenialSummaryReportGenerator> _logger;
 
+    /// <param name="labConfig">
+    /// The dashboard's LabConfig section, for the snapshot only (LRN.SnapshotGenerator registers it). A
+    /// queued export does not need it: the page sends its lab's week and columns with the job.
+    /// </param>
     public DenialSummaryReportGenerator(
         LabSettings labSettings,
         SqlDenialClaimReportRepository repo,
         Microsoft.Extensions.Options.IOptions<ReportStorageOptions> storage,
-        ILogger<DenialSummaryReportGenerator> logger)
+        ILogger<DenialSummaryReportGenerator> logger,
+        LabConfigOptions? labConfig = null)
     {
         _labSettings = labSettings;
         _repo        = repo;
         _storage     = storage.Value;
+        _labConfig   = labConfig;
         _logger      = logger;
     }
 

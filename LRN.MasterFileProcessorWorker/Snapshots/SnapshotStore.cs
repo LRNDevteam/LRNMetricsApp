@@ -12,10 +12,19 @@ public interface ISnapshotStore
     string Location { get; }
 
     /// <summary>Uploads, overwriting: a re-run of the same RunId replaces its files.</summary>
-    Task UploadAsync(string localPath, string snapshotPath, string sha256, CancellationToken ct);
+    Task UploadAsync(string localPath, string snapshotPath, string sha256, CancellationToken ct,
+        string contentType = SnapshotContentTypes.Parquet);
 
     /// <summary>Deletes every file under <paramref name="prefix"/>; returns how many.</summary>
     Task<int> DeletePrefixAsync(string prefix, CancellationToken ct);
+}
+
+public static class SnapshotContentTypes
+{
+    public const string Parquet = "application/vnd.apache.parquet";
+
+    /// <summary>A gzip-compressed JSON file (LRN.SnapshotGenerator's page-model display copy).</summary>
+    public const string GzipJson = "application/gzip";
 }
 
 /// <summary>Builds the configured <see cref="ISnapshotStore"/> on first use, so a disabled feature never touches storage.</summary>
@@ -69,13 +78,14 @@ public sealed class BlobSnapshotStore : ISnapshotStore
 
     public string Location => _container.Uri.ToString();
 
-    public async Task UploadAsync(string localPath, string snapshotPath, string sha256, CancellationToken ct)
+    public async Task UploadAsync(string localPath, string snapshotPath, string sha256, CancellationToken ct,
+        string contentType = SnapshotContentTypes.Parquet)
     {
         await EnsureContainerAsync(ct).ConfigureAwait(false);
 
         await _container.GetBlobClient(snapshotPath).UploadAsync(localPath, new BlobUploadOptions
         {
-            HttpHeaders = new BlobHttpHeaders { ContentType = "application/vnd.apache.parquet" },
+            HttpHeaders = new BlobHttpHeaders { ContentType = contentType },
             Metadata = new Dictionary<string, string> { ["sha256"] = sha256 }
         }, ct).ConfigureAwait(false);
     }
@@ -112,7 +122,8 @@ public sealed class LocalFolderSnapshotStore : ISnapshotStore
 
     public string Location => _root;
 
-    public Task UploadAsync(string localPath, string snapshotPath, string sha256, CancellationToken ct)
+    public Task UploadAsync(string localPath, string snapshotPath, string sha256, CancellationToken ct,
+        string contentType = SnapshotContentTypes.Parquet)
     {
         var target = Resolve(snapshotPath);
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);

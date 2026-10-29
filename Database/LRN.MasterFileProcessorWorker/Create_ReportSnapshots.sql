@@ -1,4 +1,7 @@
 SET NOCOUNT ON;
+-- Required for the filtered index below (sqlcmd defaults QUOTED_IDENTIFIER to OFF).
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
 GO
 
 /*
@@ -83,6 +86,65 @@ BEGIN
 
         CONSTRAINT UQ_ReportSnapshotFile UNIQUE (SnapshotRunId, ReportCode, ResultSetName)
     );
+END
+GO
+
+/*
+    dbo.ReportSnapshotRequest - snapshots of reports no service generates, so ReportsWorkflowTracker
+    never shows them as Success. Today: the Denial Summary page's Denial Insight tab (ReportCode
+    DENIALINSIGHT), which the client uploads and edits. LabMetricsDashboard writes a row on each
+    import / edit / delete (by LabKey); the master file processor writes one (by LabId) when a re-run of
+    a week replaces the run that held such a snapshot. LRN.SnapshotGenerator captures the tab for the
+    lab's current run once the row has been quiet for ReportSnapshot:RequestSettleSeconds.
+
+    One Pending row per lab + report: a new change while it is Pending only moves RequestedOn. A row is
+    closed (Done / Skipped / Failed) only if RequestedOn is unchanged since it was read, so a change made
+    during a capture is captured again.
+*/
+IF OBJECT_ID('dbo.ReportSnapshotRequest', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.ReportSnapshotRequest
+    (
+        RequestId       BIGINT IDENTITY(1,1) NOT NULL
+            CONSTRAINT PK_ReportSnapshotRequest PRIMARY KEY,
+        LabKey          NVARCHAR(100)  NULL,           -- LRN Metrics lab key, e.g. TexasDiagnostic (LabMetricsDashboard)
+        LabId           INT            NULL,           -- LRNMaster LabId (master file processor); one of the two is set
+        ReportCode      VARCHAR(50)    NOT NULL,       -- DENIALINSIGHT
+        RequestedBy     NVARCHAR(256)  NOT NULL,
+        Reason          NVARCHAR(200)  NULL,
+        RequestedOn     DATETIME2(3)   NOT NULL
+            CONSTRAINT DF_ReportSnapshotRequest_RequestedOn DEFAULT (SYSUTCDATETIME()),
+        Status          VARCHAR(20)    NOT NULL
+            CONSTRAINT DF_ReportSnapshotRequest_Status DEFAULT ('Pending'),   -- Pending | Done | Skipped | Failed
+        Attempts        INT            NOT NULL
+            CONSTRAINT DF_ReportSnapshotRequest_Attempts DEFAULT (0),
+        ProcessedOn     DATETIME2(0)   NULL,
+        RunId           NVARCHAR(64)   NULL,           -- the run the capture was filed under
+        Message         NVARCHAR(4000) NULL
+    );
+END
+GO
+
+-- Upgrade a table created by the first version of this script (LabKey NOT NULL, no LabId). The index on
+-- LabKey is dropped first - a column in an index cannot be altered - and recreated below.
+IF OBJECT_ID('dbo.ReportSnapshotRequest', 'U') IS NOT NULL AND COL_LENGTH('dbo.ReportSnapshotRequest', 'LabId') IS NULL
+BEGIN
+    IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ReportSnapshotRequest_Pending'
+                                           AND object_id = OBJECT_ID('dbo.ReportSnapshotRequest'))
+        DROP INDEX IX_ReportSnapshotRequest_Pending ON dbo.ReportSnapshotRequest;
+
+    ALTER TABLE dbo.ReportSnapshotRequest ALTER COLUMN LabKey NVARCHAR(100) NULL;
+    ALTER TABLE dbo.ReportSnapshotRequest ADD LabId INT NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_ReportSnapshotRequest_Pending'
+                 AND object_id = OBJECT_ID('dbo.ReportSnapshotRequest'))
+BEGIN
+    CREATE INDEX IX_ReportSnapshotRequest_Pending
+        ON dbo.ReportSnapshotRequest (LabKey, LabId, ReportCode)
+        WHERE Status = 'Pending';
 END
 GO
 

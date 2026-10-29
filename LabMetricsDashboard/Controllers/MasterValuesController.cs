@@ -559,6 +559,48 @@ public sealed class MasterValuesController : Controller
         catch (InvalidOperationException ex) { return BadRequest(ErrorPayload(ex.Message)); }
     }
 
+    // ── Master Data Snapshots: the weekly Parquet snapshots of each lab's Line Level, Claim Level
+    // and LIMS tables (master file processor step 88), grouped by lab, then Run ID / week. Read-only.
+
+    [HttpGet]
+    public IActionResult MasterDataSnapshots()
+    {
+        if (!HasAnyMasterAccess) return Forbid();
+        ViewData["PageLabel"] = "Master Data Snapshots";
+        return View(new MasterValuesPageViewModel { Title = "Master Data Snapshots", RoleLabel = RoleLabel });
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> MasterDataSnapshotRuns([FromServices] IMasterDataSnapshotRepository snapshots, CancellationToken ct)
+    {
+        if (!HasAnyMasterAccess) return Forbid();
+        try
+        {
+            var runs = await snapshots.GetRunsAsync(ct);
+            return Json(new { installed = runs is not null, runs = runs ?? [] });
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex)
+        {
+            _logger.LogError(ex, "Master data snapshots could not be read from LRNMaster.");
+            return StatusCode(500, ErrorPayload("The snapshot list could not be loaded."));
+        }
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> MasterDataSnapshotFiles(long snapshotRunId, [FromServices] IMasterDataSnapshotRepository snapshots, CancellationToken ct)
+    {
+        if (!HasAnyMasterAccess) return Forbid();
+        try
+        {
+            return Json(await snapshots.GetFilesAsync(snapshotRunId, ct));
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex)
+        {
+            _logger.LogError(ex, "Master data snapshot files could not be read for snapshot run {SnapshotRunId}.", snapshotRunId);
+            return StatusCode(500, ErrorPayload("The snapshot files could not be loaded."));
+        }
+    }
+
     // ── Re-run the master file processor ──────────────────────────────────────
     // Restricted to LRN Admin. A re-run truncates and reloads a lab's line, claim and LIS tables
     // and republishes its reports, so it is destructive in a way the rest of this read-only screen

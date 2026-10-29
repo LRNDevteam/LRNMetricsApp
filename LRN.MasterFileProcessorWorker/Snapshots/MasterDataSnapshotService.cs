@@ -84,8 +84,19 @@ public sealed class MasterDataSnapshotService
         try
         {
             store = _stores.Store;
-            snapshotRunId = await _index.StartRunAsync(request.LabId, request.LabName, request.RunId,
+            string? previousPrefix;
+            (snapshotRunId, previousPrefix) = await _index.StartRunAsync(request.LabId, request.LabName, request.RunId,
                 request.WeekFolder, snapshotDate, prefix, ct).ConfigureAwait(false);
+
+            // The same RunId again: its index rows are gone, so remove every file it had (master data and
+            // the report snapshots filed under it) before writing the new ones - none is left behind
+            // unindexed. A re-run with a new RunId replaces the week through retention instead, below.
+            if (!string.IsNullOrWhiteSpace(previousPrefix))
+            {
+                var removed = await store.DeletePrefixAsync(previousPrefix, ct).ConfigureAwait(false);
+                _logger.LogInformation("Lab {LabId}: run {RunId} snapshotted again - {Removed} earlier file(s) under {Prefix} deleted first.",
+                    request.LabId, request.RunId, removed, previousPrefix);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -203,10 +214,23 @@ public sealed class MasterDataSnapshotService
         {
             var runs = await _index.ListRunsAsync(labId, ct).ConfigureAwait(false);
             var expired = SnapshotRetention.SelectExpired(runs, _options.KeepWeeks, _options.KeepMonthEnd, currentSnapshotRunId, DateTime.UtcNow);
+            var currentWeek = runs.FirstOrDefault(r => r.SnapshotRunId == currentSnapshotRunId)?.WeekFolder.Trim();
 
             foreach (var run in expired)
             {
                 ct.ThrowIfCancellationRequested();
+
+                // A re-run of this week replaces the earlier run. Its generated report snapshots are taken
+                // again for the new run when those reports finish; an uploaded one (Denial Insight) is
+                // not regenerated, so it is requested again before its files go.
+                if (currentWeek is not null && string.Equals(run.WeekFolder.Trim(), currentWeek, StringComparison.OrdinalIgnoreCase))
+                {
+                    var requested = await _index.RequestRecaptureOfUploadedReportsAsync(run.SnapshotRunId, labId,
+                        $"Re-run of {currentWeek}: replaces run {run.RunId}", ct).ConfigureAwait(false);
+                    if (requested > 0)
+                        _logger.LogInformation("Lab {LabId}: {Count} uploaded report snapshot(s) of run {RunId} requested again for the re-run.",
+                            labId, requested, run.RunId);
+                }
 
                 if (!string.IsNullOrWhiteSpace(run.BlobPrefix))
                     await store.DeletePrefixAsync(run.BlobPrefix, ct).ConfigureAwait(false);

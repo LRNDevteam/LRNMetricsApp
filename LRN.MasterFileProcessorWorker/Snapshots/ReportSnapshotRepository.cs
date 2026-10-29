@@ -31,26 +31,27 @@ public sealed class ReportSnapshotRepository
 
     /// <summary>
     /// Creates the run row, or resets it when this RunId was snapshotted before (its file rows are
-    /// removed; the files themselves are overwritten at the same paths). Returns SnapshotRunId.
+    /// removed). Returns SnapshotRunId and, for a reset, the BlobPrefix its files were under, so the
+    /// caller deletes those files before writing the new ones.
     /// </summary>
-    public async Task<long> StartRunAsync(
+    public async Task<(long SnapshotRunId, string? PreviousBlobPrefix)> StartRunAsync(
         int labId, string labName, string runId, string weekFolder, DateTime snapshotDate, string blobPrefix, CancellationToken ct)
     {
         const string sql = @"
 SET XACT_ABORT ON;
 BEGIN TRAN;
 
-DECLARE @Id BIGINT =
-(
-    SELECT SnapshotRunId FROM dbo.ReportSnapshotRun WITH (UPDLOCK, HOLDLOCK)
-    WHERE LabId = @LabId AND RunId = @RunId
-);
+DECLARE @Id BIGINT, @OldPrefix NVARCHAR(500);
+SELECT @Id = SnapshotRunId, @OldPrefix = BlobPrefix
+FROM dbo.ReportSnapshotRun WITH (UPDLOCK, HOLDLOCK)
+WHERE LabId = @LabId AND RunId = @RunId;
 
 IF @Id IS NULL
 BEGIN
     INSERT dbo.ReportSnapshotRun (LabId, LabName, RunId, WeekFolder, SnapshotDate, BlobPrefix, Status)
     VALUES (@LabId, @LabName, @RunId, @WeekFolder, @SnapshotDate, @BlobPrefix, 'InProgress');
     SET @Id = SCOPE_IDENTITY();
+    SET @OldPrefix = NULL;
 END
 ELSE
 BEGIN
@@ -63,7 +64,7 @@ BEGIN
 END
 
 COMMIT;
-SELECT @Id;";
+SELECT @Id, @OldPrefix;";
 
         await using var conn = new SqlConnection(_masterConnectionString);
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 60 };
@@ -75,7 +76,50 @@ SELECT @Id;";
         cmd.Parameters.Add("@BlobPrefix", SqlDbType.NVarChar, 500).Value = blobPrefix;
 
         await conn.OpenAsync(ct).ConfigureAwait(false);
-        return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
+        await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await r.ReadAsync(ct).ConfigureAwait(false);
+        return (Convert.ToInt64(r.GetValue(0)), r.IsDBNull(1) ? null : r.GetString(1));
+    }
+
+    /// <summary>
+    /// A run of the same week is about to be deleted because a re-run replaced it. Snapshots no service
+    /// regenerates for the new run - the ones captured on request, today the uploaded Denial Insight tab -
+    /// would be lost with it, so a request is filed for each: LRN.SnapshotGenerator captures them again
+    /// under the run the lab database holds now. Does nothing before dbo.ReportSnapshotRequest exists.
+    /// </summary>
+    public async Task<int> RequestRecaptureOfUploadedReportsAsync(long expiredSnapshotRunId, int labId, string reason, CancellationToken ct)
+    {
+        const string sql = @"
+IF OBJECT_ID(N'dbo.ReportSnapshotRequest', N'U') IS NULL BEGIN SELECT 0; RETURN; END;
+EXEC sp_executesql N'
+DECLARE @Codes TABLE (ReportCode varchar(50) PRIMARY KEY);
+INSERT @Codes
+SELECT DISTINCT f.ReportCode
+FROM dbo.ReportSnapshotFile f
+WHERE f.SnapshotRunId = @Id
+  AND f.ReportCode IN (SELECT DISTINCT ReportCode FROM dbo.ReportSnapshotRequest);
+
+UPDATE q SET RequestedOn = SYSUTCDATETIME(), Reason = @Reason
+FROM dbo.ReportSnapshotRequest q JOIN @Codes c ON c.ReportCode = q.ReportCode
+WHERE q.LabId = @LabId AND q.Status = ''Pending'';
+
+INSERT dbo.ReportSnapshotRequest (LabKey, LabId, ReportCode, RequestedBy, Reason)
+SELECT NULL, @LabId, c.ReportCode, N''LRN.MasterFileProcessor'', @Reason
+FROM @Codes c
+WHERE NOT EXISTS (SELECT 1 FROM dbo.ReportSnapshotRequest q
+                  WHERE q.LabId = @LabId AND q.ReportCode = c.ReportCode AND q.Status = ''Pending'');
+
+SELECT COUNT(*) FROM @Codes;',
+    N'@Id bigint, @LabId int, @Reason nvarchar(200)', @Id = @Id, @LabId = @LabId, @Reason = @Reason;";
+
+        await using var conn = new SqlConnection(_masterConnectionString);
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 60 };
+        cmd.Parameters.Add("@Id", SqlDbType.BigInt).Value = expiredSnapshotRunId;
+        cmd.Parameters.Add("@LabId", SqlDbType.Int).Value = labId;
+        cmd.Parameters.Add("@Reason", SqlDbType.NVarChar, 200).Value = reason.Length > 200 ? reason[..200] : reason;
+
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
     }
 
     public async Task AddFileAsync(long snapshotRunId, SnapshotFileInfo file, CancellationToken ct)
