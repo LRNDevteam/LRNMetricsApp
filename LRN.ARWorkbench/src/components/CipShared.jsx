@@ -13,7 +13,12 @@ export function Attachments({ labId, files }) {
   if (!files?.length) return <span className="text-muted-ink">—</span>;
   return (
     <span className="arwb-attach-list">
-      {files.map((f) => (
+      {files.map((f) => f.scanStatus === 'Malicious' ? (
+        // Quarantined by the virus scan: shown, never downloadable.
+        <span key={f.documentId} className="arwb-quarantine-label" title="Virus detected - this document is quarantined and cannot be downloaded.">
+          <Icon name="warn" size={13} /> {f.fileName} (virus - quarantined)
+        </span>
+      ) : (
         <button key={f.documentId} type="button" className="arwb-link-btn" title={`${f.fileName} · ${fmt.count(Math.ceil(f.sizeBytes / 1024))} KB`}
           onClick={(e) => {
             e.stopPropagation();

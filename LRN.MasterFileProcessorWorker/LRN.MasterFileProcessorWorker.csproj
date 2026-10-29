@@ -17,6 +17,7 @@
 	-->
 	<ItemGroup>
 		<!-- Hosting / configuration -->
+		<PackageReference Include="Azure.Storage.Blobs" Version="12.24.1" />
 		<PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.3" />
 		<PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.3" />
 		<PackageReference Include="Microsoft.Extensions.Http" Version="10.0.3" />
@@ -39,20 +40,17 @@
 
 		<!-- Application log file -->
 		<PackageReference Include="log4net" Version="3.3.0" />
+		<PackageReference Include="Parquet.Net" Version="6.1.0" />
 		<PackageReference Include="System.IO.Packaging" Version="6.0.1" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<!-- appsettings*.json arrive as Content items from the Worker SDK, so they need Content Update. -->
-		<Content Update="appsettings.json">
+		<Content Update="appsettings.json;appsettings.Test.json">
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
 		</Content>
-		<!-- Gitignored, and absent on a clean clone; the JSON provider loads it as optional. -->
+		<!-- No longer read: every secret comes from Key Vault. Never copy a stale local copy to the output folder. -->
 		<Content Update="appsettings.Secrets.json">
-			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
-		</Content>
-		<!-- Documentation only: must never reach the output folder. -->
-		<Content Update="appsettings.Secrets.example.json">
 			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
 		</Content>
 		<None Update="log4net.config">

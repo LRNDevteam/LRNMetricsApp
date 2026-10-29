@@ -35,7 +35,7 @@ public sealed class LimsMasterBulkImporter
 			throw new FileNotFoundException("LIMS Excel file not found.", request.ExcelPath);
 
 		if (string.IsNullOrWhiteSpace(request.ConnectionString))
-			throw new InvalidOperationException("LIMS lab DB connection string is missing. Configure LabDbConnectionString for the lab.");
+			throw new InvalidOperationException("LIMS lab DB connection string is missing. Set LabDbConnectionKey for the lab and add the Key Vault secret ConnectionStrings--<key>.");
 
 		var tableName = string.IsNullOrWhiteSpace(request.DestinationTable) ? "dbo.LIMSMaster" : request.DestinationTable!;
 		var batchSize = request.BatchSize <= 0 ? DefaultBatchSize : request.BatchSize;

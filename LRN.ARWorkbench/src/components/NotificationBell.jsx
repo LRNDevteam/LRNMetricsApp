@@ -14,7 +14,8 @@ const TYPE_LABEL = {
   AutoUnassigned: 'Unassigned',
   AdjustmentNotPosted: 'Adjustment not posted',
   WriteOffApproved: 'Write-off approved',
-  CipClientResponded: 'CIP response'
+  CipClientResponded: 'CIP response',
+  DocumentMalware: 'Virus detected'
 };
 
 /**

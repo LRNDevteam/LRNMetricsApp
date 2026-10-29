@@ -73,6 +73,13 @@ public interface IArWorkbenchRepository
     Task<IReadOnlyList<(long DocumentId, string Path, string? Sha256)>> GetLocalDocumentsAsync(int labId, int batchSize, CancellationToken ct);
     /// <summary>Points a 'local' document at its new blob and logs Migrate. False when the row was not 'local' any more.</summary>
     Task<bool> MoveDocumentToBlobAsync(int labId, long documentId, StoredDocument stored, ArWorkbenchUserContext user, string? clientIp, CancellationToken ct);
+    /// <summary>Documents whose malware scan verdict is not recorded yet (script 11); empty when the lab has no scan columns.</summary>
+    Task<IReadOnlyList<ArWorkbenchPendingScanDocument>> GetPendingScanDocumentsAsync(int labId, int batchSize, CancellationToken ct);
+    /// <summary>
+    /// Records a Pending document's verdict (Clean / Malicious / NotScanned). Malicious also quarantines it: access log
+    /// 'Malware', claim activity, and notifications to the uploader and the lab's admins. False when it was no longer Pending.
+    /// </summary>
+    Task<bool> RecordDocumentScanResultAsync(int labId, long documentId, string scanStatus, CancellationToken ct);
     Task<Dictionary<string, (long CipCaseId, string Status)>> GetClientCipIndexAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);
     Task<ArWorkbenchLegacyCipResult> ConvertLegacyEscalationsAsync(int labId, string runBy, bool previewOnly, CancellationToken ct);
     Task<Dictionary<long, string>> GetCipStatusesAsync(int labId, IReadOnlyCollection<long> caseIds, ArWorkbenchUserContext user, CancellationToken ct);

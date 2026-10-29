@@ -45,6 +45,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 	private readonly ReportsWorkflowTrackerRepository _workflowTracker;
 	private readonly LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequestStore _rerunRequests;
 	private readonly LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncService _arWorkbenchSync;
+	private readonly LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotService _masterDataSnapshot;
 
 	private ColumnSchema? _commonLineSchema;
 	private ColumnSchema? _commonClaimSchema;
@@ -72,7 +73,8 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		ReportRunIdInfoLogger runInfo,
 		ReportsWorkflowTrackerRepository workflowTracker,
 		LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequestStore rerunRequests,
-		LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncService arWorkbenchSync)
+		LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncService arWorkbenchSync,
+		LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotService masterDataSnapshot)
 	{
 		_logger = logger;
 		_fileLog = fileLog;
@@ -95,7 +97,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		_workflowTracker = workflowTracker;
 		_rerunRequests = rerunRequests;
 		_arWorkbenchSync = arWorkbenchSync;
-
+		_masterDataSnapshot = masterDataSnapshot;
 	}
 
 	protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -614,7 +616,8 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 
 				_fileLog.Info($"Lab {lab.LabId}: Production raw master copied to WatchFolder week folder -> {productionRawMasterPath}");
 
-				if (!await TryDownloadSiblingRawMasterAsync(lab, selected, rawMasterFolder, runCtx.RunId, weekFolder, ct, sourceRunId))
+				var limsMaster = await TryDownloadSiblingRawMasterAsync(lab, selected, rawMasterFolder, runCtx.RunId, weekFolder, ct, sourceRunId);
+				if (!limsMaster.Available)
 					throw new InvalidOperationException("Required LIMS master file was not available in the same SharePoint week folder as the production master file.");
 
 				await TrySyncClientPaidFileAsync(lab, selected, processedOutFolder, runCtx.RunId, ct);
@@ -1165,6 +1168,67 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				else
 				{
 					_fileLog.Info($"Lab {lab.LabId}: AR Workbench sync not run - set \"ArWorkbenchEnabled\": true for this lab under MasterFileProcessor:Labs to enable it.");
+				}
+
+				// STEP 88: Snapshot this week's master data to Parquet. The Line Level, Claim Level and
+				// LIMS tables that loaded in this run are each written to one file,
+				// <container>/<LabName>/<RunId>_<WeekRange>_<LINELEVEL|CLAIMLEVEL|LIMS>.parquet, and
+				// indexed in LRNMaster.dbo.ReportSnapshotRun/File; then runs outside
+				// MasterDataSnapshot:KeepWeeks are deleted. Contained like step 87: the tables are loaded
+				// already, so a snapshot failure is a warning, never a failed run.
+				//
+				// Per lab: only labs with "MasterDataSnapshotEnabled": true under MasterFileProcessor:Labs.
+				if (IsMasterDataSnapshotEnabledForLab(lab))
+				{
+					stepSeq = 88;
+					var step88 = new StepLogRow
+					{
+						StepSeq = stepSeq,
+						StepName = "Snapshot Master Data to Parquet",
+						StepCategory = "Publish",
+						SourceSystem = "SQL",
+						StartTimeIST = _processLog.NowIST(),
+						Status = "IN_PROGRESS"
+					};
+					activeStep = step88;
+					await _processLog.StepStartAsync(runCtx, step88, ct);
+
+					var snapshot = await TrySnapshotMasterDataAsync(lab, runCtx.RunId, weekFolder, bulkOutcomes, limsMaster.LimsRows, ct);
+
+					step88.EndTimeIST = _processLog.NowIST();
+					step88.Status = snapshot.Status switch
+					{
+						LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotStatus.Succeeded => "SUCCESS",
+						LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotStatus.Skipped => "SKIPPED",
+						_ => "WARNING"
+					};
+					step88.RecordsOut = (int)Math.Min(int.MaxValue, snapshot.Rows);
+					step88.ErrorMessage = Truncate(snapshot.Message, 780);
+					await _processLog.StepEndAsync(runCtx, step88, ct);
+					activeStep = null;
+
+					_fileLog.Info($"Lab {lab.LabId}: master data snapshot {snapshot.Status}: {snapshot.Message}");
+
+					if (snapshot.Status == LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotStatus.Failed)
+					{
+						await _processLog.LogErrorAsync(runCtx, new ErrorLogRow
+						{
+							Severity = "WARNING",
+							StepName = step88.StepName,
+							ErrorCode = "SNAPSHOT_FAILED",
+							ErrorSummary = Truncate(snapshot.Message, 780),
+							FileName = selected.Name,
+							FilePath = selected.SharePointPath,
+							RecommendedAction = "Check the Key Vault secrets MasterDataSnapshot--BlobServiceUri / MasterDataSnapshot--ContainerName, the identity's access to the container, and LRNMaster.dbo.ReportSnapshotRun, then re-run the lab from the Report Audit Log.",
+							OwnerTeam = "LRN",
+							Status = "OPEN"
+						}, ct);
+						runRow.TotalWarnings += 1;
+					}
+				}
+				else if (_masterDataSnapshot.IsEnabled)
+				{
+					_fileLog.Info($"Lab {lab.LabId}: master data snapshot not taken - set \"MasterDataSnapshotEnabled\": true for this lab under MasterFileProcessor:Labs to enable it.");
 				}
 
 				// The load has finished with the staged files, so the folder can go now rather than
@@ -2372,25 +2436,35 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 	}
 
 	/// <summary>
-	/// This lab's own database connection, resolved exactly the way the bulk-copy step resolves it:
-	/// a literal LabDbConnectionString wins, otherwise the named LabDbConnectionKey. Kept as one
-	/// method so the tables are always read from the same database the rows are later written to -
-	/// two different resolutions here would be a silent cross-lab data leak.
+	/// The ONE place a lab's own database connection is resolved: the lab's LabDbConnectionKey names
+	/// the Key Vault secret ConnectionStrings--&lt;key&gt;. Every step (LIMS import, line/claim bulk
+	/// copy, AR Workbench sync, snapshots) goes through here, so the tables are always read from the
+	/// same database the rows were written to - two different resolutions would be a silent
+	/// cross-lab data leak. Null when the key or its secret is missing; there is deliberately no
+	/// fallback to DefaultConnection (LRNMaster).
 	/// </summary>
-	private string ResolveLabConnectionStringOrThrow(LabFileMap lab)
+	private string? GetLabConnectionString(LabFileMap lab)
 	{
-		var connectionString = GetLabConfigValue(lab, "LabDbConnectionString")
-			?? _configuration.GetConnectionString(GetLabConfigValue(lab, "LabDbConnectionKey") ?? string.Empty);
+		var key = GetLabConfigValue(lab, "LabDbConnectionKey");
+		if (string.IsNullOrWhiteSpace(key))
+			return null;
 
-		if (string.IsNullOrWhiteSpace(connectionString))
-		{
-			throw new InvalidOperationException(
-				$"Lab {lab.LabId} ({lab.LabName}) has MasterDataSource=LabDatabase but no database connection. " +
-				"Set LabDbConnectionKey (or LabDbConnectionString) on its Labs[] entry.");
-		}
-
-		return connectionString;
+		var connectionString = _configuration.GetConnectionString(key);
+		return string.IsNullOrWhiteSpace(connectionString) ? null : connectionString;
 	}
+
+	/// <summary>The message for a lab whose connection could not be resolved: names the vault secret to add.</summary>
+	private string MissingLabConnectionMessage(LabFileMap lab)
+	{
+		var key = GetLabConfigValue(lab, "LabDbConnectionKey");
+		return string.IsNullOrWhiteSpace(key)
+			? $"Lab {lab.LabId} ({lab.LabName}): no LabDbConnectionKey on its MasterFileProcessor:Labs entry."
+			: $"Lab {lab.LabId} ({lab.LabName}): Key Vault secret 'ConnectionStrings--{key}' is missing or empty " +
+			  $"in {_configuration["KeyVault:VaultUri"]} (or the service identity lacks 'Key Vault Secrets User').";
+	}
+
+	private string ResolveLabConnectionStringOrThrow(LabFileMap lab)
+		=> GetLabConnectionString(lab) ?? throw new InvalidOperationException(MissingLabConnectionMessage(lab));
 
 	/// <summary>
 	/// Validates both source tables against the same schema JSONs the workbook would be validated
@@ -2530,10 +2604,9 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		{
 			var mappingFolder = ResolvePath(_lineClaimOptions.LabMappingsFolder);
 
-			// The lab's own connection string wins - it is where this repo keeps them. LabMaster is
+			// The lab's own connection (Key Vault, via LabDbConnectionKey) wins. LabMaster is
 			// consulted for whether the lab is active, and as the fallback source of the connection.
-			var labConnectionString = GetLabConfigValue(lab, "LabDbConnectionString")
-				?? _configuration.GetConnectionString(GetLabConfigValue(lab, "LabDbConnectionKey") ?? string.Empty);
+			var labConnectionString = GetLabConnectionString(lab);
 
 			var resolved = await _labRegistry.TryResolveLabAsync(lab.LabId, labConnectionString, mappingFolder, ct);
 
@@ -2596,8 +2669,7 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 		try
 		{
-			var labConnectionString = GetLabConfigValue(lab, "LabDbConnectionString")
-				?? _configuration.GetConnectionString(GetLabConfigValue(lab, "LabDbConnectionKey") ?? string.Empty);
+			var labConnectionString = GetLabConnectionString(lab);
 
 			var resolved = await _labRegistry.TryResolveLabAsync(
 				lab.LabId, labConnectionString, ResolvePath(_lineClaimOptions.LabMappingsFolder), ct);
@@ -2618,6 +2690,88 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		{
 			_logger.LogError(ex, "Lab {LabId}: AR Workbench sync failed.", lab.LabId);
 			return new(LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncStatus.Failed, ex.Message);
+		}
+	}
+
+	/// <summary>
+	/// Step 88: snapshots the master tables that genuinely loaded in this run - a skipped or failed
+	/// level still holds last week's rows, and snapshotting it would file old data under this week.
+	/// Tables and connections are resolved exactly as the loads resolved them. Never throws.
+	/// </summary>
+	/// <param name="limsRows">Rows the LIMS import loaded in this run, or null when it did not load.</param>
+	private async Task<LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotOutcome> TrySnapshotMasterDataAsync(
+		LabFileMap lab,
+		string runId,
+		string weekFolder,
+		IReadOnlyList<LineClaimImportOutcome> bulkOutcomes,
+		long? limsRows,
+		CancellationToken ct)
+	{
+		var options = _masterDataSnapshot.Options;
+		var datasets = new List<LRN.MasterFileProcessorWorker.Snapshots.SnapshotDataset>();
+		var notLoaded = new List<string>();
+
+		try
+		{
+			LineClaimImportOutcome? Loaded(string fileType) => bulkOutcomes.FirstOrDefault(o =>
+				string.Equals(o.FileType, fileType, StringComparison.OrdinalIgnoreCase) && o.Succeeded && !o.Skipped);
+
+			var line = options.IncludeLineLevel ? Loaded(FileTypes.LineLevel) : null;
+			var claim = options.IncludeClaimLevel ? Loaded(FileTypes.ClaimLevel) : null;
+
+			if (options.IncludeLineLevel && line is null) notLoaded.Add("Line Level");
+			if (options.IncludeClaimLevel && claim is null) notLoaded.Add("Claim Level");
+
+			if (line is not null || claim is not null)
+			{
+				var labConnectionString = GetLabConnectionString(lab);
+
+				var resolved = await _labRegistry.TryResolveLabAsync(
+					lab.LabId, labConnectionString, ResolvePath(_lineClaimOptions.LabMappingsFolder), ct);
+
+				if (resolved is null)
+				{
+					notLoaded.Add("Line/Claim Level (lab database could not be resolved)");
+				}
+				else
+				{
+					if (line is not null && resolved.Mapping.LineLevel is { } lineMap)
+						datasets.Add(new(LRN.MasterFileProcessorWorker.Snapshots.MasterDataReportCodes.LineLevel,
+							resolved.ConnectionString, lineMap.SqlTableName, line.RowsCopied));
+
+					if (claim is not null && resolved.Mapping.ClaimLevel is { } claimMap)
+						datasets.Add(new(LRN.MasterFileProcessorWorker.Snapshots.MasterDataReportCodes.ClaimLevel,
+							resolved.ConnectionString, claimMap.SqlTableName, claim.RowsCopied));
+				}
+			}
+
+			if (options.IncludeLims)
+			{
+				// Same connection as TryImportLimsMasterAsync, so the snapshot reads the table the import wrote.
+				var limsConnectionString = GetLabConnectionString(lab);
+
+				if (limsRows is null || string.IsNullOrWhiteSpace(limsConnectionString))
+					notLoaded.Add("LIMS");
+				else
+					datasets.Add(new(LRN.MasterFileProcessorWorker.Snapshots.MasterDataReportCodes.Lims,
+						limsConnectionString, _configuration["MasterFileProcessor:LimsDestinationTable"] ?? "dbo.LIMSMaster", limsRows));
+			}
+
+			var outcome = await _masterDataSnapshot.SnapshotLabAsync(new LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotRequest(
+				lab.LabId, lab.LabName, GetLabOutputPrefix(lab), runId, weekFolder, datasets), ct);
+
+			return notLoaded.Count == 0
+				? outcome
+				: outcome with { Message = $"{outcome.Message} Not snapshotted (did not load in this run): {string.Join(", ", notLoaded)}." };
+		}
+		catch (OperationCanceledException) when (ct.IsCancellationRequested)
+		{
+			throw;
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "Lab {LabId}: master data snapshot failed.", lab.LabId);
+			return new(LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotStatus.Failed, ex.Message);
 		}
 	}
 
@@ -2863,7 +3017,11 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 	/// <param name="sourceRunId">
 	/// The upstream LrnFileStatus RunID being ingested, for a LabDatabase lab. Null elsewhere.
 	/// </param>
-	private async Task<bool> TryDownloadSiblingRawMasterAsync(
+	/// <returns>
+	/// Available: whether the LIMS master was found. LimsRows: rows loaded into the LIMS table in
+	/// this run, or null when the import was skipped or failed (step 88 snapshots LIMS only when set).
+	/// </returns>
+	private async Task<(bool Available, long? LimsRows)> TryDownloadSiblingRawMasterAsync(
 		LabFileMap lab,
 		SharePointDownloader.SelectedFile selected,
 		string rawMasterFolder,
@@ -2877,14 +3035,13 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		// master was not available" and aborts the run.
 		if (lab.UsesLabDatabaseSource && !string.IsNullOrWhiteSpace(lab.LimsSourceTable))
 		{
-			await TryImportLimsMasterAsync(lab, limsRawMasterPath: null, runId, weekFolder, ct, sourceRunId);
-			return true;
+			return (true, await TryImportLimsMasterAsync(lab, limsRawMasterPath: null, runId, weekFolder, ct, sourceRunId));
 		}
 
 		var limsPattern = GetLabConfigValue(lab, "LimsMasterFilePattern");
 
 		if (string.IsNullOrWhiteSpace(limsPattern))
-			return false;
+			return (false, null);
 
 		try
 		{
@@ -2898,7 +3055,7 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 					limsPattern);
 
 				_fileLog.Warn($"Lab {lab.LabId}: no LIMS master file matched pattern '{limsPattern}' in the same SharePoint folder.");
-				return false;
+				return (false, null);
 			}
 
 			var limsRawMasterPath = Path.Combine(rawMasterFolder, SanitizeFileName(sibling.Name));
@@ -2911,14 +3068,13 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 			_fileLog.Info($"Lab {lab.LabId}: LIMS raw master downloaded -> {limsRawMasterPath}");
 
-			await TryImportLimsMasterAsync(lab, limsRawMasterPath, runId, weekFolder, ct, sourceRunId);
-			return true;
+			return (true, await TryImportLimsMasterAsync(lab, limsRawMasterPath, runId, weekFolder, ct, sourceRunId));
 		}
 		catch (Exception ex)
 		{
 			_logger.LogWarning(ex, "Lab {LabId}: failed to download LIMS raw master file.", lab.LabId);
 			_fileLog.Error($"Lab {lab.LabId}: failed to download LIMS raw master file.", ex);
-			return false;
+			return (false, null);
 		}
 	}
 
@@ -2985,7 +3141,8 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 	/// The downloaded LIMS workbook, or null for a lab that reads its LIMS master from a table
 	/// (MasterDataSource = "LabDatabase" with LimsSourceTable set).
 	/// </param>
-	private async Task TryImportLimsMasterAsync(
+	/// <returns>Rows copied when the LIMS master loaded in this run; null when it was skipped or failed.</returns>
+	private async Task<long?> TryImportLimsMasterAsync(
 		LabFileMap lab,
 		string? limsRawMasterPath,
 		string? runId,
@@ -3021,7 +3178,7 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 				null, startedOn, ReportRunIdInfoLogger.IstNow(),
 				sourceRemark is null ? reason : $"{reason}. {sourceRemark}", ct);
 
-			return;
+			return null;
 		}
 
 		try
@@ -3037,17 +3194,7 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			// this chain, which meant a lab with a missing or misspelt connection key silently
 			// loaded its LIMS master into LRNMaster instead of failing. A lab's data must land in
 			// that lab's database or nowhere at all.
-			var connectionString =
-				GetLabConfigValue(lab, "LabDbConnectionString")
-				?? GetLabConfigValue(lab, "LimsDbConnectionString")
-				?? _configuration.GetConnectionString(GetLabConfigValue(lab, "LabDbConnectionKey") ?? string.Empty);
-
-			if (string.IsNullOrWhiteSpace(connectionString))
-			{
-				throw new InvalidOperationException(
-					$"Lab {lab.LabId} ({lab.LabName}): no LIMS connection string. Set LabDbConnectionKey on this lab " +
-					"in appsettings.json and add a matching entry under ConnectionStrings in appsettings.Secrets.json.");
-			}
+			var connectionString = ResolveLabConnectionStringOrThrow(lab);
 
 			var schemaPath = GetLabConfigValue(lab, "LIMSSchemaJsonPath");
 			if (!string.IsNullOrWhiteSpace(schemaPath))
@@ -3123,6 +3270,8 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 			await _runInfo.EndAsync(runId ?? string.Empty, WorkflowReportNames.LisSummary, lab.LabName,
 				$"LIS Summary processing ended for lab {lab.LabName} ({lab.LabId}).", ct, sourceFileName);
+
+			return result.TotalRowsCopied;
 		}
 		catch (Exception ex)
 		{
@@ -3139,6 +3288,8 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 			await _runInfo.EndAsync(runId ?? string.Empty, WorkflowReportNames.LisSummary, lab.LabName,
 				$"LIS Summary processing ended with failure for lab {lab.LabName} ({lab.LabId}).", ct, sourceFileName);
+
+			return null;
 		}
 	}
 
@@ -3382,6 +3533,13 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 	/// </summary>
 	private bool IsArWorkbenchEnabledForLab(LabFileMap lab)
 		=> _arWorkbenchSync.IsEnabledFor(lab.LabId) && ParseBool(GetLabConfigValue(lab, "ArWorkbenchEnabled"), false);
+
+	/// <summary>
+	/// Step 88 runs only when the worker-wide MasterDataSnapshot:Enabled switch is on AND the lab's own
+	/// entry under MasterFileProcessor:Labs says "MasterDataSnapshotEnabled": true. Missing key = off.
+	/// </summary>
+	private bool IsMasterDataSnapshotEnabledForLab(LabFileMap lab)
+		=> _masterDataSnapshot.IsEnabled && ParseBool(GetLabConfigValue(lab, "MasterDataSnapshotEnabled"), false);
 
 	private string? GetLabConfigValue(LabFileMap lab, string key)
 	{
