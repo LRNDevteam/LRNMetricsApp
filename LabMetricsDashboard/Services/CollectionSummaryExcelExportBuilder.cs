@@ -1,4 +1,4 @@
-﻿using ClosedXML.Excel;
+using ClosedXML.Excel;
 using LabMetricsDashboard.Models;
 
 namespace LabMetricsDashboard.Services;
@@ -871,7 +871,7 @@ public static partial class CollectionSummaryExcelExportBuilder
         // metric sub-headers on a third row for clarity
         int hRow3 = hRow2 + 1;
         hCol = 2;
-        var paymentHeader = LabCollectionPrefix.IsWellHealth(labName) ? "Total Payments" : "Insurance Payments";
+        var paymentHeader = "Insurance Payments";
         void WriteMetricPair()
         {
             WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ColHeader);
@@ -1182,9 +1182,13 @@ public static partial class CollectionSummaryExcelExportBuilder
     private static void WriteCptPanelHierarchy(IXLWorksheet ws, List<CptPaymentPctRow> rows, string labName)
     {
         var showsPay = rows[0].HasInsurancePayment;
+        // WellHealth: Sum of Units and Sum of ChargeAmount (held in PaidChargeAmount), no Payment %.
+        var showsCharge = rows[0].HasChargeAmount;
         // Analyze Pathology: Line Level Data, the count column holds Sum of Units.
-        var countHeader = LabCollectionPrefix.IsAnalyzePathology(labName) ? "Sum of Units" : "Claim Count";
-        string[] headers = showsPay
+        var countHeader = LabCollectionPrefix.IsAnalyzePathology(labName) || showsCharge ? "Sum of Units" : "Claim Count";
+        string[] headers = showsCharge
+            ? ["Panel name / CPT Code", countHeader, "Charge Amount"]
+            : showsPay
             ? ["Panel name / CPT Code", countHeader, "Insurance Payments", "Average Payment %"]
             : ["Panel name / CPT Code", countHeader, "Average Payment %"];
         var pctCol = showsPay ? 4 : 3;
@@ -1210,16 +1214,30 @@ public static partial class CollectionSummaryExcelExportBuilder
                 CloseGroup(row - 1);
                 WriteCell(ws, row, 1, r.CptCode, XLColor.White, isText: true, bold: true);
                 WriteCell(ws, row, 2, (int)r.SumServiceUnits, XLColor.White, bold: true);
-                if (showsPay) WriteCell(ws, row, 3, r.PaidInsurancePayment, XLColor.White, isCurrency: true, bold: true);
-                WriteCell(ws, row, pctCol, r.PaymentPct, XLColor.White, isPct: true, bold: true);
+                if (showsCharge)
+                {
+                    WriteCell(ws, row, 3, r.PaidChargeAmount, XLColor.White, isCurrency: true, bold: true);
+                }
+                else
+                {
+                    if (showsPay) WriteCell(ws, row, 3, r.PaidInsurancePayment, XLColor.White, isCurrency: true, bold: true);
+                    WriteCell(ws, row, pctCol, r.PaymentPct, XLColor.White, isPct: true, bold: true);
+                }
                 firstChild = row + 1;
             }
             else
             {
                 WriteCell(ws, row, 1, $"  {r.CptCode}", ColChild, isText: true);
                 WriteCell(ws, row, 2, (int)r.SumServiceUnits, ColChild);
-                if (showsPay) WriteCell(ws, row, 3, r.PaidInsurancePayment, ColChild, isCurrency: true);
-                WriteCell(ws, row, pctCol, r.PaymentPct, ColChild, isPct: true);
+                if (showsCharge)
+                {
+                    WriteCell(ws, row, 3, r.PaidChargeAmount, ColChild, isCurrency: true);
+                }
+                else
+                {
+                    if (showsPay) WriteCell(ws, row, 3, r.PaidInsurancePayment, ColChild, isCurrency: true);
+                    WriteCell(ws, row, pctCol, r.PaymentPct, ColChild, isPct: true);
+                }
             }
             row++;
         }
@@ -1227,9 +1245,16 @@ public static partial class CollectionSummaryExcelExportBuilder
 
         WriteCell(ws, row, 1, "Grand Total", ColTotal, isText: true, bold: true);
         WriteCell(ws, row, 2, (int)rows.Where(r => r.IsPanelRow).Sum(r => r.SumServiceUnits), ColTotal, bold: true);
-        if (showsPay)
-            WriteCell(ws, row, 3, rows.Where(r => r.IsPanelRow).Sum(r => r.PaidInsurancePayment), ColTotal, isCurrency: true, bold: true);
-        WriteCell(ws, row, pctCol, rows[0].TotalPaymentPctFromSp ?? 0m, ColTotal, isPct: true, bold: true);
+        if (showsCharge)
+        {
+            WriteCell(ws, row, 3, rows.Where(r => r.IsPanelRow).Sum(r => r.PaidChargeAmount), ColTotal, isCurrency: true, bold: true);
+        }
+        else
+        {
+            if (showsPay)
+                WriteCell(ws, row, 3, rows.Where(r => r.IsPanelRow).Sum(r => r.PaidInsurancePayment), ColTotal, isCurrency: true, bold: true);
+            WriteCell(ws, row, pctCol, rows[0].TotalPaymentPctFromSp ?? 0m, ColTotal, isPct: true, bold: true);
+        }
 
         AutoFitColumns(ws);
         ws.SheetView.FreezeRows(3);

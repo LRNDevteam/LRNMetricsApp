@@ -14,8 +14,9 @@
                     Insurance Balance > 0
           Columns : Denial Month = CheckDate month, every month up to the end of the
                     newest ClaimLevelData WeekFolder, a "yyyy | Total" per year, Grand Total
-          Rows    : PayerName_Raw by Total Insurance Balance, each drilled down to its
-                    Top 3 Denial Codes by Total Insurance Balance
+          Rows    : Top 10 PayerName_Raw by No. of Claims (client logic change 2026-10-30;
+                    was every payer by Total Insurance Balance, see script 32), each
+                    drilled down to its Top 3 Denial Codes by Total Insurance Balance
           Values  : No. of Claims = COUNT(DISTINCT ClaimID),
                     Total Insurance Balance = SUM(InsuranceBalance)
      2. Weekly - as Monthly; Denial Week = the 4 Wednesday-Tuesday CheckDate weeks ending
@@ -259,7 +260,7 @@ BEGIN
         RETURN;
     END;
 
-    DECLARE @TopPayers INT = 2147483647, @TopCodes INT = 3, @Weeks INT = 4;
+    DECLARE @TopPayers INT = 10, @TopCodes INT = 3, @Weeks INT = 4;
     -- 2026-09-16 was a Wednesday; ((n % 7) + 7) % 7 keeps the offset positive.
     DECLARE @Wednesday DATE = '20260916';
 
@@ -335,11 +336,11 @@ BEGIN
     JOIN   #per p ON c.DenialDate BETWEEN p.PeriodStart AND p.PeriodEnd
     JOIN   #pk k  ON k.PayerName = c.PayerName;
 
-    /* Insurances by Total Insurance Balance, then No. of Claims */
+    /* Insurances by No. of Claims, then Total Insurance Balance */
     SELECT PayerKey,
            ISNULL(MIN(NULLIF(PayerName, N'')), N'(no payer)') AS PayerLabel,
            SUM(Bal) AS Bal,
-           ROW_NUMBER() OVER (ORDER BY SUM(Bal) DESC, COUNT(DISTINCT ClaimKey) DESC, PayerKey) AS PayerRank
+           ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT ClaimKey) DESC, SUM(Bal) DESC, PayerKey) AS PayerRank
     INTO   #pr
     FROM   #b
     GROUP  BY PayerKey;

@@ -2,7 +2,8 @@
    WellHealth - Collection Summary fixes (13 Oct 2026)
 
    Panel vs Payment   InsurancePayment > 0 AND PaymentPostedDate not blank;
-                      columns = PaymentPostedDate month (was CheckDate).
+                      columns = PaymentPostedDate month (was CheckDate);
+                      value = Sum(InsurancePayment) (2026-10-30, was Sum(TotalPayments), see 12e).
    Insurance vs Aging TotalInsuranceBalance > 0; value = Sum(TotalInsuranceBalance)
                       (was InsuranceBalance).
 
@@ -131,7 +132,6 @@ BEGIN
                YEAR(PostedDt)           AS BillYear,
                MONTH(PostedDt)          AS BillMonth,
                COUNT(DISTINCT ClaimKey) AS NoOfClaims,
-               SUM(TotalPay)            AS TotalPayments,
                SUM(InsPay)              AS InsurancePayment
         FROM dbo.fn_WH_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                                  @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
@@ -142,7 +142,6 @@ BEGIN
     panel AS (
         SELECT PanelName,
                SUM(InsurancePayment) AS PanelInsPay,
-               SUM(TotalPayments)    AS PanelTotalPay,
                SUM(NoOfClaims)       AS PanelClaims
         FROM agg
         GROUP BY PanelName
@@ -151,8 +150,8 @@ BEGIN
            a.BillYear,
            a.BillMonth,
            a.NoOfClaims,
-           CAST(a.TotalPayments AS DECIMAL(18,2)) AS InsurancePayments,
-           CAST(ROW_NUMBER() OVER (ORDER BY p.PanelInsPay DESC, p.PanelTotalPay DESC, p.PanelClaims DESC,
+           CAST(a.InsurancePayment AS DECIMAL(18,2)) AS InsurancePayments,
+           CAST(ROW_NUMBER() OVER (ORDER BY p.PanelInsPay DESC, p.PanelClaims DESC,
                                             a.PanelName, a.BillYear, a.BillMonth) AS INT) AS SortOrder
     FROM agg a
     JOIN panel p ON p.PanelName = a.PanelName

@@ -7,7 +7,7 @@
     // Other labs keep CheckDate year/month pivot.
     var isInHealth = Model.IsInHealthDtrLab;
     var isSpLogic = Model.UsesSpCollectionLogic;
-    // WellHealth "Total Insurance Payment": Sum of TotalPayments + Average Payment %.
+    // WellHealth "Total Insurance Payment": Sum of InsurancePayment + Average Payment %.
     var isWellHealth = Model.IsWellHealthLab;
     // Texas Diagnostic: payer x CheckDate month / year, like the Augustus / NorthWest pivot.
     var usePayerFlat = Model.IsCoveLab || isInHealth || (isSpLogic && !Model.IsTexasDiagnosticLab);
@@ -68,7 +68,7 @@
                         {
                             <th>Count of ClaimID</th>
                         }
-                        <th>@(isWellHealth ? "Sum of Total Payment" : "Sum of Insurance Payment")</th>
+                        <th>Sum of Insurance Payment</th>
                         @if (isWellHealth)
                         {
                             <th>Average of Payment %</th>
@@ -114,8 +114,8 @@
         @if (isWellHealth)
         {
             <span><strong>Source:</strong> Claim Level Data &bull; <strong>Filter:</strong> InsurancePayment &gt; 0 &bull;
-            <strong>Rows:</strong> PayerName_Raw &bull; <strong>Sorted by:</strong> Sum of Total Payment DESC &bull;
-            <strong>Values:</strong> Count of unique ClaimID, Sum of TotalPayments, Average of Payment %.</span>
+            <strong>Rows:</strong> PayerName_Raw &bull; <strong>Sorted by:</strong> Sum of Insurance Payment DESC &bull;
+            <strong>Values:</strong> Count of unique ClaimID, Sum of InsurancePayment, Average of Payment %.</span>
         }
         else if (isSpLogic)
         {

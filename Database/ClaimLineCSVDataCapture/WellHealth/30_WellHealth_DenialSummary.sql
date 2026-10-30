@@ -13,8 +13,9 @@
                     claim's denied lines in LineLevelData
           Columns : every Denial Month up to the end of the newest ClaimLevelData
                     WeekFolder, a "yyyy | Total" column per year, Grand Total
-          Rows    : every insurance (PayerName_Raw, case / punctuation ignored)
-                    by Total Insurance Balance, each drilled down to its Top 3
+          Rows    : Top 10 insurances (PayerName_Raw, case / punctuation ignored)
+                    by Total Insurance Balance (client logic change 2026-10-30; was
+                    every insurance, see script 31), each drilled down to its Top 3
                     Denial Codes by Total Insurance Balance
           Values  : No. of Claims = COUNT(DISTINCT ClaimID),
                     Total Insurance Balance = SUM(TotalInsuranceBalance)
@@ -336,7 +337,7 @@ BEGIN
         RETURN;
     END;
 
-    DECLARE @TopPayers INT = 2147483647, @TopCodes INT = 3, @Weeks INT = 4;
+    DECLARE @TopPayers INT = 10, @TopCodes INT = 3, @Weeks INT = 4;
 
     -- End date of the newest WeekFolder ("09.21.2026 - 09.27.2026" -> 2026-09-27).
     DECLARE @LoadedThrough DATE =

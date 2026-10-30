@@ -1,24 +1,27 @@
-﻿/* =============================================================================
+/* =============================================================================
    TexasDiagnostic - Denial Summary (Denial Analysis Report)
    Database : TexasDiagnostic        Prefix : TD_
    Source   : dbo.ClaimLevelData (Claim Level)
 
    Client sheet (Texas Diagnostic Denial Summary):
      Denial Code = ClaimLevelData.DenialCodeNormalized ("197"), labelled with its
-                   DenialDescription. A claim is denied when DenialCode is not blank.
+                   DenialDescription. A claim is denied when ClaimLevelDenialCode is not
+                   blank (client logic change 2026-10-30; was DenialCode, see script 31).
      Balance     = ClaimLevelData.InsuranceBalance; shown as Total Insurance Balance.
      1. Monthly
-          Filter  : DenialCode not blank
+          Filter  : ClaimLevelDenialCode not blank
           Columns : Denial Month = DenialDate month, every month up to the end of the
                     newest ClaimLevelData WeekFolder, a "yyyy | Total" per year, Grand Total
-          Rows    : PayerName_Raw by total claim count, each drilled down to its
-                    Top 3 DenialCodeNormalized by claim count
+          Rows    : Top 10 PayerName_Raw by Total Insurance Balance, each drilled down
+                    to its Top 3 DenialCodeNormalized by claim count
           Values  : No. of Claims = COUNT(DISTINCT ClaimID),
                     Total Insurance Balance = SUM(InsuranceBalance)
-     2. Weekly - as Monthly; Denial Week = the 4 Friday-Thursday DenialDate weeks ending
-                 with the week of the newest WeekFolder end date (= DeniedWeek Week 1-4)
+     2. Weekly - as Monthly, but the Top 10 PayerName_Raw are by total claim count.
+                 Denial Week = the 4 Friday-Thursday weeks ending with the week of the
+                 newest WeekFolder end date: DeniedWeek "Week 1".."Week 4" (Week 4 =
+                 newest) when not blank, otherwise the week of DenialDate
      3. Denial List (not on the client sheet; the page always shows it)
-          Filter  : DenialCode not blank
+          Filter  : ClaimLevelDenialCode not blank
           Rows    : DenialCodeNormalized, drill down to Insurance (PayerName_Raw)
           Values  : No. of Claims, Total Insurance Balance; sorted by claim count DESC
 
@@ -50,9 +53,9 @@ SELECT
     CAST(NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(255), c.ClaimID))), '') AS NVARCHAR(200))            AS ClaimID,
     CAST(ISNULL(NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(500), c.PayerName_Raw))), ''), 'Unknown') AS NVARCHAR(500)) AS PayerName,
     CAST(ISNULL(NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(200), c.PayerType))), ''), 'Unknown') AS NVARCHAR(200))     AS PayerType,
-    CAST(CASE WHEN NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.DenialCode))), '') IS NOT NULL
+    CAST(CASE WHEN NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.ClaimLevelDenialCode))), '') IS NOT NULL
               THEN COALESCE(NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.DenialCodeNormalized))), ''),
-                            LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.DenialCode)))) END AS NVARCHAR(400)) AS DenialCode,
+                            LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.ClaimLevelDenialCode)))) END AS NVARCHAR(400)) AS DenialCode,
     COALESCE(TRY_CONVERT(DATE, c.DenialDate, 101), TRY_CAST(c.DenialDate AS DATE))                AS DenialDate,
     ISNULL(TRY_CONVERT(DECIMAL(18,2),
                        REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.InsuranceBalance))), '$', ''), ',', '')), 0)
@@ -85,8 +88,9 @@ RETURN
 GO
 
 /* ---------------------------------------------------------------------------
-   Monthly / Weekly / tiles claim rows: one row per claim whose DenialCode is not
-   blank. Denial Code = DenialCodeNormalized, Denial Date = DenialDate.
+   Monthly / Weekly / tiles claim rows: one row per claim whose ClaimLevelDenialCode
+   is not blank. Denial Code = DenialCodeNormalized, Denial Date = DenialDate,
+   DeniedWeek as written ("Week 1".."Week 4"), NULL when blank.
    --------------------------------------------------------------------------- */
 CREATE OR ALTER FUNCTION dbo.fn_TD_DenialSummaryClaims()
 RETURNS TABLE
@@ -96,14 +100,15 @@ RETURN
            CAST(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(500), c.PayerName_Raw), N''))) AS NVARCHAR(500)) AS PayerName,
            CAST(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), c.PayerType), N''))) AS NVARCHAR(200))     AS PayerType,
            CAST(COALESCE(NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.DenialCodeNormalized))), N''),
-                         LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.DenialCode)))) AS NVARCHAR(400)) AS DenialCode,
+                         LTRIM(RTRIM(CONVERT(NVARCHAR(400), c.ClaimLevelDenialCode)))) AS NVARCHAR(400)) AS DenialCode,
            LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(4000), c.DenialDescription), N'')))     AS DenialDescription,
            COALESCE(TRY_CONVERT(DATE, c.DenialDate, 101), TRY_CAST(c.DenialDate AS DATE)) AS DenialDate,
+           CAST(NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.DeniedWeek))), N'') AS NVARCHAR(100)) AS DeniedWeek,
            ISNULL(b.Bal, 0)                                                             AS Bal
     FROM   dbo.ClaimLevelData c
     CROSS  APPLY (SELECT TRY_CONVERT(DECIMAL(18,2),
                          REPLACE(REPLACE(LTRIM(RTRIM(CONVERT(NVARCHAR(100), c.InsuranceBalance))), N'$', N''), N',', N'')) AS Bal) b
-    WHERE  LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(400), c.DenialCode), N''))) <> N'';
+    WHERE  LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(400), c.ClaimLevelDenialCode), N''))) <> N'';
 GO
 
 /* Insurance grouping key: letters and digits only, upper case
@@ -236,9 +241,12 @@ GO
 
 /* ---------------------------------------------------------------------------
    Monthly / Weekly engine
-   @Grain 'M' = every Denial Month up to the loaded week, with a total per year
+   @Grain 'M' = every Denial Month up to the loaded week, with a total per year;
+                insurances by Total Insurance Balance
           'W' = the 4 Friday-Thursday weeks ending with the week of the newest
-                WeekFolder end date
+                WeekFolder end date; a claim's week is its DeniedWeek "Week 1".."Week 4"
+                (Week 4 = newest), else the week of its DenialDate; insurances by
+                No. of Claims
    --------------------------------------------------------------------------- */
 CREATE OR ALTER PROCEDURE dbo.usp_TD_DenialAnalysis_Compute
     @Grain       CHAR(1),
@@ -257,9 +265,9 @@ BEGIN
         RETURN;
     END;
 
-    DECLARE @TopPayers INT = 2147483647, @TopCodes INT = 3, @Weeks INT = 4;
+    DECLARE @TopPayers INT = 10, @TopCodes INT = 3, @Weeks INT = 4;
     -- 2026-09-18 was a Friday; ((n % 7) + 7) % 7 keeps the offset positive.
-    DECLARE @Friday DATE = '20260918';
+    DECLARE @Friday DATE = '20260918', @LastFri DATE;
 
     -- End date of the newest WeekFolder ("10.14.2026 - 10.20.2026" -> 2026-10-20).
     DECLARE @LoadedThrough DATE =
@@ -269,7 +277,7 @@ BEGIN
         WHERE  WeekFolder IS NOT NULL
     );
 
-    SELECT d.ClaimKey, d.PayerName, d.DenialCode, d.DenialDescription, d.DenialDate, d.Bal
+    SELECT d.ClaimKey, d.PayerName, d.DenialCode, d.DenialDescription, d.DenialDate, d.DeniedWeek, d.Bal
     INTO   #c
     FROM   dbo.fn_TD_DenialSummaryClaims() d
     WHERE  d.ClaimKey IS NOT NULL
@@ -301,7 +309,7 @@ BEGIN
     ELSE
     BEGIN
         DECLARE @Anchor DATE = ISNULL(@LoadedThrough, (SELECT MAX(DenialDate) FROM #c));
-        DECLARE @LastFri DATE = DATEADD(DAY, -((DATEDIFF(DAY, @Friday, @Anchor) % 7 + 7) % 7), @Anchor);
+        SET @LastFri = DATEADD(DAY, -((DATEDIFF(DAY, @Friday, @Anchor) % 7 + 7) % 7), @Anchor);
 
         INSERT INTO #per (PeriodType, PeriodStart, PeriodEnd, PeriodYear)
         SELECT 'W', DATEADD(DAY, -7 * v.n, @LastFri), DATEADD(DAY, 6 - 7 * v.n, @LastFri),
@@ -330,14 +338,20 @@ BEGIN
            p.PeriodStart, p.PeriodYear
     INTO   #b
     FROM   #c c
-    JOIN   #per p ON c.DenialDate BETWEEN p.PeriodStart AND p.PeriodEnd
+    CROSS  APPLY (SELECT CASE WHEN @Grain = 'W' AND c.DeniedWeek LIKE N'Week [1-4]'
+                              THEN DATEADD(DAY, 7 * (CAST(RIGHT(c.DeniedWeek, 1) AS INT) - @Weeks), @LastFri)
+                              ELSE c.DenialDate END AS BucketDate) w
+    JOIN   #per p ON w.BucketDate BETWEEN p.PeriodStart AND p.PeriodEnd
     JOIN   #pk k  ON k.PayerName = c.PayerName;
 
-    /* Insurances by No. of Claims, then Total Insurance Balance */
+    /* Insurances: Monthly by Total Insurance Balance, then No. of Claims;
+       Weekly by No. of Claims, then Total Insurance Balance */
     SELECT PayerKey,
            ISNULL(MIN(NULLIF(PayerName, N'')), N'(no payer)') AS PayerLabel,
            SUM(Bal) AS Bal,
-           ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT ClaimKey) DESC, SUM(Bal) DESC, PayerKey) AS PayerRank
+           ROW_NUMBER() OVER (ORDER BY CASE WHEN @Grain = 'M' THEN SUM(Bal) ELSE COUNT(DISTINCT ClaimKey) END DESC,
+                                       CASE WHEN @Grain = 'M' THEN COUNT(DISTINCT ClaimKey) ELSE SUM(Bal) END DESC,
+                                       PayerKey) AS PayerRank
     INTO   #pr
     FROM   #b
     GROUP  BY PayerKey;

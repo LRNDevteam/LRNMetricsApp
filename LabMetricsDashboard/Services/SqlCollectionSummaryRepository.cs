@@ -909,11 +909,13 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         try { paymentPctOrdinal = r.GetOrdinal("PaymentPct"); } catch { /* column absent in older SPs */ }
 
         // RowType P/C rows: Panel -> CPT hierarchy (WellHealth) or flat CPT rows (NorthWest, Analyze
-        // Pathology), claim counts - or Sum of Units when the SP returns SumUnits - and Average Payment %.
+        // Pathology), claim counts - or Sum of Units when the SP returns SumUnits - and Average Payment %,
+        // or Sum of ChargeAmount when the SP returns ChargeAmount (WellHealth).
         if (HasColumn(r, "RowType"))
         {
             var hasInsPay = HasColumn(r, "InsurancePayment");
             var hasSumUnits = HasColumn(r, "SumUnits");
+            var hasCharge = HasColumn(r, "ChargeAmount");
             while (await r.ReadAsync(ct))
             {
                 var isPanel = string.Equals(GetStringOrEmpty(r, "RowType"), "P", StringComparison.OrdinalIgnoreCase);
@@ -922,13 +924,14 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                     CptCode:              isPanel ? panel : GetStringOrEmpty(r, "CPTCode"),
                     SumServiceUnits:      hasSumUnits ? GetDecimalOrDefault(r, "SumUnits") : GetInt32OrDefault(r, "NoOfClaims"),
                     PaidInsurancePayment: hasInsPay ? GetDecimalOrDefault(r, "InsurancePayment") : 0m,
-                    PaidChargeAmount:     0m,
+                    PaidChargeAmount:     hasCharge ? GetDecimalOrDefault(r, "ChargeAmount") : 0m,
                     SnapshotPaymentPct:   GetDecimalOrNull(r, "AvgPaymentPct") ?? 0m,
                     PanelName:            panel,
                     IsPanelRow:           isPanel,
                     SnapshotPctIsPoints:  true,
                     TotalPaymentPctFromSp: GetDecimalOrNull(r, "TotalPaymentPct"),
-                    HasInsurancePayment:  hasInsPay));
+                    HasInsurancePayment:  hasInsPay,
+                    HasChargeAmount:      hasCharge));
             }
             _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
             return new CptPaymentPctResult(rows);

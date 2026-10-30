@@ -11,7 +11,8 @@
      usp_RefreshWH_CS_{X}   rebuilds the snapshot (claim-file ingest)
 
    Client requirement (Claim Level Data unless noted):
-     1  Monthly Summary        InsurancePayment <> 0; Panel + top 3 insurance by claim count;
+     1  Monthly Summary        InsurancePayment > 0 (was <> 0 until 2026-10-30, see 12d);
+                               Panel + top 3 insurance by claim count;
                                Posted Date month; sorted by Insurance Payment
      2  Weekly Summary         same as Monthly; Posted Date Mon-Sun weeks
      3  Top 5 Reimbursement %  InsurancePayment > 0; top 5 insurance by Insurance Payment;
@@ -20,10 +21,14 @@
      5  Panel Averages         by DOS / by Check Date: FirstBilledDate not blank; 6 months ending at
                                the billed week-range end date. The Panel Average tab is not shown.
      6  Insurance vs Payment % InsurancePayment > 0; sorted by Insurance Payment
-     7  Total Insurance Payment InsurancePayment > 0; sorted by Total Payment
+     7  Total Insurance Payment InsurancePayment > 0; Sum(InsurancePayment); sorted by Insurance
+                               Payment (2026-10-30, was Total Payment, see 12e)
      8  Insurance vs Aging     TotalInsuranceBalance > 0; Sum(TotalInsuranceBalance); Aging DOS
-     9  Panel Vs Payment       InsurancePayment > 0 AND Posted Date not blank; Posted Date month
-    10  CPT vs Payment %       Line Level Data; no filter; sorted by claim count
+     9  Panel Vs Payment       InsurancePayment > 0 AND Posted Date not blank; Posted Date month;
+                               Sum(InsurancePayment) (2026-10-30, was Sum(TotalPayments), see 12e)
+    10  CPT vs Payment %       Line Level Data; FirstBilledDate not blank (2026-10-30, see 12d);
+                               rows Panel (the line's claim) -> CPT Code; Sum(Units),
+                               Sum(ChargeAmount); sorted by claim count
 
    "Posted Date" = PaymentPostedDate (dashboard Check Date filter applies to it);
    "Check Date"  = CheckDate.
@@ -178,7 +183,7 @@ CREATE TABLE dbo.WH_CS2_PanelVsPayment (
 DROP TABLE IF EXISTS dbo.WH_CS2_CptVsPaymentPct;
 CREATE TABLE dbo.WH_CS2_CptVsPaymentPct (
     RowType CHAR(1) NOT NULL, PanelName NVARCHAR(500) NULL, CPTCode NVARCHAR(500) NULL, NoOfClaims INT NOT NULL,
-    AvgPaymentPct DECIMAL(9,2) NOT NULL, TotalPaymentPct DECIMAL(9,2) NOT NULL, SortOrder INT NOT NULL);
+    SumUnits DECIMAL(18,2) NOT NULL, ChargeAmount DECIMAL(18,2) NOT NULL, SortOrder INT NOT NULL);
 
 DROP TABLE IF EXISTS dbo.WH_CS2_StatusSummary;
 CREATE TABLE dbo.WH_CS2_StatusSummary (
@@ -218,7 +223,7 @@ BEGIN
                SUM(InsPay)              AS InsurancePayment
         FROM dbo.fn_WH_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                                  @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
-        WHERE InsPay <> 0
+        WHERE InsPay > 0
           AND PostedDt IS NOT NULL
         GROUP BY PanelName, PayerName, YEAR(PostedDt), MONTH(PostedDt)
     ),
@@ -272,7 +277,7 @@ BEGIN
     INTO #paid
     FROM dbo.fn_WH_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                              @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
-    WHERE InsPay <> 0
+    WHERE InsPay > 0
       AND PostedDt IS NOT NULL
       AND PostedDt <= @Today;
 
@@ -601,8 +606,9 @@ END
 GO
 
 /* =============================================================================
-   7. Total Insurance Payment (InsurancePayment > 0; sorted by Total Payment)
-      InsurancePayment carries Sum(TotalPayments); PaymentPct = Average(Payment %).
+   7. Total Insurance Payment (InsurancePayment > 0; sorted by Insurance Payment)
+      InsurancePayment = Sum(InsurancePayment); PaymentPct = Average(Payment %).
+      (Until 2026-10-30: Sum(TotalPayments), sorted by Total Payment, see 12e.)
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_WH_CS_InsuranceVsPayment_Compute
     @PayerNames NVARCHAR(MAX) = NULL, @PanelNames NVARCHAR(MAX) = NULL,
@@ -616,7 +622,7 @@ BEGIN
     WITH p AS (
         SELECT PayerName,
                COUNT(DISTINCT ClaimKey) AS NoOfPaidClaims,
-               SUM(TotalPay)            AS TotalPayment,
+               SUM(InsPay)              AS InsurancePayment,
                AVG(PaymentPct)          AS AvgPct,
                SUM(PaymentPct)          AS PctSum,
                COUNT(PaymentPct)        AS PctCnt
@@ -629,11 +635,11 @@ BEGIN
            0                                                 AS BillYear,
            0                                                 AS BillMonth,
            NoOfPaidClaims,
-           CAST(TotalPayment AS DECIMAL(18,2))               AS InsurancePayment,
+           CAST(InsurancePayment AS DECIMAL(18,2))           AS InsurancePayment,
            CAST(ROUND(ISNULL(AvgPct, 0), 2) AS DECIMAL(9,2)) AS PaymentPct,
            CAST(ROUND(ISNULL(SUM(PctSum) OVER () / NULLIF(SUM(PctCnt) OVER (), 0), 0), 2)
                 AS DECIMAL(9,2))                             AS TotalPaymentPct,
-           CAST(ROW_NUMBER() OVER (ORDER BY TotalPayment DESC, NoOfPaidClaims DESC, PayerName) AS INT) AS SortOrder
+           CAST(ROW_NUMBER() OVER (ORDER BY InsurancePayment DESC, NoOfPaidClaims DESC, PayerName) AS INT) AS SortOrder
     FROM p
     ORDER BY SortOrder;
 END
@@ -684,7 +690,8 @@ GO
 
 /* =============================================================================
    9. Panel Vs Payment (InsurancePayment > 0 AND PaymentPostedDate not blank; Posted Date month)
-      InsurancePayments carries Sum(TotalPayments); panels sorted by Insurance Payment.
+      InsurancePayments = Sum(InsurancePayment) (until 2026-10-30 Sum(TotalPayments), see 12e);
+      panels sorted by Insurance Payment.
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_WH_CS_PanelVsPayment_Compute
     @PayerNames NVARCHAR(MAX) = NULL, @PanelNames NVARCHAR(MAX) = NULL,
@@ -700,7 +707,6 @@ BEGIN
                YEAR(PostedDt)           AS BillYear,
                MONTH(PostedDt)          AS BillMonth,
                COUNT(DISTINCT ClaimKey) AS NoOfClaims,
-               SUM(TotalPay)            AS TotalPayments,
                SUM(InsPay)              AS InsurancePayment
         FROM dbo.fn_WH_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                                  @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
@@ -711,7 +717,6 @@ BEGIN
     panel AS (
         SELECT PanelName,
                SUM(InsurancePayment) AS PanelInsPay,
-               SUM(TotalPayments)    AS PanelTotalPay,
                SUM(NoOfClaims)       AS PanelClaims
         FROM agg
         GROUP BY PanelName
@@ -720,8 +725,8 @@ BEGIN
            a.BillYear,
            a.BillMonth,
            a.NoOfClaims,
-           CAST(a.TotalPayments AS DECIMAL(18,2)) AS InsurancePayments,
-           CAST(ROW_NUMBER() OVER (ORDER BY p.PanelInsPay DESC, p.PanelTotalPay DESC, p.PanelClaims DESC,
+           CAST(a.InsurancePayment AS DECIMAL(18,2)) AS InsurancePayments,
+           CAST(ROW_NUMBER() OVER (ORDER BY p.PanelInsPay DESC, p.PanelClaims DESC,
                                             a.PanelName, a.BillYear, a.BillMonth) AS INT) AS SortOrder
     FROM agg a
     JOIN panel p ON p.PanelName = a.PanelName
@@ -730,9 +735,10 @@ END
 GO
 
 /* =============================================================================
-   10. CPT vs Payment % (Line Level Data; no filter)
-       Rows CPT Code (RowType C); Count of unique ClaimID; Average of line Payment %
-       (AdditionalFields "Payment %"). TotalPaymentPct = average over every line.
+   10. CPT vs Payment % (Line Level Data; FirstBilledDate not blank)
+       Rows Panel (RowType P; Panelname of the line's claim, LineLevelData.Panelname is
+       blank) -> CPT Code (RowType C). Values Sum(Units), Sum(ChargeAmount).
+       Panels and their CPT codes sorted by Count of unique ClaimID DESC.
        Dashboard filters apply through the line's claim.
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_WH_CS_CptVsPaymentPct_Compute
@@ -744,37 +750,50 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @HasFilter BIT = dbo.fn_WH_CS_HasFilter(@PayerNames, @PanelNames, @DosFrom, @DosTo,
-                                                    @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo);
+    CREATE TABLE #k (ClaimKey NVARCHAR(450) NOT NULL PRIMARY KEY, PanelName NVARCHAR(500) NOT NULL);
+    INSERT INTO #k (ClaimKey, PanelName)
+    SELECT LEFT(ClaimKey, 450), MIN(PanelName)
+    FROM dbo.fn_WH_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
+                             @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
+    WHERE ClaimKey IS NOT NULL
+    GROUP BY LEFT(ClaimKey, 450);
 
-    CREATE TABLE #k (ClaimKey NVARCHAR(450) NOT NULL PRIMARY KEY);
-    IF @HasFilter = 1
-        INSERT INTO #k (ClaimKey)
-        SELECT DISTINCT LEFT(ClaimKey, 450)
-        FROM dbo.fn_WH_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
-                                 @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
-        WHERE ClaimKey IS NOT NULL;
-
-    SELECT ClaimKey = NULLIF(LTRIM(RTRIM(l.ClaimID)), N''),
-           CPTCode  = ISNULL(NULLIF(LTRIM(RTRIM(l.CPTCode)), N''), N'(blank)'),
-           LinePct  = CASE WHEN ISJSON(l.AdditionalFields) = 1
-                           THEN TRY_CAST(JSON_VALUE(l.AdditionalFields, N'$."Payment %"') AS DECIMAL(18,6)) * 100 END
+    SELECT k.ClaimKey,
+           k.PanelName,
+           CPTCode   = ISNULL(NULLIF(LTRIM(RTRIM(l.CPTCode)), N''), N'(blank)'),
+           Units     = ISNULL(TRY_CAST(l.Units AS DECIMAL(18,2)), 0),
+           ChargeAmt = ISNULL(TRY_CONVERT(DECIMAL(18,2), REPLACE(REPLACE(LTRIM(RTRIM(
+                           CONVERT(NVARCHAR(100), l.ChargeAmount))), N'$', N''), N',', N'')), 0)
     INTO #l
     FROM dbo.LineLevelData l
-    WHERE @HasFilter = 0
-       OR EXISTS (SELECT 1 FROM #k k WHERE k.ClaimKey = LEFT(LTRIM(RTRIM(l.ClaimID)), 450));
+    JOIN #k k ON k.ClaimKey = LEFT(LTRIM(RTRIM(l.ClaimID)), 450)
+    WHERE NULLIF(LTRIM(RTRIM(l.FirstBilledDate)), N'') IS NOT NULL;
 
-    DECLARE @TotalPct DECIMAL(38,6) = (SELECT AVG(LinePct) FROM #l);
-
-    SELECT CAST('C' AS CHAR(1))                                  AS RowType,
-           CAST(NULL AS NVARCHAR(500))                           AS PanelName,
-           CPTCode,
-           COUNT(DISTINCT ClaimKey)                              AS NoOfClaims,
-           CAST(ROUND(ISNULL(AVG(LinePct), 0), 2) AS DECIMAL(9,2)) AS AvgPaymentPct,
-           CAST(ROUND(ISNULL(@TotalPct, 0), 2) AS DECIMAL(9,2))  AS TotalPaymentPct,
-           CAST(ROW_NUMBER() OVER (ORDER BY COUNT(DISTINCT ClaimKey) DESC, CPTCode) AS INT) AS SortOrder
-    FROM #l
-    GROUP BY CPTCode
+    WITH g AS (
+        SELECT CASE WHEN GROUPING(CPTCode) = 1 THEN 'P' ELSE 'C' END AS RowType,
+               PanelName, CPTCode,
+               COUNT(DISTINCT ClaimKey) AS NoOfClaims,
+               SUM(Units)               AS SumUnits,
+               SUM(ChargeAmt)           AS ChargeAmount
+        FROM #l
+        GROUP BY GROUPING SETS ((PanelName, CPTCode), (PanelName))
+    ),
+    pnl AS (
+        SELECT PanelName, NoOfClaims AS PanelClaims, ChargeAmount AS PanelCharge
+        FROM g
+        WHERE RowType = 'P'
+    )
+    SELECT CAST(g.RowType AS CHAR(1))                         AS RowType,
+           g.PanelName,
+           CASE WHEN g.RowType = 'C' THEN g.CPTCode END       AS CPTCode,
+           g.NoOfClaims,
+           CAST(g.SumUnits     AS DECIMAL(18,2))              AS SumUnits,
+           CAST(g.ChargeAmount AS DECIMAL(18,2))              AS ChargeAmount,
+           CAST(ROW_NUMBER() OVER (ORDER BY p.PanelClaims DESC, p.PanelCharge DESC, g.PanelName,
+                                            CASE WHEN g.RowType = 'P' THEN 0 ELSE 1 END,
+                                            g.NoOfClaims DESC, g.ChargeAmount DESC, g.CPTCode) AS INT) AS SortOrder
+    FROM g
+    JOIN pnl p ON p.PanelName = g.PanelName
     ORDER BY SortOrder;
 END
 GO
@@ -1138,7 +1157,7 @@ BEGIN
                               @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo) = 0
        AND EXISTS (SELECT 1 FROM dbo.WH_CS2_CptVsPaymentPct)
     BEGIN
-        SELECT RowType, PanelName, CPTCode, NoOfClaims, AvgPaymentPct, TotalPaymentPct, SortOrder
+        SELECT RowType, PanelName, CPTCode, NoOfClaims, SumUnits, ChargeAmount, SortOrder
         FROM dbo.WH_CS2_CptVsPaymentPct
         ORDER BY SortOrder;
         RETURN;
@@ -1327,7 +1346,7 @@ BEGIN
     SET NOCOUNT ON; SET XACT_ABORT ON;
     BEGIN TRAN;
     DELETE FROM dbo.WH_CS2_CptVsPaymentPct;
-    INSERT INTO dbo.WH_CS2_CptVsPaymentPct (RowType, PanelName, CPTCode, NoOfClaims, AvgPaymentPct, TotalPaymentPct, SortOrder)
+    INSERT INTO dbo.WH_CS2_CptVsPaymentPct (RowType, PanelName, CPTCode, NoOfClaims, SumUnits, ChargeAmount, SortOrder)
     EXEC dbo.usp_WH_CS_CptVsPaymentPct_Compute;
     COMMIT;
 END

@@ -8,6 +8,9 @@
                 var hierMaxPct = hierRows.Max(r => r.PaymentPct);
                 var hierShowsPay = hierRows[0].HasInsurancePayment;
                 var hierGrandPay = hierRows.Where(r => r.IsPanelRow).Sum(r => r.PaidInsurancePayment);
+                // WellHealth: Sum of Units and Sum of ChargeAmount, no Payment %.
+                var hierShowsCharge = hierRows[0].HasChargeAmount;
+                var hierGrandCharge = hierRows.Where(r => r.IsPanelRow).Sum(r => r.PaidChargeAmount);
                 // Analyze Pathology: Line Level Data, the count column holds Sum of Units.
                 var hierIsAnP = Model.IsAnalyzePathologyLab;
                 <div class="cs-rpt-wrap">
@@ -16,12 +19,19 @@
                             <thead>
                                 <tr>
                                     <th>Panel name / CPT Code</th>
-                                    <th>@(hierIsAnP ? "Sum of Units" : "Claim Count")</th>
+                                    <th>@(hierIsAnP || hierShowsCharge ? "Sum of Units" : "Claim Count")</th>
                                     @if (hierShowsPay)
                                     {
                                         <th>Insurance Payments</th>
                                     }
-                                    <th>Average Payment %</th>
+                                    @if (hierShowsCharge)
+                                    {
+                                        <th>Charge Amount</th>
+                                    }
+                                    else
+                                    {
+                                        <th>Average Payment %</th>
+                                    }
                                 </tr>
                             </thead>
                             <tbody>
@@ -52,12 +62,19 @@
                                         {
                                             <td style="text-align:right;@(row.IsPanelRow ? "font-weight:700" : "")">@Acct2(row.PaidInsurancePayment)</td>
                                         }
-                                        <td>
-                                            <div class="reimb-bar-bg">
-                                                <div class="reimb-bar-fill" style="width:@(barWidth.ToString("F1"))%"></div>
-                                                <div class="reimb-bar-label">@pct.ToString("F2") %</div>
-                                            </div>
-                                        </td>
+                                        @if (hierShowsCharge)
+                                        {
+                                            <td style="text-align:right;@(row.IsPanelRow ? "font-weight:700" : "")">@Acct2(row.PaidChargeAmount)</td>
+                                        }
+                                        else
+                                        {
+                                            <td>
+                                                <div class="reimb-bar-bg">
+                                                    <div class="reimb-bar-fill" style="width:@(barWidth.ToString("F1"))%"></div>
+                                                    <div class="reimb-bar-label">@pct.ToString("F2") %</div>
+                                                </div>
+                                            </td>
+                                        }
                                     </tr>
                                 }
                             </tbody>
@@ -69,7 +86,14 @@
                                     {
                                         <td style="text-align:right;color:#fff">@Acct2(hierGrandPay)</td>
                                     }
-                                    <td style="text-align:right;color:#fff">@hierGrandPct.ToString("F2") %</td>
+                                    @if (hierShowsCharge)
+                                    {
+                                        <td style="text-align:right;color:#fff">@Acct2(hierGrandCharge)</td>
+                                    }
+                                    else
+                                    {
+                                        <td style="text-align:right;color:#fff">@hierGrandPct.ToString("F2") %</td>
+                                    }
                                 </tr>
                             </tfoot>
                         </table>
@@ -77,10 +101,18 @@
                 </div>
 
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
-                    <strong>Source:</strong> @(hierIsAnP ? "Line Level Data (panel from the line's claim)" : "Claim Level Data") &bull;
+                    <strong>Source:</strong> @(hierIsAnP || hierShowsCharge ? "Line Level Data (panel from the line's claim)" : "Claim Level Data") &bull;
+                    @if (hierShowsCharge)
+                    {
+                        <span><strong>Filter:</strong> FirstBilledDate not blank &bull;</span>
+                    }
                     <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &bull;
                     <strong>Rows:</strong> Panel name &rarr; CPT Code &bull; <strong>Sorted by:</strong> Claim Count (unique ClaimID) DESC &bull;
-                    @if (hierIsAnP)
+                    @if (hierShowsCharge)
+                    {
+                        <span><strong>Values:</strong> Sum of Units, Sum of ChargeAmount</span>
+                    }
+                    else if (hierIsAnP)
                     {
                         <span><strong>Values:</strong> Sum of Units, Average Payment % (line InsurancePayment / ChargeAmount × 100, lines with ChargeAmount &gt; 0)</span>
                     }

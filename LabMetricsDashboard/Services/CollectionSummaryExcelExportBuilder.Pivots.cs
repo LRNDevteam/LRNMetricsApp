@@ -115,11 +115,11 @@ public static partial class CollectionSummaryExcelExportBuilder
 
         if (LabCollectionPrefix.IsWellHealth(labName))
         {
-            // WellHealth "Total Insurance Payment": rows in SP order (Total Payment DESC).
+            // WellHealth "Total Insurance Payment": rows in SP order (Insurance Payment DESC).
             var wsWh = wb.AddWorksheet("Total Insurance Payment");
             wsWh.TabColor = ExcelTheme.Collection.TabYellow;
             ExcelTheme.ApplyDefaults(wsWh);
-            string[] whHeaders = ["Row Labels", "Count of ClaimID", "Sum of Total Payment", "Average of Payment %"];
+            string[] whHeaders = ["Row Labels", "Count of ClaimID", "Sum of Insurance Payment", "Average of Payment %"];
             int whRow = 1;
             ExcelTheme.Collection.WriteTitleBar(wsWh, whRow, whHeaders.Length, $"Total Insurance Payment — {labName}");
             whRow++;

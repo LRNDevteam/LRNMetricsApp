@@ -263,11 +263,16 @@ public static class LabCollectionPrefix
         GetPrefix(labName) is "CB" or "TD" or "NW" or "AnP" or "Cove";
 
     /// <summary>
-    /// What the Denial Summary Monthly / Weekly SPs rank insurances and their top denials by
-    /// (shown in the grid caption).
+    /// What the Denial Summary Monthly / Weekly SPs rank insurances by (shown in the grid caption).
+    /// Texas Diagnostic ranks Monthly by balance and Weekly by claim count.
     /// </summary>
-    public static string DenialSummaryRankBasis(string? labName) =>
-        GetPrefix(labName) is "WH" or "CB" ? "Total Insurance Balance" : "claim count";
+    public static string DenialSummaryRankBasis(string? labName, bool weekly = false) =>
+        GetPrefix(labName) switch
+        {
+            "WH" => "Total Insurance Balance",
+            "TD" when !weekly => "Total Insurance Balance",
+            _ => "claim count"
+        };
 
     /// <summary>
     /// NorthWest Denial Summary adds Payor vs Payer, Facility wise Denial Breakdown, and

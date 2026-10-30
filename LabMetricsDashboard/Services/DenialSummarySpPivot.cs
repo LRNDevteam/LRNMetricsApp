@@ -99,8 +99,8 @@ public static class DenialSummarySpPivot
 
         model.Monthly = ToPivot(monthlyTask.Result, weekly: false);
         model.Weekly = ToPivot(weeklyTask.Result, weekly: true);
-        model.Monthly.TopPayerRankBasis = model.Weekly.TopPayerRankBasis =
-            LabCollectionPrefix.DenialSummaryRankBasis(model.CurrentLab);
+        model.Monthly.TopPayerRankBasis = LabCollectionPrefix.DenialSummaryRankBasis(model.CurrentLab);
+        model.Weekly.TopPayerRankBasis = LabCollectionPrefix.DenialSummaryRankBasis(model.CurrentLab, weekly: true);
         if (LabCollectionPrefix.IsCoreBio(model.CurrentLab))
         {
             model.Monthly.HeaderTitle = model.Monthly.HeaderTitle.Replace("Denial Posted Date", "Check Date");

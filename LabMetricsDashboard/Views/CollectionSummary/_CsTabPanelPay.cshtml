@@ -253,7 +253,7 @@ else
 
     var isSpLogic = Model.UsesSpCollectionLogic;
     var countLabel = isSpLogic ? "Claim Count" : "Count of Panel Name";
-    var paymentLabel = Model.IsWellHealthLab ? "Total Payments" : isSpLogic ? "Insurance Payments" : "Sum of CarrierPayment";
+    var paymentLabel = isSpLogic ? "Insurance Payments" : "Sum of CarrierPayment";
     var pivotGroups = rowsData
         .Where(r => r.BillYear > 0 && r.BillMonth > 0)
         .GroupBy(r => r.PanelName, StringComparer.OrdinalIgnoreCase)
@@ -376,7 +376,7 @@ else
         <strong>Filter:</strong> InsurancePayment &gt; 0, PaymentPostedDate not blank &bull;
         <strong>Rows:</strong> Panel name &bull; <strong>Columns:</strong> PaymentPostedDate month &bull;
         <strong>Sorted by:</strong> Insurance Payment DESC &bull;
-        <strong>Values:</strong> Count of unique ClaimID, Sum of TotalPayments</span>
+        <strong>Values:</strong> Count of unique ClaimID, Sum of InsurancePayment</span>
     }
     else if (isSpLogic)
     {
