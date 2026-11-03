@@ -261,17 +261,23 @@ BEGIN
                DurationMs = DATEDIFF(MILLISECOND, @Started, SYSDATETIME());
     END TRY
     BEGIN CATCH
-        IF @@TRANCOUNT > 0 ROLLBACK;
+        -- This procedure does not BEGIN TRAN. ROLLBACK is illegal when the
+        -- caller used INSERT...EXEC (Msg 3915) and replaces the error that
+        -- entered this CATCH. Log the failure when the transaction is still usable.
+        DECLARE @Err NVARCHAR(4000) = LEFT(ERROR_MESSAGE(), 4000);
 
-        UPDATE dbo.NW_BilledUnbilled_UpdateLog
-        SET    EndedAt      = SYSDATETIME(),
-               DurationMs   = DATEDIFF(MILLISECOND, @Started, SYSDATETIME()),
-               Status       = 'Failed',
-               RowsUpdated  = 0,
-               ErrorMessage = LEFT(ERROR_MESSAGE(), 4000)
-        WHERE  LogId = @LogId;
+        IF XACT_STATE() <> -1
+        BEGIN
+            UPDATE dbo.NW_BilledUnbilled_UpdateLog
+            SET    EndedAt      = SYSDATETIME(),
+                   DurationMs   = DATEDIFF(MILLISECOND, @Started, SYSDATETIME()),
+                   Status       = 'Failed',
+                   RowsUpdated  = 0,
+                   ErrorMessage = @Err
+            WHERE  LogId = @LogId;
+        END;
 
-        THROW;
+        ;THROW;
     END CATCH;
 END;
 GO

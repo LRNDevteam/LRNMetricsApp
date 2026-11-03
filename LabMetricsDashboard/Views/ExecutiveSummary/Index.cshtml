@@ -981,7 +981,10 @@ if (showHighlightTabs)
                          data-export-url="@Url.Action("CellRowsExport", "ExecutiveSummary")"></div>
                     <div class="esc-legend">
                         <span><span class="esc-legend-swatch esc-legend-rows"></span>Value - opens the rows behind it</span>
-                        <span><span class="esc-legend-swatch esc-legend-drill"></span>Year / Grand Total - opens Insight Drill-Through</span>
+                        @if (esLisDrill)
+                        {
+                            <span><i class="bi bi-diagram-3 esc-legend-icon"></i>Next to a Year / Grand Total - opens Insight Drill-Through</span>
+                        }
                     </div>
                 }
                 <div class="es-scroll">
@@ -1144,9 +1147,10 @@ if (showHighlightTabs)
                                             var yrTot = RowYearTotal(row, year);
                                             @* Prefer rowCode (lab-specific LisDrillRowDef) over generic
                                                metric=Billable — Inhealth Billable is RowCode B, not L_A. *@
+                                            string? yrDrillUrl = null;
                                             @if (esLisDrill && !isPanelSpecificRow && (row.Category == "LIS" || row.Category == "PMS" || row.Category == "Cash") && !string.IsNullOrEmpty(row.RowCode) && yrTot != 0)
                                             {
-                                                string yrRowUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
+                                                yrDrillUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
                                                     lab      = Model.SelectedLab,
                                                     rowCode  = row.RowCode,
                                                     rowTitle = insightRowTitle,
@@ -1154,34 +1158,41 @@ if (showHighlightTabs)
                                                     year,
                                                     value    = yrTot,
                                                 })!;
-                                                <td class="es-year-total@(dollarRow ? " es-cell-dollar" : "")">
-                                                    <a href="@yrRowUrl" class="es-drill-link">@FmtCount(yrTot, row.Category, row.RowCode)</a>
-                                                </td>
                                             }
                                             else if (esLisDrill && !isPanelSpecificRow && lisDrillMetric != null && yrTot != 0)
                                             {
-                                                string yrDrillUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
+                                                yrDrillUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
                                                     lab    = Model.SelectedLab,
                                                     metric = lisDrillMetric,
                                                     year,
                                                     value  = yrTot,
                                                 })!;
+                                            }
+                                            @if (esCellRows && yrTot != 0)
+                                            {
+                                                <td class="es-year-total@(dollarRow ? " es-cell-dollar" : "")">
+                                                    <a href="#" class="es-cell-link" data-es-cat="@row.Category" data-es-row="@row.RowCode" data-es-title="@insightRowTitle" data-es-year="@year" data-es-month="0">@FmtCount(yrTot, row.Category, row.RowCode)</a>
+                                                    @if (yrDrillUrl != null)
+                                                    {
+                                                        <a href="@yrDrillUrl" class="es-drill-icon" title="Open Insight Drill-Through" aria-label="Open Insight Drill-Through"><i class="bi bi-diagram-3"></i></a>
+                                                    }
+                                                </td>
+                                            }
+                                            else if (yrDrillUrl != null)
+                                            {
                                                 <td class="es-year-total@(dollarRow ? " es-cell-dollar" : "")">
                                                     <a href="@yrDrillUrl" class="es-drill-link">@FmtCount(yrTot, row.Category, row.RowCode)</a>
                                                 </td>
-                                            }
-                                            else if (esCellRows && yrTot != 0)
-                                            {
-                                                <td class="es-year-total@(dollarRow ? " es-cell-dollar" : "")"><a href="#" class="es-cell-link" data-es-cat="@row.Category" data-es-row="@row.RowCode" data-es-title="@insightRowTitle" data-es-year="@year" data-es-month="0">@FmtCount(yrTot, row.Category, row.RowCode)</a></td>
                                             }
                                             else
                                             {
                                                 <td class="es-year-total@(dollarRow ? " es-cell-dollar" : "")">@FmtCount(yrTot, row.Category, row.RowCode)</td>
                                             }
                                         }
+                                        @{ string? gtDrillUrl = null; }
                                         @if (esLisDrill && !isPanelSpecificRow && (row.Category == "LIS" || row.Category == "PMS" || row.Category == "Cash") && !string.IsNullOrEmpty(row.RowCode) && gTot != 0)
                                         {
-                                            string gtRowUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
+                                            gtDrillUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
                                                 lab      = Model.SelectedLab,
                                                 rowCode  = row.RowCode,
                                                 rowTitle = insightRowTitle,
@@ -1189,25 +1200,31 @@ if (showHighlightTabs)
                                                 year     = 0,
                                                 value    = gTot,
                                             })!;
-                                            <td class="es-grand@(dollarRow ? " es-cell-dollar" : "")">
-                                                <a href="@gtRowUrl" class="es-drill-link">@FmtCount(gTot, row.Category, row.RowCode)</a>
-                                            </td>
                                         }
                                         else if (esLisDrill && !isPanelSpecificRow && lisDrillMetric != null && gTot != 0)
                                         {
-                                            string gtDrillUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
+                                            gtDrillUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
                                                 lab    = Model.SelectedLab,
                                                 metric = lisDrillMetric,
                                                 year   = 0,
                                                 value  = gTot,
                                             })!;
+                                        }
+                                        @if (esCellRows && gTot != 0)
+                                        {
+                                            <td class="es-grand@(dollarRow ? " es-cell-dollar" : "")">
+                                                <a href="#" class="es-cell-link" data-es-cat="@row.Category" data-es-row="@row.RowCode" data-es-title="@insightRowTitle" data-es-year="0" data-es-month="0">@FmtCount(gTot, row.Category, row.RowCode)</a>
+                                                @if (gtDrillUrl != null)
+                                                {
+                                                    <a href="@gtDrillUrl" class="es-drill-icon" title="Open Insight Drill-Through" aria-label="Open Insight Drill-Through"><i class="bi bi-diagram-3"></i></a>
+                                                }
+                                            </td>
+                                        }
+                                        else if (gtDrillUrl != null)
+                                        {
                                             <td class="es-grand@(dollarRow ? " es-cell-dollar" : "")">
                                                 <a href="@gtDrillUrl" class="es-drill-link">@FmtCount(gTot, row.Category, row.RowCode)</a>
                                             </td>
-                                        }
-                                        else if (esCellRows && gTot != 0)
-                                        {
-                                            <td class="es-grand@(dollarRow ? " es-cell-dollar" : "")"><a href="#" class="es-cell-link" data-es-cat="@row.Category" data-es-row="@row.RowCode" data-es-title="@insightRowTitle" data-es-year="0" data-es-month="0">@FmtCount(gTot, row.Category, row.RowCode)</a></td>
                                         }
                                         else
                                         {

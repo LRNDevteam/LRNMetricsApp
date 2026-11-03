@@ -19,7 +19,9 @@
    Result sets
      1. Rules   : RuleOrder, RuleGroup, RuleText
      2. Summary : SourceTable, Measure, AmountColumn, TotalRows, TotalAmount, IsFormula
-     3. Rows    : one page of source rows (Amount = the row's measured column for $ rows)
+     3. Rows    : one page of source rows (Amount = the row's measured column for $ rows).
+                  Every column of the source table is returned: the key columns first,
+                  then the rest in table order.
    Formula rows (PMS H, Avg X / Y / Z) return the formula and calculation in Rules,
    IsFormula = 1, TotalAmount = the grid value, and result set 3 = the components
    (Section, Operator, Component, Category, RowCode, Value, IsMoney, IsTotal) read from
@@ -306,16 +308,16 @@ BEGIN
 
     SELECT RuleOrder, RuleGroup, RuleText FROM @Rules ORDER BY RuleOrder;
 
+    DECLARE @Skip INT = CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END;
+    DECLARE @Take INT = CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END;
+    DECLARE @Cols NVARCHAR(MAX), @Sql NVARCHAR(MAX);
+    DECLARE @Lead TABLE (Ord INT NOT NULL, Name SYSNAME NOT NULL);
+
     /* ---- LIS samples -------------------------------------------------------- */
     IF @IsLis = 1
     BEGIN
-        SELECT
-            l.Accession,
-            TRY_CAST(l.RequestCollectDate AS DATE) AS RequestCollectDate,
-            TRY_CAST(l.BilledDate AS DATE)         AS BilledDate,
-            l.NewStatus, l.BillCategory, l.SubStatus, l.ResultStatus,
-            l.PanelName, l.ClinicName, l.ReferringProvider, l.PrimaryInsurance,
-            d.PeriodDate
+        -- LIMSMaster has no unique key (Accession repeats), so the rows are copied whole.
+        SELECT d.PeriodDate AS EsPeriodDate, l.*
         INTO #L
         FROM dbo.LIMSMaster l
         CROSS APPLY (SELECT CASE WHEN @UseBilledDate = 1 THEN TRY_CAST(l.BilledDate AS DATE)
@@ -353,17 +355,26 @@ BEGIN
                COUNT(*) AS TotalRows, CAST(0 AS DECIMAL(18,2)) AS TotalAmount, CAST(0 AS BIT) AS IsFormula
         FROM #L;
 
-        SELECT Accession, RequestCollectDate, BilledDate, NewStatus, BillCategory, SubStatus, ResultStatus,
-               PanelName, ClinicName, ReferringProvider, PrimaryInsurance
-        FROM #L
-        ORDER BY PeriodDate, Accession
-        OFFSET CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END ROWS
-        FETCH NEXT CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END ROWS ONLY;
+        INSERT INTO @Lead (Ord, Name) VALUES
+            (1, N'Accession'), (2, N'RequestCollectDate'), (3, N'BilledDate'), (4, N'NewStatus'),
+            (5, N'BillCategory'), (6, N'SubStatus'), (7, N'ResultStatus'), (8, N'PanelName'),
+            (9, N'ClinicName'), (10, N'ReferringProvider'), (11, N'PrimaryInsurance');
+
+        SELECT @Cols = STRING_AGG(CAST(QUOTENAME(c.name) AS NVARCHAR(MAX)), N', ')
+                       WITHIN GROUP (ORDER BY ISNULL(ld.Ord, 1000), c.column_id)
+        FROM sys.columns c
+        LEFT JOIN @Lead ld ON ld.Name = c.name COLLATE DATABASE_DEFAULT
+        WHERE c.object_id = OBJECT_ID(N'dbo.LIMSMaster');
+
+        SET @Sql = N'SELECT ' + @Cols + N' FROM #L ORDER BY EsPeriodDate, Accession
+                     OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;';
+        EXEC sys.sp_executesql @Sql, N'@Skip INT, @Take INT', @Skip = @Skip, @Take = @Take;
         RETURN;
     END;
 
     /* ---- Claims (PMS / Cash) ------------------------------------------------ */
     SELECT
+        c.RecordId,
         c.ClaimID, c.AccessionNumber,
         TRY_CAST(c.DateofService AS DATE)   AS DateofService,
         TRY_CAST(c.FirstBilledDate AS DATE) AS FirstBilledDate,
@@ -441,22 +452,32 @@ BEGIN
            CAST(0 AS BIT) AS IsFormula
     FROM #C;
 
+    -- Key columns come from #C (dates as DATE, Bill Status normalised, amounts as numbers);
+    -- every other ClaimLevelData column follows in table order.
+    INSERT INTO @Lead (Ord, Name) VALUES
+        (1, N'ClaimID'), (2, N'AccessionNumber'), (3, N'DateofService'), (4, N'FirstBilledDate'),
+        (5, N'PayerName_Raw'), (6, N'Panelname'), (7, N'ClinicName'), (8, N'ReferringProvider'),
+        (9, N'SalesRepname'), (10, N'BilledStatus'), (11, N'ClaimStatus'), (12, N'Amount'),
+        (13, N'ChargeAmount'), (14, N'InsurancePayment'), (15, N'PatientPayment'), (16, N'PatientBalance'),
+        (17, N'TotalAdjustments'), (18, N'TotalInsuranceBalance');
     IF @AmountCol IS NULL
-        SELECT ClaimID, AccessionNumber, DateofService, FirstBilledDate, PayerName_Raw, Panelname, ClinicName,
-               ReferringProvider, SalesRepname, BilledStatus, ClaimStatus,
-               ChargeAmount, InsurancePayment, PatientPayment, PatientBalance, TotalAdjustments, TotalInsuranceBalance
-        FROM #C
-        ORDER BY PeriodDate, ClaimID
-        OFFSET CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END ROWS
-        FETCH NEXT CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END ROWS ONLY;
-    ELSE
-        SELECT ClaimID, AccessionNumber, DateofService, FirstBilledDate, PayerName_Raw, Panelname, ClinicName,
-               ReferringProvider, SalesRepname, BilledStatus, ClaimStatus, Amount,
-               ChargeAmount, InsurancePayment, PatientPayment, PatientBalance, TotalAdjustments, TotalInsuranceBalance
-        FROM #C
-        ORDER BY PeriodDate, ClaimID
-        OFFSET CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END ROWS
-        FETCH NEXT CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END ROWS ONLY;
+        DELETE FROM @Lead WHERE Name = N'Amount';
+
+    SELECT @Cols = STRING_AGG(CAST(N'p.' + QUOTENAME(Name) AS NVARCHAR(MAX)), N', ') WITHIN GROUP (ORDER BY Ord)
+    FROM @Lead;
+
+    SELECT @Cols = @Cols + ISNULL(N', ' + STRING_AGG(CAST(N'c.' + QUOTENAME(c.name) AS NVARCHAR(MAX)), N', ')
+                                         WITHIN GROUP (ORDER BY c.column_id), N'')
+    FROM sys.columns c
+    WHERE c.object_id = OBJECT_ID(N'dbo.ClaimLevelData')
+      AND NOT EXISTS (SELECT 1 FROM @Lead ld WHERE ld.Name = c.name COLLATE DATABASE_DEFAULT);
+
+    SET @Sql = N'SELECT ' + @Cols + N'
+                 FROM #C p
+                 JOIN dbo.ClaimLevelData c ON c.RecordId = p.RecordId
+                 ORDER BY p.PeriodDate, p.ClaimID, p.RecordId
+                 OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;';
+    EXEC sys.sp_executesql @Sql, N'@Skip INT, @Take INT', @Skip = @Skip, @Take = @Take;
 END;
 GO
 

@@ -330,14 +330,15 @@ BEGIN
         PeriodDate           DATE NULL,
         PY                   INT NULL,
         PM                   INT NULL,
-        DedupeKey            NVARCHAR(220) COLLATE DATABASE_DEFAULT NULL   -- NULL for a blank AccessionNumber
+        DedupeKey            NVARCHAR(220) COLLATE DATABASE_DEFAULT NULL,  -- NULL for a blank AccessionNumber
+        EsRecordId           INT NULL
     );
 
     IF @IsLis = 0
         INSERT INTO #xC (ClaimID, AccessionNumber, DateofService, FirstBilledDate, PayerName_Raw, Panelname, ClinicName,
                          ReferringProvider, SalesRepname, BillStatus, ClaimStatus, BS, CS,
                          ChargeAmount, InsurancePayment, PatientPayment, InsuranceAdjustments, PatientAdjustments,
-                         InsuranceBalance, PatientBalance, PeriodDate, PY, PM, DedupeKey)
+                         InsuranceBalance, PatientBalance, PeriodDate, PY, PM, DedupeKey, EsRecordId)
         SELECT
             LTRIM(RTRIM(CONVERT(NVARCHAR(255), c.ClaimID))),
             CONVERT(NVARCHAR(200), c.AccessionNumber),
@@ -355,7 +356,8 @@ BEGIN
             ISNULL(TRY_CAST(c.PatientBalance       AS DECIMAL(18,2)), 0),
             p.PeriodDate, YEAR(p.PeriodDate), MONTH(p.PeriodDate),
             NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(200), c.AccessionNumber))), N'')
-                + CASE WHEN @DedupeByMonth = 1 THEN N'|' + CONVERT(NVARCHAR(6), YEAR(p.PeriodDate) * 100 + MONTH(p.PeriodDate)) ELSE N'' END
+                + CASE WHEN @DedupeByMonth = 1 THEN N'|' + CONVERT(NVARCHAR(6), YEAR(p.PeriodDate) * 100 + MONTH(p.PeriodDate)) ELSE N'' END,
+            c.RecordId
         FROM dbo.ClaimLevelData c
         CROSS APPLY (SELECT TRY_CAST(c.DateofService AS DATE) AS Dos, TRY_CAST(c.FirstBilledDate AS DATE) AS Fbd) d
         CROSS APPLY (SELECT CASE WHEN @UseBilledDate = 1 THEN d.Fbd ELSE d.Dos END AS PeriodDate) p
@@ -475,13 +477,14 @@ BEGIN
         PeriodDate               DATE NOT NULL,
         PY                       INT NOT NULL,
         PM                       INT NOT NULL,
-        DedupeKey                NVARCHAR(120) COLLATE DATABASE_DEFAULT NOT NULL
+        DedupeKey                NVARCHAR(120) COLLATE DATABASE_DEFAULT NOT NULL,
+        EsRowLoc                 BINARY(8) NULL   -- LIMSMaster has no unique key
     );
 
     IF @NeedLis = 1
         INSERT INTO #xL (Accession, DateOfCollection, BilledDate, NewStatus, BillCategory, SubStatus, ResultStatus,
                          Panel, PanelName, FacilityName, PhysicianName, SaleRepName, PrimaryInsuranceProvider,
-                         PeriodDate, PY, PM, DedupeKey)
+                         PeriodDate, PY, PM, DedupeKey, EsRowLoc)
         SELECT
             k.Acc, k.Doc, k.Bd,
             CONVERT(NVARCHAR(100), l.NewStatus), CONVERT(NVARCHAR(100), l.BillCategory), CONVERT(NVARCHAR(200), l.SubStatus),
@@ -489,7 +492,8 @@ BEGIN
             CONVERT(NVARCHAR(300), l.Panel), CONVERT(NVARCHAR(300), l.PanelName), CONVERT(NVARCHAR(300), l.FacilityName),
             CONVERT(NVARCHAR(300), l.PhysicianName), CONVERT(NVARCHAR(300), l.SaleRepName), CONVERT(NVARCHAR(300), l.PrimaryInsuranceProvider),
             p.PeriodDate, YEAR(p.PeriodDate), MONTH(p.PeriodDate),
-            k.Acc + CASE WHEN @DedupeByMonth = 1 THEN N'|' + CONVERT(NVARCHAR(6), YEAR(p.PeriodDate) * 100 + MONTH(p.PeriodDate)) ELSE N'' END
+            k.Acc + CASE WHEN @DedupeByMonth = 1 THEN N'|' + CONVERT(NVARCHAR(6), YEAR(p.PeriodDate) * 100 + MONTH(p.PeriodDate)) ELSE N'' END,
+            l.%%physloc%%
         FROM dbo.LIMSMaster l
         CROSS APPLY (
             SELECT LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(100), l.Accession), N'')))          AS Acc,
@@ -695,6 +699,12 @@ BEGIN
 
     SELECT RuleOrder, RuleGroup, RuleText FROM @Rules ORDER BY RuleOrder;
 
+    -- The grid shows the key columns below, then every other column of the source row
+    -- (for one line per accession: the row that line shows).
+    DECLARE @Skip INT = CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END;
+    DECLARE @Take INT = CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END;
+    DECLARE @Extra NVARCHAR(MAX), @Sql NVARCHAR(MAX);
+
     /* ---- LIS rows: one line per accession ------------------------------------ */
     IF @IsLis = 1
     BEGIN
@@ -713,7 +723,8 @@ BEGIN
             FROM k
         )
         SELECT Accession, DateOfCollection, BilledDate, NewStatus, BillCategory, SubStatus, ResultStatus,
-               Panel, PanelName, FacilityName, PhysicianName, SaleRepName, PrimaryInsuranceProvider, Records, PeriodDate
+               Panel, PanelName, FacilityName, PhysicianName, SaleRepName, PrimaryInsuranceProvider, Records, PeriodDate,
+               EsRowLoc
         INTO #xLOut
         FROM r
         WHERE rn = 1;
@@ -724,14 +735,31 @@ BEGIN
                COUNT(*) AS TotalRows, CAST(0 AS DECIMAL(18,2)) AS TotalAmount, CAST(0 AS BIT) AS IsFormula
         FROM #xLOut;
 
-        SELECT Accession, DateOfCollection, BilledDate, NewStatus, BillCategory, SubStatus, ResultStatus,
-               Panel, PanelName, FacilityName, PhysicianName, SaleRepName, PrimaryInsuranceProvider, Records
-        FROM #xLOut
-        ORDER BY PeriodDate, Accession
-        OFFSET CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END ROWS
-        FETCH NEXT CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END ROWS ONLY;
+        SELECT @Extra = STRING_AGG(CAST(N's.' + QUOTENAME(c.name) AS NVARCHAR(MAX)), N', ') WITHIN GROUP (ORDER BY c.column_id)
+        FROM sys.columns c
+        WHERE c.object_id = OBJECT_ID(N'dbo.LIMSMaster')
+          AND c.name NOT IN (N'Accession', N'DateOfCollection', N'BilledDate', N'NewStatus', N'BillCategory', N'SubStatus',
+                             N'ResultStatus', N'Panel', N'PanelName', N'FacilityName', N'PhysicianName', N'SaleRepName',
+                             N'PrimaryInsuranceProvider', N'Records');
+
+        SET @Sql = N'SELECT p.Accession, p.DateOfCollection, p.BilledDate, p.NewStatus, p.BillCategory, p.SubStatus, p.ResultStatus,
+               p.Panel, p.PanelName, p.FacilityName, p.PhysicianName, p.SaleRepName, p.PrimaryInsuranceProvider, p.Records'
+             + ISNULL(N', ' + @Extra, N'') + N'
+        FROM (SELECT * FROM #xLOut ORDER BY PeriodDate, Accession OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY) p
+        LEFT JOIN dbo.LIMSMaster s ON s.%%physloc%% = p.EsRowLoc
+        ORDER BY p.PeriodDate, p.Accession
+        OPTION (HASH JOIN);';
+        EXEC sys.sp_executesql @Sql, N'@Skip INT, @Take INT', @Skip = @Skip, @Take = @Take;
         RETURN;
     END;
+
+    SELECT @Extra = STRING_AGG(CAST(N's.' + QUOTENAME(c.name) AS NVARCHAR(MAX)), N', ') WITHIN GROUP (ORDER BY c.column_id)
+    FROM sys.columns c
+    WHERE c.object_id = OBJECT_ID(N'dbo.ClaimLevelData')
+      AND c.name NOT IN (N'ClaimID', N'AccessionNumber', N'DateofService', N'FirstBilledDate', N'PayerName_Raw', N'Panelname',
+                         N'ClinicName', N'ReferringProvider', N'SalesRepname', N'BillStatus', N'ClaimStatus', N'Amount', N'Claims',
+                         N'ChargeAmount', N'InsurancePayment', N'PatientPayment', N'InsuranceAdjustments', N'PatientAdjustments',
+                         N'InsuranceBalance', N'PatientBalance');
 
     /* ---- $ rows: every matching claim ---------------------------------------- */
     IF @AmountCol IS NOT NULL
@@ -753,13 +781,14 @@ BEGIN
                COUNT(*) AS TotalRows, CAST(ISNULL(SUM(Amount), 0) AS DECIMAL(18,2)) AS TotalAmount, CAST(0 AS BIT) AS IsFormula
         FROM #xCOut;
 
-        SELECT ClaimID, AccessionNumber, DateofService, FirstBilledDate, PayerName_Raw, Panelname, ClinicName,
-               ReferringProvider, SalesRepname, BillStatus, ClaimStatus, Amount,
-               ChargeAmount, InsurancePayment, PatientPayment, InsuranceAdjustments, PatientAdjustments, InsuranceBalance, PatientBalance
-        FROM #xCOut
-        ORDER BY PeriodDate, ClaimID
-        OFFSET CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END ROWS
-        FETCH NEXT CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END ROWS ONLY;
+        SET @Sql = N'SELECT p.ClaimID, p.AccessionNumber, p.DateofService, p.FirstBilledDate, p.PayerName_Raw, p.Panelname, p.ClinicName,
+               p.ReferringProvider, p.SalesRepname, p.BillStatus, p.ClaimStatus, p.Amount,
+               p.ChargeAmount, p.InsurancePayment, p.PatientPayment, p.InsuranceAdjustments, p.PatientAdjustments, p.InsuranceBalance, p.PatientBalance'
+             + ISNULL(N', ' + @Extra, N'') + N'
+        FROM (SELECT * FROM #xCOut ORDER BY PeriodDate, ClaimID OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY) p
+        LEFT JOIN dbo.ClaimLevelData s ON s.RecordId = p.EsRecordId
+        ORDER BY p.PeriodDate, p.ClaimID;';
+        EXEC sys.sp_executesql @Sql, N'@Skip INT, @Take INT', @Skip = @Skip, @Take = @Take;
         RETURN;
     END;
 
@@ -781,7 +810,7 @@ BEGIN
     SELECT ClaimID, AccessionNumber, DateofService, FirstBilledDate, PayerName_Raw, Panelname, ClinicName,
            ReferringProvider, SalesRepname, BillStatus, ClaimStatus, Claims,
            ChargeAmount, InsurancePayment, PatientPayment, InsuranceAdjustments, PatientAdjustments, InsuranceBalance, PatientBalance,
-           PeriodDate
+           PeriodDate, EsRecordId
     INTO #xAcc
     FROM r
     WHERE rn = 1;
@@ -792,13 +821,14 @@ BEGIN
            COUNT(*) AS TotalRows, CAST(0 AS DECIMAL(18,2)) AS TotalAmount, CAST(0 AS BIT) AS IsFormula
     FROM #xAcc;
 
-    SELECT ClaimID, AccessionNumber, DateofService, FirstBilledDate, PayerName_Raw, Panelname, ClinicName,
-           ReferringProvider, SalesRepname, BillStatus, ClaimStatus, Claims,
-           ChargeAmount, InsurancePayment, PatientPayment, InsuranceAdjustments, PatientAdjustments, InsuranceBalance, PatientBalance
-    FROM #xAcc
-    ORDER BY PeriodDate, AccessionNumber
-    OFFSET CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END ROWS
-    FETCH NEXT CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END ROWS ONLY;
+    SET @Sql = N'SELECT p.ClaimID, p.AccessionNumber, p.DateofService, p.FirstBilledDate, p.PayerName_Raw, p.Panelname, p.ClinicName,
+           p.ReferringProvider, p.SalesRepname, p.BillStatus, p.ClaimStatus, p.Claims,
+           p.ChargeAmount, p.InsurancePayment, p.PatientPayment, p.InsuranceAdjustments, p.PatientAdjustments, p.InsuranceBalance, p.PatientBalance'
+         + ISNULL(N', ' + @Extra, N'') + N'
+    FROM (SELECT * FROM #xAcc ORDER BY PeriodDate, AccessionNumber OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY) p
+    LEFT JOIN dbo.ClaimLevelData s ON s.RecordId = p.EsRecordId
+    ORDER BY p.PeriodDate, p.AccessionNumber;';
+    EXEC sys.sp_executesql @Sql, N'@Skip INT, @Take INT', @Skip = @Skip, @Take = @Take;
 END;
 GO
 

@@ -362,6 +362,11 @@ BEGIN
 
     SELECT RuleOrder, RuleGroup, RuleText FROM @Rules ORDER BY RuleOrder;
 
+    -- The grid shows the key columns below, then every other column of the source table.
+    DECLARE @Skip INT = CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END;
+    DECLARE @Take INT = CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END;
+    DECLARE @Extra NVARCHAR(MAX), @Sql NVARCHAR(MAX);
+
     /* ---- LIS rows ----------------------------------------------------------- */
     IF @IsLis = 1
     BEGIN
@@ -373,7 +378,8 @@ BEGIN
             l.NewStatus, l.BillCategory, l.SubStatus,
             l.TestCategory AS Category, l.PanelName, l.ClinicName AS Client, l.DoctorFullName AS ProviderName,
             l.SalesRepName, l.PrimaryInsurance, l.ResultStatus,
-            p.PeriodDate
+            p.PeriodDate,
+            l.%%physloc%% AS EsRowLoc   -- LIMSMaster has no unique key
         INTO #L
         FROM dbo.LIMSMaster l
         CROSS APPLY (
@@ -440,12 +446,22 @@ BEGIN
                COUNT(*) AS TotalRows, CAST(0 AS DECIMAL(18,2)) AS TotalAmount, CAST(0 AS BIT) AS IsFormula
         FROM #L;
 
-        SELECT SampleID, RequisitionID, CollectionDate, BilledDate, NewStatus, BillCategory, SubStatus,
-               Category, PanelName, Client, ProviderName, SalesRepName, PrimaryInsurance, ResultStatus
-        FROM #L
-        ORDER BY PeriodDate, SampleID
-        OFFSET CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END ROWS
-        FETCH NEXT CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END ROWS ONLY;
+        -- Source columns already shown above (some under another name) are not repeated.
+        SELECT @Extra = STRING_AGG(CAST(N's.' + QUOTENAME(c.name) AS NVARCHAR(MAX)), N', ') WITHIN GROUP (ORDER BY c.column_id)
+        FROM sys.columns c
+        WHERE c.object_id = OBJECT_ID(N'dbo.LIMSMaster')
+          AND c.name NOT IN (N'Accession', N'Requisition', N'RequestCollectDate', N'BilledDate', N'NewStatus', N'BillCategory',
+                             N'SubStatus', N'TestCategory', N'PanelName', N'ClinicName', N'DoctorFullName', N'SalesRepName',
+                             N'PrimaryInsurance', N'ResultStatus');
+
+        SET @Sql = N'SELECT p.SampleID, p.RequisitionID, p.CollectionDate, p.BilledDate, p.NewStatus, p.BillCategory, p.SubStatus,
+               p.Category, p.PanelName, p.Client, p.ProviderName, p.SalesRepName, p.PrimaryInsurance, p.ResultStatus'
+             + ISNULL(N', ' + @Extra, N'') + N'
+        FROM (SELECT * FROM #L ORDER BY PeriodDate, SampleID OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY) p
+        JOIN dbo.LIMSMaster s ON s.%%physloc%% = p.EsRowLoc
+        ORDER BY p.PeriodDate, p.SampleID
+        OPTION (HASH JOIN);';
+        EXEC sys.sp_executesql @Sql, N'@Skip INT, @Take INT', @Skip = @Skip, @Take = @Take;
         RETURN;
     END;
 
@@ -489,7 +505,8 @@ BEGIN
                  WHEN N'TotalBalance'         THEN n.TotalBalance
              END
         END AS Amount,
-        n.PeriodDate
+        n.PeriodDate,
+        c.RecordId AS EsRecordId
     INTO #C
     FROM c
     CROSS APPLY (
@@ -554,24 +571,24 @@ BEGIN
            CAST(0 AS BIT) AS IsFormula
     FROM #C;
 
-    IF @AmountCol IS NULL
-        SELECT ClaimID, AccessionNumber, DateofService, FirstBilledDate, PayerName_Raw, Panelname, ClinicName,
-               ReferringProvider, SalesRepname, BilledStatus, ClaimStatus,
-               ChargeAmount, ExpectedPayment, InsurancePayment, TotalPayments, TotalAdjustments,
-               InsuranceAdjustments, PatientBalance, InsuranceBalance, TotalBalance
-        FROM #C
-        ORDER BY PeriodDate, ClaimID
-        OFFSET CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END ROWS
-        FETCH NEXT CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END ROWS ONLY;
-    ELSE
-        SELECT ClaimID, AccessionNumber, DateofService, FirstBilledDate, PayerName_Raw, Panelname, ClinicName,
-               ReferringProvider, SalesRepname, BilledStatus, ClaimStatus, Amount,
-               ChargeAmount, ExpectedPayment, InsurancePayment, TotalPayments, TotalAdjustments,
-               InsuranceAdjustments, PatientBalance, InsuranceBalance, TotalBalance
-        FROM #C
-        ORDER BY PeriodDate, ClaimID
-        OFFSET CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END ROWS
-        FETCH NEXT CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END ROWS ONLY;
+    SELECT @Extra = STRING_AGG(CAST(N's.' + QUOTENAME(c.name) AS NVARCHAR(MAX)), N', ') WITHIN GROUP (ORDER BY c.column_id)
+    FROM sys.columns c
+    WHERE c.object_id = OBJECT_ID(N'dbo.ClaimLevelData')
+      AND c.name NOT IN (N'ClaimID', N'AccessionNumber', N'DateofService', N'FirstBilledDate', N'PayerName_Raw', N'Panelname',
+                         N'ClinicName', N'ReferringProvider', N'SalesRepname', N'BilledStatus', N'ClaimStatus', N'Amount',
+                         N'ChargeAmount', N'ExpectedPayment', N'InsurancePayment', N'TotalPayments', N'TotalAdjustments',
+                         N'InsuranceAdjustments', N'PatientBalance', N'InsuranceBalance', N'TotalBalance');
+
+    SET @Sql = N'SELECT p.ClaimID, p.AccessionNumber, p.DateofService, p.FirstBilledDate, p.PayerName_Raw, p.Panelname, p.ClinicName,
+               p.ReferringProvider, p.SalesRepname, p.BilledStatus, p.ClaimStatus, '
+             + CASE WHEN @AmountCol IS NULL THEN N'' ELSE N'p.Amount, ' END
+             + N'p.ChargeAmount, p.ExpectedPayment, p.InsurancePayment, p.TotalPayments, p.TotalAdjustments,
+               p.InsuranceAdjustments, p.PatientBalance, p.InsuranceBalance, p.TotalBalance'
+             + ISNULL(N', ' + @Extra, N'') + N'
+        FROM (SELECT * FROM #C ORDER BY PeriodDate, ClaimID OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY) p
+        JOIN dbo.ClaimLevelData s ON s.RecordId = p.EsRecordId
+        ORDER BY p.PeriodDate, p.ClaimID;';
+    EXEC sys.sp_executesql @Sql, N'@Skip INT, @Take INT', @Skip = @Skip, @Take = @Take;
 END;
 GO
 

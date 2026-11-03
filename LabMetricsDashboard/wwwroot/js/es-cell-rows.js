@@ -25,9 +25,11 @@
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
         });
     }
-    function money(n) {
+    function money(n, digits) {
         var v = Number(n || 0);
-        var s = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (isNaN(v)) return esc(n);
+        var d = digits == null ? 2 : digits;
+        var s = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
         return v < 0 ? '($' + s + ')' : '$' + s;
     }
     function count(n) { return Number(n || 0).toLocaleString('en-US'); }
@@ -118,10 +120,13 @@
             return;
         }
         var isAmount = !!res.amountColumn;
-        var found = isAmount ? money(res.totalAmount) : count(res.totalRows);
+        // Compare at the precision the grid displays (whole dollars on the summary grid).
+        var gridDecimals = (gridText.match(/\.(\d+)/) || ['', ''])[1].length;
+        var scale = Math.pow(10, gridDecimals);
         var gridNum = gridNumber();
-        var foundNum = isAmount ? Number(res.totalAmount) : Number(res.totalRows);
-        var matches = !isNaN(gridNum) && Math.abs(gridNum - foundNum) < 0.005;
+        var foundNum = isAmount ? Math.round(Number(res.totalAmount) * scale) / scale : Number(res.totalRows);
+        var found = isAmount ? money(foundNum, gridDecimals) : count(res.totalRows);
+        var matches = !isNaN(gridNum) && Math.abs(gridNum - foundNum) < 0.5 / scale;
         box.className = 'esc-summary ' + (matches ? 'esc-summary-ok' : 'esc-summary-warn');
         box.innerHTML =
             '<span><strong>' + count(res.totalRows) + '</strong> ' + (res.sourceTable === 'dbo.LIMSMaster' ? 'samples' : 'claims') + '</span>' +

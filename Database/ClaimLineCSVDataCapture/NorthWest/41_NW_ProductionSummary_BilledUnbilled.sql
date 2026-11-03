@@ -119,10 +119,25 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    -- Column list must match usp_UpdateNW_ClaimLevelData_BilledUnbilled's result
+    -- set exactly. A mismatch is raised inside that procedure; its CATCH then
+    -- cannot ROLLBACK (Msg 3915) because this call is INSERT...EXEC.
     CREATE TABLE #BU
     (
-        LogId INT, TotalRows INT, BilledFirstBilled INT, BilledEmedix INT,
-        UnBilledBlank INT, UnBilledOther INT, RowsUpdated INT, DurationMs INT
+        LogId                         INT,
+        TotalRows                     INT,
+        BilledFirstBilled             INT,
+        BilledEmedix                  INT,
+        UnBilledBlank                 INT,
+        UnBilledOther                 INT,
+        RowsUpdated                   INT,
+        CollectionPostedCheckDate     INT,
+        CollectionPostedChargeEntered INT,
+        DenialPostedCheckDate         INT,
+        DenialPostedLastActivity      INT,
+        DenialPostedFirstBilled       INT,
+        PostedDatesRowsUpdated        INT,
+        DurationMs                    INT
     );
     INSERT INTO #BU
     EXEC dbo.usp_UpdateNW_ClaimLevelData_BilledUnbilled

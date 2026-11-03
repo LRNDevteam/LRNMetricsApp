@@ -27,6 +27,19 @@ a.es-cell-link:focus {
     background: #fff4e5;
 }
 
+/* Small icon next to a Year / Grand Total popup value that opens Insight Drill-Through. */
+a.es-drill-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.15rem; height: 1.15rem; margin-left: .3rem;
+    font-size: .68rem; line-height: 1; vertical-align: middle;
+    color: #b45309; text-decoration: none;
+    background: #fff4e5; border: 1px solid #f3c98b; border-radius: .3rem;
+}
+a.es-drill-icon:hover,
+a.es-drill-icon:focus {
+    color: #fff; background: #b45309; border-color: #b45309; outline: none;
+}
+
 .esc-legend {
     display: flex; flex-wrap: wrap; gap: .3rem 1.4rem;
     padding: .35rem .6rem .45rem;
@@ -38,6 +51,7 @@ a.es-cell-link:focus {
 }
 .esc-legend-rows  { background: #1a56db; }
 .esc-legend-drill { background: #b45309; }
+.esc-legend-icon { margin-right: .35rem; color: #b45309; }
 
 .esc-dialog { max-width: min(1400px, 96vw); }
 .esc-modal { border: 0; border-radius: .9rem; overflow: hidden; }
