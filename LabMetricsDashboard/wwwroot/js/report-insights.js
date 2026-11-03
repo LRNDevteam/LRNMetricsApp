@@ -7,6 +7,10 @@
     if (!root) return;
     // Embedded report (Executive Summary highlights): insights are shown open, without row actions.
     const readOnly = root.dataset.readonly === "1";
+    // A saved snapshot: the week's insights as captured (data-snapshot-url, empty when none were), never the
+    // live Notes API, and nothing can be added, edited or deleted.
+    const snapshot = root.dataset.snapshot === "1";
+    const snapshotUrl = root.dataset.snapshotUrl || "";
 
     function parseWeekRange(text) {
         const out = { start: "", end: "" };
@@ -461,7 +465,9 @@
     }
 
     function emptyHtml() {
-        return `<div class="ri-empty">No insights added for the current week range.</div>`;
+        return snapshot
+            ? `<div class="ri-empty">No insights were saved for this week.</div>`
+            : `<div class="ri-empty">No insights added for the current week range.</div>`;
     }
 
     function weekKey(s) {
@@ -1152,8 +1158,23 @@
     function showPanelLoading() {
         if (el.body) el.body.innerHTML = `<div class="ri-empty"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Loading insights…</div>`;
     }
+    async function bootSnapshot() {
+        if (!snapshotUrl) { el.body.innerHTML = emptyHtml(); return; }
+        try {
+            const data = await getJson(snapshotUrl);
+            templates = data.templates || [];
+            fillTemplates();
+            rows = (data.rows || []).slice();
+            rows.forEach((n, i) => { n.displayNo = i + 1; });
+            renderRows();
+        } catch (e) {
+            showAlert(e.message, "error");
+            el.body.innerHTML = emptyHtml();
+        }
+    }
     async function boot() {
         showPanelLoading();
+        if (snapshot) return bootSnapshot();
         try {
             const avail = await getJson(`${apiBase}/Notes/Available?${q({ lab: ctx.lab })}`);
             if (!avail || !avail.available) {
@@ -1237,7 +1258,8 @@
         if (editing && editing.noteId) openHistory(editing.noteId);
     });
     const extraAdd = document.getElementById("riAddInsightBtn");
-    if (extraAdd) extraAdd.addEventListener("click", async () => {
+    if (extraAdd && snapshot) extraAdd.hidden = true;
+    else if (extraAdd) extraAdd.addEventListener("click", async () => {
         setOpen(true);
         root.scrollIntoView({ behavior: "smooth", block: "start" });
         await ensureLoaded();
@@ -1280,7 +1302,8 @@
         root.classList.toggle("ri-collapsed", !open);
         if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
         if (open) {
-            ensureLoaded().then(() => refreshTemplates().then(() => renderRows()));
+            // A snapshot's templates came with its rows; the live list is not asked for.
+            ensureLoaded().then(() => snapshot ? renderRows() : refreshTemplates().then(() => renderRows()));
         }
     }
     setOpen(readOnly);

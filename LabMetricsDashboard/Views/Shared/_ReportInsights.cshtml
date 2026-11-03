@@ -1,13 +1,17 @@
 @model LabMetricsDashboard.Models.Notes.ReportInsightsPanelModel
 @{
+    // A saved snapshot (ReportSnapshotViewer): the week's insights as captured, read-only - never the live notes.
+    var riSnapshot = LabMetricsDashboard.Services.ReportSnapshots.ReportSnapshotViewContext.From(ViewData);
     // Embedded in the NorthWest Executive Summary highlight tabs: display only.
-    var riReadOnly = string.Equals(Context.Request.Query["embed"], "1", StringComparison.Ordinal);
+    var riReadOnly = riSnapshot is not null || string.Equals(Context.Request.Query["embed"], "1", StringComparison.Ordinal);
 }
 <link rel="stylesheet" href="~/css/report-insights.css" asp-append-version="true" />
 
 <div id="riRoot"
      class="ri-panel ri-collapsed"
      data-readonly="@(riReadOnly ? "1" : null)"
+     data-snapshot="@(riSnapshot is null ? null : "1")"
+     data-snapshot-url="@(riSnapshot?.InsightsUrl)"
      data-base="@Url.Content("~/")"
      data-lab="@Model.Lab"
      data-report-name="@Model.ReportName"
@@ -22,7 +26,14 @@
             </button>
             <div>
                 <h3>Key Insights &amp; Highlights</h3>
-                <p>Saved insights are exported as the first sheet of Download Excel. Dates display as 1-Sep.</p>
+                @if (riSnapshot is not null)
+                {
+                    <p>As saved for @riSnapshot.WeekFolder. Read-only: insights are added in the live report.</p>
+                }
+                else
+                {
+                    <p>Saved insights are exported as the first sheet of Download Excel. Dates display as 1-Sep.</p>
+                }
             </div>
         </div>
         <div class="ri-head-actions">

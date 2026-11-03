@@ -51,12 +51,8 @@ public sealed class ReportPageSnapshot
 
     public object? Model { get; set; }
 
-    internal static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        ReferenceHandler = ReferenceHandler.IgnoreCycles,
-        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
-        Converters = { new JsonStringEnumConverter() }
-    };
+    /// <summary>LabMetricsDashboard's snapshot viewer reads the model back with these same options.</summary>
+    internal static JsonSerializerOptions JsonOptions => LabMetricsDashboard.Services.ReportSnapshots.ReportSnapshotJson.Options;
 
     /// <summary>Writes the gzip JSON to <paramref name="path"/>.</summary>
     public async Task WriteAsync(string path, CancellationToken ct)

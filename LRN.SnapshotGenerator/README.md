@@ -32,6 +32,12 @@ both services write into the same run folder and the same LRNMaster index.
   captured for the run the lab database holds once the request has been quiet for
   `RequestSettleSeconds`, so a burst of edits is one snapshot. The latest capture of the week replaces
   the earlier one.
+- **Key Insights (`LISINSIGHT`, `PRODINSIGHT`, `COLLINSIGHT`):** the LIS, Production and Collection pages'
+  Key Insights & Highlights panel: the loaded week's active insights and the report's templates
+  (`ReportInsightsSnapshotModel`). Users write them in the live report, so they are captured the Denial
+  Insight way: `NotesController` files a request on every insight save or delete, and the panel is
+  captured for the run the lab database holds once it has been quiet. The capture only reads; it never
+  archives earlier weeks' insights as the page does.
 
 ## Re-running a week
 
@@ -67,6 +73,60 @@ model as gzip JSON:
 
 Enums are written as names. A view model property added later is absent in older files and binds as its
 default. Views must treat such a property as "not in that week's report", not as zero.
+
+The JSON settings (`ReportSnapshotJson.Options`, including value tuples such as the Executive Summary's
+`(Year, Month)` columns) and the Denial Insight model live in LabMetricsDashboard, so the writer and the
+viewer cannot drift apart.
+
+## Viewing a snapshot
+
+LRN Metrics, **Master Values > Report Snapshots**, lists the runs by lab. Open a run, then any file opens
+in a new window (`ReportSnapshotViewerController`):
+- **Open report** (the PageModel file): the report's own page views, bound to that week's view model, in
+  snapshot mode. Shown read-only, with no menu, filters or exports, the Key Insights as captured for the
+  week (never the live notes), and a banner with the lab,
+  week, Run ID and capture time. The lazy tabs load from the snapshot, never from the lab database, and
+  any other request from the page is blocked.
+  - The Executive Summary's highlight tabs frame the same run's Production, Collection, LIS and Denial
+    snapshots.
+  - The Denial Summary shows the run's Denial Insight snapshot as its Denial Insight tab. It has no
+    Claim Level tab, because that is live claim data.
+- **Open data** (any Parquet file, report sections and Line Level / Claim Level / LIMS alike): a paged
+  table, 500 rows per page.
+
+Only these view model types are bound (`ReportPageSnapshotReader`); a file naming another type is refused.
+
+The page is for the labs' own users as well as LRN staff: the lab chosen in the header's lab selector, its
+last 6 weeks, the latest run of a re-run week only, scoped to the user's assigned labs. **Master Data
+Snapshots** stays the full log (every run and file, Parquet included) for the snapshot admins.
+
+- **Data columns** (Line Level, Claim Level, LIS Data): the week's master data files as paged tables. These
+  three are open to the lab's own users; the report sections' Parquet files stay admin-only.
+- **Key Insights** (the lightbulb in a LIS / Production / Collection cell): the week's saved insights on their
+  own. The report snapshot itself shows the same insights in its Key Insights panel. Both are read-only: no
+  Add Insight, edit, delete or archive, and the live notes are never read. A week without a capture shows
+  "No insights were saved for this week".
+
+- **Compare** (a row's Compare button, `MasterValues/ReportSnapshotCompare`): two weeks of one report side by
+  side, each the real report page, with the two kept on the same tab and scroll position. **Changes** lists every
+  table of the report with the rows matched by label, the change and %, and a paired bar chart per table.
+  Headline totals show above both views. The tables come from the view models (`ReportSnapshotComparer`), so a
+  column a report gains later is compared too.
+- **Download** (a report's download button): queued as `ReportSnapshot` in the lab's report queue and built
+  by LRN.ReportWorker with the report's own Excel builder from the snapshot. The file appears in the Reports
+  panel like any other download. Summary sheets only: the raw extracts are the master data snapshots, and the
+  Insights sheet, the Executive Summary highlight tabs and the Denial claim-level sheet read today's data, so
+  they are left out.
+
+**LRN.ReportWorker needs** (for downloads): `KeyVault:VaultUri` in its appsettings.json, with the server's managed
+identity granted **Key Vault Secrets User** on that vault and **Storage Blob Data Reader** on the container. The
+worker loads only the `MasterDataSnapshot--*` secrets from it, never the connection strings.
+
+**The web app needs:**
+- the same Key Vault secrets as this service, `MasterDataSnapshot--BlobServiceUri` and
+  `MasterDataSnapshot--ContainerName`, in its own vault;
+- **Storage Blob Data Reader** on the container for its managed identity (read only);
+- the menu item, from `Database/LRN.ReportsApi/DynamicMenu_Setup.sql`.
 
 ## How a snapshot is taken
 
@@ -123,7 +183,10 @@ A failed report is logged and retried on the next poll; it never blocks the othe
     "ProductionSummary": { "Enabled": true, "TrackerReportName": "Production Summary" },
     "CollectionSummary": { "Enabled": true, "TrackerReportName": "Collection Summary" },
     "DenialSummary":     { "Enabled": true, "TrackerReportName": "Denial Report" },
-    "DenialInsight":     { "Enabled": true }   // no tracker name: captured on upload
+    "DenialInsight":     { "Enabled": true },  // no tracker name: captured on upload
+    "LisInsight":        { "Enabled": true },  // Key Insights: captured on each save or delete
+    "ProductionInsight": { "Enabled": true },
+    "CollectionInsight": { "Enabled": true }
   }
 }
 ```

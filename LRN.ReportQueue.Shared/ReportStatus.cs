@@ -70,6 +70,8 @@ public static class ReportTypes
     public const string DenialSummary      = "DenialSummary";
     public const string CptLookup          = "CptLookup";
     public const string PanelLookup        = "PanelLookup";
+    /// <summary>A past week's report (Report Snapshots), built from its snapshot rather than the lab database.</summary>
+    public const string ReportSnapshot     = "ReportSnapshot";
 }
 
 /// <summary>

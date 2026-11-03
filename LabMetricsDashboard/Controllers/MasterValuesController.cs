@@ -434,7 +434,16 @@ public sealed class MasterValuesController : Controller
     private bool CanApprovePolicy => IsLrnAdmin || IsPayerPolicyAdmin;
     private bool CanApproveLab => IsLrnAdmin || IsReportsManager;
     private bool IsApprover => CanApprovePolicy || CanApproveLab;
-    private bool HasAnyMasterAccess => CanViewPolicy || CanViewLab;
+    private bool HasAnyMasterAccess => CanViewSnapshots(User);
+
+    /// <summary>
+    /// Anyone who can view either master (CanViewPolicy or CanViewLab): LRN Admin, Payer Policy Admin,
+    /// Reports Manager, Reports Analyst, ETL. Also the snapshot viewer's rule (ReportSnapshotViewerController).
+    /// </summary>
+    internal static bool CanViewSnapshots(System.Security.Claims.ClaimsPrincipal user) =>
+        LabMetricsDashboard.Filters.MenuAccessFilter.IsFullAdmin(user)
+        || new[] { "Payer Policy Admin", "PayerPolicyAdmin", "Reports Analyst", "ReportsAnalyst",
+                   "Reports Manager", "ReportsManager", "ETL", "Etl" }.Any(user.IsInRole);
 
     [HttpGet]
     public IActionResult ApprovalQueue()
@@ -568,6 +577,69 @@ public sealed class MasterValuesController : Controller
         if (!HasAnyMasterAccess) return Forbid();
         ViewData["PageLabel"] = "Master Data Snapshots";
         return View(new MasterValuesPageViewModel { Title = "Master Data Snapshots", RoleLabel = RoleLabel });
+    }
+
+    // ── Report Snapshots: the clients' historical reports. Each lab's last weeks, the latest run of each
+    // week only, and its report views only (no Parquet sections, no master data - that is Master Data
+    // Snapshots). A report opens in its own window as the report page itself (ReportSnapshotViewer/Report).
+    // Open to the lab's own users (their LabName claims) as well as the snapshot admins; which roles see
+    // the menu item is Admin > Role Menu Mapping.
+
+    private const int ReportSnapshotWeekCount = 6;
+
+    /// <summary>The lab the pages show: the header's lab selector (?lab=, else its cookie), as the report pages resolve it.</summary>
+    private string ResolveSnapshotLab(string? lab, LabSettings labSettings)
+    {
+        var selected = LabSelectionHelper.Resolve(HttpContext, lab, labSettings.Labs.Keys.OrderBy(x => x).ToList());
+        ViewData["SelectedLab"] = selected;
+        return selected;
+    }
+
+    [HttpGet]
+    public IActionResult ReportSnapshots(string? lab, [FromServices] LabSettings labSettings)
+    {
+        ViewData["PageLabel"] = "Report Snapshots";
+        ViewData["SnapshotLab"] = ResolveSnapshotLab(lab, labSettings);
+        return View(new MasterValuesPageViewModel { Title = "Report Snapshots", RoleLabel = RoleLabel });
+    }
+
+    /// <summary>
+    /// Compare two weeks of one report side by side (<paramref name="a"/>, <paramref name="b"/>: the two weeks'
+    /// report snapshot files). The page loads its week lists from <see cref="ReportSnapshotWeeks"/> and the
+    /// comparison from ReportSnapshotViewer/CompareData, which check the lab.
+    /// </summary>
+    [HttpGet]
+    public IActionResult ReportSnapshotCompare(string? lab, string? report, long? a, long? b, [FromServices] LabSettings labSettings)
+    {
+        ViewData["PageLabel"] = "Compare Reports";
+        ViewData["CompareLab"] = ResolveSnapshotLab(lab, labSettings);
+        ViewData["CompareReport"] = report;
+        ViewData["CompareA"] = a;
+        ViewData["CompareB"] = b;
+        return View(new MasterValuesPageViewModel { Title = "Compare Reports", RoleLabel = RoleLabel });
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> ReportSnapshotWeeks(string? lab,
+        [FromServices] IMasterDataSnapshotRepository snapshots, [FromServices] LabConfigOptions labConfig, CancellationToken ct)
+    {
+        try
+        {
+            var weeks = await snapshots.GetReportWeeksAsync(ReportSnapshotWeekCount, ct);
+            // ?lab= is the header's lab (its LabConfig name): a run is that lab's by its LabId, or by its own LabName.
+            var visible = (weeks ?? [])
+                .Where(w => ReportSnapshotViewerController.CanViewLab(User, labConfig, w.LabId, w.LabName))
+                .Where(w => string.IsNullOrWhiteSpace(lab)
+                            || string.Equals(labConfig.GetLabNameById(w.LabId), lab, StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(w.LabName, lab, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            return Json(new { installed = weeks is not null, weeks = ReportSnapshotWeekCount, rows = visible });
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex)
+        {
+            _logger.LogError(ex, "Report snapshots could not be read from LRNMaster.");
+            return StatusCode(500, ErrorPayload("The report snapshots could not be loaded."));
+        }
     }
 
     [HttpGet]

@@ -218,6 +218,32 @@ BEGIN
     PRINT 'Added Master Values > Master Data Snapshots menu item';
 END
 
+/* ── 3c-1b. Master Values: Report Snapshots (idempotent add) ──────────────
+   The same weekly snapshots, each file opening in its own window: a report
+   as its own page (ReportSnapshotViewer), a Parquet file as a table.
+   Role access is seeded from Master Data Snapshots - review it in Admin >
+   Role Menu Mapping afterwards.                                             */
+IF @MasterValuesId IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM dbo.MenuItems
+                   WHERE ParentMenuItemId = @MasterValuesId AND MenuName = N'Report Snapshots' AND IsDeleted = 0)
+BEGIN
+    INSERT dbo.MenuItems (ParentMenuItemId, MenuName, ControllerName, ActionName, IconClass, MenuOrder, IsDisabled, CreatedBy)
+    VALUES (@MasterValuesId, N'Report Snapshots', N'MasterValues', N'ReportSnapshots', N'bi-camera', 8, 0, N'system');
+    PRINT 'Added Master Values > Report Snapshots menu item';
+
+    /* Only when the item is new, so a later Role Menu Mapping change is never undone by a re-run. */
+    INSERT dbo.UserRoleMenu (RoleId, MenuItemId, CreatedBy)
+    SELECT x.RoleId, rs.MenuItemId, N'system'
+    FROM dbo.UserRoleMenu x
+    JOIN dbo.MenuItems mds ON mds.MenuItemId = x.MenuItemId
+         AND mds.ParentMenuItemId = @MasterValuesId AND mds.ControllerName = N'MasterValues'
+         AND mds.ActionName = N'MasterDataSnapshots' AND mds.IsDeleted = 0
+    CROSS JOIN (SELECT MenuItemId FROM dbo.MenuItems
+                WHERE ParentMenuItemId = @MasterValuesId AND ControllerName = N'MasterValues'
+                  AND ActionName = N'ReportSnapshots' AND IsDeleted = 0) rs
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.UserRoleMenu y WHERE y.RoleId = x.RoleId AND y.MenuItemId = rs.MenuItemId);
+END
+
 /* ── 3c-2. Denial Workflow (idempotent add) ───────────────────────────────
    The screen itself is the separate React app; the menu row exists so the
    link can be granted per role in Admin > Role Menu Mapping and so it stops

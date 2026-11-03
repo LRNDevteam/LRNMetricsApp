@@ -25,15 +25,27 @@ public sealed class NotesController : Controller
     private readonly LabSettings _labSettings;
     private readonly INotesRepository _repo;
     private readonly IAnalysisRangeService _analysisRange;
+    private readonly IReportSnapshotRequestQueue _snapshotRequests;
     private readonly ILogger<NotesController> _logger;
 
-    public NotesController(LabSettings labSettings, INotesRepository repo, IAnalysisRangeService analysisRange, ILogger<NotesController> logger)
+    public NotesController(LabSettings labSettings, INotesRepository repo, IAnalysisRangeService analysisRange,
+        IReportSnapshotRequestQueue snapshotRequests, ILogger<NotesController> logger)
     {
         _labSettings = labSettings;
         _repo = repo;
         _analysisRange = analysisRange;
+        _snapshotRequests = snapshotRequests;
         _logger = logger;
     }
+
+    /// <summary>
+    /// Asks LRN.SnapshotGenerator to capture the report's Key Insights for the week (Report Snapshots): the
+    /// insights are the users' own, so a save or delete is their only trigger. Executive Summary has none.
+    /// </summary>
+    private Task RequestInsightSnapshotAsync(string lab, string reportName, string reason) =>
+        Services.ReportSnapshots.ReportSnapshotViewContext.ReportCodes.InsightForNotesReport(reportName) is { } code
+            ? _snapshotRequests.RequestAsync(lab.Trim(), code, CurrentUser, reason, CancellationToken.None)
+            : Task.CompletedTask;
 
     private sealed record CurrentWeek(DateTime Start, DateTime End, string Text, string? RunId);
 
@@ -219,6 +231,8 @@ public sealed class NotesController : Controller
                 if (await _repo.IsWeekLifecycleEnabledAsync(cs, ct))
                     await _repo.SetWeekRangeAsync(cs, req.NoteId!.Value, req.WeekRangeStart!.Value, req.WeekRangeEnd!.Value, req.WeekRangeText, CurrentUser, ct);
             }
+            if (result.Success)
+                await RequestInsightSnapshotAsync(lab!, reportName, req.NoteId is null or <= 0 ? "Insight added" : "Insight edited");
             return Json(result);
         }
         catch (Exception ex) { return Fail(ex, "save note"); }
@@ -254,7 +268,8 @@ public sealed class NotesController : Controller
         }
     }
 
-    private static void TryParseWeekRangeText(
+    /// <summary>A week range text (10.16.2026 - 10.22.2026, ...) as dates; also LRN.SnapshotGenerator's insights capture.</summary>
+    public static void TryParseWeekRangeText(
         string? text, out DateTime? start, out DateTime? end)
     {
         start = null;
@@ -310,7 +325,11 @@ public sealed class NotesController : Controller
         if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
         try
         {
+            // Read first: the report it belonged to decides which insights snapshot to refresh.
+            var note = await _repo.GetByIdAsync(cs, id, ct);
             var result = await _repo.DeleteAsync(cs, id, CurrentUser, ct);
+            if (result.Success && note is not null)
+                await RequestInsightSnapshotAsync(lab!, note.ReportName, "Insight deleted");
             return Json(result);
         }
         catch (Exception ex) { return Fail(ex, "delete note"); }

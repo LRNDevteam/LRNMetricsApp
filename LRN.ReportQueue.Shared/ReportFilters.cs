@@ -713,6 +713,46 @@ public sealed record DenialSummaryReportFilters(
 }
 
 /// <summary>
+/// A historical report download (ReportTypes.ReportSnapshot): one report snapshot of Master Values &gt;
+/// Report Snapshots, written as the report's own Excel workbook from the view model it was captured with.
+/// </summary>
+/// <remarks>
+/// The web app resolves everything from the LRNMaster index when the job is queued, after checking the
+/// requester may see the lab - the worker only reads the snapshot container, never LRNMaster. Paths are
+/// the index's own; nothing here comes from the browser.
+/// </remarks>
+public sealed record ReportSnapshotFilters(
+    long    SnapshotFileId   = 0,
+    // EXECSUMMARY | LISSUMMARY | PRODSUMMARY | COLLSUMMARY | DENIALSUMMARY
+    string? ReportCode       = null,
+    // The report's display copy (PageModel) in the snapshot container.
+    string? BlobPath         = null,
+    // Denial Summary only: the same run's Denial Insight upload, for the workbook's Denial Insight sheet.
+    string? InsightBlobPath  = null,
+    string? RunId            = null,
+    string? WeekFolder       = null)
+{
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    public string ToJson() => JsonSerializer.Serialize(this, JsonOpts);
+
+    public static ReportSnapshotFilters FromJson(string? json) =>
+        string.IsNullOrWhiteSpace(json)
+            ? new ReportSnapshotFilters()
+            : JsonSerializer.Deserialize<ReportSnapshotFilters>(json, JsonOpts)
+              ?? new ReportSnapshotFilters();
+
+    public List<(string Label, string? Value)> ToActiveFilterList() =>
+    [
+        ("Snapshot week", WeekFolder),
+        ("Run ID", RunId),
+    ];
+}
+
+/// <summary>
 /// Filter snapshot for a Coding Summary Excel export. The page currently exports
 /// the full lab dataset (no server-side year/week/panel filter); this contract
 /// exists so queue validation stays consistent with other report types.

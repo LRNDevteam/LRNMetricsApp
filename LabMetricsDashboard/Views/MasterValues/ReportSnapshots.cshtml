@@ -1,0 +1,244 @@
+@model LabMetricsDashboard.Models.MasterValuesPageViewModel
+@{
+    ViewData["Title"] = "Report Snapshots";
+}
+<link rel="stylesheet" href="~/css/report-snapshots.css" asp-append-version="true" />
+
+<div class="rs-shell">
+    <div class="rs-head">
+        <div>
+            <h2><i class="bi bi-clock-history" aria-hidden="true"></i> Report Snapshots</h2>
+            <p>Each week's reports exactly as they were published, with their Key Insights (<i class="bi bi-lightbulb" aria-hidden="true"></i>) and the week's data. Open one in its own window, download it, or compare two weeks.</p>
+        </div>
+        <div class="rs-head-actions">
+            <button type="button" class="rs-btn" data-bs-toggle="offcanvas" data-bs-target="#rsFilters" aria-controls="rsFilters">
+                <i class="bi bi-funnel" aria-hidden="true"></i> Filters <span class="rs-count" id="filterCount" style="display:none"></span>
+            </button>
+            <button type="button" class="rs-btn" id="refreshBtn"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Refresh</button>
+        </div>
+    </div>
+
+    <div class="rs-chips" id="chips" style="display:none"></div>
+    <div class="rs-banner" id="banner" style="display:none" role="status"></div>
+    <div id="labs"><div class="rs-card rs-empty"><span class="spinner-border spinner-border-sm"></span> Loading report snapshots…</div></div>
+</div>
+
+@* The filters slide over the page rather than taking room above the tables. *@
+<div class="offcanvas offcanvas-end rs-filter-panel" tabindex="-1" id="rsFilters" aria-labelledby="rsFiltersTitle">
+    <div class="offcanvas-header">
+        <h5 class="offcanvas-title" id="rsFiltersTitle"><i class="bi bi-funnel" aria-hidden="true"></i> Filters</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body">
+        @* The lab is the header's lab selector, as on every report page. *@
+        <div class="rs-field">
+            <label for="fWeeks">Weeks</label>
+            <select class="form-select" id="fWeeks">
+                <option value="6">Last 6 weeks</option>
+                <option value="4">Last 4 weeks</option>
+                <option value="2">Last 2 weeks</option>
+                <option value="1">Latest week only</option>
+            </select>
+        </div>
+        <div class="rs-field">
+            <span class="rs-field-label">Columns</span>
+            <div class="rs-checks" id="fReports"></div>
+        </div>
+        <div class="rs-field">
+            <label for="fSearch">Week or Run ID</label>
+            <input type="search" class="form-control" id="fSearch" placeholder="e.g. 10.16.2026" autocomplete="off" />
+        </div>
+    </div>
+    <div class="offcanvas-footer">
+        <button type="button" class="rs-btn" id="resetBtn">Reset</button>
+        <button type="button" class="rs-btn primary" data-bs-dismiss="offcanvas">Done</button>
+    </div>
+</div>
+
+<form id="rsAf" hidden>@Html.AntiForgeryToken()</form>
+
+@section Scripts {
+<script nonce='@Context.Items["CspNonce"]'>
+(function(){
+const urls={
+  weeks:'@Url.Action("ReportSnapshotWeeks","MasterValues", new { lab = ViewData["SnapshotLab"] as string })',
+  report:'@Url.Action("Report","ReportSnapshotViewer")',
+  data:'@Url.Action("Data","ReportSnapshotViewer")',
+  queue:'@Url.Action("QueueDownload","ReportSnapshotViewer")',
+  compare:'@Url.Action("ReportSnapshotCompare","MasterValues")'
+};
+// The page reports, in menu order. The Denial Insight tab belongs to the Denial Summary report view;
+// its own file opens the same page, so it stands in only when a week has no Denial Summary. `insight` is the
+// report's Key Insights snapshot, which opens on its own. Then the week's data, opened as a table.
+const REPORTS=[
+  {code:'EXECSUMMARY',label:'Executive Summary',icon:'bi-clipboard-data'},
+  {code:'LISSUMMARY',label:'LIS Summary',icon:'bi-eyedropper',insight:'LISINSIGHT'},
+  {code:'PRODSUMMARY',label:'Production Summary',icon:'bi-bar-chart-line',insight:'PRODINSIGHT'},
+  {code:'COLLSUMMARY',label:'Collection Summary',icon:'bi-cash-coin',insight:'COLLINSIGHT'},
+  {code:'DENIALSUMMARY',label:'Denial Summary',icon:'bi-shield-exclamation',fallback:'DENIALINSIGHT'},
+  {code:'LINELEVEL',label:'Line Level',icon:'bi-list-columns',data:true},
+  {code:'CLAIMLEVEL',label:'Claim Level',icon:'bi-file-earmark-text',data:true},
+  {code:'LIMS',label:'LIS Data',icon:'bi-database',data:true}
+];
+const DATA_CODES=REPORTS.filter(r=>r.data).map(r=>r.code);
+// The header's lab (LabConfig name): the weeks come back for it alone, and Compare opens on it.
+const LAB=@Json.Serialize(ViewData["SnapshotLab"] as string ?? "");
+const DEFAULTS={v:2,weeks:6,reports:REPORTS.map(r=>r.code),search:''};
+let rows=[],state=load()||{...DEFAULTS};
+const el=id=>document.getElementById(id);
+function esc(v){return (v??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function banner(msg,error){const b=el('banner');b.textContent=msg||'';b.className='rs-banner'+(error?' error':'');b.style.display=msg?'':'none';}
+// SQL datetimes arrive without an offset and are UTC.
+function utc(v){if(!v)return null;const s=String(v);const d=new Date(/[zZ]|[+-]\d\d:\d\d$/.test(s)?s:s+'Z');return isNaN(d)?null:d;}
+function day(v){const d=utc(v);return d?d.toLocaleDateString(undefined,{timeZone:'UTC'}):'—';}
+// The filters are a per-viewer convenience; the page works the same without them saved.
+function load(){try{
+  const s=JSON.parse(localStorage.getItem('rsFilters')||'null');if(!s||!Array.isArray(s.reports))return null;
+  delete s.lab;
+  // Saved before the data columns existed: they start shown.
+  if(!s.v){s.reports=[...new Set([...s.reports,...DATA_CODES])];s.v=2;}
+  return {...DEFAULTS,...s};
+}catch{return null;}}
+function save(){try{localStorage.setItem('rsFilters',JSON.stringify(state));}catch{}}
+
+function fileFor(week,report){
+  const find=c=>(week.reports||[]).find(r=>r.reportCode===c);
+  return find(report.code)||(report.fallback?find(report.fallback):null);
+}
+function compareUrl(lab,list,i,report){
+  const b=fileFor(list[i],report),older=list[i+1]&&fileFor(list[i+1],report);
+  const q=new URLSearchParams({lab:LAB||lab,report:report.code});
+  if(older)q.set('a',older.snapshotFileId);
+  if(b)q.set('b',b.snapshotFileId);
+  return urls.compare+'?'+q;
+}
+// The report a row's Compare opens on: the first one both weeks have, else the first this week has.
+function compareReport(list,i,cols){
+  cols=cols.filter(c=>!c.data);
+  return cols.find(c=>fileFor(list[i],c)&&list[i+1]&&fileFor(list[i+1],c))||cols.find(c=>fileFor(list[i],c));
+}
+function cellHtml(w,c){
+  const f=fileFor(w,c);
+  if(!f)return `<td class="c${c.data?' rs-col-data':''}"><span class="rs-none" title="Not captured for this week">—</span></td>`;
+  if(c.data)
+    return `<td class="c rs-col-data"><span class="rs-cell">`+
+      `<button type="button" data-window="${esc(urls.data+'/'+encodeURIComponent(f.snapshotFileId))}" title="View the ${esc(c.label)} data of ${esc(w.weekFolder)} in a new window"><i class="bi bi-table" aria-hidden="true"></i> View</button>`+
+      `</span><span class="rs-rows">${Number(f.rowCount||0).toLocaleString()} rows</span></td>`;
+  const ins=c.insight?(w.reports||[]).find(r=>r.reportCode===c.insight):null;
+  return `<td class="c"><span class="rs-cell">`+
+    `<button type="button" data-window="${esc(urls.report+'/'+encodeURIComponent(f.snapshotFileId))}" title="Open the ${esc(c.label)} of ${esc(w.weekFolder)} in a new window"><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> Open</button>`+
+    (ins?`<button type="button" class="rs-ins" data-window="${esc(urls.report+'/'+encodeURIComponent(ins.snapshotFileId))}" aria-label="Key Insights of the ${esc(c.label)} of ${esc(w.weekFolder)}" title="Key Insights only, as saved for this week"><i class="bi bi-lightbulb" aria-hidden="true"></i></button>`:'')+
+    `<button type="button" data-download="${f.snapshotFileId}" aria-label="Download the ${esc(c.label)} of ${esc(w.weekFolder)}" title="Download as Excel (added to your Reports queue)"><i class="bi bi-download" aria-hidden="true"></i></button>`+
+    `</span></td>`;
+}
+function labTable(lab,list){
+  const cols=REPORTS.filter(rep=>state.reports.includes(rep.code)&&list.some(w=>fileFor(w,rep)));
+  if(!cols.length)return '';
+  const head='<tr><th>Week</th><th>Data as of</th>'+cols.map(c=>`<th class="c${c.data?' rs-col-data':''}"><i class="bi ${c.icon} me-1" aria-hidden="true"></i>${esc(c.label)}</th>`).join('')+'<th class="c">Compare</th></tr>';
+  const body=list.map((w,i)=>{
+    const cmp=compareReport(list,i,cols);
+    return `<tr><td><span class="rs-week">${esc(w.weekFolder)}</span>${i===0&&!state.search?'<span class="rs-latest">LATEST</span>':''}`+
+      `<span class="rs-sub">${esc(w.runId)}</span></td><td>${esc(day(w.snapshotDate))}</td>`+
+      cols.map(c=>cellHtml(w,c)).join('')+
+      `<td class="c">${cmp?`<a class="rs-act" href="${esc(compareUrl(lab,list,i,cmp))}" title="Compare this week with the week before"><i class="bi bi-layout-split" aria-hidden="true"></i> Compare</a>`:''}</td></tr>`;
+  }).join('');
+  const latest=compareReport(list,0,cols);
+  return `<section class="rs-card mb-3"><div class="rs-card-head"><div class="rs-card-title"><h3>${esc(lab)}</h3>`+
+    `<small>${list.length} week${list.length===1?'':'s'}</small></div>`+
+    (list.length>1&&latest?`<a class="rs-btn" href="${esc(compareUrl(lab,list,0,latest))}"><i class="bi bi-layout-split" aria-hidden="true"></i> Compare latest two weeks</a>`:'')+
+    `</div><div class="rs-scroll"><table class="rs-table"><thead>${head}</thead><tbody>${body}</tbody></table></div></section>`;
+}
+function render(){
+  const term=state.search.trim().toLowerCase();
+  const byLab=new Map();
+  for(const w of rows){
+    if(!byLab.has(w.labName))byLab.set(w.labName,[]);
+    byLab.get(w.labName).push(w);   // newest week first, from the server
+  }
+  const html=[...byLab.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([lab,list])=>{
+    list=list.slice(0,state.weeks);
+    if(term)list=list.filter(w=>(w.weekFolder+' '+w.runId).toLowerCase().includes(term));
+    return list.length?labTable(lab,list):'';
+  }).join('');
+  el('labs').innerHTML=html||(rows.length
+    ?'<div class="rs-card rs-empty"><i class="bi bi-funnel" aria-hidden="true"></i>No snapshots match these filters.</div>'
+    :`<div class="rs-card rs-empty"><i class="bi bi-camera" aria-hidden="true"></i>No report snapshots are available${LAB?' for '+esc(LAB):''} yet.</div>`);
+  renderChips();
+}
+function renderChips(){
+  const chips=[];
+  if(state.weeks!==DEFAULTS.weeks)chips.push(['weeks',state.weeks===1?'Latest week only':'Last '+state.weeks+' weeks']);
+  if(state.reports.length!==REPORTS.length)chips.push(['reports','Columns: '+REPORTS.filter(r=>state.reports.includes(r.code)).map(r=>r.label).join(', ')]);
+  if(state.search)chips.push(['search','Search: '+state.search]);
+  el('chips').innerHTML=chips.map(([k,t])=>`<span class="rs-chip">${esc(t)}<button type="button" data-clear="${k}" aria-label="Remove filter ${esc(t)}"><i class="bi bi-x-lg" aria-hidden="true"></i></button></span>`).join('')+
+    (chips.length>1?'<button type="button" class="rs-chip-clear" data-clear="all">Clear all</button>':'');
+  el('chips').style.display=chips.length?'':'none';
+  el('filterCount').textContent=chips.length;el('filterCount').style.display=chips.length?'':'none';
+}
+function fillControls(){
+  el('fWeeks').value=String(state.weeks);
+  const check=r=>`<div class="form-check"><input class="form-check-input" type="checkbox" id="rep_${r.code}" value="${r.code}"${state.reports.includes(r.code)?' checked':''}><label class="form-check-label" for="rep_${r.code}">${esc(r.label)}</label></div>`;
+  el('fReports').innerHTML='<div class="rs-check-group">Reports</div>'+REPORTS.filter(r=>!r.data).map(check).join('')+
+    '<div class="rs-check-group">Data</div>'+REPORTS.filter(r=>r.data).map(check).join('');
+  el('fSearch').value=state.search;
+}
+async function fetchRows(){
+  banner('');
+  try{
+    const r=await fetch(urls.weeks);
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.message||'Unable to load the report snapshots.');
+    rows=d.rows||[];
+    fillControls();render();
+  }catch(e){
+    rows=[];render();
+    banner(e.message||'Unable to load the report snapshots.',true);
+  }
+}
+// Each report opens in a window of its own, sized like a report page.
+function openWindow(url){
+  const w=Math.min(1600,Math.round(screen.availWidth*.9)),h=Math.min(1000,Math.round(screen.availHeight*.9));
+  const left=Math.round((screen.availWidth-w)/2),top=Math.round((screen.availHeight-h)/2);
+  window.open(url,'_blank',`popup=yes,width=${w},height=${h},left=${left},top=${top},noopener`);
+}
+// The workbook is built by the report worker; it lands in the Reports panel (top right) like any download.
+async function queueDownload(btn){
+  btn.disabled=true;
+  const body=new FormData();
+  body.append('__RequestVerificationToken',document.querySelector('#rsAf input[name="__RequestVerificationToken"]').value);
+  try{
+    const r=await fetch(urls.queue+'/'+encodeURIComponent(btn.dataset.download),{method:'POST',body});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok){
+      if(window.lrnShowReportAlert)window.lrnShowReportAlert('success',{title:'Historical report queued'});
+      if(window.lrnReportsBadgeRefresh)window.lrnReportsBadgeRefresh();
+    }else if(r.status===409){
+      if(window.lrnShowReportAlert)window.lrnShowReportAlert('info',{message:d.message});
+    }else{
+      if(window.lrnShowReportAlert)window.lrnShowReportAlert('error',{message:d.message||'The download could not be queued.'});
+      else banner(d.message||'The download could not be queued.',true);
+    }
+  }catch{
+    if(window.lrnShowReportAlert)window.lrnShowReportAlert('error');
+  }finally{setTimeout(()=>{btn.disabled=false;},1500);}
+}
+
+el('labs').addEventListener('click',e=>{
+  const w=e.target.closest('[data-window]');if(w){openWindow(w.dataset.window);return;}
+  const d=e.target.closest('[data-download]');if(d&&!d.disabled)queueDownload(d);
+});
+el('chips').addEventListener('click',e=>{
+  const b=e.target.closest('[data-clear]');if(!b)return;
+  const k=b.dataset.clear;
+  if(k==='all')state={...DEFAULTS};else state[k]=DEFAULTS[k];
+  save();fillControls();render();
+});
+el('fWeeks').addEventListener('change',()=>{state.weeks=Number(el('fWeeks').value)||6;save();render();});
+el('fReports').addEventListener('change',()=>{state.reports=[...el('fReports').querySelectorAll('input:checked')].map(i=>i.value);save();render();});
+el('fSearch').addEventListener('input',()=>{state.search=el('fSearch').value;save();render();});
+el('resetBtn').onclick=()=>{state={...DEFAULTS,reports:[...DEFAULTS.reports]};save();fillControls();render();};
+el('refreshBtn').onclick=()=>fetchRows();
+fetchRows();
+})();
+</script>
+}

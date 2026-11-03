@@ -25,8 +25,8 @@ GO
 
 GO
 
-DECLARE @LabId    INT           = 29,          -- <<< Cove
-        @LabName  VARCHAR(120)  = 'TexasDiagnostic',     -- <<< must match dbo.LRN_Run_Log.LabName
+DECLARE @LabId    INT           = 27,          -- <<< Cove
+        @LabName  VARCHAR(120)  = 'WellHealth',     -- <<< must match dbo.LRN_Run_Log.LabName
         @WhatIf   BIT           = 0;          -- <<< 1 = preview only, 0 = actually delete
 
 ------------------------------------------------------------------------------------------------

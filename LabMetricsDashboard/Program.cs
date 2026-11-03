@@ -659,6 +659,11 @@ builder.Services.AddScoped<IFeeScheduleRepository, SqlFeeScheduleRepository>();
 builder.Services.AddScoped<IDenialDatabaseRerunRepository, SqlDenialDatabaseRerunRepository>();
 // Master Values > Master Data Snapshots: the weekly Parquet snapshot index (LRNMaster.dbo.ReportSnapshotRun / File).
 builder.Services.AddScoped<IMasterDataSnapshotRepository, SqlMasterDataSnapshotRepository>();
+// Master Values > Report Snapshots: opens a snapshot file (MasterDataSnapshot:* storage settings, read-only).
+builder.Services.AddSingleton<LabMetricsDashboard.Services.ReportSnapshots.IReportSnapshotFileStore,
+    LabMetricsDashboard.Services.ReportSnapshots.ReportSnapshotFileStore>();
+builder.Services.AddSingleton<LabMetricsDashboard.Services.ReportSnapshots.IReportPageSnapshotReader,
+    LabMetricsDashboard.Services.ReportSnapshots.ReportPageSnapshotReader>();
 // Denial Insight upload / edit -> LRN.SnapshotGenerator snapshots the tab (LRNMaster.dbo.ReportSnapshotRequest).
 builder.Services.AddSingleton<IReportSnapshotRequestQueue, SqlReportSnapshotRequestQueue>();
 
@@ -802,6 +807,9 @@ builder.Services.AddControllersWithViews(options =>
         .Build();
     options.Filters.Add(new AuthorizeFilter(policy));
 });
+// The snapshot viewer renders the report pages' views, whose partials are named relative to their folders.
+builder.Services.Configure<Microsoft.AspNetCore.Mvc.Razor.RazorViewEngineOptions>(o =>
+    o.ViewLocationExpanders.Add(new LabMetricsDashboard.Services.ReportSnapshots.ReportSnapshotViewLocationExpander()));
 
 // The same admin set MenuAccessFilter and login use (Admin, Super Admin, LRN Admin, ignoring case and
 // spaces). [Authorize(Roles = "Admin")] matched the literal "Admin" only, so a Super Admin opening

@@ -8,6 +8,8 @@
     // Framed in Executive Summary > Denial Highlights: only the Monthly / Weekly grids are shown,
     // without the tiles or the Fullscreen buttons.
     var dcrEmbed = string.Equals(Context.Request.Query["embed"], "1", StringComparison.Ordinal);
+    // A saved snapshot (ReportSnapshotViewer): no Claim Level tab - that is the lab's live claim data.
+    var dcrSnapshot = LabMetricsDashboard.Services.ReportSnapshots.ReportSnapshotViewContext.From(ViewData);
 }
 
 @* The layout has no Styles section, so these go in the body the same way the original Denial
@@ -181,6 +183,8 @@
                 }
             </button>
         </li>
+        @if (dcrSnapshot is null)
+        {
         <li class="nav-item" role="presentation">
             <button class="nav-link @(tab == "claims" ? "active" : "")" data-bs-toggle="pill"
                     data-bs-target="#dcr-claims" type="button" data-tab-key="claims">
@@ -191,6 +195,7 @@
                 }
             </button>
         </li>
+        }
     </ul>
 
     <div class="tab-content">
@@ -311,9 +316,12 @@
             @await Html.PartialAsync("_DenialInsightPanel", Model.Insight)
         </div>
 
+        @if (dcrSnapshot is null)
+        {
         <div class="tab-pane fade @(tab == "claims" ? "show active" : "")" id="dcr-claims">
             @await Html.PartialAsync("_DenialClaimLevelTab", Model.Claims)
         </div>
+        }
     </div>
 </div>
 

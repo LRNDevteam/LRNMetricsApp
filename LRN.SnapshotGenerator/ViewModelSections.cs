@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Data;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 
 namespace LRN.SnapshotGenerator;
 
@@ -46,9 +47,10 @@ public static class ViewModelSections
     /// Members of <paramref name="obj"/>: scalars into <paramref name="row"/> (row <paramref name="rowIndex"/>),
     /// collections into their own sections.
     /// </summary>
-    private static void Walk(object obj, string prefix, RowSet row, int rowIndex, List<SnapshotSection> sections, int depth)
+    private static void Walk(object obj, string prefix, RowSet row, int rowIndex, List<SnapshotSection> sections, int depth,
+        IList<string?>? objTupleNames = null)
     {
-        foreach (var (name, value, type) in Members(obj))
+        foreach (var (name, value, type, tupleNames) in Members(obj, objTupleNames))
         {
             var path = prefix.Length == 0 ? name : $"{prefix}.{name}";
 
@@ -73,31 +75,32 @@ public static class ViewModelSections
                 if (ElementIsScalar(type, items))
                     sections.Add(new SnapshotSection(path, ValueListTable(items)));
                 else
-                    sections.Add(new SnapshotSection(path, RowsTable(items, ElementType(type), path, sections, depth)));
+                    sections.Add(new SnapshotSection(path, RowsTable(items, ElementType(type), path, sections, depth, tupleNames)));
                 continue;
             }
             // A nested object (e.g. a result record): its members, prefixed.
-            Walk(value, path, row, rowIndex, sections, depth + 1);
+            Walk(value, path, row, rowIndex, sections, depth + 1, tupleNames);
         }
     }
 
     // ── a list of rows ────────────────────────────────────────────────────────
 
-    private static DataTable RowsTable(List<object?> items, Type? elementType, string sectionName, List<SnapshotSection> sections, int depth)
+    private static DataTable RowsTable(List<object?> items, Type? elementType, string sectionName, List<SnapshotSection> sections, int depth,
+        IList<string?>? tupleNames = null)
     {
         var set = new RowSet(sectionName);
         var children = new Dictionary<string, RowSet>(StringComparer.Ordinal);
         set.EnsureColumn("RowNumber", typeof(int));
         // No rows this week: the section still records its columns, so "empty" is distinguishable from "missing".
         if (items.Count == 0)
-            AddScalarColumns(set, elementType);
+            AddScalarColumns(set, elementType, tupleNames);
 
         for (int i = 0; i < items.Count; i++)
         {
             var r = set.NewRow();
             set.Set(r, "RowNumber", i + 1, typeof(int));
             if (items[i] is { } item)
-                FlattenRow(item, "", set, r, sectionName, i + 1, children, sections, depth + 1);
+                FlattenRow(item, "", set, r, sectionName, i + 1, children, sections, depth + 1, tupleNames);
         }
 
         foreach (var (name, child) in children)
@@ -129,7 +132,7 @@ public static class ViewModelSections
 
     /// <summary>One row object into columns of <paramref name="set"/>; its own row lists into child sections.</summary>
     private static void FlattenRow(object item, string prefix, RowSet set, int rowIndex, string sectionName, int rowNumber,
-        Dictionary<string, RowSet> children, List<SnapshotSection> sections, int depth)
+        Dictionary<string, RowSet> children, List<SnapshotSection> sections, int depth, IList<string?>? tupleNames = null)
     {
         if (IsScalar(item.GetType()))
         {
@@ -137,7 +140,7 @@ public static class ViewModelSections
             return;
         }
 
-        foreach (var (name, value, type) in Members(item))
+        foreach (var (name, value, type, memberTupleNames) in Members(item, tupleNames))
         {
             var path = prefix.Length == 0 ? name : $"{prefix}.{name}";
 
@@ -180,7 +183,7 @@ public static class ViewModelSections
                     children[childName] = child = new RowSet(childName);
                     child.EnsureColumn("ParentRow", typeof(int));
                     child.EnsureColumn("RowNumber", typeof(int));
-                    AddScalarColumns(child, ElementType(type));
+                    AddScalarColumns(child, ElementType(type), memberTupleNames);
                 }
                 for (int i = 0; i < items.Count; i++)
                 {
@@ -188,11 +191,11 @@ public static class ViewModelSections
                     child.Set(r, "ParentRow", rowNumber, typeof(int));
                     child.Set(r, "RowNumber", i + 1, typeof(int));
                     if (items[i] is { } c)
-                        FlattenRow(c, "", child, r, childName, i + 1, children, sections, depth + 1);
+                        FlattenRow(c, "", child, r, childName, i + 1, children, sections, depth + 1, memberTupleNames);
                 }
                 continue;
             }
-            FlattenRow(value, path, set, rowIndex, sectionName, rowNumber, children, sections, depth + 1);
+            FlattenRow(value, path, set, rowIndex, sectionName, rowNumber, children, sections, depth + 1, memberTupleNames);
         }
     }
 
@@ -228,8 +231,23 @@ public static class ViewModelSections
 
     // ── reflection helpers ────────────────────────────────────────────────────
 
-    private static IEnumerable<(string Name, object? Value, Type Type)> Members(object obj)
+    /// <summary>
+    /// Public properties, or a value tuple's elements (fields, so not properties). <c>TupleNames</c> are the
+    /// declared element names of a tuple-typed property (<c>List&lt;(int Year, int Month)&gt;</c>), for its rows.
+    /// </summary>
+    private static IEnumerable<(string Name, object? Value, Type Type, IList<string?>? TupleNames)> Members(object obj, IList<string?>? tupleNames = null)
     {
+        if (obj is ITuple tuple && IsValueTuple(obj.GetType()))
+        {
+            var args = obj.GetType().GetGenericArguments();
+            for (int i = 0; i < tuple.Length && i < args.Length; i++)
+            {
+                var name = tupleNames is not null && i < tupleNames.Count && !string.IsNullOrEmpty(tupleNames[i]) ? tupleNames[i]! : $"Item{i + 1}";
+                yield return (name, tuple[i], args[i], null);
+            }
+            yield break;
+        }
+
         foreach (var p in obj.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
             if (!p.CanRead || p.GetIndexParameters().Length > 0) continue;
@@ -239,9 +257,12 @@ public static class ViewModelSections
             object? value;
             try { value = p.GetValue(obj); }
             catch { continue; }   // a computed property that throws on this data: not part of the snapshot
-            yield return (p.Name, value, p.PropertyType);
+            yield return (p.Name, value, p.PropertyType, p.GetCustomAttribute<TupleElementNamesAttribute>()?.TransformNames);
         }
     }
+
+    private static bool IsValueTuple(Type type) =>
+        type.IsValueType && type.IsGenericType && type.FullName?.StartsWith("System.ValueTuple`", StringComparison.Ordinal) == true;
 
     private static bool IsScalar(Type type)
     {
@@ -259,9 +280,17 @@ public static class ViewModelSections
                 ?.GetGenericArguments()[0];
 
     /// <summary>The declared scalar members of a row type as columns (for a section with no rows).</summary>
-    private static void AddScalarColumns(RowSet set, Type? rowType)
+    private static void AddScalarColumns(RowSet set, Type? rowType, IList<string?>? tupleNames = null)
     {
         if (rowType is null || rowType == typeof(object) || IsScalar(rowType)) return;
+        if (IsValueTuple(rowType))
+        {
+            var args = rowType.GetGenericArguments();
+            for (int i = 0; i < args.Length; i++)
+                if (IsScalar(args[i]))
+                    set.EnsureColumn(tupleNames is not null && i < tupleNames.Count && !string.IsNullOrEmpty(tupleNames[i]) ? tupleNames[i]! : $"Item{i + 1}", args[i]);
+            return;
+        }
         foreach (var p in rowType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
             if (!p.CanRead || p.GetIndexParameters().Length > 0 || !IsScalar(p.PropertyType)) continue;

@@ -1,0 +1,9 @@
+@model LabMetricsDashboard.Models.Notes.ReportInsightsPanelModel
+@{
+    // A report's Key Insights on their own, as saved for the week: the report page's panel in its snapshot
+    // (read-only) mode, opened. The rows come from ReportSnapshotViewer/InsightRows, never the live notes.
+    ViewData["Title"] = LabMetricsDashboard.Services.ReportSnapshots.ReportSnapshotViewContext.From(ViewData)?.ReportTitle ?? "Key Insights";
+}
+<div class="pt-2">
+    @await Html.PartialAsync("~/Views/Shared/_ReportInsights.cshtml", Model)
+</div>

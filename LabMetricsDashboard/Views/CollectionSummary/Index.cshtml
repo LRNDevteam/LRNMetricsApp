@@ -1,6 +1,8 @@
 @model LabMetricsDashboard.Models.CollectionSummaryViewModel
 @{
     var csPaneOnly = ViewData["CsPaneOnly"] as string;
+    // A saved snapshot (ReportSnapshotViewer) loads the same lazy tabs from the snapshot, and has no live notes.
+    var csSnapshot = LabMetricsDashboard.Services.ReportSnapshots.ReportSnapshotViewContext.From(ViewData);
     // Embedded in the Executive Summary: the Top 5 cards become the "Top 5 Insurances" grid tab.
     var csEmbed = string.Equals(Context.Request.Query["embed"], "1", StringComparison.Ordinal);
     if (!string.IsNullOrEmpty(csPaneOnly))
@@ -1609,6 +1611,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
     </div>
 }
 
+@* On a saved snapshot the panel shows that week's captured insights, read-only. *@
 @if (string.IsNullOrEmpty(csPaneOnly) && !string.IsNullOrWhiteSpace(Model.SelectedLab))
 {
     @await Html.PartialAsync("~/Views/Shared/_ReportInsights.cshtml", new LabMetricsDashboard.Models.Notes.ReportInsightsPanelModel
@@ -1980,7 +1983,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             '<div>Loading\u2026</div>' +
             '</div>';
 
-        var url = '@Url.Action("GetTabPartial", "CollectionSummary")' +
+        var url = '@(csSnapshot?.CollectionTabUrl ?? Url.Action("GetTabPartial", "CollectionSummary"))' +
                   '?tab=' + encodeURIComponent(tab) +
                   (baseParams ? '&' + baseParams : '');
 
@@ -2070,7 +2073,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         el.innerHTML = '';
         el.appendChild(wrap);
     }
-    var metaUrl = '@Url.Action("GetMeta", "CollectionSummary")';
+    var metaUrl = '@(csSnapshot?.CollectionMetaUrl ?? Url.Action("GetMeta", "CollectionSummary"))';
     fetch(metaUrl + (baseParams ? '?' + baseParams : ''), { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
