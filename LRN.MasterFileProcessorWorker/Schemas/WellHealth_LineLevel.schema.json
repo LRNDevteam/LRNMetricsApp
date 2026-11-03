@@ -49,7 +49,7 @@
 		{ "Name": "Denial Code", "Aliases": [ "DenialCode" ], "Required": true, "DataType": "string" },
 		{ "Name": "Denial Deposit Date", "Aliases": [ "Denial Date" ], "Required": false, "DataType": "date" },
 		{ "Name": "Deposit Date", "Aliases": [ "CheckDate" ], "Required": false, "DataType": "date" },
-		{ "Name": "Payment Entered", "Aliases": [ "Payment Posted Date" ], "Required": false, "DataType": "date" },
+		{ "Name": "Payment Entered Date", "Aliases": [ "Payment Posted Date" ], "Required": false, "DataType": "date" },
 		{ "Name": "Charge Amount", "Aliases": [ "ChargeAmount" ], "Required": true, "DataType": "decimal" },
 		{ "Name": "Charge Total Payments", "Required": false, "DataType": "decimal" },
 		{ "Name": "Payment %", "Required": false, "DataType": "decimal" },

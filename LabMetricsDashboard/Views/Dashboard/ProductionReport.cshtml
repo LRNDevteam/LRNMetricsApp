@@ -223,6 +223,7 @@
     // Shell first: Monthly is filled on the server. Other tabs stay lazy (JS).
     var prPaneOnly = ViewData["PrPaneOnly"] as string;
     var prChrome = string.IsNullOrEmpty(prPaneOnly);
+    var prSnapshot = LabMetricsDashboard.Services.ReportSnapshots.ReportSnapshotViewContext.From(ViewData);
     bool PrShow(string paneId) =>
         (!string.IsNullOrEmpty(prPaneOnly)
             && string.Equals(prPaneOnly, paneId, StringComparison.OrdinalIgnoreCase))
@@ -847,10 +848,11 @@ th.pr-month-data, td.pr-month-data {
     </ul>
     }
 
+    @* A saved snapshot (ReportSnapshotViewer) serves the same tabs from the snapshot; PrCacheKey is its file id. *@
     <div class="tab-content" id="prTabContent"
          data-pr-key="@ViewData["PrCacheKey"]"
-         data-pr-tab-url="@Url.Action("ProductionSummaryReportTab", "Dashboard")"
-         data-pr-meta-url="@Url.Action("ProductionSummaryReportMeta", "Dashboard")">
+         data-pr-tab-url="@(prSnapshot?.ProductionPaneUrl ?? Url.Action("ProductionSummaryReportTab", "Dashboard"))"
+         data-pr-meta-url="@(prSnapshot?.ProductionMetaUrl ?? Url.Action("ProductionSummaryReportMeta", "Dashboard"))">
 
         <!-- ??? Monthly Claim Volume tab pane ????????????????????? -->
         @if (prChrome || PrShow("monthly-pane"))

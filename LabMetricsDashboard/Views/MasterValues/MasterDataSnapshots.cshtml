@@ -50,19 +50,30 @@
     .sn-copy { border: 0; background: none; color: #64748b; padding: 0 .2rem; }
     .sn-copy:hover { color: #0b5ed7; }
     .sn-err { color: #B3261E; font-size: .78rem; white-space: pre-wrap; word-break: break-word; margin-bottom: .5rem; }
+    .sn-meta { color: #64748b; font-size: .72rem; }
+    .sn-open { border: 1px solid #b9cde4; background: #fff; color: #0e3460; border-radius: 6px; padding: .12rem .5rem; font-size: .72rem; font-weight: 700; white-space: nowrap; }
+    .sn-open:hover { background: #0e3460; color: #fff; border-color: #0e3460; }
+    .mv-stats { display: flex; gap: .75rem; flex-wrap: wrap; }
+    .mv-stat { background: #fff; border: 1px solid #d9e2ef; border-radius: 10px; padding: .55rem .85rem; min-width: 150px; }
+    .mv-stat b { display: block; font-size: 1.15rem; color: #0f172a; font-variant-numeric: tabular-nums; }
+    .mv-stat span { font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; color: #475569; }
 </style>
+<link rel="stylesheet" href="~/css/report-snapshots.css" asp-append-version="true" />
 
 <div class="mv-shell">
-    <div class="mv-header">
-        <div class="mv-title">
-            <h2>Master Data Snapshots</h2>
+    <div class="rs-head">
+        <div>
+            <h2><i class="bi bi-archive" aria-hidden="true"></i> Master Data Snapshots</h2>
+            <p>Every snapshot run and file, by lab: the weekly Line Level, Claim Level and LIMS data and each report's display copy.</p>
         </div>
-        <div class="d-flex gap-2">
-            <button type="button" class="btn btn-outline-secondary" id="expandBtn"><i class="bi bi-arrows-expand"></i> Expand all</button>
-            <button type="button" class="btn btn-outline-secondary" id="collapseBtn"><i class="bi bi-arrows-collapse"></i> Collapse all</button>
-            <button type="button" class="btn btn-outline-secondary" id="refreshBtn"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+        <div class="rs-head-actions">
+            <button type="button" class="rs-btn" id="expandBtn"><i class="bi bi-arrows-expand" aria-hidden="true"></i> Expand all</button>
+            <button type="button" class="rs-btn" id="collapseBtn"><i class="bi bi-arrows-collapse" aria-hidden="true"></i> Collapse all</button>
+            <button type="button" class="rs-btn" id="refreshBtn"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Refresh</button>
         </div>
     </div>
+
+    <div class="mv-stats" id="stats"></div>
 
     <div class="mv-info-banner" id="errorBanner" style="display:none;"></div>
 
@@ -113,22 +124,46 @@
 (function(){
 const urls={
   runs:'@Url.Action("MasterDataSnapshotRuns","MasterValues")',
-  files:'@Url.Action("MasterDataSnapshotFiles","MasterValues")'
+  files:'@Url.Action("MasterDataSnapshotFiles","MasterValues")',
+  report:'@Url.Action("Report","ReportSnapshotViewer")',
+  data:'@Url.Action("Data","ReportSnapshotViewer")'
 };
 const COLS=6;
 const CODE_LABEL={LINELEVEL:'Line Level',CLAIMLEVEL:'Claim Level',LIMS:'LIMS',
   EXECSUMMARY:'Executive Summary',LISSUMMARY:'LIS Summary',PRODSUMMARY:'Production Summary',
   COLLSUMMARY:'Collection Summary',DENIALSUMMARY:'Denial Summary',DENIALINSIGHT:'Denial Insight (uploaded)'};
+// Logic changes per file id: shown from a marker, so the list never stretches the table.
+const logicByFile=new Map();
 // A report's display copy: the page's view model, with the trigger and how the report logic changed since last week.
 function pageModelNote(f){
   if(f.resultSetName!=='PageModel') return '';
-  let h=`<div class="text-muted" style="font-size:.72rem;">Display copy (page model)${f.trigger?' · '+esc(f.trigger):''}`+
-    (f.logicObjects!=null?` · ${n(f.logicObjects)} report object(s)`:'')+'</div>';
-  if((f.logicChanges||[]).length)
-    h+=`<div class="text-warning-emphasis" style="font-size:.72rem;"><i class="bi bi-exclamation-triangle"></i> Report logic changed since the previous snapshot: `+
-      f.logicChanges.map(esc).join('; ')+'</div>';
-  return h;
+  const changes=f.logicChanges||[];
+  if(changes.length)logicByFile.set(String(f.snapshotFileId),changes);
+  return `<div class="sn-meta">Display copy${f.trigger?' · '+esc(f.trigger):''}`+
+    (f.logicObjects!=null?` · ${n(f.logicObjects)} report object(s)`:'')+
+    (changes.length?`<button type="button" class="rs-logic" data-logic="${f.snapshotFileId}" aria-expanded="false" title="Report logic changed since the previous snapshot">`+
+      `<i class="bi bi-code-slash" aria-hidden="true"></i> ${changes.length} logic change${changes.length===1?'':'s'}</button>`:'')+'</div>';
 }
+function openButton(f){
+  const isPage=f.resultSetName==='PageModel';
+  return `<button type="button" class="sn-open" data-window="${esc((isPage?urls.report:urls.data)+'/'+encodeURIComponent(f.snapshotFileId))}" title="Opens in a new window">`+
+    `<i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> ${isPage?'Report':'Data'}</button>`;
+}
+let logicPop=null;
+function closeLogic(){if(logicPop){logicPop.btn.setAttribute('aria-expanded','false');logicPop.el.remove();logicPop=null;}}
+function toggleLogic(btn){
+  const same=logicPop&&logicPop.btn===btn;closeLogic();if(same)return;
+  const pop=document.createElement('div');pop.className='rs-logic-pop';pop.setAttribute('role','dialog');
+  pop.innerHTML='<h4><i class="bi bi-code-slash" aria-hidden="true"></i> Report logic changed since the previous snapshot</h4><ul>'+
+    (logicByFile.get(btn.dataset.logic)||[]).map(c=>`<li>${esc(c)}</li>`).join('')+'</ul>';
+  document.body.appendChild(pop);
+  const r=btn.getBoundingClientRect();
+  pop.style.top=(window.scrollY+r.bottom+6)+'px';
+  pop.style.left=Math.max(8,Math.min(window.scrollX+r.left,window.scrollX+document.documentElement.clientWidth-pop.offsetWidth-8))+'px';
+  btn.setAttribute('aria-expanded','true');logicPop={btn,el:pop};
+}
+document.addEventListener('click',e=>{if(logicPop&&!e.target.closest('.rs-logic,.rs-logic-pop'))closeLogic();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeLogic();});
 let allRuns=[],collapsed=new Set(),openRuns=new Set(),fileCache=new Map();
 const el=id=>document.getElementById(id);
 function esc(v){return (v??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
@@ -188,18 +223,27 @@ function detailHtml(r){
   if(files===null)return err+'<span class="text-danger">The files could not be loaded.</span>';
   if(!files.length)return err+'<span class="text-muted">No snapshot files were written for this run.</span>';
   return err+'<table class="table table-sm table-bordered sn-files"><thead><tr>'+
-    '<th>Snapshot</th><th>File (in the snapshot container)</th><th class="num">Rows</th><th class="num">Columns</th><th class="num">Size</th><th>Created (UTC)</th>'+
+    '<th>Snapshot</th><th>File (in the snapshot container)</th><th class="num">Rows</th><th class="num">Columns</th><th class="num">Size</th><th>Created (UTC)</th><th>Open</th>'+
     '</tr></thead><tbody>'+
     files.map(f=>`<tr><td><span class="sn-code">${esc(f.reportCode)}</span> ${esc(CODE_LABEL[f.reportCode]||'')}`+
       (f.resultSetName==='PageModel'?pageModelNote(f)
-        :f.resultSetName&&f.resultSetName!=='Data'?`<div class="text-muted" style="font-size:.72rem;">${esc(f.resultSetName)}</div>`:'')+`</td>`+
-      `<td class="sn-path">${esc(f.blobPath)} <button type="button" class="sn-copy" data-copy="${esc(f.blobPath)}" title="Copy path"><i class="bi bi-clipboard"></i></button></td>`+
+        :f.resultSetName&&f.resultSetName!=='Data'?`<div class="sn-meta">${esc(f.resultSetName)}</div>`:'')+`</td>`+
+      `<td class="sn-path">${esc(f.blobPath)} <button type="button" class="sn-copy" data-copy="${esc(f.blobPath)}" title="Copy path" aria-label="Copy path"><i class="bi bi-clipboard"></i></button></td>`+
       `<td class="num">${n(f.rowCount)}</td><td class="num">${f.columns??'—'}</td><td class="num">${size(f.sizeBytes)}</td>`+
-      `<td>${esc(when(f.createdOn))}</td></tr>`).join('')+
+      `<td>${esc(when(f.createdOn))}</td><td>${openButton(f)}</td></tr>`).join('')+
     '</tbody></table>';
 }
+function renderStats(list){
+  const ok=list.filter(r=>r.status==='Success'),failed=list.filter(r=>r.status==='Failed');
+  const labs=new Set(list.map(r=>r.labName)).size;
+  const bytes=list.reduce((t,r)=>t+(r.totalBytes||0),0),files=list.reduce((t,r)=>t+(r.files||0),0);
+  el('stats').innerHTML=[[labs,'Labs'],[ok.length,'Successful runs'],[failed.length,'Failed runs'],[n(files),'Files'],[size(bytes),'Stored']]
+    .map(([v,l])=>`<div class="mv-stat"><b>${esc(String(v))}</b><span>${esc(l)}</span></div>`).join('');
+}
 function render(){
+  closeLogic();
   const list=filtered();
+  renderStats(list);
   const groups=groupByLab(list);
   el('rows').innerHTML=groups.map(([lab,runs])=>{
     const isCollapsed=collapsed.has(lab);
@@ -247,6 +291,14 @@ async function loadFiles(id){
 
 // ── interactions ───────────────────────────────────────────────────────────
 el('rows').addEventListener('click',e=>{
+  const logic=e.target.closest('[data-logic]');
+  if(logic){toggleLogic(logic);return;}
+  const win=e.target.closest('[data-window]');
+  if(win){
+    const w=Math.min(1600,Math.round(screen.availWidth*.9)),h=Math.min(1000,Math.round(screen.availHeight*.9));
+    window.open(win.dataset.window,'_blank',`popup=yes,width=${w},height=${h},left=${Math.round((screen.availWidth-w)/2)},top=${Math.round((screen.availHeight-h)/2)},noopener`);
+    return;
+  }
   const copy=e.target.closest('[data-copy]');
   if(copy){navigator.clipboard?.writeText(copy.dataset.copy);return;}
   const open=e.target.closest('[data-open]');

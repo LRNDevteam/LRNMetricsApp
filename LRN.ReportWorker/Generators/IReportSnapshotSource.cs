@@ -28,4 +28,8 @@ public static class ReportSnapshotCodes
     public const string DenialSummary = "DENIALSUMMARY";
     /// <summary>The Denial Summary page's Denial Insight tab: client-uploaded, captured on upload.</summary>
     public const string DenialInsight = "DENIALINSIGHT";
+    /// <summary>The LIS / Production / Collection pages' Key Insights &amp; Highlights: users' notes, captured on each save or delete.</summary>
+    public const string LisInsight = "LISINSIGHT";
+    public const string ProductionInsight = "PRODINSIGHT";
+    public const string CollectionInsight = "COLLINSIGHT";
 }

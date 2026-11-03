@@ -60,6 +60,8 @@ var host = Host.CreateDefaultBuilder(args)
             .Get<LabMetricsDashboard.Models.LabConfigOptions>() ?? new LabMetricsDashboard.Models.LabConfigOptions());
         // The Denial Insight tab: client-uploaded, captured on LabMetricsDashboard's request.
         services.AddSingleton<IReportSnapshotSource, DenialInsightSnapshotSource>();
+        // The LIS / Production / Collection Key Insights: users' notes, captured on LabMetricsDashboard's request.
+        ReportInsightsSnapshotSource.Register(services);
 
         // Snapshot storage, index and retention: the master file processor's (MasterDataSnapshot section).
         services.Configure<MasterDataSnapshotOptions>(context.Configuration.GetSection(MasterDataSnapshotOptions.SectionName));

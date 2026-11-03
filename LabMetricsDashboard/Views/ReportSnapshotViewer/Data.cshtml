@@ -1,0 +1,100 @@
+@model LabMetricsDashboard.Controllers.ReportSnapshotDataViewModel
+@{
+    var table = Model.Table;
+    var first = table.TotalRows == 0 ? 0 : table.Offset + 1;
+    var last = table.Offset + table.Rows.Count;
+
+    string Cell(object? value) => value switch
+    {
+        null => "",
+        DateTime d => d.TimeOfDay == TimeSpan.Zero ? d.ToString("MM/dd/yyyy") : d.ToString("MM/dd/yyyy HH:mm:ss"),
+        DateTimeOffset o => o.ToString("MM/dd/yyyy HH:mm:ss zzz"),
+        decimal m => m.ToString("#,##0.##########", System.Globalization.CultureInfo.InvariantCulture),
+        double f => f.ToString("#,##0.##########", System.Globalization.CultureInfo.InvariantCulture),
+        float f => f.ToString("#,##0.######", System.Globalization.CultureInfo.InvariantCulture),
+        bool b => b ? "True" : "False",
+        IFormattable n => n.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+        _ => value.ToString() ?? ""
+    };
+}
+
+<style>
+    .snd-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .75rem; }
+    .snd-head .snd-meta { color: #475569; font-size: .82rem; }
+    .snd-head .snd-meta b { color: #0f172a; }
+    .snd-path { font-family: Consolas, monospace; font-size: .74rem; color: #64748b; word-break: break-all; }
+    .snd-card { background: #fff; border: 1px solid #d9e2ef; border-radius: 8px; box-shadow: 0 6px 18px rgba(15, 23, 42, .06); }
+    .snd-scroll { overflow: auto; max-height: calc(100vh - 210px); }
+    .snd-table { font-size: .78rem; margin: 0; }
+    .snd-table th, .snd-table td { border: 1px solid #d8e1ee; white-space: nowrap; vertical-align: top; padding: .25rem .5rem; }
+    .snd-table thead th { position: sticky; top: 0; z-index: 2; background: #f8fafc; color: #0f172a; font-size: .7rem; }
+    .snd-table thead th small { display: block; color: #94a3b8; font-weight: 600; text-transform: none; }
+    .snd-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .snd-table td.rn, .snd-table th.rn { color: #94a3b8; text-align: right; background: #fbfdff; position: sticky; left: 0; z-index: 1; }
+    .snd-table thead th.rn { z-index: 3; }
+    .snd-table td.null { background: #fcfcfd; }
+    .snd-pager { display: flex; align-items: center; gap: .4rem; }
+    .snd-pager .btn { font-size: .78rem; }
+</style>
+
+<div class="snd-head">
+    <div>
+        <div class="snd-meta">
+            <b>@table.TotalRows.ToString("N0")</b> row@(table.TotalRows == 1 ? "" : "s") ·
+            <b>@table.Columns.Count</b> column@(table.Columns.Count == 1 ? "" : "s")
+            @if (table.TotalRows > 0)
+            {
+                <span>· showing @first.ToString("N0")–@last.ToString("N0")</span>
+            }
+        </div>
+        <div class="snd-path">@Model.File.BlobPath</div>
+    </div>
+    @if (Model.TotalPages > 1)
+    {
+        <div class="snd-pager">
+            <a class="btn btn-sm btn-outline-secondary @(Model.Page <= 1 ? "disabled" : "")"
+               href="@Url.Action("Data", new { id = Model.File.SnapshotFileId, page = 1 })" title="First page"><i class="bi bi-chevron-double-left"></i></a>
+            <a class="btn btn-sm btn-outline-secondary @(Model.Page <= 1 ? "disabled" : "")"
+               href="@Url.Action("Data", new { id = Model.File.SnapshotFileId, page = Model.Page - 1 })" title="Previous page"><i class="bi bi-chevron-left"></i></a>
+            <span class="text-muted" style="font-size:.8rem;">Page @Model.Page of @Model.TotalPages.ToString("N0")</span>
+            <a class="btn btn-sm btn-outline-secondary @(Model.Page >= Model.TotalPages ? "disabled" : "")"
+               href="@Url.Action("Data", new { id = Model.File.SnapshotFileId, page = Model.Page + 1 })" title="Next page"><i class="bi bi-chevron-right"></i></a>
+            <a class="btn btn-sm btn-outline-secondary @(Model.Page >= Model.TotalPages ? "disabled" : "")"
+               href="@Url.Action("Data", new { id = Model.File.SnapshotFileId, page = Model.TotalPages })" title="Last page"><i class="bi bi-chevron-double-right"></i></a>
+        </div>
+    }
+</div>
+
+<div class="snd-card">
+    <div class="snd-scroll">
+        <table class="table table-sm snd-table">
+            <thead>
+                <tr>
+                    <th class="rn">#</th>
+                    @foreach (var c in table.Columns)
+                    {
+                        <th>@c.Name<small>@c.Type</small></th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @for (int r = 0; r < table.Rows.Count; r++)
+                {
+                    var row = table.Rows[r];
+                    <tr>
+                        <td class="rn">@((table.Offset + r + 1).ToString("N0"))</td>
+                        @for (int c = 0; c < table.Columns.Count; c++)
+                        {
+                            var v = row[c];
+                            <td class="@(v is null ? "null" : table.Columns[c].IsNumeric ? "num" : null)">@Cell(v)</td>
+                        }
+                    </tr>
+                }
+                @if (table.Rows.Count == 0)
+                {
+                    <tr><td colspan="@(table.Columns.Count + 1)" class="text-center text-muted py-4">This file has no rows.</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

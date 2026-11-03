@@ -12,6 +12,16 @@ using Microsoft.Extensions.Logging;
 var host = Host.CreateDefaultBuilder(args)
     .UseContentRoot(AppContext.BaseDirectory)
     .UseWindowsService(o => o.ServiceName = "LRN - Report Generation Worker")
+    .ConfigureAppConfiguration(config =>
+    {
+        // Historical report downloads (Report Snapshots) read the snapshot container: only the
+        // MasterDataSnapshot--BlobServiceUri / --ContainerName secrets are taken from the vault, never
+        // the connection strings it also holds. KeyVault:VaultUri empty = no vault (the
+        // MasterDataSnapshot section then comes from appsettings, e.g. Storage = LocalFolder).
+        var vaultUri = config.Build()["KeyVault:VaultUri"];
+        if (!string.IsNullOrWhiteSpace(vaultUri))
+            config.AddAzureKeyVault(new Uri(vaultUri), new Azure.Identity.DefaultAzureCredential(), new SnapshotSecretsOnly());
+    })
     .ConfigureLogging((context, logging) =>
     {
         logging.ClearProviders();
@@ -66,6 +76,10 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IReportGenerator, LisSummaryReportGenerator>();
         services.AddSingleton<IReportGenerator, DenialDashboardReportGenerator>();
         services.AddSingleton<IReportGenerator, DenialSummaryReportGenerator>();
+        // A past week's report, from its snapshot (Master Values > Report Snapshots).
+        services.AddSingleton<LabMetricsDashboard.Services.ReportSnapshots.IReportSnapshotFileStore,
+            LabMetricsDashboard.Services.ReportSnapshots.ReportSnapshotFileStore>();
+        services.AddSingleton<IReportGenerator, ReportSnapshotDownloadGenerator>();
         // Two report types, one class: registered per tab so the factory can key on ReportType.
         services.AddSingleton<IReportGenerator>(sp => CptLookupReportGenerator.ForCpt(
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ReportStorageOptions>>(),
@@ -97,3 +111,10 @@ await host.RunAsync();
 
 static LogLevel ParseLogLevel(string? value, LogLevel fallback) =>
     Enum.TryParse<LogLevel>(value, ignoreCase: true, out var level) ? level : fallback;
+
+/// <summary>Loads only the snapshot container's two secrets from the vault.</summary>
+sealed class SnapshotSecretsOnly : Azure.Extensions.AspNetCore.Configuration.Secrets.KeyVaultSecretManager
+{
+    public override bool Load(Azure.Security.KeyVault.Secrets.SecretProperties secret) =>
+        secret.Name.StartsWith("MasterDataSnapshot--", StringComparison.OrdinalIgnoreCase);
+}

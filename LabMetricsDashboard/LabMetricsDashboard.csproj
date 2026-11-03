@@ -41,6 +41,10 @@
          Microsoft.Extensions.Configuration.Abstractions 10.0.0.0 (HTTP 500.30 / 500.37). -->
     <PackageReference Include="Azure.Extensions.AspNetCore.Configuration.Secrets" Version="1.4.0" />
     <PackageReference Include="Azure.Identity" Version="1.13.2" />
+    <!-- Master Values > Report Snapshots: reads the weekly snapshot files (Parquet and the reports' page
+         models) from the snapshot container. Same versions as LRN.SnapshotGenerator, which writes them. -->
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.24.1" />
+    <PackageReference Include="Parquet.Net" Version="6.1.0" />
     <PackageReference Include="ClosedXML" Version="0.104.2" />
     <PackageReference Include="CsvHelper" Version="33.0.1" />
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.1.1" />

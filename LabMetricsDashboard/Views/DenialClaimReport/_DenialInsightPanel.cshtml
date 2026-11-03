@@ -6,6 +6,13 @@
     var isCurrent = Model.Bucket == DenialInsightBuckets.Current;
     var currentCount = Model.BucketCounts.GetValueOrDefault(DenialInsightBuckets.Current);
     var previousCount = Model.BucketCounts.GetValueOrDefault(DenialInsightBuckets.Previous);
+
+    // A saved snapshot (ReportSnapshotViewer) swaps weeks from the snapshot, and has no export.
+    var insightSnapshot = LabMetricsDashboard.Services.ReportSnapshots.ReportSnapshotViewContext.From(ViewData);
+    string BucketPanelUrl(string bucket) =>
+        insightSnapshot?.InsightPanelUrl(bucket) ?? Url.Action("InsightPanel", new { lab = Model.CurrentLab, bucket })!;
+    string BucketPageUrl(string bucket) =>
+        insightSnapshot is not null ? "#" : Url.Action("Index", new { lab = Model.CurrentLab, tab = "insight", bucket })!;
 }
 
 @* Observation and Action hold sanitized HTML (bold, bullets) from the client's workbook, so they are
@@ -41,10 +48,13 @@
                     <i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span>
                 </button>
 
+                @if (insightSnapshot is null)
+                {
                 <a class="btn btn-sm btn-outline-secondary" asp-action="ExportInsights"
                    asp-route-lab="@Model.CurrentLab" asp-route-bucket="@Model.Bucket">
                     <i class="bi bi-download"></i> Export
                 </a>
+                }
 
                 @if (Model.CanEdit && !isCurrent)
                 {
@@ -82,20 +92,16 @@
             <ul class="nav nav-tabs insight-subtabs">
                 <li class="nav-item">
                     <a class="nav-link @(isCurrent ? "active" : "")" data-panel="insight"
-                       data-panel-url="@Url.Action("InsightPanel", new { lab = Model.CurrentLab, bucket = DenialInsightBuckets.Current })"
-                       asp-action="Index"
-                       asp-route-lab="@Model.CurrentLab" asp-route-tab="insight"
-                       asp-route-bucket="@DenialInsightBuckets.Current">
+                       data-panel-url="@BucketPanelUrl(DenialInsightBuckets.Current)"
+                       href="@BucketPageUrl(DenialInsightBuckets.Current)">
                         Current Week
                         <span class="badge rounded-pill @(isCurrent ? "bg-primary" : "bg-secondary-subtle text-secondary-emphasis")">@currentCount.ToString("N0")</span>
                     </a>
                 </li>
                 <li class="nav-item">
                     <a class="nav-link @(!isCurrent ? "active" : "")" data-panel="insight"
-                       data-panel-url="@Url.Action("InsightPanel", new { lab = Model.CurrentLab, bucket = DenialInsightBuckets.Previous })"
-                       asp-action="Index"
-                       asp-route-lab="@Model.CurrentLab" asp-route-tab="insight"
-                       asp-route-bucket="@DenialInsightBuckets.Previous">
+                       data-panel-url="@BucketPanelUrl(DenialInsightBuckets.Previous)"
+                       href="@BucketPageUrl(DenialInsightBuckets.Previous)">
                         Previous Week
                         <span class="badge rounded-pill @(!isCurrent ? "bg-primary" : "bg-secondary-subtle text-secondary-emphasis")">@previousCount.ToString("N0")</span>
                     </a>

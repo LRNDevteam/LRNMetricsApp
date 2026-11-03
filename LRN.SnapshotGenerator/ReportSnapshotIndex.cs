@@ -38,17 +38,23 @@ public sealed class ReportSnapshotIndex
             ?? throw new InvalidOperationException("Missing DefaultConnection connection string (LRNMaster). Add the Key Vault secret ConnectionStrings--DefaultConnection.");
     }
 
-    // The tracker's timestamp column, in order of preference. The table's definition is not in this
-    // repository, so the service looks it up once instead of assuming one (it has no UpdatedOn).
+    // The tracker's timestamp columns, in order of preference. The table's definition is not in this
+    // repository, so the service looks them up once instead of assuming one (it has no UpdatedOn), and
+    // uses the first that is filled in on each row: some writers leave CompletedOn / StartedOn NULL.
     private static readonly string[] TrackerStampColumns =
-        ["UpdatedOn", "ModifiedOn", "LastUpdatedOn", "UpdatedDate", "CompletedOn", "EndTime", "CreatedOn", "CreatedDate"];
-    private string? _trackerStampColumn;
-    private bool _trackerStampResolved;
+        ["UpdatedOn", "ModifiedOn", "LastUpdatedOn", "UpdatedDate", "CompletedOn", "EndTime", "StartedOn", "CreatedOn", "CreatedDate"];
+    private List<string>? _trackerStampColumns;
 
-    /// <summary>The tracker's timestamp column (null when it has none), looked up once.</summary>
-    public async Task<string?> GetTrackerStampColumnAsync(CancellationToken ct)
+    /// <summary>The tracker's timestamp columns present, in preference order, as text for the log ("none" when it has none).</summary>
+    public async Task<string> GetTrackerStampColumnAsync(CancellationToken ct)
     {
-        if (_trackerStampResolved) return _trackerStampColumn;
+        var columns = await GetTrackerStampColumnsAsync(ct);
+        return columns.Count == 0 ? "none" : string.Join(" > ", columns);
+    }
+
+    private async Task<List<string>> GetTrackerStampColumnsAsync(CancellationToken ct)
+    {
+        if (_trackerStampColumns is not null) return _trackerStampColumns;
 
         const string sql = @"
 SELECT c.name
@@ -62,15 +68,16 @@ WHERE c.object_id = OBJECT_ID(N'dbo.ReportsWorkflowTracker')
         var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         while (await r.ReadAsync(ct)) present.Add(r.GetString(0));
 
-        // Only a name from the fixed list ever goes into the statement text.
-        _trackerStampColumn = TrackerStampColumns.FirstOrDefault(present.Contains);
-        _trackerStampResolved = true;
-        return _trackerStampColumn;
+        // Only names from the fixed list ever go into the statement text.
+        _trackerStampColumns = TrackerStampColumns.Where(present.Contains).ToList();
+        return _trackerStampColumns;
     }
 
     /// <summary>
-    /// Success rows of the given labs and report names, newest first; with a timestamp column, only those
-    /// of the last <paramref name="lookbackDays"/> days (a day of slack for the column's time zone).
+    /// Success rows of the given labs and report names, newest first. A row is dated by the first of the
+    /// tracker's timestamp columns it has filled in; a dated row older than <paramref name="lookbackDays"/>
+    /// days (plus a day of slack for the column's time zone) is skipped, an undated row is kept - the
+    /// RunId still says which run it is, and a superseded run is skipped later anyway.
     /// LabName / WeekFolder are the tracker's, falling back to dbo.LRN_Run_Log.
     /// </summary>
     public async Task<IReadOnlyList<TrackerSuccess>> GetTrackerSuccessesAsync(
@@ -78,10 +85,17 @@ WHERE c.object_id = OBJECT_ID(N'dbo.ReportsWorkflowTracker')
     {
         if (labIds.Count == 0 || reportNames.Count == 0) return [];
 
-        var stamp = await GetTrackerStampColumnAsync(ct);
-        var stampExpr = stamp is null ? "CAST(NULL AS datetime2)" : $"CAST(t.[{stamp}] AS datetime2)";
-        var window = stamp is null ? "" : $"\n  AND t.[{stamp}] >= DATEADD(DAY, -(@LookbackDays + 1), SYSUTCDATETIME())";
-        var order = stamp is null ? "t.RunId DESC" : $"t.[{stamp}] DESC, t.RunId DESC";
+        var columns = await GetTrackerStampColumnsAsync(ct);
+        var stampExpr = columns.Count switch
+        {
+            0 => "CAST(NULL AS datetime2)",
+            1 => $"CAST(t.[{columns[0]}] AS datetime2)",
+            _ => $"COALESCE({string.Join(", ", columns.Select(c => $"CAST(t.[{c}] AS datetime2)"))})"
+        };
+        var window = columns.Count == 0 ? "" : $"\n  AND ({stampExpr} IS NULL OR {stampExpr} >= DATEADD(DAY, -(@LookbackDays + 1), SYSUTCDATETIME()))";
+        // Newest run first - the RunId starts with its date (R20261029TXD0391), so it orders a lab's runs
+        // whether or not the row is dated - then the newest row of a run.
+        var order = columns.Count == 0 ? "t.RunId DESC" : $"t.RunId DESC, {stampExpr} DESC";
 
         // Lab ids and report names are passed as delimited lists and split server-side (STRING_SPLIT),
         // so the statement text never carries values.
@@ -139,7 +153,9 @@ WHERE r.LabId = @LabId AND r.RunId = @RunId AND f.ReportCode = @ReportCode;";
         await conn.OpenAsync(ct);
         await using var r = await cmd.ExecuteReaderAsync(ct);
         if (!await r.ReadAsync(ct) || r.GetInt32(0) == 0) return (false, null);
-        return (true, PageModelIndexInfo.Parse(r.IsDBNull(1) ? null : r.GetString(1))?.TrackerStamp);
+        // Parquet files without the display copy (its JSON failed): not captured, so it is taken again.
+        if (r.IsDBNull(1)) return (false, null);
+        return (true, PageModelIndexInfo.Parse(r.GetString(1))?.TrackerStamp);
     }
 
     /// <summary>When this report was last snapshotted for the run (UTC), or null when it never was.</summary>

@@ -1,0 +1,24 @@
+@model string
+@{
+    // Without a snapshot context (an unknown file id) the page still opens without the menu: it is its own window.
+    if (LabMetricsDashboard.Services.ReportSnapshots.ReportSnapshotViewContext.From(ViewData) is null)
+        Layout = null;
+}
+@if (Layout is null)
+{
+    @Html.Raw("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\" /><title>Snapshot unavailable</title>")
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/lib/bootstrap-icons/font/bootstrap-icons.min.css" />
+    @Html.Raw("</head><body style=\"background:#f0f4f8\"><div class=\"container py-5\">")
+}
+<div class="alert alert-warning border-0 shadow-sm d-flex gap-2 align-items-start" style="max-width:760px;">
+    <i class="bi bi-camera" style="font-size:1.3rem;"></i>
+    <div>
+        <div class="fw-bold mb-1">This snapshot cannot be shown</div>
+        <div>@Model</div>
+    </div>
+</div>
+@if (Layout is null)
+{
+    @Html.Raw("</div></body></html>")
+}

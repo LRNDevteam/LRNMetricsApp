@@ -18,6 +18,11 @@
     // highlight tabs): no menu, footer or page chrome. ?embedTabs= lists the tab panes to keep.
     var isEmbed = string.Equals(Context.Request.Query["embed"], "1", StringComparison.Ordinal);
     var embedTabs = isEmbed ? Context.Request.Query["embedTabs"].ToString() : null;
+    // A saved report snapshot (ReportSnapshotViewer): the embedded page chrome in its own window, plus a
+    // banner naming the week, and nothing that reaches the live report (see the guard script below).
+    var reportSnapshot = LabMetricsDashboard.Services.ReportSnapshots.ReportSnapshotViewContext.From(ViewData);
+    var snapshotFramed = isEmbed;
+    if (reportSnapshot is not null) isEmbed = true;
 }
 <!DOCTYPE html>
 <html lang="en" class="@(showReportPageLoader ? "lmd-boot" : null)">
@@ -126,7 +131,90 @@
     }
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    @if (reportSnapshot is not null)
+    {
+        <title>@reportSnapshot.ReportTitle snapshot - @reportSnapshot.LabName - @reportSnapshot.WeekFolder</title>
+        @* First script of the page, so it is in place before any view script runs. A snapshot is read-only
+           and is not the lab's live data: requests to anything but the snapshot viewer fail, forms do not
+           submit and links to other pages are stopped, with a short note instead. *@
+        <script nonce='@Context.Items["CspNonce"]'>
+            (function () {
+                var base = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(reportSnapshot.ViewerBasePath));
+                // The viewer's own endpoints only: a report view's relative links (asp-action="Export...")
+                // also resolve under the viewer's path, and must not pass for it.
+                var viewer = new RegExp('^' + base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+                    '(report|productionpane|productionmeta|collectiontab|collectionmeta|insightpanel|insightrows|data)(/|$)', 'i');
+                function allowed(url) {
+                    try {
+                        var u = new URL(url, window.location.href);
+                        if (u.origin !== window.location.origin) return false;
+                        if (viewer.test(u.pathname)) return true;
+                        // Static files (scripts, styles, fonts, images) a page may load on demand.
+                        return /\.(js|css|map|woff2?|ttf|svg|png|jpe?g|gif|ico)$/i.test(u.pathname);
+                    } catch (e) { return false; }
+                }
+                function note() {
+                    var el = document.getElementById('lmdSnapNote');
+                    if (!el) {
+                        el = document.createElement('div');
+                        el.id = 'lmdSnapNote';
+                        el.className = 'lmd-snap-note';
+                        el.textContent = 'Not available in a snapshot. This is a saved copy of the report and is read-only.';
+                        document.body.appendChild(el);
+                    }
+                    el.classList.add('show');
+                    clearTimeout(el._t);
+                    el._t = setTimeout(function () { el.classList.remove('show'); }, 2600);
+                }
+                window.lmdReportSnapshot = true;
+
+                var nativeFetch = window.fetch;
+                if (nativeFetch) {
+                    window.fetch = function (input, init) {
+                        var url = typeof input === 'string' ? input : (input && input.url) || '';
+                        if (!allowed(url)) return Promise.reject(new TypeError('Not available in a report snapshot.'));
+                        return nativeFetch.apply(this, arguments);
+                    };
+                }
+                var open = XMLHttpRequest.prototype.open, send = XMLHttpRequest.prototype.send;
+                XMLHttpRequest.prototype.open = function (method, url) {
+                    this._lmdSnapBlocked = !allowed(url);
+                    return open.apply(this, arguments);
+                };
+                XMLHttpRequest.prototype.send = function () {
+                    if (this._lmdSnapBlocked) { this.abort(); return; }
+                    return send.apply(this, arguments);
+                };
+                if (navigator.sendBeacon) {
+                    var beacon = navigator.sendBeacon.bind(navigator);
+                    navigator.sendBeacon = function (url, data) { return allowed(url) ? beacon(url, data) : false; };
+                }
+
+                // Capture phase on window: runs before every page handler, so a stopped link never
+                // reaches the page's own panel loaders either.
+                window.addEventListener('click', function (e) {
+                    var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+                    if (!a || a.hasAttribute('data-bs-toggle')) return;
+                    var href = a.getAttribute('href') || '';
+                    if (!href || href.charAt(0) === '#' || /^javascript:/i.test(href)) return;
+                    var panel = a.getAttribute('data-panel-url');
+                    if (allowed(panel || href)) return;
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    note();
+                }, true);
+                window.addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    note();
+                }, true);
+            })();
+        </script>
+    }
+    else
+    {
     <title>@ViewData["Title"] - Lab Revenue Intelligence</title>
+    }
     <script nonce='@Context.Items["CspNonce"]' type="importmap"></script>
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="~/lib/bootstrap-icons/font/bootstrap-icons.min.css" />
@@ -1031,6 +1119,33 @@
             border-color: #7fa3cf !important;
             box-shadow: 0 2px 8px rgba(14, 52, 96, .12) !important;
         }
+
+        /* -- Report snapshot (ReportSnapshotViewer) ---------------------- */
+        /* The embedded chrome above, minus everything that acts on live data. */
+        body.lmd-snapshot .page-actions,
+        body.lmd-snapshot .rpt-toolbar,
+        body.lmd-snapshot [data-ni-open],
+        body.lmd-snapshot .ni-btn-open,
+        body.lmd-snapshot .fs-bar { display: none !important; }
+        body.lmd-snapshot:not(.lmd-snapshot-framed) > .container-fluid { padding: 0 1.25rem 1.5rem !important; }
+        .lmd-snap-banner {
+            position: sticky; top: 0; z-index: 1030;
+            display: flex; flex-wrap: wrap; align-items: center; gap: .35rem 1.25rem;
+            margin: 0 -1.25rem 1rem; padding: .6rem 1.25rem;
+            background: #0e3460; color: #fff; font-size: .82rem;
+            box-shadow: 0 2px 10px rgba(14, 52, 96, .25);
+        }
+        .lmd-snap-banner .snap-title { font-weight: 800; font-size: .95rem; display: inline-flex; align-items: center; gap: .45rem; }
+        .lmd-snap-banner .snap-badge { background: #f59e0b; color: #1f2937; border-radius: 999px; padding: .1rem .55rem; font-size: .68rem; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; }
+        .lmd-snap-banner .snap-pair { white-space: nowrap; }
+        .lmd-snap-banner .snap-pair span { opacity: .7; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; margin-right: .3rem; }
+        .lmd-snap-banner .snap-logic { display: inline-flex; align-items: center; gap: .3rem; border: 1px solid rgba(253, 230, 138, .6); color: #fde68a; border-radius: 999px; padding: .05rem .55rem; font-size: .72rem; font-weight: 700; cursor: help; }
+        .lmd-snap-note {
+            position: fixed; left: 50%; bottom: 1.25rem; z-index: 2000; transform: translate(-50%, 1rem);
+            background: #1f2937; color: #fff; padding: .55rem 1rem; border-radius: 8px; font-size: .82rem;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, .25); opacity: 0; pointer-events: none; transition: all .2s;
+        }
+        .lmd-snap-note.show { opacity: 1; transform: translate(-50%, 0); }
     </style>
 </head>
 @{
@@ -1040,7 +1155,7 @@
     var routeAction = bootAction;
 }
 
-<body class="@(isEmbed ? "lmd-embed" : null)" data-embed-tabs="@embedTabs">
+<body class="@(isEmbed ? "lmd-embed" : null)@(reportSnapshot is null ? null : snapshotFramed ? " lmd-snapshot lmd-snapshot-framed" : " lmd-snapshot")" data-embed-tabs="@embedTabs">
 
 
     <!-- Full-screen loader overlay -->
@@ -1353,6 +1468,30 @@
 
     <div class="container-fluid px-4 pt-3">
         <main role="main" class="pb-4">
+            @if (reportSnapshot is not null && !snapshotFramed)
+            {
+                <div class="lmd-snap-banner" role="note">
+                    <span class="snap-title">
+                        <i class="bi bi-camera"></i>@reportSnapshot.ReportTitle@(reportSnapshot.ResultSetName is { } section ? " · " + section : null)
+                        <span class="snap-badge">Snapshot · read-only</span>
+                    </span>
+                    <span class="snap-pair"><span>Lab</span>@reportSnapshot.LabName</span>
+                    <span class="snap-pair"><span>Week</span>@reportSnapshot.WeekFolder</span>
+                    <span class="snap-pair"><span>Run ID</span>@reportSnapshot.RunId</span>
+                    @if (reportSnapshot.CapturedOnUtc is { } captured)
+                    {
+                        <span class="snap-pair"><span>Captured (UTC)</span>@captured.ToString("MMM d, yyyy HH:mm")</span>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(reportSnapshot.Trigger))
+                    {
+                        <span class="snap-pair"><span>Trigger</span>@reportSnapshot.Trigger</span>
+                    }
+                    @if (reportSnapshot.LogicChanges.Count > 0)
+                    {
+                        <span class="snap-logic" tabindex="0" title="Report logic changed since the previous snapshot:&#10;@string.Join("\n", reportSnapshot.LogicChanges)"><i class="bi bi-code-slash" aria-hidden="true"></i> @reportSnapshot.LogicChanges.Count logic change@(reportSnapshot.LogicChanges.Count == 1 ? "" : "s")</span>
+                    }
+                </div>
+            }
             @RenderBody()
         </main>
     </div>
@@ -1540,7 +1679,8 @@
                 CodingSummary: 'Coding Summary',
                 DenialDashboard: 'Denial Dashboard',
                 CptLookup: 'CPT Lookup',
-                PanelLookup: 'Panel Lookup'
+                PanelLookup: 'Panel Lookup',
+                ReportSnapshot: 'Historical Report'
             };
             var TYPE_COLORS = ['rpt-type-c1', 'rpt-type-c2', 'rpt-type-c3', 'rpt-type-c4', 'rpt-type-c5', 'rpt-type-c6'];
             function typeLabel(t) {
@@ -1583,7 +1723,7 @@
                         : '';
                     return '<div class="rpt-item">'
                         + '<div class="rpt-item-main">'
-                        + '<div class="rpt-item-title" title="' + esc(r.fileName || '') + '">' + esc(r.reportType) + '</div>'
+                        + '<div class="rpt-item-title" title="' + esc(r.fileName || '') + '">' + esc(typeLabel(r.reportType)) + '</div>'
                         + '<div class="rpt-item-sub">' + sub + '</div>'
                         + err
                         + '</div>'

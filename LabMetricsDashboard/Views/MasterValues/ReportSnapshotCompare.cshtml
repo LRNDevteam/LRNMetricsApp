@@ -1,0 +1,331 @@
+@model LabMetricsDashboard.Models.MasterValuesPageViewModel
+@{
+    ViewData["Title"] = "Compare Reports";
+}
+<link rel="stylesheet" href="~/css/report-snapshots.css" asp-append-version="true" />
+
+<div class="rs-shell">
+    <div class="rs-head">
+        <div>
+            <h2><i class="bi bi-layout-split" aria-hidden="true"></i> Compare Reports</h2>
+            <p>Two weeks of the same report, each exactly as it was published.</p>
+        </div>
+        <div class="rs-head-actions">
+            <a class="rs-btn" href="@Url.Action("ReportSnapshots", "MasterValues")"><i class="bi bi-arrow-left" aria-hidden="true"></i> Report Snapshots</a>
+            <div class="cmp-toggle" role="group" aria-label="View">
+                <button type="button" id="viewSide" aria-pressed="true"><i class="bi bi-layout-split" aria-hidden="true"></i> Side by side</button>
+                <button type="button" id="viewChanges" aria-pressed="false"><i class="bi bi-bar-chart-steps" aria-hidden="true"></i> Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="rs-card">
+        <div class="cmp-bar">
+            @* The lab is the header's lab selector; switching it there reopens this page on that lab's latest two weeks. *@
+            <div class="rs-field">
+                <label for="cReport">Report</label>
+                <select class="form-select" id="cReport"></select>
+            </div>
+            <div class="rs-field" style="min-width:230px">
+                <label for="cA"><span class="cmp-week-a" aria-hidden="true"></span>Week A</label>
+                <select class="form-select" id="cA"></select>
+            </div>
+            <button type="button" class="cmp-swap" id="swapBtn" aria-label="Swap Week A and Week B" title="Swap weeks"><i class="bi bi-arrow-left-right" aria-hidden="true"></i></button>
+            <div class="rs-field" style="min-width:230px">
+                <label for="cB"><span class="cmp-week-b" aria-hidden="true"></span>Week B</label>
+                <select class="form-select" id="cB"></select>
+            </div>
+        </div>
+    </div>
+
+    <div class="rs-banner" id="banner" style="display:none" role="status"></div>
+    <div class="cmp-kpis" id="kpis"></div>
+
+    <div id="sidePanel">
+        <div class="d-flex justify-content-end mb-2">
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="syncScroll" checked>
+                <label class="form-check-label small" for="syncScroll">Keep tabs and scrolling in step</label>
+            </div>
+        </div>
+        <div class="cmp-panes">
+            <section class="rs-card">
+                <div class="cmp-pane-head"><strong><span class="cmp-week-a" aria-hidden="true"></span><span id="paneA">Week A</span></strong><span class="rs-sub" id="paneARun"></span></div>
+                <iframe class="cmp-pane-frame" id="frameA" title="Week A report"></iframe>
+            </section>
+            <section class="rs-card">
+                <div class="cmp-pane-head"><strong><span class="cmp-week-b" aria-hidden="true"></span><span id="paneB">Week B</span></strong><span class="rs-sub" id="paneBRun"></span></div>
+                <iframe class="cmp-pane-frame" id="frameB" title="Week B report"></iframe>
+            </section>
+        </div>
+    </div>
+
+    <div id="changesPanel" style="display:none">
+        <div class="d-flex flex-wrap gap-3 align-items-center justify-content-between mb-2">
+            <div class="form-check form-switch m-0">
+                <input class="form-check-input" type="checkbox" id="onlyChanged">
+                <label class="form-check-label small" for="onlyChanged">Only rows that changed</label>
+            </div>
+            <div class="d-flex gap-2">
+                <input type="search" class="form-control form-control-sm" id="sectionSearch" placeholder="Find a table…" style="width:220px" aria-label="Find a table" />
+                <button type="button" class="rs-btn" id="expandAll">Expand all</button>
+                <button type="button" class="rs-btn" id="collapseAll">Collapse all</button>
+            </div>
+        </div>
+        <div id="sections"></div>
+    </div>
+</div>
+
+@section Scripts {
+<script nonce='@Context.Items["CspNonce"]'>
+(function(){
+const urls={
+  weeks:'@Url.Action("ReportSnapshotWeeks","MasterValues", new { lab = ViewData["CompareLab"] as string })',
+  data:'@Url.Action("CompareData","ReportSnapshotViewer")',
+  report:'@Url.Action("Report","ReportSnapshotViewer")'
+};
+const initial={
+  lab:@Json.Serialize(ViewData["CompareLab"] as string),
+  report:@Json.Serialize(ViewData["CompareReport"] as string),
+  a:@Json.Serialize(ViewData["CompareA"] as long?),
+  b:@Json.Serialize(ViewData["CompareB"] as long?)
+};
+const REPORTS=[
+  {code:'EXECSUMMARY',label:'Executive Summary'},
+  {code:'LISSUMMARY',label:'LIS Summary'},
+  {code:'PRODSUMMARY',label:'Production Summary'},
+  {code:'COLLSUMMARY',label:'Collection Summary'},
+  {code:'DENIALSUMMARY',label:'Denial Summary'}
+];
+const TOP=10;
+let weeks=[],data=null,view='side',measureBySection={},expanded=new Set(),showAll=new Set();
+const el=id=>document.getElementById(id);
+function esc(v){return (v??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function banner(msg,error){const b=el('banner');b.textContent=msg||'';b.className='rs-banner'+(error?' error':'');b.style.display=msg?'':'none';}
+
+// ── number formatting, as the report pages print them ──────────────────────
+function fmt(v,format,fraction){
+  if(v==null)return '—';
+  const n=Number(v),abs=Math.abs(n);
+  switch(format){
+    case 'money':return (n<0?'−$':'$')+abs.toLocaleString(undefined,{maximumFractionDigits:abs>=1000?0:2,minimumFractionDigits:abs>=1000?0:2});
+    case 'percent':return (fraction?n*100:n).toLocaleString(undefined,{maximumFractionDigits:1})+'%';
+    case 'count':return n.toLocaleString(undefined,{maximumFractionDigits:0});
+    default:return n.toLocaleString(undefined,{maximumFractionDigits:2});
+  }
+}
+// A percentage column held as 0-1 prints as 0-100.
+function isFraction(values){const m=Math.max(0,...values.filter(v=>v!=null).map(v=>Math.abs(Number(v))));return m>0&&m<=1.5;}
+// A compared week by its week range (10.16.2026 - 10.22.2026); the picker's name until the comparison loads.
+function weekLabel(side){const w=data&&data[side];return w&&w.weekFolder?w.weekFolder:(side==='a'?'Week A':'Week B');}
+function delta(a,b,format,fraction){
+  if(a==null&&b==null)return {text:'',cls:'same',pct:''};
+  if(a==null)return {text:'new',cls:'up',pct:''};
+  if(b==null)return {text:'not in '+weekLabel('b'),cls:'down',pct:''};
+  const d=Number(b)-Number(a);
+  if(d===0)return {text:'no change',cls:'same',pct:'0%'};
+  const pct=Number(a)===0?'':(d>0?'+':'−')+Math.abs(d/Number(a)*100).toLocaleString(undefined,{maximumFractionDigits:1})+'%';
+  const shown=format==='percent'?(fraction?Math.abs(d)*100:Math.abs(d)).toLocaleString(undefined,{maximumFractionDigits:1})+' pt':fmt(Math.abs(d),format,fraction);
+  return {text:(d>0?'▲ +':'▼ −')+shown,cls:d>0?'up':'down',pct};
+}
+
+// ── selectors ──────────────────────────────────────────────────────────────
+function fileFor(week,code){
+  const r=(week.reports||[]).find(x=>x.reportCode===code)||(code==='DENIALSUMMARY'?(week.reports||[]).find(x=>x.reportCode==='DENIALINSIGHT'):null);
+  return r?r.snapshotFileId:null;
+}
+// The weeks come back for the header's lab alone.
+function labWeeks(){return weeks;}
+function fillReports(keep){
+  const list=labWeeks();
+  const reps=REPORTS.filter(r=>list.filter(w=>fileFor(w,r.code)).length>0);
+  const current=keep||el('cReport').value;
+  el('cReport').innerHTML=reps.map(r=>`<option value="${r.code}">${esc(r.label)}</option>`).join('');
+  if(reps.some(r=>r.code===current))el('cReport').value=current;
+}
+function fillWeeks(a,b){
+  const code=el('cReport').value;
+  const list=labWeeks().filter(w=>fileFor(w,code));
+  const opts=list.map((w,i)=>`<option value="${fileFor(w,code)}">${esc(w.weekFolder)}${i===0?' (latest)':''}</option>`).join('');
+  el('cA').innerHTML=opts;el('cB').innerHTML=opts;
+  const ids=list.map(w=>String(fileFor(w,code)));
+  el('cB').value=b&&ids.includes(String(b))?String(b):(ids[0]||'');
+  el('cA').value=a&&ids.includes(String(a))?String(a):(ids[1]||ids[0]||'');
+}
+function weekOf(id){return weeks.find(w=>(w.reports||[]).some(r=>String(r.snapshotFileId)===String(id)));}
+
+// ── loading ────────────────────────────────────────────────────────────────
+async function loadWeeks(){
+  try{
+    const r=await fetch(urls.weeks);const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.message||'Unable to load the report snapshots.');
+    weeks=d.rows||[];
+    if(!weeks.length){banner('No report snapshots are available'+(initial.lab?' for '+initial.lab:'')+' yet.');return;}
+    fillReports(initial.report);fillWeeks(initial.a,initial.b);
+    refresh();
+  }catch(e){banner(e.message,true);}
+}
+function refresh(){
+  const a=el('cA').value,b=el('cB').value;
+  const q=new URLSearchParams({lab:initial.lab||'',report:el('cReport').value,a,b});
+  history.replaceState(null,'',location.pathname+'?'+q);
+  const wa=weekOf(a),wb=weekOf(b);
+  el('paneA').textContent=wa?wa.weekFolder:'Week A';el('paneARun').textContent=wa?wa.runId:'';
+  el('paneB').textContent=wb?wb.weekFolder:'Week B';el('paneBRun').textContent=wb?wb.runId:'';
+  el('frameA').title=(wa?wa.weekFolder:'Week A')+' report';el('frameB').title=(wb?wb.weekFolder:'Week B')+' report';
+  if(!a||!b){banner('Pick two weeks to compare.');return;}
+  banner(a===b?'Week A and Week B are the same week. Pick a different week to see what changed.':'');
+  setFrame('frameA',a);setFrame('frameB',b);
+  loadData(a,b);
+}
+function setFrame(id,fileId){
+  const src=urls.report+'/'+encodeURIComponent(fileId)+'?embed=1';
+  const f=el(id);if(f.dataset.src!==src){f.dataset.src=src;f.src=src;}
+}
+async function loadData(a,b){
+  el('kpis').innerHTML='';el('sections').innerHTML='<div class="rs-card rs-empty"><span class="spinner-border spinner-border-sm"></span> Comparing…</div>';
+  try{
+    const r=await fetch(urls.data+'?'+new URLSearchParams({a,b}));const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.message||'The two weeks could not be compared.');
+    data=d;measureBySection={};showAll.clear();
+    if(!expanded.size)(d.sections||[]).slice(0,3).forEach(s=>expanded.add(s.key));
+    renderKpis();renderSections();
+  }catch(e){data=null;el('sections').innerHTML='';banner(e.message,true);}
+}
+
+// ── headline totals ────────────────────────────────────────────────────────
+function renderKpis(){
+  const totals=(data&&data.totals)||[];
+  el('kpis').innerHTML=totals.slice(0,8).map(t=>{
+    const fr=t.format==='percent'&&isFraction([t.a,t.b]),d=delta(t.a,t.b,t.format,fr);
+    return `<div class="cmp-kpi"><span class="cmp-kpi-label">${esc(t.label)}</span>`+
+      `<div class="cmp-kpi-vals"><span class="cmp-kpi-a" title="${esc(weekLabel('a'))}">${esc(fmt(t.a,t.format,fr))}</span><span aria-hidden="true">→</span>`+
+      `<span class="cmp-kpi-b" title="${esc(weekLabel('b'))}">${esc(fmt(t.b,t.format,fr))}</span></div>`+
+      `<span class="cmp-delta ${d.cls}">${esc(d.text)}${d.pct&&d.pct!=='0%'?' ('+esc(d.pct)+')':''}</span></div>`;
+  }).join('');
+}
+
+// ── changes: one table + butterfly chart per section ───────────────────────
+function changed(row,mi){
+  const a=row.a?row.a[mi]:null,b=row.b?row.b[mi]:null;
+  return a==null||b==null?a!==b:Number(a)!==Number(b);
+}
+function renderSections(){
+  if(!data)return;
+  const only=el('onlyChanged').checked,term=el('sectionSearch').value.trim().toLowerCase();
+  const html=(data.sections||[]).filter(s=>!term||s.title.toLowerCase().includes(term)).map((s,si)=>{
+    const mi=Math.min(measureBySection[s.key]??0,s.measures.length-1),m=s.measures[mi];
+    const vals=s.rows.flatMap(r=>[r.a?r.a[mi]:null,r.b?r.b[mi]:null]);
+    const fr=m.format==='percent'&&isFraction(vals);
+    const nChanged=s.rows.filter(r=>changed(r,mi)).length;
+    const rows=only?s.rows.filter(r=>changed(r,mi)):s.rows;
+    const open=expanded.has(s.key);
+    const table='<table class="rs-table"><thead><tr>'+
+      `<th>${esc(s.labelName)}</th><th class="r"><span class="cmp-week-a" aria-hidden="true"></span>${esc(weekLabel('a'))}</th><th class="r"><span class="cmp-week-b" aria-hidden="true"></span>${esc(weekLabel('b'))}</th><th class="r">Change</th><th class="r">%</th></tr></thead><tbody>`+
+      (rows.map(r=>{
+        const a=r.a?r.a[mi]:null,b=r.b?r.b[mi]:null,d=delta(a,b,m.format,fr);
+        const tag=!r.a?'<span class="cmp-tag">NEW</span>':!r.b?'<span class="cmp-tag">GONE</span>':'';
+        return `<tr><td>${esc(r.label)}${tag}</td><td class="r">${esc(fmt(a,m.format,fr))}</td><td class="r">${esc(fmt(b,m.format,fr))}</td>`+
+          `<td class="r"><span class="cmp-delta ${d.cls}">${esc(d.text)}</span></td><td class="r"><span class="cmp-delta ${d.cls}">${esc(d.pct)}</span></td></tr>`;
+      }).join('')||'<tr><td colspan="5" class="text-muted">No rows changed.</td></tr>')+'</tbody></table>';
+    return `<section class="rs-card cmp-section${open?'':' collapsed'}" data-section="${esc(s.key)}">`+
+      `<div class="rs-card-head" data-toggle="${esc(s.key)}"><div class="rs-card-title"><i class="bi bi-chevron-down" aria-hidden="true"></i><h3>${esc(s.title)}</h3>`+
+      `<small>${s.rows.length} row${s.rows.length===1?'':'s'} · ${nChanged} changed</small></div>`+
+      `<div class="cmp-section-tools">${s.measures.length>1?`<label class="visually-hidden" for="m_${si}">Measure</label><select class="form-select" id="m_${si}" data-measure="${esc(s.key)}">`+
+        s.measures.map((x,i)=>`<option value="${i}"${i===mi?' selected':''}>${esc(x.label)}</option>`).join('')+'</select>':`<small class="text-muted">${esc(m.label)}</small>`}</div></div>`+
+      `<div class="cmp-section-body"><div class="rs-scroll">${table}</div>${butterfly(s,mi,fr,rows)}</div></section>`;
+  }).join('');
+  el('sections').innerHTML=html||'<div class="rs-card rs-empty"><i class="bi bi-table" aria-hidden="true"></i>No tables to compare.</div>';
+}
+// Week A grows left from the centre line, Week B right, on one scale: the largest value shown. Both are
+// labelled by their week range.
+function butterfly(s,mi,fr,rows){
+  const m=s.measures[mi];
+  const ranked=rows.map(r=>({r,a:r.a?r.a[mi]:null,b:r.b?r.b[mi]:null}))
+    .filter(x=>x.a!=null||x.b!=null)
+    .sort((x,y)=>Math.max(Math.abs(y.a??0),Math.abs(y.b??0))-Math.max(Math.abs(x.a??0),Math.abs(x.b??0)));
+  if(!ranked.length)return '';
+  const all=showAll.has(s.key),shown=all?ranked:ranked.slice(0,TOP);
+  const max=Math.max(...shown.map(x=>Math.max(Math.abs(x.a??0),Math.abs(x.b??0))))||1;
+  const wa=weekLabel('a'),wb=weekLabel('b');
+  const bar=(v,side)=>{
+    if(v==null)return `<div class="cmp-bf-track ${side}"><span class="cmp-bf-val text-muted">—</span></div>`;
+    const pct=Math.max(.5,Math.abs(v)/max*100),text=esc(fmt(v,m.format,fr));
+    // The value sits inside a bar wide enough to hold it, beside a short one.
+    const inside=pct>=22;
+    return `<div class="cmp-bf-track ${side}">`+(side==='a'&&!inside?`<span class="cmp-bf-val">${text}</span>`:'')+
+      `<div class="cmp-bf-bar" style="width:${pct.toFixed(2)}%">${inside?`<span class="cmp-bf-val">${text}</span>`:''}</div>`+
+      (side==='b'&&!inside?`<span class="cmp-bf-val">${text}</span>`:'')+`</div>`;
+  };
+  const body=shown.map(x=>{
+    const d=delta(x.a,x.b,m.format,fr);
+    const tip=`${x.r.label} — ${wa}: ${fmt(x.a,m.format,fr)} · ${wb}: ${fmt(x.b,m.format,fr)}${d.pct?' ('+d.pct+')':''}`;
+    return `<div class="cmp-bf-label l" title="${esc(tip)}">${esc(x.r.label)}</div>${bar(x.a,'a')}${bar(x.b,'b')}`+
+      `<div class="cmp-bf-label r"><span class="cmp-delta ${d.cls}">${esc(d.pct||d.text)}</span></div>`;
+  }).join('');
+  return `<div class="cmp-chart" role="img" aria-label="${esc(m.label)} by ${esc(s.labelName)}, ${esc(wa)} against ${esc(wb)}">`+
+    `<div class="cmp-chart-head"><span class="cmp-chart-title">${esc(m.label)}${ranked.length>TOP&&!all?' · top '+TOP:''}</span>`+
+    `<span class="cmp-legend"><span><span class="cmp-week-a" aria-hidden="true"></span>${esc(wa)}</span><span><span class="cmp-week-b" aria-hidden="true"></span>${esc(wb)}</span></span></div>`+
+    `<div class="cmp-bf">${body}</div>`+
+    (ranked.length>TOP?`<button type="button" class="cmp-bf-more" data-more="${esc(s.key)}">${all?'Show top '+TOP:'Show all '+ranked.length}</button>`:'')+`</div>`;
+}
+
+// ── side by side: the two report pages, kept in step ───────────────────────
+let syncing=false;
+function frameDoc(f){try{return f.contentDocument;}catch{return null;}}
+function wireFrame(src,dst){
+  const s=el(src);
+  s.addEventListener('load',()=>{
+    const doc=frameDoc(s);if(!doc)return;
+    doc.defaultView.addEventListener('scroll',()=>{
+      if(syncing||!el('syncScroll').checked)return;
+      const other=frameDoc(el(dst));if(!other)return;
+      const se=doc.scrollingElement,oe=other.scrollingElement;
+      const ratio=se.scrollTop/Math.max(1,se.scrollHeight-se.clientHeight);
+      syncing=true;oe.scrollTop=ratio*(oe.scrollHeight-oe.clientHeight);
+      requestAnimationFrame(()=>{syncing=false;});
+    },{passive:true});
+    doc.addEventListener('click',e=>{
+      if(syncing||!el('syncScroll').checked)return;
+      const tab=e.target.closest('[data-bs-toggle="tab"],[data-bs-toggle="pill"],[role="tab"]');if(!tab)return;
+      const other=frameDoc(el(dst));if(!other)return;
+      const target=tab.getAttribute('data-bs-target')||tab.getAttribute('href');
+      const match=(tab.id&&other.getElementById(tab.id))
+        ||(target&&target.startsWith('#')&&other.querySelector(`[data-bs-target="${CSS.escape(target)}"],[href="${CSS.escape(target)}"]`))
+        ||[...other.querySelectorAll('[data-bs-toggle="tab"],[data-bs-toggle="pill"],[role="tab"]')].find(t=>t.textContent.trim()===tab.textContent.trim());
+      if(match){syncing=true;match.click();setTimeout(()=>{syncing=false;},0);}
+    });
+  });
+}
+wireFrame('frameA','frameB');wireFrame('frameB','frameA');
+
+function setView(v){
+  view=v;
+  el('viewSide').setAttribute('aria-pressed',v==='side');el('viewChanges').setAttribute('aria-pressed',v==='changes');
+  el('sidePanel').style.display=v==='side'?'':'none';el('changesPanel').style.display=v==='changes'?'':'none';
+}
+el('viewSide').onclick=()=>setView('side');
+el('viewChanges').onclick=()=>setView('changes');
+el('cReport').addEventListener('change',()=>{fillWeeks();expanded.clear();refresh();});
+el('cA').addEventListener('change',refresh);
+el('cB').addEventListener('change',refresh);
+el('swapBtn').onclick=()=>{const a=el('cA').value;el('cA').value=el('cB').value;el('cB').value=a;refresh();};
+el('onlyChanged').addEventListener('change',renderSections);
+el('sectionSearch').addEventListener('input',renderSections);
+el('expandAll').onclick=()=>{(data?.sections||[]).forEach(s=>expanded.add(s.key));renderSections();};
+el('collapseAll').onclick=()=>{expanded.clear();renderSections();};
+el('sections').addEventListener('change',e=>{
+  const s=e.target.closest('[data-measure]');if(!s)return;
+  measureBySection[s.dataset.measure]=Number(s.value);renderSections();
+});
+el('sections').addEventListener('click',e=>{
+  if(e.target.closest('select'))return;
+  const more=e.target.closest('[data-more]');
+  if(more){const k=more.dataset.more;showAll.has(k)?showAll.delete(k):showAll.add(k);renderSections();return;}
+  const head=e.target.closest('[data-toggle]');
+  if(head){const k=head.dataset.toggle;expanded.has(k)?expanded.delete(k):expanded.add(k);renderSections();}
+});
+loadWeeks();
+})();
+</script>
+}

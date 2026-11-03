@@ -1886,6 +1886,7 @@ else
 
 @if (string.IsNullOrEmpty(lisPaneOnly))
 {
+@* On a saved snapshot (ReportSnapshotViewer) the panel shows that week's captured insights, read-only. *@
 @await Html.PartialAsync("~/Views/Shared/_ReportInsights.cshtml", new LabMetricsDashboard.Models.Notes.ReportInsightsPanelModel
 {
     Lab = string.IsNullOrWhiteSpace(Model.ConfiguredLabKey) ? Model.CurrentLabName : Model.ConfiguredLabKey,

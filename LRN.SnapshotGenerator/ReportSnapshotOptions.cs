@@ -20,8 +20,11 @@ public sealed class ReportSnapshotOptions
     /// <summary>Only tracker rows updated within this many days are considered.</summary>
     public int LookbackDays { get; set; } = 14;
 
-    /// <summary>Delay after a lab's report turns Success before it is captured, so a report still settling is not caught mid-write.</summary>
-    public int SettleMinutes { get; set; } = 5;
+    /// <summary>
+    /// Optional wait after the service first sees a Success, before capturing it. 0 (the default) captures on
+    /// the poll that finds it: a report writes its Success row when it has finished.
+    /// </summary>
+    public int SettleMinutes { get; set; }
 
     /// <summary>How often dbo.ReportSnapshotRequest is checked (Denial Insight uploads and edits).</summary>
     public int RequestPollSeconds { get; set; } = 60;
@@ -51,7 +54,10 @@ public sealed class LabSnapshotConfig
 
     public bool Enabled { get; set; }
 
-    /// <summary>Keyed by report: ExecutiveSummary, LisSummary, ProductionSummary, CollectionSummary, DenialSummary, DenialInsight.</summary>
+    /// <summary>
+    /// Keyed by report: ExecutiveSummary, LisSummary, ProductionSummary, CollectionSummary, DenialSummary, DenialInsight,
+    /// LisInsight, ProductionInsight, CollectionInsight.
+    /// </summary>
     public Dictionary<string, LabReportSnapshotConfig> Reports { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Where the file came from, for log messages.</summary>
@@ -126,7 +132,10 @@ public static class SnapshotReports
         new("ProductionSummary", LRN.ReportWorker.Generators.ReportSnapshotCodes.ProductionSummary, "Production Summary"),
         new("CollectionSummary", LRN.ReportWorker.Generators.ReportSnapshotCodes.CollectionSummary, "Collection Summary"),
         new("DenialSummary", LRN.ReportWorker.Generators.ReportSnapshotCodes.DenialSummary, "Denial Report"),
-        new("DenialInsight", LRN.ReportWorker.Generators.ReportSnapshotCodes.DenialInsight, null)
+        new("DenialInsight", LRN.ReportWorker.Generators.ReportSnapshotCodes.DenialInsight, null),
+        new("LisInsight", LRN.ReportWorker.Generators.ReportSnapshotCodes.LisInsight, null),
+        new("ProductionInsight", LRN.ReportWorker.Generators.ReportSnapshotCodes.ProductionInsight, null),
+        new("CollectionInsight", LRN.ReportWorker.Generators.ReportSnapshotCodes.CollectionInsight, null)
     ];
 
     public static Definition? ByCode(string reportCode) =>

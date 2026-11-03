@@ -127,10 +127,45 @@ public static class SelfTest
             "Logic: changed, added and dropped objects are reported");
         Check(after.ChangesSince(null).Count == 0, "Logic: the first snapshot is the baseline");
 
+        // The Executive Summary: value tuples as columns and as JSON (System.Text.Json alone writes them as {} / refuses the keys).
+        var es = new LabMetricsDashboard.Models.PhiExecutiveSummaryViewModel
+        {
+            YearMonthColumns = [(2026, 9), (2026, 10), (0, 0)],
+            YearlyTotals = new() { [2026] = 15m },
+            Rows = [new LabMetricsDashboard.Models.ExecSummaryRow { RowCode = "A", Category = "LIS", Description = "Samples",
+                ValuesByYearMonth = new() { [(2026, 9)] = 5m, [(2026, 10)] = 10m, [(0, 0)] = 15m } }]
+        };
+        var esSections = ViewModelSections.Extract(es);
+        var ymc = esSections.FirstOrDefault(s => s.Name == "YearMonthColumns")?.Table;
+        Check(ymc is not null && ymc.Rows.Count == 3 && ymc.Columns.Contains("Year") && ymc.Columns.Contains("Month")
+              && (int)ymc.Rows[1]["Year"] == 2026 && (int)ymc.Rows[1]["Month"] == 10,
+            "Executive Summary: YearMonthColumns keeps Year and Month");
+        var esJson = JsonSerializer.Serialize(es, ReportPageSnapshot.JsonOptions);
+        var esBack = JsonSerializer.Deserialize<LabMetricsDashboard.Models.PhiExecutiveSummaryViewModel>(esJson, ReportPageSnapshot.JsonOptions);
+        Check(esBack is not null && esBack.YearMonthColumns.SequenceEqual(es.YearMonthColumns)
+              && esBack.Rows[0].ValuesByYearMonth[(2026, 10)] == 10m && esBack.Rows[0].Total == 15m,
+            "Executive Summary: page model binds back with its (Year, Month) columns and cells");
+
         // The Denial Insight model: both weeks as sections, even when empty.
-        var insight = ViewModelSections.Extract(new DenialInsightSnapshotModel { CurrentLab = "TexasDiagnostic" });
+        var insight = ViewModelSections.Extract(new LabMetricsDashboard.ViewModels.DenialInsightSnapshotModel { CurrentLab = "TexasDiagnostic" });
         Check(insight.Any(s => s.Name == "CurrentWeek" && s.Table.Columns.Contains("DenialCode")) && insight.Any(s => s.Name == "PreviousWeek"),
             "Denial Insight: Current Week and Previous Week sections with their columns");
+
+        // A report's Key Insights: the rows as a section, and the page model binds back with its templates.
+        var keyInsights = new LabMetricsDashboard.ViewModels.ReportInsightsSnapshotModel
+        {
+            CurrentLab = "TexasDiagnostic", ReportName = "LIS Report", WeekText = "10.16.2026 - 10.22.2026",
+            Templates = [new LabMetricsDashboard.Models.Notes.NotesTemplateBundle { TemplateId = 1, TemplateName = "Key Insights",
+                Columns = [new LabMetricsDashboard.Models.Notes.NotesTemplateColumnDef { ColumnName = "Risk", FieldKey = "Risk", DropdownValues = ["Red"] }] }],
+            Rows = [new LabMetricsDashboard.Models.Notes.NoteInsight { NoteId = 5, Insights = "<b>Denials up</b>", TotalCharge = 120.5m }]
+        };
+        var keySections = ViewModelSections.Extract(keyInsights);
+        Check(keySections.Any(s => s.Name == "Rows" && s.Table.Rows.Count == 1 && s.Table.Columns.Contains("Insights")),
+            "Key Insights: the insights as a Rows section");
+        var keyBack = JsonSerializer.Deserialize<LabMetricsDashboard.ViewModels.ReportInsightsSnapshotModel>(
+            JsonSerializer.Serialize(keyInsights, ReportPageSnapshot.JsonOptions), ReportPageSnapshot.JsonOptions);
+        Check(keyBack is not null && keyBack.Rows[0].TotalCharge == 120.5m && keyBack.Templates[0].Columns[0].DropdownValues[0] == "Red",
+            "Key Insights: page model binds back with its rows and templates");
 
         Console.WriteLine(failed == 0 ? "All self-tests passed." : $"{failed} self-test(s) FAILED.");
         return failed == 0 ? 0 : 1;

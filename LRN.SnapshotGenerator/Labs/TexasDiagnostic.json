@@ -5,6 +5,7 @@
   // a report runs are the page's own for this lab - nothing to list here. A report the lab does not have
   // in LRN Metrics is logged as "not available"; set its Enabled to false to stop checking it.
   // DenialInsight has no tracker report: the client uploads it, and it is captured after each upload or edit.
+  // LisInsight / ProductionInsight / CollectionInsight: the reports' Key Insights, captured after each save or delete.
   "LabId": 29,
   "LabKey": "TexasDiagnostic",
   "Enabled": true,
@@ -14,6 +15,9 @@
     "ProductionSummary": { "Enabled": true, "TrackerReportName": "Production Summary" },
     "CollectionSummary": { "Enabled": true, "TrackerReportName": "Collection Summary" },
     "DenialSummary":     { "Enabled": true, "TrackerReportName": "Denial Report" },
-    "DenialInsight":     { "Enabled": true }
+    "DenialInsight":     { "Enabled": true },
+    "LisInsight":        { "Enabled": true },
+    "ProductionInsight": { "Enabled": true },
+    "CollectionInsight": { "Enabled": true }
   }
 }

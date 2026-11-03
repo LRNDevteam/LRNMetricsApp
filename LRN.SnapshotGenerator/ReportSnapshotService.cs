@@ -127,9 +127,9 @@ public sealed partial class ReportSnapshotService
             wanted.Select(w => w.Lab.LabId).Distinct().ToList(),
             wanted.Select(w => w.TrackerName).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             _options.LookbackDays, ct);
-        _logger.LogInformation("Report snapshots: tracker poll - {Labs} lab(s) enabled ({LabKeys}), {Rows} Success row(s) in the last {Days} day(s) (tracker time column: {Column}).",
+        _logger.LogInformation("Report snapshots: tracker poll - {Labs} lab(s) enabled ({LabKeys}), {Rows} Success row(s) in the last {Days} day(s) (tracker time columns: {Column}).",
             enabled.Count, string.Join(", ", enabled.Select(l => $"{l.LabKey}#{l.LabId}")), successes.Count, _options.LookbackDays,
-            await _index.GetTrackerStampColumnAsync(ct) ?? "none");
+            await _index.GetTrackerStampColumnAsync(ct));
 
         // Newest first: per lab + report only the most recent Success matters (older runs are superseded anyway).
         var touchedLabs = new HashSet<int>();
@@ -453,7 +453,7 @@ public sealed partial class ReportSnapshotService
 
     /// <summary>
     /// The display copy. A view model that cannot be written as JSON is logged, not fatal: its Parquet
-    /// sections are already stored, and a retry would fail the same way.
+    /// sections are already stored. The report counts as not captured without it, so the next poll retries.
     /// </summary>
     private async Task<bool> WritePageModelAsync(ReportPageSnapshot page, string prefix, long snapshotRunId, ISnapshotStore store, string work, CancellationToken ct)
     {
