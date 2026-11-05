@@ -1,4 +1,4 @@
-﻿/* =============================================================================
+/* =============================================================================
    TexasDiagnostic - Executive Summary (LIS / PMS / Cash / Average)
    Database : TexasDiagnostic        Prefix : TD
 
@@ -15,7 +15,7 @@
    LIS Breakdown (LIMSMaster; same NewStatus / BillCategory / SubStatus values as the LIS Summary)
      A   Total Samples              every sample
      B   Billable Samples           NewStatus = Billable
-     B1-B10 Toxicology, Blood, Urinalysis, STI, Wound, PGX, UTI, RPP, GI, UTI + Urinalysis
+     B.{PANEL} one row per PanelName found (dynamic; blank PanelName has no row), largest Total first
                                     Billable AND PanelName = the panel
      C   Billed                     Billable AND BillCategory = Billed
      D   Unbilled                   Billable AND BillCategory = Unbilled
@@ -43,7 +43,8 @@
    Cash Breakdown
      P   Total Billed ($)                   SUM(ChargeAmount)         billed claims
      Q   Expected Payment ($)               SUM(ExpectedPayment)      billed claims
-     Q1-Q9 by Panelname (Toxicology, Blood, PGX, Wound, RPP, UTI, STI, GI, Urinalysis)
+     Q.{PANEL} one row per Panelname with billed claims (dynamic; blank Panelname has no row),
+               largest Total first
      R   Insurance Payment ($)              SUM(InsurancePayment)     ClaimStatus = Fully Paid
      S   Partially Paid ($)                 SUM(InsurancePayment)     ClaimStatus = Partially Paid
      T   Total Payments ($)                 SUM(InsurancePayment)     ClaimStatus IN (Fully Paid, Partially Paid)
@@ -59,8 +60,12 @@
 
    Expected Payment Per Claim (end of the Cash section; the Averages section holds only Z / AA / AB)
      Y   Average Expected Payment ($)       Q / F
-     Y1-Y9 per panel                        panel Expected Payment (Q1-Q9) / LIS Billable Samples of
-                                            the same panel (B1-B9)
+     Y.{PANEL} the Q.{PANEL} panels         panel Expected Payment (Q.{PANEL}) / LIS Billable Samples of
+                                            the same panel (B.{PANEL}), largest Total first
+   {PANEL} = UPPER(TRIM(panel name)); the row shows the name as written in the data.
+   SortOrder = the fixed row's code x 100; panel rows follow their parent (parent + rank).
+   The page re-orders every subcategory group (panels, D1-D2, E1-E6, O1-O3, X1-X3) by Grand
+   Total, largest first (SqlPhiExecutiveSummaryRepository.SortSubRowsByTotalDesc).
    Average Payment Per Claim
      Z   Total Pay / Billed Claims          T / F
      AA  Total Pay / Paid Claims            R / J
@@ -80,7 +85,7 @@ IF OBJECT_ID(N'dbo.TD_ES_LIS', N'U') IS NULL
 CREATE TABLE dbo.TD_ES_LIS
 (
     Id                  INT            NOT NULL IDENTITY(1,1) PRIMARY KEY,
-    RoleID              NVARCHAR(20)   NOT NULL,
+    RoleID              NVARCHAR(320)  NOT NULL,
     Description         NVARCHAR(300)  NOT NULL,
     ESYear              INT            NOT NULL,
     ESMonth             INT            NOT NULL,
@@ -95,7 +100,7 @@ IF OBJECT_ID(N'dbo.TD_ES_PMS', N'U') IS NULL
 CREATE TABLE dbo.TD_ES_PMS
 (
     Id                  INT            NOT NULL IDENTITY(1,1) PRIMARY KEY,
-    RoleID              NVARCHAR(20)   NOT NULL,
+    RoleID              NVARCHAR(320)  NOT NULL,
     Description         NVARCHAR(300)  NOT NULL,
     ESYear              INT            NOT NULL,
     ESMonth             INT            NOT NULL,
@@ -110,7 +115,7 @@ IF OBJECT_ID(N'dbo.TD_ES_Cash', N'U') IS NULL
 CREATE TABLE dbo.TD_ES_Cash
 (
     Id                  INT            NOT NULL IDENTITY(1,1) PRIMARY KEY,
-    RoleID              NVARCHAR(20)   NOT NULL,
+    RoleID              NVARCHAR(320)  NOT NULL,
     Description         NVARCHAR(300)  NOT NULL,
     ESYear              INT            NOT NULL,
     ESMonth             INT            NOT NULL,
@@ -125,7 +130,7 @@ IF OBJECT_ID(N'dbo.TD_ES_Avg', N'U') IS NULL
 CREATE TABLE dbo.TD_ES_Avg
 (
     Id                  INT            NOT NULL IDENTITY(1,1) PRIMARY KEY,
-    RoleID              NVARCHAR(20)   NOT NULL,
+    RoleID              NVARCHAR(320)  NOT NULL,
     Description         NVARCHAR(300)  NOT NULL,
     ESYear              INT            NOT NULL,
     ESMonth             INT            NOT NULL,
@@ -136,10 +141,18 @@ CREATE TABLE dbo.TD_ES_Avg
 );
 GO
 
+-- Panel rows use 'B.' / 'Q.' / 'Y.' + the panel name as their code.
+IF COL_LENGTH(N'dbo.TD_ES_LIS', N'RoleID') < 640  ALTER TABLE dbo.TD_ES_LIS  ALTER COLUMN RoleID NVARCHAR(320) NOT NULL;
+IF COL_LENGTH(N'dbo.TD_ES_PMS', N'RoleID') < 640  ALTER TABLE dbo.TD_ES_PMS  ALTER COLUMN RoleID NVARCHAR(320) NOT NULL;
+IF COL_LENGTH(N'dbo.TD_ES_Cash', N'RoleID') < 640 ALTER TABLE dbo.TD_ES_Cash ALTER COLUMN RoleID NVARCHAR(320) NOT NULL;
+IF COL_LENGTH(N'dbo.TD_ES_Avg', N'RoleID') < 640  ALTER TABLE dbo.TD_ES_Avg  ALTER COLUMN RoleID NVARCHAR(320) NOT NULL;
+GO
+
 /* -----------------------------------------------------------------------------
    usp_TD_ES_Load fills #EsLis and #EsClaims. The caller creates both.
    #EsLis carries the sample's status key (St), billed flag (Bill 'B' / 'U' / ''),
-   sub status key (Sub) and panel key (Panel).
+   sub status key (Sub), panel key (Panel = UPPER(TRIM(PanelName)), '' when blank) and the
+   panel name as written (PanelLabel). #EsClaims carries the same Panel / PanelLabel.
    ----------------------------------------------------------------------------- */
 CREATE OR ALTER PROCEDURE dbo.usp_TD_ES_Load
 (
@@ -178,8 +191,8 @@ BEGIN
     DECLARE @HasRep      BIT = CASE WHEN EXISTS (SELECT 1 FROM #Filters WHERE Dim = 'Rep')      THEN 1 ELSE 0 END;
 
     DELETE FROM #EsLis;
-    INSERT INTO #EsLis (ESYear, ESMonth, St, Bill, Sub, Panel, Cnt)
-    SELECT YEAR(p.PeriodDate), MONTH(p.PeriodDate), k.St, k.Bill, k.Sub, k.Panel, COUNT(*)
+    INSERT INTO #EsLis (ESYear, ESMonth, St, Bill, Sub, Panel, PanelLabel, Cnt)
+    SELECT YEAR(p.PeriodDate), MONTH(p.PeriodDate), k.St, k.Bill, k.Sub, k.Panel, k.PanelLabel, COUNT(*)
     FROM dbo.LIMSMaster l
     CROSS APPLY (
         SELECT TRY_CAST(l.RequestCollectDate AS DATE) AS Dos,
@@ -208,8 +221,8 @@ BEGIN
                    WHEN p.SS = N'READY TO BILL' THEN 'READY'
                    WHEN p.SS = N'MISSING INSURANCE INFO' THEN 'MISSINS'
                    ELSE '' END AS VARCHAR(10)) AS Sub,
-               CAST(CASE WHEN p.PN IN (N'TOXICOLOGY', N'BLOOD', N'URINALYSIS', N'STI', N'WOUND', N'PGX',
-                                       N'UTI', N'RPP', N'GI', N'UTI + URINALYSIS') THEN p.PN ELSE N'' END AS NVARCHAR(20)) AS Panel
+               CAST(p.PN AS NVARCHAR(300)) AS Panel,
+               CAST(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(500), l.PanelName), N''))) AS NVARCHAR(300)) AS PanelLabel
     ) k
     WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(500), l.Accession))), N'') IS NOT NULL
       AND p.Dos IS NOT NULL
@@ -225,7 +238,7 @@ BEGIN
       AND (@HasClinic   = 0 OR LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), l.ClinicName), N'')))     IN (SELECT Val FROM #Filters WHERE Dim = 'Clinic'))
       AND (@HasProvider = 0 OR LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), l.DoctorFullName), N''))) IN (SELECT Val FROM #Filters WHERE Dim = 'Provider'))
       AND (@HasRep      = 0 OR LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), l.SalesRepName), N'')))   IN (SELECT Val FROM #Filters WHERE Dim = 'Rep'))
-    GROUP BY YEAR(p.PeriodDate), MONTH(p.PeriodDate), k.St, k.Bill, k.Sub, k.Panel
+    GROUP BY YEAR(p.PeriodDate), MONTH(p.PeriodDate), k.St, k.Bill, k.Sub, k.Panel, k.PanelLabel
     OPTION (RECOMPILE);
 
     DELETE FROM #EsClaims;
@@ -233,9 +246,8 @@ BEGIN
     (
         SELECT
             UPPER(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), c.ClaimStatus), N''))))  AS ClaimStatus,
-            CAST(CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(500), c.Panelname), N''))))
-                           IN (N'TOXICOLOGY', N'BLOOD', N'URINALYSIS', N'WOUND', N'PGX', N'UTI', N'STI', N'RPP', N'GI')
-                      THEN UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(500), c.Panelname)))) ELSE N'' END AS NVARCHAR(20)) AS Panel,
+            CAST(UPPER(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(500), c.Panelname), N'')))) AS NVARCHAR(300)) AS Panel,
+            CAST(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(500), c.Panelname), N''))) AS NVARCHAR(300))        AS PanelLabel,
             -- Every claim but the latest (highest ClaimID) carrying the same AccessionNumber.
             CAST(CASE WHEN NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(1000), c.AccessionNumber))), N'') IS NOT NULL
                       AND ROW_NUMBER() OVER (PARTITION BY LTRIM(RTRIM(CONVERT(NVARCHAR(1000), c.AccessionNumber)))
@@ -261,9 +273,9 @@ BEGIN
         WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(255), c.ClaimID))), N'') IS NOT NULL
     )
     INSERT INTO #EsClaims
-        (ESYear, ESMonth, IsDup, IsBilled, ClaimStatus, Panel, ClaimCnt, ChargeAmount, InsurancePayment,
+        (ESYear, ESMonth, IsDup, IsBilled, ClaimStatus, Panel, PanelLabel, ClaimCnt, ChargeAmount, InsurancePayment,
          TotalAdjustments, InsuranceAdjustments, PatientBalance, InsuranceBalance, TotalBalance, ExpectedPayment)
-    SELECT YEAR(n.PeriodDate), MONTH(n.PeriodDate), n.IsDup, b.IsBilled, n.ClaimStatus, n.Panel,
+    SELECT YEAR(n.PeriodDate), MONTH(n.PeriodDate), n.IsDup, b.IsBilled, n.ClaimStatus, n.Panel, n.PanelLabel,
            COUNT(*),
            SUM(n.ChargeAmount), SUM(n.InsurancePayment), SUM(n.TotalAdjustments),
            SUM(n.InsuranceAdjustments), SUM(n.PatientBalance), SUM(n.InsuranceBalance), SUM(n.TotalBalance), SUM(n.ExpectedPayment)
@@ -282,7 +294,7 @@ BEGIN
       AND (@HasClinic   = 0 OR n.ClinicFilter   IN (SELECT Val FROM #Filters WHERE Dim = 'Clinic'))
       AND (@HasProvider = 0 OR n.ProviderFilter IN (SELECT Val FROM #Filters WHERE Dim = 'Provider'))
       AND (@HasRep      = 0 OR n.RepFilter      IN (SELECT Val FROM #Filters WHERE Dim = 'Rep'))
-    GROUP BY YEAR(n.PeriodDate), MONTH(n.PeriodDate), n.IsDup, b.IsBilled, n.ClaimStatus, n.Panel
+    GROUP BY YEAR(n.PeriodDate), MONTH(n.PeriodDate), n.IsDup, b.IsBilled, n.ClaimStatus, n.Panel, n.PanelLabel
     OPTION (RECOMPILE);
 END;
 GO
@@ -301,16 +313,6 @@ BEGIN
         CASE WHEN GROUPING(ESMonth) = 1 THEN 0 ELSE ESMonth END AS M,
         ISNULL(SUM(Cnt), 0) AS L_A,
         ISNULL(SUM(CASE WHEN St = 'INS' THEN Cnt END), 0) AS L_B,
-        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'TOXICOLOGY' THEN Cnt END), 0) AS L_B1,
-        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'BLOOD'      THEN Cnt END), 0) AS L_B2,
-        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'URINALYSIS' THEN Cnt END), 0) AS L_B3,
-        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'STI'        THEN Cnt END), 0) AS L_B4,
-        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'WOUND'      THEN Cnt END), 0) AS L_B5,
-        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'PGX'        THEN Cnt END), 0) AS L_B6,
-        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'UTI'        THEN Cnt END), 0) AS L_B7,
-        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'RPP'        THEN Cnt END), 0) AS L_B8,
-        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'GI'         THEN Cnt END), 0) AS L_B9,
-        ISNULL(SUM(CASE WHEN St = 'INS' AND Panel = N'UTI + URINALYSIS' THEN Cnt END), 0) AS L_B10,
         ISNULL(SUM(CASE WHEN St = 'INS' AND Bill = 'B' THEN Cnt END), 0) AS L_C,
         ISNULL(SUM(CASE WHEN St = 'INS' AND Bill = 'U' THEN Cnt END), 0) AS L_D,
         ISNULL(SUM(CASE WHEN St = 'INS' AND Bill = 'U' AND Sub = 'READY'   THEN Cnt END), 0) AS L_D1,
@@ -343,15 +345,6 @@ BEGIN
         ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus = N'NO RESPONSE' THEN ClaimCnt END), 0) AS P_O3,
         ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 THEN ChargeAmount END), 0) AS C_P,
         ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 THEN ExpectedPayment END), 0) AS C_Q,
-        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'TOXICOLOGY' THEN ExpectedPayment END), 0) AS C_Q1,
-        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'BLOOD'      THEN ExpectedPayment END), 0) AS C_Q2,
-        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'PGX'        THEN ExpectedPayment END), 0) AS C_Q3,
-        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'WOUND'      THEN ExpectedPayment END), 0) AS C_Q4,
-        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'RPP'        THEN ExpectedPayment END), 0) AS C_Q5,
-        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'UTI'        THEN ExpectedPayment END), 0) AS C_Q6,
-        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'STI'        THEN ExpectedPayment END), 0) AS C_Q7,
-        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'GI'         THEN ExpectedPayment END), 0) AS C_Q8,
-        ISNULL(SUM(CASE WHEN IsDup = 0 AND IsBilled = 1 AND Panel = N'URINALYSIS' THEN ExpectedPayment END), 0) AS C_Q9,
         ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus = N'FULLY PAID' THEN InsurancePayment END), 0) AS C_R,
         ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus = N'PARTIALLY PAID' THEN InsurancePayment END), 0) AS C_S,
         ISNULL(SUM(CASE WHEN IsDup = 0 AND ClaimStatus IN (N'FULLY PAID', N'PARTIALLY PAID') THEN InsurancePayment END), 0) AS C_T,
@@ -368,8 +361,6 @@ BEGIN
     DROP TABLE IF EXISTS #Per;
     SELECT COALESCE(l.Y, c.Y) AS Y, COALESCE(l.M, c.M) AS M,
            ISNULL(l.L_A, 0) L_A, ISNULL(l.L_B, 0) L_B,
-           ISNULL(l.L_B1, 0) L_B1, ISNULL(l.L_B2, 0) L_B2, ISNULL(l.L_B3, 0) L_B3, ISNULL(l.L_B4, 0) L_B4, ISNULL(l.L_B5, 0) L_B5,
-           ISNULL(l.L_B6, 0) L_B6, ISNULL(l.L_B7, 0) L_B7, ISNULL(l.L_B8, 0) L_B8, ISNULL(l.L_B9, 0) L_B9, ISNULL(l.L_B10, 0) L_B10,
            ISNULL(l.L_C, 0) L_C, ISNULL(l.L_D, 0) L_D, ISNULL(l.L_D1, 0) L_D1, ISNULL(l.L_D2, 0) L_D2,
            ISNULL(l.L_E, 0) L_E, ISNULL(l.L_E1, 0) L_E1, ISNULL(l.L_E2, 0) L_E2, ISNULL(l.L_E3, 0) L_E3,
            ISNULL(l.L_E4, 0) L_E4, ISNULL(l.L_E5, 0) L_E5, ISNULL(l.L_E6, 0) L_E6,
@@ -377,8 +368,6 @@ BEGIN
            ISNULL(c.P_L, 0) P_L, ISNULL(c.P_M, 0) P_M, ISNULL(c.P_N, 0) P_N,
            ISNULL(c.P_O1, 0) P_O1, ISNULL(c.P_O2, 0) P_O2, ISNULL(c.P_O3, 0) P_O3,
            ISNULL(c.C_P, 0) C_P, ISNULL(c.C_Q, 0) C_Q,
-           ISNULL(c.C_Q1, 0) C_Q1, ISNULL(c.C_Q2, 0) C_Q2, ISNULL(c.C_Q3, 0) C_Q3, ISNULL(c.C_Q4, 0) C_Q4, ISNULL(c.C_Q5, 0) C_Q5,
-           ISNULL(c.C_Q6, 0) C_Q6, ISNULL(c.C_Q7, 0) C_Q7, ISNULL(c.C_Q8, 0) C_Q8, ISNULL(c.C_Q9, 0) C_Q9,
            ISNULL(c.C_R, 0) C_R, ISNULL(c.C_S, 0) C_S, ISNULL(c.C_T, 0) C_T, ISNULL(c.C_U, 0) C_U, ISNULL(c.C_V, 0) C_V,
            ISNULL(c.C_W, 0) C_W, ISNULL(c.C_X1, 0) + ISNULL(c.C_X2, 0) + ISNULL(c.C_X3, 0) C_X,
            ISNULL(c.C_X1, 0) C_X1, ISNULL(c.C_X2, 0) C_X2, ISNULL(c.C_X3, 0) C_X3
@@ -387,7 +376,7 @@ BEGIN
     FULL OUTER JOIN #ClmM c ON c.Y = l.Y AND c.M = l.M;
 
     INSERT INTO #EsOut (Category, RowCode, Description, SortOrder, ESYear, ESMonth, MetricValue, ClaimCount)
-    SELECT r.Category, r.RowCode, r.Description, r.SortOrder, p.Y, p.M,
+    SELECT r.Category, r.RowCode, r.Description, r.SortOrder * 100, p.Y, p.M,
            CAST(r.MetricValue AS DECIMAL(18,2)), r.ClaimCount
     FROM #Per p
     CROSS APPLY (
@@ -396,16 +385,6 @@ BEGIN
     CROSS APPLY (VALUES
         ('LIS', 'A',   N'Total Samples',                10, CAST(p.L_A AS DECIMAL(38,6)), p.L_A),
         ('LIS', 'B',   N'Billable Samples',             20, CAST(p.L_B AS DECIMAL(38,6)), p.L_B),
-        ('LIS', 'B1',  N'  Toxicology',                 21, CAST(p.L_B1 AS DECIMAL(38,6)), p.L_B1),
-        ('LIS', 'B2',  N'  Blood',                      22, CAST(p.L_B2 AS DECIMAL(38,6)), p.L_B2),
-        ('LIS', 'B3',  N'  Urinalysis',                 23, CAST(p.L_B3 AS DECIMAL(38,6)), p.L_B3),
-        ('LIS', 'B4',  N'  STI',                        24, CAST(p.L_B4 AS DECIMAL(38,6)), p.L_B4),
-        ('LIS', 'B5',  N'  Wound',                      25, CAST(p.L_B5 AS DECIMAL(38,6)), p.L_B5),
-        ('LIS', 'B6',  N'  PGX',                        26, CAST(p.L_B6 AS DECIMAL(38,6)), p.L_B6),
-        ('LIS', 'B7',  N'  UTI',                        27, CAST(p.L_B7 AS DECIMAL(38,6)), p.L_B7),
-        ('LIS', 'B8',  N'  RPP',                        28, CAST(p.L_B8 AS DECIMAL(38,6)), p.L_B8),
-        ('LIS', 'B9',  N'  GI',                         29, CAST(p.L_B9 AS DECIMAL(38,6)), p.L_B9),
-        ('LIS', 'B10', N'  UTI + Urinalysis',           30, CAST(p.L_B10 AS DECIMAL(38,6)), p.L_B10),
         ('LIS', 'C',   N'Billed',                       40, CAST(p.L_C AS DECIMAL(38,6)), p.L_C),
         ('LIS', 'D',   N'Unbilled',                     50, CAST(p.L_D AS DECIMAL(38,6)), p.L_D),
         ('LIS', 'D1',  N'  Ready to Bill',              60, CAST(p.L_D1 AS DECIMAL(38,6)), p.L_D1),
@@ -434,15 +413,6 @@ BEGIN
 
         ('Cash', 'P',   N'Total Billed ($)',                                410, p.C_P, 0),
         ('Cash', 'Q',   N'Expected Payment (Based On Medicare Allowable)',  420, p.C_Q, 0),
-        ('Cash', 'Q1',  N'  Toxicology',                                    421, p.C_Q1, 0),
-        ('Cash', 'Q2',  N'  Blood',                                         422, p.C_Q2, 0),
-        ('Cash', 'Q3',  N'  PGX',                                           423, p.C_Q3, 0),
-        ('Cash', 'Q4',  N'  Wound',                                         424, p.C_Q4, 0),
-        ('Cash', 'Q5',  N'  RPP',                                           425, p.C_Q5, 0),
-        ('Cash', 'Q6',  N'  UTI',                                           426, p.C_Q6, 0),
-        ('Cash', 'Q7',  N'  STI',                                           427, p.C_Q7, 0),
-        ('Cash', 'Q8',  N'  GI',                                            428, p.C_Q8, 0),
-        ('Cash', 'Q9',  N'  Urinalysis',                                    429, p.C_Q9, 0),
         ('Cash', 'R',   N'Insurance Payment ($)',                           440, p.C_R, 0),
         ('Cash', 'S',   N'Partially Paid ($)',                              450, p.C_S, 0),
         ('Cash', 'T',   N'Total Payments ($)',                              460, p.C_T, 0),
@@ -456,15 +426,6 @@ BEGIN
 
         ('Cash', 'Y',   N'Average Expected Payment ($) - Expected Pay/Billable Claims', 610,
             ISNULL(ROUND(CAST(p.C_Q AS DECIMAL(38,6)) / NULLIF(CAST(p.P_F AS DECIMAL(38,6)), 0), 2), 0), p.P_F),
-        ('Cash', 'Y1',  N'  Toxicology', 611, ISNULL(ROUND(CAST(p.C_Q1 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B1 AS DECIMAL(38,6)), 0), 2), 0), p.L_B1),
-        ('Cash', 'Y2',  N'  Blood',      612, ISNULL(ROUND(CAST(p.C_Q2 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B2 AS DECIMAL(38,6)), 0), 2), 0), p.L_B2),
-        ('Cash', 'Y3',  N'  PGX',        613, ISNULL(ROUND(CAST(p.C_Q3 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B6 AS DECIMAL(38,6)), 0), 2), 0), p.L_B6),
-        ('Cash', 'Y4',  N'  Wound',      614, ISNULL(ROUND(CAST(p.C_Q4 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B5 AS DECIMAL(38,6)), 0), 2), 0), p.L_B5),
-        ('Cash', 'Y5',  N'  RPP',        615, ISNULL(ROUND(CAST(p.C_Q5 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B8 AS DECIMAL(38,6)), 0), 2), 0), p.L_B8),
-        ('Cash', 'Y6',  N'  UTI',        616, ISNULL(ROUND(CAST(p.C_Q6 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B7 AS DECIMAL(38,6)), 0), 2), 0), p.L_B7),
-        ('Cash', 'Y7',  N'  STI',        617, ISNULL(ROUND(CAST(p.C_Q7 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B4 AS DECIMAL(38,6)), 0), 2), 0), p.L_B4),
-        ('Cash', 'Y8',  N'  GI',         618, ISNULL(ROUND(CAST(p.C_Q8 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B9 AS DECIMAL(38,6)), 0), 2), 0), p.L_B9),
-        ('Cash', 'Y9',  N'  Urinalysis', 619, ISNULL(ROUND(CAST(p.C_Q9 AS DECIMAL(38,6)) / NULLIF(CAST(p.L_B3 AS DECIMAL(38,6)), 0), 2), 0), p.L_B3),
         ('Avg', 'Z',   N'Average Payment ($) - Total Pay/Billed Claims',      710,
             ISNULL(ROUND(CAST(p.C_T AS DECIMAL(38,6)) / NULLIF(CAST(p.P_F AS DECIMAL(38,6)), 0), 2), 0), p.P_F),
         ('Avg', 'AA',  N'Average Payment ($) - Total Pay/Paid Claims',        720,
@@ -472,6 +433,75 @@ BEGIN
         ('Avg', 'AB',  N'Average Payment ($) - Total Pay/Adjudicated Claims', 730,
             ISNULL(ROUND(CAST(p.C_T AS DECIMAL(38,6)) / NULLIF(d.AdjudicatedClaims, 0), 2), 0), CAST(d.AdjudicatedClaims AS INT))
     ) r(Category, RowCode, Description, SortOrder, MetricValue, ClaimCount);
+
+    /* ---- Panel rows (dynamic) -------------------------------------------------
+       B.{PANEL}  Billable samples of the panel                    (LIS, under B)
+       Q.{PANEL}  Expected Payment of the panel's billed claims    (Cash, under Q)
+       Y.{PANEL}  Q.{PANEL} / B.{PANEL}                            (Cash, under Y)
+       Each block lists the panels found in the loaded rows, largest Grand Total first. */
+    DROP TABLE IF EXISTS #PanelLabel;
+    SELECT Panel, MIN(PanelLabel) AS Label
+    INTO #PanelLabel
+    FROM (SELECT Panel, PanelLabel FROM #EsLis UNION ALL SELECT Panel, PanelLabel FROM #EsClaims) x
+    WHERE Panel <> N''
+    GROUP BY Panel;
+
+    DROP TABLE IF EXISTS #LisP;
+    SELECT ISNULL(ESYear, 0) AS Y, CASE WHEN GROUPING(ESMonth) = 1 THEN 0 ELSE ESMonth END AS M,
+           Panel, SUM(Cnt) AS Cnt
+    INTO #LisP
+    FROM #EsLis
+    WHERE St = 'INS' AND Panel <> N''
+    GROUP BY GROUPING SETS ((Panel, ESYear, ESMonth), (Panel, ESYear), (Panel));
+
+    DROP TABLE IF EXISTS #ClmP;
+    SELECT ISNULL(ESYear, 0) AS Y, CASE WHEN GROUPING(ESMonth) = 1 THEN 0 ELSE ESMonth END AS M,
+           Panel, SUM(ExpectedPayment) AS Amt
+    INTO #ClmP
+    FROM #EsClaims
+    WHERE IsDup = 0 AND IsBilled = 1 AND Panel <> N''
+    GROUP BY GROUPING SETS ((Panel, ESYear, ESMonth), (Panel, ESYear), (Panel));
+
+    DROP TABLE IF EXISTS #Pnl;
+    CREATE TABLE #Pnl (Sec CHAR(1) NOT NULL, Panel NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL, Rnk INT NOT NULL);
+
+    INSERT INTO #Pnl (Sec, Panel, Rnk)
+    SELECT 'B', l.Panel, ROW_NUMBER() OVER (ORDER BY l.Cnt DESC, pl.Label)
+    FROM #LisP l
+    JOIN #PanelLabel pl ON pl.Panel = l.Panel
+    WHERE l.Y = 0 AND l.M = 0;
+
+    INSERT INTO #Pnl (Sec, Panel, Rnk)
+    SELECT 'Q', c.Panel, ROW_NUMBER() OVER (ORDER BY c.Amt DESC, pl.Label)
+    FROM #ClmP c
+    JOIN #PanelLabel pl ON pl.Panel = c.Panel
+    WHERE c.Y = 0 AND c.M = 0;
+
+    INSERT INTO #Pnl (Sec, Panel, Rnk)
+    SELECT 'Y', c.Panel,
+           ROW_NUMBER() OVER (ORDER BY ISNULL(ROUND(CAST(c.Amt AS DECIMAL(38,6)) / NULLIF(CAST(l.Cnt AS DECIMAL(38,6)), 0), 2), 0) DESC, pl.Label)
+    FROM #ClmP c
+    JOIN #PanelLabel pl ON pl.Panel = c.Panel
+    LEFT JOIN #LisP l ON l.Panel = c.Panel AND l.Y = 0 AND l.M = 0
+    WHERE c.Y = 0 AND c.M = 0;
+
+    -- Every panel row gets every period of #Per, so its month / year / total cells are all present.
+    INSERT INTO #EsOut (Category, RowCode, Description, SortOrder, ESYear, ESMonth, MetricValue, ClaimCount)
+    SELECT CASE WHEN n.Sec = 'B' THEN 'LIS' ELSE 'Cash' END,
+           n.Sec + N'.' + n.Panel,
+           N'  ' + LEFT(pl.Label, 298),
+           CASE n.Sec WHEN 'B' THEN 2000 WHEN 'Q' THEN 42000 ELSE 61000 END + n.Rnk,
+           p.Y, p.M,
+           CAST(CASE n.Sec WHEN 'B' THEN ISNULL(l.Cnt, 0)
+                           WHEN 'Q' THEN ISNULL(c.Amt, 0)
+                           ELSE ISNULL(ROUND(CAST(c.Amt AS DECIMAL(38,6)) / NULLIF(CAST(l.Cnt AS DECIMAL(38,6)), 0), 2), 0)
+                END AS DECIMAL(18,2)),
+           CASE WHEN n.Sec = 'Q' THEN 0 ELSE ISNULL(l.Cnt, 0) END
+    FROM #Pnl n
+    JOIN #PanelLabel pl ON pl.Panel = n.Panel
+    CROSS JOIN (SELECT Y, M FROM #Per) p
+    LEFT JOIN #LisP l ON l.Panel = n.Panel AND l.Y = p.Y AND l.M = p.M
+    LEFT JOIN #ClmP c ON c.Panel = n.Panel AND c.Y = p.Y AND c.M = p.M;
 END;
 GO
 
@@ -485,7 +515,8 @@ BEGIN
     (
         ESYear INT NOT NULL, ESMonth INT NOT NULL,
         St VARCHAR(10) NOT NULL, Bill CHAR(1) NOT NULL, Sub VARCHAR(10) NOT NULL,
-        Panel NVARCHAR(20) COLLATE DATABASE_DEFAULT NOT NULL,
+        Panel NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL,
+        PanelLabel NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL,
         Cnt INT NOT NULL
     );
     CREATE TABLE #EsClaims
@@ -493,7 +524,8 @@ BEGIN
         ESYear INT NOT NULL, ESMonth INT NOT NULL,
         IsDup BIT NOT NULL, IsBilled BIT NOT NULL,
         ClaimStatus NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL,
-        Panel NVARCHAR(20) COLLATE DATABASE_DEFAULT NOT NULL,
+        Panel NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL,
+        PanelLabel NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL,
         ClaimCnt INT NOT NULL,
         ChargeAmount DECIMAL(18,2) NOT NULL, InsurancePayment DECIMAL(18,2) NOT NULL,
         TotalAdjustments DECIMAL(18,2) NOT NULL, InsuranceAdjustments DECIMAL(18,2) NOT NULL,
@@ -503,7 +535,7 @@ BEGIN
     CREATE TABLE #EsOut
     (
         Category VARCHAR(10) NOT NULL,
-        RowCode NVARCHAR(20) COLLATE DATABASE_DEFAULT NOT NULL,
+        RowCode NVARCHAR(320) COLLATE DATABASE_DEFAULT NOT NULL,
         Description NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL,
         SortOrder INT NOT NULL,
         ESYear INT NOT NULL, ESMonth INT NOT NULL,
@@ -599,7 +631,8 @@ BEGIN
     (
         ESYear INT NOT NULL, ESMonth INT NOT NULL,
         St VARCHAR(10) NOT NULL, Bill CHAR(1) NOT NULL, Sub VARCHAR(10) NOT NULL,
-        Panel NVARCHAR(20) COLLATE DATABASE_DEFAULT NOT NULL,
+        Panel NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL,
+        PanelLabel NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL,
         Cnt INT NOT NULL
     );
     CREATE TABLE #EsClaims
@@ -607,7 +640,8 @@ BEGIN
         ESYear INT NOT NULL, ESMonth INT NOT NULL,
         IsDup BIT NOT NULL, IsBilled BIT NOT NULL,
         ClaimStatus NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL,
-        Panel NVARCHAR(20) COLLATE DATABASE_DEFAULT NOT NULL,
+        Panel NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL,
+        PanelLabel NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL,
         ClaimCnt INT NOT NULL,
         ChargeAmount DECIMAL(18,2) NOT NULL, InsurancePayment DECIMAL(18,2) NOT NULL,
         TotalAdjustments DECIMAL(18,2) NOT NULL, InsuranceAdjustments DECIMAL(18,2) NOT NULL,
@@ -617,7 +651,7 @@ BEGIN
     CREATE TABLE #EsOut
     (
         Category VARCHAR(10) NOT NULL,
-        RowCode NVARCHAR(20) COLLATE DATABASE_DEFAULT NOT NULL,
+        RowCode NVARCHAR(320) COLLATE DATABASE_DEFAULT NOT NULL,
         Description NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL,
         SortOrder INT NOT NULL,
         ESYear INT NOT NULL, ESMonth INT NOT NULL,

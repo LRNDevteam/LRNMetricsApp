@@ -36,29 +36,40 @@ public sealed class ExecSummaryCellRowsExcelTests
         table.Rows.Add("C1", 100.25m);
         table.Rows.Add("C2", 200.25m);
 
-        var ws = Build(head, table);
+        var wb = Build(head, table);
+        Assert.Equal(["Summary", "Rows"], wb.Worksheets.Select(s => s.Name));
 
-        Assert.Equal("Beech_Tree - Executive Summary - Total Billed ($) - Grand Total", ws.Cell(1, 1).GetString());
-        Assert.Equal("Lab", ws.Cell(2, 1).GetString());
-        Assert.Equal("Beech_Tree", ws.Cell(2, 2).GetString());
-        Assert.Equal("Report generated", ws.Cell(3, 1).GetString());
-        Assert.Equal("29-Oct-2026 07:15 CET", ws.Cell(3, 2).GetString());
-        Assert.Equal("Week Range", ws.Cell(4, 1).GetString());
-        Assert.Equal("10.16.2026 - 10.22.2026", ws.Cell(4, 2).GetString());
-        Assert.Equal("Filters used", ws.Cell(5, 1).GetString());
-        Assert.Equal("Panels: Toxicology", ws.Cell(5, 2).GetString());
-        Assert.True(ws.Cell(1, 1).IsMerged());
-        Assert.Equal("A1:B1", ws.Cell(1, 1).MergedRange().RangeAddress.ToString());
-        Assert.Equal("How this value is calculated", ws.Cell(1, 5).GetString());
-        Assert.Equal("Row rule", ws.Cell(2, 5).GetString());
-        Assert.Equal("BilledUnbilled = Billed", ws.Cell(2, 6).GetString());
-        Assert.StartsWith("Grid value: $300.50    Rows found: 2", ws.Cell(7, 1).GetString());
+        var sum = wb.Worksheet("Summary");
+        Assert.Equal("Beech_Tree - Executive Summary - Total Billed ($) - Grand Total", sum.Cell(1, 1).GetString());
+        Assert.Equal("A1:B1", sum.Cell(1, 1).MergedRange().RangeAddress.ToString());
+        Assert.Equal("Lab", sum.Cell(3, 1).GetString());
+        Assert.Equal("Beech_Tree", sum.Cell(3, 2).GetString());
+        Assert.Equal("Report generated", sum.Cell(4, 1).GetString());
+        Assert.Equal("29-Oct-2026 07:15 CET", sum.Cell(4, 2).GetString());
+        Assert.Equal("Week Range", sum.Cell(5, 1).GetString());
+        Assert.Equal("10.16.2026 - 10.22.2026", sum.Cell(5, 2).GetString());
+        Assert.Equal("Filters used", sum.Cell(6, 1).GetString());
+        Assert.Equal("Panels: Toxicology", sum.Cell(6, 2).GetString());
+        Assert.Equal("Grid value", sum.Cell(8, 1).GetString());
+        Assert.Equal("$300.50", sum.Cell(8, 2).GetString());
+        Assert.Equal("Rows found", sum.Cell(9, 1).GetString());
+        Assert.Equal(2, sum.Cell(9, 2).GetValue<int>());
+        Assert.Equal("Sum of ChargeAmount", sum.Cell(10, 1).GetString());
+        Assert.Equal(300.50m, sum.Cell(10, 2).GetValue<decimal>());
+        Assert.Equal("How this value is calculated", sum.Cell(12, 1).GetString());
+        Assert.Equal("Row rule", sum.Cell(13, 1).GetString());
+        Assert.Equal("BilledUnbilled = Billed", sum.Cell(13, 2).GetString());
 
-        var header = ws.Search("ClaimID").Single();
-        Assert.Equal("C1", ws.Cell(header.Address.RowNumber + 1, 1).GetString());
-        Assert.Equal(200.25m, ws.Cell(header.Address.RowNumber + 2, 2).GetValue<decimal>());
-        Assert.Contains("$", ws.Cell(header.Address.RowNumber + 2, 2).Style.NumberFormat.Format);
-        Assert.Equal(header.Address.RowNumber, ws.SheetView.SplitRow);
+        // The Rows sheet holds only the rows: header on row 1, data from row 2.
+        var ws = wb.Worksheet("Rows");
+        Assert.Equal("ClaimID", ws.Cell(1, 1).GetString());
+        Assert.Equal("Amount", ws.Cell(1, 2).GetString());
+        Assert.Equal("C1", ws.Cell(2, 1).GetString());
+        Assert.Equal(200.25m, ws.Cell(3, 2).GetValue<decimal>());
+        Assert.Contains("$", ws.Cell(3, 2).Style.NumberFormat.Format);
+        Assert.Equal(3, ws.LastRowUsed()!.RowNumber());
+        Assert.Equal(1, ws.SheetView.SplitRow);
+        Assert.NotNull(ws.AutoFilter);
     }
 
     [Fact]
@@ -76,15 +87,17 @@ public sealed class ExecSummaryCellRowsExcelTests
         table.Rows.Add("Numerator", "Total Payments ($)", 1000m, true, true);
         table.Rows.Add("Result", "Average Payment ($)", 41.56m, true, true);
 
-        var ws = Build(head, table);
+        var wb = Build(head, table);
+        Assert.Equal("Result", wb.Worksheet("Summary").Search("Result").Single().GetString());
 
-        var header = ws.Search("Section").Single();
+        var ws = wb.Worksheet("Rows");
+        Assert.Equal("Section", ws.Cell(1, 1).GetString());
         Assert.Empty(ws.Search("IsMoney"));
-        Assert.Equal(41.56m, ws.Cell(header.Address.RowNumber + 2, 3).GetValue<decimal>());
-        Assert.True(ws.Cell(header.Address.RowNumber + 2, 3).Style.Font.Bold);
+        Assert.Equal(41.56m, ws.Cell(3, 3).GetValue<decimal>());
+        Assert.True(ws.Cell(3, 3).Style.Font.Bold);
     }
 
-    private static IXLWorksheet Build(ExecSummaryCellRowsResult head, DataTable rows)
+    private static XLWorkbook Build(ExecSummaryCellRowsResult head, DataTable rows)
     {
         var ms = new MemoryStream();
         using (var reader = rows.CreateDataReader())
@@ -98,6 +111,6 @@ public sealed class ExecSummaryCellRowsExcelTests
             Assert.True(errors.Count == 0, string.Join(Environment.NewLine, errors));
         }
         ms.Position = 0;
-        return new XLWorkbook(ms).Worksheet("Rows");
+        return new XLWorkbook(ms);
     }
 }

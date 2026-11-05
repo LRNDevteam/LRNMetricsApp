@@ -98,15 +98,12 @@ BEGIN
     DECLARE @HasPanel         BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
     DECLARE @HasAging         BIT = CASE WHEN EXISTS (SELECT 1 FROM @AgingList) THEN 1 ELSE 0 END;
 
-    /* ==== BeechTree ClaimLevel columns (Sql/Select_Script) — add/remove fields here ==== */
+    /* ==== BeechTree mandatory ClaimLevel columns (LabClaimLineColumnCatalog ["BeechTree"]) — add/remove fields here ==== */
     SELECT
             [LabID],
             [LabName],
             CASE WHEN [ClaimID] LIKE '%.00' THEN LEFT([ClaimID], LEN([ClaimID])-3) ELSE ISNULL(LTRIM(RTRIM([ClaimID])),'') END AS [ClaimID],
             [AccessionNumber],
-            [SourceFileID],
-            [IngestedOn],
-            [CsvRowHash],
             [PayerName_Raw],
             ISNULL(LTRIM(RTRIM([PayerName])),'') AS [PayerName],
             [Payer_Code],
@@ -117,7 +114,6 @@ BEGIN
             [BillingProvider],
             [ReferringProvider],
             ISNULL(LTRIM(RTRIM([ClinicName])),'') AS [ClinicName],
-            ISNULL(LTRIM(RTRIM([SalesRepname])),'') AS [SalesRepname],
             CASE WHEN [PatientID] LIKE '%.00' THEN LEFT([PatientID], LEN([PatientID])-3) ELSE ISNULL(LTRIM(RTRIM([PatientID])),'') END AS [PatientID],
             [PatientDOB],
             [DateofService],
@@ -148,7 +144,6 @@ BEGIN
             [RollingDays],
             [DaystoBill],
             [DaystoPost],
-            [ICDPointer],
             [InsertedDateTime],
             [PatientName],
             [PaymentPercent],
@@ -166,16 +161,8 @@ BEGIN
             [Days30Amount],
             [Days60Count],
             [Days60Amount],
-            [DOE_Year],
-            [DOE_Month],
-            [ClaimUID],
-            [AgingDOE],
-            [AgingDOS],
-            [PanelNameLIS],
-            [PanelNameBasedOnCPT],
             ISNULL(TRY_CAST([InsuranceBalance_Decimal] AS DECIMAL(18,2)), 0) AS [InsuranceBalance_Decimal],
-            [Facility],
-            [Modifier]
+            [Facility]
     FROM dbo.ClaimLevelData
     WHERE (@HasPayerNameLike = 0 OR EXISTS (SELECT 1 FROM @PayerNameLike p WHERE LTRIM(RTRIM(ClaimLevelData.PayerName)) LIKE N'%' + p.Value + N'%'))
       AND (@HasPayerType = 0 OR LTRIM(RTRIM(PayerType)) IN (SELECT Value FROM @PayerTypeList))
@@ -291,15 +278,12 @@ BEGIN
     DECLARE @HasCpt           BIT = CASE WHEN EXISTS (SELECT 1 FROM @CptList) THEN 1 ELSE 0 END;
     DECLARE @HasClinic        BIT = CASE WHEN EXISTS (SELECT 1 FROM @ClinicList) THEN 1 ELSE 0 END;
 
-    /* ==== BeechTree LineLevel columns (Sql/Select_Script) — add/remove fields here ==== */
+    /* ==== BeechTree mandatory LineLevel columns (LabClaimLineColumnCatalog ["BeechTree"]) — add/remove fields here ==== */
     SELECT
             [LabID],
             [LabName],
             CASE WHEN [ClaimID] LIKE '%.00' THEN LEFT([ClaimID], LEN([ClaimID])-3) ELSE ISNULL(LTRIM(RTRIM([ClaimID])),'') END AS [ClaimID],
             [AccessionNumber],
-            [SourceFileID],
-            [IngestedOn],
-            [CsvRowHash],
             [PayerName_Raw],
             ISNULL(LTRIM(RTRIM([PayerName])),'') AS [PayerName],
             [Payer_Code],
@@ -310,7 +294,6 @@ BEGIN
             [BillingProvider],
             [ReferringProvider],
             ISNULL(LTRIM(RTRIM([ClinicName])),'') AS [ClinicName],
-            ISNULL(LTRIM(RTRIM([SalesRepname])),'') AS [SalesRepname],
             CASE WHEN [PatientID] LIKE '%.00' THEN LEFT([PatientID], LEN([PatientID])-3) ELSE ISNULL(LTRIM(RTRIM([PatientID])),'') END AS [PatientID],
             [PatientDOB],
             [DateofService],
@@ -340,7 +323,6 @@ BEGIN
             ISNULL(TRY_CAST([TotalBalance] AS DECIMAL(18,2)), 0) AS [TotalBalance],
             [CheckDate],
             [PostingDate],
-            ISNULL(LTRIM(RTRIM([ClaimStatus])),'') AS [ClaimStatus],
             ISNULL(LTRIM(RTRIM([PayStatus])),'') AS [PayStatus],
             [DenialCode],
             [DenialCodeNormalized],
@@ -351,8 +333,6 @@ BEGIN
             [RollingDays],
             [DaystoBill],
             [DaystoPost],
-            [ICDPointer],
-            [InsertedDateTime],
             [PatientName],
             [SubscriberId],
             [PaymentPostedDate],
@@ -364,7 +344,6 @@ BEGIN
             [CPTMOD],
             [PostedWeek],
             [LineLevelUID],
-            [Source],
             ISNULL(TRY_CAST([InsuranceBalance_Decimal] AS DECIMAL(18,2)), 0) AS [InsuranceBalance_Decimal],
             [Facility]
     FROM dbo.LineLevelData

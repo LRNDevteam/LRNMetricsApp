@@ -699,7 +699,8 @@ BEGIN
 
     SELECT RuleOrder, RuleGroup, RuleText FROM @Rules ORDER BY RuleOrder;
 
-    -- The grid shows the key columns below, then every other column of the source row
+    -- LIS: key columns, then every other LIMSMaster column. Claims: the Elixir mandatory ClaimLevelData columns
+    -- (below, @ClaimCols). The grid shows the key columns below, then every other column of the source row
     -- (for one line per accession: the row that line shows).
     DECLARE @Skip INT = CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END;
     DECLARE @Take INT = CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END;
@@ -740,7 +741,10 @@ BEGIN
         WHERE c.object_id = OBJECT_ID(N'dbo.LIMSMaster')
           AND c.name NOT IN (N'Accession', N'DateOfCollection', N'BilledDate', N'NewStatus', N'BillCategory', N'SubStatus',
                              N'ResultStatus', N'Panel', N'PanelName', N'FacilityName', N'PhysicianName', N'SaleRepName',
-                             N'PrimaryInsuranceProvider', N'Records');
+                             N'PrimaryInsuranceProvider', N'Records')
+          -- Load metadata and denial-workflow fields Elixir does not want in the popup / Excel.
+          AND c.name NOT IN (N'RecordId', N'RunId', N'AdditionalFields', N'DenialActionCategory', N'DenialActionCode',
+                             N'DenialSLA', N'DenialPriority');
 
         SET @Sql = N'SELECT p.Accession, p.DateOfCollection, p.BilledDate, p.NewStatus, p.BillCategory, p.SubStatus, p.ResultStatus,
                p.Panel, p.PanelName, p.FacilityName, p.PhysicianName, p.SaleRepName, p.PrimaryInsuranceProvider, p.Records'
@@ -753,13 +757,23 @@ BEGIN
         RETURN;
     END;
 
-    SELECT @Extra = STRING_AGG(CAST(N's.' + QUOTENAME(c.name) AS NVARCHAR(MAX)), N', ') WITHIN GROUP (ORDER BY c.column_id)
-    FROM sys.columns c
-    WHERE c.object_id = OBJECT_ID(N'dbo.ClaimLevelData')
-      AND c.name NOT IN (N'ClaimID', N'AccessionNumber', N'DateofService', N'FirstBilledDate', N'PayerName_Raw', N'Panelname',
-                         N'ClinicName', N'ReferringProvider', N'SalesRepname', N'BillStatus', N'ClaimStatus', N'Amount', N'Claims',
-                         N'ChargeAmount', N'InsurancePayment', N'PatientPayment', N'InsuranceAdjustments', N'PatientAdjustments',
-                         N'InsuranceBalance', N'PatientBalance');
+    -- Elixir mandatory ClaimLevelData columns, in order (LabClaimLineColumnCatalog ["Elixir"]);
+    -- $ rows lead with the measured Amount, count rows with Claims (claims behind the line).
+    DECLARE @ClaimCols NVARCHAR(MAX) = N's.LabID, s.LabName, p.ClaimID, p.AccessionNumber, p.PayerName_Raw, s.PayerName,
+               s.Payer_Code, s.Payer_Common_Code, s.Payer_Group_Code, s.Global_Payer_ID, s.PayerType, s.BillingProvider,
+               p.ReferringProvider, p.ClinicName, p.SalesRepname, s.PatientID, s.PatientDOB, p.DateofService,
+               s.ChargeEnteredDate, p.FirstBilledDate, p.Panelname, s.CPTCodeXUnitsXModifier, s.POS, s.TOS,
+               p.ChargeAmount, s.AllowedAmount, p.InsurancePayment, p.PatientPayment, s.TotalPayments, p.InsuranceAdjustments,
+               p.PatientAdjustments, s.TotalAdjustments, p.InsuranceBalance, p.PatientBalance, s.TotalBalance, s.CheckDate,
+               p.ClaimStatus, s.DenialCode, s.DenialCodeNormalized, s.DenialDescription, s.ICDCode, s.DaystoDOS,
+               s.RollingDays, s.DaystoBill, s.DaystoPost, s.ICDPointer, s.InsertedDateTime, s.CPTCodeXUnitsXModifierOrginal,
+               s.T_F, s.PatientFirstName, s.PatientLastName, s.AgingDOS, s.ServiceToDate, s.AgingDOE,
+               s.Facility, s.ServiceLocationCode, s.PrimarySubId, s.ICDField, s.DODWeek, s.BilledWeek,
+               s.DenialReason, s.BillingOption, s.CurrentStatus, s.BatchNo, s.CreatedOn, s.CreatedBy,
+               s.UpdatedOn, s.UpdatedBy, p.BillStatus, s.PaymentPercent, s.FullyPaidCount, s.FullyPaidAmount,
+               s.AdjucticatedCount, s.AdjucticatedAmount, s.Bucket30Count, s.Bucket30Amount, s.Bucket60Count, s.Bucket60Amount,
+               s.InsuranceBalance_Decimal, s.Modifiers, s.Units, s.CptXModXUnits, s.ServiceChargeAmount, s.DenialDate,
+               s.LineLevelDenialCode';
 
     /* ---- $ rows: every matching claim ---------------------------------------- */
     IF @AmountCol IS NOT NULL
@@ -781,10 +795,7 @@ BEGIN
                COUNT(*) AS TotalRows, CAST(ISNULL(SUM(Amount), 0) AS DECIMAL(18,2)) AS TotalAmount, CAST(0 AS BIT) AS IsFormula
         FROM #xCOut;
 
-        SET @Sql = N'SELECT p.ClaimID, p.AccessionNumber, p.DateofService, p.FirstBilledDate, p.PayerName_Raw, p.Panelname, p.ClinicName,
-               p.ReferringProvider, p.SalesRepname, p.BillStatus, p.ClaimStatus, p.Amount,
-               p.ChargeAmount, p.InsurancePayment, p.PatientPayment, p.InsuranceAdjustments, p.PatientAdjustments, p.InsuranceBalance, p.PatientBalance'
-             + ISNULL(N', ' + @Extra, N'') + N'
+        SET @Sql = N'SELECT p.Amount, ' + @ClaimCols + N'
         FROM (SELECT * FROM #xCOut ORDER BY PeriodDate, ClaimID OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY) p
         LEFT JOIN dbo.ClaimLevelData s ON s.RecordId = p.EsRecordId
         ORDER BY p.PeriodDate, p.ClaimID;';
@@ -821,10 +832,7 @@ BEGIN
            COUNT(*) AS TotalRows, CAST(0 AS DECIMAL(18,2)) AS TotalAmount, CAST(0 AS BIT) AS IsFormula
     FROM #xAcc;
 
-    SET @Sql = N'SELECT p.ClaimID, p.AccessionNumber, p.DateofService, p.FirstBilledDate, p.PayerName_Raw, p.Panelname, p.ClinicName,
-           p.ReferringProvider, p.SalesRepname, p.BillStatus, p.ClaimStatus, p.Claims,
-           p.ChargeAmount, p.InsurancePayment, p.PatientPayment, p.InsuranceAdjustments, p.PatientAdjustments, p.InsuranceBalance, p.PatientBalance'
-         + ISNULL(N', ' + @Extra, N'') + N'
+    SET @Sql = N'SELECT p.Claims, ' + @ClaimCols + N'
     FROM (SELECT * FROM #xAcc ORDER BY PeriodDate, AccessionNumber OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY) p
     LEFT JOIN dbo.ClaimLevelData s ON s.RecordId = p.EsRecordId
     ORDER BY p.PeriodDate, p.AccessionNumber;';

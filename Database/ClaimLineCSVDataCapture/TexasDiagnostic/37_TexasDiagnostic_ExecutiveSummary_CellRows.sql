@@ -1,4 +1,4 @@
-﻿/* =============================================================================
+/* =============================================================================
    TexasDiagnostic - Executive Summary cell rows (value click -> popup grid)
    File     : 37_TexasDiagnostic_ExecutiveSummary_CellRows.sql
    Database : TexasDiagnostic
@@ -11,7 +11,9 @@
    clicked value. Keep the two files in step when a row rule changes.
 
    Parameters
-     @Category / @RowCode   the clicked row (LIS A..E6, PMS F..O3, Cash P..X3 / Y..Y9, Avg Z..AB)
+     @Category / @RowCode   the clicked row (LIS A..E6, PMS F..O3, Cash P..X3 / Y, Avg Z..AB) or a
+                            dynamic panel row: LIS B.{PANEL}, Cash Q.{PANEL} / Y.{PANEL}
+                            ({PANEL} = UPPER(TRIM(panel name)))
      @Year / @Month         the clicked column: (Y, M) month, (Y, 0) year total, (0, 0) grand total
      @YearFrom .. @Reps     the page filters (same as usp_GetTD_ExecutiveSummary)
      @Page / @PageSize      paging; @PageSize = 0 returns every row (Excel download)
@@ -20,7 +22,7 @@
      1. Rules   : RuleOrder, RuleGroup, RuleText - how the value is calculated, incl. page filters
      2. Summary : SourceTable, Measure, AmountColumn, TotalRows, TotalAmount, IsFormula
      3. Rows    : one page of source rows (Amount = the row's measured column for $ rows)
-   Formula rows (PMS G, Cash Y / Y1-Y9, Avg Z / AA / AB) return the formula and the calculation in
+   Formula rows (PMS G, Cash Y / Y.{PANEL}, Avg Z / AA / AB) return the formula and the calculation in
    Rules, IsFormula = 1, TotalAmount = the result, and result set 3 = the components
    (Section, Operator, Component, Category, RowCode, Value, IsMoney, IsTotal) taken from
    usp_TD_ES_Load + usp_TD_ES_Compute for the same period and filters.
@@ -41,7 +43,7 @@ GO
 CREATE OR ALTER PROCEDURE dbo.usp_GetTD_ExecutiveSummaryCellRows
 (
     @Category   VARCHAR(10),
-    @RowCode    NVARCHAR(20),
+    @RowCode    NVARCHAR(420),
     @Year       INT           = 0,
     @Month      INT           = 0,
     @YearFrom   INT           = NULL,
@@ -96,21 +98,11 @@ BEGIN
         RuleText  NVARCHAR(1000) NOT NULL,
         AmountCol NVARCHAR(100)  NULL,
         IsFormula BIT            NOT NULL,
-        Panel     NVARCHAR(20)   NULL
+        Panel     NVARCHAR(300)  NULL
     );
     INSERT INTO @Def (Category, RowCode, RuleText, AmountCol, IsFormula, Panel) VALUES
         ('LIS', 'A',  N'Every sample (no status filter)', NULL, 0, NULL),
         ('LIS', 'B',  N'NewStatus = Billable', NULL, 0, NULL),
-        ('LIS', 'B1', N'NewStatus = Billable AND PanelName = Toxicology', NULL, 0, N'TOXICOLOGY'),
-        ('LIS', 'B2', N'NewStatus = Billable AND PanelName = Blood', NULL, 0, N'BLOOD'),
-        ('LIS', 'B3', N'NewStatus = Billable AND PanelName = Urinalysis', NULL, 0, N'URINALYSIS'),
-        ('LIS', 'B4', N'NewStatus = Billable AND PanelName = STI', NULL, 0, N'STI'),
-        ('LIS', 'B5', N'NewStatus = Billable AND PanelName = Wound', NULL, 0, N'WOUND'),
-        ('LIS', 'B6', N'NewStatus = Billable AND PanelName = PGX', NULL, 0, N'PGX'),
-        ('LIS', 'B7', N'NewStatus = Billable AND PanelName = UTI', NULL, 0, N'UTI'),
-        ('LIS', 'B8', N'NewStatus = Billable AND PanelName = RPP', NULL, 0, N'RPP'),
-        ('LIS', 'B9', N'NewStatus = Billable AND PanelName = GI', NULL, 0, N'GI'),
-        ('LIS', 'B10', N'NewStatus = Billable AND PanelName = UTI + Urinalysis', NULL, 0, N'UTI + URINALYSIS'),
         ('LIS', 'C',  N'NewStatus = Billable AND BillCategory = Billed', NULL, 0, NULL),
         ('LIS', 'D',  N'NewStatus = Billable AND BillCategory = Unbilled', NULL, 0, NULL),
         ('LIS', 'D1', N'NewStatus = Billable AND BillCategory = Unbilled AND SubStatus = Ready to Bill', NULL, 0, NULL),
@@ -137,15 +129,6 @@ BEGIN
         ('PMS', 'O3', N'Duplicate = FALSE AND ClaimStatus = No Response', NULL, 0, NULL),
         ('Cash', 'P',   N'Duplicate = FALSE AND ClaimStatus NOT IN (Unbilled, Unbilled - Patient Balance)', N'ChargeAmount', 0, NULL),
         ('Cash', 'Q',   N'Duplicate = FALSE AND ClaimStatus NOT IN (Unbilled, Unbilled - Patient Balance)', N'ExpectedPayment', 0, NULL),
-        ('Cash', 'Q1',  N'Duplicate = FALSE AND ClaimStatus NOT IN (Unbilled, Unbilled - Patient Balance) AND Panelname = Toxicology', N'ExpectedPayment', 0, N'TOXICOLOGY'),
-        ('Cash', 'Q2',  N'Duplicate = FALSE AND ClaimStatus NOT IN (Unbilled, Unbilled - Patient Balance) AND Panelname = Blood', N'ExpectedPayment', 0, N'BLOOD'),
-        ('Cash', 'Q3',  N'Duplicate = FALSE AND ClaimStatus NOT IN (Unbilled, Unbilled - Patient Balance) AND Panelname = PGX', N'ExpectedPayment', 0, N'PGX'),
-        ('Cash', 'Q4',  N'Duplicate = FALSE AND ClaimStatus NOT IN (Unbilled, Unbilled - Patient Balance) AND Panelname = Wound', N'ExpectedPayment', 0, N'WOUND'),
-        ('Cash', 'Q5',  N'Duplicate = FALSE AND ClaimStatus NOT IN (Unbilled, Unbilled - Patient Balance) AND Panelname = RPP', N'ExpectedPayment', 0, N'RPP'),
-        ('Cash', 'Q6',  N'Duplicate = FALSE AND ClaimStatus NOT IN (Unbilled, Unbilled - Patient Balance) AND Panelname = UTI', N'ExpectedPayment', 0, N'UTI'),
-        ('Cash', 'Q7',  N'Duplicate = FALSE AND ClaimStatus NOT IN (Unbilled, Unbilled - Patient Balance) AND Panelname = STI', N'ExpectedPayment', 0, N'STI'),
-        ('Cash', 'Q8',  N'Duplicate = FALSE AND ClaimStatus NOT IN (Unbilled, Unbilled - Patient Balance) AND Panelname = GI', N'ExpectedPayment', 0, N'GI'),
-        ('Cash', 'Q9',  N'Duplicate = FALSE AND ClaimStatus NOT IN (Unbilled, Unbilled - Patient Balance) AND Panelname = Urinalysis', N'ExpectedPayment', 0, N'URINALYSIS'),
         ('Cash', 'R',   N'Duplicate = FALSE AND ClaimStatus = Fully Paid', N'InsurancePayment', 0, NULL),
         ('Cash', 'S',   N'Duplicate = FALSE AND ClaimStatus = Partially Paid', N'InsurancePayment', 0, NULL),
         ('Cash', 'T',   N'Duplicate = FALSE AND ClaimStatus IN (Fully Paid, Partially Paid)', N'InsurancePayment', 0, NULL),
@@ -157,22 +140,32 @@ BEGIN
         ('Cash', 'X2',  N'Duplicate = FALSE AND ClaimStatus IN (Partially Adjusted, Partially Paid, Partially Denied)', N'InsuranceBalance', 0, NULL),
         ('Cash', 'X3',  N'Duplicate = FALSE AND ClaimStatus = No Response', N'InsuranceBalance', 0, NULL),
         ('Cash', 'Y',   N'Formula: Expected Payment $ (Cash Q) / No. of Billed Claims (PMS F)', NULL, 1, NULL),
-        ('Cash', 'Y1',  N'Formula: Toxicology Expected Payment $ (Cash Q1) / Toxicology Billable Samples (LIS B1)', NULL, 1, NULL),
-        ('Cash', 'Y2',  N'Formula: Blood Expected Payment $ (Cash Q2) / Blood Billable Samples (LIS B2)', NULL, 1, NULL),
-        ('Cash', 'Y3',  N'Formula: PGX Expected Payment $ (Cash Q3) / PGX Billable Samples (LIS B6)', NULL, 1, NULL),
-        ('Cash', 'Y4',  N'Formula: Wound Expected Payment $ (Cash Q4) / Wound Billable Samples (LIS B5)', NULL, 1, NULL),
-        ('Cash', 'Y5',  N'Formula: RPP Expected Payment $ (Cash Q5) / RPP Billable Samples (LIS B8)', NULL, 1, NULL),
-        ('Cash', 'Y6',  N'Formula: UTI Expected Payment $ (Cash Q6) / UTI Billable Samples (LIS B7)', NULL, 1, NULL),
-        ('Cash', 'Y7',  N'Formula: STI Expected Payment $ (Cash Q7) / STI Billable Samples (LIS B4)', NULL, 1, NULL),
-        ('Cash', 'Y8',  N'Formula: GI Expected Payment $ (Cash Q8) / GI Billable Samples (LIS B9)', NULL, 1, NULL),
-        ('Cash', 'Y9',  N'Formula: Urinalysis Expected Payment $ (Cash Q9) / Urinalysis Billable Samples (LIS B3)', NULL, 1, NULL),
         ('Avg', 'Z',   N'Formula: Total Payments $ (Cash T) / No. of Billed Claims (PMS F)', NULL, 1, NULL),
         ('Avg', 'AA',  N'Formula: Insurance Payment $ (Cash R) / No. of Fully Paid Claims (PMS J)', NULL, 1, NULL),
         ('Avg', 'AB',  N'Formula: Total Payments $ (Cash T) / (Fully Paid + Partially Paid + Patient Responsibility + Fully Adjusted + Partially Adjusted + Fully Denied + Partially Denied claims)', NULL, 1, NULL);
 
-    DECLARE @RuleText NVARCHAR(1000), @AmountCol NVARCHAR(100), @IsFormula BIT, @Panel NVARCHAR(20);
+    DECLARE @RuleText NVARCHAR(1000), @AmountCol NVARCHAR(100), @IsFormula BIT, @Panel NVARCHAR(300);
     SELECT @RuleText = RuleText, @AmountCol = AmountCol, @IsFormula = IsFormula, @Panel = Panel
     FROM @Def WHERE Category = @Category AND RowCode = @RowCode;
+
+    -- Dynamic panel rows (usp_TD_ES_Compute): B.{PANEL}, Q.{PANEL}, Y.{PANEL}.
+    IF @RuleText IS NULL AND LEN(@RowCode) > 2 AND SUBSTRING(@RowCode, 2, 1) = N'.'
+       AND ((@Category = 'LIS' AND LEFT(@RowCode, 1) = N'B') OR (@Category = 'Cash' AND LEFT(@RowCode, 1) IN (N'Q', N'Y')))
+    BEGIN
+        SET @Panel = SUBSTRING(@RowCode, 3, 300);
+        DECLARE @PanelText NVARCHAR(300) = COALESCE(
+            (SELECT TOP (1) LTRIM(RTRIM(CONVERT(NVARCHAR(300), PanelName))) FROM dbo.LIMSMaster
+             WHERE UPPER(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(500), PanelName), N'')))) = @Panel),
+            (SELECT TOP (1) LTRIM(RTRIM(CONVERT(NVARCHAR(300), Panelname))) FROM dbo.ClaimLevelData
+             WHERE UPPER(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(500), Panelname), N'')))) = @Panel),
+            @Panel);
+        SELECT @IsFormula = IIF(LEFT(@RowCode, 1) = N'Y', 1, 0),
+               @AmountCol = IIF(LEFT(@RowCode, 1) = N'Q', N'ExpectedPayment', NULL),
+               @RuleText = CASE LEFT(@RowCode, 1)
+                   WHEN N'B' THEN N'NewStatus = Billable AND PanelName = ' + @PanelText
+                   WHEN N'Q' THEN N'Duplicate = FALSE AND ClaimStatus NOT IN (Unbilled, Unbilled - Patient Balance) AND Panelname = ' + @PanelText
+                   ELSE N'Formula: ' + @PanelText + N' Expected Payment $ (Cash Q) / ' + @PanelText + N' Billable Samples (LIS B)' END;
+    END;
 
     IF @RuleText IS NULL
     BEGIN
@@ -232,7 +225,8 @@ BEGIN
         (
             ESYear INT NOT NULL, ESMonth INT NOT NULL,
             St VARCHAR(10) NOT NULL, Bill CHAR(1) NOT NULL, Sub VARCHAR(10) NOT NULL,
-            Panel NVARCHAR(20) COLLATE DATABASE_DEFAULT NOT NULL,
+            Panel NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL,
+            PanelLabel NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL,
             Cnt INT NOT NULL
         );
         CREATE TABLE #EsClaims
@@ -240,7 +234,8 @@ BEGIN
             ESYear INT NOT NULL, ESMonth INT NOT NULL,
             IsDup BIT NOT NULL, IsBilled BIT NOT NULL,
             ClaimStatus NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL,
-            Panel NVARCHAR(20) COLLATE DATABASE_DEFAULT NOT NULL,
+            Panel NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL,
+            PanelLabel NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL,
             ClaimCnt INT NOT NULL,
             ChargeAmount DECIMAL(18,2) NOT NULL, InsurancePayment DECIMAL(18,2) NOT NULL,
             TotalAdjustments DECIMAL(18,2) NOT NULL, InsuranceAdjustments DECIMAL(18,2) NOT NULL,
@@ -250,7 +245,7 @@ BEGIN
         CREATE TABLE #EsOut
         (
             Category VARCHAR(10) NOT NULL,
-            RowCode NVARCHAR(20) COLLATE DATABASE_DEFAULT NOT NULL,
+            RowCode NVARCHAR(320) COLLATE DATABASE_DEFAULT NOT NULL,
             Description NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL,
             SortOrder INT NOT NULL,
             ESYear INT NOT NULL, ESMonth INT NOT NULL,
@@ -265,11 +260,11 @@ BEGIN
         EXEC dbo.usp_TD_ES_Compute;
 
         -- Section / order / operator / component; UseCount = 1 takes the row's claim count
-        -- (the Y1-Y9 panel rows carry their LIS billable-sample denominator there).
+        -- (the Y.{PANEL} rows carry their LIS billable-sample denominator there).
         DECLARE @Comp TABLE
         (
             Seq INT NOT NULL, Section NVARCHAR(20) NOT NULL, Op NVARCHAR(4) NOT NULL,
-            Category VARCHAR(10) NULL, RowCode NVARCHAR(20) NULL, Label NVARCHAR(200) NULL,
+            Category VARCHAR(10) NULL, RowCode NVARCHAR(320) NULL, Label NVARCHAR(400) NULL,
             IsMoney BIT NOT NULL, IsTotal BIT NOT NULL, UseCount BIT NOT NULL
         );
 
@@ -283,12 +278,10 @@ BEGIN
                 (1,  N'Numerator',   N'',  'Cash', N'Q', NULL, 1, 0, 0),
                 (11, N'Denominator', N'',  'PMS',  N'F', NULL, 0, 0, 0),
                 (29, N'Result',      N'=', 'Cash', N'Y', NULL, 1, 1, 0);
-        ELSE IF @RowCode LIKE N'Y[1-9]'
+        ELSE IF LEFT(@RowCode, 2) = N'Y.'
             INSERT INTO @Comp VALUES
-                (1,  N'Numerator',   N'',  'Cash', N'Q' + RIGHT(@RowCode, 1), NULL, 1, 0, 0),
-                (11, N'Denominator', N'',  'Cash', @RowCode,
-                     (SELECT TOP (1) LTRIM(o.Description) FROM #EsOut o WHERE o.Category = 'Cash' AND o.RowCode = @RowCode) + N' Billable Samples',
-                     0, 0, 1),
+                (1,  N'Numerator',   N'',  'Cash', N'Q.' + @Panel, NULL, 1, 0, 0),
+                (11, N'Denominator', N'',  'Cash', @RowCode, @PanelText + N' Billable Samples', 0, 0, 1),
                 (29, N'Result',      N'=', 'Cash', @RowCode, NULL, 1, 1, 0);
         ELSE IF @RowCode = N'Z'
             INSERT INTO @Comp VALUES
@@ -362,7 +355,7 @@ BEGIN
 
     SELECT RuleOrder, RuleGroup, RuleText FROM @Rules ORDER BY RuleOrder;
 
-    -- The grid shows the key columns below, then every other column of the source table.
+    -- LIS: key columns, then every other LIMSMaster column. Claims: the TexasDiagnostic mandatory ClaimLevelData columns.
     DECLARE @Skip INT = CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END;
     DECLARE @Take INT = CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END;
     DECLARE @Extra NVARCHAR(MAX), @Sql NVARCHAR(MAX);
@@ -428,7 +421,7 @@ BEGIN
           AND (@HasRep      = 0 OR LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), l.SalesRepName), N'')))   IN (SELECT Val FROM #Filters WHERE Dim = 'Rep'))
           AND (   @RowCode = N'A'
                OR (@RowCode = N'B'  AND k.St = 'INS')
-               OR (@RowCode LIKE N'B[1-9]%' AND k.St = 'INS' AND p.PN = @Panel)
+               OR (LEFT(@RowCode, 2) = N'B.' AND k.St = 'INS' AND p.PN = @Panel)
                OR (@RowCode = N'C'  AND k.St = 'INS' AND k.Bill = 'B')
                OR (@RowCode = N'D'  AND k.St = 'INS' AND k.Bill = 'U')
                OR (@RowCode = N'D1' AND k.St = 'INS' AND k.Bill = 'U' AND k.Sub = 'READY')
@@ -472,9 +465,7 @@ BEGIN
             c.ClaimID, c.RecordId, c.AccessionNumber, c.DateofService, c.FirstBilledDate, c.PayerName_Raw, c.Panelname,
             c.ClinicName, c.ReferringProvider, c.SalesRepname, c.BilledStatus, c.ClaimStatus,
             UPPER(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), c.ClaimStatus), N''))))  AS CS,
-            CAST(CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(500), c.Panelname), N''))))
-                           IN (N'TOXICOLOGY', N'BLOOD', N'URINALYSIS', N'WOUND', N'PGX', N'UTI', N'STI', N'RPP', N'GI')
-                      THEN UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(500), c.Panelname)))) ELSE N'' END AS NVARCHAR(20)) AS PanelKey,
+            CAST(UPPER(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(500), c.Panelname), N'')))) AS NVARCHAR(300)) AS PanelKey,
             CASE WHEN NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(1000), c.AccessionNumber))), N'') IS NOT NULL
                       AND ROW_NUMBER() OVER (PARTITION BY LTRIM(RTRIM(CONVERT(NVARCHAR(1000), c.AccessionNumber)))
                                              ORDER BY TRY_CAST(c.ClaimID AS BIGINT) DESC, c.ClaimID DESC, c.RecordId DESC) > 1
@@ -545,7 +536,7 @@ BEGIN
       AND (   (@RowCode = N'H' AND c.IsDup = 1)
            OR (c.IsDup = 0 AND (
                   (@RowCode IN (N'F', N'P', N'Q', N'W') AND c.IsBilled = 1)
-               OR (@RowCode LIKE N'Q[1-9]' AND c.IsBilled = 1 AND c.PanelKey = @Panel)
+               OR (LEFT(@RowCode, 2) = N'Q.' AND c.IsBilled = 1 AND c.PanelKey = @Panel)
                OR (@RowCode = N'I'  AND c.IsBilled = 0)
                OR (@RowCode IN (N'J', N'R') AND c.CS = N'FULLY PAID')
                OR (@RowCode IN (N'K', N'S') AND c.CS = N'PARTIALLY PAID')
@@ -571,20 +562,20 @@ BEGIN
            CAST(0 AS BIT) AS IsFormula
     FROM #C;
 
-    SELECT @Extra = STRING_AGG(CAST(N's.' + QUOTENAME(c.name) AS NVARCHAR(MAX)), N', ') WITHIN GROUP (ORDER BY c.column_id)
-    FROM sys.columns c
-    WHERE c.object_id = OBJECT_ID(N'dbo.ClaimLevelData')
-      AND c.name NOT IN (N'ClaimID', N'AccessionNumber', N'DateofService', N'FirstBilledDate', N'PayerName_Raw', N'Panelname',
-                         N'ClinicName', N'ReferringProvider', N'SalesRepname', N'BilledStatus', N'ClaimStatus', N'Amount',
-                         N'ChargeAmount', N'ExpectedPayment', N'InsurancePayment', N'TotalPayments', N'TotalAdjustments',
-                         N'InsuranceAdjustments', N'PatientBalance', N'InsuranceBalance', N'TotalBalance');
-
-    SET @Sql = N'SELECT p.ClaimID, p.AccessionNumber, p.DateofService, p.FirstBilledDate, p.PayerName_Raw, p.Panelname, p.ClinicName,
-               p.ReferringProvider, p.SalesRepname, p.BilledStatus, p.ClaimStatus, '
-             + CASE WHEN @AmountCol IS NULL THEN N'' ELSE N'p.Amount, ' END
-             + N'p.ChargeAmount, p.ExpectedPayment, p.InsurancePayment, p.TotalPayments, p.TotalAdjustments,
-               p.InsuranceAdjustments, p.PatientBalance, p.InsuranceBalance, p.TotalBalance'
-             + ISNULL(N', ' + @Extra, N'') + N'
+    -- TexasDiagnostic mandatory ClaimLevelData columns, in order (LabClaimLineColumnCatalog ["TexasDiagnostic"]);
+    -- $ rows lead with the measured Amount.
+    SET @Sql = N'SELECT ' + CASE WHEN @AmountCol IS NULL THEN N'' ELSE N'p.Amount, ' END + N'
+               s.LabID, s.LabName, p.ClaimID, p.AccessionNumber, p.PayerName_Raw, s.PayerName, s.PayerType,
+               s.BillingProvider, p.ReferringProvider, p.ClinicName, s.PatientID, s.PatientDOB, p.DateofService,
+               s.ChargeEnteredDate, p.FirstBilledDate, p.Panelname, s.CPTCodeXUnitsXModifier, s.POS, s.TOS,
+               p.ChargeAmount, s.AllowedAmount, p.InsurancePayment, s.PatientPayment, p.TotalPayments,
+               p.InsuranceAdjustments, s.PatientAdjustments, p.TotalAdjustments,
+               p.InsuranceBalance, p.PatientBalance, p.TotalBalance, s.CheckDate, p.ClaimStatus,
+               s.DenialCode, s.DenialCodeNormalized, s.DenialDescription, s.ICDCode,
+               s.DaystoDOS, s.RollingDays, s.DaystoBill, s.DaystoPost,
+               s.PaymentPercent, s.FullyPaidCount, s.FullyPaidAmount, s.Adjudicated, s.AdjudicatedAmount,
+               s.Bucket30, s.Bucket30Amount, s.Bucket60, s.Bucket60Amount,
+               s.CheckNumber, s.EntryWeek, s.DepositWeek, s.BilledWeek
         FROM (SELECT * FROM #C ORDER BY PeriodDate, ClaimID OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY) p
         JOIN dbo.ClaimLevelData s ON s.RecordId = p.EsRecordId
         ORDER BY p.PeriodDate, p.ClaimID;';

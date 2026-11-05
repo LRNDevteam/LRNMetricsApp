@@ -98,15 +98,12 @@ BEGIN
     DECLARE @HasPanel         BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
     DECLARE @HasAging         BIT = CASE WHEN EXISTS (SELECT 1 FROM @AgingList) THEN 1 ELSE 0 END;
 
-    /* ==== Elixir ClaimLevel columns (Sql/Select_Script) — add/remove fields here ==== */
+    /* ==== Elixir mandatory ClaimLevel columns (LabClaimLineColumnCatalog ["Elixir"]) — add/remove fields here ==== */
     SELECT
             [LabID],
             [LabName],
             CASE WHEN [ClaimID] LIKE '%.00' THEN LEFT([ClaimID], LEN([ClaimID])-3) ELSE ISNULL(LTRIM(RTRIM([ClaimID])),'') END AS [ClaimID],
             [AccessionNumber],
-            [SourceFileID],
-            [IngestedOn],
-            [CsvRowHash],
             [PayerName_Raw],
             ISNULL(LTRIM(RTRIM([PayerName])),'') AS [PayerName],
             [Payer_Code],
@@ -154,14 +151,11 @@ BEGIN
             [T_F],
             [PatientFirstName],
             [PatientLastName],
-            [PatientAddress],
-            [Coverage],
             [AgingDOS],
             [ServiceToDate],
             [AgingDOE],
             [Facility],
             [ServiceLocationCode],
-            [ServiceLocationName],
             [PrimarySubId],
             [ICDField],
             [DODWeek],
@@ -184,9 +178,6 @@ BEGIN
             ISNULL(TRY_CAST([Bucket30Amount] AS DECIMAL(18,2)), 0) AS [Bucket30Amount],
             [Bucket60Count],
             ISNULL(TRY_CAST([Bucket60Amount] AS DECIMAL(18,2)), 0) AS [Bucket60Amount],
-            [ClaimUID],
-            [PanelNameLIS],
-            [PanelNameBasedOnCPT],
             ISNULL(TRY_CAST([InsuranceBalance_Decimal] AS DECIMAL(18,2)), 0) AS [InsuranceBalance_Decimal],
             [Modifiers],
             [Units],
@@ -309,22 +300,18 @@ BEGIN
     DECLARE @HasCpt           BIT = CASE WHEN EXISTS (SELECT 1 FROM @CptList) THEN 1 ELSE 0 END;
     DECLARE @HasClinic        BIT = CASE WHEN EXISTS (SELECT 1 FROM @ClinicList) THEN 1 ELSE 0 END;
 
-    /* ==== Elixir LineLevel columns (Sql/Select_Script) — add/remove fields here ==== */
+    /* ==== Elixir mandatory LineLevel columns (LabClaimLineColumnCatalog ["Elixir"]) — add/remove fields here ==== */
     SELECT
             [LabID],
             [LabName],
             CASE WHEN [ClaimID] LIKE '%.00' THEN LEFT([ClaimID], LEN([ClaimID])-3) ELSE ISNULL(LTRIM(RTRIM([ClaimID])),'') END AS [ClaimID],
             [AccessionNumber],
-            [SourceFileID],
-            [IngestedOn],
-            [CsvRowHash],
             [PayerName_Raw],
             ISNULL(LTRIM(RTRIM([PayerName])),'') AS [PayerName],
             [Payer_Code],
             [Payer_Common_Code],
             [Payer_Group_Code],
             [Global_Payer_ID],
-            ISNULL(LTRIM(RTRIM([PayerType])),'') AS [PayerType],
             [BillingProvider],
             [ReferringProvider],
             ISNULL(LTRIM(RTRIM([ClinicName])),'') AS [ClinicName],
@@ -350,15 +337,12 @@ BEGIN
             ISNULL(TRY_CAST([PatientPaymentPerUnit] AS DECIMAL(18,2)), 0) AS [PatientPaymentPerUnit],
             ISNULL(TRY_CAST([TotalPayments] AS DECIMAL(18,2)), 0) AS [TotalPayments],
             [InsuranceAdjustments],
-            [PatientAdjustments],
             [TotalAdjustments],
             ISNULL(TRY_CAST([InsuranceBalance] AS DECIMAL(18,2)), 0) AS [InsuranceBalance],
             ISNULL(TRY_CAST([PatientBalance] AS DECIMAL(18,2)), 0) AS [PatientBalance],
             ISNULL(TRY_CAST([PatientBalancePerUnit] AS DECIMAL(18,2)), 0) AS [PatientBalancePerUnit],
             ISNULL(TRY_CAST([TotalBalance] AS DECIMAL(18,2)), 0) AS [TotalBalance],
             [CheckDate],
-            [PostingDate],
-            ISNULL(LTRIM(RTRIM([ClaimStatus])),'') AS [ClaimStatus],
             ISNULL(LTRIM(RTRIM([PayStatus])),'') AS [PayStatus],
             [DenialCode],
             [DenialCodeNormalized],
@@ -369,9 +353,6 @@ BEGIN
             [RollingDays],
             [DaystoBill],
             [DaystoPost],
-            [ICDPointer],
-            [InsertedDateTime],
-            [PaymentPostedDate],
             [T_F],
             [VisitXCptXMod],
             [UID],

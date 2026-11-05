@@ -618,6 +618,7 @@ BEGIN
 
     SELECT RuleOrder, RuleGroup, RuleText FROM @Rules ORDER BY RuleOrder;
 
+    -- LIS: key columns, then every other LIMSMaster column. Claims: the InHealth mandatory ClaimLevelData columns.
     -- The grid shows the key columns below, then every other column of the source row
     -- (for one line per OrderID: the row that line shows).
     DECLARE @Skip INT = CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END;
@@ -711,20 +712,20 @@ BEGIN
            COUNT(*) AS TotalRows, CAST(ISNULL(SUM(Amount), 0) AS DECIMAL(18,2)) AS TotalAmount, CAST(0 AS BIT) AS IsFormula
     FROM #xCOut;
 
-    -- TotalAdjustments above is Insurance + Patient adjustments; the source column of that name is not repeated.
-    SELECT @Extra = STRING_AGG(CAST(N's.' + QUOTENAME(c.name) AS NVARCHAR(MAX)), N', ') WITHIN GROUP (ORDER BY c.column_id)
-    FROM sys.columns c
-    WHERE c.object_id = OBJECT_ID(N'dbo.ClaimLevelData')
-      AND c.name NOT IN (N'ClaimID', N'AccessionNumber', N'DateofService', N'FirstBilledDate', N'PayerName_Raw', N'PanelNameBasedOnCPT',
-                         N'ClinicName', N'ReferringProvider', N'SalesRepname', N'BillStatus', N'ClaimStatus', N'Amount',
-                         N'ChargeAmount', N'InsurancePayment', N'PatientPayment', N'TotalAdjustments', N'InsuranceBalance',
-                         N'PatientBalance');
-
-    SET @Sql = N'SELECT p.ClaimID, p.AccessionNumber, p.DateofService, p.FirstBilledDate, p.PayerName_Raw, p.PanelNameBasedOnCPT, p.ClinicName,
-               p.ReferringProvider, p.SalesRepname, p.BillStatus, p.ClaimStatus, '
-             + CASE WHEN @AmountCol IS NULL THEN N'' ELSE N'p.Amount, ' END
-             + N'p.ChargeAmount, p.InsurancePayment, p.PatientPayment, p.TotalAdjustments, p.InsuranceBalance, p.PatientBalance'
-             + ISNULL(N', ' + @Extra, N'') + N'
+    -- InHealth mandatory ClaimLevelData columns, in order (LabClaimLineColumnCatalog ["InHealth"]);
+    -- $ rows lead with the measured Amount. TotalAdjustments = Insurance + Patient adjustments (the measured value).
+    SET @Sql = N'SELECT ' + CASE WHEN @AmountCol IS NULL THEN N'' ELSE N'p.Amount, ' END + N'
+               s.LabID, s.LabName, p.ClaimID, p.AccessionNumber, p.PayerName_Raw, s.PayerName,
+               s.Payer_Code, s.Payer_Common_Code, s.Payer_Group_Code, s.Global_Payer_ID, s.BillingProvider, p.ReferringProvider,
+               p.ClinicName, s.PatientID, s.PatientDOB, p.DateofService, s.ChargeEnteredDate, p.FirstBilledDate,
+               s.CPTCodeXUnitsXModifier, p.ChargeAmount, s.AllowedAmount, p.InsurancePayment, p.PatientPayment, s.TotalPayments,
+               p.InsuranceAdjustments, p.PatientAdjustments, p.TotalAdjustments, p.InsuranceBalance, p.PatientBalance, s.TotalBalance,
+               s.CheckDate, p.ClaimStatus, s.DenialCode, s.DenialCodeNormalized, s.DenialDescription, s.ICDCode,
+               s.DaystoDOS, s.RollingDays, s.DaystoBill, s.DaystoPost, s.ICDPointer, s.CPTCodeXUnitsXModifierOrginal,
+               s.PaymentPercent, s.AdjudicatedCount, s.FullyPaidCount, s.FullyPaidAmount, s.AdjudicatedAmount, s.PatientName,
+               s.BilledWeek, s.PanelNameLIS, p.PanelNameBasedOnCPT, s.TotalWO, p.BillStatus, s.AgingDOS,
+               s.AgingDOE, s.ResponsibleParty, s.SubscriberID, s.EndDOS, s.DODWeek, s.CheckNumber,
+               s.LineLevelICD, s.Facility, s.Bucket30Count, s.Bucket30Amount, s.Bucket60Count, s.Bucket60Amount
         FROM (SELECT * FROM #xCOut ORDER BY PY, PM, ClaimID OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY) p
         LEFT JOIN dbo.ClaimLevelData s ON s.RecordId = p.EsRecordId
         ORDER BY p.PY, p.PM, p.ClaimID;';

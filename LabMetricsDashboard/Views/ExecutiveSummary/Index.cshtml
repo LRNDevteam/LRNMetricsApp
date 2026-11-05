@@ -983,7 +983,9 @@ if (showHighlightTabs)
                          data-lab="@Model.SelectedLab"
                          data-filters="@EsFilterQuery()"
                          data-rows-url="@Url.Action("CellRows", "ExecutiveSummary")"
-                         data-export-url="@Url.Action("CellRowsExport", "ExecutiveSummary")"></div>
+                         data-export-url="@Url.Action("CellRowsExport", "ExecutiveSummary")"
+                         data-export-status-url="@Url.Action("CellRowsExportStatus", "ExecutiveSummary")"
+                         data-csv-row-threshold="@LabMetricsDashboard.Services.ExecSummaryCellRowsCsvBuilder.RowThreshold"></div>
                     <div class="esc-legend">
                         <span><span class="esc-legend-swatch esc-legend-rows"></span>Value - opens the rows behind it</span>
                         @if (esLisDrill)
@@ -1392,6 +1394,15 @@ if (showHighlightTabs)
                     </div>
                 </div>
                 <div class="modal-footer esc-foot">
+                    <div class="esc-progress" id="esCellProgress" hidden>
+                        <div class="esc-progress-head">
+                            <span id="esCellProgressText">Preparing…</span>
+                            <strong id="esCellProgressPct">0%</strong>
+                        </div>
+                        <div class="progress" role="progressbar" aria-label="Download progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="esCellProgressBar">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" id="esCellProgressFill"></div>
+                        </div>
+                    </div>
                     <div class="esc-pager" id="esCellPager"></div>
                     <button type="button" class="btn btn-sm btn-outline-primary" id="esCellBack" hidden>
                         <i class="bi bi-arrow-left"></i> Back to calculation

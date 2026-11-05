@@ -1,9 +1,10 @@
-﻿/* =============================================================================
-   CoreBio - Claim Level Data page (usp_GetClaimLevelDetails)
+/* =============================================================================
+   CoreBio - Claim Level / Line Level Data pages
+             (usp_GetClaimLevelDetails, usp_GetLineLevelDetails)
    Database : CoreBio
-   The Claim Level grid shows the columns this SELECT returns.
+   The Claim Level and Line Level grids show the columns these SELECTs return.
    2026-10-27: adds ClaimLevelDenialCode after DenialCode.
-   The Excel download uses LabClaimLineColumnCatalog ["CoreBio"]; keep the two lists in step.
+   The Excel downloads use LabClaimLineColumnCatalog ["CoreBio"]; keep the lists in step.
    ============================================================================= */
 IF DB_NAME() <> N'CoreBio'
 BEGIN
@@ -88,7 +89,7 @@ BEGIN
     DECLARE @HasPanel         BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
     DECLARE @HasAging         BIT = CASE WHEN EXISTS (SELECT 1 FROM @AgingList) THEN 1 ELSE 0 END;
 
-    /* ==== CoreBio ClaimLevel columns - add/remove fields here ==== */
+    /* ==== CoreBio mandatory ClaimLevel columns (LabClaimLineColumnCatalog ["CoreBio"]) - add/remove fields here ==== */
     SELECT
             [LabID],
             [LabName],
@@ -98,9 +99,7 @@ BEGIN
             ISNULL(LTRIM(RTRIM([PayerName])),'') AS [PayerName],
             ISNULL(LTRIM(RTRIM([PayerType])),'') AS [PayerType],
             [ReferringProvider],
-            [BillingProvider],
             ISNULL(LTRIM(RTRIM([ClinicName])),'') AS [ClinicName],
-            ISNULL(LTRIM(RTRIM([SalesRepname])),'') AS [SalesRepname],
             CASE WHEN [PatientID] LIKE '%.00' THEN LEFT([PatientID], LEN([PatientID])-3) ELSE ISNULL(LTRIM(RTRIM([PatientID])),'') END AS [PatientID],
             [PatientName],
             [PatientDOB],
@@ -116,9 +115,6 @@ BEGIN
             [CPTCodeList],
             [UnitsList],
             [ModifierList],
-            [CptWithUnits],
-            [Modifier],
-            [POS],
             ISNULL(TRY_CAST([ChargeAmount] AS DECIMAL(18,2)), 0) AS [ChargeAmount],
             ISNULL(TRY_CAST([InsurancePayment] AS DECIMAL(18,2)), 0) AS [InsurancePayment],
             ISNULL(TRY_CAST([PatientPayment] AS DECIMAL(18,2)), 0) AS [PatientPayment],
@@ -157,12 +153,10 @@ BEGIN
             ISNULL(TRY_CAST([Bucket60Amount] AS DECIMAL(18,2)), 0) AS [Bucket60Amount],
             ISNULL(LTRIM(RTRIM([Facility])),'') AS [Facility],
             [OrderingProviderID],
-            [ClaimUID],
             [DaystoDOS],
             [RollingDays],
             [DaystoBill],
-            [DaystoPost],
-            [InsertedDateTime]
+            [DaystoPost]
     FROM dbo.ClaimLevelData
     WHERE (@HasPayerNameLike = 0 OR EXISTS (SELECT 1 FROM @PayerNameLike p WHERE LTRIM(RTRIM(ClaimLevelData.PayerName)) LIKE N'%' + p.Value + N'%'))
       AND (@HasPayerType = 0 OR LTRIM(RTRIM(PayerType)) IN (SELECT Value FROM @PayerTypeList))
@@ -221,6 +215,129 @@ BEGIN
             AND (@DosTo   IS NULL OR TRY_CAST(DateOfService AS DATE) <= @DosTo)))
           )
     ORDER BY ClaimID
+    OFFSET ISNULL(@Offset, 0) ROWS
+    FETCH NEXT ISNULL(@PageSize, 2147483647) ROWS ONLY;
+END
+GO
+
+-- DenialCodeNormalized / DenialDescription are filled by LRN.MasterFileProcessorWorker after each
+-- line-level import. Created here as well, so usp_GetLineLevelDetails can be created on a database
+-- the worker has not populated yet. Re-runnable.
+IF OBJECT_ID('dbo.LineLevelData', 'U') IS NOT NULL AND COL_LENGTH('dbo.LineLevelData', 'DenialCodeNormalized') IS NULL
+    ALTER TABLE dbo.LineLevelData ADD [DenialCodeNormalized] nvarchar(400) NULL;
+IF OBJECT_ID('dbo.LineLevelData', 'U') IS NOT NULL AND COL_LENGTH('dbo.LineLevelData', 'DenialDescription') IS NULL
+    ALTER TABLE dbo.LineLevelData ADD [DenialDescription] nvarchar(max) NULL;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.usp_GetLineLevelDetails
+    @PayerName       NVARCHAR(500) = NULL,
+    @PayerTypes      NVARCHAR(MAX) = NULL,
+    @ClaimStatuses   NVARCHAR(MAX) = NULL,
+    @PayStatuses     NVARCHAR(MAX) = NULL,
+    @CPTCodes        NVARCHAR(MAX) = NULL,
+    @ClinicNames     NVARCHAR(MAX) = NULL,
+    @DenialCode      NVARCHAR(500) = NULL,
+    @Offset          INT           = 0,
+    @PageSize        INT           = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @PayerNameLike   TABLE (Value NVARCHAR(500) NOT NULL);
+    DECLARE @DenialCodeLike  TABLE (Value NVARCHAR(500) NOT NULL);
+    DECLARE @PayerTypeList   TABLE (Value NVARCHAR(500) NOT NULL);
+    DECLARE @ClaimStatusList TABLE (Value NVARCHAR(500) NOT NULL);
+    DECLARE @PayStatusList   TABLE (Value NVARCHAR(500) NOT NULL);
+    DECLARE @CptList         TABLE (Value NVARCHAR(100) NOT NULL);
+    DECLARE @ClinicList      TABLE (Value NVARCHAR(500) NOT NULL);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerName)), '') IS NOT NULL
+        INSERT INTO @PayerNameLike SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500)
+        FROM STRING_SPLIT(@PayerName, ',') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+    IF NULLIF(LTRIM(RTRIM(@DenialCode)), '') IS NOT NULL
+        INSERT INTO @DenialCodeLike SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500)
+        FROM STRING_SPLIT(@DenialCode, ',') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+    IF NULLIF(LTRIM(RTRIM(@PayerTypes)), '') IS NOT NULL
+        INSERT INTO @PayerTypeList SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500)
+        FROM STRING_SPLIT(@PayerTypes, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+    IF NULLIF(LTRIM(RTRIM(@ClaimStatuses)), '') IS NOT NULL
+        INSERT INTO @ClaimStatusList SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500)
+        FROM STRING_SPLIT(@ClaimStatuses, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+    IF NULLIF(LTRIM(RTRIM(@PayStatuses)), '') IS NOT NULL
+        INSERT INTO @PayStatusList SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500)
+        FROM STRING_SPLIT(@PayStatuses, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+    IF NULLIF(LTRIM(RTRIM(@CPTCodes)), '') IS NOT NULL
+        INSERT INTO @CptList SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 100)
+        FROM STRING_SPLIT(@CPTCodes, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+    IF NULLIF(LTRIM(RTRIM(@ClinicNames)), '') IS NOT NULL
+        INSERT INTO @ClinicList SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 500)
+        FROM STRING_SPLIT(@ClinicNames, '|') WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerNameLike BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerNameLike) THEN 1 ELSE 0 END;
+    DECLARE @HasDenialLike    BIT = CASE WHEN EXISTS (SELECT 1 FROM @DenialCodeLike) THEN 1 ELSE 0 END;
+    DECLARE @HasPayerType     BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerTypeList) THEN 1 ELSE 0 END;
+    DECLARE @HasClaimStatus   BIT = CASE WHEN EXISTS (SELECT 1 FROM @ClaimStatusList) THEN 1 ELSE 0 END;
+    DECLARE @HasPayStatus     BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayStatusList) THEN 1 ELSE 0 END;
+    DECLARE @HasCpt           BIT = CASE WHEN EXISTS (SELECT 1 FROM @CptList) THEN 1 ELSE 0 END;
+    DECLARE @HasClinic        BIT = CASE WHEN EXISTS (SELECT 1 FROM @ClinicList) THEN 1 ELSE 0 END;
+
+    /* ==== CoreBio mandatory LineLevel columns (LabClaimLineColumnCatalog ["CoreBio"]) - add/remove fields here ==== */
+    SELECT
+            [LabID],
+            [LabName],
+            CASE WHEN [ClaimID] LIKE '%.00' THEN LEFT([ClaimID], LEN([ClaimID])-3) ELSE ISNULL(LTRIM(RTRIM([ClaimID])),'') END AS [ClaimID],
+            [AccessionNumber],
+            [PayerName_Raw],
+            ISNULL(LTRIM(RTRIM([PayerName])),'') AS [PayerName],
+            ISNULL(LTRIM(RTRIM([PayerType])),'') AS [PayerType],
+            [ReferringProvider],
+            ISNULL(LTRIM(RTRIM([ClinicName])),'') AS [ClinicName],
+            CASE WHEN [PatientID] LIKE '%.00' THEN LEFT([PatientID], LEN([PatientID])-3) ELSE ISNULL(LTRIM(RTRIM([PatientID])),'') END AS [PatientID],
+            [PatientDOB],
+            [DateofService],
+            [ChargeEnteredDate],
+            [FirstBilledDate],
+            ISNULL(LTRIM(RTRIM([Panelname])),'') AS [Panelname],
+            CASE WHEN [CPTCode] LIKE '%.00' THEN LEFT([CPTCode], LEN([CPTCode])-3) ELSE ISNULL(LTRIM(RTRIM([CPTCode])),'') END AS [CPTCode],
+            ISNULL(FLOOR(TRY_CAST([Units] AS DECIMAL(18,2))), 0) AS [Units],
+            CASE WHEN [Modifier] LIKE '%.00' THEN LEFT([Modifier], LEN([Modifier])-3) ELSE ISNULL(LTRIM(RTRIM([Modifier])),'') END AS [Modifier],
+            ISNULL(TRY_CAST([ChargeAmount] AS DECIMAL(18,2)), 0) AS [ChargeAmount],
+            ISNULL(TRY_CAST([ChargeAmountPerUnit] AS DECIMAL(18,2)), 0) AS [ChargeAmountPerUnit],
+            ISNULL(TRY_CAST([AllowedAmount] AS DECIMAL(18,2)), 0) AS [AllowedAmount],
+            ISNULL(TRY_CAST([AllowedAmountPerUnit] AS DECIMAL(18,2)), 0) AS [AllowedAmountPerUnit],
+            ISNULL(TRY_CAST([InsurancePayment] AS DECIMAL(18,2)), 0) AS [InsurancePayment],
+            ISNULL(TRY_CAST([InsurancePaymentPerUnit] AS DECIMAL(18,2)), 0) AS [InsurancePaymentPerUnit],
+            ISNULL(TRY_CAST([PatientPayment] AS DECIMAL(18,2)), 0) AS [PatientPayment],
+            ISNULL(TRY_CAST([PatientPaymentPerUnit] AS DECIMAL(18,2)), 0) AS [PatientPaymentPerUnit],
+            ISNULL(TRY_CAST([TotalPayments] AS DECIMAL(18,2)), 0) AS [TotalPayments],
+            [InsuranceAdjustments],
+            [PatientAdjustments],
+            [TotalAdjustments],
+            ISNULL(TRY_CAST([InsuranceBalance] AS DECIMAL(18,2)), 0) AS [InsuranceBalance],
+            ISNULL(TRY_CAST([PatientBalance] AS DECIMAL(18,2)), 0) AS [PatientBalance],
+            ISNULL(TRY_CAST([PatientBalancePerUnit] AS DECIMAL(18,2)), 0) AS [PatientBalancePerUnit],
+            ISNULL(TRY_CAST([TotalBalance] AS DECIMAL(18,2)), 0) AS [TotalBalance],
+            [CheckDate],
+            ISNULL(LTRIM(RTRIM([PayStatus])),'') AS [PayStatus],
+            [DenialCode],
+            [DenialCodeNormalized],
+            [DenialDescription],
+            [DenialDate],
+            [ICDCode],
+            [DaystoDOS],
+            [RollingDays],
+            [DaystoBill],
+            [DaystoPost],
+            [ICDPointer]
+    FROM dbo.LineLevelData
+    WHERE (@HasPayerNameLike = 0 OR EXISTS (SELECT 1 FROM @PayerNameLike p WHERE LTRIM(RTRIM(LineLevelData.PayerName)) LIKE N'%' + p.Value + N'%'))
+      AND (@HasPayerType = 0 OR LTRIM(RTRIM(PayerType)) IN (SELECT Value FROM @PayerTypeList))
+      AND (@HasClaimStatus = 0 OR LTRIM(RTRIM(ClaimStatus)) IN (SELECT Value FROM @ClaimStatusList))
+      AND (@HasPayStatus = 0 OR LTRIM(RTRIM(PayStatus)) IN (SELECT Value FROM @PayStatusList))
+      AND (@HasCpt = 0 OR LTRIM(RTRIM(CPTCode)) IN (SELECT Value FROM @CptList))
+      AND (@HasClinic = 0 OR LTRIM(RTRIM(ClinicName)) IN (SELECT Value FROM @ClinicList))
+      AND (@HasDenialLike = 0 OR EXISTS (SELECT 1 FROM @DenialCodeLike d WHERE LTRIM(RTRIM(LineLevelData.DenialCode)) LIKE N'%' + d.Value + N'%'))
+    ORDER BY ClaimID, CPTCode
     OFFSET ISNULL(@Offset, 0) ROWS
     FETCH NEXT ISNULL(@PageSize, 2147483647) ROWS ONLY;
 END

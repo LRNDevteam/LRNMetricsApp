@@ -542,7 +542,7 @@ BEGIN
         RETURN;
     END;
 
-    -- The grid shows the key columns below, then every other column of the source table.
+    -- LIS: key columns, then every other LIS column. Claims: the NorthWest mandatory ClaimLevelData columns.
     DECLARE @Skip INT = CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END;
     DECLARE @Take INT = CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END;
     DECLARE @Extra NVARCHAR(MAX), @Sql NVARCHAR(MAX);
@@ -633,21 +633,22 @@ BEGIN
            CAST(0 AS BIT) AS IsFormula
     FROM #C;
 
-    -- Source columns already shown above (DuplicatePayment = DuplicatePaymentPosted) are not repeated.
-    SELECT @Extra = STRING_AGG(CAST(N's.' + QUOTENAME(c.name) AS NVARCHAR(MAX)), N', ') WITHIN GROUP (ORDER BY c.column_id)
-    FROM sys.columns c
-    WHERE c.object_id = OBJECT_ID(N'dbo.ClaimLevelData')
-      AND c.name NOT IN (N'ClaimID', N'AccessionNumber', N'DateofService', N'FirstBilledDate', N'PayerName_Raw', N'PanelType',
-                         N'ClinicName', N'ReferringProvider', N'SalesRepname', N'BilledUnbilled', N'ClaimType', N'ClaimStatus',
-                         N'Amount', N'ChargeAmount', N'InsurancePayment', N'ActualPayment', N'DuplicatePayment',
-                         N'DuplicatePaymentPosted', N'PatientPayment', N'InsuranceBalance', N'PatientBalance');
-
-    SET @Sql = N'SELECT p.ClaimID, p.AccessionNumber, p.DateofService, p.FirstBilledDate, p.PayerName_Raw, p.PanelType, p.ClinicName,
-               p.ReferringProvider, p.SalesRepname, p.BilledUnbilled, p.ClaimType, p.ClaimStatus, '
-             + CASE WHEN @AmountName IS NULL THEN N'' ELSE N'p.Amount, ' END
-             + N'p.ChargeAmount, p.InsurancePayment, p.ActualPayment, p.DuplicatePayment, p.PatientPayment,
-               p.InsuranceBalance, p.PatientBalance'
-             + ISNULL(N', ' + @Extra, N'') + N'
+    -- NorthWest mandatory ClaimLevelData columns, in order (LabClaimLineColumnCatalog ["NorthWest"]);
+    -- $ rows lead with the measured Amount. DuplicatePaymentPosted = the decimal DuplicatePayment.
+    SET @Sql = N'SELECT ' + CASE WHEN @AmountName IS NULL THEN N'' ELSE N'p.Amount, ' END + N'
+               s.LabID, s.LabName, p.ClaimID, p.AccessionNumber, p.PayerName_Raw, s.PayerName,
+               s.PayerType, s.BillingProvider, p.ReferringProvider, p.ClinicName, s.PatientID, s.PatientDOB,
+               p.DateofService, s.ChargeEnteredDate, p.FirstBilledDate, s.Panelname, s.CPTCodeXUnitsXModifier, p.ChargeAmount,
+               s.AllowedAmount, p.InsurancePayment, p.PatientPayment, s.TotalPayments, s.InsuranceAdjustments, s.PatientAdjustments,
+               s.TotalAdjustments, p.InsuranceBalance, p.PatientBalance, s.TotalBalance, s.CheckDate, p.ClaimStatus,
+               s.DenialCode, s.DenialCodeNormalized, s.DenialDescription, s.ICDCode, s.DaystoDOS, s.RollingDays,
+               s.DaystoBill, s.DaystoPost, s.ICDPointer, s.InsertedDateTime, s.Aging, s.PatientName,
+               s.LISPatientName, s.SubscriberId, p.PanelType, s.EnteredWeek, s.EnteredStatus, s.LastActivityDate,
+               s.EmedixSubmissionDate, p.ClaimType, p.BilledUnbilled, s.BilledStatus, s.BilledWeek, s.PostedWeek,
+               s.ModField, s.CheqNo, p.DuplicatePayment AS DuplicatePaymentPosted, p.ActualPayment, s.ProcTotalBal, s.DeniedStatus,
+               s.ScrubberEditReason, s.EmedixRejectionDate, s.EmedixRejection, s.RejectionCategory, s.TimeToPay, s.PaymentPercent,
+               s.FullyPaidCount, s.FullyPaidAmount, s.Adjudicated, s.AdjudicatedAmount, s.Bucket30, s.Bucket30Amount,
+               s.Bucket60, s.Bucket60Amount, s.CPTCodeXUnitsXModifierOrginal, s.NWLCollectionPostedDate, s.NWLDenialPostedDate
         FROM (SELECT * FROM #C ORDER BY DateofService, ClaimID OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY) p
         LEFT JOIN dbo.ClaimLevelData s ON s.RecordId = p.EsRecordId
         ORDER BY p.DateofService, p.ClaimID;';

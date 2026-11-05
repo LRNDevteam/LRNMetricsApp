@@ -452,25 +452,19 @@ BEGIN
            CAST(0 AS BIT) AS IsFormula
     FROM #C;
 
-    -- Key columns come from #C (dates as DATE, Bill Status normalised, amounts as numbers);
-    -- every other ClaimLevelData column follows in table order.
-    INSERT INTO @Lead (Ord, Name) VALUES
-        (1, N'ClaimID'), (2, N'AccessionNumber'), (3, N'DateofService'), (4, N'FirstBilledDate'),
-        (5, N'PayerName_Raw'), (6, N'Panelname'), (7, N'ClinicName'), (8, N'ReferringProvider'),
-        (9, N'SalesRepname'), (10, N'BilledStatus'), (11, N'ClaimStatus'), (12, N'Amount'),
-        (13, N'ChargeAmount'), (14, N'InsurancePayment'), (15, N'PatientPayment'), (16, N'PatientBalance'),
-        (17, N'TotalAdjustments'), (18, N'TotalInsuranceBalance');
-    IF @AmountCol IS NULL
-        DELETE FROM @Lead WHERE Name = N'Amount';
-
-    SELECT @Cols = STRING_AGG(CAST(N'p.' + QUOTENAME(Name) AS NVARCHAR(MAX)), N', ') WITHIN GROUP (ORDER BY Ord)
-    FROM @Lead;
-
-    SELECT @Cols = @Cols + ISNULL(N', ' + STRING_AGG(CAST(N'c.' + QUOTENAME(c.name) AS NVARCHAR(MAX)), N', ')
-                                         WITHIN GROUP (ORDER BY c.column_id), N'')
-    FROM sys.columns c
-    WHERE c.object_id = OBJECT_ID(N'dbo.ClaimLevelData')
-      AND NOT EXISTS (SELECT 1 FROM @Lead ld WHERE ld.Name = c.name COLLATE DATABASE_DEFAULT);
+    -- Analyze Pathology mandatory ClaimLevelData columns, in order (LabClaimLineColumnCatalog ["AnalyzePathology"]);
+    -- $ rows lead with the measured Amount. p = #C (dates as DATE, Bill Status normalised, amounts as numbers).
+    SET @Cols = CASE WHEN @AmountCol IS NULL THEN N'' ELSE N'p.Amount, ' END + N'c.LabID, c.LabName, p.ClaimID, p.AccessionNumber, p.PayerName_Raw, c.PayerType,
+               p.ReferringProvider, c.BillingProvider, p.ClinicName, c.PatientID, c.PatientName, c.PatientDOB,
+               c.SubscriberId, p.DateofService, c.ChargeEnteredDate, p.FirstBilledDate, c.LastBilledDate, c.BilledWeek,
+               p.BilledStatus, p.Panelname, c.CPTCodeXUnitsXModifier, c.CPTCodeList, c.UnitsList, c.ModifierList,
+               c.POS, p.ChargeAmount, p.InsurancePayment, p.PatientPayment, c.TotalPayments, c.InsuranceAdjustments,
+               c.PatientAdjustments, p.TotalAdjustments, c.InsuranceBalance, p.PatientBalance, c.TotalBalance, p.TotalInsuranceBalance,
+               c.OtherBalance, c.ChargeToDate, c.ChargeTotalPayments, c.ChargeTotalAdjustments, c.CheckDate, c.PaymentPostedDate,
+               c.PostedWeek, p.ClaimStatus, c.DenialCode, c.DenialCodeNormalized, c.DenialDescription, c.DenialDate,
+               c.ICDCode, c.ICDPointer, c.AgingDOS, c.PaymentPercent, c.FullyPaidCount, c.FullyPaidAmount,
+               c.Adjudicated, c.AdjudicatedAmount, c.Bucket30, c.Bucket30Amount, c.Bucket60, c.Bucket60Amount,
+               c.Facility, c.OrderingProviderID, c.DaystoDOS, c.RollingDays, c.DaystoBill, c.DaystoPost';
 
     SET @Sql = N'SELECT ' + @Cols + N'
                  FROM #C p

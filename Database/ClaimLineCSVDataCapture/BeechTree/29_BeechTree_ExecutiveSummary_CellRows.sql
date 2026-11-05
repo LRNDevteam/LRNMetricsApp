@@ -759,7 +759,8 @@ BEGIN
 
     SELECT RuleOrder, RuleGroup, RuleText FROM @Rules ORDER BY RuleOrder;
 
-    -- The grid shows the key columns below, then every other column of the source row
+    -- LIS / write-off rows: key columns, then every other column of the source row. Claims: the BeechTree
+    -- mandatory ClaimLevelData columns (below, @ClaimCols). The grid shows the key columns below, then every other column of the source row
     -- (for one line per claim and month: the row that line shows).
     DECLARE @Skip INT = CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END;
     DECLARE @Take INT = CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END;
@@ -815,13 +816,19 @@ BEGIN
         RETURN;
     END;
 
-    SELECT @Extra = STRING_AGG(CAST(N's.' + QUOTENAME(c.name) AS NVARCHAR(MAX)), N', ') WITHIN GROUP (ORDER BY c.column_id)
-    FROM sys.columns c
-    WHERE c.object_id = OBJECT_ID(N'dbo.ClaimLevelData')
-      AND c.name NOT IN (N'ClaimID', N'AccessionNumber', N'DateofService', N'FirstBilledDate', N'PayerName_Raw', N'Panelname',
-                         N'ClinicName', N'ReferringProvider', N'SalesRepname', N'BilledUnbilled', N'ClaimStatus', N'Amount', N'Claims',
-                         N'ChargeAmount', N'InsurancePayment', N'PatientPayment', N'InsuranceAdjustments', N'PatientAdjustments',
-                         N'InsuranceBalance', N'PatientBalance');
+    -- BeechTree mandatory ClaimLevelData columns, in order (LabClaimLineColumnCatalog ["BeechTree"]);
+    -- $ rows lead with the measured Amount, count rows with Claims (claims behind the line).
+    DECLARE @ClaimCols NVARCHAR(MAX) = N's.LabID, s.LabName, p.ClaimID, p.AccessionNumber, p.PayerName_Raw, s.PayerName,
+               s.Payer_Code, s.Payer_Common_Code, s.Payer_Group_Code, s.Global_Payer_ID, s.PayerType, s.BillingProvider,
+               p.ReferringProvider, p.ClinicName, s.PatientID, s.PatientDOB, p.DateofService, s.ChargeEnteredDate,
+               p.FirstBilledDate, p.Panelname, s.CPTCodeXUnitsXModifier, s.POS, s.TOS, p.ChargeAmount,
+               s.AllowedAmount, p.InsurancePayment, p.PatientPayment, s.TotalPayments, p.InsuranceAdjustments, p.PatientAdjustments,
+               s.TotalAdjustments, p.InsuranceBalance, p.PatientBalance, s.TotalBalance, s.CheckDate, p.ClaimStatus,
+               s.DenialCode, s.DenialCodeNormalized, s.DenialDescription, s.ICDCode, s.DaystoDOS, s.RollingDays,
+               s.DaystoBill, s.DaystoPost, s.InsertedDateTime, s.PatientName, s.PaymentPercent, s.Aging,
+               s.BilledWeek, s.PostedWeek, s.FullyPaidCount, s.FullyPaidAmount, s.AdjudicatedAmount, s.CPTCodeXUnitsXModifierOrginal,
+               p.BilledUnbilled, s.AgingBucket, s.AdjudicatedCount, s.Days30Count, s.Days30Amount, s.Days60Count,
+               s.Days60Amount, s.InsuranceBalance_Decimal, s.Facility';
 
     /* ---- $ rows: every matching claim row ------------------------------------ */
     IF @AmountCol IS NOT NULL
@@ -845,10 +852,7 @@ BEGIN
                COUNT(*) AS TotalRows, CAST(ISNULL(SUM(Amount), 0) AS DECIMAL(18,2)) AS TotalAmount, CAST(0 AS BIT) AS IsFormula
         FROM #xCOut;
 
-        SET @Sql = N'SELECT p.ClaimID, p.AccessionNumber, p.DateofService, p.FirstBilledDate, p.PayerName_Raw, p.Panelname, p.ClinicName,
-               p.ReferringProvider, p.SalesRepname, p.BilledUnbilled, p.ClaimStatus, p.Amount,
-               p.ChargeAmount, p.InsurancePayment, p.PatientPayment, p.InsuranceAdjustments, p.PatientAdjustments, p.InsuranceBalance, p.PatientBalance'
-             + ISNULL(N', ' + @Extra, N'') + N'
+        SET @Sql = N'SELECT p.Amount, ' + @ClaimCols + N'
         FROM (SELECT * FROM #xCOut ORDER BY PY, PM, ClaimID OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY) p
         LEFT JOIN dbo.ClaimLevelData s ON s.RecordId = p.EsRecordId
         ORDER BY p.PY, p.PM, p.ClaimID;';
@@ -883,10 +887,7 @@ BEGIN
            COUNT(*) AS TotalRows, CAST(0 AS DECIMAL(18,2)) AS TotalAmount, CAST(0 AS BIT) AS IsFormula
     FROM #xAcc;
 
-    SET @Sql = N'SELECT p.ClaimID, p.AccessionNumber, p.DateofService, p.FirstBilledDate, p.PayerName_Raw, p.Panelname, p.ClinicName,
-           p.ReferringProvider, p.SalesRepname, p.BilledUnbilled, p.ClaimStatus, p.Claims,
-           p.ChargeAmount, p.InsurancePayment, p.PatientPayment, p.InsuranceAdjustments, p.PatientAdjustments, p.InsuranceBalance, p.PatientBalance'
-         + ISNULL(N', ' + @Extra, N'') + N'
+    SET @Sql = N'SELECT p.Claims, ' + @ClaimCols + N'
     FROM (SELECT * FROM #xAcc ORDER BY PY, PM, ClaimID OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY) p
     LEFT JOIN dbo.ClaimLevelData s ON s.RecordId = p.EsRecordId
     ORDER BY p.PY, p.PM, p.ClaimID;';

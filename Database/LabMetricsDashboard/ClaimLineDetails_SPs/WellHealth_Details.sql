@@ -99,14 +99,11 @@ BEGIN
             ISNULL(LTRIM(RTRIM([PayerName])),'') AS [PayerName],
             ISNULL(LTRIM(RTRIM([PayerType])),'') AS [PayerType],
             [ReferringProvider],
-            [BillingProvider],
             [ClaimBillingProviderID],
             ISNULL(LTRIM(RTRIM([ClinicName])),'') AS [ClinicName],
-            ISNULL(LTRIM(RTRIM([SalesRepname])),'') AS [SalesRepname],
             CASE WHEN [PatientID] LIKE '%.00' THEN LEFT([PatientID], LEN([PatientID])-3) ELSE ISNULL(LTRIM(RTRIM([PatientID])),'') END AS [PatientID],
             [PatientName],
             [PatientDOB],
-            [SubscriberId],
             [DateofService],
             [ChargeEnteredDate],
             [FirstBilledDate],
@@ -116,11 +113,7 @@ BEGIN
             ISNULL(LTRIM(RTRIM([Panelname])),'') AS [Panelname],
             [ChargePanelID],
             [CPTCodeXUnitsXModifier],
-            [CPTCodeList],
-            [UnitsList],
             [ModifierList],
-            [CptWithUnits],
-            [Modifier],
             [POS],
             ISNULL(TRY_CAST([ChargeAmount] AS DECIMAL(18,2)), 0) AS [ChargeAmount],
             ISNULL(TRY_CAST([InsurancePayment] AS DECIMAL(18,2)), 0) AS [InsurancePayment],
@@ -161,12 +154,10 @@ BEGIN
             [Bucket60],
             ISNULL(TRY_CAST([Bucket60Amount] AS DECIMAL(18,2)), 0) AS [Bucket60Amount],
             ISNULL(LTRIM(RTRIM([Facility])),'') AS [Facility],
-            [ClaimUID],
             [DaystoDOS],
             [RollingDays],
             [DaystoBill],
-            [DaystoPost],
-            [InsertedDateTime]
+            [DaystoPost]
     FROM dbo.ClaimLevelData
     WHERE (@HasPayerNameLike = 0 OR EXISTS (SELECT 1 FROM @PayerNameLike p WHERE LTRIM(RTRIM(ClaimLevelData.PayerName)) LIKE N'%' + p.Value + N'%'))
       AND (@HasPayerType = 0 OR LTRIM(RTRIM(PayerType)) IN (SELECT Value FROM @PayerTypeList))
@@ -282,15 +273,12 @@ BEGIN
     DECLARE @HasCpt           BIT = CASE WHEN EXISTS (SELECT 1 FROM @CptList) THEN 1 ELSE 0 END;
     DECLARE @HasClinic        BIT = CASE WHEN EXISTS (SELECT 1 FROM @ClinicList) THEN 1 ELSE 0 END;
 
-    /* ==== WellHealth LineLevel columns (LabClaimLineColumnCatalog) - add/remove fields here ==== */
+    /* ==== WellHealth mandatory LineLevel columns (LabClaimLineColumnCatalog ["WellHealth"]) - add/remove fields here ==== */
     SELECT
             [LabID],
             [LabName],
             CASE WHEN [ClaimID] LIKE '%.00' THEN LEFT([ClaimID], LEN([ClaimID])-3) ELSE ISNULL(LTRIM(RTRIM([ClaimID])),'') END AS [ClaimID],
             [AccessionNumber],
-            [SourceFileID],
-            [IngestedOn],
-            [CsvRowHash],
             [PayerName_Raw],
             ISNULL(LTRIM(RTRIM([PayerName])),'') AS [PayerName],
             [Payer_Code],
@@ -299,15 +287,12 @@ BEGIN
             [Global_Payer_ID],
             ISNULL(LTRIM(RTRIM([PayerType])),'') AS [PayerType],
             [ReferringProvider],
-            [BillingProvider],
             [ClaimBillingProviderID],
             ISNULL(LTRIM(RTRIM([ClinicName])),'') AS [ClinicName],
             ISNULL(LTRIM(RTRIM([Facility])),'') AS [Facility],
-            ISNULL(LTRIM(RTRIM([SalesRepname])),'') AS [SalesRepname],
             CASE WHEN [PatientID] LIKE '%.00' THEN LEFT([PatientID], LEN([PatientID])-3) ELSE ISNULL(LTRIM(RTRIM([PatientID])),'') END AS [PatientID],
             [PatientName],
             [PatientDOB],
-            [SubscriberId],
             [DateofService],
             ISNULL(CONVERT(VARCHAR(10), TRY_CAST([ChargeToDate] AS DATE), 101), [ChargeToDate]) AS [ChargeToDate],
             [ChargeEnteredDate],
@@ -318,14 +303,10 @@ BEGIN
             CASE WHEN [CPTCode] LIKE '%.00' THEN LEFT([CPTCode], LEN([CPTCode])-3) ELSE ISNULL(LTRIM(RTRIM([CPTCode])),'') END AS [CPTCode],
             ISNULL(FLOOR(TRY_CAST([Units] AS DECIMAL(18,2))), 0) AS [Units],
             CASE WHEN [Modifier] LIKE '%.00' THEN LEFT([Modifier], LEN([Modifier])-3) ELSE ISNULL(LTRIM(RTRIM([Modifier])),'') END AS [Modifier],
-            [CPTUnits],
-            [CPTMOD],
-            [CPTs],
             [ClaimCPTs],
             [CptWithUnits],
             [CPTModifier],
             [POS],
-            [TOS],
             ISNULL(TRY_CAST([ChargeAmount] AS DECIMAL(18,2)), 0) AS [ChargeAmount],
             ISNULL(TRY_CAST([ChargeAmountPerUnit] AS DECIMAL(18,2)), 0) AS [ChargeAmountPerUnit],
             ISNULL(TRY_CAST([AllowedAmount] AS DECIMAL(18,2)), 0) AS [AllowedAmount],
@@ -350,8 +331,6 @@ BEGIN
             [CheckDate],
             [PostingDate],
             [PaymentPostedDate],
-            [PostedWeek],
-            ISNULL(LTRIM(RTRIM([ClaimStatus])),'') AS [ClaimStatus],
             ISNULL(LTRIM(RTRIM([PayStatus])),'') AS [PayStatus],
             [DenialCode],
             [DenialCodeNormalized],
@@ -363,9 +342,7 @@ BEGIN
             [RollingDays],
             [DaystoBill],
             [DaystoPost],
-            [UID],
-            [LineLevelUID],
-            [InsertedDateTime]
+            [UID]
     FROM dbo.LineLevelData
     WHERE (@HasPayerNameLike = 0 OR EXISTS (SELECT 1 FROM @PayerNameLike p WHERE LTRIM(RTRIM(LineLevelData.PayerName)) LIKE N'%' + p.Value + N'%'))
       AND (@HasPayerType = 0 OR LTRIM(RTRIM(PayerType)) IN (SELECT Value FROM @PayerTypeList))

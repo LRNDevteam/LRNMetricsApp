@@ -266,36 +266,111 @@
         return m ? decodeURIComponent(m[1]) : 'ExecutiveSummary_Rows.xlsx';
     }
 
+    // Download progress bar: the server reports its phase / rows written (CellRowsExportStatus), then the
+    // browser counts the bytes received. Phase share of the bar: database 3%, rows 5-85%, closing the file 88%,
+    // download 90-100%.
+    function newId() {
+        if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+        var b = new Uint8Array(16); crypto.getRandomValues(b);
+        b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+        var h = Array.prototype.map.call(b, function (x) { return (x + 0x100).toString(16).slice(1); }).join('');
+        return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
+    }
+    function mb(bytes) { return (bytes / 1048576).toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' MB'; }
+    var lastPct = 0;
+    function setProgress(pct, text) {
+        var box = el('esCellProgress');
+        if (!box) return;
+        if (pct == null) { box.hidden = true; lastPct = 0; return; }
+        pct = Math.max(lastPct, Math.min(100, Math.round(pct)));   // never moves backwards
+        lastPct = pct;
+        box.hidden = false;
+        el('esCellProgressFill').style.width = pct + '%';
+        el('esCellProgressBar').setAttribute('aria-valuenow', String(pct));
+        el('esCellProgressPct').textContent = pct + '%';
+        if (text) el('esCellProgressText').textContent = text;
+    }
+    function serverProgress(s, kind, startedAt) {
+        if (s.phase === 'query' || s.phase === 'unknown')
+            setProgress(3, 'Reading rows from the database… ' + Math.round((Date.now() - startedAt) / 1000) + 's');
+        else if (s.phase === 'rows' && s.totalRows > 0)
+            setProgress(5 + 80 * s.rows / s.totalRows, 'Writing ' + kind + ': ' + count(s.rows) + ' of ' + count(s.totalRows) + ' rows');
+        else if (s.phase === 'finishing') setProgress(88, 'Finishing the ' + kind + ' file…');
+        else if (s.phase === 'ready') setProgress(90, 'Starting the download…');
+    }
+    // Reads the response body chunk by chunk to show the downloaded share (Content-Length is sent).
+    function readWithProgress(r, kind) {
+        var total = Number(r.headers.get('Content-Length') || 0);
+        if (!r.body || !r.body.getReader || !total) {
+            setProgress(95, 'Downloading the ' + kind + ' file…');
+            return r.blob();
+        }
+        var reader = r.body.getReader(), chunks = [], received = 0;
+        function pump() {
+            return reader.read().then(function (step) {
+                if (step.done) return new Blob(chunks, { type: r.headers.get('Content-Type') || '' });
+                chunks.push(step.value);
+                received += step.value.length;
+                setProgress(90 + 10 * received / total, 'Downloading: ' + mb(received) + ' of ' + mb(total));
+                return pump();
+            });
+        }
+        return pump();
+    }
+
     function exportExcel() {
         var ctx = el('esCellCtx');
         var btn = el('esCellExport');
         if (!ctx || !current || !btn || btn.disabled) return;
         var label = btn.innerHTML;
+        // Above the server's threshold the download is a CSV (an .xlsx that size does not fit in memory).
+        var csvThreshold = Number(ctx.dataset.csvRowThreshold || 0);
+        var kind = csvThreshold > 0 && current.totalRows > csvThreshold ? 'CSV' : 'Excel';
+        var id = newId();
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>' +
-            (current.totalRows > 50000
-                ? 'Preparing Excel (' + count(current.totalRows) + ' rows, may take a few minutes)…'
-                : 'Preparing Excel…');
+            'Preparing ' + kind + '…';
         showAlert('');
+        setProgress(null);
+        setProgress(3, 'Reading rows from the database…');
+
+        var polling = true, startedAt = Date.now();
+        function poll() {
+            if (!polling || !ctx.dataset.exportStatusUrl) return;
+            fetch(ctx.dataset.exportStatusUrl + '?' + query({ id: id }), { credentials: 'same-origin', cache: 'no-store' })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (s) { if (polling && s) serverProgress(s, kind, startedAt); })
+                .catch(function () { /* the next tick tries again */ })
+                .finally(function () { if (polling) setTimeout(poll, 1000); });
+        }
+        setTimeout(poll, 1000);
+
         var url = ctx.dataset.exportUrl + '?' + query({
             category: current.cat, rowCode: current.row, year: current.year, month: current.month,
-            title: current.title, value: (current.valueText || '').trim()
+            title: current.title, value: (current.valueText || '').trim(), progressId: id
         });
         fetch(url, { credentials: 'same-origin' })
             .then(function (r) {
+                polling = false;
                 if (!r.ok) return r.text().then(function (t) { throw new Error(t || ('Download failed (' + r.status + ').')); });
-                return r.blob().then(function (b) { return { blob: b, name: fileNameFrom(r) }; });
+                setProgress(90, 'Downloading the ' + kind + ' file…');
+                return readWithProgress(r, kind).then(function (b) { return { blob: b, name: fileNameFrom(r) }; });
             })
             .then(function (f) {
+                setProgress(100, 'Done - ' + f.name);
                 var a = document.createElement('a');
                 a.href = URL.createObjectURL(f.blob);
                 a.download = f.name;
                 document.body.appendChild(a);
                 a.click();
                 setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+                setTimeout(function () { if (lastPct === 100) setProgress(null); }, 4000);
             })
-            .catch(function (err) { showAlert(err.message || 'The Excel file could not be created.'); })
-            .finally(function () { btn.disabled = false; btn.innerHTML = label; });
+            .catch(function (err) {
+                setProgress(null);
+                showAlert(err.message || 'The ' + kind + ' file could not be created.');
+            })
+            .finally(function () { polling = false; btn.disabled = false; btn.innerHTML = label; });
     }
 
     // Views opened from a formula breakdown, so Back returns to the formula.

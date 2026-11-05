@@ -466,7 +466,7 @@ public sealed partial class SqlPhiExecutiveSummaryRepository
 
             DropEmptyCpExceptionPanelRows(vm.Rows);
 
-            if (LabCollectionPrefix.IsInHealthDtr(selectedLab))
+            if (LabCollectionPrefix.IsInHealthDtr(selectedLab) || LabCollectionPrefix.IsTexasDiagnostic(selectedLab))
                 vm.Rows = SortSubRowsByTotalDesc(vm.Rows);
 
             if (spName.Contains("Cove", StringComparison.OrdinalIgnoreCase)

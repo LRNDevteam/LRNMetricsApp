@@ -542,7 +542,7 @@ BEGIN
 
     SELECT RuleOrder, RuleGroup, RuleText FROM @Rules ORDER BY RuleOrder;
 
-    -- The grid shows the key columns below, then every other column of the source row.
+    -- LIS: key columns, then every other LIMSMaster column. Claims: the Cove mandatory ClaimLevelData columns.
     DECLARE @Skip INT = CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END;
     DECLARE @Take INT = CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END;
     DECLARE @Extra NVARCHAR(MAX), @Sql NVARCHAR(MAX);
@@ -680,20 +680,22 @@ BEGIN
            CAST(0 AS BIT) AS IsFormula
     FROM #CH;
 
-    SELECT @Extra = STRING_AGG(CAST(N's.' + QUOTENAME(c.name) AS NVARCHAR(MAX)), N', ') WITHIN GROUP (ORDER BY c.column_id)
-    FROM sys.columns c
-    WHERE c.object_id = OBJECT_ID(N'dbo.ClaimLevelData')
-      AND c.name NOT IN (N'ClaimID', N'AccessionNumber', N'DateofService', N'FirstBilledDate', N'PayerName_Raw', N'PanelName',
-                         N'Panelname', N'ClinicName', N'ReferringProvider', N'SalesRepname', N'BillStatus', N'ClaimStatus', N'Amount',
-                         N'ChargeAmount', N'InsurancePayment', N'PatientPayment', N'InsuranceAdjustments', N'PatientAdjustments',
-                         N'InsuranceBalance', N'PatientBalance');
-
-    SET @Sql = N'SELECT p.ClaimID, p.AccessionNumber, p.DateofService, p.FirstBilledDate, p.PayerName_Raw, p.PanelName, p.ClinicName,
-               p.ReferringProvider, p.SalesRepname, p.BillStatus, p.ClaimStatus, '
-             + CASE WHEN @AmountCol IS NULL THEN N'' ELSE N'p.Amount, ' END
-             + N'p.ChargeAmount, p.InsurancePayment, p.PatientPayment, p.InsuranceAdjustments, p.PatientAdjustments,
-               p.InsuranceBalance, p.PatientBalance'
-             + ISNULL(N', ' + @Extra, N'') + N'
+    -- Cove mandatory ClaimLevelData columns, in order (LabClaimLineColumnCatalog ["Cove"]);
+    -- $ rows lead with the measured Amount.
+    SET @Sql = N'SELECT ' + CASE WHEN @AmountCol IS NULL THEN N'' ELSE N'p.Amount, ' END + N'
+               s.LabID, s.LabName, p.ClaimID, p.AccessionNumber, p.PayerName_Raw, s.PayerName,
+               s.Payer_Code, s.Payer_Common_Code, s.Payer_Group_Code, s.Global_Payer_ID, s.BillingProvider, p.ReferringProvider,
+               p.ClinicName, p.SalesRepname, s.PatientID, s.PatientDOB, p.DateofService, s.ChargeEnteredDate,
+               p.FirstBilledDate, p.PanelName AS Panelname, s.CPTCodeXUnitsXModifier, s.POS, s.TOS, p.ChargeAmount,
+               s.AllowedAmount, p.InsurancePayment, p.PatientPayment, s.TotalPayments, p.InsuranceAdjustments, p.PatientAdjustments,
+               s.TotalAdjustments, p.InsuranceBalance, p.PatientBalance, s.TotalBalance, s.CheckDate, p.ClaimStatus,
+               s.DenialCode, s.DenialCodeNormalized, s.DenialDescription, s.ICDCode, s.DaystoDOS, s.RollingDays,
+               s.DaystoBill, s.DaystoPost, s.ICDPointer, s.InsertedDateTime, s.CPTCodeXUnitsXModifierOrginal, s.T_F,
+               s.UID, s.Facility, s.PatientName, s.SubscriberId, s.AgingDOS, s.EndDOS,
+               s.AgingDOE, s.BilledWeek, s.Units, s.DODWeek, s.DenialDate, s.DeniedWeek,
+               s.ModifierField, s.TotalWO, s.TotalPayment, s.PaymentPercent, p.BillStatus, s.FullyPaidCount,
+               s.FullyPaidAmount, s.AdjucticatedCount, s.AdjucticatedAmount, s.Bucket30Count, s.Bucket30Amount, s.Bucket60Count,
+               s.Bucket60Amount, s.Aging, s.InsuranceBalance_Decimal
         FROM (SELECT * FROM #CH ORDER BY Y, M, DateofService, ClaimID OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY) p
         LEFT JOIN dbo.ClaimLevelData s WITH (NOLOCK) ON s.RecordId = p.EsRecordId
         ORDER BY p.Y, p.M, p.DateofService, p.ClaimID;';

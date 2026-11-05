@@ -341,7 +341,9 @@ BEGIN
 
     SELECT RuleOrder, RuleGroup, RuleText FROM @Rules ORDER BY RuleOrder;
 
-    -- The grid shows the key columns below, then every other column of the source table.
+    -- LIS: key columns, then every other LIMSMaster column. Claims: the CoreBio mandatory ClaimLevelData columns.
+    -- The row queries need OPTION (RECOMPILE): popup pages and full downloads share their text, and a shared
+    -- plan's memory grant (sized by feedback from 100-row pages) spills a download's sort to tempdb for minutes.
     DECLARE @Skip INT = CASE WHEN @PageSize = 0 THEN 0 ELSE (@Page - 1) * @PageSize END;
     DECLARE @Take INT = CASE WHEN @PageSize = 0 THEN 2147483647 ELSE @PageSize END;
     DECLARE @Extra NVARCHAR(MAX), @Sql NVARCHAR(MAX);
@@ -432,7 +434,7 @@ BEGIN
         FROM (SELECT * FROM #L ORDER BY PeriodDate, Accession OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY) p
         JOIN dbo.LIMSMaster s ON s.%%physloc%% = p.EsRowLoc
         ORDER BY p.PeriodDate, p.Accession
-        OPTION (HASH JOIN);';
+        OPTION (HASH JOIN, RECOMPILE);';
         EXEC sys.sp_executesql @Sql, N'@Skip INT, @Take INT', @Skip = @Skip, @Take = @Take;
         RETURN;
     END;
@@ -512,21 +514,24 @@ BEGIN
            CAST(0 AS BIT) AS IsFormula
     FROM #C;
 
-    SELECT @Extra = STRING_AGG(CAST(N's.' + QUOTENAME(c.name) AS NVARCHAR(MAX)), N', ') WITHIN GROUP (ORDER BY c.column_id)
-    FROM sys.columns c
-    WHERE c.object_id = OBJECT_ID(N'dbo.ClaimLevelData')
-      AND c.name NOT IN (N'ClaimID', N'AccessionNumber', N'DateofService', N'FirstBilledDate', N'PayerName_Raw', N'Panelname',
-                         N'ClinicName', N'ReferringProvider', N'SalesRepname', N'BilledStatus', N'ClaimStatus', N'Amount',
-                         N'ChargeAmount', N'InsurancePayment', N'PatientPayment', N'PatientBalance', N'InsuranceBalance');
-
-    SET @Sql = N'SELECT p.ClaimID, p.AccessionNumber, p.DateofService, p.FirstBilledDate, p.PayerName_Raw, p.Panelname, p.ClinicName,
-               p.ReferringProvider, p.SalesRepname, p.BilledStatus, p.ClaimStatus, '
-             + CASE WHEN @AmountCol IS NULL THEN N'' ELSE N'p.Amount, ' END
-             + N'p.ChargeAmount, p.InsurancePayment, p.PatientPayment, p.PatientBalance, p.InsuranceBalance'
-             + ISNULL(N', ' + @Extra, N'') + N'
+    -- CoreBio mandatory ClaimLevelData columns, in order (LabClaimLineColumnCatalog ["CoreBio"]);
+    -- $ rows lead with the measured Amount.
+    SET @Sql = N'SELECT ' + CASE WHEN @AmountCol IS NULL THEN N'' ELSE N'p.Amount, ' END + N'
+               s.LabID, s.LabName, p.ClaimID, p.AccessionNumber, p.PayerName_Raw, s.PayerName,
+               s.PayerType, p.ReferringProvider, p.ClinicName, s.PatientID, s.PatientName, s.PatientDOB,
+               s.SubscriberId, p.DateofService, s.ChargeEnteredDate, p.FirstBilledDate, s.LastBilledDate, s.BilledWeek,
+               p.BilledStatus, p.Panelname, s.CPTCodeXUnitsXModifier, s.CPTCodeList, s.UnitsList, s.ModifierList,
+               p.ChargeAmount, p.InsurancePayment, p.PatientPayment, s.TotalPayments, s.InsuranceAdjustments, s.PatientAdjustments,
+               s.TotalAdjustments, p.InsuranceBalance, p.PatientBalance, s.TotalBalance, s.TotalInsuranceBalance, s.OtherBalance,
+               s.ChargeToDate, s.ChargeTotalPayments, s.ChargeTotalAdjustments, s.CheckDate, s.PaymentPostedDate, s.PostedWeek,
+               p.ClaimStatus, s.DenialCode, s.ClaimLevelDenialCode, s.DenialCodeNormalized, s.DenialDescription, s.DenialDate,
+               s.ICDCode, s.ICDPointer, s.AgingDOS, s.PaymentPercent, s.FullyPaidCount, s.FullyPaidAmount,
+               s.Adjudicated, s.AdjudicatedAmount, s.Bucket30, s.Bucket30Amount, s.Bucket60, s.Bucket60Amount,
+               s.Facility, s.OrderingProviderID, s.DaystoDOS, s.RollingDays, s.DaystoBill, s.DaystoPost
         FROM (SELECT * FROM #C ORDER BY PeriodDate, ClaimID OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY) p
         JOIN dbo.ClaimLevelData s ON s.RecordId = p.EsRecordId
-        ORDER BY p.PeriodDate, p.ClaimID;';
+        ORDER BY p.PeriodDate, p.ClaimID
+        OPTION (RECOMPILE);';
     EXEC sys.sp_executesql @Sql, N'@Skip INT, @Take INT', @Skip = @Skip, @Take = @Take;
 END;
 GO

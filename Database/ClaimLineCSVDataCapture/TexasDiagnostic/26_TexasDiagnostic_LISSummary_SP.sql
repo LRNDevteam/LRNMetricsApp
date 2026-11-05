@@ -25,12 +25,16 @@
      B  Client Bill                 NewStatus = Client Bill OR Client Bills
      1    Billed                    ... AND BillCategory = Billed
      C  Rejected                    NewStatus = Rejected
-     D  Yet to be Validated         NewStatus = Yet to be Validated
-     E  System Test                 NewStatus = System Test
-     F  Self Pay                    NewStatus = Self Pay
+     D  System Test                 NewStatus = System Test
+     E  Self Pay                    NewStatus = Self Pay
      1    Billed                    ... AND BillCategory = Billed
+     F  Yet to be Validated         NewStatus = Yet to be Validated
      G  CIP/Pending                 NewStatus = CIP/Pending
         Total Samples               all samples (returned as the grand-total row)
+
+   Sort order: A Billable is always first (Billed, Unbilled fixed; Unbilled bullets by total
+   descending). The other main rows are by total descending, each with its Billed sub-row,
+   and the letters B-G follow that order. Total Samples is last.
 
    Objects:
      dbo.TD_LIS_StatusSummary      day x dimension x status aggregate
@@ -196,27 +200,52 @@ BEGIN
 			 END) s
 	GROUP BY GROUPING SETS ((Y, M), (Y), ());
 
-	-- Result set 1: ordered rows. IsGrandTotal = 1 is the table's closing total row.
-	SELECT r.SortOrder, r.Code, r.Description, r.RowLevel, r.Logic, r.IsGrandTotal,
+	-- Rows with their place in the hierarchy: Grp = main row (A-G), Sub = its sub-row, Leaf = sub-sub-row.
+	DROP TABLE IF EXISTS #R;
+	SELECT r.Seq, r.Grp, r.Sub, r.Leaf, r.Code, r.Description, r.RowLevel, r.Logic, r.IsGrandTotal,
 		   m.RowYear, m.RowMonth, r.SampleCount
+	INTO #R
 	FROM #M m
 	CROSS APPLY (VALUES
-		( 10, N'A',        N'Billable',               0, N'NewStatus = Billable', 0, m.Billable),
-		( 20, N'1',        N'Billed',                 1, N'NewStatus = Billable AND BillCategory = Billed', 0, m.BillableBilled),
-		( 30, N'2',        N'Unbilled',               1, N'NewStatus = Billable AND BillCategory = Unbilled', 0, m.BillableUnbilled),
-		( 40, NCHAR(8226), N'Ready to Bill',          2, N'NewStatus = Billable AND BillCategory = Unbilled AND Sub Status = Ready to Bill', 0, m.ReadyToBill),
-		( 50, NCHAR(8226), N'Missing Insurance Info', 2, N'NewStatus = Billable AND BillCategory = Unbilled AND Sub Status = Missing Insurance Info', 0, m.MissingInsurance),
-		( 60, N'B',        N'Client Bill',            0, N'NewStatus = Client Bill OR Client Bills', 0, m.ClientBill),
-		( 70, N'1',        N'Billed',                 1, N'NewStatus = Client Bill OR Client Bills AND BillCategory = Billed', 0, m.ClientBillBilled),
-		( 80, N'C',        N'Rejected',               0, N'NewStatus = Rejected', 0, m.Rejected),
-		( 90, N'D',        N'Yet to be Validated',    0, N'NewStatus = Yet to be Validated', 0, m.YetToBeValidated),
-		(100, N'E',        N'System Test',            0, N'NewStatus = System Test', 0, m.SystemTest),
-		(110, N'F',        N'Self Pay',               0, N'NewStatus = Self Pay', 0, m.SelfPay),
-		(120, N'1',        N'Billed',                 1, N'NewStatus = Self Pay AND BillCategory = Billed', 0, m.SelfPayBilled),
-		(130, N'G',        N'CIP/Pending',            0, N'NewStatus = CIP/Pending', 0, m.CipPending),
-		(999, N'',         N'Total Samples',          0, N'Total Samples', 1, m.TotalSamples)
-	) r(SortOrder, Code, Description, RowLevel, Logic, IsGrandTotal, SampleCount)
-	ORDER BY r.SortOrder, m.RowYear, m.RowMonth;
+		( 10, 1, 0, 0, N'A',        N'Billable',               0, N'NewStatus = Billable', 0, m.Billable),
+		( 20, 1, 1, 0, N'1',        N'Billed',                 1, N'NewStatus = Billable AND BillCategory = Billed', 0, m.BillableBilled),
+		( 30, 1, 2, 0, N'2',        N'Unbilled',               1, N'NewStatus = Billable AND BillCategory = Unbilled', 0, m.BillableUnbilled),
+		( 40, 1, 2, 1, NCHAR(8226), N'Ready to Bill',          2, N'NewStatus = Billable AND BillCategory = Unbilled AND Sub Status = Ready to Bill', 0, m.ReadyToBill),
+		( 50, 1, 2, 2, NCHAR(8226), N'Missing Insurance Info', 2, N'NewStatus = Billable AND BillCategory = Unbilled AND Sub Status = Missing Insurance Info', 0, m.MissingInsurance),
+		( 60, 2, 0, 0, N'B',        N'Client Bill',            0, N'NewStatus = Client Bill OR Client Bills', 0, m.ClientBill),
+		( 70, 2, 1, 0, N'1',        N'Billed',                 1, N'NewStatus = Client Bill OR Client Bills AND BillCategory = Billed', 0, m.ClientBillBilled),
+		( 80, 3, 0, 0, N'C',        N'Rejected',               0, N'NewStatus = Rejected', 0, m.Rejected),
+		( 90, 4, 0, 0, N'D',        N'System Test',            0, N'NewStatus = System Test', 0, m.SystemTest),
+		(100, 5, 0, 0, N'E',        N'Self Pay',               0, N'NewStatus = Self Pay', 0, m.SelfPay),
+		(110, 5, 1, 0, N'1',        N'Billed',                 1, N'NewStatus = Self Pay AND BillCategory = Billed', 0, m.SelfPayBilled),
+		(120, 6, 0, 0, N'F',        N'Yet to be Validated',    0, N'NewStatus = Yet to be Validated', 0, m.YetToBeValidated),
+		(130, 7, 0, 0, N'G',        N'CIP/Pending',            0, N'NewStatus = CIP/Pending', 0, m.CipPending),
+		(999, 0, 0, 0, N'',         N'Total Samples',          0, N'Total Samples', 1, m.TotalSamples)
+	) r(Seq, Grp, Sub, Leaf, Code, Description, RowLevel, Logic, IsGrandTotal, SampleCount);
+
+	-- Client ask: Billable (A) is always first and its 1 Billed / 2 Unbilled stay fixed; the bullets under
+	-- Unbilled are by TOTAL descending. All other main rows are by TOTAL descending, each keeping its
+	-- Billed sub-row, and are re-lettered B, C, ... in that order. Total Samples stays last.
+	DROP TABLE IF EXISTS #O;
+	WITH t AS (SELECT Seq, Grp, Sub, Leaf, IsGrandTotal, SampleCount FROM #R WHERE RowYear = 0 AND RowMonth = 0),
+	g AS (SELECT Grp, GrpRank = ROW_NUMBER() OVER (ORDER BY IIF(Grp = 1, 0, 1), SampleCount DESC, Seq)
+		  FROM t WHERE IsGrandTotal = 0 AND Sub = 0 AND Leaf = 0),
+	l AS (SELECT Grp, Sub, Leaf, LeafRank = ROW_NUMBER() OVER (PARTITION BY Grp, Sub ORDER BY SampleCount DESC, Seq)
+		  FROM t WHERE Leaf > 0)
+	SELECT t.Seq,
+		   SortOrder = IIF(t.IsGrandTotal = 1, 999, g.GrpRank * 100 + t.Sub * 10 + ISNULL(l.LeafRank, 0)),
+		   Code = IIF(t.IsGrandTotal = 0 AND t.Sub = 0 AND t.Leaf = 0, NCHAR(64 + g.GrpRank), NULL)
+	INTO #O
+	FROM t
+	LEFT JOIN g ON g.Grp = t.Grp
+	LEFT JOIN l ON l.Grp = t.Grp AND l.Sub = t.Sub AND l.Leaf = t.Leaf;
+
+	-- Result set 1: ordered rows. IsGrandTotal = 1 is the table's closing total row.
+	SELECT o.SortOrder, ISNULL(o.Code, r.Code) AS Code, r.Description, r.RowLevel, r.Logic, r.IsGrandTotal,
+		   r.RowYear, r.RowMonth, r.SampleCount
+	FROM #R r
+	JOIN #O o ON o.Seq = r.Seq
+	ORDER BY o.SortOrder, r.RowYear, r.RowMonth;
 
 	-- Result set 2: KPI cards (Billable billed / unbilled, Self Pay section).
 	SELECT TotalSamples,

@@ -596,10 +596,11 @@ public sealed class ExecutiveSummaryController : Controller
         int? yearFrom = null, int? yearTo = null, int? monthFrom = null, int? monthTo = null,
         DateTime? dosFrom = null, DateTime? dosTo = null, DateTime? billedFrom = null, DateTime? billedTo = null,
         string[]? panels = null, string[]? clinics = null, string[]? providers = null, string[]? reps = null,
-        CancellationToken ct = default)
+        string? progressId = null, CancellationToken ct = default)
     {
+        var progress = CellRowsExportProgress.Start(progressId);
         var (labName, connStr, prefix, error) = await ResolveCellRowsLabAsync(lab, ct);
-        if (error is not null) return BadRequest(error);
+        if (error is not null) { progress.Update("failed"); return BadRequest(error); }
 
         var req = BuildCellRowsRequest(category, rowCode, year, month, 1, 0,
             yearFrom, yearTo, monthFrom, monthTo, dosFrom, dosTo, billedFrom, billedTo, panels, clinics, providers, reps);
@@ -620,31 +621,61 @@ public sealed class ExecutiveSummaryController : Controller
             ("Value", $"{category} - {rowTitle} - {periodLabel}: {value}"),
         };
         // Streamed to a temp file that deletes itself once the response has been sent.
-        var file = new FileStream(Path.Combine(Path.GetTempPath(), $"es-cellrows-{Guid.NewGuid():N}.xlsx"),
+        var file = new FileStream(Path.Combine(Path.GetTempPath(), $"es-cellrows-{Guid.NewGuid():N}.tmp"),
             FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose);
+        var asCsv = false;
         try
         {
-            await _repo.ExportCellRowsAsync(connStr!, prefix!, req,
-                (head, rows) => ExecSummaryCellRowsExcelBuilder.Write(file, head, rows, labName, rowTitle, periodLabel,
-                    value ?? string.Empty, reportInfo), ct);
+            await _repo.ExportCellRowsAsync(connStr!, prefix!, req, (head, rows) =>
+            {
+                asCsv = head.TotalRows > ExecSummaryCellRowsCsvBuilder.RowThreshold;
+                if (progress is not null)
+                {
+                    progress.TotalRows = head.TotalRows;
+                    progress.Format = asCsv ? "CSV" : "Excel";
+                }
+                progress.Update("rows", 0);
+                // The last row is written before the .xlsx package is closed (zipped).
+                void OnRows(int n) => progress.Update(n >= head.TotalRows ? "finishing" : "rows", n);
+                if (asCsv)
+                    ExecSummaryCellRowsCsvBuilder.Write(file, rows, OnRows);
+                else
+                    ExecSummaryCellRowsExcelBuilder.Write(file, head, rows, labName, rowTitle, periodLabel,
+                        value ?? string.Empty, reportInfo, OnRows);
+            }, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            progress.Update("failed");
             await file.DisposeAsync();
             _logger.LogError(ex, "Executive Summary cell rows export failed for lab {Lab} {Category}/{RowCode} {Year}-{Month}.",
                 labName, category, rowCode, year, month);
-            return StatusCode(500, "The Excel file could not be created.");
+            return StatusCode(500, asCsv ? "The CSV file could not be created." : "The Excel file could not be created.");
         }
         catch
         {
+            progress.Update("failed");
             await file.DisposeAsync();
             throw;
         }
         file.Position = 0;
+        progress.Update("ready");
 
         var safeTitle = string.Concat(rowTitle.Split(Path.GetInvalidFileNameChars())).Replace(' ', '_');
-        return File(file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            $"ExecutiveSummary_{labName}_{safeTitle}_{periodLabel.Replace(' ', '_')}_{generatedAt:yyyyMMdd_HHmm}.xlsx");
+        var baseName = $"ExecutiveSummary_{labName}_{safeTitle}_{periodLabel.Replace(' ', '_')}_{generatedAt:yyyyMMdd_HHmm}";
+        return asCsv
+            ? File(file, "text/csv", baseName + ".csv")
+            : File(file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", baseName + ".xlsx");
+    }
+
+    /// <summary>Progress of a running <see cref="CellRowsExport"/> (the page polls it for its % bar).</summary>
+    [HttpGet]
+    public IActionResult CellRowsExportStatus(string? id)
+    {
+        var p = CellRowsExportProgress.Get(id);
+        return p is null
+            ? Json(new { phase = "unknown", rows = 0, totalRows = 0, format = "" })
+            : Json(new { phase = p.Phase, rows = p.Rows, totalRows = p.TotalRows, format = p.Format });
     }
 
     /// <summary>Current time in Central European time (CET, or CEST in summer).</summary>

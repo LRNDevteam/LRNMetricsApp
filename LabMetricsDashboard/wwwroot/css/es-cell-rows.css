@@ -197,4 +197,9 @@ a.esc-comp-link:hover { background: #e8f0fe; border-color: #1a56db; }
 .esc-loading { padding: .75rem; text-align: center; color: #64748b; font-size: .82rem; }
 
 .esc-foot { justify-content: flex-end; gap: .5rem; background: #fff; }
+.esc-progress { flex: 1 0 100%; order: -1; margin-bottom: .25rem; }
+.esc-progress-head { display: flex; justify-content: space-between; margin-bottom: .25rem; font-size: .8rem; color: #475569; }
+.esc-progress-head strong { color: #166534; }
+.esc-progress .progress { height: .7rem; border-radius: .35rem; background: #e2e8f0; }
+.esc-progress .progress-bar { width: 0; transition: width .4s ease; }
 .esc-pager { display: flex; align-items: center; gap: .6rem; margin-right: auto; font-size: .8rem; color: #475569; }
