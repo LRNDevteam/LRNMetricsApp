@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Globalization;
 using System.Net.Http.Headers;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -23,6 +24,7 @@ public sealed class SharePointDownloader
 	private string? _siteId;
 	private string? _driveId;
 	private string? _rootFolderId; // when SharedFolderUrl is used
+	private TokenCredential? _credential;
 
 	public SharePointDownloader(HttpClient http, IOptions<ImportOptions> opt, ILogger<SharePointDownloader> logger)
 	{
@@ -680,7 +682,7 @@ public sealed class SharePointDownloader
 		var missing = new List<string>();
 		if (string.IsNullOrWhiteSpace(sp.TenantId)) missing.Add("TenantId");
 		if (string.IsNullOrWhiteSpace(sp.ClientId)) missing.Add("ClientId");
-		if (string.IsNullOrWhiteSpace(sp.ClientSecret)) missing.Add("ClientSecret");
+		if (string.IsNullOrWhiteSpace(sp.ClientSecret) && string.IsNullOrWhiteSpace(sp.ClientCertificate)) missing.Add("ClientCertificate");
 
 		if (missing.Count > 0)
 		{
@@ -692,14 +694,38 @@ public sealed class SharePointDownloader
 				"service's identity has the 'Key Vault Secrets User' role. Run --diagnose to check.");
 		}
 
-		var credential = new ClientSecretCredential(sp.TenantId, sp.ClientId, sp.ClientSecret);
+		// Built once: the credential caches its token, and the certificate is parsed only once.
+		_credential ??= CreateCredential(sp);
 
-		var token = await credential.GetTokenAsync(
+		var token = await _credential.GetTokenAsync(
 			new TokenRequestContext(new[] { "https://graph.microsoft.com/.default" }), ct);
 
 		_http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
 		_http.DefaultRequestHeaders.Accept.Clear();
 		_http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+	}
+
+	/// <summary>
+	/// Certificate when the vault holds one (HIPAA MF-01), otherwise the client secret. A secret is a
+	/// password that can be copied out of the vault and replayed; a certificate's private key signs
+	/// the token request and is never sent.
+	/// </summary>
+	private TokenCredential CreateCredential(SharePointOptions sp)
+	{
+		if (string.IsNullOrWhiteSpace(sp.ClientCertificate))
+		{
+			_logger.LogWarning(
+				"SharePoint: authenticating with a client secret. Import a certificate into Key Vault as " +
+				"'MasterFileProcessor--SharePoint--ClientCertificate' and remove the secret (HIPAA MF-01).");
+			return new ClientSecretCredential(sp.TenantId, sp.ClientId, sp.ClientSecret);
+		}
+
+		var certificate = new X509Certificate2(
+			Convert.FromBase64String(sp.ClientCertificate.Trim()),
+			(string?)null,
+			X509KeyStorageFlags.EphemeralKeySet);
+
+		return new ClientCertificateCredential(sp.TenantId, sp.ClientId, certificate);
 	}
 
 	private async Task<string> GetSiteIdAsync(CancellationToken ct)

@@ -1,7 +1,7 @@
 {
   "LabId": 13,
   "LabName": "PCR Labs of America",
-  "DatabaseName": "LRN_PCRLOA",
+  "DatabaseName": "PCRLOA_LRN",
   "ClaimLevel": {
     "Enabled": true,
     "CreateCsv": true,

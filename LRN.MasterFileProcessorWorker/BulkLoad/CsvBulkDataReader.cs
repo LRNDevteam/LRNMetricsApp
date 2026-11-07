@@ -39,6 +39,7 @@ public sealed class CsvBulkDataReader : IDataReader
     private readonly string[] _columnNames;
     private readonly int[] _csvIndexByField;
     private readonly TextFieldParser _parser;
+    private readonly string _csvFileName;
 
     /// <summary>
     /// Header name + CSV ordinal for every column that goes into the AdditionalFields JSON, and
@@ -116,6 +117,7 @@ public sealed class CsvBulkDataReader : IDataReader
         _fields = fields.Where(f => !AuditColumns.IsPipelineOwned(f.SqlColumn)).ToList();
         _audit = audit;
         _hasher = new RowHasher(_fields);
+        _csvFileName = Path.GetFileName(csvPath);
 
         _parser = new TextFieldParser(csvPath)
         {
@@ -245,9 +247,10 @@ public sealed class CsvBulkDataReader : IDataReader
             catch (MalformedLineException ex)
             {
                 // Fail rather than skip: a malformed line means the file is not what we think it is,
-                // and silently dropping rows would corrupt the load with no trace.
+                // and silently dropping rows would corrupt the load with no trace. The line number
+                // and file only - the line itself is a patient row (HIPAA MF-07).
                 throw new InvalidDataException(
-                    $"Malformed CSV at line {ex.Message}. File: {_parser.ErrorLine}", ex);
+                    $"Malformed CSV at line {ex.LineNumber} of {_csvFileName}. Open the file to see the line; its content is not logged.");
             }
 
             var hasMappedValue = false;

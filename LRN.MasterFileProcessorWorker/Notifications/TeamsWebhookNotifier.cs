@@ -1,3 +1,4 @@
+using LRN.MasterFileProcessorWorker.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Text;
@@ -35,7 +36,12 @@ public sealed class TeamsWebhookNotifier : ITeamsNotifier
 		if (!Uri.TryCreate(_opt.WebhookUrl, UriKind.Absolute, out var uri))
 			throw new InvalidOperationException("Teams webhook URL is invalid.");
 
-		var payload = BuildAdaptiveCardWrapper(msg);
+		// Teams is outside the PHI systems: a failure message can quote a cell value, so it is scrubbed.
+		var payload = BuildAdaptiveCardWrapper(new TeamsNotification
+		{
+			Title = PhiRedactor.Scrub(msg.Title) ?? "",
+			Message = PhiRedactor.Scrub(msg.Message) ?? ""
+		});
 		var json = JsonSerializer.Serialize(payload);
 
 		using var content = new StringContent(json, Encoding.UTF8, "application/json");

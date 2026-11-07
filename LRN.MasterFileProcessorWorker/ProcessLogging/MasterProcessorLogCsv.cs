@@ -51,7 +51,7 @@ public static class MasterProcessorLogCsv
             Escape(sourceFileName),
             Escape(sourceFileLocation),
             Escape(status),
-            Escape(message),
+            Escape(LRN.MasterFileProcessorWorker.Security.PhiRedactor.Scrub(message)),
             Escape(claimOutput),
             Escape(lineOutput));
 

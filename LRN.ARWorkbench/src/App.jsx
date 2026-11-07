@@ -18,6 +18,7 @@ import DenialCodeMasterPage from './pages/DenialCodeMasterPage';
 import DocumentVaultPage from './pages/DocumentVaultPage';
 import DownloadsPage from './pages/DownloadsPage';
 import MasterDataPage from './pages/MasterDataPage';
+import MasterFileUploadPage from './pages/MasterFileUploadPage';
 import PlannedPage from './pages/PlannedPage';
 import QaPage from './pages/QaPage';
 import ReportsPage from './pages/ReportsPage';
@@ -49,6 +50,7 @@ const SCREENS = {
   cip: CipPage,
   'client-cip': ClientCipPage,
   'data-processing': DataProcessingPage,
+  'master-file-upload': MasterFileUploadPage,
   // Master Values submenu: one page component serves several menu items, each a different view.
   'master-values': MasterDataPage,
   'denial-codes': DenialCodeMasterPage,

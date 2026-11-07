@@ -1,5 +1,6 @@
 ﻿using System.Data;
 using System.Diagnostics;
+using LRN.MasterFileProcessorWorker.Security;
 using Microsoft.Data.SqlClient;
 
 namespace LRN.MasterFileProcessorWorker.BulkLoad;
@@ -62,6 +63,9 @@ public sealed class LineClaimBulkLoader
 
         await using var conn = new SqlConnection(lab.ConnectionString);
         await conn.OpenAsync(ct).ConfigureAwait(false);
+
+        // HIPAA MF-05, second check: the database the connection actually landed on, before TRUNCATE.
+        LabDatabaseGuard.EnsureOpenConnectionIsLabs(lab.LabId, lab.Mapping.DatabaseName, conn);
 
         await EnsureTableExistsAsync(conn, level.SqlTableName, ct).ConfigureAwait(false);
 

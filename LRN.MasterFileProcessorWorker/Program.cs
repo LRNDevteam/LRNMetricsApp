@@ -3,11 +3,14 @@ using LRN.MasterFileProcessorWorker.BulkLoad;
 using LRN.MasterFileProcessorWorker.ExcelValidation;
 using LRN.MasterFileProcessorWorker.Logging;
 using LRN.MasterFileProcessorWorker.Notifications;
+using LRN.MasterFileProcessorWorker.Security;
 using LRN.MasterFileProcessorWorker.SharePoint;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.EventLog;
 using Microsoft.Extensions.Options;
 
 // Self-tests for the line/claim bulk-copy pipeline. Runs without a database or a test framework.
@@ -46,7 +49,13 @@ var host = Host.CreateDefaultBuilder(args)
 	{
 		logging.ClearProviders();
 		logging.AddConsole();
-		logging.AddEventLog();
+
+		// The event log is kept on the server, so what reaches it is scrubbed of row values first
+		// (HIPAA CC-18). Warning and above, as the default host configured for the plain provider.
+		logging.Services.AddSingleton<ILoggerProvider>(sp => OperatingSystem.IsWindows()
+			? new RedactingLoggerProvider(new EventLogLoggerProvider(sp.GetRequiredService<IOptions<EventLogSettings>>()))
+			: NullLoggerProvider.Instance);
+		logging.AddFilter<RedactingLoggerProvider>(level => level >= LogLevel.Warning);
 	})
 	.ConfigureServices((context, services) =>
 	{
@@ -89,6 +98,7 @@ var host = Host.CreateDefaultBuilder(args)
 		// upstream run that filled them reports Completed, and only once per run.
 		services.AddSingleton<LRN.MasterFileProcessorWorker.Database.LabSourceRunGate>();
 		services.AddSingleton<LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequestStore>();
+		services.AddSingleton<LRN.MasterFileProcessorWorker.ProcessLogging.MasterFileUploadStore>();
 
 		// After the line/claim load: refresh the lab's AR Workbench (Denial Workbench) claims and move
 		// assigned claims whose claim status changed to RCM Manager verification.
@@ -104,9 +114,18 @@ var host = Host.CreateDefaultBuilder(args)
 		services.AddSingleton<LRN.MasterFileProcessorWorker.Snapshots.ReportSnapshotRepository>();
 		services.AddSingleton<LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotService>();
 
+		// HIPAA MF-03: hourly sweep of temp copies of lab data an interrupted run left behind.
+		services.Configure<TempFileOptions>(context.Configuration.GetSection(TempFileOptions.SectionName));
+		services.AddSingleton<TempFileJanitor>();
+
 		services.AddHostedService<MasterFileProcessorWorker>();
 	})
 	.Build();
+
+// HIPAA CC-08 / MF-04: every SQL connection string, checked before anything opens one. Encryption is
+// switched on in memory where a secret has it off; what cannot be fixed here is reported.
+var configuration = host.Services.GetRequiredService<IConfiguration>();
+var sqlFindings = SqlConnectionPolicy.Apply(configuration);
 
 // Preflight check: verifies config, mappings, LabMaster and the target tables without
 // processing a file. Answers "is the bulk copy set up correctly" directly.
@@ -118,10 +137,32 @@ if (args.Contains("--diagnose", StringComparer.OrdinalIgnoreCase))
 	return await ImportDiagnostics.RunAsync(
 		sp.GetRequiredService<IOptions<LineClaimImportOptions>>().Value,
 		sp.GetRequiredService<IOptions<ImportOptions>>().Value,
-		sp.GetRequiredService<IConfiguration>(),
+		configuration,
 		sp.GetRequiredService<LabMappingLoader>(),
 		AppContext.BaseDirectory,
+		sqlFindings,
 		CancellationToken.None);
+}
+
+if (sqlFindings.Count > 0)
+{
+	var startupLog = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("LRN.MasterFileProcessorWorker.Startup");
+	var fileLog = host.Services.GetRequiredService<ILoggerService>();
+
+	foreach (var finding in sqlFindings)
+	{
+		startupLog.LogWarning("SQL connection policy: {Key} ({Target}): {Problem}", finding.Key, finding.Target, finding.Problem);
+		fileLog.Warn($"SQL connection policy: {finding.Key} ({finding.Target}): {finding.Problem}");
+	}
+
+	if (SqlConnectionPolicy.IsEnforced(configuration) && sqlFindings.Any(f => !f.Corrected))
+	{
+		const string refusal = "Not starting: Security:SqlConnectionPolicy is Enforce and the connection strings above " +
+							   "break it. Fix the Key Vault secrets, or set the policy to Warn to start anyway.";
+		startupLog.LogCritical(refusal);
+		fileLog.Fatal(refusal);
+		return 1;
+	}
 }
 
 await host.RunAsync();

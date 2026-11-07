@@ -1,4 +1,5 @@
 ﻿using System.Data;
+using LRN.MasterFileProcessorWorker.Security;
 using Microsoft.Data.SqlClient;
 
 namespace LRN.MasterFileProcessorWorker.BulkLoad;
@@ -88,7 +89,7 @@ public sealed class ReportsWorkflowTrackerRepository
             cmd.Parameters.Add("@RowCount", SqlDbType.BigInt).Value = (object?)rowCount ?? DBNull.Value;
             cmd.Parameters.Add("@StartedOn", SqlDbType.DateTime2).Value = (object?)startedOn ?? DBNull.Value;
             cmd.Parameters.Add("@CompletedOn", SqlDbType.DateTime2).Value = (object?)completedOn ?? DBNull.Value;
-            cmd.Parameters.Add("@Remarks", SqlDbType.NVarChar, -1).Value = (object?)remarks ?? DBNull.Value;
+            cmd.Parameters.Add("@Remarks", SqlDbType.NVarChar, -1).Value = (object?)PhiRedactor.Scrub(remarks) ?? DBNull.Value;
             cmd.Parameters.Add("@CreatedBy", SqlDbType.VarChar, 100).Value = _createdBy;
 
             // Passed as a fallback: the procedure prefers dbo.LRN_Run_Log, and uses these only when

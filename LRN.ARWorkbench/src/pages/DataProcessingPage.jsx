@@ -93,6 +93,10 @@ export default function DataProcessingPage() {
           title="Run the Master File Processor for this lab: load the latest line-level and claim-level master files from SharePoint, with the denial data, then sync">
           {queueing ? <><span className="arwb-spinner" /> Queuing…</> : <><Icon name="refresh" size={15} /> Run Master File Load</>}
         </button>
+        <button type="button" className="arwb-btn arwb-btn-sm" onClick={() => navigate('/master-file-upload')}
+          title="Load the master data from the standard template instead of SharePoint (a lab without the SharePoint master sync, or a one-off load)">
+          <Icon name="upload" size={15} /> Upload Master File
+        </button>
         <button type="button" className="arwb-btn arwb-btn-sm" disabled={running}
           onClick={() => { setConfirmingLoad(false); setConfirming(true); }}
           title="Re-sync the AR Workbench from the master data already loaded in this lab's database">
@@ -248,7 +252,21 @@ function loadStatus(r) {
   return ['Completed', 'arwb-badge-good'];
 }
 
-function MasterFileLoads({ labId, version, onFinished }) {
+// Where a load's data came from: an uploaded standard template (file + week) or the SharePoint master folder.
+function LoadSource({ run }) {
+  if (!run.uploadId) return <Badge className="arwb-badge-neutral">SharePoint</Badge>;
+  return (
+    <>
+      <Badge className="arwb-badge-info">Upload</Badge>
+      <div className="arwb-hint">{run.uploadFileName}</div>
+      {run.periodStart && <div className="arwb-hint">Week {fmt.date(run.periodStart)} – {fmt.date(run.periodEnd)}</div>}
+      {run.uploadClaimRows != null && <div className="arwb-hint">{fmt.count(run.uploadClaimRows)} claims · {fmt.count(run.uploadLineRows)} lines</div>}
+    </>
+  );
+}
+
+// Shared with the Master File Upload page: both queue the same Master File Processor loads.
+export function MasterFileLoads({ labId, version, onFinished }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('progress');
@@ -294,7 +312,7 @@ function MasterFileLoads({ labId, version, onFinished }) {
       <div className="arwb-panel-head">
         <h3>Master File Loads</h3>
         <span className="arwb-card-sub">
-          Master File Processor runs for this lab: latest line-level and claim-level master files from SharePoint, denial data, then the AR Workbench sync
+          Master File Processor runs for this lab: the line-level and claim-level master data (from SharePoint, or an uploaded template), denial data, then the AR Workbench sync
           {hasOpen ? ' · refreshing every 15 seconds' : ''}
         </span>
         <div className="arwb-panel-head-actions">
@@ -321,16 +339,16 @@ function MasterFileLoads({ labId, version, onFinished }) {
           <table className="arwb-data-table">
             <thead>
               <tr>
-                <th scope="col">#</th><th scope="col">Status</th><th scope="col">Requested</th><th scope="col">By</th>
+                <th scope="col">#</th><th scope="col">Status</th><th scope="col">Source</th><th scope="col">Requested</th><th scope="col">By</th>
                 <th scope="col">Started</th><th scope="col">{tab === 'progress' ? 'Worker' : 'Finished'}</th>
                 <th scope="col">Run ID</th>{tab === 'progress' && <th scope="col">Note</th>}
               </tr>
             </thead>
             <tbody>
-              {!data && <tr><td colSpan={tab === 'progress' ? 8 : 7}><Loading /></td></tr>}
+              {!data && <tr><td colSpan={tab === 'progress' ? 9 : 8}><Loading /></td></tr>}
               {data && rows.length === 0 && (
-                <tr><td colSpan={tab === 'progress' ? 8 : 7}><div className="arwb-empty-state">
-                  {tab === 'progress' ? 'No master file load is queued or running. Use Run Master File Load to start one.' : 'No completed master file loads yet.'}
+                <tr><td colSpan={tab === 'progress' ? 9 : 8}><div className="arwb-empty-state">
+                  {tab === 'progress' ? 'No master file load is queued or running. Use Run Master File Load, or upload a master file, to start one.' : 'No completed master file loads yet.'}
                 </div></td></tr>
               )}
               {rows.map((r) => {
@@ -345,6 +363,7 @@ function MasterFileLoads({ labId, version, onFinished }) {
                       </span>
                       {r.requestedFromApp && r.requestedFromApp !== 'LRN.ARWorkbench' && <div className="arwb-hint">from {r.requestedFromApp}</div>}
                     </td>
+                    <td className="wrap"><LoadSource run={r} /></td>
                     <td>{fmt.dateTime(r.requestedOn)}</td>
                     <td>{r.requestedBy || '—'}</td>
                     <td>{r.claimedOn ? fmt.dateTime(r.claimedOn) : <span className="arwb-hint">waiting for the next poll</span>}</td>

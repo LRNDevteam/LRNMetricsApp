@@ -1,7 +1,7 @@
 {
   "LabId": 27,
   "LabName": "WellHealth",
-  "DatabaseName": "WellHealth_LRN",
+  "DatabaseName": "WellHealth",
   "ClaimLevel": {
     "Enabled": true,
     "CreateCsv": true,

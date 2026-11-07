@@ -26,6 +26,7 @@ public interface IArWorkbenchRepository
     // Master File Processor load requests (SqlArWorkbenchRepository.MasterFileRuns.cs) - LRNMaster queue
     Task<ArWorkbenchMasterFileQueueResult> QueueMasterFileRunAsync(int labId, string labName, ArWorkbenchMasterFileRequestContext context, CancellationToken ct);
     Task<ArWorkbenchMasterFileRunList> GetMasterFileRunsAsync(int labId, int top, CancellationToken ct);
+    Task<ArWorkbenchMasterFileQueueResult> QueueMasterFileUploadAsync(int labId, string labName, ArWorkbenchMasterFileUpload upload, ArWorkbenchMasterFileRequestContext context, CancellationToken ct);
 
     // My Work / Follow-Up Management tiles (SqlArWorkbenchRepository.WorkSummary.cs)
     Task<ArWorkbenchWorkSummary> GetWorkSummaryAsync(int labId, ArWorkbenchUserContext user, CancellationToken ct);

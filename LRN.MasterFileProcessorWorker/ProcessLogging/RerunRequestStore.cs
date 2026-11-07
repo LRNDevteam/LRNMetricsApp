@@ -5,14 +5,19 @@ using Microsoft.Extensions.Logging;
 
 namespace LRN.MasterFileProcessorWorker.ProcessLogging;
 
-/// <summary>One re-run asked for from the Report Audit Log screen, already claimed by this worker.</summary>
+/// <summary>
+/// One re-run asked for from the Report Audit Log screen (or the AR Workbench), already claimed by
+/// this worker. UploadId is set when the request carries a master file uploaded in the AR Workbench
+/// (dbo.MasterFileUpload): the run reads that workbook instead of looking on SharePoint.
+/// </summary>
 public sealed record RerunRequest(
     long RerunRequestId,
     int LabId,
     string? LabName,
     string RequestedBy,
     DateTime RequestedOn,
-    string? Notes);
+    string? Notes,
+    long? UploadId = null);
 
 /// <summary>
 /// Reads and completes <c>LRNMaster.dbo.MasterFileProcessorRerunRequest</c>.
@@ -64,13 +69,15 @@ public sealed class RerunRequestStore
     /// </summary>
     public async Task<IReadOnlyList<RerunRequest>> ClaimPendingAsync(CancellationToken ct)
     {
+        // UploadId arrives with Create_MasterFileUploads.sql. Before that script is run the column
+        // does not exist, and OUTPUT naming it would fail the whole claim, so it is read as NULL.
         const string sql = @"
 UPDATE r
 SET    Status        = 'Claimed',
        ClaimedOn     = SYSUTCDATETIME(),
        ClaimedByHost = @Host
 OUTPUT inserted.RerunRequestId, inserted.LabId, inserted.LabName,
-       inserted.RequestedBy, inserted.RequestedOn, inserted.Notes
+       inserted.RequestedBy, inserted.RequestedOn, inserted.Notes, {0}
 FROM   dbo.MasterFileProcessorRerunRequest AS r WITH (UPDLOCK, READPAST)
 WHERE  r.Status = 'Pending';";
 
@@ -81,7 +88,15 @@ WHERE  r.Status = 'Pending';";
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync(ct).ConfigureAwait(false);
 
-            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 30 };
+            bool hasUploadId;
+            await using (var probe = new SqlCommand(
+                "SELECT CAST(CASE WHEN COL_LENGTH('dbo.MasterFileProcessorRerunRequest', 'UploadId') IS NULL THEN 0 ELSE 1 END AS bit);", conn))
+            {
+                hasUploadId = (bool)(await probe.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? false);
+            }
+
+            await using var cmd = new SqlCommand(
+                string.Format(sql, hasUploadId ? "inserted.UploadId" : "CAST(NULL AS bigint)"), conn) { CommandTimeout = 30 };
             cmd.Parameters.Add("@Host", SqlDbType.NVarChar, 200).Value = _host;
 
             await using var rd = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -93,7 +108,8 @@ WHERE  r.Status = 'Pending';";
                     LabName: rd.IsDBNull(2) ? null : rd.GetString(2),
                     RequestedBy: rd.IsDBNull(3) ? "unknown" : rd.GetString(3),
                     RequestedOn: rd.GetDateTime(4),
-                    Notes: rd.IsDBNull(5) ? null : rd.GetString(5)));
+                    Notes: rd.IsDBNull(5) ? null : rd.GetString(5),
+                    UploadId: rd.IsDBNull(6) ? null : rd.GetInt64(6)));
             }
 
             if (claimed.Count > 0)
@@ -136,7 +152,7 @@ WHERE  RerunRequestId = @Id;";
             cmd.Parameters.Add("@Id", SqlDbType.BigInt).Value = rerunRequestId;
             cmd.Parameters.Add("@RunId", SqlDbType.VarChar, 30).Value = (object?)runId ?? DBNull.Value;
             cmd.Parameters.Add("@ResultStatus", SqlDbType.VarChar, 30).Value = resultStatus;
-            cmd.Parameters.Add("@Message", SqlDbType.NVarChar, -1).Value = (object?)message ?? DBNull.Value;
+            cmd.Parameters.Add("@Message", SqlDbType.NVarChar, -1).Value = (object?)LRN.MasterFileProcessorWorker.Security.PhiRedactor.Scrub(message) ?? DBNull.Value;
 
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }

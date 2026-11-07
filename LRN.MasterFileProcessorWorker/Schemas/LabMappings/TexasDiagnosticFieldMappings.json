@@ -1,7 +1,7 @@
 {
   "LabId": 29,
   "LabName": "TexasDiagnostic",
-  "DatabaseName": "TexasDiagnostic_LRN",
+  "DatabaseName": "TexasDiagnostic",
   "ClaimLevel": {
     "Enabled": true,
     "CreateCsv": true,

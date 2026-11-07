@@ -33,4 +33,14 @@
     -->
     <Content Update="appsettings.Local.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
   </ItemGroup>
+  <ItemGroup>
+    <!--
+      AR Workbench > Upload Master File: the standard template's columns. One definition, owned by the
+      Master File Processor (which validates and standardizes the upload with it); linked here so the
+      downloadable template and the API's upload check are built from the same files.
+    -->
+    <Content Include="..\LRN.MasterFileProcessorWorker\Schemas\StandardUpload\*.schema.json"
+             Link="ArWorkbench\MasterFileTemplate\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

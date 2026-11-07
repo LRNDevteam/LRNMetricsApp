@@ -53,14 +53,14 @@
     {
         <div class="snd-pager">
             <a class="btn btn-sm btn-outline-secondary @(Model.Page <= 1 ? "disabled" : "")"
-               href="@Url.Action("Data", new { id = Model.File.SnapshotFileId, page = 1 })" title="First page"><i class="bi bi-chevron-double-left"></i></a>
+               href="@Url.Action("Data", new { id = Model.File.SnapshotFileId, page = 1 })" target="_self" title="First page"><i class="bi bi-chevron-double-left"></i></a>
             <a class="btn btn-sm btn-outline-secondary @(Model.Page <= 1 ? "disabled" : "")"
-               href="@Url.Action("Data", new { id = Model.File.SnapshotFileId, page = Model.Page - 1 })" title="Previous page"><i class="bi bi-chevron-left"></i></a>
+               href="@Url.Action("Data", new { id = Model.File.SnapshotFileId, page = Model.Page - 1 })" target="_self" title="Previous page"><i class="bi bi-chevron-left"></i></a>
             <span class="text-muted" style="font-size:.8rem;">Page @Model.Page of @Model.TotalPages.ToString("N0")</span>
             <a class="btn btn-sm btn-outline-secondary @(Model.Page >= Model.TotalPages ? "disabled" : "")"
-               href="@Url.Action("Data", new { id = Model.File.SnapshotFileId, page = Model.Page + 1 })" title="Next page"><i class="bi bi-chevron-right"></i></a>
+               href="@Url.Action("Data", new { id = Model.File.SnapshotFileId, page = Model.Page + 1 })" target="_self" title="Next page"><i class="bi bi-chevron-right"></i></a>
             <a class="btn btn-sm btn-outline-secondary @(Model.Page >= Model.TotalPages ? "disabled" : "")"
-               href="@Url.Action("Data", new { id = Model.File.SnapshotFileId, page = Model.TotalPages })" title="Last page"><i class="bi bi-chevron-double-right"></i></a>
+               href="@Url.Action("Data", new { id = Model.File.SnapshotFileId, page = Model.TotalPages })" target="_self" title="Last page"><i class="bi bi-chevron-double-right"></i></a>
         </div>
     }
 </div>

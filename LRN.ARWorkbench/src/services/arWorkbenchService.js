@@ -224,5 +224,21 @@ export const arWorkbenchService = {
   runRefresh: (labId, note) => api(`data-processing/run${qs({ labId })}`, { method: 'POST', body: JSON.stringify({ note }) }),
   // Master File Processor load for the lab (SharePoint -> line / claim level + denials -> AR Workbench sync), queued
   masterFileRuns: (labId, top = 25, signal) => api(`data-processing/master-file-runs${qs({ labId, top })}`, { signal }),
-  runMasterFileLoad: (labId, note) => api(`data-processing/master-file-run${qs({ labId })}`, { method: 'POST', body: JSON.stringify({ note }) })
+  runMasterFileLoad: (labId, note) => api(`data-processing/master-file-run${qs({ labId })}`, { method: 'POST', body: JSON.stringify({ note }) }),
+  // Master File Upload: the standard template (Claim Level + Line Level sheets), a check-only call,
+  // and the upload that stores the file and queues the same Master File Processor load
+  masterFileTemplate: (labId) => downloadFile(`data-processing/master-file-template${qs({ labId })}`, 'ARWorkbench_MasterFile_Template.xlsx'),
+  validateMasterFile: (labId, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api(`data-processing/master-file-upload/validate${qs({ labId })}`, { method: 'POST', body: form });
+  },
+  uploadMasterFile: (labId, file, { periodStart, periodEnd, note }) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('periodStart', periodStart);
+    form.append('periodEnd', periodEnd);
+    if (note) form.append('note', note);
+    return api(`data-processing/master-file-upload${qs({ labId })}`, { method: 'POST', body: form });
+  }
 };

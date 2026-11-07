@@ -4,6 +4,10 @@ public sealed class ColumnSchema
 {
     public string SchemaName { get; set; } = "";
     public int HeaderRow { get; set; } = 1;
+
+    // Standard upload template only (Schemas/StandardUpload): the sheet the template puts this level on.
+    public string? SheetName { get; set; }
+
     public List<ColumnSpec> Columns { get; set; } = new();
 }
 

@@ -1,7 +1,7 @@
 {
   "LabId": 4,
   "LabName": "Cove",
-  "DatabaseName": "Cove_LRN",
+  "DatabaseName": "CoveLRN",
   "_comment": "BulkCopyToTable is false because this lab mapping is missing columns that ClaimLevelLineLevel_Fields.xlsx declares - see TypeReconciliation.md section C. Add the missing CsvHeader/SqlColumn pairs, regenerate sql/, then set it true.",
   "ClaimLevel": {
     "Enabled": true,

@@ -1,4 +1,6 @@
 ﻿using System.Diagnostics;
+using System.Security.Cryptography;
+using LRN.MasterFileProcessorWorker.Security;
 using Microsoft.Extensions.Options;
 
 namespace LRN.MasterFileProcessorWorker.BulkLoad;
@@ -41,7 +43,10 @@ public sealed record LineClaimImportRequest(
     }
 }
 
-public sealed record LineClaimImportOutcome(string FileType, bool Succeeded, bool Skipped, long RowsCopied, string? Message);
+/// <param name="ErrorCode">Set for a failure the worker must record in LRN_Error_Log under its own
+/// code - today only <see cref="LabRoutingException.ErrorCode"/>.</param>
+public sealed record LineClaimImportOutcome(string FileType, bool Succeeded, bool Skipped, long RowsCopied, string? Message,
+    string? ErrorCode = null);
 
 /// <summary>
 /// Per-lab, per-level import: file log -> bulk load -> verify -> run info log -> workflow tracker.
@@ -270,6 +275,10 @@ public sealed class LineClaimImportService
 
         try
         {
+            // HIPAA MF-05: the lab's connection must reach the lab's own database. Checked before
+            // anything - not even the file-log row - is written there.
+            LabDatabaseGuard.EnsureConnectionTargetsLab(lab.LabId, lab.Mapping.DatabaseName, lab.ConnectionString);
+
             await _runInfo.StartAsync(request.RunId, fileType, sourceSystem,
                 $"{fileType} bulk copy started for lab {lab.LabName} ({lab.LabId}). Source: {sourceOverride ?? request.SourceFileName}", ct, logSourceName)
                 .ConfigureAwait(false);
@@ -320,8 +329,12 @@ public sealed class LineClaimImportService
             await _fileLog.TryCompleteAsync(lab.ConnectionString, fileLogId,
                 WorkflowStatus.Success, result.RowsInTable, null, ct).ConfigureAwait(false);
 
+            // HIPAA MF-12: rows read from the file, rows in the table (equal, or the load rolled back)
+            // and the file's SHA-256, so a later question about what was loaded has a verifiable answer.
             await _runInfo.InfoAsync(request.RunId, fileType, sourceSystem,
-                $"{fileType} bulk copy completed. Rows={result.RowsInTable}, Table={level!.SqlTableName}, Duration={stopwatch.ElapsedMilliseconds} ms.", ct, logSourceName)
+                $"{fileType} bulk copy completed. Rows={result.RowsInTable}, CsvRows={result.RowsRead}, " +
+                $"CsvSha256={await TrySha256Async(csvPath, ct).ConfigureAwait(false)}, " +
+                $"Table={level!.SqlTableName}, Duration={stopwatch.ElapsedMilliseconds} ms.", ct, logSourceName)
                 .ConfigureAwait(false);
 
             // Derived denial columns, claim and line level. The rows are committed by this point, so
@@ -365,7 +378,23 @@ public sealed class LineClaimImportService
             await _runInfo.EndAsync(request.RunId, fileType, sourceSystem,
                 $"{fileType} processing ended with failure for lab {lab.LabName} ({lab.LabId}).", ct, logSourceName).ConfigureAwait(false);
 
-            return new LineClaimImportOutcome(fileType, false, false, 0, ex.Message);
+            return new LineClaimImportOutcome(fileType, false, false, 0, ex.Message,
+                ex is LabRoutingException ? LabRoutingException.ErrorCode : null);
+        }
+    }
+
+    /// <summary>Lower-case hex SHA-256 of the file, or "unavailable" - a hash is evidence, never a reason to fail a load.</summary>
+    private async Task<string> TrySha256Async(string path, CancellationToken ct)
+    {
+        try
+        {
+            await using var stream = File.OpenRead(path);
+            return Convert.ToHexString(await SHA256.HashDataAsync(stream, ct).ConfigureAwait(false)).ToLowerInvariant();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not hash {File}.", Path.GetFileName(path));
+            return "unavailable";
         }
     }
 

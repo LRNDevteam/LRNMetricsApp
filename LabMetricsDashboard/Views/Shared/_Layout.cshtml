@@ -2264,8 +2264,10 @@
                     if (!active && kept.length && window.bootstrap) bootstrap.Tab.getOrCreateInstance(kept[0]).show();
                 }
 
-                // Links leave the frame: a full report page inside it would bring its menu along.
+                // Links leave the frame: a full report page inside it would bring its menu along. A page in
+                // its own window (a snapshot opened from Report Snapshots) keeps its links, e.g. the data pager.
                 document.addEventListener('click', function (e) {
+                    if (window.parent === window) return;
                     var a = e.target.closest ? e.target.closest('a[href]') : null;
                     if (!a || a.target || a.hasAttribute('data-bs-toggle')) return;
                     var href = a.getAttribute('href') || '';

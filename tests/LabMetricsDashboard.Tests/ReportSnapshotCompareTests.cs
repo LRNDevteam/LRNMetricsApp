@@ -18,6 +18,17 @@ namespace LabMetricsDashboard.Tests;
 /// </summary>
 public sealed class ReportSnapshotCompareTests
 {
+    [Theory]
+    [InlineData("BilledCount", typeof(decimal), "count")]
+    [InlineData("UnbilledCount", typeof(decimal), "count")]
+    [InlineData("SelfPayCount", typeof(int), "count")]
+    [InlineData("BilledCountPct", typeof(decimal), "percent")]
+    [InlineData("BilledCharges", typeof(decimal), "money")]
+    [InlineData("AccountBalance", typeof(decimal), "money")]
+    [InlineData("DiscountAmount", typeof(decimal), "money")]
+    public void Count_columns_are_not_printed_as_money(string name, Type type, string expected) =>
+        Assert.Equal(expected, ReportSnapshotComparer.FormatFor(name, type));
+
     [Fact]
     public void Rows_are_matched_by_label_and_a_row_only_one_week_has_is_null_in_the_other()
     {

@@ -1,4 +1,5 @@
 using System.Data;
+using LRN.MasterFileProcessorWorker.Security;
 using Microsoft.Data.SqlClient;
 
 namespace LRN.MasterFileProcessorWorker.BulkLoad;
@@ -85,7 +86,7 @@ END";
             cmd.Parameters.Add("@FileLogId", SqlDbType.BigInt).Value = fileLogId;
             cmd.Parameters.Add("@Status", SqlDbType.NVarChar, 50).Value = status;
             cmd.Parameters.Add("@RowsCopied", SqlDbType.BigInt).Value = (object?)rowsCopied ?? DBNull.Value;
-            cmd.Parameters.Add("@ErrorMessage", SqlDbType.NVarChar, -1).Value = (object?)errorMessage ?? DBNull.Value;
+            cmd.Parameters.Add("@ErrorMessage", SqlDbType.NVarChar, -1).Value = (object?)PhiRedactor.Scrub(errorMessage) ?? DBNull.Value;
             cmd.Parameters.Add("@CompletedDateTime", SqlDbType.DateTime2).Value = DateTime.Now;
 
             await conn.OpenAsync(ct).ConfigureAwait(false);

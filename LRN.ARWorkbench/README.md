@@ -64,6 +64,7 @@ A new screen has four parts: an entry in `NAV`, a page in `pages/`, an entry in 
 | Work Queue | Queue, sub-queue, status, category and search filters kept in the URL, server paging and sorting, column visibility, CSV |
 | Claim workspace | Header badges, a 4-stage stepper, the named stage path for the category, and tabs: Overview (recovery), CPT/Line Detail, Denial Info, Follow-Ups, Activity Timeline |
 | Data Processing | Runs `ARWB_usp_LoadClaimsFromSource`, with run history and counts |
+| Master File Upload | Standard template download (Claim Level + Line Level sheets), check, and upload with the data's week. The upload queues the Master File Processor, which loads it like a SharePoint master file. For labs without the SharePoint master sync; any lab can use it. Needs `Database/LRN.MasterFileProcessorWorker/Create_MasterFileUploads.sql` in LRNMaster. |
 | Master File Maintenance | Read-only view of every list and of Fix/Resolution by status |
 
 The other routes are in `NAV` but show a "planned" page with their build phase. They are Assignment, My Work, Follow-Up, QA, Agent Requests, CIP, Client CIP, Analytics, Reports, Audit and Users. The tables they need already exist.

@@ -433,6 +433,134 @@ public sealed class ArWorkbenchController : ControllerBase
     }
 
     // ==========================================================================================
+    // Upload Master File - for a lab whose master file does not reach the SharePoint master folder
+    // (a client that takes only the AR Workbench), or any lab loading a file by hand. The user fills
+    // the standard template (one workbook: Claim Level + Line Level sheets) and uploads it; it is
+    // validated here, stored in LRNMaster dbo.MasterFileUpload and queued for the Master File
+    // Processor, which loads it through the same pipeline as a SharePoint file (standardize, denial
+    // enrichment, dbo.LineLevelData / dbo.ClaimLevelData, AR Workbench sync). Progress shows under
+    // Master File Loads, like Run Master File Load.
+    // ==========================================================================================
+
+    private const long MasterFileUploadMaxBytes = 90L * 1024 * 1024;
+
+    // Matches the worker's PhiFileNameGuard: a file name is copied into every log and loaded row.
+    private static readonly System.Text.RegularExpressions.Regex SsnInName = new(@"(?<!\d)\d{3}[-_ ]\d{2}[-_ ]\d{4}(?!\d)");
+    private static readonly System.Text.RegularExpressions.Regex LongNumberInName = new(@"\d{9,}");
+
+    public sealed class ArWorkbenchMasterFileUploadRequest
+    {
+        public IFormFile? File { get; set; }
+        public DateTime? PeriodStart { get; set; }
+        public DateTime? PeriodEnd { get; set; }
+        public string? Note { get; set; }
+    }
+
+    [HttpGet("data-processing/master-file-template")]
+    public async Task<ActionResult> MasterFileTemplate([FromQuery] int labId, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!IsAdminOrManager(user!)) return Forbidden("Only an Administrator or RCM Manager can upload a master file.");
+        return File(ArWorkbenchMasterFileTemplate.Build(), XlsxContentType, $"ARWorkbench_MasterFile_Template_v{ArWorkbenchMasterFileTemplate.Version}.xlsx");
+    }
+
+    /// <summary>Checks a filled template without storing or queuing anything.</summary>
+    [HttpPost("data-processing/master-file-upload/validate")]
+    [RequestSizeLimit(104_857_600)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 104_857_600)]
+    public async Task<ActionResult<MasterFileValidationResult>> ValidateMasterFileUpload([FromQuery] int labId, [FromForm] ArWorkbenchMasterFileUploadRequest request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!IsAdminOrManager(user!)) return Forbidden("Only an Administrator or RCM Manager can upload a master file.");
+
+        var (content, error) = await ReadMasterFileAsync(request.File, ct);
+        if (error is not null) return BadRequest(new { message = error });
+
+        using var stream = new MemoryStream(content!, writable: false);
+        return Ok(ArWorkbenchMasterFileTemplate.Validate(stream));
+    }
+
+    /// <summary>Validates the filled template, stores it and queues the Master File Processor for this lab.</summary>
+    [HttpPost("data-processing/master-file-upload")]
+    [RequestSizeLimit(104_857_600)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 104_857_600)]
+    public async Task<ActionResult<ArWorkbenchMasterFileQueueResult>> UploadMasterFile([FromQuery] int labId, [FromForm] ArWorkbenchMasterFileUploadRequest request, CancellationToken ct)
+    {
+        var (user, denied) = await ResolveUserAsync(labId, ct);
+        if (denied is not null) return denied;
+        if (!IsAdminOrManager(user!)) return Forbidden("Only an Administrator or RCM Manager can upload a master file.");
+        if ((request.Note?.Length ?? 0) > 1000) return BadRequest(new { message = "Note must be 1000 characters or fewer." });
+
+        if (request.PeriodStart is not DateTime start || request.PeriodEnd is not DateTime end)
+            return BadRequest(new { message = "Choose the week the data belongs to (period start and end)." });
+        start = start.Date;
+        end = end.Date;
+        if (end < start) return BadRequest(new { message = "The period end is before its start." });
+        if ((end - start).TotalDays > 31) return BadRequest(new { message = "The period can be at most 31 days: one master file is one week's (or month's) data." });
+        if (end > DateTime.Today.AddDays(7)) return BadRequest(new { message = "The period cannot end more than a week from today." });
+
+        var (content, error) = await ReadMasterFileAsync(request.File, ct);
+        if (error is not null) return BadRequest(new { message = error });
+
+        MasterFileValidationResult validation;
+        using (var stream = new MemoryStream(content!, writable: false))
+            validation = ArWorkbenchMasterFileTemplate.Validate(stream);
+        if (!validation.Valid)
+            return UnprocessableEntity(new { message = "The file does not match the standard template. Fix the problems listed and upload it again.", validation });
+
+        var upload = new ArWorkbenchMasterFileUpload
+        {
+            FileName = Path.GetFileName(request.File!.FileName),
+            Content = content!,
+            Sha256 = Convert.ToHexString(SHA256.HashData(content!)).ToLowerInvariant(),
+            PeriodStart = start,
+            PeriodEnd = end,
+            ClaimRows = validation.ClaimRows,
+            LineRows = validation.LineRows,
+            TemplateVersion = validation.TemplateVersion
+        };
+        var context = new ArWorkbenchMasterFileRequestContext
+        {
+            RequestedBy = user!.UserName,
+            RequestedByRole = user.SiteAdmin ? SiteAdminRole() : user.RoleCode,
+            ClientIp = HttpContext.Connection.RemoteIpAddress?.ToString(),
+            UserAgent = Request.Headers.UserAgent.ToString(),
+            Note = request.Note
+        };
+
+        var result = await _repository.QueueMasterFileUploadAsync(labId, await LabNameAsync(labId, ct), upload, context, ct);
+        if (!result.Installed)
+            return Conflict(new { message = "Master file upload is not installed in LRNMaster. Run Database/LRN.MasterFileProcessorWorker/Create_RerunRequests.sql, then Create_MasterFileUploads.sql." });
+        if (!result.Queued)
+            return Conflict(new { message = result.ExistingStatus == "Claimed"
+                ? "A master file load for this lab is in progress. Wait for it to finish, then upload."
+                : "A master file load for this lab is already queued. Wait for it to finish, then upload." });
+
+        result.Validation = validation;
+        _logger.LogInformation("AR Workbench master file uploaded for lab {LabId} by {User} (upload {UploadId}, request {RequestId}, {Claims} claims, {Lines} lines)",
+            labId, user.UserName, result.UploadId, result.RequestId, validation.ClaimRows, validation.LineRows);
+        return Ok(result);
+    }
+
+    private static async Task<(byte[]? Content, string? Error)> ReadMasterFileAsync(IFormFile? file, CancellationToken ct)
+    {
+        var uploadError = await FileUploadGuard.ValidateExcelAsync(file, MasterFileUploadMaxBytes, ct);
+        if (uploadError is not null) return (null, uploadError);
+
+        var name = Path.GetFileNameWithoutExtension(file!.FileName);
+        var withoutDates = System.Text.RegularExpressions.Regex.Replace(name, @"\d{1,2}[.\-_/]\d{1,2}[.\-_/]\d{2,4}|\d{8}", "");
+        if (SsnInName.IsMatch(name) || LongNumberInName.IsMatch(withoutDates))
+            return (null, "The file name looks like it contains a patient identifier. Rename the file (lab, report and week only) and upload it again.");
+
+        await using var source = file.OpenReadStream();
+        using var buffer = new MemoryStream((int)file.Length);
+        await source.CopyToAsync(buffer, ct);
+        return (buffer.ToArray(), null);
+    }
+
+    // ==========================================================================================
     // Follow-up notes - ARWorkbench.EditClaim. An agent reaches only their own claims (scope is
     // applied in SQL); the claim must not already be waiting for QA.
     // ==========================================================================================
