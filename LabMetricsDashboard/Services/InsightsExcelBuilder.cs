@@ -164,13 +164,36 @@ public static class InsightsExcelBuilder
     private static void OverlayHeader(
         string[] headers, int index, string fieldKey, IReadOnlyList<NotesTemplateColumnDef> columns)
     {
-        var hit = columns.FirstOrDefault(c =>
-            string.Equals((c.FieldKey ?? "").Trim(), fieldKey, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(GuessFieldKey(c), fieldKey, StringComparison.OrdinalIgnoreCase));
+        var hit = columns.FirstOrDefault(c => MatchesField(c, fieldKey));
         var name = hit?.ColumnName?.Trim();
         if (!string.IsNullOrEmpty(name))
             headers[index] = name;
     }
+
+    private static bool MatchesField(NotesTemplateColumnDef col, string fieldKey) =>
+        string.Equals((col.FieldKey ?? "").Trim(), fieldKey, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(GuessFieldKey(col), fieldKey, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Field key per layout header index (0 = row number).</summary>
+    private static readonly string[] FieldKeys =
+    [
+        "#", "Risk", "ResponsibleParty", "Insights", "NoOfClaims", "TotalCharge", "ActionSolution",
+        "FeedbackResponse", "Responsibility", "DiscussionDate", "ETA", "ClosedDate", "Status"
+    ];
+
+    private static readonly double[] FieldWidths = [6, 12, 22, 48, 14, 16, 42, 28, 16, 16, 12, 14, 16];
+
+    private const int ActionField = 6;
+    private const int StatusField = 12;
+
+    /// <summary>Layout header indexes to write: every field when there is no template, otherwise
+    /// the row number, Risk, Insights and Status plus the fields on the template.</summary>
+    private static int[] VisibleFields(IReadOnlyList<NotesTemplateColumnDef>? columns) =>
+        Enumerable.Range(0, FieldKeys.Length)
+            .Where(i => columns is not { Count: > 0 }
+                || i is 0 or 1 or 3 or StatusField
+                || columns.Any(c => MatchesField(c, FieldKeys[i])))
+            .ToArray();
 
     private static string GuessFieldKey(NotesTemplateColumnDef col)
     {
@@ -203,7 +226,10 @@ public static class InsightsExcelBuilder
         IReadOnlyList<NotesTemplateColumnDef>? templateColumns = null)
     {
         var layout = LayoutFor(reportName, templateColumns);
-        const int colCount = 13;
+        var fields = VisibleFields(templateColumns);
+        var colCount = fields.Length;
+        int ColOf(int field) => Array.IndexOf(fields, field) + 1;
+        var splitCol = Array.FindIndex(fields, f => f >= ActionField) + 1;
         var isProduction = (reportName ?? "").Contains("Production", StringComparison.OrdinalIgnoreCase);
         var isCollection = (reportName ?? "").Contains("Collection", StringComparison.OrdinalIgnoreCase);
         var splitTitle = isProduction || isCollection;
@@ -214,7 +240,7 @@ public static class InsightsExcelBuilder
         var titleRow = startRow;
         if (splitTitle)
         {
-            var leftTitle = ws.Range(titleRow, 1, titleRow, 6);
+            var leftTitle = ws.Range(titleRow, 1, titleRow, splitCol - 1);
             leftTitle.Merge();
             ws.Cell(titleRow, 1).Value = "Key Insights & Highlights";
             ws.Cell(titleRow, 1).Style.Font.Bold = true;
@@ -224,12 +250,12 @@ public static class InsightsExcelBuilder
             leftTitle.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             leftTitle.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
 
-            var rightTitle = ws.Range(titleRow, 7, titleRow, colCount);
+            var rightTitle = ws.Range(titleRow, splitCol, titleRow, colCount);
             rightTitle.Merge();
-            ws.Cell(titleRow, 7).Value = "Active Priorities / Suggestions";
-            ws.Cell(titleRow, 7).Style.Font.Bold = true;
-            ws.Cell(titleRow, 7).Style.Font.FontSize = 12;
-            ws.Cell(titleRow, 7).Style.Font.FontColor = XLColor.White;
+            ws.Cell(titleRow, splitCol).Value = "Active Priorities / Suggestions";
+            ws.Cell(titleRow, splitCol).Style.Font.Bold = true;
+            ws.Cell(titleRow, splitCol).Style.Font.FontSize = 12;
+            ws.Cell(titleRow, splitCol).Style.Font.FontColor = XLColor.White;
             rightTitle.Style.Fill.BackgroundColor = ActionRed;
             rightTitle.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             rightTitle.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
@@ -254,13 +280,14 @@ public static class InsightsExcelBuilder
         var headerRow = titleRow + 1;
         for (var c = 1; c <= colCount; c++)
         {
+            var field = fields[c - 1];
             var cell = ws.Cell(headerRow, c);
-            cell.Value = layout.Headers[c - 1];
+            cell.Value = layout.Headers[field];
             cell.Style.Font.Bold = true;
             cell.Style.Font.FontColor = XLColor.White;
             cell.Style.Fill.BackgroundColor = splitTitle
-                ? (c >= 7 ? ActionRed : HeaderGreen)
-                : (c == 7 ? ActionRed : HeaderGreen);
+                ? (field >= ActionField ? ActionRed : HeaderGreen)
+                : (field == ActionField ? ActionRed : HeaderGreen);
             cell.Style.Alignment.WrapText = true;
             cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
@@ -273,29 +300,8 @@ public static class InsightsExcelBuilder
         var displayNo = 1;
         foreach (var n in insights.OrderBy(x => x.EntryNo ?? int.MaxValue).ThenBy(x => x.NoteId))
         {
-            ws.Cell(row, 1).Value = displayNo;
-            ws.Cell(row, 2).Value = ExcelTheme.SanitizeText(DisplayRisk(n));
-            ws.Cell(row, 3).Value = ExcelTheme.SanitizeText(n.ResponsibleParty ?? "");
-            ws.Cell(row, 4).Value = ExcelTheme.SanitizeText(StripHtml(n.Insights));
-            if (n.NoOfSamples.HasValue)
-            {
-                ws.Cell(row, 5).Value = n.NoOfSamples.Value;
-                ws.Cell(row, 5).Style.NumberFormat.Format = "#,##0";
-            }
-            if (n.TotalCharge.HasValue)
-            {
-                ws.Cell(row, 6).Value = n.TotalCharge.Value;
-                ws.Cell(row, 6).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
-                ws.Cell(row, 6).Style.Font.Bold = true;
-            }
-
-            ws.Cell(row, 7).Value = ExcelTheme.SanitizeText(StripHtml(n.ActionSolution));
-            ws.Cell(row, 8).Value = ExcelTheme.SanitizeText(StripHtml(n.FeedbackResponse));
-            ws.Cell(row, 9).Value = ExcelTheme.SanitizeText(n.Responsibility ?? "");
-            WriteDate(ws.Cell(row, 10), n.DiscussionDate);
-            WriteDate(ws.Cell(row, 11), n.ETA);
-            WriteDate(ws.Cell(row, 12), n.ClosedDate);
-            ws.Cell(row, 13).Value = ExcelTheme.SanitizeText(n.StatusLabel ?? n.StatusCode);
+            for (var c = 1; c <= colCount; c++)
+                WriteField(ws.Cell(row, c), fields[c - 1], n, displayNo);
 
             var rowBg = splitTitle && row % 2 == 0
                 ? XLColor.FromHtml("#F2F2F2")
@@ -308,11 +314,11 @@ public static class InsightsExcelBuilder
                 cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
                 cell.Style.Border.OutsideBorderColor = XLColor.FromHtml("#CCCCCC");
                 cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
-                cell.Style.Alignment.WrapText = c is 4 or 7 or 8;
+                cell.Style.Alignment.WrapText = fields[c - 1] is 3 or ActionField or 7;
             }
 
-            ApplyRiskStyle(ws.Cell(row, 2), n);
-            ApplyStatusStyle(ws.Cell(row, 13), n);
+            ApplyRiskStyle(ws.Cell(row, ColOf(1)), n);
+            ApplyStatusStyle(ws.Cell(row, ColOf(StatusField)), n);
 
             row++;
             displayNo++;
@@ -341,20 +347,42 @@ public static class InsightsExcelBuilder
 
         if (!append)
         {
-            ws.Column(1).Width = 6;
-            ws.Column(2).Width = 12;
-            ws.Column(3).Width = 22;
-            ws.Column(4).Width = 48;
-            ws.Column(5).Width = 14;
-            ws.Column(6).Width = 16;
-            ws.Column(7).Width = 42;
-            ws.Column(8).Width = 28;
-            ws.Column(9).Width = 16;
-            ws.Column(10).Width = 16;
-            ws.Column(11).Width = 12;
-            ws.Column(12).Width = 14;
-            ws.Column(13).Width = 16;
+            for (var c = 1; c <= colCount; c++)
+                ws.Column(c).Width = FieldWidths[fields[c - 1]];
             ws.TabColor = ActionRed;
+        }
+    }
+
+    private static void WriteField(IXLCell cell, int field, NoteInsight n, int displayNo)
+    {
+        switch (field)
+        {
+            case 0: cell.Value = displayNo; break;
+            case 1: cell.Value = ExcelTheme.SanitizeText(DisplayRisk(n)); break;
+            case 2: cell.Value = ExcelTheme.SanitizeText(n.ResponsibleParty ?? ""); break;
+            case 3: cell.Value = ExcelTheme.SanitizeText(StripHtml(n.Insights)); break;
+            case 4:
+                if (n.NoOfSamples.HasValue)
+                {
+                    cell.Value = n.NoOfSamples.Value;
+                    cell.Style.NumberFormat.Format = "#,##0";
+                }
+                break;
+            case 5:
+                if (n.TotalCharge.HasValue)
+                {
+                    cell.Value = n.TotalCharge.Value;
+                    cell.Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+                    cell.Style.Font.Bold = true;
+                }
+                break;
+            case ActionField: cell.Value = ExcelTheme.SanitizeText(StripHtml(n.ActionSolution)); break;
+            case 7: cell.Value = ExcelTheme.SanitizeText(StripHtml(n.FeedbackResponse)); break;
+            case 8: cell.Value = ExcelTheme.SanitizeText(n.Responsibility ?? ""); break;
+            case 9: WriteDate(cell, n.DiscussionDate); break;
+            case 10: WriteDate(cell, n.ETA); break;
+            case 11: WriteDate(cell, n.ClosedDate); break;
+            case StatusField: cell.Value = ExcelTheme.SanitizeText(n.StatusLabel ?? n.StatusCode); break;
         }
     }
 

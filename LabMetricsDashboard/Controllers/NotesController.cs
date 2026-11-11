@@ -24,15 +24,17 @@ public sealed class NotesController : Controller
 
     private readonly LabSettings _labSettings;
     private readonly INotesRepository _repo;
+    private readonly INotesImportFileRepository _importFiles;
     private readonly IAnalysisRangeService _analysisRange;
     private readonly IReportSnapshotRequestQueue _snapshotRequests;
     private readonly ILogger<NotesController> _logger;
 
-    public NotesController(LabSettings labSettings, INotesRepository repo, IAnalysisRangeService analysisRange,
-        IReportSnapshotRequestQueue snapshotRequests, ILogger<NotesController> logger)
+    public NotesController(LabSettings labSettings, INotesRepository repo, INotesImportFileRepository importFiles,
+        IAnalysisRangeService analysisRange, IReportSnapshotRequestQueue snapshotRequests, ILogger<NotesController> logger)
     {
         _labSettings = labSettings;
         _repo = repo;
+        _importFiles = importFiles;
         _analysisRange = analysisRange;
         _snapshotRequests = snapshotRequests;
         _logger = logger;
@@ -333,6 +335,158 @@ public sealed class NotesController : Controller
             return Json(result);
         }
         catch (Exception ex) { return Fail(ex, "delete note"); }
+    }
+
+    /// <summary>The report's Key Insights import workbook: its layout, limited to the template's columns.</summary>
+    [HttpGet("ImportTemplate")]
+    public async Task<IActionResult> ImportTemplate(string? lab, string? report, CancellationToken ct)
+    {
+        if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
+        if (!TryResolveReportName(report, out var reportName)) return BadRequest(new { error = $"Unknown report '{report}'." });
+        try
+        {
+            var columns = await InsightsExcelBuilder.LoadTemplateColumnsAsync(_repo, cs, reportName, ct);
+            NotesLookups? lookups = null;
+            try { lookups = await _repo.GetLookupsAsync(cs, ct); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Notes: lookups unavailable for the import template; using default statuses."); }
+            var bytes = KeyInsightsImportWorkbook.BuildTemplate(reportName, columns, lookups);
+            return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                KeyInsightsImportWorkbook.TemplateFileName(reportName));
+        }
+        catch (Exception ex) { return Fail(ex, "build the import template"); }
+    }
+
+    /// <summary>
+    /// Imports a filled-in Key Insights workbook as new insights for the current week. The whole file
+    /// is validated first: any row problem rejects the import and nothing is written. With
+    /// <paramref name="replace"/>, the week's existing insights are deleted before the rows are added.
+    /// </summary>
+    [HttpPost("Import")]
+    [ValidateAntiForgeryToken]
+    [RequestSizeLimit(26 * 1024 * 1024)]
+    public async Task<IActionResult> Import(string? lab, string? report, IFormFile? file, bool replace,
+        DateTime? weekStart, DateTime? weekEnd, string? weekText, string? runId, CancellationToken ct)
+    {
+        if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
+        if (!TryResolveReportName(report, out var reportName)) return BadRequest(new { error = $"Unknown report '{report}'." });
+        if (file is null || file.Length == 0) return BadRequest(new { error = "Choose an Excel file to import." });
+        var uploadError = await FileUploadGuard.ValidateExcelAsync(file, 25 * 1024 * 1024, ct);
+        if (uploadError is not null) return BadRequest(new { error = uploadError });
+
+        try
+        {
+            var week = new NoteSaveRequest { WeekRangeStart = weekStart, WeekRangeEnd = weekEnd, WeekRangeText = weekText, ReportRunId = runId };
+            if (await _repo.IsWeekLifecycleEnabledAsync(cs, ct) && await GetCurrentWeekAsync(cs, ct) is { } current)
+            {
+                week.WeekRangeStart = current.Start;
+                week.WeekRangeEnd = current.End;
+                week.WeekRangeText = current.Text;
+                week.ReportRunId ??= current.RunId;
+            }
+            NormalizeWeekRange(week);
+
+            NotesLookups? lookups = null;
+            try { lookups = await _repo.GetLookupsAsync(cs, ct); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Notes: lookups unavailable for import; using default status codes."); }
+
+            byte[] content;
+            await using (var upload = file.OpenReadStream())
+            using (var buffer = new MemoryStream())
+            {
+                await upload.CopyToAsync(buffer, ct);
+                content = buffer.ToArray();
+            }
+
+            KeyInsightsImportWorkbook.ImportResult parsed;
+            try
+            {
+                using var stream = new MemoryStream(content, writable: false);
+                parsed = KeyInsightsImportWorkbook.Parse(stream, reportName, lookups, week.WeekRangeStart!.Value);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Notes: import workbook could not be read.");
+                return BadRequest(new { error = "The file could not be read as an Excel workbook (.xlsx)." });
+            }
+            if (parsed.Errors.Count > 0)
+                return BadRequest(new { error = "Nothing was imported. Fix these rows and import again.", errors = parsed.Errors, warnings = parsed.Warnings });
+
+            var reportKeyId = await _repo.EnsureReportAsync(cs, reportName, ct);
+            var replaced = 0;
+            if (replace)
+            {
+                var existing = await _repo.GetActiveAsync(cs, reportKeyId, ct: ct);
+                foreach (var note in existing.Where(n => n.ArchiveStatus != "Archived"
+                             && n.WeekRangeStart?.Date == week.WeekRangeStart!.Value.Date))
+                {
+                    if ((await _repo.DeleteAsync(cs, note.NoteId, CurrentUser, ct)).Success) replaced++;
+                }
+            }
+
+            var imported = 0;
+            var failures = new List<string>();
+            foreach (var row in parsed.Rows)
+            {
+                row.ReportName = reportName;
+                row.ReportRunId = week.ReportRunId;
+                row.WeekRangeStart = week.WeekRangeStart;
+                row.WeekRangeEnd = week.WeekRangeEnd;
+                row.WeekRangeText = week.WeekRangeText;
+                var result = await _repo.InsertAsync(cs, reportKeyId, row, CurrentUser, ct);
+                if (result.Success) imported++;
+                else failures.Add(result.Message ?? "Insert failed.");
+            }
+
+            var warnings = parsed.Warnings.ToList();
+            if (imported > 0)
+            {
+                try
+                {
+                    await _importFiles.SaveAsync(cs, reportName, Path.GetFileName(file.FileName), file.ContentType, content,
+                        week.WeekRangeText, week.WeekRangeStart, week.ReportRunId, replace ? "Replace" : "Append",
+                        imported, replaced, CurrentUser, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Notes: imported workbook {File} could not be stored for {Report}.", file.FileName, reportName);
+                    warnings.Add("The insights were imported, but the workbook could not be stored for download.");
+                }
+            }
+
+            if (imported > 0 || replaced > 0)
+                await RequestInsightSnapshotAsync(lab!, reportName, "Insights imported");
+            return Json(new { imported, replaced, failed = failures.Count, errors = failures, warnings, weekText = week.WeekRangeText });
+        }
+        catch (Exception ex) { return Fail(ex, "import insights"); }
+    }
+
+    /// <summary>The report's imported Key Insights workbooks, newest first.</summary>
+    [HttpGet("ImportFiles")]
+    public async Task<IActionResult> ImportFiles(string? lab, string? report, CancellationToken ct)
+    {
+        if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
+        if (!TryResolveReportName(report, out var reportName)) return BadRequest(new { error = $"Unknown report '{report}'." });
+        try
+        {
+            var files = await _importFiles.ListAsync(cs, reportName, 100, ct);
+            return Json(new { files });
+        }
+        catch (Exception ex) { return Fail(ex, "load imported files"); }
+    }
+
+    /// <summary>Downloads an imported workbook exactly as it was uploaded.</summary>
+    [HttpGet("ImportFile")]
+    public async Task<IActionResult> ImportFile(string? lab, int id, CancellationToken ct)
+    {
+        if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
+        if (id <= 0) return BadRequest(new { error = "File id is required." });
+        try
+        {
+            var file = await _importFiles.GetAsync(cs, id, ct);
+            if (file is null) return NotFound(new { error = "Imported file not found." });
+            return File(file.Content, file.ContentType, file.FileName);
+        }
+        catch (Exception ex) { return Fail(ex, "download the imported file"); }
     }
 
     [HttpGet("Templates")]

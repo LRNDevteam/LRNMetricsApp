@@ -115,7 +115,9 @@
             </a>
         </li>
 
-        @if (LabMetricsDashboard.Services.LabCollectionPrefix.HasDenialSummary(activeLab))
+        @* Same labs as Executive Summary > Denial Highlights; labs without the Denial SPs are read from ClaimLevelData. *@
+        @if (LabMetricsDashboard.Services.LabCollectionPrefix.HasDenialSummary(activeLab)
+             || LabMetricsDashboard.Services.ExecutiveSummaryHighlightsExcel.ShowsDenialHighlights(activeLab))
         {
             <li>
                 <a class="dropdown-item" asp-controller="DenialClaimReport" asp-action="Index" data-lab-link="Denial Summary">

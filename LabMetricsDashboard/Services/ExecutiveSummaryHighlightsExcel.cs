@@ -99,7 +99,7 @@ public sealed class ExecutiveSummaryHighlightsExcel
             new("Lims", "LIMS Highlights", null),
         };
         if (ShowsDenialHighlights(labName))
-            tabs.Add(new("Denial", "Denial Highlights", "dcr-monthly,dcr-weekly"));
+            tabs.Add(new("Denial", "Denial Highlights", "dcr-monthly,dcr-weekly,dcr-insight"));
         return tabs;
     }
 

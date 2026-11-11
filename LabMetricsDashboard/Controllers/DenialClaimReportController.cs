@@ -213,14 +213,16 @@ public sealed class DenialClaimReportController : Controller
                                            CancellationToken ct)
     {
         ViewData["PageLabel"] = "Denial Summary";
+        // Framed in Executive Summary > Denial Highlights: Denial Insight is the Current Week, read-only.
+        var embed = string.Equals(Request.Query["embed"], "1", StringComparison.Ordinal);
 
         var model = new DenialClaimReportViewModel
         {
             ActiveTab = NormalizeTab(tab),
             Insight = new DenialInsightPanelViewModel
             {
-                CanEdit = CanEditInsights(),
-                Bucket = DenialInsightBuckets.Normalize(bucket),
+                CanEdit = !embed && CanEditInsights(),
+                Bucket = embed ? DenialInsightBuckets.Current : DenialInsightBuckets.Normalize(bucket),
                 CurrentWeekStart = SqlDenialClaimReportRepository.WeekStartOf(DateTime.Today)
             },
             Claims = new DenialClaimLevelTabViewModel

@@ -256,6 +256,14 @@
         if (n === "status") return "Status";
         return colName(col) || "Text";
     }
+    // Risk, Insights and Status drive badges, validation and archiving, so they always show.
+    const CORE_FIELDS = ["Risk", "Insights", "Status"];
+    function hasField(key) {
+        const cols = tplColumns();
+        if (!cols.length || CORE_FIELDS.includes(key)) return true;
+        const k = key.toLowerCase();
+        return cols.some(c => String(fieldKey(c)).toLowerCase() === k);
+    }
 
     function riskCode(val) {
         const v = String(val || "").toLowerCase();
@@ -421,23 +429,47 @@
         openDeleteConfirm(noteId);
     }
 
+    const cls = c => (c ? ` class="${c}"` : "");
+
+    /* Grid columns in display order, limited to the fields on the selected template. */
+    function insightFields(archive) {
+        const L = reportLayout();
+        const long = archive ? "ri-arch-long" : "";
+        const date = archive ? "ri-arch-date" : "";
+        const td = (c, html) => `<td${cls(c)}>${html}</td>`;
+        return [
+            { key: "Risk", label: L.risk, cell: n => { const r = riskDisplay(n); return td("ri-risk-" + esc(r), esc(r)); } },
+            { key: "ResponsibleParty", label: L.party, cell: n => td("", esc(n.responsibleParty || "")) },
+            { key: "Insights", label: L.insights, th: archive ? long : "ri-insights",
+                cell: n => td(archive ? long : "ri-insights", `<div class="ri-insights-html">${sanitizeRichHtml(n.insights || "")}</div>`) },
+            { key: "NoOfClaims", label: L.claims, cell: n => td("ri-count", esc(formatClaims(n.noOfSamples))) },
+            { key: "TotalCharge", label: L.charge,
+                cell: n => td("ri-charge", n.totalCharge == null || n.totalCharge === "" ? "" : money(n.totalCharge)) },
+            { key: "ActionSolution", label: L.action, th: archive ? long : "ri-action",
+                cell: n => td(archive ? long : "ri-action-cell", esc(stripHtml(n.actionSolution || ""))) },
+            { key: "FeedbackResponse", label: L.feedback, th: long, cell: n => td(long, esc(stripHtml(n.feedbackResponse || ""))) },
+            { key: "Responsibility", label: L.owner, cell: n => td("", esc(n.responsibility || "")) },
+            { key: "DiscussionDate", label: L.discuss, cell: n => td(date, esc(fmtShort(n.discussionDate))) },
+            { key: "ETA", label: L.eta, cell: n => td(date, esc(fmtShort(n.eta))) },
+            { key: "ClosedDate", label: L.closed, cell: n => td(date, esc(fmtShort(n.closedDate))) },
+            { key: "Status", label: L.status, cell: n => {
+                const st = n.statusLabel || n.statusCode || "";
+                return td(!archive && /yet to discuss|discuss/i.test(st) ? "ri-status-discuss" : "", esc(st));
+            } }
+        ].filter(f => hasField(f.key));
+    }
+
     function buildTableHtml(opts) {
         const float = !!(opts && opts.float);
         const noActs = float || readOnly;
         const L = reportLayout();
-        const colCount = noActs ? 13 : 14;
+        const fields = insightFields(false);
+        const colCount = fields.length + (noActs ? 1 : 2);
         const thead = `<thead><tr>
-            <th>#</th><th>${esc(L.risk)}</th><th>${esc(L.party)}</th><th class="ri-insights">${esc(L.insights)}</th>
-            <th>${esc(L.claims)}</th><th>${esc(L.charge)}</th>
-            <th class="ri-action">${esc(L.action)}</th>
-            <th>${esc(L.feedback)}</th><th>${esc(L.owner)}</th>
-            <th>${esc(L.discuss)}</th><th>${esc(L.eta)}</th><th>${esc(L.closed)}</th><th>${esc(L.status)}</th>${noActs ? "" : "<th></th>"}
+            <th>#</th>${fields.map(f => `<th${cls(f.th)}>${esc(f.label)}</th>`).join("")}${noActs ? "" : "<th></th>"}
         </tr></thead>`;
         const tfoot = float ? "" : `<tfoot><tr class="ri-foot-row"><td colspan="${colCount}"><div class="ri-footer">${esc(L.footer)}<small>${esc(L.footerSub)}</small></div></td></tr></tfoot>`;
         return `<table class="ri-table">${thead}<tbody>${rows.map(n => {
-            const risk = riskDisplay(n);
-            const st = n.statusLabel || n.statusCode || "";
-            const discuss = /yet to discuss|discuss/i.test(st);
             const carry = n.archiveStatus === "Carry Forward" ? `<span class="ri-carry">Carry Forward</span>` : "";
             const canDelete = n.archiveStatus !== "Archived";
             const acts = noActs ? "" : `<td class="ri-row-acts">
@@ -447,18 +479,7 @@
                 </td>`;
             return `<tr>
                 <td>${esc(n.displayNo ?? "")}${carry}</td>
-                <td class="ri-risk-${esc(risk)}">${esc(risk)}</td>
-                <td>${esc(n.responsibleParty || "")}</td>
-                <td class="ri-insights"><div class="ri-insights-html">${sanitizeRichHtml(n.insights || "")}</div></td>
-                <td class="ri-count">${esc(formatClaims(n.noOfSamples))}</td>
-                <td class="ri-charge">${n.totalCharge == null || n.totalCharge === "" ? "" : money(n.totalCharge)}</td>
-                <td class="ri-action-cell">${esc(stripHtml(n.actionSolution || ""))}</td>
-                <td>${esc(stripHtml(n.feedbackResponse || ""))}</td>
-                <td>${esc(n.responsibility || "")}</td>
-                <td>${esc(fmtShort(n.discussionDate))}</td>
-                <td>${esc(fmtShort(n.eta))}</td>
-                <td>${esc(fmtShort(n.closedDate))}</td>
-                <td class="${discuss ? "ri-status-discuss" : ""}">${esc(st)}</td>
+                ${fields.map(f => f.cell(n)).join("")}
                 ${acts}
             </tr>`;
         }).join("")}</tbody>${tfoot}</table>`;
@@ -644,6 +665,27 @@
                             </div>
                         </div>
                     </section>`;
+        const opt = (key, html) => (hasField(key) ? html : "");
+        const actionSection = !["ActionSolution", "FeedbackResponse", "Responsibility"].some(hasField) ? "" : `
+                    <section class="ri-info-card">
+                        <div class="ri-info-head"><div class="ri-info-title">Action and Response</div><div class="ri-info-sub">Follow-up plan and feedback</div></div>
+                        <div class="ri-info-body">
+                            ${opt("ActionSolution", `<div class="ri-field" style="margin-bottom:9px;">
+                                <label for="ri_ActionSolution">${esc(L.action)}</label>
+                                <textarea id="ri_ActionSolution" data-key="ActionSolution" ${roAttr}>${esc(stripHtml(row ? row.actionSolution : ""))}</textarea>
+                            </div>`)}
+                            <div class="ri-field-grid">
+                                ${opt("FeedbackResponse", `<div class="ri-field">
+                                    <label for="ri_FeedbackResponse">${esc(L.feedback)}</label>
+                                    <textarea id="ri_FeedbackResponse" data-key="FeedbackResponse" ${roAttr}>${esc(stripHtml(row ? row.feedbackResponse : ""))}</textarea>
+                                </div>`)}
+                                ${opt("Responsibility", `<div class="ri-field">
+                                    <label for="ri_Responsibility">${esc(L.owner)}</label>
+                                    <select id="ri_Responsibility" data-key="Responsibility" ${ro}>${partyOptions(row ? row.responsibility : "")}</select>
+                                </div>`)}
+                            </div>
+                        </div>
+                    </section>`;
 
         el.form.innerHTML = `
             ${banner}
@@ -664,22 +706,22 @@
                                     <select id="ri_Risk" data-key="Risk" ${ro}>${riskOptions(riskSelectValue(row))}</select>
                                     <span id="riRiskPreview" class="ri-risk-preview">Risk</span>
                                 </div>
-                                <div class="ri-field">
+                                ${opt("ResponsibleParty", `<div class="ri-field">
                                     <label for="ri_ResponsibleParty">${esc(L.party)}</label>
                                     <select id="ri_ResponsibleParty" data-key="ResponsibleParty" ${ro}>${partyOptions(row ? row.responsibleParty : "")}</select>
-                                </div>
-                                <div class="ri-field">
+                                </div>`)}
+                                ${opt("NoOfClaims", `<div class="ri-field">
                                     <label for="ri_NoOfClaims">${esc(L.claims)}</label>
                                     <input id="ri_NoOfClaims" data-key="NoOfClaims" type="text" inputmode="numeric" value="${esc(formatClaims(row && row.noOfSamples))}" ${roAttr} />
-                                </div>
+                                </div>`)}
                                 <div class="ri-field">
                                     <label for="ri_Status">${esc(L.status)}</label>
                                     <select id="ri_Status" data-key="Status" ${ro}>${statusOptions(row ? (row.statusCode || "Open") : "Discuss")}</select>
                                 </div>
-                                <div class="ri-field">
+                                ${opt("TotalCharge", `<div class="ri-field">
                                     <label for="ri_TotalCharge">${esc(L.charge)}</label>
                                     <input id="ri_TotalCharge" data-key="TotalCharge" type="number" step="0.01" value="${esc(row && row.totalCharge != null ? row.totalCharge : "")}" ${roAttr} />
-                                </div>
+                                </div>`)}
                             </div>
                             <div class="ri-field">
                                 <label>${esc(L.insights)}</label>
@@ -694,35 +736,16 @@
                                 <div id="riInsightsEditor" class="ri-rich" contenteditable="${editable}" data-key="Insights">${htmlFromText(row ? row.insights : "")}</div>
                             </div>
                         </div>
-                    </section>
-                    <section class="ri-info-card">
-                        <div class="ri-info-head"><div class="ri-info-title">Action and Response</div><div class="ri-info-sub">Follow-up plan and feedback</div></div>
-                        <div class="ri-info-body">
-                            <div class="ri-field" style="margin-bottom:9px;">
-                                <label for="ri_ActionSolution">${esc(L.action)}</label>
-                                <textarea id="ri_ActionSolution" data-key="ActionSolution" ${roAttr}>${esc(stripHtml(row ? row.actionSolution : ""))}</textarea>
-                            </div>
-                            <div class="ri-field-grid">
-                                <div class="ri-field">
-                                    <label for="ri_FeedbackResponse">${esc(L.feedback)}</label>
-                                    <textarea id="ri_FeedbackResponse" data-key="FeedbackResponse" ${roAttr}>${esc(stripHtml(row ? row.feedbackResponse : ""))}</textarea>
-                                </div>
-                                <div class="ri-field">
-                                    <label for="ri_Responsibility">${esc(L.owner)}</label>
-                                    <select id="ri_Responsibility" data-key="Responsibility" ${ro}>${partyOptions(row ? row.responsibility : "")}</select>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
+                    </section>${actionSection}
                 </div>
                 <div class="ri-detail-col">${weekSection}
                     <section class="ri-info-card">
                         <div class="ri-info-head"><div class="ri-info-title">Timeline</div><div class="ri-info-sub">Discussion through close</div></div>
                         <div class="ri-info-body">
                             <div class="ri-field-grid">
-                                <div class="ri-field"><label for="ri_DiscussionDate">${esc(L.discuss)}</label><input id="ri_DiscussionDate" data-key="DiscussionDate" type="date" value="${esc(isoDate(row && row.discussionDate))}" ${roAttr} /></div>
-                                <div class="ri-field"><label for="ri_ETA">${esc(L.eta)}</label><input id="ri_ETA" data-key="ETA" type="date" value="${esc(isoDate(row && row.eta))}" ${roAttr} /></div>
-                                <div class="ri-field"><label for="ri_ClosedDate">${esc(L.closed)}</label><input id="ri_ClosedDate" data-key="ClosedDate" type="date" value="${esc(isoDate(row && row.closedDate))}" ${roAttr} /></div>
+                                ${opt("DiscussionDate", `<div class="ri-field"><label for="ri_DiscussionDate">${esc(L.discuss)}</label><input id="ri_DiscussionDate" data-key="DiscussionDate" type="date" value="${esc(isoDate(row && row.discussionDate))}" ${roAttr} /></div>`)}
+                                ${opt("ETA", `<div class="ri-field"><label for="ri_ETA">${esc(L.eta)}</label><input id="ri_ETA" data-key="ETA" type="date" value="${esc(isoDate(row && row.eta))}" ${roAttr} /></div>`)}
+                                ${opt("ClosedDate", `<div class="ri-field"><label for="ri_ClosedDate">${esc(L.closed)}</label><input id="ri_ClosedDate" data-key="ClosedDate" type="date" value="${esc(isoDate(row && row.closedDate))}" ${roAttr} /></div>`)}
                                 <div class="ri-field"><label>Archive Status</label><span class="ri-status-pill">${esc(archiveLabel)}</span></div>
                             </div>
                         </div>
@@ -798,6 +821,15 @@
             closedDate: dateOrNull(get("ClosedDate")),
             statusCode: statusCode(get("Status") || "Discuss")
         };
+        // Fields not on the template keep the values already stored on the insight.
+        [["ResponsibleParty", "responsibleParty"], ["NoOfClaims", "noOfSamples"], ["TotalCharge", "totalCharge"],
+            ["ActionSolution", "actionSolution"], ["FeedbackResponse", "feedbackResponse"], ["Responsibility", "responsibility"],
+            ["DiscussionDate", "discussionDate", true], ["ETA", "eta", true], ["ClosedDate", "closedDate", true]
+        ].forEach(([key, prop, isDate]) => {
+            if (el.form.querySelector(`[data-key="${key}"]`)) return;
+            const prev = editing && editing[prop] != null ? editing[prop] : null;
+            payload[prop] = isDate ? dateOrNull(prev) : prev;
+        });
         const wf = weekLifecycle ? weekFields() : null;
         if (wf) {
             const ws = wf.start.value, we = wf.end.value || wf.start.value;
@@ -887,7 +919,7 @@
         if (detailReadOnly) return;
         const payload = readForm();
         if (!stripHtml(payload.insights)) { await riNotice("Insights is required", "Enter the insight text before saving."); return; }
-        if (payload.statusCode === "Closed" && !payload.closedDate) {
+        if (payload.statusCode === "Closed" && !payload.closedDate && hasField("ClosedDate")) {
             await riNotice("Closed Date is required", "Closed Date is required when Status is Closed.");
             return;
         }
@@ -1080,30 +1112,16 @@
     }
 
     function archiveTableHtml(list) {
-        const L = reportLayout();
+        const fields = insightFields(true);
         const head = `<thead><tr>
-            <th>#</th><th class="ri-arch-weekcol">Week Range</th><th>${esc(L.risk)}</th><th>${esc(L.party)}</th>
-            <th class="ri-arch-long">${esc(L.insights)}</th>
-            <th>${esc(L.claims)}</th><th>${esc(L.charge)}</th>
-            <th class="ri-arch-long">${esc(L.action)}</th><th class="ri-arch-long">${esc(L.feedback)}</th>
-            <th>${esc(L.owner)}</th><th>${esc(L.discuss)}</th><th>${esc(L.eta)}</th><th>${esc(L.closed)}</th>
-            <th>${esc(L.status)}</th><th>Archived On</th><th></th>
+            <th>#</th><th class="ri-arch-weekcol">Week Range</th>
+            ${fields.map(f => `<th${cls(f.th)}>${esc(f.label)}</th>`).join("")}
+            <th>Archived On</th><th></th>
         </tr></thead>`;
         const body = list.map((n, i) => `<tr>
                 <td>${i + 1}</td>
                 <td class="ri-arch-weekcol"><span class="ri-arch-weekpill">${esc(archWeekText(n))}</span></td>
-                <td class="ri-risk-${esc(riskDisplay(n))}">${esc(riskDisplay(n))}</td>
-                <td>${esc(n.responsibleParty || "")}</td>
-                <td class="ri-arch-long"><div class="ri-insights-html">${sanitizeRichHtml(n.insights || "")}</div></td>
-                <td class="ri-count">${esc(formatClaims(n.noOfSamples))}</td>
-                <td class="ri-charge">${n.totalCharge == null || n.totalCharge === "" ? "" : money(n.totalCharge)}</td>
-                <td class="ri-arch-long">${esc(stripHtml(n.actionSolution || ""))}</td>
-                <td class="ri-arch-long">${esc(stripHtml(n.feedbackResponse || ""))}</td>
-                <td>${esc(n.responsibility || "")}</td>
-                <td class="ri-arch-date">${esc(fmtShort(n.discussionDate))}</td>
-                <td class="ri-arch-date">${esc(fmtShort(n.eta))}</td>
-                <td class="ri-arch-date">${esc(fmtShort(n.closedDate))}</td>
-                <td>${esc(n.statusLabel || n.statusCode || "")}</td>
+                ${fields.map(f => f.cell(n)).join("")}
                 <td class="ri-arch-date">${esc(fmtShort(n.archivedDate))}</td>
                 <td class="ri-row-acts">
                     <button type="button" class="btn btn-sm btn-outline-secondary" data-aview="${n.noteId}">View</button>
@@ -1182,6 +1200,10 @@
                 el.body.innerHTML = emptyHtml();
                 el.add.disabled = true;
                 if (el.archiveBtn) el.archiveBtn.disabled = true;
+                const importBtn = document.getElementById("riImportBtn");
+                if (importBtn) importBtn.disabled = true;
+                const templateBtn = document.getElementById("riTemplateBtn");
+                if (templateBtn) { templateBtn.classList.add("disabled"); templateBtn.removeAttribute("href"); }
                 const toolbarAdd = document.getElementById("riAddInsightBtn");
                 if (toolbarAdd) toolbarAdd.disabled = true;
                 return;
@@ -1257,6 +1279,129 @@
     if (el.historyBtn) el.historyBtn.addEventListener("click", () => {
         if (editing && editing.noteId) openHistory(editing.noteId);
     });
+    (function enableImport() {
+        const importBtn = document.getElementById("riImportBtn");
+        const node = document.getElementById("riImportModal");
+        if (!importBtn || !node || readOnly || snapshot) return;
+        const templateUrl = `${apiBase}/Notes/ImportTemplate?${q({ lab: ctx.lab, report: ctx.reportName })}`;
+        ["riTemplateBtn", "riImportTemplateLink"].forEach(id => {
+            const a = document.getElementById(id);
+            if (a) a.href = templateUrl;
+        });
+        const file = document.getElementById("riImportFile");
+        const replace = document.getElementById("riImportReplace");
+        const note = document.getElementById("riImportModeNote");
+        const result = document.getElementById("riImportResult");
+        const submit = document.getElementById("riImportSubmit");
+        const sub = document.getElementById("riImportSub");
+        let importModal = null;
+
+        const showResult = (kind, html) => {
+            result.hidden = !html;
+            result.className = "mt-3 itm-alert " + kind;
+            result.innerHTML = html || "";
+        };
+        const applyMode = () => {
+            note.textContent = replace.checked
+                ? "This week's saved insights are deleted, and the workbook's rows take their place."
+                : "The rows are added after the insights already saved for this week.";
+            submit.classList.toggle("btn-success", !replace.checked);
+            submit.classList.toggle("btn-danger", replace.checked);
+        };
+        replace.addEventListener("change", applyMode);
+
+        const filesBox = document.getElementById("riImportFiles");
+        const fileSize = n => n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+        async function loadImportFiles() {
+            if (!filesBox) return;
+            filesBox.innerHTML = `<div class="itm-empty">Loading imported files…</div>`;
+            try {
+                const data = await getJson(`${apiBase}/Notes/ImportFiles?${q({ lab: ctx.lab, report: ctx.reportName })}`);
+                const files = data.files || [];
+                if (!files.length) {
+                    filesBox.innerHTML = `<div class="itm-empty">No workbooks imported for ${esc(ctx.reportName)} yet.</div>`;
+                    return;
+                }
+                filesBox.innerHTML = `<table class="ri-archive-table ri-import-files-table"><thead><tr>
+                    <th>Imported</th><th>File</th><th>Week Range</th><th>Rows</th><th>By</th><th></th>
+                </tr></thead><tbody>${files.map(f => `<tr>
+                    <td>${esc(fmtDT(f.importedDateTime))}</td>
+                    <td>${esc(f.fileName)}<div class="text-muted small">${esc(fileSize(f.fileSize))}</div></td>
+                    <td>${esc(f.weekRangeText || "")}</td>
+                    <td>${esc(f.rowsImported)} ${f.importMode === "Replace" ? `<div class="text-muted small">replaced ${esc(f.rowsReplaced)}</div>` : ""}</td>
+                    <td>${esc(f.importedBy)}</td>
+                    <td class="ri-row-acts"><a class="btn btn-sm btn-outline-secondary" href="${apiBase}/Notes/ImportFile?${q({ lab: ctx.lab, id: f.importFileId })}">
+                        <i class="bi bi-download" aria-hidden="true"></i> Download</a></td>
+                </tr>`).join("")}</tbody></table>`;
+            } catch (e) {
+                filesBox.innerHTML = `<div class="itm-alert error">${esc(e.message)}</div>`;
+            }
+        }
+
+        importBtn.addEventListener("click", async () => {
+            await ensureLoaded();
+            if (!featureAvailable) { showAlert(notEnabledMsg, "info"); return; }
+            file.value = "";
+            replace.checked = false;
+            applyMode();
+            showResult("", "");
+            submit.disabled = false;
+            if (sub) sub.textContent = `Adds the workbook's rows as ${ctx.reportName} insights for ${ctx.weekText || "the current week"}`;
+            if (!importModal && window.bootstrap) importModal = new bootstrap.Modal(node);
+            importModal && importModal.show();
+            loadImportFiles();
+        });
+
+        submit.addEventListener("click", async () => {
+            const f = file.files && file.files[0];
+            if (!f) { showResult("error", "Choose the filled-in Key Insights workbook first."); return; }
+            if (replace.checked) {
+                const go = await riDialog({
+                    tone: "warn", title: "Replace this week's insights?",
+                    sub: "The insights saved for this week are deleted",
+                    bodyHtml: `<div class="ri-dialog-msg">Every insight saved for <b>${esc(ctx.weekText || "the current week")}</b> is deleted, and the rows in <b>${esc(f.name)}</b> take their place. This cannot be undone.</div>`,
+                    okText: "Delete and import", cancelText: "Cancel"
+                });
+                if (!go) return;
+            }
+            const body = new FormData();
+            body.append("file", f);
+            body.append("replace", replace.checked ? "true" : "false");
+            if (ctx.weekStart) body.append("weekStart", ctx.weekStart);
+            if (ctx.weekEnd) body.append("weekEnd", ctx.weekEnd);
+            if (ctx.weekText) body.append("weekText", ctx.weekText);
+            if (ctx.runId) body.append("runId", ctx.runId);
+            submit.disabled = true;
+            showResult("info", `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Checking and importing ${esc(f.name)}…`);
+            try {
+                const res = await fetch(`${apiBase}/Notes/Import?${q({ lab: ctx.lab, report: ctx.reportName })}`, {
+                    method: "POST", headers: { Accept: "application/json", RequestVerificationToken: ctx.token }, body
+                });
+                let data = null;
+                try { data = await res.json(); } catch { /* not JSON */ }
+                if (!res.ok) {
+                    const list = data && data.errors && data.errors.length
+                        ? `<ul class="mb-0 mt-1">${data.errors.slice(0, 50).map(e => `<li>${esc(e)}</li>`).join("")}</ul>${data.errors.length > 50 ? `<div>…and ${data.errors.length - 50} more.</div>` : ""}`
+                        : "";
+                    showResult("error", `<strong>${esc((data && data.error) || ("Import failed (" + res.status + ")"))}</strong>${list}`);
+                    return;
+                }
+                await loadRows();
+                const parts = [`${data.imported} insight(s) imported for ${data.weekText || ctx.weekText || "the current week"}`];
+                if (data.replaced) parts.push(`${data.replaced} previous insight(s) replaced`);
+                if (data.failed) parts.push(`${data.failed} row(s) could not be saved: ${(data.errors || []).join("; ")}`);
+                if (data.warnings && data.warnings.length) parts.push(data.warnings.join(" "));
+                importModal && importModal.hide();
+                showAlert(parts.join(". ") + ".", data.failed ? "error" : "ok");
+                setOpen(true);
+            } catch (e) {
+                showResult("error", esc(e.message || "Import failed."));
+            } finally {
+                submit.disabled = false;
+            }
+        });
+    })();
+
     const extraAdd = document.getElementById("riAddInsightBtn");
     if (extraAdd && snapshot) extraAdd.hidden = true;
     else if (extraAdd) extraAdd.addEventListener("click", async () => {

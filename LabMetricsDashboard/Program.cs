@@ -580,6 +580,7 @@ builder.Services.AddScoped<IDenialSummaryRepository, SqlDenialSummaryRepository>
 builder.Services.AddScoped<SqlPhiExecutiveSummaryRepository>();
 builder.Services.AddScoped<BeechTreeRevenuePipelineLisService>();
 builder.Services.AddScoped<INotesRepository, SqlNotesRepository>();
+builder.Services.AddScoped<INotesImportFileRepository, SqlNotesImportFileRepository>();
 builder.Services.AddScoped<ExecutiveSummaryExcelBuilder>();
 builder.Services.AddScoped<ExecutiveSummaryHighlightsExcel>();
 

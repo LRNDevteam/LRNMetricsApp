@@ -13,6 +13,8 @@
         insightSnapshot?.InsightPanelUrl(bucket) ?? Url.Action("InsightPanel", new { lab = Model.CurrentLab, bucket })!;
     string BucketPageUrl(string bucket) =>
         insightSnapshot is not null ? "#" : Url.Action("Index", new { lab = Model.CurrentLab, tab = "insight", bucket })!;
+    // Framed in Executive Summary > Denial Highlights: the Current Week grid only, no week tabs or toolbar.
+    var insightEmbed = string.Equals(Context.Request.Query["embed"], "1", StringComparison.Ordinal);
 }
 
 @* Observation and Action hold sanitized HTML (bold, bullets) from the client's workbook, so they are
@@ -29,7 +31,14 @@
             <div>
                 <div class="insight-title">Key Observations &amp; Highlights</div>
                 <div class="text-muted" style="font-size:.82rem;">
-                    @if (isCurrent)
+                    @if (insightEmbed && isCurrent)
+                    {
+                        <span>
+                            Current Week denial insights. Week of
+                            <strong>@Model.CurrentWeekStart.ToString("dd MMM yyyy")</strong>.
+                        </span>
+                    }
+                    else if (isCurrent)
                     {
                         <span>
                             Import your Denial Insight workbook, edit it here, and save. Week of
@@ -43,6 +52,8 @@
                 </div>
             </div>
 
+            @if (!insightEmbed)
+            {
             <div class="d-flex flex-wrap gap-2 align-items-center">
                 <button type="button" class="fs-btn" data-fs-target="#insightFsHost">
                     <i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span>
@@ -86,8 +97,11 @@
                     </form>
                 }
             </div>
+            }
         </div>
 
+        @if (!insightEmbed)
+        {
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
             <ul class="nav nav-tabs insight-subtabs">
                 <li class="nav-item">
@@ -121,6 +135,7 @@
                 </span>
             }
         </div>
+        }
 
             <div class="insight-scroll">
                 <table class="table table-sm insight-table mb-0" id="insightTable">

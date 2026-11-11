@@ -167,22 +167,28 @@
                 </li>
             }
         }
+        @{
+            // The two tabs only. Archived rows are retained but out of the working view, so
+            // counting them here would claim more insights than the tab can show. Embedded, the
+            // tab is the Current Week alone and is left out when that week has no insights.
+            var currentInsightCount = Model.Insight.BucketCounts.GetValueOrDefault(DenialInsightBuckets.Current);
+            var insightCount = dcrEmbed
+                ? currentInsightCount
+                : currentInsightCount + Model.Insight.BucketCounts.GetValueOrDefault(DenialInsightBuckets.Previous);
+        }
+        @if (!dcrEmbed || currentInsightCount > 0)
+        {
         <li class="nav-item" role="presentation">
             <button class="nav-link @(tab == "insight" ? "active" : "")" data-bs-toggle="pill"
                     data-bs-target="#dcr-insight" type="button" data-tab-key="insight">
-                <i class="bi bi-lightbulb me-2"></i>Denial Insight
-                @{
-                    // The two tabs only. Archived rows are retained but out of the working view, so
-                    // counting them here would claim more insights than the tab can show.
-                    var insightCount = Model.Insight.BucketCounts.GetValueOrDefault(DenialInsightBuckets.Current)
-                                     + Model.Insight.BucketCounts.GetValueOrDefault(DenialInsightBuckets.Previous);
-                }
+                <i class="bi bi-lightbulb me-2"></i>@(dcrEmbed ? "Current Week Denial Insight" : "Denial Insight")
                 @if (insightCount > 0)
                 {
                     <span class="badge rounded-pill bg-light text-dark ms-2">@insightCount.ToString("N0")</span>
                 }
             </button>
         </li>
+        }
         @if (dcrSnapshot is null)
         {
         <li class="nav-item" role="presentation">
@@ -476,6 +482,8 @@
                 if (!link) return;
                 if (link.classList.contains('disabled')) { e.preventDefault(); return; }
                 if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;  // let new-tab work
+                // Embedded, the layout sends links to a new tab; the Claim Level pane is not shown here.
+                if (link.target === '_blank') return;
 
                 if (loadPanel(link)) e.preventDefault();
             });
