@@ -1,7 +1,7 @@
 {
   "LabId": 28,
   "LabName": "CoreBio",
-  "DatabaseName": "CoreBio_LRN",
+  "DatabaseName": "CoreBio",
   "ClaimLevel": {
     "Enabled": true,
     "CreateCsv": true,

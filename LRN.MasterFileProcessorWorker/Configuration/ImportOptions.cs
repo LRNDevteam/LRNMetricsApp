@@ -57,6 +57,13 @@
     public string CommonLineLevelSchemaJsonPath { get; set; } = "Schemas/LineLevel.schema.json";
     public string CommonClaimLevelSchemaJsonPath { get; set; } = "Schemas/ClaimLevel.schema.json";
 
+    // The standard upload template (AR Workbench > Data Processing > Upload Master File). Used as the
+    // LAB schema for an uploaded workbook, whatever the lab: its columns are the common column names,
+    // with Required flags for validation and the sheet name the template uses. LRN.ReportsApi builds
+    // the downloadable template from the same two files.
+    public string StandardUploadLineLevelSchemaJsonPath { get; set; } = "Schemas/StandardUpload/StandardUpload_LineLevel.schema.json";
+    public string StandardUploadClaimLevelSchemaJsonPath { get; set; } = "Schemas/StandardUpload/StandardUpload_ClaimLevel.schema.json";
+
     // Consolidated Lab Insurance Master (CSV) for payer normalization
     public string InsuranceMasterCsvPath { get; set; } = "";
     public string PanelMasterFilePath { get; set; } = "";
@@ -86,6 +93,15 @@ public sealed class SharePointOptions
     public string TenantId { get; set; } = "";
     public string ClientId { get; set; } = "";
     public string ClientSecret { get; set; } = "";
+
+    /// <summary>
+    /// The app registration's certificate as base64 PFX - preferred over <see cref="ClientSecret"/>
+    /// (HIPAA checklist MF-01). Import the certificate into Key Vault as a CERTIFICATE named
+    /// <c>MasterFileProcessor--SharePoint--ClientCertificate</c>: the vault exposes a certificate's
+    /// PFX as a secret of the same name, so it binds here with nothing else to configure. When set,
+    /// the client secret is not used.
+    /// </summary>
+    public string ClientCertificate { get; set; } = "";
 
     // Example:
     // Hostname: "3eclaimsprocessingllc.sharepoint.com"
@@ -205,6 +221,14 @@ public sealed class LabFileMap
 	//
 	// Both table names are required when MasterDataSource is LabDatabase; the run fails fast if
 	// either is missing, rather than silently loading one level.
+	//
+	// "Upload" is a lab with no SharePoint master folder at all (e.g. a client that takes only the
+	// AR Workbench): the scheduled poll skips it silently, and it runs only when a master file is
+	// uploaded in the AR Workbench. Any lab, whatever its source, also takes an upload when one is
+	// queued - the upload replaces the SharePoint / lab-database read for that one run.
+	//
+	//   { "LabId": 30, "LabName": "NewClient", "MasterDataSource": "Upload",
+	//     "LabDbConnectionKey": "NewClientConnStr", "ArWorkbenchEnabled": true }
 	public string? MasterDataSource { get; set; }
 
 	public string? ClaimLevelSourceTable { get; set; }
@@ -217,4 +241,8 @@ public sealed class LabFileMap
 	/// <summary>True when this lab reads its master data from its own database, not SharePoint.</summary>
 	public bool UsesLabDatabaseSource =>
 		string.Equals(MasterDataSource?.Trim(), "LabDatabase", StringComparison.OrdinalIgnoreCase);
+
+	/// <summary>True when this lab's master data only ever arrives as an AR Workbench upload.</summary>
+	public bool UsesUploadOnlySource =>
+		string.Equals(MasterDataSource?.Trim(), "Upload", StringComparison.OrdinalIgnoreCase);
 }

@@ -1,3 +1,4 @@
+using LRN.MasterFileProcessorWorker.Security;
 using log4net;
 using log4net.Config;
 using log4net.Util;
@@ -46,9 +47,11 @@ namespace LRN.MasterFileProcessorWorker.Logging
             }
         }
 
-        public void Info(string message) => Log.Info(message);
-        public void Warn(string message) => Log.Warn(message);
-        public void Error(string message, Exception? ex = null) => Log.Error(message, ex);
-        public void Fatal(string message, Exception? ex = null) => Log.Fatal(message, ex);
+        // Messages interpolate exception text, and exceptions quote the cell that failed - both are
+        // scrubbed so the log file on the server carries no row value (HIPAA MF-07).
+        public void Info(string message) => Log.Info(PhiRedactor.Scrub(message));
+        public void Warn(string message) => Log.Warn(PhiRedactor.Scrub(message));
+        public void Error(string message, Exception? ex = null) => Log.Error(PhiRedactor.Scrub(message), PhiRedactor.Wrap(ex));
+        public void Fatal(string message, Exception? ex = null) => Log.Fatal(PhiRedactor.Scrub(message), PhiRedactor.Wrap(ex));
     }
 }

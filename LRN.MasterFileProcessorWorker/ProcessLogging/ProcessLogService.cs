@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Options;
+﻿using LRN.MasterFileProcessorWorker.Security;
+using Microsoft.Extensions.Options;
 using System;
 using System.Reflection;
 using System.Threading;
@@ -94,9 +95,30 @@ public sealed class ProcessLogService : IProcessLogService
         return new ProcessRunContext { RunId = runId, LabName = labName, StartTimeIST = start };
     }
 
+    // HIPAA MF-07: LRN_Run_Log / LRN_Step_Log / LRN_Error_Log (SQL, CSV and workbook alike) carry
+    // IDs, row numbers, column names and error types - never a row value. Free text is scrubbed
+    // here, once, before any of the three sinks sees it.
+    private static void Scrub(StepLogRow step)
+    {
+        step.ErrorMessage = PhiRedactor.Scrub(step.ErrorMessage);
+        step.ErrorDetail = PhiRedactor.Scrub(step.ErrorDetail);
+    }
+
+    private static void Scrub(ErrorLogRow err)
+    {
+        err.ErrorSummary = PhiRedactor.Scrub(err.ErrorSummary) ?? "";
+        err.MissingColumns = PhiRedactor.Scrub(err.MissingColumns);
+        err.RecommendedAction = PhiRedactor.Scrub(err.RecommendedAction);
+
+        // A copy of a source row is PHI by definition. The column stays for schema compatibility.
+        err.RowExample = null;
+    }
+
     public async Task StepStartAsync(ProcessRunContext ctx, StepLogRow step, CancellationToken ct)
     {
         if (!_opt.Enabled || string.IsNullOrWhiteSpace(ctx.RunId)) return;
+
+        Scrub(step);
 
         step.RunID = ctx.RunId;
         step.LabId ??= ctx.LabId;
@@ -121,6 +143,8 @@ public sealed class ProcessLogService : IProcessLogService
     public async Task StepEndAsync(ProcessRunContext ctx, StepLogRow step, CancellationToken ct)
     {
         if (!_opt.Enabled || string.IsNullOrWhiteSpace(ctx.RunId)) return;
+
+        Scrub(step);
 
         step.RunID = ctx.RunId;
         step.LabId ??= ctx.LabId;
@@ -151,6 +175,8 @@ public sealed class ProcessLogService : IProcessLogService
     public async Task LogErrorAsync(ProcessRunContext ctx, ErrorLogRow err, CancellationToken ct)
     {
         if (!_opt.Enabled || string.IsNullOrWhiteSpace(ctx.RunId)) return;
+
+        Scrub(err);
 
         err.RunID = ctx.RunId;
         err.LabName ??= ctx.LabName;
@@ -183,6 +209,7 @@ public sealed class ProcessLogService : IProcessLogService
         if (!_opt.Enabled || string.IsNullOrWhiteSpace(ctx.RunId)) return;
 
         var end = NowIST();
+        finalUpdate.Notes = PhiRedactor.Scrub(finalUpdate.Notes);
         finalUpdate.RunID = ctx.RunId;
         finalUpdate.LabName = ctx.LabName;
         finalUpdate.EndTimeIST = end;

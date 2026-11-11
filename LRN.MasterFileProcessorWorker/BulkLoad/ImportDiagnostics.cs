@@ -1,4 +1,7 @@
 ﻿using System.Data;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using LRN.MasterFileProcessorWorker.Security;
 using Microsoft.Data.SqlClient;
 
 namespace LRN.MasterFileProcessorWorker.BulkLoad;
@@ -23,6 +26,7 @@ public static class ImportDiagnostics
         IConfiguration configuration,
         LabMappingLoader loader,
         string contentRoot,
+        IReadOnlyList<SqlConnectionFinding> sqlFindings,
         CancellationToken ct)
     {
         _fail = 0;
@@ -58,8 +62,7 @@ public static class ImportDiagnostics
             foreach (var (name, value) in new[]
                      {
                          ("TenantId", sp.TenantId),
-                         ("ClientId", sp.ClientId),
-                         ("ClientSecret", sp.ClientSecret)
+                         ("ClientId", sp.ClientId)
                      })
             {
                 Report($"SharePoint:{name}", !string.IsNullOrWhiteSpace(value),
@@ -67,6 +70,51 @@ public static class ImportDiagnostics
                         ? $"missing - create the Key Vault secret 'MasterFileProcessor--SharePoint--{name}'"
                         : MaskSecret(value));
             }
+
+            // A certificate is what HIPAA MF-01 asks for; a secret still works and is reported as a note.
+            var hasCertificate = !string.IsNullOrWhiteSpace(sp.ClientCertificate);
+            var hasSecret = !string.IsNullOrWhiteSpace(sp.ClientSecret);
+
+            if (hasCertificate)
+                Report("SharePoint credential", true, "certificate (MF-01)");
+            else if (hasSecret)
+                Note("SharePoint credential", $"client secret {MaskSecret(sp.ClientSecret)} - import a certificate as 'MasterFileProcessor--SharePoint--ClientCertificate' (MF-01)");
+            else
+                Report("SharePoint credential", false, "missing - import the certificate 'MasterFileProcessor--SharePoint--ClientCertificate' into Key Vault");
+        }
+
+        // 1c. HIPAA controls that are configuration, not code: checked here so the evidence is one command away.
+        Section("1c. HIPAA controls");
+
+        var enforced = SqlConnectionPolicy.IsEnforced(configuration);
+        Note(SqlConnectionPolicy.ModeKey, enforced ? "Enforce" : "Warn - findings below are logged, not refused");
+
+        if (sqlFindings.Count == 0)
+            Report("SQL connection policy (CC-08 / MF-04)", true, "every ConnectionStrings:* value encrypts, validates the certificate and avoids sa");
+
+        foreach (var finding in sqlFindings)
+        {
+            if (finding.Corrected)
+                Note($"SQL {finding.Key}", $"{finding.Target}: {finding.Problem}");
+            else
+                Report($"SQL {finding.Key}", false, $"{finding.Target}: {finding.Problem}");
+        }
+
+        foreach (var (name, folder) in new[]
+                 {
+                     ("WatchFolder", importOptions.WatchFolder),
+                     ("ReportOutputsRoot", importOptions.ReportOutputsRoot),
+                     ("ErrorFolder", importOptions.ErrorFolder)
+                 })
+        {
+            if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+                continue;
+
+            var broad = BroadReadAccess(folder);
+            Report($"{name} ACL (MF-02)", broad is null,
+                broad is null
+                    ? $"{folder}: no Everyone / Users / Authenticated Users read access"
+                    : $"{folder}: {broad} can read lab data here - restrict to the service account and an admin group");
         }
 
         // 2. mappings
@@ -184,13 +232,12 @@ public static class ImportDiagnostics
 
             if (!labOk.Ok) continue;
 
+            // The same check the load makes before writing (HIPAA MF-05): a FAIL here is a lab whose
+            // every load will be refused.
             var catalog = CatalogOf(labConn!);
-            if (!string.IsNullOrWhiteSpace(mapping.DatabaseName) &&
-                !string.Equals(catalog, mapping.DatabaseName, StringComparison.OrdinalIgnoreCase))
-            {
-                Report("  DatabaseName matches connection", false,
-                    $"mapping says '{mapping.DatabaseName}' but the connection targets '{catalog}' - the generated sql/Labs/<db>/ scripts may target the wrong database");
-            }
+            var routing = LabDatabaseGuard.Check(lab.LabId, mapping.DatabaseName, catalog);
+            Report("  lab database guard (MF-05)", routing is null,
+                routing ?? $"connection targets '{catalog}', the lab's own database");
 
             foreach (var table in new[] { "dbo.LineClaimFileLogs" }
                          .Concat(new[] { mapping.LineLevel, mapping.ClaimLevel }
@@ -268,6 +315,49 @@ public static class ImportDiagnostics
         if (!ok) _fail++;
         var mark = ok ? "ok  " : "FAIL";
         Console.WriteLine($"  {mark} {name,-42} {detail}");
+    }
+
+    /// <summary>Worth knowing, not a failure.</summary>
+    private static void Note(string name, string? detail) =>
+        Console.WriteLine($"  note {name,-42} {detail}");
+
+    /// <summary>
+    /// The broad group that can read the folder (Everyone, Users, Authenticated Users), or null. The
+    /// folders hold full copies of lab claim data, so only the service account and admins should.
+    /// </summary>
+    private static string? BroadReadAccess(string folder)
+    {
+        if (!OperatingSystem.IsWindows())
+            return null;
+
+        var broad = new[]
+        {
+            new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null),
+            new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null)
+        };
+
+        try
+        {
+            var rules = new DirectoryInfo(folder).GetAccessControl()
+                .GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier));
+
+            foreach (FileSystemAccessRule rule in rules)
+            {
+                if (rule.AccessControlType == AccessControlType.Allow &&
+                    (rule.FileSystemRights & FileSystemRights.ReadData) != 0 &&
+                    broad.Contains(rule.IdentityReference))
+                {
+                    return rule.IdentityReference.Translate(typeof(NTAccount)).Value;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or IdentityNotMappedException)
+        {
+            return null;
+        }
+
+        return null;
     }
 
     private static string? FirstNonBlank(params string?[] values) =>

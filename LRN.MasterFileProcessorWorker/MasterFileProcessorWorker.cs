@@ -2,6 +2,7 @@
 using LRN.MasterFileProcessorWorker.ExcelValidation;
 using LRN.MasterFileProcessorWorker.Logging;
 using LRN.MasterFileProcessorWorker.Notifications;
+using LRN.MasterFileProcessorWorker.Security;
 using LRN.MasterFileProcessorWorker.SharePoint;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
@@ -44,8 +45,10 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 	private readonly ReportRunIdInfoLogger _runInfo;
 	private readonly ReportsWorkflowTrackerRepository _workflowTracker;
 	private readonly LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequestStore _rerunRequests;
+	private readonly LRN.MasterFileProcessorWorker.ProcessLogging.MasterFileUploadStore _uploads;
 	private readonly LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncService _arWorkbenchSync;
 	private readonly LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotService _masterDataSnapshot;
+	private readonly TempFileJanitor _tempFiles;
 
 	private ColumnSchema? _commonLineSchema;
 	private ColumnSchema? _commonClaimSchema;
@@ -73,8 +76,10 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		ReportRunIdInfoLogger runInfo,
 		ReportsWorkflowTrackerRepository workflowTracker,
 		LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequestStore rerunRequests,
+		LRN.MasterFileProcessorWorker.ProcessLogging.MasterFileUploadStore uploads,
 		LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncService arWorkbenchSync,
-		LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotService masterDataSnapshot)
+		LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotService masterDataSnapshot,
+		TempFileJanitor tempFiles)
 	{
 		_logger = logger;
 		_fileLog = fileLog;
@@ -96,8 +101,10 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		_runInfo = runInfo;
 		_workflowTracker = workflowTracker;
 		_rerunRequests = rerunRequests;
+		_uploads = uploads;
 		_arWorkbenchSync = arWorkbenchSync;
 		_masterDataSnapshot = masterDataSnapshot;
+		_tempFiles = tempFiles;
 	}
 
 	protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -162,6 +169,9 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 	{
 		var runLocalNow = DateTime.Now;
 
+		// HIPAA MF-03: remove temp copies of lab data that an interrupted run left behind (hourly at most).
+		_tempFiles.SweepIfDue();
+
 		// Daily master processor log (local)
 		var masterLogFolder = Path.Combine(_opt.ReportOutputsRoot, "Logs", "Master File Processor");
 
@@ -223,7 +233,30 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 			// the screen and the audit trail in LRN_Run_Log name the same person.
 			rerunByLab.TryGetValue(lab.LabId, out var rerun);
 
-			var triggerType = rerun is null ? "Schedule" : "Rerun";
+			// A master file uploaded in the AR Workbench (standard template). It replaces the
+			// SharePoint / lab-database read for this run only; every later step is unchanged.
+			var uploadId = rerun?.UploadId;
+			var fromUpload = uploadId is not null;
+
+			// An upload-only lab has no SharePoint master folder, so the schedule has nothing to look
+			// for. It is skipped without a run log: a SKIPPED row and a Teams "no file found" every
+			// poll would be noise about a lab that is working as intended.
+			if (lab.UsesUploadOnlySource && !fromUpload)
+			{
+				if (rerun is not null)
+				{
+					await _rerunRequests.CompleteAsync(rerun.RerunRequestId, runId: null, resultStatus: "SKIPPED",
+						message: $"{lab.LabName} takes its master file by upload only (MasterDataSource \"Upload\"). Use Upload Master File in the AR Workbench.",
+						ct);
+				}
+				continue;
+			}
+
+			// The data of an upload comes from the workbook even for a lab that normally reads its
+			// own tables, so the lab-database gate and exports are off for that run.
+			var useLabDatabase = lab.UsesLabDatabaseSource && !fromUpload;
+
+			var triggerType = rerun is null ? "Schedule" : fromUpload ? "Upload" : "Rerun";
 			var triggeredBy = rerun?.RequestedBy ?? Environment.UserName;
 
 			// One unique RunID per lab-run: R<YYYYMMDD><SHORT><NNNN>, e.g. R20260803CRT0001
@@ -269,6 +302,12 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 			// into the week folder by then.
 			string? stagingFolder = null;
 
+			// Working copies of the lab's claims that only this run needs: the workbook downloaded into
+			// LRN-RAWFILE and its RAW CSV exports. Declared out here for the same reason (HIPAA MF-02/03).
+			string? rawDownloadPath = null;
+			string? lineRawPath = null;
+			string? claimRawPath = null;
+
 			// The upstream run that fills this lab's tables has to have finished, and its RunID has
 			// to be one we have not already taken. Checked BEFORE the SharePoint lookup: there is
 			// no point downloading a workbook for a lab whose data has not moved.
@@ -276,7 +315,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 
 			try
 			{
-				if (lab.UsesLabDatabaseSource)
+				if (useLabDatabase)
 				{
 					// A re-run ignores the "already ingested" marker - that is the whole point of
 					// asking for one - but NOT the readiness check. LIS, LINELEVEL and CLAIMLEVEL
@@ -308,27 +347,88 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				var step10 = new StepLogRow
 				{
 					StepSeq = stepSeq,
-					StepName = "Find Latest Master File",
+					StepName = fromUpload ? "Read Uploaded Master File" : "Find Latest Master File",
 					StepCategory = "Ingestion",
-					SourceSystem = "SharePoint",
+					SourceSystem = fromUpload ? "AR Workbench Upload" : "SharePoint",
 					StartTimeIST = _processLog.NowIST(),
 					Status = "IN_PROGRESS"
 				};
 				activeStep = step10;
 				await _processLog.StepStartAsync(runCtx, step10, ct);
 
-				var lookup = await _sp.TryGetLatestFileForLabAsync(lab, runLocalNow.Year, ct);
-				selected = lookup.File;
+				SharePointDownloader.LatestFileLookupResult? lookup = null;
+				if (fromUpload)
+				{
+					var upload = await _uploads.GetAsync(uploadId!.Value, lab.LabId, ct);
+					if (upload is null || !upload.ContentAvailable)
+						throw new InvalidOperationException(upload is null
+							? $"Uploaded master file #{uploadId} was not found for lab {lab.LabId}."
+							: $"Uploaded master file #{uploadId} has no content any more (it was already processed). Upload the file again.");
+
+					selected = BuildUploadedSelectedFile(lab, upload, siteDriveId);
+				}
+				else
+				{
+					lookup = await _sp.TryGetLatestFileForLabAsync(lab, runLocalNow.Year, ct);
+					selected = lookup.File;
+				}
+
+				// HIPAA MF-08: the file's name and path are copied into every log, every loaded row and
+				// the local folders. One that carries a patient identifier is refused here, before any
+				// of that, and the message never repeats it.
+				var nameProblem = selected is null || !_configuration.GetValue("Security:RejectPhiInFileNames", true)
+					? null
+					: PhiFileNameGuard.FindIdentifier(selected.Name) ?? PhiFileNameGuard.FindIdentifier(selected.SharePointPath);
+
+				if (nameProblem is not null)
+				{
+					var rejectMsg = fromUpload
+						? $"Uploaded master file rejected: its name {nameProblem}, so it was not loaded. " +
+						  $"Rename the file without patient identifiers and upload it again (upload #{uploadId})."
+						: $"Master file rejected: its name or SharePoint path {nameProblem}, so it was not downloaded. " +
+						  $"Rename it on SharePoint without patient identifiers; the next poll picks it up (SharePoint item {selected!.ItemId}).";
+
+					step10.EndTimeIST = _processLog.NowIST();
+					step10.Status = "FAILED";
+					step10.ErrorCode = "PHI_IN_FILE_NAME";
+					step10.ErrorMessage = rejectMsg;
+					await _processLog.StepEndAsync(runCtx, step10, ct);
+					activeStep = null;
+
+					await _processLog.LogErrorAsync(runCtx, new ErrorLogRow
+					{
+						Severity = "ERROR",
+						StepName = step10.StepName,
+						ErrorCode = "PHI_IN_FILE_NAME",
+						ErrorSummary = rejectMsg,
+						RecommendedAction = "Rename the file on SharePoint to the lab's usual name (lab, report and week only).",
+						OwnerTeam = "LRN",
+						Status = "OPEN"
+					}, ct);
+					runRow.TotalErrors += 1;
+
+					runRow.OverallStatus = "FAILED";
+					runRow.Notes = rejectMsg;
+					await _processLog.CompleteRunAsync(runCtx, runRow, ct);
+
+					_logger.LogWarning("Lab {LabId}: {Message}", lab.LabId, rejectMsg);
+					_fileLog.Warn($"Lab {lab.LabId}: {rejectMsg}");
+					await NotifyProcessingErrorAsync(lab, rejectMsg, null, null, ct);
+
+					selected = null;
+					continue;
+				}
 
 				step10.EndTimeIST = _processLog.NowIST();
 				step10.Status = selected == null ? "SKIPPED" : "SUCCESS";
 				step10.PathOut = selected?.SharePointPath;
 				step10.FileNameOut = selected?.Name;
-				step10.ErrorMessage = selected == null ? lookup.Message : null;
+				step10.ErrorMessage = selected == null ? lookup?.Message : null;
 				await _processLog.StepEndAsync(runCtx, step10, ct);
 				activeStep = null;
 
-				if (selected == null)
+				// Only a SharePoint lookup can come back empty; a missing upload has already thrown.
+				if (selected == null && lookup is not null)
 				{
 					_logger.LogInformation("Lab {LabId}: {Message}", lab.LabId, lookup.Message);
 					_fileLog.Info($"Lab {lab.LabId}: {lookup.Message}");
@@ -376,6 +476,9 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 					continue;
 				}
 
+				if (selected == null)
+					throw new InvalidOperationException("No master file was selected for this run.");
+
 				runRow.LatestMasterFileFound = "YES";
 
 				// What the run log calls its input has to be what the data actually came from. A
@@ -383,7 +486,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				// and the week folder is still the output destination - but not one claim or line row
 				// comes out of it, so naming it here would send anyone reconciling a figure to a file
 				// that never fed the load.
-				var dbRunSourceLabel = lab.UsesLabDatabaseSource
+				var dbRunSourceLabel = useLabDatabase
 					? LRN.MasterFileProcessorWorker.Database.LabSourceRunGate.RunSourceLabel(
 						sourceRunId,
 						new[] { lab.LineLevelSourceTable, lab.ClaimLevelSourceTable, lab.LimsSourceTable })
@@ -445,6 +548,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				step15.EndTimeIST = _processLog.NowIST();
 				step15.Status = alreadyProcessed ? "SKIPPED" : "SUCCESS";
 				step15.ErrorMessage = alreadyProcessed ? "already processed (etag unchanged)"
+					: fromUpload ? "uploaded in the AR Workbench; the already-processed check does not apply"
 					: rerun is not null ? "re-run requested; the already-processed check was bypassed"
 					: null;
 				await _processLog.StepEndAsync(runCtx, step15, ct);
@@ -522,7 +626,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 					StepSeq = stepSeq,
 					StepName = "Download Master File",
 					StepCategory = "Ingestion",
-					SourceSystem = "SharePoint",
+					SourceSystem = fromUpload ? "LRNMaster" : "SharePoint",
 					StartTimeIST = _processLog.NowIST(),
 					Status = "IN_PROGRESS",
 					FileNameIn = selected.Name,
@@ -600,12 +704,16 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				// Download XLSX into RAW ROOT
 				var stagingFileName = $"{labPrefix}_{SanitizeFileName(selected.Name)}";
 				var stagingPath = Path.Combine(rawRoot, stagingFileName);
+				rawDownloadPath = stagingPath;
 				var productionRawMasterPath = Path.Combine(rawMasterFolder, SanitizeFileName(selected.Name));
 
 				_logger.LogInformation("Lab {LabId}: downloading {SpPath} -> {Local}", lab.LabId, selected.SharePointPath, stagingPath);
 				_fileLog.Info($"Lab {lab.LabId}: downloading {selected.SharePointPath} -> {stagingPath}");
 
-				await DownloadSharePointFileWithRetryAsync(selected.DriveId, selected.ItemId, stagingPath, ct);
+				if (fromUpload)
+					await _uploads.SaveContentToFileAsync(uploadId!.Value, lab.LabId, stagingPath, ct);
+				else
+					await DownloadSharePointFileWithRetryAsync(selected.DriveId, selected.ItemId, stagingPath, ct);
 
 				File.Copy(stagingPath, productionRawMasterPath, overwrite: true);
 
@@ -616,16 +724,22 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 
 				_fileLog.Info($"Lab {lab.LabId}: Production raw master copied to WatchFolder week folder -> {productionRawMasterPath}");
 
-				var limsMaster = await TryDownloadSiblingRawMasterAsync(lab, selected, rawMasterFolder, runCtx.RunId, weekFolder, ct, sourceRunId);
+				// An upload is the claim and line levels only: there is no SharePoint week folder for a
+				// LIMS master or a client-paid file to sit in, so both are skipped and the lab's LIMS
+				// table keeps what it has.
+				(bool Available, long? LimsRows) limsMaster = fromUpload
+					? (true, null)
+					: await TryDownloadSiblingRawMasterAsync(lab, selected, rawMasterFolder, runCtx.RunId, weekFolder, ct, sourceRunId);
 				if (!limsMaster.Available)
 					throw new InvalidOperationException("Required LIMS master file was not available in the same SharePoint week folder as the production master file.");
 
-				await TrySyncClientPaidFileAsync(lab, selected, processedOutFolder, runCtx.RunId, ct);
+				if (!fromUpload)
+					await TrySyncClientPaidFileAsync(lab, selected, processedOutFolder, runCtx.RunId, ct);
 
 				// Update file size after download
 				// Skipped for a LabDatabase lab: the size of a workbook it did not read from would
 				// sit beside a table name and read as that table's size.
-				if (!lab.UsesLabDatabaseSource)
+				if (!useLabDatabase)
 				{
 					try
 					{
@@ -664,13 +778,24 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				activeStep = null;
 
 				// -------- Column validation --------
-				var lineSchemaPath = ResolvePath(!string.IsNullOrWhiteSpace(lab.LineLevelSchemaJsonPath)
-					? lab.LineLevelSchemaJsonPath!
-					: _opt.LineLevelSchemaJsonPath);
+				// An uploaded workbook is the standard template, whatever the lab: its headers are the
+				// common column names, so the template schema stands in for the lab's own schema - for
+				// the required-column check here and for header matching in the standardization below.
+				var lineSchemaPath = fromUpload
+					? ResolvePath(_opt.StandardUploadLineLevelSchemaJsonPath)
+					: ResolvePath(!string.IsNullOrWhiteSpace(lab.LineLevelSchemaJsonPath)
+						? lab.LineLevelSchemaJsonPath!
+						: _opt.LineLevelSchemaJsonPath);
 
-				var claimSchemaPath = ResolvePath(!string.IsNullOrWhiteSpace(lab.ClaimLevelSchemaJsonPath)
-					? lab.ClaimLevelSchemaJsonPath!
-					: _opt.ClaimLevelSchemaJsonPath);
+				var claimSchemaPath = fromUpload
+					? ResolvePath(_opt.StandardUploadClaimLevelSchemaJsonPath)
+					: ResolvePath(!string.IsNullOrWhiteSpace(lab.ClaimLevelSchemaJsonPath)
+						? lab.ClaimLevelSchemaJsonPath!
+						: _opt.ClaimLevelSchemaJsonPath);
+
+				var claimSheetCandidates = fromUpload
+					? _schemaLoader.LoadFromFile(claimSchemaPath).SheetName ?? "Claim Level"
+					: _opt.ClaimSheetName;
 
 				// STEP 40: Schema validation
 				stepSeq = 40;
@@ -688,7 +813,11 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				activeStep = step40;
 				await _processLog.StepStartAsync(runCtx, step40, ct);
 
-				var effectiveLineCandidates = GetEffectiveLineSheetCandidates(lab, stagingPath);
+				// The template has exactly one line-level sheet; the lab's multi-sheet layouts (NorthWest,
+				// period sheets) belong to its own workbook, not to the template.
+				var effectiveLineCandidates = fromUpload
+					? _schemaLoader.LoadFromFile(lineSchemaPath).SheetName ?? "Line Level"
+					: GetEffectiveLineSheetCandidates(lab, stagingPath);
 
 				// A LabDatabase lab still has a SharePoint week folder - the LIMS master and the
 				// client-paid file live there - but its claim/line DATA comes from its own tables,
@@ -696,7 +825,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				SchemaValidationResult lineValidation;
 				SchemaValidationResult claimValidation;
 
-				if (lab.UsesLabDatabaseSource)
+				if (useLabDatabase)
 				{
 					(lineValidation, claimValidation) =
 						await ValidateLabDatabaseSourceTablesAsync(lab, lineSchemaPath, claimSchemaPath, ct);
@@ -704,12 +833,12 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				else
 				{
 					lineValidation = _schemaValidator.Validate(stagingPath, effectiveLineCandidates, lineSchemaPath);
-					claimValidation = _schemaValidator.Validate(stagingPath, _opt.ClaimSheetName, claimSchemaPath);
+					claimValidation = _schemaValidator.Validate(stagingPath, claimSheetCandidates, claimSchemaPath);
 				}
 
 				if (!lineValidation.IsValid || !claimValidation.IsValid)
 				{
-					var msg = BuildSchemaErrorMessage(lineValidation, claimValidation, effectiveLineCandidates, _opt.ClaimSheetName);
+					var msg = BuildSchemaErrorMessage(lineValidation, claimValidation, effectiveLineCandidates, claimSheetCandidates);
 
 					_logger.LogError("Lab {LabId}: schema validation failed for file {File}. {Msg}", lab.LabId, selected.Name, msg);
 					_fileLog.Error($"Lab {lab.LabId}: schema validation failed for {selected.Name}. {msg}");
@@ -780,8 +909,8 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 
 				// RAW intermediate exports (Excel -> CSV) stored under RAW ROOT (no lab folder)
 				var baseName = SanitizeFileName(Path.GetFileNameWithoutExtension(selected.Name));
-				var lineRawPath = Path.Combine(rawRoot, $"{labPrefix}_{baseName}_LineLevel_RAW.csv");
-				var claimRawPath = Path.Combine(rawRoot, $"{labPrefix}_{baseName}_ClaimLevel_RAW.csv");
+				lineRawPath = Path.Combine(rawRoot, $"{labPrefix}_{baseName}_LineLevel_RAW.csv");
+				claimRawPath = Path.Combine(rawRoot, $"{labPrefix}_{baseName}_ClaimLevel_RAW.csv");
 
 				await _status.UpsertStatusAsync(
 					selected.LabId, selected.DriveId, selected.ItemId, selected.ETagKey,
@@ -834,7 +963,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				var lineSheetNames = effectiveLineCandidates
 					.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-				if (lab.UsesLabDatabaseSource)
+				if (useLabDatabase)
 				{
 					var rows = await ExportLabDatabaseTableAsync(lab, lab.LineLevelSourceTable, "LineLevel", lineRawPath, ct);
 					step50.SourceSystem = "LabDatabase";
@@ -955,7 +1084,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				};
 				activeStep = step70;
 				await _processLog.StepStartAsync(runCtx, step70, ct);
-				if (lab.UsesLabDatabaseSource)
+				if (useLabDatabase)
 				{
 					var claimRows = await ExportLabDatabaseTableAsync(lab, lab.ClaimLevelSourceTable, "ClaimLevel", claimRawPath, ct);
 					step70.SourceSystem = "LabDatabase";
@@ -965,7 +1094,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				}
 				else
 				{
-					await ExcelCsvExporter.ExportSingleSheetToCsvAsync(stagingPath, _opt.ClaimSheetName, claimRawPath, ct);
+					await ExcelCsvExporter.ExportSingleSheetToCsvAsync(stagingPath, claimSheetCandidates, claimRawPath, ct);
 				}
 				step70.EndTimeIST = _processLog.NowIST();
 				step70.Status = "SUCCESS";
@@ -1089,6 +1218,13 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				step85.ErrorDetail = string.IsNullOrEmpty(bulkErrors) ? null : bulkErrors;
 				await _processLog.StepEndAsync(runCtx, step85, ct);
 				activeStep = null;
+
+				// HIPAA MF-05: a level refused because the lab's connection reaches another lab's
+				// database is not a contained step failure - it fails the run, which writes
+				// LAB_ROUTING_MISMATCH to LRN_Error_Log and notifies Teams.
+				var misrouted = bulkOutcomes.FirstOrDefault(o => o.ErrorCode == LabRoutingException.ErrorCode);
+				if (misrouted is not null)
+					throw new LabRoutingException(misrouted.Message ?? $"Lab {lab.LabId}: target database is not this lab's.");
 
 				// Only now, with the rows committed, is the upstream run recorded as taken. Marking
 				// earlier would let a failed load look ingested and the next poll would skip it, so
@@ -1442,7 +1578,8 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 				activeStep = step130;
 				await _processLog.StepStartAsync(runCtx, step130, ct);
 
-				var processedFolderId = await _sp.TryResolveProcessedFolderIdAsync(ct);
+				// An upload has no SharePoint item to move.
+				var processedFolderId = fromUpload ? null : await _sp.TryResolveProcessedFolderIdAsync(ct);
 				if (!string.IsNullOrWhiteSpace(processedFolderId))
 				{
 					await _sp.MoveItemAsync(selected.DriveId, selected.ItemId, processedFolderId!, ct);
@@ -1452,7 +1589,9 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 				else
 				{
 					step130.Status = "SKIPPED";
-					step130.ErrorMessage = "Processed folder not configured or not resolved.";
+					step130.ErrorMessage = fromUpload
+						? "Uploaded in the AR Workbench; there is no SharePoint file to move."
+						: "Processed folder not configured or not resolved.";
 				}
 				step130.EndTimeIST = _processLog.NowIST();
 				await _processLog.StepEndAsync(runCtx, step130, ct);
@@ -1479,7 +1618,10 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 				// watcher holding a previous output file). Treat this as transient: skip the file
 				// for THIS run and let the next poll retry it. Do not mark ERROR, do not raise an
 				// Error_Log row, and do not send a failure notification.
-				var skipMsg = $"File locked by another process; skipping this run and retrying on the next run. {ex.Message}";
+				// An upload is not retried by the next poll - its request closes below - so it says to upload again.
+				var skipMsg = fromUpload
+					? $"File locked by another process; the uploaded file was not loaded. Upload it again. {ex.Message}"
+					: $"File locked by another process; skipping this run and retrying on the next run. {ex.Message}";
 
 				try
 				{
@@ -1564,15 +1706,19 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 				// Error_Log entry for unexpected exceptions
 				try
 				{
+					var misrouted = ex is LabRoutingException;
+
 					await _processLog.LogErrorAsync(runCtx, new ErrorLogRow
 					{
 						Severity = "ERROR",
 						StepName = stepSeq > 0 ? $"Step {stepSeq}" : "Unhandled",
-						ErrorCode = "UNHANDLED_EXCEPTION",
+						ErrorCode = misrouted ? LabRoutingException.ErrorCode : "UNHANDLED_EXCEPTION",
 						ErrorSummary = ex.Message,
 						FileName = selected?.Name,
 						FilePath = selected?.SharePointPath,
-						RecommendedAction = "Check ErrorDetail and fix the underlying failure, then rerun.",
+						RecommendedAction = misrouted
+							? "Nothing was written to the other database. Fix the lab's LabDbConnectionKey or its Key Vault secret so it names the lab's own database, then rerun."
+							: "Check ErrorDetail and fix the underlying failure, then rerun.",
 						OwnerTeam = "LRN",
 						Status = "OPEN"
 					}, ct);
@@ -1615,6 +1761,26 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 					TryDeleteDirectory(stagingFolder);
 				}
 
+				// The same for the downloaded workbook and the RAW CSVs. A successful run has already
+				// moved the workbook to LRN-RAWFILE\Archive and deleted the CSVs, so these only fire
+				// for a run that failed or stopped early - its working copies of the lab's claims are
+				// not left on disk for the next person to find (HIPAA MF-02/03). The workbook is still
+				// on SharePoint; a rerun downloads it again.
+				if (rawDownloadPath != null)
+					TryDelete(rawDownloadPath);
+
+				if (!_opt.KeepRawCsvExports)
+				{
+					if (lineRawPath != null) TryDelete(lineRawPath);
+					if (claimRawPath != null) TryDelete(claimRawPath);
+				}
+
+				// The uploaded workbook does not rest in LRNMaster once its run is over, however it
+				// ended: a successful run has archived its own copy, and a failed one needs the user to
+				// fix and upload the file again anyway.
+				if (fromUpload)
+					await _uploads.PurgeContentAsync(uploadId!.Value, ct);
+
 				// In the finally rather than on the success path because every early exit above is
 				// a `continue`, which runs this block. A claimed request that never gets an outcome
 				// blocks the lab from being re-run again, so it has to be closed on every path.
@@ -1639,8 +1805,12 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 				orphan.RerunRequestId,
 				runId: null,
 				resultStatus: "SKIPPED",
-				message: $"Lab {orphan.LabId} is not configured in this Master File Processor ({Environment.MachineName}).",
+				message: $"Lab {orphan.LabId} is not configured in this Master File Processor ({Environment.MachineName}). " +
+						 "Add it under MasterFileProcessor:Labs (MasterDataSource \"Upload\" for a lab with no SharePoint master folder).",
 				ct);
+
+			if (orphan.UploadId is long orphanUpload)
+				await _uploads.PurgeContentAsync(orphanUpload, ct);
 		}
 
 		// Upload the daily master processor log once per run (client requirement)
@@ -2013,6 +2183,13 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 				return result;
 			}
 
+			// An AR Workbench upload carries the site drive only when it resolved this poll.
+			if (string.IsNullOrWhiteSpace(selected.DriveId))
+			{
+				result.Summary = "SKIPPED (SharePoint drive not resolved)";
+				return result;
+			}
+
 			var year = TryParseYearFromSharePointPath(selected.SharePointPath)
 				?? runLocalNow.ToString("yyyy", CultureInfo.InvariantCulture);
 
@@ -2116,6 +2293,38 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			.Select(p => p.Trim().Trim('/').Trim('\\'))
 			.Where(p => p.Length > 0);
 		return string.Join("/", clean);
+	}
+
+	/// <summary>
+	/// Describes an AR Workbench upload the way a SharePoint lookup describes the week's file, so the
+	/// rest of the run needs no second path. The "SharePoint path" is synthetic and shaped like the
+	/// real week-folder layout (…/&lt;yyyy&gt;/&lt;MM.Month&gt;/&lt;MM.dd.yyyy - MM.dd.yyyy&gt;/&lt;file&gt;),
+	/// built from the period the user chose, so the year, month and week folders - and with them the
+	/// output file names, the week folder of the bulk-load log and the snapshot week range - come out
+	/// exactly as for a SharePoint file of that week. The item id keeps the file-status rows of
+	/// uploads apart from SharePoint items; the drive is the site drive, for the output upload.
+	/// </summary>
+	private static SharePointDownloader.SelectedFile BuildUploadedSelectedFile(
+		LabFileMap lab,
+		LRN.MasterFileProcessorWorker.ProcessLogging.MasterFileUpload upload,
+		string? siteDriveId)
+	{
+		var start = upload.PeriodStart.Date;
+		var end = upload.PeriodEnd.Date;
+		var inv = CultureInfo.InvariantCulture;
+
+		var monthFolder = $"{start:MM}.{start.ToString("MMMM", inv)}";
+		var weekFolder = $"{start.ToString("MM.dd.yyyy", inv)} - {end.ToString("MM.dd.yyyy", inv)}";
+		var fileName = Path.GetFileName(upload.FileName);
+
+		return new SharePointDownloader.SelectedFile(
+			LabId: lab.LabId,
+			DriveId: siteDriveId ?? "",
+			ItemId: $"ARWB-UPLOAD-{upload.UploadId}",
+			Name: fileName,
+			ETagKey: upload.FileSha256,
+			LastModifiedUtc: new DateTimeOffset(DateTime.SpecifyKind(upload.UploadedOn, DateTimeKind.Utc)),
+			SharePointPath: CombineSpPath("AR Workbench Upload", lab.LabName, start.ToString("yyyy", inv), monthFolder, weekFolder, fileName));
 	}
 
 	private static (string MonthFolder, string DateFolder) ParseMonthAndDateFolder(string sharePointPath)
@@ -2390,7 +2599,8 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			return await _labRunGate.DecideAsync(
 				lab.LabId, connectionString, requiredFileTypes, ingestFileTypes, ct, ignoreAlreadyIngested);
 		}
-		catch (Exception ex)
+		// A connection to another lab's database is not "try again next poll": it fails the run (MF-05).
+		catch (Exception ex) when (ex is not LabRoutingException)
 		{
 			_logger.LogError(ex, "Lab {LabId}: could not read the source run status; skipping this poll.", lab.LabId);
 			_fileLog.Error($"Lab {lab.LabId}: could not read the source run status; skipping this poll.", ex);
@@ -2463,8 +2673,20 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			  $"in {_configuration["KeyVault:VaultUri"]} (or the service identity lacks 'Key Vault Secrets User').";
 	}
 
+	/// <summary>
+	/// The lab's connection, confirmed to reach the lab's own database (HIPAA MF-05) - every LIMS
+	/// load and every lab-database read comes through here. Throws when it is missing or points at a
+	/// database other than the DatabaseName in the lab's *FieldMappings.json.
+	/// </summary>
 	private string ResolveLabConnectionStringOrThrow(LabFileMap lab)
-		=> GetLabConnectionString(lab) ?? throw new InvalidOperationException(MissingLabConnectionMessage(lab));
+	{
+		var connectionString = GetLabConnectionString(lab) ?? throw new InvalidOperationException(MissingLabConnectionMessage(lab));
+
+		var mapping = _labRegistry.TryGetMapping(lab.LabId, ResolvePath(_lineClaimOptions.LabMappingsFolder));
+		LabDatabaseGuard.EnsureConnectionTargetsLab(lab.LabId, mapping?.DatabaseName, connectionString);
+
+		return connectionString;
+	}
 
 	/// <summary>
 	/// Validates both source tables against the same schema JSONs the workbook would be validated
@@ -3070,7 +3292,7 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 			return (true, await TryImportLimsMasterAsync(lab, limsRawMasterPath, runId, weekFolder, ct, sourceRunId));
 		}
-		catch (Exception ex)
+		catch (Exception ex) when (ex is not LabRoutingException)
 		{
 			_logger.LogWarning(ex, "Lab {LabId}: failed to download LIMS raw master file.", lab.LabId);
 			_fileLog.Error($"Lab {lab.LabId}: failed to download LIMS raw master file.", ex);
@@ -3273,7 +3495,8 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 
 			return result.TotalRowsCopied;
 		}
-		catch (Exception ex)
+		// Contained like any LIMS failure, except a load aimed at another lab's database: that fails the run (MF-05).
+		catch (Exception ex) when (ex is not LabRoutingException)
 		{
 			_logger.LogError(ex, "Lab {LabId}: LIMS SQL import failed for {Path}", lab.LabId, limsRawMasterPath);
 			_fileLog.Error($"Lab {lab.LabId}: LIMS SQL import failed for {limsRawMasterPath}", ex);

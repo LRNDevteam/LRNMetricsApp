@@ -267,10 +267,13 @@ public static class ReportSnapshotComparer
 
     private static readonly Regex Money = new("Charge|Paid|Payment|Balance|Amount|Revenue|Allowed|Billed|Collected|Cost|Price|Reimburse|Expected|Dollar", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex Percent = new("Pct|Percent|Rate|Ratio|Share", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    // "BilledCount" is a count of billed samples, not dollars; "Account" and "Discount" are not counts.
+    private static readonly Regex Count = new("(?<!ac|dis)Count|Qty|Quantity", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>money | percent | count | number - how the page prints the column.</summary>
     internal static string FormatFor(string name, Type type) =>
         Percent.IsMatch(name) ? "percent"
+        : Count.IsMatch(name) ? "count"
         : Money.IsMatch(name) ? "money"
         : type == typeof(int) || type == typeof(long) || type == typeof(short) ? "count"
         : "number";

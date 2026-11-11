@@ -215,7 +215,7 @@ public static class FileStatusLogCsv
 			Escape(sourceFileLocation),
 			Escape(status),
 			Escape(outputLocation),
-			Escape(logMessage));
+			Escape(LRN.MasterFileProcessorWorker.Security.PhiRedactor.Scrub(logMessage)));
 
 		AppendLine(csvPath, row);
 	}

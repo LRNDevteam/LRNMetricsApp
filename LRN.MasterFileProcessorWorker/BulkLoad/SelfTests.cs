@@ -16,7 +16,7 @@ namespace LRN.MasterFileProcessorWorker.BulkLoad;
 /// mechanical once that is approved.
 /// </para>
 /// </summary>
-public static class SelfTests
+public static partial class SelfTests
 {
     private static int _passed;
     private static readonly List<string> Failures = new();
@@ -84,6 +84,16 @@ public static class SelfTests
         SnapshotRetentionKeepsMonthEnds();
         ParquetSnapshotRoundTrip();
         LocalFolderSnapshotStoreUploadAndPrune();
+
+        // HIPAA controls - SelfTests.Hipaa.cs
+        PhiRedactorStripsRowValues();
+        PhiRedactorWrapsExceptions();
+        MalformedCsvErrorCarriesNoRowContent();
+        SqlConnectionPolicyFindings();
+        LabDatabaseGuardRefusesAnotherLabsDatabase();
+        EveryLabMappingNamesItsDatabase();
+        PhiFileNameGuardFindsIdentifiersNotDates();
+        TempFileJanitorRemovesOnlyOrphanedTempFiles();
 
         Console.WriteLine(new string('-', 70));
 

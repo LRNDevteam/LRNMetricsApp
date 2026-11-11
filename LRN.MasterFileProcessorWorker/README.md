@@ -37,6 +37,7 @@ dotnet publish  services/LRN.MasterFileProcessorWorker -c Release
 | `ProcessLogging/` | `LRN_Run_Log` / `LRN_Step_Log` / `LRN_Error_Log` writers (SQL, CSV, daily workbook) and file-status tracking. |
 | `Logging/` | log4net-backed `ILoggerService`, the application log file that only carries our own messages. |
 | `Notifications/` | Teams webhook and Graph email notifiers. |
+| `Security/` | HIPAA controls: PHI redaction for every log sink, SQL connection policy, lab-database guard, file-name guard, temp-file sweep. |
 | `Schemas/` | Per-lab column schemas and field mappings. Copied to the output folder. |
 | `sql/` | Table and stored-procedure scripts. Reference only - never copied to the output folder. |
 | `Sample/` | Sample workbooks and verification queries. Reference only. |
@@ -91,17 +92,22 @@ never falls back to LRNMaster:
 | 10 Beech Tree | `BeechTreeConnStr` | `BeechTree_LRN` |
 | 12 Phi Life | `PhiLifeConnStr` | `PhiLife_LRN` |
 | 13 PCR Labs of America | `PCRLOAConnStr` | `PCRLOA_LRN` |
-| 25 VariantX | `VariantXConnection` | |
+| 25 VariantX | `VariantXConnection` | `VariantX_LRN` |
 | 16 Elixir | `ElixirConnection` | `Elixir_LRN` |
 | 18 Certus | `CertusConnection` | `Certus_LRN` |
 | 23 NorthWest | `NWLConnection` | `NWL_LRN` |
 | 24 Augustus Labs | `AugustusConnStr` | `Augustus_LRN` |
-| 26 Analyze Pathology | `AnalyzePathologyConnStr` | `AnalyzePathology_LRN` (tables: `sql/AnalyzePathology/`) |
-| 27 WellHealth | `WellHealthConnStr` | `WellHealth_LRN` |
-| 28 CoreBio | `CoreBioConnStr` | `CoreBio_LRN` (tables: `Database/LRN.MasterFileProcessorWorker/CoreBio/`) |
-| 29 TexasDiagnostic | `TexasDiagnosticConnStr` | `TexasDiagnostic_LRN` (tables: `Database/LRN.MasterFileProcessorWorker/TexasDiagnostic/`) |
+| 26 Analyze Pathology | `AnalyzePathologyConnStr` | `AnalyzePathology` (tables: `sql/AnalyzePathology/`) |
+| 27 WellHealth | `WellHealthConnStr` | `WellHealth` |
+| 28 CoreBio | `CoreBioConnStr` | `CoreBio` (tables: `Database/LRN.MasterFileProcessorWorker/CoreBio/`) |
+| 29 TexasDiagnostic | `TexasDiagnosticConnStr` | `TexasDiagnostic` (tables: `Database/LRN.MasterFileProcessorWorker/TexasDiagnostic/`) |
 
 A literal `LabDbConnectionString` / `LimsDbConnectionString` on a lab is no longer read.
+
+The Database column is also the `DatabaseName` in the lab's `*FieldMappings.json`, and it is enforced:
+every load refuses a connection that reaches any other database (see [HIPAA controls](#hipaa-controls),
+MF-05). The names above were checked against `kv-lrnmetrics-prod` with `--diagnose` in Nov 2026. A lab
+moved to a new database needs its mapping file changed in the same release as its vault secret.
 
 ### Authenticating to the vault
 
@@ -147,6 +153,50 @@ Columns the file marks **Unmapped / N/A / Not Required** (for example `ClinicNam
 `ClaimUID`, `TotalWO`, `T_F`, `PlanName`, the deposit dates, `Created/Updated On/By`) are still
 loaded on purpose: Clinic Summary, Sales Rep Summary, the Denial worker and the dashboards read them.
 
+## Uploaded master files (AR Workbench > Master File Upload)
+
+For a client whose master file never reaches the SharePoint master folder (a lab that takes only the
+AR Workbench), or a one-off load for any lab, the master data can be uploaded in the AR Workbench
+instead. The user downloads the **standard template** (one workbook: `Instructions`, `Claim Level`,
+`Line Level`), maps their data into it and uploads it with the week it belongs to.
+
+| Piece | Where |
+| --- | --- |
+| Template columns (the one definition) | `Schemas/StandardUpload/StandardUpload_ClaimLevel.schema.json`, `..._LineLevel.schema.json`. Headers are the common column names; `Required` drives validation. `LRN.ReportsApi` links the same two files to build the downloadable template and its upload check. |
+| Stored upload | `LRNMaster.dbo.MasterFileUpload` (`Database/LRN.MasterFileProcessorWorker/Create_MasterFileUploads.sql`, after `Create_RerunRequests.sql`) |
+| Queue | the usual `dbo.MasterFileProcessorRerunRequest` row, with `UploadId` set |
+
+A claimed request with an `UploadId` changes only how the run **gets** its workbook (trigger type
+`Upload` in `LRN_Run_Log`):
+
+* Step 10 reads the upload row instead of searching SharePoint; step 15 does not apply; step 20 writes
+  the stored workbook to the same local path a download would use.
+* Validation, RAW export and standardization use the template schemas as the lab schema (and the
+  template's sheet names), whatever the lab's own schema is.
+* No LIMS master and no client-paid file (an upload has no SharePoint week folder); step 130 has no
+  SharePoint item to move. A LabDatabase lab's table gate and table export are off for that run.
+* Everything else is unchanged: insurance-master payer normalization, denial enrichment, the
+  `dbo.LineLevelData` / `dbo.ClaimLevelData` bulk load, the AR Workbench sync (step 87), snapshots,
+  output CSVs and their SharePoint upload, the archive copy, Teams notifications.
+* The week the user picked becomes a synthetic path `AR Workbench Upload/<Lab>/<yyyy>/<MM.Month>/<MM.dd.yyyy - MM.dd.yyyy>/<file>`,
+  so year, month and week folders, output names and the snapshot week range come out as for a
+  SharePoint file of that week.
+* HIPAA: `FileContent` is set to NULL when the run ends, success or failure (the archive keeps the
+  processed copy, as for every master file). A failed upload is fixed and uploaded again.
+
+Every configured lab accepts an upload. A lab with **no** SharePoint master folder is configured with
+`"MasterDataSource": "Upload"`: the schedule skips it silently (no run log, no "no file found" Teams
+message), and a plain Run Master File Load for it is closed as SKIPPED. Onboarding such a lab needs
+the same pieces as any other lab, minus SharePoint:
+
+1. Its database with `dbo.LineLevelData` / `dbo.ClaimLevelData` (and the AR Workbench scripts), an
+   active `LabMaster` row, and its Key Vault connection secret.
+2. A `Schemas/LabMappings/<Lab>FieldMappings.json` with its `LabId` and `DatabaseName`.
+3. A `MasterFileProcessor:Labs` entry, e.g.
+   `{ "LabId": 30, "LabName": "NewClient", "MasterDataSource": "Upload", "LabDbConnectionKey": "NewClientConnStr", "ArWorkbenchEnabled": true }`.
+
+A request for a lab that is not in `Labs` is closed as SKIPPED with that reason, and its upload is cleared.
+
 ## Master data snapshots (step 88)
 
 Design: [`docs/master-file-processor/LRN_Report_Snapshots_Parquet_Storage_Implementation.pdf`](../docs/master-file-processor/LRN_Report_Snapshots_Parquet_Storage_Implementation.pdf).
@@ -186,6 +236,62 @@ To turn it on:
 
 To inspect a file, download it with Azure Storage Explorer and open it with DuckDB:
 `SELECT * FROM 'R20260213BTL0001_02.06.2026-02.12.2026_LINELEVEL.parquet' LIMIT 20;`
+
+## HIPAA controls
+
+Implements the `LRN.MasterFileProcessorWorker` rows of
+[`docs/security/LRN HIPAA Compliance Checklist.pdf`](../docs/security/LRN%20HIPAA%20Compliance%20Checklist.pdf)
+(section 2) that code can satisfy, and Wave 4 tasks W4-2 / W4-6 of
+[`LRN_HIPAA_Platform_Implementation.md`](../docs/security/LRN_HIPAA_Platform_Implementation.md).
+`--diagnose` section **1c** reports the ones that depend on configuration or the server.
+
+| Row | Control | Where |
+| --- | --- | --- |
+| MF-05 | Before any write, the lab's connection must reach the database named by `DatabaseName` in its `*FieldMappings.json`. Checked on the connection string before the `LineClaimFileLogs` row and every LIMS / lab-database access, and again on the open connection before `TRUNCATE`. A mismatch fails the run: `LAB_ROUTING_MISMATCH` in `LRN_Error_Log`, Teams notified, nothing written. | `Security/LabDatabaseGuard.cs` |
+| MF-07, CC-18 | No row values in any log. Exception text that quotes a cell (`The given value '…'`, `Truncated value: '…'`, duplicate key values, parse errors, SSNs) is scrubbed before it reaches `LRN_Run/Step/Error_Log` (SQL, CSV, workbook), `ReportRunIdInfoLog`, `ReportsWorkflowTracker`, `LineClaimFileLogs`, the rerun queue, the file-status and master-processor CSVs, the log4net file, the Windows event log and Teams. `LRN_Error_Log.RowExample` is always written empty. A malformed CSV line is reported by number, never by content. | `Security/PhiRedactor.cs`, `Security/RedactingLoggerProvider.cs` |
+| CC-08, MF-04 | At startup every `ConnectionStrings:*` value is checked. `Encrypt=False` is switched on in memory; `TrustServerCertificate=True` and an `sa` login are logged. `Security:SqlConnectionPolicy = Enforce` refuses to start while any remain; it ships as `Warn` because the vault secrets still have both (see below). | `Security/SqlConnectionPolicy.cs`, `Program.cs` |
+| MF-02, MF-03 | A run's downloaded workbook and RAW CSVs are deleted in `finally` if the run did not finish (a finished run has already archived / deleted them). An hourly sweep removes temp copies older than 24 h: `LRN-RAWFILE` (not `Archive`), `~staging_*`, `*.download`, Mode/Median temp workbooks, snapshot `*.parquet` work files. `--diagnose` fails a data folder that Everyone / Users / Authenticated Users can read. | `Security/TempFileJanitor.cs`, `MasterFileProcessorWorker.cs` |
+| MF-08 | A master file whose name or SharePoint path carries an SSN-shaped value or a 9+ digit number that is not a date is refused before download (`PHI_IN_FILE_NAME`); the message never repeats the name. `Security:RejectPhiInFileNames`. | `Security/PhiFileNameGuard.cs` |
+| MF-01 | SharePoint authenticates with a certificate when the vault holds `MasterFileProcessor--SharePoint--ClientCertificate` (import it as a Key Vault *certificate*), falling back to the client secret with a warning. | `SharePoint/SharePointDownloader.cs` |
+| MF-12 | The bulk-copy completion entry in `ReportRunIdInfoLog` records rows in the table, rows in the CSV and the CSV's SHA-256. A count mismatch already rolls the load back. | `BulkLoad/LineClaimImportService.cs` |
+| MF-06 | No staging tables exist: line/claim loads `TRUNCATE` and bulk copy inside one transaction. | `BulkLoad/LineClaimBulkLoader.cs` |
+| MF-09 | `RowHash` (SHA-256 of the hashed business columns) is for change detection only. It is **not** de-identification: the inputs are low-entropy, so a hash can be matched back to a patient by anyone who can guess them. Never expose it as a substitute identifier. | `BulkLoad/RowHasher.cs` |
+
+### Where PHI rests (W4-2)
+
+| Location | Holds | Kept |
+| --- | --- | --- |
+| Each lab's database (`LineLevelData`, `ClaimLevelData`, `LIMSMaster`, `ARWB_*`) | Current week's claims and lines | Replaced every run (MF-13); earlier weeks remain in SQL backups |
+| `C:\LRN-Files\Automation\LRN-RAWFILE\<month>\<week>\` | Downloaded workbook, RAW CSV exports | Duration of the run; swept after 24 h |
+| `C:\LRN-Files\Automation\LRN-RAWFILE\Archive\…` | Every processed workbook | Indefinitely - moves to Blob in Wave 4 (W4-3) |
+| `C:\LRN-Files\Automation\LRN-Input\<lab>\<year>\<month>\<week>\` (+ `Obsolete\`) | Published standardized CSVs, the raw master copy, LIMS / client-paid files | Indefinitely - read by the downstream watcher; retention to be decided (D1) |
+| `…\LRN-Input\<lab>\~staging_<RunId>\` | Work-in-progress outputs | Duration of the run; swept after 24 h |
+| `C:\LRN-Files\Automation\LRN-Output\Mode`, `\Median` | Mode/median payment workbooks (aggregates by CPT/payer) | Indefinitely |
+| `%TEMP%` (Mode/Median temp, `LRN-Snapshots\`) | Work files | Duration of the step; swept after 24 h |
+| Snapshot container (`MasterDataSnapshot`) | Weekly Parquet copies of the three tables | `KeepWeeks` (5) |
+| `logs\`, `Logs\`, `…\Logs\Master File Processor` | Run/step/error logs | No row values; file and SharePoint paths only |
+
+### Still open for this worker
+
+These need infrastructure or a decision, not code:
+
+* **CC-10 / G10 - rotate credentials.** The SQL `sqladmin` and `sa` passwords, the SharePoint client
+  secret and the Teams webhook URL were committed to git in the past (`appsettings.Secrets.json`
+  history). Rotate all of them, then decide D6 (history rewrite).
+* **CC-08 / MF-04 - fix the vault secrets.** Every connection string has `TrustServerCertificate=True`,
+  and nine production labs connect to `ReportEngine\SQLEXPRESS` as `sa`. Give each a least-privilege
+  login (or managed identity on SQL MI), install a trusted certificate on SQL Express, then set
+  `Security:SqlConnectionPolicy` to `Enforce`.
+* **MF-02 - folder ACLs and disk encryption.** Remove `Authenticated Users` from `C:\LRN-Files\Automation`
+  and confirm BitLocker on the volume (W4-1).
+* **MF-01 - `Sites.Selected`.** Grant the app registration `Sites.Selected` on the one site and remove
+  any tenant-wide `Sites.*` permission, then import the certificate.
+* **MF-10 - snapshot container.** Private access, a 5-week lifecycle rule and soft delete are storage
+  account settings. Blob names hold the lab, RunId and week - no patient identifiers.
+* **MF-11 - service account.** Run the service under a gMSA or low-privilege account.
+* **MF-13 - retention.** Earlier weeks remain in SQL backups; document the backup retention.
+* **CC-17 - PhiAccessAudit.** The shared table belongs with the API work; this worker's own access is
+  already recorded per RunId in `LRN_Run_Log` / `ReportRunIdInfoLog`.
 
 ## Notifications
 

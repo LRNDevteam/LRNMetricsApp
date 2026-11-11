@@ -1,4 +1,5 @@
 ﻿using System.Data;
+using LRN.MasterFileProcessorWorker.Security;
 using Microsoft.Data.SqlClient;
 
 namespace LRN.MasterFileProcessorWorker.BulkLoad;
@@ -69,6 +70,9 @@ public sealed class ReportRunIdInfoLogger
     {
         if (string.IsNullOrWhiteSpace(runId))
             return;
+
+        // Exception text quotes the cell that failed to convert or fit; the value never leaves here.
+        message = PhiRedactor.Scrub(message);
 
         try
         {

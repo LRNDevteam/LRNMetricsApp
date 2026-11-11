@@ -1,7 +1,7 @@
 {
   "LabId": 26,
   "LabName": "Analyze_Pathology",
-  "DatabaseName": "AnalyzePathology_LRN",
+  "DatabaseName": "AnalyzePathology",
   "ClaimLevel": {
     "Enabled": true,
     "CreateCsv": true,
