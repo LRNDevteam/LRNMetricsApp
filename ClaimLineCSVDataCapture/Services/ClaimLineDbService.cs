@@ -579,6 +579,26 @@ public sealed class ClaimLineDbService
     }
 
     /// <summary>
+    /// Runs PNC production report stored procedures after ingestion.
+    /// Prefix PNC_. Texas Diagnostic's sheet with Wednesday–Tuesday weeks (EntryWeek not blank).
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshPncProductionReports()
+    {
+        string[] procedures =
+        [
+            "dbo.usp_RefreshPNC_MonthlyBilledProductionSummary",
+            "dbo.usp_RefreshPNC_WeeklyBilledProductionSummary",
+            "dbo.usp_RefreshPNC_PayerBreakdown",
+            "dbo.usp_RefreshPNC_PayerByPanel",
+            "dbo.usp_RefreshPNC_PanelBreakdownWithPayers",
+            "dbo.usp_RefreshPNC_UnbilledAging",
+            "dbo.usp_RefreshPNC_CPTBreakdown",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>
     /// Runs all WellHealth production report stored procedures after ingestion.
     /// Prefix WH_. Same shape as Analyze Pathology, but billed = First Billed Date not blank
     /// and unbilled = First Billed Date blank (Mon–Sun weeks).
@@ -842,6 +862,7 @@ public sealed class ClaimLineDbService
             ["TexasDiagnostic"]  = "TD",
             ["Texas_Diagnostic"] = "TD",
             ["Texas Diagnostic"] = "TD",
+            ["PNC"]              = "PNC",
         };
 
     /// <summary>
@@ -1150,6 +1171,24 @@ public sealed class ClaimLineDbService
         ]);
 
     /// <summary>
+    /// Refreshes the PNC Collection Summary snapshots
+    /// (Database\ClaimLineCSVDataCapture\PNC\12_PNC_CollectionSummary.sql).
+    /// Panel Averages by DOS / Check Date are computed live, so there is no snapshot for them.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshPncCollectionReports()
+        => RunProductionReportSPs([
+            "dbo.usp_RefreshPNC_CS_MonthlyClaimVolume",
+            "dbo.usp_RefreshPNC_CS_WeeklyClaimVolume",
+            "dbo.usp_RefreshPNC_CS_Top5ReimbursementPct",
+            "dbo.usp_RefreshPNC_CS_Top5ReimbursementPay",
+            "dbo.usp_RefreshPNC_CS_InsuranceVsAging",
+            "dbo.usp_RefreshPNC_CS_InsuranceVsPaymentPct",
+            "dbo.usp_RefreshPNC_CS_PanelVsPayment",
+            "dbo.usp_RefreshPNC_CS_InsuranceVsPayment",
+            "dbo.usp_RefreshPNC_CS_CptVsPaymentPct",
+        ]);
+
+    /// <summary>
     /// Refreshes the Analyze Pathology Denial Summary aggregates (Monthly / Weekly Denial
     /// Analysis, Denial List, Denial List - Plan Type) from dbo.ClaimLevelData.
     /// </summary>
@@ -1182,6 +1221,17 @@ public sealed class ClaimLineDbService
             "dbo.usp_RefreshCB_DenialMonthly",
             "dbo.usp_RefreshCB_DenialWeekly",
             "dbo.usp_RefreshCB_DenialList",
+        ]);
+
+    /// <summary>
+    /// Refreshes the PNC Denial Summary aggregates (Monthly by Posted Date, Weekly by PostedWeek,
+    /// Top Denial List) from dbo.ClaimLevelData. PNC has no Plan Type tab.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshPncDenialReports()
+        => RunProductionReportSPs([
+            "dbo.usp_RefreshPNC_DenialMonthly",
+            "dbo.usp_RefreshPNC_DenialWeekly",
+            "dbo.usp_RefreshPNC_DenialList",
         ]);
 
     /// <summary>

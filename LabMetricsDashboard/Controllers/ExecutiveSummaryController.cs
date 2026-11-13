@@ -80,6 +80,7 @@ public sealed class ExecutiveSummaryController : Controller
             ["TexasDiagnostic"]  = "TD",
             ["Texas_Diagnostic"] = "TD",
             ["Texas Diagnostic"] = "TD",
+            ["PNC"]              = "PNC",
         };
 
     public ExecutiveSummaryController(

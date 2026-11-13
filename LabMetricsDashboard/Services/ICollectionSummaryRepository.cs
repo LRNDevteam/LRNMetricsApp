@@ -36,6 +36,16 @@ public interface ICollectionSummaryRepository
         CancellationToken ct = default);
 
     /// <summary>
+    /// Filter dropdown values from <c>usp_Get{prefix}_CS_FilterOptions</c>
+    /// (result set 1 = payer names, 2 = panel names), for labs listed in
+    /// <c>LabCollectionPrefix.HasCollectionFilterOptionsSp</c>.
+    /// </summary>
+    Task<CollectionFilterOptions> GetFilterOptionsFromSpAsync(
+        string connectionString,
+        string prefix,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Returns the Monthly Claim Volume pivot data for the Collection Report.
     /// Source: ClaimLevelData where InsurancePayment &gt; 0
     ///         and ClaimStatus IN ('Fully Paid','Partially Paid','Paid-Client').

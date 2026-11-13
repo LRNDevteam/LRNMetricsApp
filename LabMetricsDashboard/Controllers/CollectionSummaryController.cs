@@ -253,7 +253,11 @@ public class CollectionSummaryController : Controller
         try
         {
             CollectionFilterOptions options;
-            if (aggregatePrefix is not null && !hasActiveFilters
+            if (LabCollectionPrefix.HasCollectionFilterOptionsSp(labName))
+            {
+                options = await _repo.GetFilterOptionsFromSpAsync(connStr, LabCollectionPrefix.GetPrefix(labName)!, ct);
+            }
+            else if (aggregatePrefix is not null && !hasActiveFilters
                 && !LabCollectionPrefix.UsesSpCollectionLogic(labName)
                 && !LabCollectionPrefix.ReadsCollectionSpsLive(labName))
             {

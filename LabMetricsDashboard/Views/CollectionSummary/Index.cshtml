@@ -1509,8 +1509,15 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 {
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> Claim Level Data &bull;
-                    <strong>Filter:</strong> InsurancePayment &gt; 0 &nbsp;·&nbsp; CheckDate in @(DateTime.Today.Year - 1) &amp; @DateTime.Today.Year &bull;
-                    <strong>Rows:</strong> Panelname &rarr; Top @(Model.IsTexasDiagnosticLab ? 5 : 3) PayerName_Raw by Claim Count &bull;
+                    @if (Model.IsPncLab)
+                    {
+                    <span><strong>Filter:</strong> InsurancePayment &gt; 0 &nbsp;·&nbsp; CheckDate from 01/01/2024 to the week-range end date &bull;</span>
+                    }
+                    else
+                    {
+                    <span><strong>Filter:</strong> InsurancePayment &gt; 0 &nbsp;·&nbsp; CheckDate in @(DateTime.Today.Year - 1) &amp; @DateTime.Today.Year &bull;</span>
+                    }
+                    <strong>Rows:</strong> Panelname &rarr; Top @(Model.UsesTexasCollectionLayout ? 5 : 3) PayerName_Raw by Claim Count &bull;
                     <strong>Columns:</strong> CheckDate month / year / total &bull;
                     <strong>Values:</strong> Count of unique ClaimID, Sum of InsurancePayment &bull;
                     <strong>Sorted by:</strong> Claim Count DESC

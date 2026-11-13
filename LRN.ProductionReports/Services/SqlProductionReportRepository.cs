@@ -27,6 +27,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
     private const string WellHealthPrefix = "WH_";
     private const string CoreBioPrefix = "CB_";
     private const string TexasDiagnosticPrefix = "TD_";
+    private const string PncPrefix = "PNC_";
     private const string AugustusPrefix = "Aug_";
     private const string NorthWestPrefix = "NW_";
     private const string PcrPrefix = "PCR_";
@@ -38,6 +39,20 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
     /// <c>PanelName</c>, ranked by <c>COUNT(DISTINCT ClaimID)</c> descending.
     /// </summary>
     private const int TopPayerDrillDownCount = 3;
+
+    /// <summary>
+    /// Read-SP labs whose Monthly / Weekly SPs rank more than <see cref="TopPayerDrillDownCount"/>
+    /// payers per panel. The SP decides the payers; this only stops the C# side cutting them.
+    /// </summary>
+    private static int SpTopPayerCount(string spPrefix) =>
+        string.Equals(spPrefix, PncPrefix, StringComparison.OrdinalIgnoreCase) ? 5 : TopPayerDrillDownCount;
+
+    /// <summary>
+    /// Read-SP labs whose Production filter dropdowns come from
+    /// <c>usp_Get{prefix}ProductionFilterOptions</c> (result set 1 = payers, 2 = panels).
+    /// </summary>
+    private static bool HasFilterOptionsSp(string spPrefix) =>
+        string.Equals(spPrefix, PncPrefix, StringComparison.OrdinalIgnoreCase);
 
     private readonly ILogger<SqlProductionReportRepository> _logger;
 
@@ -3625,7 +3640,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             }
         }
 
-        return BuildProductionReportResultFromStoredProcedure(panelMonth, payerMonthMap, payerRankMap, allMonths, payerNames, panelNames);
+        return BuildProductionReportResultFromStoredProcedure(panelMonth, payerMonthMap, payerRankMap, allMonths, payerNames, panelNames, SpTopPayerCount(spPrefix));
     }
 
     private static ProductionReportResult BuildProductionReportResultFromStoredProcedure(
@@ -3634,7 +3649,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         Dictionary<string, Dictionary<string, int>> payerRankMap,
         SortedSet<string> allMonths,
         List<string> payerNames,
-        List<string> panelNames)
+        List<string> panelNames,
+        int topPayerCount)
     {
         var months = allMonths.ToList();
         var years = months.Select(m => int.Parse(m[..4], CultureInfo.InvariantCulture)).Distinct().OrderBy(y => y).ToList();
@@ -3656,7 +3672,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             var topPayers = payerMonthMap.TryGetValue(panel, out var payers) && payerRankMap.TryGetValue(panel, out var ranks)
                 ? payers
                     .OrderBy(p => ranks.GetValueOrDefault(p.Key, 99))
-                    .Take(TopPayerDrillDownCount)
+                    .Take(topPayerCount)
                     .Select(p => new ProductionPayerDrillDown
                     {
                         PayerName = p.Key,
@@ -3701,6 +3717,26 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(rule);
+
+        if (HasFilterOptionsSp(rule))
+        {
+            await using var spConn = new SqlConnection(connectionString);
+            await spConn.OpenAsync(ct).ConfigureAwait(false);
+            await using var spCmd = new SqlCommand($"dbo.usp_Get{rule}ProductionFilterOptions", spConn)
+            {
+                CommandType = CommandType.StoredProcedure,
+                CommandTimeout = 120,
+            };
+            await using var spRdr = await spCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            var spPayers = new List<string>();
+            while (await spRdr.ReadAsync(ct).ConfigureAwait(false))
+                if (!spRdr.IsDBNull(0)) spPayers.Add(spRdr.GetString(0));
+            await spRdr.NextResultAsync(ct).ConfigureAwait(false);
+            var spPanels = new List<string>();
+            while (await spRdr.ReadAsync(ct).ConfigureAwait(false))
+                if (!spRdr.IsDBNull(0)) spPanels.Add(spRdr.GetString(0));
+            return (spPayers, spPanels);
+        }
 
         // Panel column hardcoded per lab rule � ClaimLevelData only (filter options are always claim-level):
         //   NorthWest  (NW_  / Rule4) = PanelType
@@ -3866,14 +3902,15 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             }
         }
 
-        return BuildWeeklyResultFromStoredProcedure(weekCols, panelWeek, payerWeekMap, payerRankMap);
+        return BuildWeeklyResultFromStoredProcedure(weekCols, panelWeek, payerWeekMap, payerRankMap, SpTopPayerCount(spPrefix));
     }
 
     private static WeeklyClaimVolumeResult BuildWeeklyResultFromStoredProcedure(
         Dictionary<string, WeekColumn> weekCols,
         Dictionary<string, Dictionary<string, (int c, decimal ch)>> panelWeek,
         Dictionary<string, Dictionary<string, Dictionary<string, (int c, decimal ch)>>> payerWeekMap,
-        Dictionary<string, Dictionary<string, int>> payerRankMap)
+        Dictionary<string, Dictionary<string, int>> payerRankMap,
+        int topPayerCount)
     {
         var columns = weekCols.Values.OrderBy(w => w.WeekStart).ToList();
         var grandByWeek = new Dictionary<string, ProductionMonthCell>();
@@ -3894,7 +3931,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             var topPayers = payerWeekMap.TryGetValue(panel, out var payers) && payerRankMap.TryGetValue(panel, out var ranks)
                 ? payers
                     .OrderBy(p => ranks.GetValueOrDefault(p.Key, 99))
-                    .Take(TopPayerDrillDownCount)
+                    .Take(topPayerCount)
                     .Select(p => new WeeklyPayerDrillDown
                     {
                         PayerName = p.Key,
@@ -4381,6 +4418,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             "CoreBio_LRN" => CoreBioPrefix,
             "TexasDiagnostic" => TexasDiagnosticPrefix,
             "TexasDiagnostic_LRN" => TexasDiagnosticPrefix,
+            "PNC" => PncPrefix,
+            "PNC_LRN" => PncPrefix,
             "Certus_LRN" => CertusPrefix,
             "Augustus_LRN" => AugustusPrefix,
             "NWL" => NorthWestPrefix,

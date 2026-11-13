@@ -49,6 +49,8 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
+            if (_cfg.HasFilterOptionsSp)
+                return await LoadFilterOptionsFromSpAsync(conn, ct);
             return await ProductionFilterLookup.LoadFastAsync(conn, _cfg.Prefix, _logger, ct);
         }
         catch (Exception ex)
@@ -56,6 +58,25 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
             _logger.LogError(ex, "[{Prefix}] GetFilterOptionsAsync failed.", _cfg.Prefix);
             return ([], []);
         }
+    }
+
+    private async Task<(List<string> PayerNames, List<string> PanelNames)> LoadFilterOptionsFromSpAsync(
+        SqlConnection conn, CancellationToken ct)
+    {
+        await using var cmd = new SqlCommand($"dbo.usp_Get{_cfg.Prefix}ProductionFilterOptions", conn)
+        {
+            CommandType    = CommandType.StoredProcedure,
+            CommandTimeout = 60,
+        };
+        await using var rdr = await cmd.ExecuteReaderAsync(ct);
+        var payers = new List<string>();
+        while (await rdr.ReadAsync(ct))
+            if (!rdr.IsDBNull(0)) payers.Add(rdr.GetString(0));
+        await rdr.NextResultAsync(ct);
+        var panels = new List<string>();
+        while (await rdr.ReadAsync(ct))
+            if (!rdr.IsDBNull(0)) panels.Add(rdr.GetString(0));
+        return (payers, panels);
     }
 
     // ?? Monthly Claim Volume ??????????????????????????????????????????????

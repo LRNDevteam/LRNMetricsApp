@@ -114,6 +114,7 @@ public sealed class LabConfigOptions
                && !Services.LabCollectionPrefix.IsAugustus(labName)
                && !Services.LabCollectionPrefix.IsCoreBio(labName)
                && !Services.LabCollectionPrefix.IsTexasDiagnostic(labName)
+               && !Services.LabCollectionPrefix.IsPnc(labName)
             ? "TotalInsuranceBalance" : null;
     }
 

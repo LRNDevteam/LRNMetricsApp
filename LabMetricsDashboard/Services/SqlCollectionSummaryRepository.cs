@@ -64,6 +64,32 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         return new CollectionFilterOptions(payerNames, panelNames);
     }
 
+    public async Task<CollectionFilterOptions> GetFilterOptionsFromSpAsync(
+        string connectionString,
+        string prefix,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
+
+        var payerNames = new List<string>();
+        var panelNames = new List<string>();
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand($"dbo.usp_Get{prefix}_CS_FilterOptions", conn)
+        {
+            CommandType = System.Data.CommandType.StoredProcedure,
+            CommandTimeout = 120
+        };
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct)) if (!r.IsDBNull(0)) payerNames.Add(r.GetString(0));
+        await r.NextResultAsync(ct);
+        while (await r.ReadAsync(ct)) if (!r.IsDBNull(0)) panelNames.Add(r.GetString(0));
+
+        return new CollectionFilterOptions(payerNames, panelNames);
+    }
+
     /// <summary>Returns true when the lab name maps to the NorthWest prefix ("NW").</summary>
     private static bool IsNorthWest(string? labName) =>
         string.Equals(LabCollectionPrefix.GetPrefix(labName), "NW", StringComparison.OrdinalIgnoreCase);
@@ -164,7 +190,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         string.Equals(prefix, "AnP", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "WH", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "CB", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(prefix, "TD", StringComparison.OrdinalIgnoreCase);
+        string.Equals(prefix, "TD", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "PNC", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Labs whose live/filter Top5 Payments path prefers
@@ -180,7 +207,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         string.Equals(prefix, "AnP", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "WH", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "CB", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(prefix, "TD", StringComparison.OrdinalIgnoreCase);
+        string.Equals(prefix, "TD", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "PNC", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Augustus Collection Report client logic lives in *_v3 SPs
@@ -361,10 +389,11 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         return BuildWeeklyVolumePivotFromAggregate(rows, keepSourceOrder: spOrdered, topPayerCount: CollectionTopPayerCount(prefix));
     }
 
-    // NorthWest and Texas Diagnostic client sheets: Monthly / Weekly drill-down shows the Top 5 payers; other labs keep 3.
+    // NorthWest, Texas Diagnostic and PNC client sheets: Monthly / Weekly drill-down shows the Top 5 payers; other labs keep 3.
     private static int CollectionTopPayerCount(string prefix) =>
         string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(prefix, "TD", StringComparison.OrdinalIgnoreCase) ? 5 : 3;
+        || string.Equals(prefix, "TD", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(prefix, "PNC", StringComparison.OrdinalIgnoreCase) ? 5 : 3;
 
     // ── NW SP helpers for the remaining 9 tabs ─────────────────────────────
     // Each follows the same pattern as GetCollectionMonthlyVolumeViaSpAsync:

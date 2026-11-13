@@ -48,6 +48,9 @@ public static class LabCollectionPrefix
         // TexasDiagnostic: CoreBio SP-only pattern with the Texas Collection sheet. Prefix TD_CS_*.
         ["TexasDiagnostic"]    = "TD",
         ["Texas_Diagnostic"]   = "TD",
+        // PNC: Texas Diagnostic SP-only pattern with Wednesday–Tuesday weeks. Prefix PNC_CS_*.
+        // Collection Summary only for now - PNC is in none of the Denial / Executive / Clinic lists.
+        ["PNC"]                = "PNC",
         ["PhiLife"]            = "Phi",
         ["Phi_Life"]           = "Phi",
         ["PCRLabsofAmerica"]   = "PCR",
@@ -116,14 +119,14 @@ public static class LabCollectionPrefix
     /// <c>usp_Get{prefix}_CS_AvgPayments_ClientLogic</c>, with "Last 3 Months" hidden.
     /// </summary>
     public static bool UsesAvgPaymentsByDateBasis(string? labName) =>
-        GetPrefix(labName) is "RT" or "BT" or "IHD" or "WH" or "NW" or "Aug" or "CB" or "TD";
+        GetPrefix(labName) is "RT" or "BT" or "IHD" or "WH" or "NW" or "Aug" or "CB" or "TD" or "PNC";
 
     /// <summary>
     /// Labs whose two date-basis Average Payments tabs / sheets are titled
     /// "Panel Averages - by DOS" and "Panel Averages - by Check Date".
     /// </summary>
     public static bool UsesPanelAveragesTitles(string? labName) =>
-        GetPrefix(labName) is "WH" or "NW" or "Aug" or "CB" or "TD";
+        GetPrefix(labName) is "WH" or "NW" or "Aug" or "CB" or "TD" or "PNC";
 
     /// <summary>
     /// Augustus client-logic Collection Summary (34_Augustus_CollectionSummary_ClientLogic.sql):
@@ -154,7 +157,14 @@ public static class LabCollectionPrefix
     /// and Excel never read the <c>{prefix}_CS_*</c> tables directly and keep the SP row order.
     /// </summary>
     public static bool UsesSpCollectionLogic(string? labName) =>
-        GetPrefix(labName) is "AnP" or "WH" or "CB" or "TD";
+        GetPrefix(labName) is "AnP" or "WH" or "CB" or "TD" or "PNC";
+
+    /// <summary>
+    /// Labs whose Collection filter dropdowns come from <c>usp_Get{prefix}_CS_FilterOptions</c>
+    /// instead of a DISTINCT over <c>ClaimLevelData</c>.
+    /// </summary>
+    public static bool HasCollectionFilterOptionsSp(string? labName) =>
+        GetPrefix(labName) is "PNC";
 
     /// <summary>
     /// Labs with the Collection Summary "Panel Average" tab and Excel sheet.
@@ -190,11 +200,25 @@ public static class LabCollectionPrefix
         GetPrefix(labName) is "TD";
 
     /// <summary>
+    /// PNC client sheet: Texas Diagnostic's Collection layout with Wednesday–Tuesday weeks and
+    /// CheckDate from 2024 to the claim file's week-range end.
+    /// </summary>
+    public static bool IsPnc(string? labName) =>
+        GetPrefix(labName) is "PNC";
+
+    /// <summary>
+    /// Labs on the Texas Diagnostic Collection sheet: top 5 payers, payer x CheckDate month
+    /// Insurance Vs Payment, claim-count sorts.
+    /// </summary>
+    public static bool UsesTexasCollectionLayout(string? labName) =>
+        GetPrefix(labName) is "TD" or "PNC";
+
+    /// <summary>
     /// Labs on the CoreBio Collection layout: CheckDate months, No Response Vs Aging, Panel Vs Payment
     /// by ChargeEnteredDate, line-level CPT units and insurance payment.
     /// </summary>
     public static bool UsesCoreBioCollectionLayout(string? labName) =>
-        GetPrefix(labName) is "CB" or "TD";
+        GetPrefix(labName) is "CB" or "TD" or "PNC";
 
     /// <summary>
     /// Status Summary, Provider and Rep Vs Payment tabs / sheets. The CoreBio and Texas sheets do not include them.
@@ -216,7 +240,7 @@ public static class LabCollectionPrefix
     /// BilledCharges). NorthWest: PanelType x ChargeEnteredDate; Cove: Panelname x FirstBilledDate.
     /// </summary>
     public static bool UsesBilledPaidPanelPayment(string? labName) =>
-        GetPrefix(labName) is "NW" or "Cove" or "Aug" or "CB" or "TD";
+        GetPrefix(labName) is "NW" or "Cove" or "Aug" or "CB" or "TD" or "PNC";
 
     /// <summary>
     /// Claim / line column behind the Collection Summary "Posted Date" and its Check Date filter.
@@ -234,33 +258,33 @@ public static class LabCollectionPrefix
     /// <c>{prefix}_Denial*</c> aggregate tables refreshed at claim-file ingest.
     /// </summary>
     public static bool HasDenialSummary(string? labName) =>
-        GetPrefix(labName) is "AnP" or "WH" or "NW" or "Aug" or "CB" or "TD";
+        GetPrefix(labName) is "AnP" or "WH" or "NW" or "Aug" or "CB" or "TD" or "PNC";
 
     /// <summary>
     /// Denial List - Plan Type tab and sheet (<c>usp_Get{prefix}_DenialPlanType</c>).
-    /// The CoreBio and Texas Diagnostic Denial Summary sheets have no Plan Type.
+    /// The CoreBio, Texas Diagnostic and PNC Denial Summary sheets have no Plan Type.
     /// </summary>
     public static bool HasDenialPlanType(string? labName) =>
-        HasDenialSummary(labName) && !IsCoreBio(labName) && !IsTexasDiagnostic(labName);
+        HasDenialSummary(labName) && !IsCoreBio(labName) && !IsTexasDiagnostic(labName) && !IsPnc(labName);
 
     /// <summary>
     /// Labs whose Executive Summary values open the "rows behind this value" popup, read from
     /// <c>usp_Get{prefix}_ExecutiveSummaryCellRows</c> (same rules as the Executive Summary SPs).
     /// </summary>
     public static bool HasEsCellRows(string? labName) =>
-        GetPrefix(labName) is "WH" or "CB" or "TD" or "Elix" or "IHD" or "RT" or "BT" or "NW" or "AnP" or "Cove";
+        GetPrefix(labName) is "WH" or "CB" or "TD" or "PNC" or "Elix" or "IHD" or "RT" or "BT" or "NW" or "AnP" or "Cove";
 
     /// <summary>
     /// Labs whose Executive Summary Year Total / Grand Total cells also open the value popup instead
     /// of the LisDrill page. CoreBio's LIS Billed / Unbilled rules (BillCategory OR BillingStatus)
     /// and its Adjustments formula cannot be expressed as dbo.LisDrillRowDef conditions; Texas
-    /// Diagnostic has no dbo.LisDrillRowDef rows; NorthWest's rows (BilledUnbilled, Claim Type,
+    /// Diagnostic and PNC have no dbo.LisDrillRowDef rows; NorthWest's rows (BilledUnbilled, Claim Type,
     /// Aria windows) are defined by fn_NW_ES_LisRowCodes / fn_NW_ES_ClaimRowCodes, not LisDrillRowDef;
     /// Analyze Pathology's rows (usp_AnP_ES_Compute) changed after its LisDrillRowDef rows were written;
     /// Cove's grid has two rule sets (snapshot vs filtered) that one LisDrillRowDef row cannot express.
     /// </summary>
     public static bool EsTotalsUseCellRows(string? labName) =>
-        GetPrefix(labName) is "CB" or "TD" or "NW" or "AnP" or "Cove";
+        GetPrefix(labName) is "CB" or "TD" or "PNC" or "NW" or "AnP" or "Cove";
 
     /// <summary>
     /// What the Denial Summary Monthly / Weekly SPs rank insurances by (shown in the grid caption).
@@ -270,6 +294,7 @@ public static class LabCollectionPrefix
         GetPrefix(labName) switch
         {
             "WH" => "Total Insurance Balance",
+            "PNC" => "Total Insurance Balance",
             "TD" when !weekly => "Total Insurance Balance",
             _ => "claim count"
         };

@@ -2687,7 +2687,7 @@ public class DashboardController : Controller
                 CptBreakdownGrandTotalCharges  = cptResult.GrandTotalCharges,
                 CptBreakdownGrandTotalClaims   = cptResult.GrandTotalClaims,
                 CptTotalsOnly                  = cptResult.TotalsOnly,
-                CptUnitsLabel                  = isAugustusLab || IsTexasDiagnosticLab(selectedLab)
+                CptUnitsLabel                  = isAugustusLab || UsesClaimCountCptLabel(selectedLab)
                     ? "Claim Count"
                     : selectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
                     ? "Count of CPT"
@@ -2929,7 +2929,7 @@ public class DashboardController : Controller
             FilterFirstBillTo = Q(q, "filterFirstBillTo"),
             FilterFirstBilledFrom = Q(q, "filterFirstBilledFrom"),
             FilterFirstBilledTo = Q(q, "filterFirstBilledTo"),
-            CptUnitsLabel = isAugustusLab || IsTexasDiagnosticLab(selectedLab)
+            CptUnitsLabel = isAugustusLab || UsesClaimCountCptLabel(selectedLab)
                 ? "Claim Count"
                 : selectedLab.Contains("Cove", StringComparison.OrdinalIgnoreCase)
                 ? "Count of CPT"
@@ -2974,6 +2974,12 @@ public class DashboardController : Controller
 
     private static bool IsTexasDiagnosticLab(string? lab) =>
         (lab ?? "").Replace("_", "").Replace(" ", "").Contains("TexasDiagnostic", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsPncLab(string? lab) =>
+        string.Equals((lab ?? "").Trim(), "PNC", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>CPT Breakdown counts Claim IDs (not CPT units) on these labs' sheets.</summary>
+    private static bool UsesClaimCountCptLabel(string? lab) => IsTexasDiagnosticLab(lab) || IsPncLab(lab);
 
     private async Task EnsureProductionPaneAsync(CachedProductionReport entry, string pane, CancellationToken ct)
     {
@@ -3654,7 +3660,7 @@ public class DashboardController : Controller
                 CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
                 CptBreakdownGrandTotalClaims    = cptResult.GrandTotalClaims,
                 CptTotalsOnly                   = cptResult.TotalsOnly,
-                CptUnitsLabel                   = isAugustusLab || IsTexasDiagnosticLab(selectedLab) ? "Claim Count" : "Count of CPT",
+                CptUnitsLabel                   = isAugustusLab || UsesClaimCountCptLabel(selectedLab) ? "Claim Count" : "Count of CPT",
                 PanelBreakdownMonths              = pnlResult.Months,
                 PanelBreakdownYears               = pnlResult.Years,
                 PanelBreakdownRows                = pnlResult.PayerRows,

@@ -41,6 +41,7 @@ public static class LabProductionSummaryRepositoryMap
             ["TexasDiagnostic"]  = texasDiagnostic,
             ["Texas_Diagnostic"] = texasDiagnostic,
             ["Texas Diagnostic"] = texasDiagnostic,
+            ["PNC"]              = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Pnc),
             ["PCRLabsofAmerica"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PCRLabsofAmerica),
             ["Beech_Tree"]       = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.BeechTree),
             ["Rising_Tides"]     = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.RisingTides),

@@ -238,8 +238,12 @@
         <strong>Source:</strong> ClaimLevelData &bull;
         @if (dateBasis is not null)
         {
-            <span><strong>Date Range:</strong> @windowBasis @(result.WindowFrom?.ToString("MM/dd/yyyy")) &ndash; @(result.WindowTo?.ToString("MM/dd/yyyy")) (@(Model.UsesPanelAveragesTitles ? $"{months} months from the billed week-range end date" : $"last {months} calendar months up to the latest {windowBasis} on or before the billed week-range end")) &bull;</span>
-            @if (Model.IsAugustusLab)
+            <span><strong>Date Range:</strong> @windowBasis @(result.WindowFrom?.ToString("MM/dd/yyyy")) &ndash; @(result.WindowTo?.ToString("MM/dd/yyyy")) (@(Model.IsPncLab && dateBasis != AvgPaymentsDateBasis.DateOfService ? $"latest {months} months, month-wise, ending with the billed week-range end month" : Model.UsesPanelAveragesTitles ? $"{months} months from the billed week-range end date" : $"last {months} calendar months up to the latest {windowBasis} on or before the billed week-range end")) &bull;</span>
+            @if (Model.IsPncLab)
+            {
+                <span><strong>Filter:</strong> none (every claim in the date range) &bull;</span>
+            }
+            else if (Model.IsAugustusLab)
             {
                 <span><strong>Filter:</strong> BillingStatus = Billed &bull;</span>
             }
@@ -251,7 +255,11 @@
             {
                 <span><strong>Filter:</strong> FirstBilledDate not blank &bull;</span>
             }
-            @if (Model.IsTexasDiagnosticLab)
+            @if (Model.IsPncLab)
+            {
+                <span><strong>Fully Paid / Adjudicated / 30 / 60 Days:</strong> FullyPaidCount = Fully Paid, Sum of FullyPaidAmount / Adjudicated filled, Sum of AdjudicatedAmount / Bucket30 filled (30+), Sum of Bucket30Amount / Bucket60 filled (60+), Sum of Bucket60Amount &bull;</span>
+            }
+            else if (Model.IsTexasDiagnosticLab)
             {
                 <span><strong>Fully Paid / Adjudicated / 30 / 60 Days:</strong> ClaimStatus = Fully Paid / Adjudicated = Adjudicated / Bucket30 not blank (30+) / Bucket60 not blank (60+) &bull;</span>
             }

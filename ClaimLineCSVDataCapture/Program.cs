@@ -1295,6 +1295,59 @@ foreach (var lab in labConfigs)
             }
         }
 
+        // ── PNC production report aggregates ─────────────────────────────────────
+        if (lab.LabName.Equals("PNC", StringComparison.OrdinalIgnoreCase))
+        {
+            log.Info($"  [PNC Reports] Running PNC production report SPs…");
+            try
+            {
+                var pncResults = db.RefreshPncProductionReports();
+                prodSummaryResults = pncResults;
+                foreach (var (spName, elapsedMs, error) in pncResults)
+                {
+                    if (error is null)
+                        log.Info($"  [PNC Reports] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [PNC Reports] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+
+                var failed = pncResults.Count(r => r.Error is not null);
+                var passed = pncResults.Count(r => r.Error is null);
+                log.Info($"  [PNC Reports] {passed}/{pncResults.Count} SP(s) succeeded.");
+                if (failed > 0)
+                    log.Warn($"  [PNC Reports] {failed} SP(s) failed — see errors above.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [PNC Reports] Unexpected error running PNC production report SPs: {ex.Message}");
+            }
+
+            collSummaryResults = RunCollectionSummary(log, db, "PNC CS", db.RefreshPncCollectionReports);
+
+            log.Info($"  [PNC Denial] Running PNC Denial Summary SPs…");
+            try
+            {
+                var denialResults = db.RefreshPncDenialReports();
+                foreach (var (spName, elapsedMs, error) in denialResults)
+                {
+                    if (error is null)
+                        log.Info($"  [PNC Denial] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [PNC Denial] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+
+                var failed = denialResults.Count(r => r.Error is not null);
+                var passed = denialResults.Count(r => r.Error is null);
+                log.Info($"  [PNC Denial] {passed}/{denialResults.Count} SP(s) succeeded.");
+                if (failed > 0)
+                    log.Warn($"  [PNC Denial] {failed} SP(s) failed — see errors above.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [PNC Denial] Unexpected error running PNC Denial Summary SPs: {ex.Message}");
+            }
+        }
+
         // ── CoreBio production report aggregates ─────────────────────────────────
         if (lab.LabName.Equals("CoreBio", StringComparison.OrdinalIgnoreCase)
             || lab.LabName.Equals("Core_Bio", StringComparison.OrdinalIgnoreCase))
@@ -2417,6 +2470,7 @@ static string? GetCollectionSummarySpPrefix(ClaimLineCSVDataCapture.Models.LabCo
         name.Equals("Core_Bio",          StringComparison.OrdinalIgnoreCase)) return "CB";
     if (name.Equals("TexasDiagnostic",  StringComparison.OrdinalIgnoreCase) ||
         name.Equals("Texas_Diagnostic",  StringComparison.OrdinalIgnoreCase)) return "TD";
+    if (name.Equals("PNC",              StringComparison.OrdinalIgnoreCase)) return "PNC";
     if (name.Equals("PCRLabsofAmerica", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("PCR_Labs_of_America", StringComparison.OrdinalIgnoreCase)) return "PCR";
     if (name.Equals("PhiLife",          StringComparison.OrdinalIgnoreCase) ||

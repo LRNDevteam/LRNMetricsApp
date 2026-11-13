@@ -32,7 +32,10 @@
 
     var isCoreBio = (Model.SelectedLab ?? "").Replace(" ", "").Replace("_", "")
         .Contains("CoreBio", StringComparison.OrdinalIgnoreCase);
-    var isTexas = (Model.SelectedLab ?? "").Replace(" ", "").Replace("_", "")
+    // PNC's Production sheet is Texas Diagnostic's with Wednesday–Tuesday weeks, so isTexas
+    // covers both labs and only the weekly labels check isPnc.
+    var isPnc = string.Equals((Model.SelectedLab ?? "").Trim(), "PNC", StringComparison.OrdinalIgnoreCase);
+    var isTexas = isPnc || (Model.SelectedLab ?? "").Replace(" ", "").Replace("_", "")
         .Contains("TexasDiagnostic", StringComparison.OrdinalIgnoreCase);
 
     var validYears  = Model.Years.Where(y => y > 1900).ToList();
@@ -1141,6 +1144,8 @@ th.pr-month-data, td.pr-month-data {
                                             ? "Thursday – Wednesday (EnteredWeek)"
                                             : isCoreBio
                                                 ? "Wednesday – Tuesday (FirstBilledDate)"
+                                                : isPnc
+                                                    ? "Wednesday – Tuesday (ChargeEnteredDate / EnteredWeek)"
                                                 : isTexas
                                                     ? "Friday – Thursday (ChargeEnteredDate / EntryWeek)"
                                                     : $"Data based on Last 4 Week [{headerDateLabel}]")
@@ -1279,6 +1284,13 @@ th.pr-month-data, td.pr-month-data {
                         <li>Source: <code>ClaimLevelData</code> · <code>BilledStatus</code> = Billed · <code>BilledWeek</code> is not blank</li>
                         <li>Rows: <code>Panelname</code> · Top 3 <code>PayerName_Raw</code> by claim count</li>
                         <li>Columns: last four Wednesday–Tuesday weeks of <code>FirstBilledDate</code></li>
+                        <li>Values: Count of unique Claim ID, Sum of Charge Amount · Sorted by claim count</li>
+                    }
+                    else if (isPnc)
+                    {
+                        <li>Source: <code>ClaimLevelData</code> · <code>FirstBilledDate</code> is a valid date · <code>EnteredWeek</code> (<code>EntryWeek</code>) is not blank</li>
+                        <li>Rows: <code>Panelname</code> · Top 5 <code>PayerName_Raw</code> by claim count</li>
+                        <li>Columns: last four Wednesday–Tuesday weeks of <code>ChargeEnteredDate</code></li>
                         <li>Values: Count of unique Claim ID, Sum of Charge Amount · Sorted by claim count</li>
                     }
                     else if (isTexas)

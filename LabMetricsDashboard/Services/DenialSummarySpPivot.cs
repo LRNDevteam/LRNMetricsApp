@@ -24,18 +24,25 @@ public static class DenialSummarySpPivot
         var columns = result.Columns.Where(c => c.PeriodType != "A").ToList();
         if (total is null || listed.Count == 0 || columns.Count == 0) return model;
 
+        // A "B" column (claims without a period date, e.g. PNC "No Posted Date") has no date of its
+        // own; it takes the first dated column's year and start so the year bands and Excel ranges hold.
+        var firstDated = columns
+            .Select(c => total.Cells.GetValueOrDefault(c.PeriodKey))
+            .FirstOrDefault(cell => cell?.PeriodStart is not null);
+
         model.Periods = columns.Select(c =>
         {
             var cell = total.Cells.GetValueOrDefault(c.PeriodKey);
-            var start = cell?.PeriodStart ?? DateTime.MinValue;
+            var undated = c.PeriodType == "B";
+            var start = (undated ? firstDated?.PeriodStart : cell?.PeriodStart) ?? DateTime.MinValue;
             return new BreakdownPivotPeriod
             {
                 Key = c.PeriodKey,
                 Label = c.PeriodLabel,
                 StartDate = start,
-                EndDate = cell?.PeriodEnd ?? start,
-                Year = c.PeriodYear ?? start.Year,
-                Month = c.PeriodType == "Y" ? null : start.Month,
+                EndDate = undated ? start : cell?.PeriodEnd ?? start,
+                Year = (undated ? null : c.PeriodYear) ?? start.Year,
+                Month = c.PeriodType is "Y" or "B" ? null : start.Month,
                 IsYearTotal = c.PeriodType == "Y"
             };
         }).ToList();
@@ -110,6 +117,11 @@ public static class DenialSummarySpPivot
         {
             model.Monthly.HeaderTitle = model.Monthly.HeaderTitle.Replace("Denial Posted Date", "Denial Date");
             model.Weekly.HeaderTitle = model.Weekly.HeaderTitle.Replace("Denial Posted Date", "Denial Date (Friday - Thursday)");
+        }
+        else if (LabCollectionPrefix.IsPnc(model.CurrentLab))
+        {
+            model.Monthly.HeaderTitle = model.Monthly.HeaderTitle.Replace("Denial Posted Date", "Posted Date");
+            model.Weekly.HeaderTitle = model.Weekly.HeaderTitle.Replace("Denial Posted Date", "Posted Week (Wednesday - Tuesday)");
         }
     }
 

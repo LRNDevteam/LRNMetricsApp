@@ -34,6 +34,7 @@ public static class LisSummaryAggregateLabs
         ["Texas_Diagnostic"] = "TD_",
         ["Texas Diagnostic"] = "TD_",
         ["TexasDx"] = "TD_",
+        ["PNC"] = "PNC_",
     };
 
     private static readonly Dictionary<int, string> PrefixByLabId = new()
@@ -45,6 +46,7 @@ public static class LisSummaryAggregateLabs
         [27] = "WH_",
         [28] = "CB_",
         [29] = "TD_",
+        [30] = "PNC_",
     };
 
     public static bool TryGetTablePrefix(string? labName, int? labId, out string prefix)

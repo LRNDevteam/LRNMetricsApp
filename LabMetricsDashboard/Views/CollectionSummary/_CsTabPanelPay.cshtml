@@ -173,6 +173,15 @@ else if (Model.UsesBilledPaidPanelPayment && hasMonthlyGrain)
         <strong>Billed:</strong> BilledStatus = Billed, PayerName_Raw not UHP MANAGEMENT / PERENNIAL ADVANTAGE OF OHIO (MEDICARE) / NORTH CAROLINA BLUE SHIELD &mdash; Count of unique ClaimID, Sum of ChargeAmount &bull;
         <strong>Paid:</strong> InsurancePayment &gt; 0 &mdash; Count of unique ClaimID, Sum of InsurancePayment</span>
     }
+    else if (Model.IsPncLab)
+    {
+        <span><strong>Source:</strong> Claim Level Data &bull;
+        <strong>Filter:</strong> InsurancePayment &gt; 0, CheckDate from 01/01/2024 to the week-range end date &bull;
+        <strong>Rows:</strong> Panelname &bull; <strong>Columns:</strong> ChargeEnteredDate month &bull;
+        <strong>Sorted by:</strong> Billed Claim Count DESC &bull;
+        <strong>Billed:</strong> FirstBilledDate is a date &mdash; Count of unique ClaimID, Sum of ChargeAmount &bull;
+        <strong>Paid:</strong> InsurancePayment &gt; 0 &mdash; Count of unique ClaimID, Sum of InsurancePayment</span>
+    }
     else if (Model.IsTexasDiagnosticLab)
     {
         <span><strong>Source:</strong> Claim Level Data &bull;

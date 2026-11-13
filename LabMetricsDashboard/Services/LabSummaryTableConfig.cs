@@ -76,6 +76,13 @@ public record LabSummaryTableConfig(
     /// </summary>
     public int TopPayerCount { get; init; } = 3;
 
+    /// <summary>
+    /// <c>true</c> when the Production filter dropdowns come from
+    /// <c>usp_Get{Prefix}ProductionFilterOptions</c> (result set 1 = payers, 2 = panels)
+    /// instead of reading the snapshot tables directly.
+    /// </summary>
+    public bool HasFilterOptionsSp { get; init; }
+
     // ?? Static per-lab configs ????????????????????????????????????????????
 
     /// <summary>Certus Labs � prefix <c>Cert_</c>. Row key = PayerName. Supports coding tables/read SPs.</summary>
@@ -125,6 +132,16 @@ public record LabSummaryTableConfig(
     public static readonly LabSummaryTableConfig TexasDiagnostic =
         new("TD_",   "PayerName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: false)
         { SupportsFilteredMonthlyWeeklySp = true, CptSortByCount = true, TopPayerCount = 5 };
+
+    /// <summary>
+    /// PNC — prefix <c>PNC_</c>. Texas Diagnostic's sheet with Wednesday–Tuesday weeks: billed =
+    /// FirstBilledDate is a date, columns by ChargeEnteredDate, weekly where EntryWeek (EnteredWeek) is
+    /// filled, top 5 payers per panel, Unbilled = ClaimStatus Unbilled by payer, CPT by month with
+    /// Count of ClaimID. No coding tables. Filter dropdowns from usp_GetPNC_ProductionFilterOptions.
+    /// </summary>
+    public static readonly LabSummaryTableConfig Pnc =
+        new("PNC_",  "PayerName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: false)
+        { SupportsFilteredMonthlyWeeklySp = true, CptSortByCount = true, TopPayerCount = 5, HasFilterOptionsSp = true };
 
     /// <summary>PCR Labs of America � prefix <c>PCR_</c>. Monthly/Weekly read SPs accept filter parameters.</summary>
     public static readonly LabSummaryTableConfig PCRLabsofAmerica =

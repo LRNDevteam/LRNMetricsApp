@@ -104,7 +104,7 @@ public static partial class CollectionSummaryExcelExportBuilder
     private static void BuildInsuranceVsPaymentFlatSheet(
         XLWorkbook wb, List<InsuranceVsPaymentRow> rows, string labName)
     {
-        var isTexas = LabCollectionPrefix.IsTexasDiagnostic(labName);
+        var isTexas = LabCollectionPrefix.UsesTexasCollectionLayout(labName);
         var isSpLogic = LabCollectionPrefix.UsesSpCollectionLogic(labName) && !isTexas;
         // Analyze Pathology: payer-flat Count + Sum like Cove, rows in SP order (claim count).
         // Texas Diagnostic: payer x CheckDate month / year grid below.

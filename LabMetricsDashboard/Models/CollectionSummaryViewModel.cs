@@ -119,6 +119,12 @@ public sealed class CollectionSummaryViewModel
     /// <summary>Texas Diagnostic: CoreBio Collection layout with the Texas sheet's filters and labels.</summary>
     public bool IsTexasDiagnosticLab => LabCollectionPrefix.IsTexasDiagnostic(SelectedLab);
 
+    /// <summary>PNC: Texas Diagnostic's Collection layout with Wednesday–Tuesday weeks and CheckDate from 2024.</summary>
+    public bool IsPncLab => LabCollectionPrefix.IsPnc(SelectedLab);
+
+    /// <summary>Texas Diagnostic or PNC: top 5 payers, payer x CheckDate month Insurance Vs Payment, claim-count sorts.</summary>
+    public bool UsesTexasCollectionLayout => LabCollectionPrefix.UsesTexasCollectionLayout(SelectedLab);
+
     /// <summary>CoreBio or Texas Diagnostic: CheckDate months, No Response Vs Aging, line-level CPT units.</summary>
     public bool UsesCoreBioCollectionLayout => LabCollectionPrefix.UsesCoreBioCollectionLayout(SelectedLab);
 
@@ -135,7 +141,7 @@ public sealed class CollectionSummaryViewModel
     public bool UsesPanelAveragesTitles => LabCollectionPrefix.UsesPanelAveragesTitles(SelectedLab);
 
     /// <summary>Insurance pivots (Insurance / Payer Vs Payment, Panel Vs Payment) sorted by claim count.</summary>
-    public bool SortsPaymentPivotsByClaims => IsAugustusLab || IsNorthWestLab || IsTexasDiagnosticLab;
+    public bool SortsPaymentPivotsByClaims => IsAugustusLab || IsNorthWestLab || UsesTexasCollectionLayout;
 
     /// <summary>Women's Health Panel breakdown (NorthWest).</summary>
     public WomensHealthBreakdownResult WomensHealthBreakdown { get; set; } = WomensHealthBreakdownResult.Empty;
@@ -148,7 +154,8 @@ public sealed class CollectionSummaryViewModel
 
     /// <summary>Base filter of the Monthly Claim Volume tab (its footer), shown when the tab has no rows.</summary>
     public string MonthlyClaimVolumeFilterText =>
-        UsesCoreBioCollectionLayout ? $"InsurancePayment > 0 \u00B7 CheckDate in {DateTime.Today.Year - 1} or {DateTime.Today.Year}"
+        IsPncLab ? "InsurancePayment > 0 \u00B7 CheckDate from 2024 to the week-range end date"
+        : UsesCoreBioCollectionLayout ? $"InsurancePayment > 0 \u00B7 CheckDate in {DateTime.Today.Year - 1} or {DateTime.Today.Year}"
         : IsWellHealthLab ? "InsurancePayment > 0 \u00B7 PaymentPostedDate is a valid date"
         : UsesSpCollectionLogic ? "InsurancePayment \u2260 0 \u00B7 PaymentPostedDate is a valid date"
         : IsNorthWestLab ? "InsurancePayment > 0 \u00B7 NWLCollectionPostedDate is a valid date"
@@ -158,6 +165,7 @@ public sealed class CollectionSummaryViewModel
     public string WeeklyClaimVolumeFilterText =>
         IsNorthWestLab ? "InsurancePayment > 0 \u00B7 PostedWeek, else Check Date, in the last 4 Thursday\u2013Wednesday weeks"
         : IsAugustusLab ? "InsurancePayment > 0 \u00B7 PostedWeek not blank"
+        : IsPncLab ? "InsurancePayment > 0 \u00B7 DepositWeek not blank \u00B7 last 4 Wednesday\u2013Tuesday weeks of Check Date"
         : UsesCoreBioCollectionLayout ? "InsurancePayment > 0 \u00B7 DepositWeek not blank"
         : IsWellHealthLab ? "InsurancePayment > 0 \u00B7 PaymentPostedDate in the last 4 completed Monday\u2013Sunday weeks"
         : UsesSpCollectionLogic ? "InsurancePayment \u2260 0 \u00B7 PaymentPostedDate in the last 4 completed Monday\u2013Sunday weeks"
