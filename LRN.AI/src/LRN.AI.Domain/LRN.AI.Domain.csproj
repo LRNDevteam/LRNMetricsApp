@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Business entities, value objects and deterministic rules. No project or infrastructure dependencies.
+       Phase 1 has no domain types yet; denial/recommendation entities arrive with Phase 2-4. -->
+  <PropertyGroup>
+    <RootNamespace>LRN.AI.Domain</RootNamespace>
+  </PropertyGroup>
+
+</Project>

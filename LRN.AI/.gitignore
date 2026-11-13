@@ -1,0 +1,12 @@
+bin/
+obj/
+.vs/
+*.user
+TestResults/
+
+# Per-machine secrets (JWT signing key etc.). Never commit real values.
+appsettings.Local.json
+appsettings.Secrets.json
+
+# Live model-evaluation output. Phase 1 prompts are PHI-free, but later evaluation runs may not be.
+evaluation-results/

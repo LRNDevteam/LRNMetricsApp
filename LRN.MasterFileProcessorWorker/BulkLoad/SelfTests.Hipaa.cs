@@ -191,7 +191,8 @@ public static partial class SelfTests
         foreach (var (labId, expected) in new[]
                  {
                      (4, "CoveLRN"), (2, "InHealthDTRLRN"), (18, "Certus_LRN"), (13, "PCRLOA_LRN"),
-                     (26, "AnalyzePathology"), (27, "WellHealth"), (28, "CoreBio"), (29, "TexasDiagnostic")
+                     (26, "AnalyzePathology"), (27, "WellHealth"), (28, "CoreBio"), (29, "TexasDiagnostic"),
+                     (30, "PNC")
                  })
         {
             byLab.TryGetValue(labId, out var actual);

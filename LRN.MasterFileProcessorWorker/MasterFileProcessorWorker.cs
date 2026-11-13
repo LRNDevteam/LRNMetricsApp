@@ -3098,7 +3098,9 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			// CoreBio's "Line Level File" sheet has no Claim Status either. Configured as "CoreBio".
 			|| labName.Replace(" ", "").Contains("CoreBio", StringComparison.OrdinalIgnoreCase)
 			// Texas Diagnostic's "Line Level" sheet has no Claim Status either. Configured as "TexasDiagnostic".
-			|| labName.Replace(" ", "").Contains("TexasDiagnostic", StringComparison.OrdinalIgnoreCase);
+			|| labName.Replace(" ", "").Contains("TexasDiagnostic", StringComparison.OrdinalIgnoreCase)
+			// PNC's "Line Level" sheet has no Claim Status either (its "Status" is the billing system's own).
+			|| labName.Trim().Equals("PNC", StringComparison.OrdinalIgnoreCase);
 	}
 
 	/// <summary>

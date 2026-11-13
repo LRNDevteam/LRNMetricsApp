@@ -135,10 +135,23 @@ public sealed class SharePointDownloader
 			// the root (Analyze Pathology: "Master File/Sep'26/09.21.2026 - 09.27.2026"). Take the
 			// latest month by (year, month); the year then names the local output folder as a year
 			// folder would.
-			var datedMonth = rootChildren
+			var monthCandidates = rootChildren
 				.Where(x => x.IsFolder)
 				.Select(x => new { Item = x, Month = TryParseMonthFolder(x.Name), Year = TryParseMonthFolderYear(x.Name) })
-				.Where(x => x.Month.HasValue && x.Year.HasValue)
+				.Where(x => x.Month.HasValue)
+				.ToList();
+
+			// Dated month folders win. Only when there are none does a plain month folder count (PNC:
+			// "02. Master File/11. November/<week>"), its year inferred from today.
+			if (!monthCandidates.Any(x => x.Year.HasValue))
+			{
+				monthCandidates = monthCandidates
+					.Select(x => new { x.Item, x.Month, Year = (int?)InferUndatedMonthFolderYear(x.Month!.Value, DateTime.Today) })
+					.ToList();
+			}
+
+			var datedMonth = monthCandidates
+				.Where(x => x.Year.HasValue)
 				.OrderByDescending(x => x.Year!.Value)
 				.ThenByDescending(x => x.Month!.Value)
 				.ThenByDescending(x => x.Item.LastModifiedUtc ?? DateTimeOffset.MinValue)
@@ -152,7 +165,7 @@ public sealed class SharePointDownloader
 					YearFolderName: null,
 					MonthFolderName: null,
 					WeekFolderName: null,
-					Message: $"No year folder (e.g. '2026') or dated month folder (e.g. \"Sep'26\") found under '{lab.SharePointRootPath}'.");
+					Message: $"No year folder (e.g. '2026') or month folder (e.g. \"Sep'26\", \"11. November\") found under '{lab.SharePointRootPath}'.");
 			}
 
 			monthFolder = datedMonth.Item;
@@ -905,6 +918,14 @@ public sealed class SharePointDownloader
 
 		return null;
 	}
+
+	/// <summary>
+	/// The year of a month folder that names none ("11. November"), for labs with neither a year folder
+	/// nor dated month folders: this year, or last year for a month still ahead of <paramref name="today"/>
+	/// - so in January "12. December" is last December, not a December eleven months away.
+	/// </summary>
+	internal static int InferUndatedMonthFolderYear(int month, DateTime today) =>
+		month > today.Month ? today.Year - 1 : today.Year;
 
     private static int? TryParseMonthFolder(string name)
     {

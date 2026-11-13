@@ -1,0 +1,10 @@
+<Project>
+  <!-- Shared settings for every LRN.AI project. The repo root has no Directory.Build.props, so nothing is inherited. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NuGetAudit>true</NuGetAudit>
+  </PropertyGroup>
+</Project>

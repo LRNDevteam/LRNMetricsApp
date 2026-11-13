@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>LRN.AI.Api</RootNamespace>
+    <UserSecretsId>lrn-ai-api-6d3f2b1e</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LRN.AI.Application\LRN.AI.Application.csproj" />
+    <ProjectReference Include="..\LRN.AI.Infrastructure\LRN.AI.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Same version LRN.ReportsApi uses; OpenAPI UI is enabled in Development only. -->
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="LRN.AI.UnitTests" />
+  </ItemGroup>
+
+</Project>

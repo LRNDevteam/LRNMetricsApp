@@ -1,0 +1,22 @@
+[
+  {
+    "id": "carc-co11",
+    "prompt": "Explain the likely causes of a CO-11 denial (diagnosis inconsistent with procedure) for a clinical laboratory claim. Do not assume claim-specific facts. List the documents an AR reviewer should check."
+  },
+  {
+    "id": "carc-co16",
+    "prompt": "A laboratory claim line was denied with CARC CO-16 and a RARC indicating missing information. Explain what CO-16 means, the most common missing items, and the next action an AR reviewer should take. Do not invent payer-specific rules."
+  },
+  {
+    "id": "carc-co97",
+    "prompt": "Explain CARC CO-97 (bundled service) for laboratory CPT codes. When is an appeal appropriate and when is it not? State clearly which points depend on payer policy."
+  },
+  {
+    "id": "carc-pr204",
+    "prompt": "Explain PR-204 (service not covered under the patient's current benefit plan). What should the AR reviewer verify before billing the patient, and what information is missing from this question to give a definitive answer?"
+  },
+  {
+    "id": "carc-co50",
+    "prompt": "Explain CO-50 (not medically necessary) for a molecular laboratory test. Which supporting evidence typically matters, and what should a reviewer avoid concluding without the payer's coverage policy?"
+  }
+]

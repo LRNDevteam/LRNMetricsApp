@@ -16,6 +16,26 @@
     ----------
     Set @LabId and @LabName below, then run with @WhatIf = 1 first. That prints what would go and
     changes nothing. Set @WhatIf = 0 only once the counts look right.
+
+	LABID - 26	 , LABNAME - Analyze_Pathology
+	LABID - 24	 , LABNAME - Augustus Labs
+	LABID - 10	 , LABNAME - Beech_Tree
+	LABID - 18	 , LABNAME - Certus
+	LABID - 28	 , LABNAME - CoreBio
+	LABID - 4	 , LABNAME - Cove
+	LABID - 16	 , LABNAME - Elixir
+	LABID - 2	 , LABNAME - Inhealth_DTR
+	LABID - 23	 , LABNAME - NorthWest
+	LABID - 13	 , LABNAME - PCR Labs of America
+	LABID - 6	 , LABNAME - PCR_Dx_AL
+	LABID - 7	 , LABNAME - PCR_Dx_CO
+	LABID - 12	 , LABNAME - Phi Life
+	LABID - 2	 , LABNAME - Phi Life
+	LABID - 30	 , LABNAME - PNC
+	LABID - 9	 , LABNAME - Rising Tides
+	LABID - 29	 , LABNAME - TexasDiagnostic
+	LABID - 25	 , LABNAME - VariantX
+	LABID - 27	 , LABNAME - WellHealth
 ================================================================================================
 */
 
@@ -25,8 +45,8 @@ GO
 
 GO
 
-DECLARE @LabId    INT           = 2,          -- <<< Cove
-        @LabName  VARCHAR(120)  = 'Inhealth_DTR',     -- <<< must match dbo.LRN_Run_Log.LabName
+DECLARE @LabId    INT           = 10,          -- <<< Cove
+        @LabName  VARCHAR(120)  = 'Beech_Tree',     -- <<< must match dbo.LRN_Run_Log.LabName
         @WhatIf   BIT           = 0;          -- <<< 1 = preview only, 0 = actually delete
 
 ------------------------------------------------------------------------------------------------

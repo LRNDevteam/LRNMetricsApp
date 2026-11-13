@@ -1,0 +1,27 @@
+{
+
+
+  "PNC": {
+    "DbConnectionString": "Server=lrnanalytics-sqlmi.public.4e3a76f4ed99.database.windows.net,3342;Initial Catalog=PNC;User ID=sqladmin;Password=Labrevnavigator@26;Encrypt=True;TrustServerCertificate=True;",
+
+    "ProductionMasterCsvPath": "C:\\LRN-Files\\Automation\\LRN-Input\\PNC\\",
+    "PayerPolicyValidationReportPath": "C:\\LRN-Files\\Automation\\LRN-Output\\PayerPolicy_Validation_Report\\PNC\\",
+    "InsightPath": "",
+    "RCMJsonpath": "C:\\LRN-Files\\Automation\\LRN-Output\\RCM_Insights\\PNC\\Input\\",
+    "Reports": "C:\\LRN-Files\\Automation\\LRN-Output\\Coding_Validation_Report\\PNC",
+    "Avgs": "C:\\LRN-Files\\Automation\\LRN-Output\\Averages\\PNC",
+
+    "DBEnabled": true,
+    "LineClaimEnable": true,
+    "EnableCoding": false,
+    "EnablePrediction": true,
+    "EnableForcast": true,
+    "EnableClinicsummary": true,
+    "EnableSalesRepsummary": true,
+    "EnableProductionReport": true,
+    "EnableCollectionReport": true,
+    "EnableProductionSummaryReport": true,
+    "EnableCollectionSummaryReport": true,
+    "UseDBDashboard": true
+  }
+}

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>LRN.AI.Infrastructure</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LRN.AI.Application\LRN.AI.Application.csproj" />
+    <ProjectReference Include="..\LRN.AI.Domain\LRN.AI.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="LRN.AI.UnitTests" />
+    <InternalsVisibleTo Include="LRN.AI.IntegrationTests" />
+    <InternalsVisibleTo Include="LRN.AI.ModelEvaluationTests" />
+  </ItemGroup>
+
+</Project>

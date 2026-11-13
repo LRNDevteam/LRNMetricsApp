@@ -2015,6 +2015,7 @@ public static class StandardCsvExporter
 		[NormKey("WellHealth")] = "WHL",
 		[NormKey("CoreBio")] = "CBL",
 		[NormKey("TexasDiagnostic")] = "TXD",
+		[NormKey("PNC")] = "PNC",
 	};
 
 	/// <summary>
