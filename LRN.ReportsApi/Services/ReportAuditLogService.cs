@@ -40,6 +40,13 @@ public sealed class ReportAuditQuery
     /// <summary>All | Latest | LatestSuccess - see usp_ReportsWorkflowTracker_Pivot.</summary>
     public string? Mode { get; set; }
     public bool IncludeInactiveReports { get; set; }
+    /// <summary>
+    /// Also list master file processor runs from dbo.LRN_Run_Log that never reached the report
+    /// tracker - a run that FAILED (or a re-run that was SKIPPED) before any report was built has no
+    /// ReportsWorkflowTracker row, so the pivot alone never shows it. Only in "All" mode, and only
+    /// for the Report Audit Log; the Report Board keeps the pivot as it was.
+    /// </summary>
+    public bool IncludePipelineRuns { get; set; }
 }
 
 public sealed class ReportRunLogQuery
@@ -71,6 +78,21 @@ public sealed class ReportAuditRunRow
     public int NotRunCount { get; set; }
     public int ErrorLogCount { get; set; }
     public int TotalLogCount { get; set; }
+
+    // From dbo.LRN_Run_Log - the master file processor's own outcome for this RunId. Null when the
+    // run log has no row for it (or IncludePipelineRuns was off).
+    /// <summary>SUCCESS | FAILED | SKIPPED | IN_PROGRESS.</summary>
+    public string? PipelineStatus { get; set; }
+    /// <summary>Why: LRN_Run_Log.Notes (the failure / skip reason the worker recorded).</summary>
+    public string? PipelineNotes { get; set; }
+    /// <summary>Schedule | Rerun | Upload.</summary>
+    public string? TriggerType { get; set; }
+    public string? TriggeredBy { get; set; }
+    public DateTime? StartedOn { get; set; }
+    /// <summary>Rows for this run in dbo.LRN_Error_Log.</summary>
+    public int PipelineErrorCount { get; set; }
+    /// <summary>True when the run has no report-tracker row and is listed only from the run log.</summary>
+    public bool PipelineOnly { get; set; }
 }
 
 public sealed class ReportAuditPivotResult
@@ -126,12 +148,18 @@ public sealed class ReportAuditLogService : IReportAuditLogService
     private static readonly string[] LogCsvHeader =
         { "Log Id", "Run Id", "Report Type", "Source System", "Log Type", "Log Message", "Source File Name", "Created On", "Created By" };
 
-    private readonly string _connectionString;
+    // Upper bound on run-log rows added to the grid, so a lab failing every poll for weeks cannot
+    // turn the page into tens of thousands of rows. Newest first, so the cap drops the oldest.
+    private const int MaxPipelineRuns = 2000;
 
-    public ReportAuditLogService(IConfiguration configuration)
+    private readonly string _connectionString;
+    private readonly ILogger<ReportAuditLogService> _logger;
+
+    public ReportAuditLogService(IConfiguration configuration, ILogger<ReportAuditLogService> logger)
     {
         _connectionString = configuration.GetConnectionString("DefaultConnection")
             ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is missing. It must point to LRNMaster.");
+        _logger = logger;
     }
 
     public async Task<ReportAuditPivotResult> GetRunsAsync(ReportAuditQuery query, CancellationToken ct)
@@ -191,8 +219,153 @@ public sealed class ReportAuditLogService : IReportAuditLogService
             }
         }
 
+        if (query.IncludePipelineRuns)
+        {
+            // Best effort: the pivot is the page's primary data, and a missing column or table in
+            // the run log must not take the whole grid down with it.
+            try { await ApplyPipelineRunsAsync(conn, result, query, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Could not merge master file processor runs from dbo.LRN_Run_Log into the report audit log.");
+            }
+        }
+
         await ApplyLogCountsAsync(conn, result.Rows, query, ct);
         return result;
+    }
+
+    /// <summary>
+    /// Attaches the master file processor's own outcome (dbo.LRN_Run_Log) to each pivot row and, in
+    /// "All" mode, adds the runs the pivot cannot show: FAILED runs, and every re-run / upload run
+    /// whatever its outcome, that never produced a ReportsWorkflowTracker row.
+    /// </summary>
+    private static async Task ApplyPipelineRunsAsync(SqlConnection conn, ReportAuditPivotResult result, ReportAuditQuery query, CancellationToken ct)
+    {
+        bool hasLabId, hasWeek;
+        await using (var probe = new SqlCommand("""
+            SELECT CAST(CASE WHEN OBJECT_ID('dbo.LRN_Run_Log', 'U') IS NULL THEN 0 ELSE 1 END AS bit),
+                   CAST(CASE WHEN COL_LENGTH('dbo.LRN_Run_Log', 'LabId')      IS NULL THEN 0 ELSE 1 END AS bit),
+                   CAST(CASE WHEN COL_LENGTH('dbo.LRN_Run_Log', 'WeekFolder') IS NULL THEN 0 ELSE 1 END AS bit);
+            """, conn))
+        await using (var rd = await probe.ExecuteReaderAsync(ct))
+        {
+            if (!await rd.ReadAsync(ct) || !rd.GetBoolean(0)) return;
+            hasLabId = rd.GetBoolean(1);
+            hasWeek = rd.GetBoolean(2);
+        }
+
+        string Select(string top) => $"""
+            SELECT {top} R.RunID, R.LabName, {(hasWeek ? "R.WeekFolder" : "CAST(NULL AS varchar(100))")},
+                    R.TriggerType, R.TriggeredBy, R.StartTimeIST, R.OverallStatus, R.Notes,
+                    (SELECT COUNT(*) FROM dbo.LRN_Error_Log E WHERE E.RunID = R.RunID) AS PipelineErrors
+            FROM    dbo.LRN_Run_Log R
+            """;
+
+        var byRunId = result.Rows
+            .Where(r => !string.IsNullOrWhiteSpace(r.RunId))
+            .GroupBy(r => r.RunId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        // Run-log lab spelling -> the pivot's spelling, so an added row files under the same name in
+        // the Lab filter as that lab's other runs.
+        var labNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // 1) Enrich the rows the pivot already returned, in batches under SQL Server's parameter limit.
+        foreach (var batch in byRunId.Keys.Chunk(1000))
+        {
+            await using var cmd = new SqlCommand(
+                Select("") + " WHERE R.RunID IN (" + string.Join(", ", batch.Select((_, i) => "@R" + i)) + ");", conn) { CommandTimeout = 60 };
+            for (var i = 0; i < batch.Length; i++)
+                cmd.Parameters.Add("@R" + i, SqlDbType.VarChar, 30).Value = batch[i];
+
+            await using var rd = await cmd.ExecuteReaderAsync(ct);
+            while (await rd.ReadAsync(ct))
+            {
+                var run = ReadPipelineRun(rd);
+                if (!byRunId.TryGetValue(run.RunId, out var row)) continue;
+                CopyPipeline(run, row);
+                if (!string.IsNullOrWhiteSpace(run.Lab) && !string.IsNullOrWhiteSpace(row.Lab))
+                    labNameMap.TryAdd(run.Lab!, row.Lab!);
+            }
+        }
+
+        // 2) Add the runs the pivot cannot show. "Latest" modes are one row per lab by definition,
+        //    so extra rows would break their meaning; there the enrichment above is all that applies.
+        if (!string.Equals(NormalizeMode(query.Mode), "All", StringComparison.Ordinal)) return;
+
+        await using (var cmd = new SqlCommand($"""
+            {Select($"TOP ({MaxPipelineRuns})")}
+            WHERE  (R.OverallStatus = 'FAILED' OR R.TriggerType IN ('Rerun', 'Upload'))
+              AND  (@RunId    IS NULL OR R.RunID = @RunId)
+              AND  (@FromDate IS NULL OR R.StartTimeIST >= @FromDate)
+              AND  (@ToDate   IS NULL OR R.StartTimeIST <  DATEADD(DAY, 1, @ToDate))
+              {(hasLabId ? "AND (@LabId IS NULL OR R.LabId = @LabId)" : "")}
+            ORDER BY R.StartTimeIST DESC;
+            """, conn) { CommandTimeout = 60 })
+        {
+            AddNullable(cmd, "@RunId", SqlDbType.VarChar, 30, Trim(query.RunId));
+            AddNullable(cmd, "@FromDate", SqlDbType.Date, 0, query.FromDate?.Date);
+            AddNullable(cmd, "@ToDate", SqlDbType.Date, 0, query.ToDate?.Date);
+            if (hasLabId) AddNullable(cmd, "@LabId", SqlDbType.Int, 0, query.LabId);
+
+            await using var rd = await cmd.ExecuteReaderAsync(ct);
+            while (await rd.ReadAsync(ct))
+            {
+                var run = ReadPipelineRun(rd);
+                if (string.IsNullOrWhiteSpace(run.RunId) || byRunId.ContainsKey(run.RunId)) continue;
+
+                var row = new ReportAuditRunRow
+                {
+                    RunId = run.RunId,
+                    Lab = run.Lab is not null && labNameMap.TryGetValue(run.Lab, out var mapped) ? mapped : run.Lab,
+                    SyncedOn = run.StartedOn?.ToString("MM/dd/yyyy", CultureInfo.InvariantCulture),
+                    SyncedOnDate = run.StartedOn?.Date,
+                    Week = run.Week,
+                    PipelineOnly = true
+                };
+                foreach (var column in result.ReportColumns)
+                {
+                    row.Statuses[column] = null;
+                    row.NotRunCount++;
+                }
+                CopyPipeline(run, row);
+
+                byRunId[row.RunId] = row;
+                result.Rows.Add(row);
+            }
+        }
+
+        // Newest first across both sources. OrderBy is stable, so pivot rows keep the proc's own
+        // order within a day where neither side has a start time.
+        result.Rows = result.Rows
+            .OrderByDescending(r => r.SyncedOnDate ?? DateTime.MinValue)
+            .ThenByDescending(r => r.StartedOn ?? DateTime.MinValue)
+            .ToList();
+    }
+
+    private sealed record PipelineRun(
+        string RunId, string? Lab, string? Week, string? TriggerType, string? TriggeredBy,
+        DateTime? StartedOn, string? Status, string? Notes, int ErrorCount);
+
+    private static PipelineRun ReadPipelineRun(SqlDataReader rd) => new(
+        RunId: ReadString(rd, 0) ?? string.Empty,
+        Lab: ReadString(rd, 1),
+        Week: ReadString(rd, 2),
+        TriggerType: ReadString(rd, 3),
+        TriggeredBy: ReadString(rd, 4),
+        StartedOn: rd.IsDBNull(5) ? null : rd.GetDateTime(5),
+        Status: ReadString(rd, 6),
+        Notes: ReadString(rd, 7),
+        ErrorCount: rd.IsDBNull(8) ? 0 : Convert.ToInt32(rd.GetValue(8), CultureInfo.InvariantCulture));
+
+    private static void CopyPipeline(PipelineRun run, ReportAuditRunRow row)
+    {
+        row.PipelineStatus = run.Status;
+        row.PipelineNotes = run.Notes;
+        row.TriggerType = run.TriggerType;
+        row.TriggeredBy = run.TriggeredBy;
+        row.StartedOn = run.StartedOn;
+        row.PipelineErrorCount = run.ErrorCount;
     }
 
     /// <summary>

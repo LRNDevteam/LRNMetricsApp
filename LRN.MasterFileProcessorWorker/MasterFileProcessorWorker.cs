@@ -116,13 +116,24 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 
 		////await TrySendTeamNotificationAsync("Test : Master File Processor", string.Join(Environment.NewLine, "Message : This is test"), stoppingToken);
 
+		// Anything this host had Claimed is not running any more - the process just started. Left as
+		// it was, it would block every future re-run request for those labs.
+		await _rerunRequests.ReleaseAbandonedClaimsAsync(stoppingToken);
+
+		var nextScheduledPassUtc = DateTime.UtcNow;
+
 		while (!stoppingToken.IsCancellationRequested)
 		{
+			// Before the next scheduled pass is due, a pass only runs because a re-run is waiting,
+			// and then it touches only the requested labs - asking to re-run one lab must not start
+			// the whole schedule for every other lab ahead of it.
+			var rerunOnly = DateTime.UtcNow < nextScheduledPassUtc;
+
 			try
 			{
 				if (_opt.SharePoint.Enabled)
 				{
-					await ProcessSharePointOnceAsync(stoppingToken);
+					await ProcessSharePointOnceAsync(stoppingToken, rerunOnly);
 				}
 				else
 				{
@@ -140,13 +151,44 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 				_fileLog.Error("Top-level worker loop error.", ex);
 			}
 
+			if (!rerunOnly)
+				nextScheduledPassUtc = DateTime.UtcNow.AddSeconds(Math.Max(10, _opt.PollSeconds));
+
 			try
 			{
-				await Task.Delay(TimeSpan.FromSeconds(Math.Max(10, _opt.PollSeconds)), stoppingToken);
+				await WaitForNextPassAsync(nextScheduledPassUtc, stoppingToken);
 			}
 			catch (OperationCanceledException) { }
 		}
 	}
+
+	/// <summary>
+	/// Sleeps until the next scheduled pass is due, but returns early as soon as a re-run request
+	/// for one of this instance's labs is waiting. The queue is checked first, so a request that
+	/// arrived while a long pass was running starts the moment that pass ends.
+	/// </summary>
+	private async Task WaitForNextPassAsync(DateTime nextScheduledPassUtc, CancellationToken ct)
+	{
+		var labIds = ConfiguredLabIds();
+		var slice = TimeSpan.FromSeconds(Math.Max(10, _opt.RerunCheckSeconds));
+
+		while (!ct.IsCancellationRequested)
+		{
+			if (_opt.SharePoint.Enabled && await _rerunRequests.HasPendingAsync(labIds, ct))
+			{
+				_logger.LogInformation("Re-run request waiting; starting a re-run pass now.");
+				_fileLog.Info("Re-run request waiting; starting a re-run pass now.");
+				return;
+			}
+
+			var remaining = nextScheduledPassUtc - DateTime.UtcNow;
+			if (remaining <= TimeSpan.Zero) return;
+
+			await Task.Delay(remaining < slice ? remaining : slice, ct);
+		}
+	}
+
+	private int[] ConfiguredLabIds() => _opt.Labs.Select(l => l.LabId).Distinct().ToArray();
 
 	private void EnsureFolders()
 	{
@@ -165,8 +207,51 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, "logs"));
 	}
 
-	private async Task ProcessSharePointOnceAsync(CancellationToken ct)
+	/// <param name="rerunOnly">
+	/// True between scheduled passes: only labs with a claimed re-run request are processed, and the
+	/// pass ends immediately when nothing was claimed.
+	/// </param>
+	private async Task ProcessSharePointOnceAsync(CancellationToken ct, bool rerunOnly = false)
 	{
+		// Claimed first, before any of the per-pass setup below, so a re-run-only pass with nothing
+		// to do costs one query. Claimed once per pass and BEFORE the lab loop, so a request that
+		// arrives mid-pass waits for the next one (seconds away now) rather than being half-applied
+		// to a lab the loop has already passed. Only this instance's labs are claimed.
+		var rerunByLab = new Dictionary<int, LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequest>();
+
+		foreach (var request in (await _rerunRequests.ClaimPendingAsync(ConfiguredLabIds(), ct)).OrderBy(r => r.RerunRequestId))
+		{
+			// Two requests for one lab (e.g. one from the Report Audit Log and one from the AR
+			// Workbench) run once, as the newest. The older one is closed here; left in the dictionary
+			// overwrite it would stay Claimed forever and block the lab.
+			if (rerunByLab.TryGetValue(request.LabId, out var superseded))
+			{
+				await _rerunRequests.CompleteAsync(superseded.RerunRequestId, runId: null, resultStatus: "SKIPPED",
+					message: $"Superseded by re-run request #{request.RerunRequestId} for the same lab, which ran instead.", ct);
+				if (superseded.UploadId is long supersededUpload)
+					await _uploads.PurgeContentAsync(supersededUpload, ct);
+			}
+			rerunByLab[request.LabId] = request;
+		}
+
+		// Requests for labs that no instance runs. Closed only after a long wait, because another
+		// instance that does run the lab may simply be in the middle of a long pass.
+		foreach (var orphanUpload in await _rerunRequests.CloseUnclaimedOrphansAsync(
+					 ConfiguredLabIds(), TimeSpan.FromMinutes(Math.Max(30, _opt.RerunOrphanMinutes)), ct))
+		{
+			await _uploads.PurgeContentAsync(orphanUpload, ct);
+		}
+
+		if (rerunOnly && rerunByLab.Count == 0)
+			return;
+
+		if (rerunByLab.Count > 0)
+		{
+			var labsText = string.Join(", ", rerunByLab.Values.Select(r => $"{r.LabName ?? r.LabId.ToString(CultureInfo.InvariantCulture)} (request #{r.RerunRequestId}, by {r.RequestedBy})"));
+			_logger.LogInformation("Re-run requested for: {Labs}. {Mode}", labsText, rerunOnly ? "Running only these labs now." : "Running with the scheduled pass.");
+			_fileLog.Info($"Re-run requested for: {labsText}. {(rerunOnly ? "Running only these labs now." : "Running with the scheduled pass.")}");
+		}
+
 		var runLocalNow = DateTime.Now;
 
 		// HIPAA MF-03: remove temp copies of lab data that an interrupted run left behind (hourly at most).
@@ -205,14 +290,6 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 			}
 		}
 
-		// Re-runs asked for from the Report Audit Log screen. Claimed once per poll and BEFORE the
-		// lab loop, so a request that arrives mid-poll waits for the next one rather than being
-		// half-applied to a lab the loop has already passed.
-		var rerunByLab = new Dictionary<int, LRN.MasterFileProcessorWorker.ProcessLogging.RerunRequest>();
-
-		foreach (var request in await _rerunRequests.ClaimPendingAsync(ct))
-			rerunByLab[request.LabId] = request;
-
 		// Resolve driveId once (needed for status log upload even when selected is null)
 		string? siteDriveId = null;
 		try
@@ -232,6 +309,15 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 			// The run log records WHO asked rather than the service account, so the audit trail on
 			// the screen and the audit trail in LRN_Run_Log name the same person.
 			rerunByLab.TryGetValue(lab.LabId, out var rerun);
+
+			// A re-run-only pass leaves every other lab to the schedule.
+			if (rerunOnly && rerun is null)
+				continue;
+
+			// The same LabId listed twice in Labs would run the request twice and complete it twice.
+			// The first entry takes it; the request is removed so later entries run as scheduled.
+			if (rerun is not null)
+				rerunByLab.Remove(lab.LabId);
 
 			// A master file uploaded in the AR Workbench (standard template). It replaces the
 			// SharePoint / lab-database read for this run only; every later step is unchanged.
@@ -1796,22 +1882,9 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 			}
 		}
 
-		// A request for a lab this worker does not run (not in its Labs list, e.g. queued from the AR
-		// Workbench for a lab configured on another instance) would otherwise stay Claimed forever and
-		// block every later request for that lab. Close it with the reason instead.
-		foreach (var orphan in rerunByLab.Values.Where(r => _opt.Labs.All(l => l.LabId != r.LabId)))
-		{
-			await _rerunRequests.CompleteAsync(
-				orphan.RerunRequestId,
-				runId: null,
-				resultStatus: "SKIPPED",
-				message: $"Lab {orphan.LabId} is not configured in this Master File Processor ({Environment.MachineName}). " +
-						 "Add it under MasterFileProcessor:Labs (MasterDataSource \"Upload\" for a lab with no SharePoint master folder).",
-				ct);
-
-			if (orphan.UploadId is long orphanUpload)
-				await _uploads.PurgeContentAsync(orphanUpload, ct);
-		}
+		// Only this instance's labs are claimed (ClaimPendingAsync), so every claimed request was
+		// matched by the loop above and closed in its finally. Requests for labs no instance runs are
+		// closed by CloseUnclaimedOrphansAsync at the start of the pass.
 
 		// Upload the daily master processor log once per run (client requirement)
 		await TryUploadMasterProcessorLogAsync(runLocalNow, masterLogFolder, ct);

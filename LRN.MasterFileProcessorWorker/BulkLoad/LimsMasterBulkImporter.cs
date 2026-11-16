@@ -627,16 +627,16 @@ public sealed class LimsMasterBulkImporter
 			}
 
 			if (type is "int")
-				return int.TryParse(RemoveExcelDecimal(value), NumberStyles.Any, CultureInfo.InvariantCulture, out var i) ? i : null;
+				return ParseWholeNumber(value, int.MinValue, int.MaxValue) is long i ? (int)i : null;
 
 			if (type is "bigint")
-				return long.TryParse(RemoveExcelDecimal(value), NumberStyles.Any, CultureInfo.InvariantCulture, out var l) ? l : null;
+				return ParseWholeNumber(value, long.MinValue, long.MaxValue);
 
 			if (type is "smallint")
-				return short.TryParse(RemoveExcelDecimal(value), NumberStyles.Any, CultureInfo.InvariantCulture, out var s) ? s : null;
+				return ParseWholeNumber(value, short.MinValue, short.MaxValue) is long s ? (short)s : null;
 
 			if (type is "tinyint")
-				return byte.TryParse(RemoveExcelDecimal(value), NumberStyles.Any, CultureInfo.InvariantCulture, out var b) ? b : null;
+				return ParseWholeNumber(value, byte.MinValue, byte.MaxValue) is long b ? (byte)b : null;
 
 			if (type is "bit")
 			{
@@ -664,6 +664,35 @@ public sealed class LimsMasterBulkImporter
 			return value[..destinationColumn.MaxLength];
 
 		return value;
+	}
+
+	/// <summary>
+	/// A whole number for an integer destination column, or null when the text is not numeric or
+	/// does not fit.
+	/// <para>
+	/// A cell can hold a fraction while Excel shows a whole number. Cove's "Time to Bill" is billed
+	/// time minus collected time, so it is stored as fractional days (3.3750578703693463) under a
+	/// "0" number format that displays 3. A strict integer parse rejected every one of those and
+	/// the column loaded entirely NULL. The value is rounded the way that "0" format rounds (half
+	/// away from zero), so the table holds what the workbook shows.
+	/// </para>
+	/// </summary>
+	private static long? ParseWholeNumber(string value, long min, long max)
+	{
+		long whole;
+
+		if (long.TryParse(RemoveExcelDecimal(value), NumberStyles.Any, CultureInfo.InvariantCulture, out var exact))
+			whole = exact;
+		else if (decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var fractional)
+				 && fractional >= long.MinValue && fractional <= long.MaxValue)
+			whole = (long)Math.Round(fractional, MidpointRounding.AwayFromZero);
+		else if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var dbl)
+				 && !double.IsNaN(dbl) && Math.Abs(dbl) < 9.2e18)
+			whole = (long)Math.Round(dbl, MidpointRounding.AwayFromZero);
+		else
+			return null;
+
+		return whole < min || whole > max ? null : whole;
 	}
 
 	private static string RemoveExcelDecimal(string value)
