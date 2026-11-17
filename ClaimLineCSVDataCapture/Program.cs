@@ -1129,6 +1129,23 @@ foreach (var lab in labConfigs)
             }
 
             collSummaryResults = RunCollectionSummary(log, db, "VarX CS", db.RefreshVariantXCollectionReports);
+
+            log.Info($"  [VarX Denial] Running VariantX Denial Summary SPs…");
+            try
+            {
+                var denialResults = db.RefreshVariantXDenialReports();
+                foreach (var (spName, elapsedMs, error) in denialResults)
+                {
+                    if (error is null)
+                        log.Info($"  [VarX Denial] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [VarX Denial] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [VarX Denial] Unexpected error running VariantX denial summary SPs: {ex.Message}");
+            }
         }
 
         // ── Analyze Pathology production report aggregates ────────────────────

@@ -7,12 +7,15 @@
                 var grandPaidChg = Model.InsurancePaymentPct.Sum(r => r.PaidChargeAmount);
                 var isSpLogicPct = Model.UsesSpCollectionLogic;
                 var isInHealthPct = Model.IsInHealthDtrLab || isSpLogicPct || Model.IsNorthWestLab;
+                // VariantX (and InHealth-style labs) store AVG(PaymentPercent); PaidChargeAmount is 0,
+                // so charge-ratio grand total would incorrectly show 0 — use claim-weighted average.
+                var usesAvgPaymentPercent = isInHealthPct || Model.IsVariantXLab || Model.IsAugustusLab || Model.IsWellHealthLab;
                 var grandPaymentPct = grandPaidChg == 0 ? 0m : Math.Round(grandPaidIns / grandPaidChg * 100m, 2);
                 if (Model.InsurancePaymentPct[0].TotalPaymentPctFromSp is { } spGrandPct)
                 {
                     grandPaymentPct = spGrandPct;
                 }
-                else if (isInHealthPct && grandPaidChg == 0 && grandTotalClaims > 0)
+                else if (usesAvgPaymentPercent && grandPaidChg == 0 && grandTotalClaims > 0)
                 {
                     // Average of PaymentPercent over every claim = claim-weighted payer averages.
                     grandPaymentPct = Math.Round(Model.InsurancePaymentPct.Sum(r => r.PaymentPct * r.TotalClaims) / grandTotalClaims, 2);
@@ -97,9 +100,9 @@
                                 {
                                 <tr>
                                     <th>Payer</th>
-                                    <th>@(isInHealthPct ? "Count of ClaimID" : "Total No. of Claims")</th>
-                                    <th>@(isInHealthPct ? "Sum of InsurancePayment" : "Insurance Payments")</th>
-                                    <th>@(isInHealthPct ? "Average of PaymentPercent" : "Payment %")</th>
+                                    <th>@(isInHealthPct || Model.IsVariantXLab ? "Count of ClaimID" : "Total No. of Claims")</th>
+                                    <th>@(isInHealthPct || Model.IsVariantXLab ? "Sum of InsurancePayment" : "Insurance Payments")</th>
+                                    <th>@(isInHealthPct || Model.IsVariantXLab ? "Average of PaymentPercent" : "Payment %")</th>
                                 </tr>
                                 }
                             </thead>
@@ -134,7 +137,8 @@
                                 }
                                 else
                                 {
-                                    var pctRows = Model.IsAugustusLab
+                                    // VariantX / Augustus client logic: Sort By Claim Count
+                                    var pctRows = Model.IsAugustusLab || Model.IsVariantXLab
                                         ? Model.InsurancePaymentPct.OrderByDescending(r => r.TotalClaims).ThenByDescending(r => r.InsurancePayments).ToList()
                                         : Model.InsurancePaymentPct;
                                     @foreach (var row in pctRows)
@@ -148,7 +152,7 @@
                                         <td>
                                             <div class="reimb-bar-bg">
                                                 <div class="reimb-bar-fill" style="width:@(barWidth.ToString("F1"))%"></div>
-                                                <div class="reimb-bar-label">@(Model.IsAugustusLab ? pct.ToString("F0") : pct.ToString("F2")) %</div>
+                                                <div class="reimb-bar-label">@(Model.IsAugustusLab || Model.IsVariantXLab ? pct.ToString("F0") : pct.ToString("F2")) %</div>
                                             </div>
                                         </td>
                                     </tr>
@@ -198,8 +202,12 @@
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> Claim Level Data &bull;
                     <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) — @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &bull;
-                    <strong>Sorted by:</strong> @(Model.IsWellHealthLab ? "SUM(InsurancePayment) DESC" : Model.IsAugustusLab || isSpLogicPct || Model.IsNorthWestLab ? "Count of ClaimID DESC" : "SUM(InsurancePayment) DESC") &bull;
-                    @if (Model.IsWellHealthLab || Model.IsAugustusLab)
+                    <strong>Sorted by:</strong> @(Model.IsWellHealthLab ? "SUM(InsurancePayment) DESC" : Model.IsAugustusLab || Model.IsVariantXLab || isSpLogicPct || Model.IsNorthWestLab ? "Count of ClaimID DESC" : "SUM(InsurancePayment) DESC") &bull;
+                    @if (Model.IsVariantXLab)
+                    {
+                        <span><strong>Filter:</strong> InsurancePayment &gt; 0 &bull; <strong>Payment %:</strong> Average of (InsurancePayment / ChargeAmount × 100)</span>
+                    }
+                    else if (Model.IsWellHealthLab || Model.IsAugustusLab)
                     {
                         <span><strong>Filter:</strong> InsurancePayment &gt; 0 &bull; <strong>Payment %:</strong> Average of PaymentPercent</span>
                     }

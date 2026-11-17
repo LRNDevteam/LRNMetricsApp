@@ -300,7 +300,7 @@ public sealed class DenialClaimReportController : Controller
             model.Error = "The denial summary could not be loaded for this lab.";
         }
 
-        if (LabCollectionPrefix.HasDenialSummary(labName))
+        if (LabCollectionPrefix.HasDenialLists(labName))
         {
             model.HasDenialLists = true;
             model.HasDenialPlanType = LabCollectionPrefix.HasDenialPlanType(labName);

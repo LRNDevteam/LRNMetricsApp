@@ -6,10 +6,10 @@
    Source tables: dbo.ClaimLevelData, dbo.LineLevelData, dbo.LIMSMaster
    No inline UI queries — dashboard/ReportWorker must call these SPs only.
    ============================================================================= */
--- VariantX Labs � Monthly Claim Production Billed Summary
+-- VariantX Labs — Monthly Claim Production Billed Summary
 -- Rule:
 --   Filter  : TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
---   Rows    : Panelname  x  Top 3 Payer (by COUNT(DISTINCT ClaimID), per Panelname)
+--   Rows    : Panelname total (PayerRank 0) + Top 3 Payer (by COUNT(DISTINCT ClaimID))
 --   Columns : FirstBilledDate Year-Month (yyyy-MM) | COUNT(DISTINCT ClaimID) | SUM(ChargeAmount)
 -- ============================================================
 
@@ -24,8 +24,8 @@ CREATE TABLE dbo.VarX_MonthlyBilledProductionSummary
 (
     SummaryId       INT             NOT NULL IDENTITY(1,1) PRIMARY KEY,
     PanelType       NVARCHAR(MAX)   NOT NULL,   -- stores Panelname value
-    PayerName       NVARCHAR(500)   NOT NULL,
-    PayerRank       TINYINT         NOT NULL,   -- 1 / 2 / 3 within the Panelname
+    PayerName       NVARCHAR(500)   NOT NULL,   -- '' on PayerRank 0 panel-total rows
+    PayerRank       TINYINT         NOT NULL,   -- 0 = panel total; 1 / 2 / 3 = top payers
     BilledYearMonth NVARCHAR(7)     NOT NULL,   -- 'yyyy-MM' from FirstBilledDate
     ClaimCount      INT             NOT NULL DEFAULT 0,
     TotalCharges    DECIMAL(18,2)   NOT NULL DEFAULT 0,
@@ -42,7 +42,6 @@ BEGIN
     SET NOCOUNT ON;
 
     -- Aggregate by Panelname x PayerName_Raw x FirstBilledDate month.
-    -- No payer exclusions for VariantX.
     SELECT
         LTRIM(RTRIM(ISNULL(Panelname,     'Unknown')))               AS Panelname,
         LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))               AS PayerName_Raw,
@@ -52,6 +51,7 @@ BEGIN
     INTO #BilledRaw
     FROM dbo.ClaimLevelData
     WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+      AND LTRIM(RTRIM(FirstBilledDate)) <> ''
     GROUP BY
         LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))),
         LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
@@ -69,6 +69,16 @@ BEGIN
     FROM #BilledRaw
     GROUP BY Panelname, PayerName_Raw;
 
+    -- Panel totals across ALL payers (PayerRank 0) — required for dashboard panel row.
+    SELECT
+        Panelname,
+        BilledYearMonth,
+        SUM(ClaimCount) AS ClaimCount,
+        SUM(TotalCharges) AS TotalCharges
+    INTO #PanelTotal
+    FROM #BilledRaw
+    GROUP BY Panelname, BilledYearMonth;
+
     SELECT
         b.Panelname,
         b.PayerName_Raw,
@@ -85,15 +95,23 @@ BEGIN
 
     INSERT INTO dbo.VarX_MonthlyBilledProductionSummary
         (PanelType, PayerName, PayerRank, BilledYearMonth, ClaimCount, TotalCharges, RefreshedAt)
-    SELECT Panelname, PayerName_Raw, PayerRank, BilledYearMonth, ClaimCount, TotalCharges, GETDATE()
-    FROM #Top3
+    SELECT Panelname, PayerName, PayerRank, BilledYearMonth, ClaimCount, TotalCharges, GETDATE()
+    FROM (
+        SELECT Panelname, CAST(N'' AS NVARCHAR(500)) AS PayerName, CAST(0 AS TINYINT) AS PayerRank,
+               BilledYearMonth, ClaimCount, TotalCharges
+        FROM #PanelTotal
+        UNION ALL
+        SELECT Panelname, PayerName_Raw, PayerRank, BilledYearMonth, ClaimCount, TotalCharges
+        FROM #Top3
+    ) x
     ORDER BY Panelname, PayerRank, BilledYearMonth;
 
     DROP TABLE IF EXISTS #BilledRaw;
     DROP TABLE IF EXISTS #PayerRanks;
+    DROP TABLE IF EXISTS #PanelTotal;
     DROP TABLE IF EXISTS #Top3;
 
-    PRINT 'usp_RefreshVarX_MonthlyBilledProductionSummary completed � ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
+    PRINT 'usp_RefreshVarX_MonthlyBilledProductionSummary completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END
 GO
 
@@ -104,4 +122,3 @@ ORDER BY PanelType, PayerRank, BilledYearMonth;
 */
 
 PRINT '06_VariantX_MonthlyBilledProductionSummary.sql completed.';
-

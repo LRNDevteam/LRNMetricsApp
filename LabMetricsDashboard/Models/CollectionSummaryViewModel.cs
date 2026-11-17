@@ -122,6 +122,8 @@ public sealed class CollectionSummaryViewModel
     /// <summary>PNC: Texas Diagnostic's Collection layout with Wednesday–Tuesday weeks and CheckDate from 2024.</summary>
     public bool IsPncLab => LabCollectionPrefix.IsPnc(SelectedLab);
 
+    public bool IsVariantXLab => LabCollectionPrefix.IsVariantX(SelectedLab);
+
     /// <summary>Texas Diagnostic or PNC: top 5 payers, payer x CheckDate month Insurance Vs Payment, claim-count sorts.</summary>
     public bool UsesTexasCollectionLayout => LabCollectionPrefix.UsesTexasCollectionLayout(SelectedLab);
 

@@ -100,10 +100,16 @@ public record LabSummaryTableConfig(
         new("Elix_", "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
         { SupportsFilteredMonthlyWeeklySp = true };
 
-    /// <summary>VariantX Labs — prefix <c>VarX_</c> (Elixir clone: Rule5, Wed–Tue).</summary>
+    /// <summary>
+    /// VariantX Labs — prefix <c>VarX_</c>. Client sheet: billed = FirstBilledDate is a date,
+    /// Monthly/Payer columns by FirstBilledDate (weekly = Thursday–Wednesday of FirstBilledDate,
+    /// top 3 payers). CPT Breakdown is totals only: LineLevel SUM(Units) + SUM(ChargeAmount),
+    /// no default filter, sorted by Claim Count.
+    /// Coding / Unbilled Aging tabs are hidden (not on the sheet).
+    /// </summary>
     public static readonly LabSummaryTableConfig VariantX =
         new("VarX_", "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
-        { SupportsFilteredMonthlyWeeklySp = true };
+        { SupportsFilteredMonthlyWeeklySp = true, CptTotalsOnly = true };
 
     /// <summary>Analyze Pathology — prefix <c>AnP_</c> (VariantX clone; Production Summary per client sheet, Mon–Sun weeks).</summary>
     public static readonly LabSummaryTableConfig AnalyzePathology =

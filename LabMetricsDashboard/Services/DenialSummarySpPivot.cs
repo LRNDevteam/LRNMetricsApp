@@ -123,6 +123,11 @@ public static class DenialSummarySpPivot
             model.Monthly.HeaderTitle = model.Monthly.HeaderTitle.Replace("Denial Posted Date", "Posted Date");
             model.Weekly.HeaderTitle = model.Weekly.HeaderTitle.Replace("Denial Posted Date", "Posted Week (Wednesday - Tuesday)");
         }
+        else if (LabCollectionPrefix.IsVariantX(model.CurrentLab))
+        {
+            model.Monthly.HeaderTitle = model.Monthly.HeaderTitle.Replace("Denial Posted Date", "Denial Date");
+            model.Weekly.HeaderTitle = model.Weekly.HeaderTitle.Replace("Denial Posted Date", "Denial Date (Thursday - Wednesday)");
+        }
     }
 
     private static BreakdownPivotCell Cell(DenialPeriodRow? row) => new()

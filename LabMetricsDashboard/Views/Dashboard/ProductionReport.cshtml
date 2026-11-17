@@ -37,6 +37,10 @@
     var isPnc = string.Equals((Model.SelectedLab ?? "").Trim(), "PNC", StringComparison.OrdinalIgnoreCase);
     var isTexas = isPnc || (Model.SelectedLab ?? "").Replace(" ", "").Replace("_", "")
         .Contains("TexasDiagnostic", StringComparison.OrdinalIgnoreCase);
+    // VariantX's sheet matches the Texas / PNC one except its weeks are Thursday–Wednesday of
+    // FirstBilledDate (BilledWeek) and its monthly columns are FirstBilledDate, not ChargeEnteredDate.
+    var isVariantX = (Model.SelectedLab ?? "").Replace(" ", "").Replace("_", "")
+        .Contains("VariantX", StringComparison.OrdinalIgnoreCase);
 
     var validYears  = Model.Years.Where(y => y > 1900).ToList();
     var validMonths = Model.Months.Where(IsYm).ToList();
@@ -786,7 +790,7 @@ th.pr-month-data, td.pr-month-data {
                 <i class="bi bi-calendar-week"></i> Weekly Claim Volume
             </button>
         </li>
-        @if (!isCoreBio && !isTexas)
+        @if (!isCoreBio && !isTexas && !isVariantX)
         {
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="coding-tab" data-bs-toggle="pill"
@@ -810,6 +814,8 @@ th.pr-month-data, td.pr-month-data {
                 <i class="bi bi-grid-3x3-gap"></i> Payer X Panel
             </button>
         </li>
+        @if (!isVariantX)
+        {
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="unbilled-aging-tab" data-bs-toggle="pill"
                     data-bs-target="#unbilled-aging-pane" type="button" role="tab"
@@ -817,6 +823,7 @@ th.pr-month-data, td.pr-month-data {
                 <i class="bi bi-hourglass-split"></i> Unbilled X Aging
             </button>
         </li>
+        }
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="cpt-breakdown-tab" data-bs-toggle="pill"
                     data-bs-target="#cpt-breakdown-pane" type="button" role="tab"
@@ -998,13 +1005,15 @@ th.pr-month-data, td.pr-month-data {
                     
                     <div class="px-3 py-2 small text-muted">
                         @{
-                            // Cove Monthly: Charge Entered Date (lab-specific). Other labs still follow Rule.
+                            // Cove Monthly: Charge Entered Date (lab-specific). VariantX sheet: FirstBilledDate.
+                            // Other labs still follow Rule.
                             var ppRule = Model.ProductionSummaryRule;
-                            var ppUsesCharge = Model.IsCoveLab
+                            var ppUsesCharge = !isVariantX
+                                && (Model.IsCoveLab
                                 || string.Equals(ppRule, "Rule1", StringComparison.OrdinalIgnoreCase)
                                 || string.Equals(ppRule, "Rule2", StringComparison.OrdinalIgnoreCase)
                                 || string.Equals(ppRule, "Rule3", StringComparison.OrdinalIgnoreCase)
-                                || string.Equals(ppRule, "Rule4", StringComparison.OrdinalIgnoreCase);
+                                || string.Equals(ppRule, "Rule4", StringComparison.OrdinalIgnoreCase));
                             var ppDateLabel = ppUsesCharge ? "Charge Entered Date" : "First Billed Date";
                             var ppSelectedPayers = Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0
                                 ? string.Join(", ", Model.FilterPayerNames) : "All";
@@ -1144,6 +1153,8 @@ th.pr-month-data, td.pr-month-data {
                                             ? "Thursday – Wednesday (EnteredWeek)"
                                             : isCoreBio
                                                 ? "Wednesday – Tuesday (FirstBilledDate)"
+                                                : isVariantX
+                                                    ? "Thursday – Wednesday (FirstBilledDate / BilledWeek)"
                                                 : isPnc
                                                     ? "Wednesday – Tuesday (ChargeEnteredDate / EnteredWeek)"
                                                 : isTexas
@@ -1286,6 +1297,13 @@ th.pr-month-data, td.pr-month-data {
                         <li>Columns: last four Wednesday–Tuesday weeks of <code>FirstBilledDate</code></li>
                         <li>Values: Count of unique Claim ID, Sum of Charge Amount · Sorted by claim count</li>
                     }
+                    else if (isVariantX)
+                    {
+                        <li>Source: <code>ClaimLevelData</code> · <code>FirstBilledDate</code> is a valid date · <code>BilledWeek</code> is not blank</li>
+                        <li>Rows: <code>Panelname</code> · Top 3 <code>PayerName_Raw</code> by claim count</li>
+                        <li>Columns: last four Thursday–Wednesday weeks of <code>FirstBilledDate</code></li>
+                        <li>Values: Count of unique Claim ID, Sum of Charge Amount · Sorted by claim count</li>
+                    }
                     else if (isPnc)
                     {
                         <li>Source: <code>ClaimLevelData</code> · <code>FirstBilledDate</code> is a valid date · <code>EnteredWeek</code> (<code>EntryWeek</code>) is not blank</li>
@@ -1331,7 +1349,7 @@ th.pr-month-data, td.pr-month-data {
         }
 
         <!-- ??? Coding tab pane ?????????????????????????????????? -->
-        @if (!isCoreBio && !isTexas && (prChrome || PrShow("coding-pane")))
+        @if (!isCoreBio && !isTexas && !isVariantX && (prChrome || PrShow("coding-pane")))
         {
         <div class="tab-pane fade" id="coding-pane" role="tabpanel" aria-labelledby="coding-tab" data-pr-lazy="coding-pane">
             @if (PrShow("coding-pane"))
@@ -1427,6 +1445,15 @@ th.pr-month-data, td.pr-month-data {
                             <span class="filter-key-2">FirstBilledDate</span> is a valid date
                             &nbsp;·&nbsp; Rows: <span class="filter-key">PayerName_Raw</span>
                             &nbsp;·&nbsp; Columns: <span class="filter-key">ChargeEnteredDate</span> month / year
+                            &nbsp;·&nbsp; Values: Count of unique Claim ID, Sum of Charge Amount
+                            &nbsp;·&nbsp; Sorted by claim count</span>
+                        }
+                        else if (isVariantX)
+                        {
+                        <span><span class="filter-label">Filter:</span>
+                            <span class="filter-key-2">FirstBilledDate</span> is a valid date
+                            &nbsp;·&nbsp; Rows: <span class="filter-key">PayerName_Raw</span>
+                            &nbsp;·&nbsp; Columns: <span class="filter-key">FirstBilledDate</span> month / year
                             &nbsp;·&nbsp; Values: Count of unique Claim ID, Sum of Charge Amount
                             &nbsp;·&nbsp; Sorted by claim count</span>
                         }
@@ -1772,7 +1799,7 @@ th.pr-month-data, td.pr-month-data {
         }
 
         <!-- ??? Unbilled X Aging tab pane ???????????????????????? -->
-        @if (prChrome || PrShow("unbilled-aging-pane"))
+        @if (!isVariantX && (prChrome || PrShow("unbilled-aging-pane")))
         {
         <div class="tab-pane fade" id="unbilled-aging-pane" role="tabpanel" aria-labelledby="unbilled-aging-tab" data-pr-lazy="unbilled-aging-pane">
             @if (PrShow("unbilled-aging-pane"))
@@ -2096,13 +2123,17 @@ th.pr-month-data, td.pr-month-data {
             else if (Model.CptBreakdownRows.Count > 0
                      && (Model.CptTotalsOnly || Model.SelectedLab.Contains("InHealth", StringComparison.OrdinalIgnoreCase)))
             {
+                var cptUnitsAndChargesOnly = isVariantX; // sheet: Sum of Units + Sum of Charge Amount (no claim-count col)
                 <div class="pr-wrap">
                     <div class="pr-scroll">
                         <table class="pr-table">
                             <colgroup>
                                 <col style="width:160px" />
-                                <col style="width:110px" />
-                                @if (isCoreBio)
+                                @if (!cptUnitsAndChargesOnly)
+                                {
+                                    <col style="width:110px" />
+                                }
+                                @if (isCoreBio || cptUnitsAndChargesOnly)
                                 {
                                     <col style="width:110px" />
                                 }
@@ -2111,12 +2142,15 @@ th.pr-month-data, td.pr-month-data {
                             <thead>
                                 <tr>
                                     <th>@(Model.CptTotalsOnly ? "CPT Code" : "CPT Codes")</th>
-                                    <th class="pr-grand-total">@(Model.CptTotalsOnly ? "Claim Count" : cptUnitsHeader)</th>
-                                    @if (isCoreBio)
+                                    @if (!cptUnitsAndChargesOnly)
                                     {
-                                        <th class="pr-grand-total">Units</th>
+                                        <th class="pr-grand-total">@(Model.CptTotalsOnly ? "Claim Count" : cptUnitsHeader)</th>
                                     }
-                                    <th class="pr-grand-total">@(Model.CptTotalsOnly ? "Charge Amount" : "Total Charge")</th>
+                                    @if (isCoreBio || cptUnitsAndChargesOnly)
+                                    {
+                                        <th class="pr-grand-total">@(cptUnitsAndChargesOnly ? "Sum of Units" : "Units")</th>
+                                    }
+                                    <th class="pr-grand-total">@(cptUnitsAndChargesOnly ? "Sum of Total Charges" : (Model.CptTotalsOnly ? "Charge Amount" : "Total Charge"))</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -2124,8 +2158,11 @@ th.pr-month-data, td.pr-month-data {
                                 {
                                     <tr class="pr-panel-row">
                                         <td>@row.CptCode</td>
-                                        <td class="pr-grand-total">@row.GrandTotalClaims.N0OrDash()</td>
-                                        @if (isCoreBio)
+                                        @if (!cptUnitsAndChargesOnly)
+                                        {
+                                            <td class="pr-grand-total">@row.GrandTotalClaims.N0OrDash()</td>
+                                        }
+                                        @if (isCoreBio || cptUnitsAndChargesOnly)
                                         {
                                             <td class="pr-grand-total">@row.GrandTotalUnits.N0OrDash()</td>
                                         }
@@ -2138,8 +2175,11 @@ th.pr-month-data, td.pr-month-data {
                                     <td>Grand Total</td>
                                     @if (Model.CptTotalsOnly)
                                     {
-                                        <td class="pr-grand-total">@Model.CptBreakdownGrandTotalClaims.N0OrDash()</td>
-                                        @if (isCoreBio)
+                                        @if (!cptUnitsAndChargesOnly)
+                                        {
+                                            <td class="pr-grand-total">@Model.CptBreakdownGrandTotalClaims.N0OrDash()</td>
+                                        }
+                                        @if (isCoreBio || cptUnitsAndChargesOnly)
                                         {
                                             <td class="pr-grand-total">@Model.CptBreakdownGrandTotalUnits.N0OrDash()</td>
                                         }
@@ -2159,17 +2199,21 @@ th.pr-month-data, td.pr-month-data {
                 {
                     <div class="pr-filter-summary">
                         <strong>Source:</strong> Line Level Data &bull;
+                        <strong>Filter:</strong> @(isVariantX ? "N/A" : "FirstBilledDate is a valid date") &bull;
                         <strong>Rows:</strong> CPT Code &bull;
-                        <strong>Values:</strong> @(isCoreBio ? "Claim Count = Count of unique Claim ID, Units = Sum of Units, Charge Amount = Sum of Charge Amount" : "Claim Count = Count of unique Claim ID, Charge Amount = Sum of Charge Amount") &bull;
-                        <strong>Sorted by:</strong> Claim Count DESC &bull;
-                        Grand Total claim count = sum of the CPT code claim counts
+                        <strong>Values:</strong> @(cptUnitsAndChargesOnly
+                            ? "Sum of Units, Sum of Charge Amount"
+                            : isCoreBio
+                                ? "Claim Count = Count of unique Claim ID, Units = Sum of Units, Charge Amount = Sum of Charge Amount"
+                                : "Claim Count = Count of unique Claim ID, Charge Amount = Sum of Charge Amount") &bull;
+                        <strong>Sorted by:</strong> @(isVariantX || !cptUnitsAndChargesOnly ? "Claim Count DESC" : "Sum of Units DESC")
                     </div>
                 }
             }
             else if (Model.CptBreakdownRows.Count > 0 && cptYears.Count > 0)
             {
                 <div class="pr-wrap">
-                    @if (isTexas)
+                    @if (isTexas || isVariantX)
                     {
                     <div class="pr-filter-summary">
                         <span class="filter-dot">•</span>

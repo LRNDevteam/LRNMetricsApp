@@ -1,14 +1,7 @@
-﻿/* =============================================================================
-   VariantX Labs — cloned from Elixir (21_Elixir_ExecutiveSummaryDetailRows_PMSCash.sql)
-   Prefix: VarX_ / VarX_CS_ / VarX_ES_
-   Refresh: usp_RefreshVarX_*
-   Read:    usp_GetVarX_*
-   Source tables: dbo.ClaimLevelData, dbo.LineLevelData, dbo.LIMSMaster
-   No inline UI queries — dashboard/ReportWorker must call these SPs only.
-
-   NOTE: Display columns (PatientName, ClinicName, BillingProvider, PayerType,
-   BillStatus, PatientFirst/Last) are auto-detected. Missing columns fall back
-   to '' so this SP works when ClaimLevelData alters (scripts 02-05) are skipped.
+/* =============================================================================
+   VariantX – Executive Summary PMS/Cash Detail-Rows SP
+   Mirrors 16_VariantX_ExecutiveSummary_Aggregate RoleIDs (FirstBilledDate / ClaimID).
+   Generic name: dbo.usp_GetExecutiveSummaryDetail_PMSCash
    ============================================================================= */
 SET NOCOUNT ON;
 GO
@@ -69,16 +62,10 @@ BEGIN
             ELSE N'CASE WHEN LTRIM(RTRIM(ISNULL(ClaimStatus, ''''))) IN (''Unbilled'',''Unbilled - PB'') THEN ''Unbilled'' ELSE ''Billed'' END'
         END;
 
-    DECLARE @FirstBilledExpr NVARCHAR(400) =
-        CASE
-            WHEN COL_LENGTH(N'dbo.ClaimLevelData', N'FirstBilledDate') IS NOT NULL
-                THEN N'FirstBilledDate'
-            ELSE N'CAST(NULL AS NVARCHAR(100))'
-        END;
-
     DROP TABLE IF EXISTS #Base;
     CREATE TABLE #Base
     (
+        ClaimKey              NVARCHAR(100)   NULL,
         AccessionNumber       NVARCHAR(100)   NULL,
         PatientName           NVARCHAR(500)   NOT NULL,
         PayerName             NVARCHAR(500)   NOT NULL,
@@ -102,6 +89,7 @@ BEGIN
     DECLARE @sql NVARCHAR(MAX) = N'
     INSERT INTO #Base
     SELECT
+        NULLIF(LTRIM(RTRIM(ClaimID)), ''''),
         AccessionNumber,
         ' + @PatientExpr + N' AS PatientName,
         LTRIM(RTRIM(ISNULL(PayerName, ''''))) AS PayerName,
@@ -109,7 +97,7 @@ BEGIN
         ' + @ClinicExpr + N' AS ClinicName,
         ' + @ProviderExpr + N' AS BillingProvider,
         DateofService,
-        ' + @FirstBilledExpr + N' AS FirstBilledDate,
+        FirstBilledDate,
         ' + @BillStatusExpr + N' AS BilledUnbilled,
         ISNULL(LTRIM(RTRIM(ClaimStatus)), '''') AS ClaimStatus,
         ' + @PayerTypeExpr + N' AS PayerType,
@@ -121,17 +109,18 @@ BEGIN
         ISNULL(TRY_CAST(InsuranceAdjustments AS DECIMAL(18,2)), 0),
         ISNULL(TRY_CAST(PatientAdjustments   AS DECIMAL(18,2)), 0)
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(DateofService AS DATE) IS NOT NULL
-      AND NULLIF(LTRIM(RTRIM(AccessionNumber)), '''') IS NOT NULL
-      AND (@Year = 0  OR YEAR (TRY_CAST(DateofService AS DATE)) = @Year)
-      AND (@Month = 0 OR MONTH(TRY_CAST(DateofService AS DATE)) = @Month);';
+    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+      AND NULLIF(LTRIM(RTRIM(ClaimID)), '''') IS NOT NULL
+      AND (@Year = 0  OR YEAR (TRY_CAST(FirstBilledDate AS DATE)) = @Year)
+      AND (@Month = 0 OR MONTH(TRY_CAST(FirstBilledDate AS DATE)) = @Month);';
 
     EXEC sys.sp_executesql @sql,
         N'@Year INT, @Month INT',
         @Year = @Year, @Month = @Month;
 
     SELECT DISTINCT
-        b.AccessionNumber AS VisitNumber,
+        b.ClaimKey         AS VisitNumber,
+        b.AccessionNumber,
         b.PatientName,
         b.PayerName,
         b.Panelname        AS PanelName,
@@ -151,32 +140,29 @@ BEGIN
         b.PatientAdjustments
     FROM #Base b
     WHERE
-           (@RowCode = 'F'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus NOT IN ('Billed Amount 0','Unbilled','Unbilled - PB'))
-        OR (@RowCode = 'G'    AND b.ClaimStatus IN ('Unbilled','Unbilled - PB'))
-        OR (@RowCode = 'H'    AND b.ClaimStatus = 'Voided')
-        OR (@RowCode = 'I'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus NOT IN ('Billed Amount 0','Unbilled'))
-        OR (@RowCode = 'J'    AND b.ClaimStatus = 'Fully Paid')
-        OR (@RowCode = 'K'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Patient Responsibility')
-        OR (@RowCode = 'L'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Patient Payment')
-        OR (@RowCode = 'M'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Fully Adjusted')
-        OR (@RowCode = 'N'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Partially Adjusted')
-        OR (@RowCode = 'O'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Partially Paid')
-        OR (@RowCode = 'P'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus IN ('Denied','No Response','Partially Denied'))
-        OR (@RowCode = 'P.1'  AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Denied')
-        OR (@RowCode = 'P.2'  AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus IN ('Partially Adjusted','Partially Denied'))
-        OR (@RowCode = 'P.3'  AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'No Response')
-        OR (@RowCode = 'Q'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus NOT IN ('Unbilled','Unbilled - PB','Billed Amount 0'))
-        OR (@RowCode = 'R'    AND b.ClaimStatus = 'Unbilled')
-        OR (@RowCode = 'S'    AND b.ClaimStatus = 'Fully Paid')
-        OR (@RowCode = 'T'    AND b.BilledUnbilled = 'Billed')
-        OR (@RowCode = 'U'    AND b.BilledUnbilled = 'Billed')
-        OR (@RowCode = 'V'    AND b.BilledUnbilled = 'Billed')
-        OR (@RowCode = 'W'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Partially Paid')
-        OR (@RowCode = 'X'    AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus NOT IN ('Unbilled','Billed Amount 0'))
-        OR (@RowCode = 'X.1'  AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Denied')
-        OR (@RowCode = 'X.2'  AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus IN ('Partially Denied','Partially Paid','Partially Adjusted','Patient Responsibility'))
-        OR (@RowCode = 'X.3'  AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'No Response')
-    ORDER BY b.DateofService, b.AccessionNumber;
+           (@RowCode = 'F')
+        OR (@RowCode = 'G')  -- mismatch drill: all billed claims (same as F)
+        OR (@RowCode = 'H'   AND b.ClaimStatus = 'Fully Paid')
+        OR (@RowCode = 'I'   AND b.ClaimStatus = 'Patient Responsibility')
+        OR (@RowCode = 'J'   AND b.ClaimStatus = 'Fully Adjusted')
+        OR (@RowCode = 'K'   AND b.ClaimStatus = 'Partially Adjusted')
+        OR (@RowCode = 'L'   AND b.ClaimStatus = 'Partially Paid')
+        OR (@RowCode = 'M'   AND b.ClaimStatus = 'Patient Payment')
+        OR (@RowCode = 'N'   AND b.ClaimStatus IN ('Fully Denied','Denied','Partially Denied','No Response'))
+        OR (@RowCode = 'N.1' AND b.ClaimStatus IN ('Fully Denied','Denied'))
+        OR (@RowCode = 'N.2' AND b.ClaimStatus = 'Partially Denied')
+        OR (@RowCode = 'N.3' AND b.ClaimStatus = 'No Response')
+        OR (@RowCode = 'O')
+        OR (@RowCode = 'P'   AND b.ClaimStatus = 'Fully Paid')
+        OR (@RowCode = 'Q')
+        OR (@RowCode = 'R')
+        OR (@RowCode = 'S')  -- derived; show all billed-period claims
+        OR (@RowCode = 'T'   AND b.ClaimStatus = 'Partially Paid')
+        OR (@RowCode = 'U')
+        OR (@RowCode = 'U.1' AND b.ClaimStatus IN ('Denied','Fully Denied'))
+        OR (@RowCode = 'U.2' AND b.ClaimStatus = 'Partially Denied')
+        OR (@RowCode = 'U.3' AND b.ClaimStatus = 'No Response')
+    ORDER BY b.FirstBilledDate, b.ClaimKey;
 
     DROP TABLE IF EXISTS #Base;
 END;

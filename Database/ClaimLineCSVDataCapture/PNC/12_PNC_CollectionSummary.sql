@@ -7,6 +7,7 @@
 
      fn_PNC_CS_Claims        claim-level base + dashboard filters
      fn_PNC_CS_WeekEnd       week-range end date of the loaded claim file
+     fn_PNC_CS_CheckDateTo   31 Dec of the current year ("CheckDate = 2024 to Current Year")
      usp_PNC_CS_{X}_Compute  the logic (live, honours filters)
      PNC_CS2_{X}             no-filter snapshot
      usp_GetPNC_CS_{X}       snapshot when unfiltered, else compute
@@ -14,9 +15,10 @@
 
    Client sheet (Claim Level Data unless noted; sorted by claim count). "Week End Date" is the
    end of the claim file's week range (LineClaimFileLogs.WeekFolder, e.g. 11.04.2026 - 11.10.2026).
-     1  Monthly                InsurancePayment > 0; CheckDate 2024-01-01 to Week End Date;
+   "2024 to Current Year" = CheckDate 2024-01-01 to 31 Dec of the current year (fn_PNC_CS_CheckDateTo).
+     1  Monthly                InsurancePayment > 0; CheckDate 2024 to Current Year;
                                Panelname + top 5 PayerName_Raw; CheckDate month
-     2  Weekly                 InsurancePayment > 0; CheckDate 2024-01-01 to Week End Date;
+     2  Weekly                 InsurancePayment > 0; CheckDate 2024 to Current Year;
                                last 4 Wednesday-Tuesday weeks of CheckDate where DepositWeek is
                                filled (DepositWeek Week 1-4 = those weeks); Panelname + top 5 payers
      3  Top 5 Reimbursement %  InsurancePayment > 0; top 5 PayerName_Raw by claim count;
@@ -27,11 +29,12 @@
                                blank - Aging is empty on the current file); claim count +
                                Sum(InsuranceBalance)
      6  Insurance vs Payment % InsurancePayment > 0; claim count + Average(PaymentPercent)
-     7  Panel Vs Payment       InsurancePayment > 0; CheckDate 2024-01-01 to Week End Date;
+     7  Panel Vs Payment       InsurancePayment > 0; CheckDate 2024 to Current Year;
                                ChargeEnteredDate month; rows Panelname.
                                Billed = FirstBilledDate is a date: claim count + Sum(ChargeAmount).
                                Paid = InsurancePayment > 0: claim count + Sum(InsurancePayment)
-     8  Insurance vs Payment   InsurancePayment > 0; CheckDate month; claim count + Sum(InsurancePayment)
+     8  Insurance vs Payment   InsurancePayment > 0; CheckDate 2024 to Current Year; CheckDate month;
+                               claim count + Sum(InsurancePayment)
                                (14_PNC_CS_InsuranceVsPayment_CheckDate.sql)
      9  CPT vs Payment         Line Level Data; line InsurancePayment > 0; Sum(Units) and
                                Sum(InsurancePayment); sorted by units (not on the client sheet;
@@ -166,6 +169,15 @@ BEGIN
 END
 GO
 
+/* "CheckDate = 2024 to Current Year": the last day of the current year. */
+CREATE OR ALTER FUNCTION dbo.fn_PNC_CS_CheckDateTo()
+RETURNS DATE
+AS
+BEGIN
+    RETURN DATEFROMPARTS(YEAR(GETDATE()), 12, 31);
+END
+GO
+
 /* =============================================================================
    Snapshot tables
    ============================================================================= */
@@ -221,7 +233,7 @@ CREATE TABLE dbo.PNC_CS2_CptVsPaymentPct (
 GO
 
 /* =============================================================================
-   1. Monthly (CheckDate month, 2024-01-01 to Week End Date)
+   1. Monthly (CheckDate month, CheckDate 2024 to Current Year)
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_PNC_CS_MonthlyClaimVolume_Compute
     @PayerNames NVARCHAR(MAX) = NULL, @PanelNames NVARCHAR(MAX) = NULL,
@@ -233,7 +245,7 @@ BEGIN
     SET NOCOUNT ON;
 
     DECLARE @CheckFrom DATE = '20240101';
-    DECLARE @CheckTo   DATE = dbo.fn_PNC_CS_WeekEnd();
+    DECLARE @CheckTo   DATE = dbo.fn_PNC_CS_CheckDateTo();
 
     WITH agg AS (
         SELECT PanelName, PayerName,
@@ -279,7 +291,7 @@ END
 GO
 
 /* =============================================================================
-   2. Weekly (CheckDate, Wednesday-Tuesday weeks, CheckDate 2024-01-01 to Week End Date)
+   2. Weekly (CheckDate, Wednesday-Tuesday weeks, CheckDate 2024 to Current Year)
       Last 4 weeks ending at the latest week that has DepositWeek filled.
    ============================================================================= */
 CREATE OR ALTER PROCEDURE dbo.usp_PNC_CS_WeeklyClaimVolume_Compute
@@ -294,7 +306,7 @@ BEGIN
     -- 2026-09-16 was a Wednesday; ((n % 7) + 7) % 7 keeps the offset positive.
     DECLARE @Wednesday DATE = '20260916';
     DECLARE @CheckFrom DATE = '20240101';
-    DECLARE @CheckTo   DATE = dbo.fn_PNC_CS_WeekEnd();
+    DECLARE @CheckTo   DATE = dbo.fn_PNC_CS_CheckDateTo();
 
     SELECT PanelName, PayerName, ClaimKey, InsPay,
            WeekStart = DATEADD(DAY, -((DATEDIFF(DAY, @Wednesday, CheckDt) % 7 + 7) % 7), CheckDt)
@@ -583,7 +595,7 @@ GO
 
 /* =============================================================================
    7. Panel Vs Payment (ChargeEnteredDate month)
-      Filter: InsurancePayment > 0 AND CheckDate 2024-01-01 to Week End Date
+      Filter: InsurancePayment > 0 AND CheckDate 2024 to Current Year
       Billed: FirstBilledDate is a date -> claim count, Sum(ChargeAmount)
       Paid:   InsurancePayment > 0      -> claim count, Sum(InsurancePayment)
    ============================================================================= */
@@ -597,7 +609,7 @@ BEGIN
     SET NOCOUNT ON;
 
     DECLARE @CheckFrom DATE = '20240101';
-    DECLARE @CheckTo   DATE = dbo.fn_PNC_CS_WeekEnd();
+    DECLARE @CheckTo   DATE = dbo.fn_PNC_CS_CheckDateTo();
 
     WITH base AS (
         SELECT PanelName, ClaimKey, ChargeAmt, InsPay,

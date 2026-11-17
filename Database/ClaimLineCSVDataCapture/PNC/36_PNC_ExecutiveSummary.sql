@@ -51,19 +51,18 @@
      U   Contractual Obligation W/O         SUM(InsuranceAdjustments) ClaimStatus NOT IN (Fully Adjusted, Unbilled,
                                                                                          Unbilled - Patient Balance)
      V   Total Patient Responsibility       SUM(PatientBalance)       billed claims
-     W   Total Insurance Balance ($)        W1 + W2 + W3
+     W   Total Insurance Balance ($)        SUM(InsuranceBalance)     billed claims
      W1    Denials                          SUM(InsuranceBalance)     ClaimStatus = Fully Denied
-     W2    Partially Denied                 SUM(InsuranceBalance)     ClaimStatus IN (Partially Adjusted, Partially Paid,
-                                                                                     Partially Denied)
+     W2    Partially Denied                 SUM(InsuranceBalance)     billed claims AND ClaimStatus NOT IN
+                                                                      (No Response, Fully Denied)
      W3    No Response from Payor           SUM(InsuranceBalance)     ClaimStatus = No Response
-   (W / W2 are marked "Doubt" on the sheet; the sheet's own figures equal W1 + W2 + W3 and the
-    Partially Paid balance, which is what these rules return.)
+   (W = W1 + W2 + W3.)
 
    Average Payment Per Claim
      AK  Total Pay / Billed Claims          S / F
      AL  Total Pay / Paid Claims            Q / J
-     AM  Total Pay / Adjudicated Claims     S / (F - O3)  = S / (J + K + L + M + MP + N + O1 + O2)
-         (marked "Doubt" on the sheet; the sheet's monthly figures equal S / (F - O3))
+     AM  Total Pay / Adjudicated Claims     S / (J + N + O1 + O2)
+         (Fully Paid + Patient Paid + Fully Denied + Partially Denied claims)
 
    {PANEL} = UPPER(TRIM(PanelName)); the row shows the name as written in the data.
    SortOrder = the row's position x 100; panel rows follow B (2000 + rank).
@@ -340,7 +339,7 @@ BEGIN
         ISNULL(SUM(CASE WHEN IsBilled = 1 AND ClaimStatus <> N'FULLY ADJUSTED' THEN InsuranceAdjustments END), 0) AS C_U,
         ISNULL(SUM(CASE WHEN IsBilled = 1 THEN PatientBalance END), 0) AS C_V,
         ISNULL(SUM(CASE WHEN ClaimStatus = N'FULLY DENIED' THEN InsuranceBalance END), 0) AS C_W1,
-        ISNULL(SUM(CASE WHEN ClaimStatus IN (N'PARTIALLY ADJUSTED', N'PARTIALLY PAID', N'PARTIALLY DENIED') THEN InsuranceBalance END), 0) AS C_W2,
+        ISNULL(SUM(CASE WHEN IsBilled = 1 AND ClaimStatus NOT IN (N'NO RESPONSE', N'FULLY DENIED') THEN InsuranceBalance END), 0) AS C_W2,
         ISNULL(SUM(CASE WHEN ClaimStatus = N'NO RESPONSE' THEN InsuranceBalance END), 0) AS C_W3
     INTO #ClmM
     FROM #EsClaims
@@ -370,7 +369,7 @@ BEGIN
            CAST(r.MetricValue AS DECIMAL(18,2)), r.ClaimCount
     FROM #Per p
     CROSS APPLY (
-        SELECT CAST(p.P_F - p.P_O3 AS DECIMAL(38,6)) AS AdjudicatedClaims
+        SELECT CAST(p.P_J + p.P_N + p.P_O1 + p.P_O2 AS DECIMAL(38,6)) AS AdjudicatedClaims
     ) d
     CROSS APPLY (VALUES
         ('LIS', 'A',   N'Total Samples',                          10, CAST(p.L_A AS DECIMAL(38,6)), p.L_A),

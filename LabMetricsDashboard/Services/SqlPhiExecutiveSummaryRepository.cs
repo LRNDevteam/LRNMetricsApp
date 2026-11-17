@@ -25,9 +25,11 @@ public sealed partial class SqlPhiExecutiveSummaryRepository
         "J","K",
         "L","L-Recv","L-Coll",
         "M","N","O","P",
-        "Q","R","S","T","U","V","W","X","Y","Y.1","Y.2","Y.3",
+        "Q","R","S","T","U","U.1","U.2","U.3","V","W","X","Y","Y.1","Y.2","Y.3",
         "Z","AA","AB","AC","AD","AE","AF","AG","AG1","AG2","AG3","AH","AI1",
         "AJ","AK","AL",
+        // VariantX sheet PMS/Cash sub-rows (N.x / U.x also resolve via GetSortKey)
+        "N.1","N.2","N.3",
 
         // Alternate LIS breakdown (RoleID 'L_0','L_A'..'L_B2'), populated by
         // dbo.usp_RefreshRT_ExecutiveSummary_LIS_Alt — added alongside the

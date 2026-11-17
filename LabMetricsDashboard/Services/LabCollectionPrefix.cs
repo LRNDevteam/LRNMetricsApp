@@ -33,7 +33,7 @@ public static class LabCollectionPrefix
         ["Cert"]               = "Cert",
         ["Cove"]               = "Cove",
         ["Elixir"]             = "Elix",
-        // VariantX is an Elixir clone (Rule5 / Wed–Tue); aggregate prefix VarX_*.
+        // VariantX is an Elixir clone; weekly Collection / Denial weeks are Thu–Wed. Prefix VarX_*.
         ["VariantX"]           = "VarX",
         ["VariantX_LRN"]       = "VarX",
         // Analyze Pathology: VariantX clone; Production Summary follows the client sheet. Prefix AnP_*.
@@ -257,22 +257,31 @@ public static class LabCollectionPrefix
     /// Labs with the Denial Summary page: <c>usp_Get{prefix}_Denial*</c> read SPs over the
     /// <c>{prefix}_Denial*</c> aggregate tables refreshed at claim-file ingest.
     /// </summary>
+    public static bool IsVariantX(string? labName) =>
+        GetPrefix(labName) is "VarX";
+
     public static bool HasDenialSummary(string? labName) =>
-        GetPrefix(labName) is "AnP" or "WH" or "NW" or "Aug" or "CB" or "TD" or "PNC";
+        GetPrefix(labName) is "AnP" or "WH" or "NW" or "Aug" or "CB" or "TD" or "PNC" or "VarX";
+
+    /// <summary>
+    /// Denial List tab and sheet. VariantX's client sheet is Monthly / Weekly only.
+    /// </summary>
+    public static bool HasDenialLists(string? labName) =>
+        HasDenialSummary(labName) && !IsVariantX(labName);
 
     /// <summary>
     /// Denial List - Plan Type tab and sheet (<c>usp_Get{prefix}_DenialPlanType</c>).
     /// The CoreBio, Texas Diagnostic and PNC Denial Summary sheets have no Plan Type.
     /// </summary>
     public static bool HasDenialPlanType(string? labName) =>
-        HasDenialSummary(labName) && !IsCoreBio(labName) && !IsTexasDiagnostic(labName) && !IsPnc(labName);
+        HasDenialLists(labName) && !IsCoreBio(labName) && !IsTexasDiagnostic(labName) && !IsPnc(labName);
 
     /// <summary>
     /// Labs whose Executive Summary values open the "rows behind this value" popup, read from
     /// <c>usp_Get{prefix}_ExecutiveSummaryCellRows</c> (same rules as the Executive Summary SPs).
     /// </summary>
     public static bool HasEsCellRows(string? labName) =>
-        GetPrefix(labName) is "WH" or "CB" or "TD" or "PNC" or "Elix" or "IHD" or "RT" or "BT" or "NW" or "AnP" or "Cove";
+        GetPrefix(labName) is "WH" or "CB" or "TD" or "PNC" or "Elix" or "IHD" or "RT" or "BT" or "NW" or "AnP" or "Cove" or "VarX";
 
     /// <summary>
     /// Labs whose Executive Summary Year Total / Grand Total cells also open the value popup instead
@@ -284,7 +293,7 @@ public static class LabCollectionPrefix
     /// Cove's grid has two rule sets (snapshot vs filtered) that one LisDrillRowDef row cannot express.
     /// </summary>
     public static bool EsTotalsUseCellRows(string? labName) =>
-        GetPrefix(labName) is "CB" or "TD" or "PNC" or "NW" or "AnP" or "Cove";
+        GetPrefix(labName) is "CB" or "TD" or "PNC" or "NW" or "AnP" or "Cove" or "VarX";
 
     /// <summary>
     /// What the Denial Summary Monthly / Weekly SPs rank insurances by (shown in the grid caption).

@@ -27,6 +27,7 @@ public sealed class ExecutiveSummaryHighlightsExcel
     {
         ["Monthly Summary"] = "Denial Highlights - Monthly",
         ["Weekly Summary"]  = "Denial Highlights - Weekly",
+        ["Denial Insight"]  = "Denial Highlights - Insight",
     };
 
     private readonly LabSettings _labSettings;
@@ -66,11 +67,11 @@ public sealed class ExecutiveSummaryHighlightsExcel
 
     /// <summary>Labs whose Executive Summary page shows the highlight tabs.</summary>
     public static bool AppliesTo(string? labName) =>
-        LabCollectionPrefix.GetPrefix(labName) is "NW" or "Cove" or "Elix" or "IHD" or "RT" or "BT" or "AnP" or "Aug" or "WH" or "CB" or "TD" or "PNC";
+        LabCollectionPrefix.GetPrefix(labName) is "NW" or "Cove" or "Elix" or "IHD" or "RT" or "BT" or "AnP" or "Aug" or "WH" or "CB" or "TD" or "PNC" or "VarX";
 
     /// <summary>Labs among <see cref="AppliesTo"/> whose Denial Highlights tab is live.</summary>
     public static bool ShowsDenialHighlights(string? labName) =>
-        LabCollectionPrefix.GetPrefix(labName) is "NW" or "Cove" or "Elix" or "IHD" or "RT" or "BT" or "AnP" or "Aug" or "WH" or "CB" or "TD" or "PNC";
+        LabCollectionPrefix.GetPrefix(labName) is "NW" or "Cove" or "Elix" or "IHD" or "RT" or "BT" or "AnP" or "Aug" or "WH" or "CB" or "TD" or "PNC" or "VarX";
 
     /// <summary>
     /// One highlight tab of the Executive Summary page: another report's page, unfiltered, showing only
@@ -88,8 +89,11 @@ public sealed class ExecutiveSummaryHighlightsExcel
         if (!AppliesTo(labName)) return [];
 
         // NorthWest and Augustus have the date-basis Average Payments tabs (Panel Averages by DOS / Check Date);
-        // the others show Average Payments and, where the lab has it, Last 3 Months.
-        var collectionTabs = LabCollectionPrefix.UsesAvgPaymentsByDateBasis(labName)
+        // VariantX labels Avg Payments as Panel Averages - by DOS (avgpay-pane).
+        // Others show Average Payments and, where the lab has it, Last 3 Months.
+        var collectionTabs = LabCollectionPrefix.IsVariantX(labName)
+            ? "mcv-pane,wcv-pane,top5grid-pane,avgpay-pane"
+            : LabCollectionPrefix.UsesAvgPaymentsByDateBasis(labName)
             ? "mcv-pane,wcv-pane,top5grid-pane,avgpaydos-pane,avgpay-pane"
             : "mcv-pane,wcv-pane,top5grid-pane,avgpay-pane,avgpay3-pane";
         var tabs = new List<HighlightTab>
@@ -334,6 +338,7 @@ public sealed class ExecutiveSummaryHighlightsExcel
     /// <summary>
     /// Monthly and Weekly Summary of the Denial Summary page: the lab's usp_Get{prefix}_Denial*
     /// SPs (NorthWest, Analyze Pathology, Augustus, WellHealth), else the inline ClaimLevelData summary (Cove, Elixir, InHealth DTR, Rising Tides, Beech Tree).
+    /// Plus the Current Week Denial Insight, as the page's Denial Highlights tab shows it.
     /// </summary>
     private async Task<XLWorkbook> BuildDenialAsync(string connStr, string labName, CancellationToken ct)
     {
@@ -342,7 +347,9 @@ public sealed class ExecutiveSummaryHighlightsExcel
             _denial, connStr, labName, weekStartsOn,
             _labConfig?.GetDenialSummaryDateColumn(labName),
             _labConfig?.GetDenialSummaryBalanceColumn(labName), ct);
-        return DenialClaimReportExcelBuilder.BuildSummary(model);
+        model.Insight.Bucket = DenialInsightBuckets.Current;
+        model.Insight.Rows = await _denial.GetInsightsAsync(connStr, DenialInsightBuckets.Current, ct);
+        return DenialClaimReportExcelBuilder.BuildHighlights(model);
     }
 
     private async Task AppendInsightsAsync(

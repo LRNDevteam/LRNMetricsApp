@@ -191,7 +191,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         string.Equals(prefix, "WH", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "CB", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "TD", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(prefix, "PNC", StringComparison.OrdinalIgnoreCase);
+        string.Equals(prefix, "PNC", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "VarX", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Labs whose live/filter Top5 Payments path prefers
@@ -208,7 +209,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         string.Equals(prefix, "WH", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "CB", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(prefix, "TD", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(prefix, "PNC", StringComparison.OrdinalIgnoreCase);
+        string.Equals(prefix, "PNC", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "VarX", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Augustus Collection Report client logic lives in *_v3 SPs
@@ -966,6 +968,11 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             return new CptPaymentPctResult(rows);
         }
 
+        // VariantX CS CPT Breakdown: ChargeAmount column + IsCptBreakdown flag
+        // (Sum of Units + Sum of Charge Amount, no Payment %).
+        var hasChargeCol = HasColumn(r, "ChargeAmount");
+        var isCptBreakdown = HasColumn(r, "IsCptBreakdown");
+
         while (await r.ReadAsync(ct))
         {
             decimal? snapshotPct = paymentPctOrdinal >= 0 && !r.IsDBNull(paymentPctOrdinal)
@@ -975,12 +982,18 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             var cpt = GetStringOrEmpty(r, "CPTCode");
             if (string.IsNullOrWhiteSpace(cpt)) continue;
 
+            var charge = hasChargeCol
+                ? GetDecimalOrDefault(r, "ChargeAmount")
+                : GetDecimalOrDefault(r, "PaidChargeAmount");
+            var breakdown = isCptBreakdown && GetInt32OrDefault(r, "IsCptBreakdown") == 1;
+
             rows.Add(new CptPaymentPctRow(
                 CptCode:              cpt,
                 SumServiceUnits:      GetDecimalOrDefault(r, "SumUnits"),
                 PaidInsurancePayment: GetDecimalOrDefault(r, "PaidInsurancePayment"),
-                PaidChargeAmount:     GetDecimalOrDefault(r, "PaidChargeAmount"),
-                SnapshotPaymentPct:   snapshotPct));
+                PaidChargeAmount:     charge,
+                SnapshotPaymentPct:   breakdown ? null : snapshotPct,
+                HasChargeAmount:      breakdown || hasChargeCol));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
         return new CptPaymentPctResult(rows);

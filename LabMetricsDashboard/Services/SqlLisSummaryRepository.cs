@@ -2290,10 +2290,11 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				ExpressionForColumn(FirstExisting(columns, "ClinicName")),
 				ExpressionForColumn(FirstExisting(columns, "DoctorFullName")),
 				null, null),
+			// TestType / PhysicianName are VariantX's names; they must match dbo.usp_RefreshVarX_LISSummary.
 			"Cove" => new FilterColumnProfile(
-				ExpressionForColumn(FirstExisting(columns, "PanelType", "PanelName")),
+				ExpressionForColumn(FirstExisting(columns, "PanelType", "PanelName", "TestType")),
 				ExpressionForColumn(FirstExisting(columns, "FacilityName", "Facility")),
-				ExpressionForColumn(FirstExisting(columns, "ProviderName", "Provider")),
+				ExpressionForColumn(FirstExisting(columns, "ProviderName", "Provider", "PhysicianName")),
 				ExpressionForColumn(FirstExisting(columns, "SaleRepName")),
 				null),
 			"Elixir" => new FilterColumnProfile(
@@ -3919,9 +3920,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				18 => "Certus",
 				19 => "Augustus",
 				20 => "NWL",
-				// VariantX reports its LIS on Cove's template: the same Final Status / Billed-Not /
-				// Sub Status shape, so it also inherits Cove's date columns (DateOfCollection,
-				// ReceivedDate, ValidatedDate) and panel/clinic/provider filters.
+				// VariantX rows come from dbo.usp_GetVarX_LISSummary. Cove's sheet maps its dates and
+				// filters (with VariantX's RequestCollectDate / RequestReceivedDate / TestType /
+				// PhysicianName fallbacks) and is the row template when that SP is not deployed.
 				25 => "Cove",
 				// Analyze Pathology follows VariantX until its own LIS logic arrives: NewStatus / BillCategory /
 				// SubStatus fill Cove's Final Status / Billed-Not / Sub Status ("Unbilled" matches "Not Billed").

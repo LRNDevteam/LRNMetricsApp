@@ -114,12 +114,12 @@
                                     <th colspan="2">Grand Total</th>
                                 </tr>
                                 <tr>
-                                    <th>No. of Claims</th><th>Insurance Balance</th>
-                                    <th>No. of Claims</th><th>Insurance Balance</th>
-                                    <th>No. of Claims</th><th>Insurance Balance</th>
-                                    <th>No. of Claims</th><th>Insurance Balance</th>
-                                    <th>No. of Claims</th><th>Insurance Balance</th>
-                                    <th>No. of Claims</th><th>Insurance Balance</th>
+                                    <th>No. of Claims</th><th>@(Model.IsVariantXLab ? "Charge Amount" : "Insurance Balance")</th>
+                                    <th>No. of Claims</th><th>@(Model.IsVariantXLab ? "Charge Amount" : "Insurance Balance")</th>
+                                    <th>No. of Claims</th><th>@(Model.IsVariantXLab ? "Charge Amount" : "Insurance Balance")</th>
+                                    <th>No. of Claims</th><th>@(Model.IsVariantXLab ? "Charge Amount" : "Insurance Balance")</th>
+                                    <th>No. of Claims</th><th>@(Model.IsVariantXLab ? "Charge Amount" : "Insurance Balance")</th>
+                                    <th>No. of Claims</th><th>@(Model.IsVariantXLab ? "Charge Amount" : "Insurance Balance")</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -206,7 +206,16 @@
                 </div>
 
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
-                @if (Model.IsCoreBioLab)
+                @if (Model.IsVariantXLab)
+                {
+                    <span><strong>Data:</strong> Claim Level Data &bull;
+                    <strong>Filter:</strong> ClaimStatus = No Response &bull;
+                    <strong>Rows:</strong> PayerName_Raw &bull;
+                    <strong>Columns:</strong> AgingDOS &bull;
+                    <strong>Sorted by:</strong> Insurance Payment &bull;
+                    <strong>Metric:</strong> Count of unique ClaimID, SUM(ChargeAmount)</span>
+                }
+                else if (Model.IsCoreBioLab)
                 {
                     <span><strong>Data:</strong> Claim Level Data &bull;
                     <strong>Filter:</strong> ClaimStatus = No Response; PayerName_Raw not UHP MANAGEMENT, PERENNIAL ADVANTAGE OF OHIO (MEDICARE), NORTH CAROLINA BLUE SHIELD &bull;

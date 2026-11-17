@@ -89,8 +89,7 @@ CREATE TABLE dbo.VarX_CS_WeeklyClaimVolume
 );
 GO
 
-DROP TABLE IF EXISTS dbo.VarX_CS_PanelAverages;
-GO
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'VarX_CS_PanelAverages')
 CREATE TABLE dbo.VarX_CS_PanelAverages
 (
     SummaryId           INT             NOT NULL IDENTITY(1,1) PRIMARY KEY,
@@ -153,8 +152,7 @@ CREATE TABLE dbo.VarX_CS_InsuranceVsAging
 );
 GO
 
-DROP TABLE IF EXISTS dbo.VarX_CS_PanelVsPayment;
-GO
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'VarX_CS_PanelVsPayment')
 CREATE TABLE dbo.VarX_CS_PanelVsPayment
 (
     SummaryId        INT             NOT NULL IDENTITY(1,1) PRIMARY KEY,
@@ -241,7 +239,9 @@ GO
 -- STORED PROCEDURES
 -- =====================================================================
 
--- 1. Top 5 Insurances | Reimbursement % (vs Billed Charge)
+-- 1. Top 5 Insurances | Reimbursement Rate
+-- Same ranking as Top 5 Total Payments: InsurancePayment > 0, sort by SUM(InsurancePayment).
+-- Payment % = AVG(InsurancePayment / ChargeAmount * 100) per claim (client Excel).
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshVarX_CS_Top5ReimbursementPct
 AS
 BEGIN
@@ -252,33 +252,29 @@ BEGIN
             LTRIM(RTRIM(PayerName_Raw))                                                     AS PayerName,
             ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)                     AS SumIns,
             ISNULL(SUM(TRY_CAST(ChargeAmount     AS DECIMAL(18,2))), 0)                     AS SumChg,
-            COUNT(NULLIF(LTRIM(RTRIM(AccessionNumber)), ''))                                AS Visits,
-            ROUND(
-                ISNULL(AVG(TRY_CAST(PaymentPercent AS DECIMAL(18,4))), 0) * 100,
-                0
-            )                                                                               AS PaymentPct
+            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))                               AS Visits,
+            ROUND(AVG(
+                CASE WHEN TRY_CAST(ChargeAmount AS DECIMAL(18,2)) IS NULL
+                       OR TRY_CAST(ChargeAmount AS DECIMAL(18,2)) = 0 THEN NULL
+                     ELSE TRY_CAST(InsurancePayment AS DECIMAL(18,2))
+                          / TRY_CAST(ChargeAmount AS DECIMAL(18,2)) * 100 END
+            ), 1)                                                                           AS PaymentPct
         FROM dbo.ClaimLevelData
         WHERE PayerName_Raw IS NOT NULL
           AND LTRIM(RTRIM(PayerName_Raw)) <> ''
           AND ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
-          AND LTRIM(RTRIM(ClaimStatus)) <> 'No Response'
         GROUP BY LTRIM(RTRIM(PayerName_Raw))
-    ),
-    grand AS (
-        SELECT NULLIF(SUM(SumIns), 0) AS GrandTotal
-        FROM agg
     ),
     ranked AS (
         SELECT TOP 5
-               ROW_NUMBER() OVER (ORDER BY a.SumIns DESC) AS Rnk,
+               ROW_NUMBER() OVER (ORDER BY a.SumIns DESC, a.Visits DESC) AS Rnk,
                a.PayerName,
                a.SumIns,
                a.SumChg,
                a.Visits,
                a.PaymentPct
         FROM agg a
-        CROSS JOIN grand g
-        ORDER BY a.SumIns DESC
+        ORDER BY a.SumIns DESC, a.Visits DESC
     )
     SELECT * INTO #out FROM ranked;
 
@@ -295,7 +291,10 @@ END
 GO
 
 
--- 2. Top 5 Insurances | Reimbursement Payments
+-- 2. Top 5 Insurances | Total Payments
+-- Filter: InsurancePayment > 0 (same pool as Insurance vs Payment %)
+-- Sort: SUM(InsurancePayment) DESC
+-- Claim Count = COUNT(DISTINCT ClaimID)
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshVarX_CS_Top5ReimbursementPay
 AS
 BEGIN
@@ -305,20 +304,19 @@ BEGIN
         SELECT
             LTRIM(RTRIM(PayerName_Raw))                                                     AS PayerName,
             ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)                     AS TotalPay,
-            COUNT(NULLIF(LTRIM(RTRIM(AccessionNumber)), ''))                                AS Visits
+            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))                               AS Visits
         FROM dbo.ClaimLevelData
         WHERE PayerName_Raw IS NOT NULL
           AND LTRIM(RTRIM(PayerName_Raw)) <> ''
           AND ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
-          AND LTRIM(RTRIM(ClaimStatus)) <> 'No Response'
         GROUP BY LTRIM(RTRIM(PayerName_Raw))
     ),
     ranked AS (
         SELECT TOP 5
-               ROW_NUMBER() OVER (ORDER BY TotalPay DESC) AS Rnk,
+               ROW_NUMBER() OVER (ORDER BY TotalPay DESC, Visits DESC) AS Rnk,
                PayerName, TotalPay, Visits
         FROM agg
-        ORDER BY TotalPay DESC
+        ORDER BY TotalPay DESC, Visits DESC
     )
     SELECT * INTO #out FROM ranked;
 
@@ -359,9 +357,10 @@ BEGIN
         YEAR (TRY_CAST(CheckDate AS DATE)),
         MONTH(TRY_CAST(CheckDate AS DATE));
 
+    -- Rank all payers (C# panel totals need every payer; drill-down shows Top 3 by PayerRank).
     SELECT
         PanelName, PayerName,
-        DENSE_RANK() OVER (PARTITION BY PanelName ORDER BY SUM(NoOfClaims) DESC) AS PayerRank
+        DENSE_RANK() OVER (PARTITION BY PanelName ORDER BY SUM(NoOfClaims) DESC, SUM(InsurancePayment) DESC, PayerName) AS PayerRank
     INTO #ranks
     FROM #raw
     GROUP BY PanelName, PayerName;
@@ -373,7 +372,6 @@ BEGIN
            r.BillYear, CAST(r.BillMonth AS TINYINT), r.NoOfClaims, r.InsurancePayment, GETDATE()
     FROM #raw r
     JOIN #ranks k ON k.PanelName = r.PanelName AND k.PayerName = r.PayerName
-   -- WHERE k.PayerRank <= 3
     ORDER BY r.PanelName, k.PayerRank, r.BillYear, r.BillMonth;
 
     DROP TABLE IF EXISTS #raw;
@@ -383,7 +381,7 @@ END
 GO
 
 
--- 4. Weekly Claim Volume (LineLevelData, PostingDate, Fri-Thu, last 4 complete weeks)
+-- 4. Weekly Claim Volume (ClaimLevelData, CheckDate, Thu-Wed, last 4 complete weeks)
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshVarX_CS_WeeklyClaimVolume
 AS
 BEGIN
@@ -412,12 +410,12 @@ BEGIN
     END;
 
     /*
-      Thu-Wed week logic
-      1900-01-04 is Thursday
+      Thu-Wed week logic. 1900-01-04 is a Thursday, so the week starts Thursday
+      and ends Wednesday (the client sheet's Week Range).
     */
     SET @WeekContainingMaxStart =
         DATEADD(DAY,
-            -(DATEDIFF(DAY, '19000103', @MaxCheckDate) % 7),
+            -((DATEDIFF(DAY, '19000104', @MaxCheckDate) % 7 + 7) % 7),
             @MaxCheckDate);
 
     SET @WeekContainingMaxEnd = DATEADD(DAY, 6, @WeekContainingMaxStart);
@@ -657,28 +655,24 @@ END;
 GO
 
 
--- 6. AvgPayments (DateOfService rows; rolling 6 months from latest week-range end)
+-- 6. AvgPayments (DateOfService rows; rolling 6 months ending at max DOS)
+-- Panel Averages - by DOS must use DateOfService, not the billing week-folder end.
+-- Week-folder dates (CheckDate ingest) run months ahead of DOS and produced an empty window.
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshVarX_CS_AvgPayments
 AS
 BEGIN
     SET NOCOUNT ON;
     DROP TABLE IF EXISTS #out;
 
-    DECLARE @WindowEnd DATE;
+    DECLARE @MaxDos DATE =
+        (SELECT MAX(TRY_CAST(DateOfService AS DATE))
+         FROM dbo.ClaimLevelData
+         WHERE TRY_CAST(DateOfService AS DATE) IS NOT NULL
+           AND TRY_CAST(DateOfService AS DATE) <= CAST(GETDATE() AS DATE));
 
-    IF OBJECT_ID(N'dbo.LineClaimFileLogs', N'U') IS NOT NULL
-        SELECT @WindowEnd = MAX(TRY_CONVERT(DATE,
-            REPLACE(LTRIM(RTRIM(SUBSTRING(WeekFolder, CHARINDEX(' - ', WeekFolder) + 3, 50))), '.', '/'),
-            101))
-        FROM dbo.LineClaimFileLogs
-        WHERE NULLIF(LTRIM(RTRIM(RunId)), '') IS NOT NULL
-          AND CHARINDEX(' - ', WeekFolder) > 0;
-
-    IF @WindowEnd IS NULL
-        SELECT @WindowEnd = MAX(TRY_CAST(DateOfService AS DATE))
-        FROM dbo.ClaimLevelData;
-
-    DECLARE @Cutoff DATE = DATEADD(MONTH, -6, @WindowEnd);
+    -- Exclusive end so the latest DOS day is included (< MaxDos + 1).
+    DECLARE @WindowEnd DATE = DATEADD(DAY, 1, @MaxDos);
+    DECLARE @Cutoff DATE = DATEADD(MONTH, -6, @MaxDos);
     DECLARE @WindowFrom DATE = DATEADD(DAY, 1, @Cutoff);
 
     DECLARE @HasFullyPaid BIT = CASE WHEN COL_LENGTH(N'dbo.ClaimLevelData', N'FullyPaidCount') IS NOT NULL THEN 1 ELSE 0 END;
@@ -770,9 +764,9 @@ BEGIN
         @WindowEnd = @WindowEnd;
 
     PRINT 'usp_RefreshVarX_CS_AvgPayments completed: DateOfService '
-        + COALESCE(CONVERT(VARCHAR(10), DATEADD(DAY, 1, @Cutoff), 120), 'NULL')
+        + COALESCE(CONVERT(VARCHAR(10), @WindowFrom, 120), 'NULL')
         + ' .. < ' + COALESCE(CONVERT(VARCHAR(10), @WindowEnd, 120), 'NULL')
-        + ' (week-range end, exclusive)';
+        + ' (max DOS exclusive end)';
 END
 GO
 
@@ -803,13 +797,12 @@ BEGIN
             WHEN '120+'    THEN '120+'
             ELSE '(blank)'
         END                                                          AS AgingBucket,
-        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(AccessionNumber)), ''))    AS VisitCount,
-        ISNULL(SUM(TRY_CAST(InsuranceBalance AS DECIMAL(18,2))), 0)  AS InsuranceBalance,
+        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))            AS VisitCount,
+        ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)      AS InsuranceBalance,
         GETDATE()                                                    AS RefreshedAt
     FROM dbo.ClaimLevelData
     WHERE
        LTRIM(RTRIM(PayerName_Raw))                    <> ''
-      AND ISNULL(TRY_CAST(InsuranceBalance AS DECIMAL(18,2)), 0) <> 0
       AND LTRIM(RTRIM(ClaimStatus))                       = 'No Response'
       AND LTRIM(RTRIM(AgingDOS))                         IN ('Current','30+','60+','90+','120+')
     GROUP BY
@@ -828,6 +821,10 @@ END;
 GO
 
 -- 8. Panel vs Payment
+-- Client sheet: InsurancePayment > 0 AND CheckDate is a date.
+-- Rows = PanelName; Columns = CheckDate Year/Month;
+-- Claim Count = COUNT(DISTINCT ClaimID); InsurancePayment = SUM(InsurancePayment);
+-- Sorted by InsurancePayment.
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshVarX_CS_PanelVsPayment
 AS
 BEGIN
@@ -838,7 +835,7 @@ BEGIN
     INSERT INTO dbo.VarX_CS_PanelVsPayment
         (PanelName, BilledYear, BilledMonth, NoOfClaims, InsurancePayment, RefreshedAt)
     SELECT
-        LTRIM(RTRIM(Panelname))                                         AS PanelName,
+        ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), N'Unknown')         AS PanelName,
         YEAR (TRY_CAST(CheckDate AS DATE))                              AS BilledYear,
         CAST(MONTH(TRY_CAST(CheckDate AS DATE)) AS TINYINT)             AS BilledMonth,
         COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))               AS NoOfClaims,
@@ -847,10 +844,10 @@ BEGIN
     FROM dbo.ClaimLevelData
     WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
       AND TRY_CAST(CheckDate AS DATE) IS NOT NULL
+      AND LTRIM(RTRIM(ISNULL(CheckDate, ''))) <> ''
       AND YEAR(TRY_CAST(CheckDate AS DATE)) > 1900
-     
     GROUP BY
-        LTRIM(RTRIM(Panelname)),
+        ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), N'Unknown'),
         YEAR (TRY_CAST(CheckDate AS DATE)),
         MONTH(TRY_CAST(CheckDate AS DATE));
 
@@ -921,20 +918,15 @@ BEGIN
     SET NOCOUNT ON;
     DROP TABLE IF EXISTS #out;
 
-    DECLARE @HasPayPct BIT =
-        CASE WHEN COL_LENGTH(N'dbo.ClaimLevelData', N'PaymentPercent') IS NOT NULL THEN 1 ELSE 0 END;
-
-    DECLARE @sql NVARCHAR(MAX) = N'
+    -- Client Excel "Average of Payment %" = AVG(InsurancePayment / ChargeAmount * 100) per claim
+    -- (not AVG of the PaymentPercent file column). Sort by Claim Count.
     ;WITH base AS
     (
         SELECT
             LTRIM(RTRIM(PayerName_Raw)) AS PayerName,
-            LTRIM(RTRIM(Panelname)) AS PanelName,
+            NULLIF(LTRIM(RTRIM(ClaimID)), '') AS ClaimID,
             TRY_CAST(InsurancePayment AS DECIMAL(18,2)) AS InsPay,
-            ' + CASE WHEN @HasPayPct = 1
-                     THEN N'TRY_CAST(PaymentPercent AS DECIMAL(9,4))'
-                     ELSE N'CAST(NULL AS DECIMAL(9,4))'
-                END + N' AS PayPct
+            TRY_CAST(ChargeAmount     AS DECIMAL(18,2)) AS Chg
         FROM dbo.ClaimLevelData
         WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
     ),
@@ -942,9 +934,12 @@ BEGIN
     (
         SELECT
             PayerName,
-            COUNT(*) AS PanelGroupCount,
+            COUNT(DISTINCT ClaimID) AS PanelGroupCount,
             ISNULL(SUM(InsPay), 0) AS InsurancePayment,
-            ROUND(ISNULL(AVG(PayPct), 0) * 100, 0) AS PaymentPct
+            ROUND(AVG(
+                CASE WHEN Chg IS NULL OR Chg = 0 THEN NULL
+                     ELSE InsPay / Chg * 100 END
+            ), 0) AS PaymentPct
         FROM base
         GROUP BY PayerName
     )
@@ -973,11 +968,9 @@ BEGIN
         PaymentPct,
         GETDATE()
     FROM #out
-    ORDER BY InsurancePayment DESC;
+    ORDER BY PanelGroupCount DESC, InsurancePayment DESC;
 
-    DROP TABLE IF EXISTS #out;';
-
-    EXEC sys.sp_executesql @sql;
+    DROP TABLE IF EXISTS #out;
     PRINT 'usp_RefreshVarX_CS_InsuranceVsPaymentPct completed.';
 END
 GO
@@ -1218,14 +1211,15 @@ BEGIN
             YEAR (TRY_CAST(CheckDate AS DATE))                          AS BillYear,
             MONTH(TRY_CAST(CheckDate AS DATE))                          AS BillMonth,
 
-            COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), ''))           AS NoOfPaidClaims,
+            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))  AS NoOfPaidClaims,
 
             ISNULL(
                 SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))),
                 0
             )                                                           AS InsurancePayment
 
-        FROM dbo.ClaimLevelData                                          -- ✅ VarX uses LineLevelData
+        -- Client sheet: Claim Level Data, InsurancePayment > 0, CheckDate is a date.
+        FROM dbo.ClaimLevelData
         WHERE
             ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
             AND NULLIF(LTRIM(RTRIM(CheckDate)), '') IS NOT NULL
@@ -1301,12 +1295,10 @@ BEGIN
 END
 GO
 -- =====================================================================
--- TEST / VERIFICATION  (safe to re-run; no DML, just EXEC + SELECT)
--- Uncomment or run interactively after deploying the file to validate
--- that each SP populates its target table.
+-- Refresh all Collection Summary snapshots after deploy.
+-- (Previously commented out — DROP+CREATE left PanelVsPayment empty.)
 -- =====================================================================
-
-/*
+PRINT '12_VariantX_CollectionSummary.sql: refreshing CS snapshots...';
 EXEC dbo.usp_RefreshVarX_CS_Top5ReimbursementPct;
 EXEC dbo.usp_RefreshVarX_CS_Top5ReimbursementPay;
 EXEC dbo.usp_RefreshVarX_CS_MonthlyClaimVolume;
@@ -1317,6 +1309,7 @@ EXEC dbo.usp_RefreshVarX_CS_InsuranceVsAging;
 EXEC dbo.usp_RefreshVarX_CS_PanelVsPayment;
 EXEC dbo.usp_RefreshVarX_CS_RepVsPayment;
 EXEC dbo.usp_RefreshVarX_CS_InsuranceVsPaymentPct;
+EXEC dbo.usp_RefreshVarX_CS_InsuranceVsPayment;
 EXEC dbo.usp_RefreshVarX_CS_CptVsPaymentPct;
 EXEC dbo.usp_RefreshVarX_CS_StatusSummary;
 EXEC dbo.usp_RefreshVarX_CS_ProviderSummary;
@@ -1336,11 +1329,5 @@ UNION ALL SELECT 'VarX_CS_StatusSummary',          COUNT(*), MAX(RefreshedAt) FR
 UNION ALL SELECT 'VarX_CS_ProviderSummary',        COUNT(*), MAX(RefreshedAt) FROM dbo.VarX_CS_ProviderSummary
 ORDER BY [Table];
 
--- Spot-check the largest tables
-SELECT TOP 20 * FROM dbo.VarX_CS_PanelAverages          ORDER BY PanelName, PayerName;
-SELECT TOP 20 * FROM dbo.VarX_CS_MonthlyClaimVolume     ORDER BY PanelName, PayerRank, BillYear, BillMonth;
-SELECT TOP 20 * FROM dbo.VarX_CS_WeeklyClaimVolume      ORDER BY PanelName, PayerRank, WeekKey;
-SELECT *      FROM dbo.VarX_CS_Top5ReimbursementPct     ORDER BY PayerRank;
-SELECT *      FROM dbo.VarX_CS_Top5ReimbursementPay     ORDER BY PayerRank;
-*/
+PRINT '12_VariantX_CollectionSummary.sql completed.';
 

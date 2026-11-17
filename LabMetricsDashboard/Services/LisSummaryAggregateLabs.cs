@@ -35,6 +35,9 @@ public static class LisSummaryAggregateLabs
         ["Texas Diagnostic"] = "TD_",
         ["TexasDx"] = "TD_",
         ["PNC"] = "PNC_",
+        ["VariantX"] = "VarX_",
+        ["Variant_X"] = "VarX_",
+        ["Variant X"] = "VarX_",
     };
 
     private static readonly Dictionary<int, string> PrefixByLabId = new()
@@ -42,6 +45,7 @@ public static class LisSummaryAggregateLabs
         [19] = "Aug_",
         [23] = "NW_",
         [24] = "Aug_",
+        [25] = "VarX_",
         [26] = "AnP_",
         [27] = "WH_",
         [28] = "CB_",

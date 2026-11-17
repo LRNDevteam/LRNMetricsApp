@@ -73,7 +73,8 @@ public sealed partial class SqlCollectionSummaryRepository
             string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "Cert", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "CERT", StringComparison.OrdinalIgnoreCase))
+            string.Equals(prefix, "CERT", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(prefix, "VarX", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogInformation("CollectionSummary[Aggregate] Top5ReimbursementPct({Prefix}): routing to SP usp_Get{Prefix}_CS_Top5ReimbursementPct", prefix, prefix);
             try
@@ -96,9 +97,10 @@ public sealed partial class SqlCollectionSummaryRepository
 
         _logger.LogInformation("CollectionSummary[Aggregate] Top5ReimbursementPct({Prefix}): reading snapshot table {Prefix}_CS_Top5ReimbursementPct", prefix, prefix);
 
-        // Snapshot tables: PaymentPct (NW/Aug) or AvgPaymentPct (Certus).
+        // Snapshot tables: PaymentPct (NW/Aug/VarX) or AvgPaymentPct (Certus).
         var hasPaymentPctColumn = string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
-                                   string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase);
+                                   string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
+                                   string.Equals(prefix, "VarX", StringComparison.OrdinalIgnoreCase);
         var hasAvgPaymentPctColumn = string.Equals(prefix, "Cert", StringComparison.OrdinalIgnoreCase) ||
                                       string.Equals(prefix, "CERT", StringComparison.OrdinalIgnoreCase);
         var sql = hasPaymentPctColumn
@@ -159,7 +161,8 @@ public sealed partial class SqlCollectionSummaryRepository
             string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
+            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(prefix, "VarX", StringComparison.OrdinalIgnoreCase))
             return await GetTop5TotalPaymentsViaSpAsync(
                 connectionString, prefix,
                 filterPayerNames: null, filterPanelNames: null,
@@ -674,7 +677,8 @@ public sealed partial class SqlCollectionSummaryRepository
             string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
+            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(prefix, "VarX", StringComparison.OrdinalIgnoreCase))
             return await GetPanelPaymentViaSpAsync(
                 connectionString,
                 CollectionGetSp(prefix, "CS_PanelVsPayment"),
@@ -684,8 +688,8 @@ public sealed partial class SqlCollectionSummaryRepository
                 filterCheckDateFrom: null, filterCheckDateTo: null,
                 ct).ConfigureAwait(false);
 
-        // Elixir/BT/Cert snapshots store per-month rows (PanelName, BilledYear, BilledMonth) so the UI
-        // can pivot Year/Month. Other labs keep a flat panel-level row.
+        // Elixir/BT/Cert snapshots store per-month rows (PanelName, BilledYear, BilledMonth)
+        // so the UI can pivot CheckDate Year/Month. Other labs keep a flat panel-level row.
         bool hasMonthlyGrain = string.Equals(prefix, "Elix", StringComparison.OrdinalIgnoreCase)
             || string.Equals(prefix, "BT",   StringComparison.OrdinalIgnoreCase)
             || string.Equals(prefix, "Cert", StringComparison.OrdinalIgnoreCase);
@@ -790,7 +794,8 @@ public sealed partial class SqlCollectionSummaryRepository
             string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
+            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(prefix, "VarX", StringComparison.OrdinalIgnoreCase))
             return await GetInsurancePaymentPctViaSpAsync(
                 connectionString,
                 CollectionGetSp(prefix, "CS_InsuranceVsPaymentPct"),
@@ -808,15 +813,17 @@ public sealed partial class SqlCollectionSummaryRepository
             FROM   dbo.{prefix}_CS_InsuranceVsPaymentPct
             ORDER  BY BillYear DESC, BillMonth DESC, InsurancePayment DESC;
             """;
+        // VariantX client logic sorts Insurance vs Payment % by Claim Count.
+        var isVarXPct = string.Equals(prefix, "VarX", StringComparison.OrdinalIgnoreCase);
         var sqlA = $"""
             SELECT PayerName, NoOfPaidClaims AS NoOfClaims, InsurancePayment, PaymentPct
             FROM   dbo.{prefix}_CS_InsuranceVsPaymentPct
-            ORDER  BY InsurancePayment DESC;
+            ORDER  BY {(isVarXPct ? "NoOfPaidClaims DESC, InsurancePayment DESC" : "InsurancePayment DESC")};
             """;
         var sqlB = $"""
             SELECT PayerName, PanelGroupCount AS NoOfClaims, InsurancePayment, PaymentPct
             FROM   dbo.{prefix}_CS_InsuranceVsPaymentPct
-            ORDER  BY InsurancePayment DESC;
+            ORDER  BY {(isVarXPct ? "PanelGroupCount DESC, InsurancePayment DESC" : "InsurancePayment DESC")};
             """;
 
         var rows = new List<InsurancePaymentPctRow>();

@@ -136,13 +136,13 @@ BEGIN
         ('Cash', 'T',   N'ClaimStatus = Fully Adjusted', N'InsuranceAdjustments', 0),
         ('Cash', 'U',   N'ClaimStatus NOT IN (Fully Adjusted, Unbilled, Unbilled - Patient Balance)', N'InsuranceAdjustments', 0),
         ('Cash', 'V',   N'ClaimStatus NOT IN (Unbilled, Unbilled - Patient Balance)', N'PatientBalance', 0),
-        ('Cash', 'W',   N'W1 + W2 + W3: ClaimStatus IN (Fully Denied, Partially Adjusted, Partially Paid, Partially Denied, No Response)', N'InsuranceBalance', 0),
+        ('Cash', 'W',   N'ClaimStatus NOT IN (Unbilled, Unbilled - Patient Balance)', N'InsuranceBalance', 0),
         ('Cash', 'W1',  N'ClaimStatus = Fully Denied', N'InsuranceBalance', 0),
-        ('Cash', 'W2',  N'ClaimStatus IN (Partially Adjusted, Partially Paid, Partially Denied)', N'InsuranceBalance', 0),
+        ('Cash', 'W2',  N'ClaimStatus NOT IN (Unbilled, Unbilled - Patient Balance, No Response, Fully Denied)', N'InsuranceBalance', 0),
         ('Cash', 'W3',  N'ClaimStatus = No Response', N'InsuranceBalance', 0),
         ('Avg', 'AK',  N'Formula: Total Payments $ (Cash S) / No. of Billed Claims (PMS F)', NULL, 1),
         ('Avg', 'AL',  N'Formula: Insurance Payment $ (Cash Q) / No. of Fully Paid Claims (PMS J)', NULL, 1),
-        ('Avg', 'AM',  N'Formula: Total Payments $ (Cash S) / (No. of Billed Claims (PMS F) - No Response claims (PMS O3))', NULL, 1);
+        ('Avg', 'AM',  N'Formula: Total Payments $ (Cash S) / (Fully Paid (PMS J) + Patient Paid (PMS N) + Fully Denied (PMS O1) + Partially Denied (PMS O2) claims)', NULL, 1);
 
     DECLARE @RuleText NVARCHAR(1000), @AmountCol NVARCHAR(100), @IsFormula BIT, @Panel NVARCHAR(300);
     SELECT @RuleText = RuleText, @AmountCol = AmountCol, @IsFormula = IsFormula
@@ -280,8 +280,10 @@ BEGIN
         ELSE
             INSERT INTO @Comp VALUES
                 (1,  N'Numerator',   N'',  'Cash', N'S',  NULL, 1, 0),
-                (11, N'Denominator', N'',  'PMS',  N'F',  NULL, 0, 0),
-                (12, N'Denominator', N'-', 'PMS',  N'O3', NULL, 0, 0),
+                (11, N'Denominator', N'',  'PMS',  N'J',  NULL, 0, 0),
+                (12, N'Denominator', N'+', 'PMS',  N'N',  NULL, 0, 0),
+                (13, N'Denominator', N'+', 'PMS',  N'O1', NULL, 0, 0),
+                (14, N'Denominator', N'+', 'PMS',  N'O2', NULL, 0, 0),
                 (19, N'Denominator', N'=', NULL, NULL, N'Adjudicated claims', 0, 1),
                 (29, N'Result',      N'=', 'Avg',  N'AM', NULL, 1, 1);
 
@@ -528,9 +530,8 @@ BEGIN
            OR (@RowCode = N'O2' AND c.CS = N'PARTIALLY DENIED')
            OR (@RowCode IN (N'O3', N'W3') AND c.CS = N'NO RESPONSE')
            OR (@RowCode = N'U'  AND c.IsBilled = 1 AND c.CS <> N'FULLY ADJUSTED')
-           OR (@RowCode = N'W'  AND c.CS IN (N'FULLY DENIED', N'PARTIALLY ADJUSTED', N'PARTIALLY PAID',
-                                             N'PARTIALLY DENIED', N'NO RESPONSE'))
-           OR (@RowCode = N'W2' AND c.CS IN (N'PARTIALLY ADJUSTED', N'PARTIALLY PAID', N'PARTIALLY DENIED')))
+           OR (@RowCode = N'W'  AND c.IsBilled = 1)
+           OR (@RowCode = N'W2' AND c.IsBilled = 1 AND c.CS NOT IN (N'NO RESPONSE', N'FULLY DENIED')))
     OPTION (RECOMPILE);
 
     SELECT N'dbo.ClaimLevelData' AS SourceTable,

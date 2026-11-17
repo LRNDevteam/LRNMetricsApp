@@ -4,7 +4,7 @@
    Database : PNC        Prefix : PNC
    Requires : 12_PNC_CollectionSummary.sql
 
-   Filter  : InsurancePayment > 0 (CheckDate a valid date - every paid claim has one)
+   Filter  : InsurancePayment > 0 AND CheckDate 2024 to Current Year (fn_PNC_CS_CheckDateTo)
    Rows    : PayerName_Raw, sorted by Claim Count DESC, then Insurance Payment
    Columns : CheckDate year / month
    Values  : Claim Count        = Count of unique ClaimID
@@ -36,12 +36,15 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
+    DECLARE @CheckFrom DATE = '20240101';
+    DECLARE @CheckTo   DATE = dbo.fn_PNC_CS_CheckDateTo();
+
     SELECT PayerName, ClaimKey, InsPay, PaymentPct, CheckDt
     INTO #c
     FROM dbo.fn_PNC_CS_Claims(@PayerNames, @PanelNames, @DosFrom, @DosTo,
                              @FirstBillFrom, @FirstBillTo, @CheckDateFrom, @CheckDateTo)
     WHERE InsPay > 0
-      AND CheckDt IS NOT NULL;
+      AND CheckDt BETWEEN @CheckFrom AND @CheckTo;
 
     WITH p AS (
         SELECT PayerName,

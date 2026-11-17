@@ -1,10 +1,8 @@
 ﻿-- =====================================================================
--- VariantX Average Payments: DateOfService rows, anchored to week-range end
--- Date: 2026-09-24
+-- VariantX Average Payments: DateOfService rows, anchored to max DOS
 --
--- Six months: DateOfService > DATEADD(MONTH, -6, latest week-range end)
--- Three months: DateOfService > DATEADD(MONTH, -3, latest week-range end)
--- Start date is inclusive; week-range end date is exclusive.
+-- Panel Averages - by DOS uses DateOfService (not billing week-folder end).
+-- Six months ending at max DateOfService (inclusive via exclusive end+1 day).
 -- =====================================================================
 SET NOCOUNT ON;
 GO
@@ -17,21 +15,14 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @WindowEnd DATE;
+    DECLARE @MaxDos DATE =
+        (SELECT MAX(TRY_CAST(DateOfService AS DATE))
+         FROM dbo.ClaimLevelData
+         WHERE TRY_CAST(DateOfService AS DATE) IS NOT NULL
+           AND TRY_CAST(DateOfService AS DATE) <= CAST(GETDATE() AS DATE));
 
-    IF OBJECT_ID(N'dbo.LineClaimFileLogs', N'U') IS NOT NULL
-        SELECT @WindowEnd = MAX(TRY_CONVERT(DATE,
-            REPLACE(LTRIM(RTRIM(SUBSTRING(WeekFolder, CHARINDEX(' - ', WeekFolder) + 3, 50))), '.', '/'),
-            101))
-        FROM dbo.LineClaimFileLogs
-        WHERE NULLIF(LTRIM(RTRIM(RunId)), '') IS NOT NULL
-          AND CHARINDEX(' - ', WeekFolder) > 0;
-
-    IF @WindowEnd IS NULL
-        SELECT @WindowEnd = MAX(TRY_CAST(DateOfService AS DATE))
-        FROM dbo.ClaimLevelData;
-
-    DECLARE @Cutoff DATE = DATEADD(MONTH, -6, @WindowEnd);
+    DECLARE @WindowEnd DATE = DATEADD(DAY, 1, @MaxDos);
+    DECLARE @Cutoff DATE = DATEADD(MONTH, -6, @MaxDos);
     DECLARE @WindowFrom DATE = DATEADD(DAY, 1, @Cutoff);
 
     ;WITH base AS
@@ -127,7 +118,7 @@ BEGIN
     PRINT 'usp_RefreshVarX_CS_AvgPayments completed: DateOfService '
         + COALESCE(CONVERT(VARCHAR(10), DATEADD(DAY, 1, @Cutoff), 120), 'NULL')
         + ' .. < ' + COALESCE(CONVERT(VARCHAR(10), @WindowEnd, 120), 'NULL')
-        + ' (week-range end, exclusive)';
+        + ' (max DOS exclusive end)';
 END
 GO
 
@@ -171,21 +162,14 @@ BEGIN
     DECLARE @HasPanelFilter BIT =
         CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
 
-    DECLARE @WindowEnd DATE;
+    DECLARE @MaxDos DATE =
+        (SELECT MAX(TRY_CAST(DateOfService AS DATE))
+         FROM dbo.ClaimLevelData
+         WHERE TRY_CAST(DateOfService AS DATE) IS NOT NULL
+           AND TRY_CAST(DateOfService AS DATE) <= CAST(GETDATE() AS DATE));
 
-    IF OBJECT_ID(N'dbo.LineClaimFileLogs', N'U') IS NOT NULL
-        SELECT @WindowEnd = MAX(TRY_CONVERT(DATE,
-            REPLACE(LTRIM(RTRIM(SUBSTRING(WeekFolder, CHARINDEX(' - ', WeekFolder) + 3, 50))), '.', '/'),
-            101))
-        FROM dbo.LineClaimFileLogs
-        WHERE NULLIF(LTRIM(RTRIM(RunId)), '') IS NOT NULL
-          AND CHARINDEX(' - ', WeekFolder) > 0;
-
-    IF @WindowEnd IS NULL
-        SELECT @WindowEnd = MAX(TRY_CAST(DateOfService AS DATE))
-        FROM dbo.ClaimLevelData;
-
-    DECLARE @Cutoff DATE = DATEADD(MONTH, -@LastMonths, @WindowEnd);
+    DECLARE @WindowEnd DATE = DATEADD(DAY, 1, @MaxDos);
+    DECLARE @Cutoff DATE = DATEADD(MONTH, -@LastMonths, @MaxDos);
     DECLARE @WindowFrom DATE = DATEADD(DAY, 1, @Cutoff);
 
     ;WITH base AS

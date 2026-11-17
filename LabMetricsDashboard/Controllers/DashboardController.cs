@@ -2978,6 +2978,9 @@ public class DashboardController : Controller
     private static bool IsPncLab(string? lab) =>
         string.Equals((lab ?? "").Trim(), "PNC", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsVariantXLab(string? lab) =>
+        (lab ?? "").Replace("_", "").Replace(" ", "").Contains("VariantX", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>CPT Breakdown counts Claim IDs (not CPT units) on these labs' sheets.</summary>
     private static bool UsesClaimCountCptLabel(string? lab) => IsTexasDiagnosticLab(lab) || IsPncLab(lab);
 

@@ -9,12 +9,12 @@
 -- VariantX Labs � Read stored procedures for the Production Summary Report tabs.
 -- Called by LabMetricsDashboard.SqlLabProductionSummaryRepository.
 --
--- Lab specifics:
---   * Weekly week boundary: Wednesday-Tuesday (anchor 1900-01-03).
---   * Weekly column joins on FirstBilledDate.
---   * Monthly column pivot uses ChargeEnteredDate.
---   * Coding tab is sourced from UNBILLED claims (FirstBilledDate IS NULL/blank).
---   * UnbilledAging snapshot uses the AgingBucket column (TotalCharges present).
+-- Lab specifics (client Production Summary sheet):
+--   * Weekly week boundary: Thursday-Wednesday (anchor 1900-01-04) — see 07b.
+--   * Monthly / Payer / Panel columns pivot on FirstBilledDate (not ChargeEnteredDate).
+--   * Filter: FirstBilledDate is a valid date; Row payer key = PayerName_Raw.
+--   * CPT Breakdown is totals-only via usp_GetVarX_CPTBreakdownTotals
+--     (Sum Units + Sum Charge, Filter N/A, sorted by Claim Count).
 -- ============================================================
 
 SET NOCOUNT ON;
@@ -67,13 +67,12 @@ BEGIN
         SELECT
             LTRIM(RTRIM(ISNULL(Panelname,     'Unknown')))         AS Panelname,
             LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))         AS PayerName_Raw,
-            FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM') AS BilledYearMonth,
+            FORMAT(TRY_CAST(FirstBilledDate AS DATE), 'yyyy-MM') AS BilledYearMonth,
             COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))      AS ClaimCount,
             ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0) AS TotalCharges
         FROM   dbo.ClaimLevelData
         WHERE  TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
           AND  LTRIM(RTRIM(FirstBilledDate)) <> ''
-          AND  TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
           AND  (@HasPayerFilter   = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))) IN (SELECT Value FROM @PayerList))
           AND  (@HasPanelFilter   = 0 OR LTRIM(RTRIM(ISNULL(Panelname,'Unknown'))) IN (SELECT Value FROM @PanelList))
           AND  (@DosFrom          IS NULL OR TRY_CAST(DateOfService    AS DATE) >= @DosFrom)
@@ -83,7 +82,7 @@ BEGIN
           AND  (@FirstBilledFrom  IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) >= @FirstBilledFrom)
           AND  (@FirstBilledTo    IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) <= @FirstBilledTo)
         GROUP BY LTRIM(RTRIM(ISNULL(Panelname,'Unknown'))), LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))),
-                 FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM')
+                 FORMAT(TRY_CAST(FirstBilledDate AS DATE), 'yyyy-MM')
     ),
     Ranks AS (
         SELECT  Panelname, PayerName_Raw,
@@ -283,7 +282,7 @@ BEGIN
 
     SELECT
         LTRIM(RTRIM(PayerName_Raw))                            AS PayerName,
-        FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM') AS BilledYearMonth,
+        FORMAT(TRY_CAST(FirstBilledDate AS DATE), 'yyyy-MM')   AS BilledYearMonth,
         COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))      AS ClaimCount,
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0) AS TotalCharges
     FROM   dbo.ClaimLevelData
@@ -291,7 +290,6 @@ BEGIN
       AND  LTRIM(RTRIM(FirstBilledDate)) <> ''
       AND  PayerName_Raw IS NOT NULL
       AND  LTRIM(RTRIM(PayerName_Raw)) <> ''
-      AND  TRY_CAST(ChargeEnteredDate  AS DATE) IS NOT NULL
       AND  (@HasPayerFilter   = 0 OR LTRIM(RTRIM(PayerName_Raw)) IN (SELECT Value FROM @PayerList))
       AND  (@HasPanelFilter   = 0 OR LTRIM(RTRIM(ISNULL(Panelname,'Unknown'))) IN (SELECT Value FROM @PanelList))
       AND  (@DosFrom          IS NULL OR TRY_CAST(DateOfService    AS DATE) >= @DosFrom)
@@ -300,7 +298,7 @@ BEGIN
       AND  (@FirstBillTo      IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) <= @FirstBillTo)
       AND  (@FirstBilledFrom  IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) >= @FirstBilledFrom)
       AND  (@FirstBilledTo    IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) <= @FirstBilledTo)
-    GROUP BY LTRIM(RTRIM(PayerName_Raw)), FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM')
+    GROUP BY LTRIM(RTRIM(PayerName_Raw)), FORMAT(TRY_CAST(FirstBilledDate AS DATE), 'yyyy-MM')
     ORDER BY PayerName, BilledYearMonth;
 END
 GO
@@ -502,58 +500,9 @@ BEGIN
 END
 GO
 
--- ============================================================
--- CPT Breakdown (line-level)
--- ============================================================
-CREATE OR ALTER PROCEDURE dbo.usp_GetVarX_CPTBreakdown
-    @PayerNames      NVARCHAR(MAX) = NULL,
-    @PanelNames      NVARCHAR(MAX) = NULL,
-    @DosFrom         DATE          = NULL,
-    @DosTo           DATE          = NULL,
-    @FirstBillFrom   DATE          = NULL,
-    @FirstBillTo     DATE          = NULL,
-    @FirstBilledFrom DATE          = NULL,
-    @FirstBilledTo   DATE          = NULL
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    DECLARE @HasFilter BIT =
-        CASE
-            WHEN @DosFrom         IS NOT NULL OR @DosTo         IS NOT NULL THEN 1
-            WHEN @FirstBillFrom   IS NOT NULL OR @FirstBillTo   IS NOT NULL THEN 1
-            WHEN @FirstBilledFrom IS NOT NULL OR @FirstBilledTo IS NOT NULL THEN 1
-            ELSE 0
-        END;
-
-    IF @HasFilter = 0
-    BEGIN
-        SELECT  CPTCode, BilledYearMonth, CPTCount, BilledUnits, TotalCharges
-        FROM    dbo.VarX_CPTBreakdown ORDER BY CPTCode, BilledYearMonth;
-        RETURN;
-    END
-
-    SELECT
-        LTRIM(RTRIM(ISNULL(CPTCode, 'Unknown')))                AS CPTCode,
-        FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM')  AS BilledYearMonth,
-        COUNT(*)                                                 AS CPTCount,
-        ISNULL(SUM(TRY_CAST(Units        AS DECIMAL(18,2))), 0) AS BilledUnits,
-        ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0) AS TotalCharges
-    FROM   dbo.LineLevelData
-    WHERE  TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
-      AND  LTRIM(RTRIM(FirstBilledDate)) <> ''
-      AND  NULLIF(LTRIM(RTRIM(CPTCode)), '') IS NOT NULL
-      AND  (@DosFrom          IS NULL OR TRY_CAST(DateOfService    AS DATE) >= @DosFrom)
-      AND  (@DosTo            IS NULL OR TRY_CAST(DateOfService    AS DATE) <= @DosTo)
-      AND  (@FirstBillFrom    IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) >= @FirstBillFrom)
-      AND  (@FirstBillTo      IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) <= @FirstBillTo)
-      AND  (@FirstBilledFrom  IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) >= @FirstBilledFrom)
-      AND  (@FirstBilledTo    IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) <= @FirstBilledTo)
-    GROUP BY LTRIM(RTRIM(ISNULL(CPTCode, 'Unknown'))),
-             FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM')
-    ORDER BY CPTCode, BilledYearMonth;
-END
-GO
+-- CPT Breakdown SPs (usp_GetVarX_CPTBreakdown / usp_GetVarX_CPTBreakdownTotals /
+-- usp_RefreshVarX_CPTBreakdown) are owned by 10_VariantX_CPTBreakdown.sql —
+-- not redefined here so a later deploy of this file cannot overwrite Sum(Units).
 
 PRINT '13_VariantX_ReadSPs.sql completed.';
 

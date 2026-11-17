@@ -122,6 +122,51 @@
                     }
                 </div>
             }
+            else if (Model.CptPaymentPct.Count > 0 && (Model.IsVariantXLab || Model.CptPaymentPct[0].HasChargeAmount) && !Model.CptPaymentPct.Any(r => r.IsPanelRow))
+            {
+                // VariantX CPT vs Payment: CPT Code | Sum of Units | Sum of Total Charges (no Payment %)
+                var bdRows = Model.CptPaymentPct;
+                var bdUnits = bdRows.Sum(r => r.SumServiceUnits);
+                var bdCharges = bdRows.Sum(r => r.PaidChargeAmount);
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                <tr>
+                                    <th>CPT Code</th>
+                                    <th>Sum of Units</th>
+                                    <th>Sum of Total Charges</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in bdRows)
+                                {
+                                    <tr>
+                                        <td style="text-align:left;font-weight:600">@row.CptCode</td>
+                                        <td style="text-align:right">@row.SumServiceUnits.N0OrDash()</td>
+                                        <td style="text-align:right">@Acct2(row.PaidChargeAmount)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                    <td style="text-align:right;color:#fff">@bdUnits.N0OrDash()</td>
+                                    <td style="text-align:right;color:#fff">@Acct2(bdCharges)</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> Line Level Data &bull;
+                    <strong>Filter:</strong> N/A &bull;
+                    <strong>Rows:</strong> CPT Code &bull;
+                    <strong>Values:</strong> Sum of Units, Sum of Total Charges (Sum of Charge Amount) &bull;
+                    <strong>Sorted by:</strong> Claim Count DESC
+                </div>
+            }
             else if (Model.CptPaymentPct.Count > 0 && Model.UsesCoreBioCollectionLayout)
             {
                 <div class="cs-rpt-wrap">

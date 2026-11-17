@@ -1012,7 +1012,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <div class="top5-card-hdr reimb-hdr">
                     <div>
                         <div class="top5-card-hdr-title">Reimbursement Rate</div>
-                        <div class="top5-card-hdr-sub">@(Model.IsWellHealthLab || Model.IsNorthWestLab ? "Top 5 payers by insurance payment" : Model.UsesSpCollectionLogic || Model.IsAugustusLab ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
+                        <div class="top5-card-hdr-sub">@(Model.IsWellHealthLab || Model.IsNorthWestLab || Model.IsVariantXLab ? "Top 5 payers by insurance payment" : Model.UsesSpCollectionLogic || Model.IsAugustusLab ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
                     </div>
                     <span class="top5-card-badge reimb-badge">
                         <i class="bi bi-percent"></i> Reimbursement
@@ -1063,7 +1063,12 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 </div>
 
                 <div class="top5-card-footer">
-                    @if (Model.IsWellHealthLab || Model.IsNorthWestLab)
+                    @if (Model.IsVariantXLab)
+                    {
+                        <span>Top 5 by <span class="top5-hl-blue">Insurance Payment</span> &bull;
+                        InsurancePayment &gt; 0 &bull; Payment % = Average(InsurancePayment / ChargeAmount × 100)</span>
+                    }
+                    else if (Model.IsWellHealthLab || Model.IsNorthWestLab)
                     {
                         <span>Top 5 by <span class="top5-hl-blue">Insurance Payment</span> &bull;
                         InsurancePayment &gt; 0 &bull; Payment % = Average(PaymentPercent)</span>
@@ -1085,7 +1090,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <div class="top5-card-hdr reimb-hdr">
                     <div>
                         <div class="top5-card-hdr-title">Reimbursement Rate</div>
-                        <div class="top5-card-hdr-sub">Top 5 payers by unique visit count</div>
+                        <div class="top5-card-hdr-sub">@(Model.IsVariantXLab ? "Top 5 payers by insurance payment" : "Top 5 payers by unique visit count")</div>
                     </div>
                     <span class="top5-card-badge reimb-badge"><i class="bi bi-percent"></i> Reimbursement</span>
                 </div>
@@ -1112,7 +1117,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <div class="top5-card-hdr totpay-hdr">
                     <div>
                         <div class="top5-card-hdr-title">Total Payments</div>
-                        <div class="top5-card-hdr-sub">@(Model.IsWellHealthLab || Model.IsNorthWestLab ? "Top 5 payers by total payment" : Model.UsesSpCollectionLogic || Model.IsAugustusLab ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
+                        <div class="top5-card-hdr-sub">@(Model.IsWellHealthLab || Model.IsNorthWestLab || Model.IsVariantXLab ? "Top 5 payers by total payment" : Model.UsesSpCollectionLogic || Model.IsAugustusLab ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
                     </div>
                     <span class="top5-card-badge totpay-badge">
                         <i class="bi bi-cash-stack"></i> Payments
@@ -1161,7 +1166,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 </div>
 
                 <div class="top5-card-footer">
-                    @(Model.UsesSpCollectionLogic || Model.IsAugustusLab ? "Sorted by" : "Ranked by") <span class="top5-hl-green">@(Model.IsWellHealthLab || Model.IsNorthWestLab ? "total payment (InsurancePayment > 0)" : Model.UsesSpCollectionLogic || Model.IsAugustusLab ? "claim count" : "unique visit count")</span> &bull;
+                    @(Model.UsesSpCollectionLogic || Model.IsAugustusLab ? "Sorted by" : "Ranked by") <span class="top5-hl-green">@(Model.IsWellHealthLab || Model.IsNorthWestLab || Model.IsVariantXLab ? "total payment (InsurancePayment > 0)" : Model.UsesSpCollectionLogic || Model.IsAugustusLab ? "claim count" : "unique visit count")</span> &bull;
                     Top payer accounts for <span class="top5-hl-green">@topPayerPct.ToString("F0")%</span> of total payments
                 </div>
             }
@@ -1170,7 +1175,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <div class="top5-card-hdr totpay-hdr">
                     <div>
                         <div class="top5-card-hdr-title">Total Payments</div>
-                        <div class="top5-card-hdr-sub">Top 5 payers by unique visit count</div>
+                        <div class="top5-card-hdr-sub">@(Model.IsVariantXLab ? "Top 5 payers by total payment" : "Top 5 payers by unique visit count")</div>
                     </div>
                     <span class="top5-card-badge totpay-badge"><i class="bi bi-cash-stack"></i> Payments</span>
                 </div>
@@ -1233,7 +1238,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             <button class="nav-link" id="avgpay-tab" data-bs-toggle="pill"
                     data-bs-target="#avgpay-pane" type="button" role="tab"
                     aria-controls="avgpay-pane" aria-selected="false">
-                <i class="bi bi-cash-coin"></i> @(Model.UsesPanelAveragesTitles ? "Panel Averages - by Check Date" : Model.ShowAvgPaymentsByDateBasis ? "Avg Payments - Check Date" : "Avg Payments")
+                <i class="bi bi-cash-coin"></i> @(Model.IsVariantXLab ? "Panel Averages - by DOS" : Model.UsesPanelAveragesTitles ? "Panel Averages - by Check Date" : Model.ShowAvgPaymentsByDateBasis ? "Avg Payments - Check Date" : "Avg Payments")
             </button>
         </li>
         @if (Model.ShowAvgPaymentsLast3Months)
@@ -1291,7 +1296,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             <button class="nav-link" id="cptpctpay-tab" data-bs-toggle="pill"
                     data-bs-target="#cptpctpay-pane" type="button" role="tab"
                     aria-controls="cptpctpay-pane" aria-selected="false">
-                <i class="bi bi-list-ol"></i> @(Model.UsesCoreBioCollectionLayout ? "CPT vs Payment" : "CPT vs Payment %")
+                <i class="bi bi-list-ol"></i> @(Model.IsVariantXLab || Model.UsesCoreBioCollectionLayout ? "CPT vs Payment" : "CPT vs Payment %")
             </button>
         </li>
             @if (Model.ShowStatusProviderSummaries)

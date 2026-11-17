@@ -22,7 +22,10 @@
 
 @if (!Model.HasData)
 {
-    <div class="text-center text-muted py-4">No denial rows were found for the selected lab.</div>
+    var emptyMsg = string.Equals(Model.SectionTitle, "Weekly Summary", StringComparison.OrdinalIgnoreCase)
+        ? "No Weekly data found for this week range."
+        : "No denial rows were found for the selected lab.";
+    <div class="text-center text-muted py-4">@emptyMsg</div>
     return;
 }
 

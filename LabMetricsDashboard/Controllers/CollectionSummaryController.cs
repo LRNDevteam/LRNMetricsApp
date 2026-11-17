@@ -606,44 +606,79 @@ public class CollectionSummaryController : Controller
         DateOnly? cdFromN, DateOnly? cdToN,
         CancellationToken ct)
     {
-        // Fetch all report data in parallel
-        var monthlyVolumeTask = _repo.GetCollectionMonthlyVolumeAsync(
-            connStr, selectedLab, useLineEncounters, payerFilter, panelFilter,
-            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
-        var weeklyVolumeTask = _repo.GetCollectionWeeklyVolumeAsync(
-            connStr, useLineEncounters, payerFilter, panelFilter,
-            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-        var reimbursementTask = _repo.GetTop5ReimbursementAsync(
-            connStr, payerFilter, panelFilter,
-            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-        var totalPaymentsTask = showTotalPayments
-            ? _repo.GetTop5TotalPaymentsAsync(connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
-            : Task.FromResult(new Top5TotalPaymentsResult([]));
-        var insuranceAgingTask = _repo.GetInsuranceAgingAsync(
-            connStr, payerFilter, panelFilter,
-            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-        var panelPaymentTask = _repo.GetPanelPaymentAsync(
-            connStr, payerFilter, panelFilter,
-            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-        var insurancePaymentPctTask = _repo.GetInsurancePaymentPctAsync(
-            connStr, payerFilter, panelFilter,
-            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-        var cptPaymentPctTask = _repo.GetCptPaymentPctAsync(
-            connStr, payerFilter, panelFilter,
-            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        // Same aggregate vs live routing as GetTabPartial / the Collection Summary UI so
+        // Download Excel sheets match the page (VariantX Top5 / Ins% / Panel Vs Payment, etc.).
+        bool hasActiveFilters = payerFilter is { Count: > 0 } || panelFilter is { Count: > 0 }
+            || fbFromN.HasValue || fbToN.HasValue
+            || dosFromN.HasValue || dosToN.HasValue
+            || cdFromN.HasValue || cdToN.HasValue;
+        var aggregatePrefix = LabCollectionPrefix.GetPrefix(selectedLab);
+        bool useAggregates = aggregatePrefix is not null && !hasActiveFilters
+            && !LabCollectionPrefix.UsesSpCollectionLogic(selectedLab)
+            && !LabCollectionPrefix.ReadsCollectionSpsLive(selectedLab);
+
+        _logger.LogInformation(
+            "CollectionSummary[ExportVM] Lab={Lab}, Prefix={Prefix}, UseAggregates={UseAgg}, HasFilters={HasFilters}",
+            selectedLab, aggregatePrefix ?? "null", useAggregates, hasActiveFilters);
+
+        // Fetch all report data in parallel — aggregate path mirrors UI tabs; live path for filters / SP-only labs.
+        var monthlyVolumeTask = useAggregates
+            ? _repo.GetCollectionMonthlyVolumeFromAggregatesAsync(connStr, aggregatePrefix!, ct)
+            : _repo.GetCollectionMonthlyVolumeAsync(
+                connStr, selectedLab, useLineEncounters, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
+        var weeklyVolumeTask = useAggregates
+            ? _repo.GetCollectionWeeklyVolumeFromAggregatesAsync(connStr, aggregatePrefix!, ct)
+            : _repo.GetCollectionWeeklyVolumeAsync(
+                connStr, useLineEncounters, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var reimbursementTask = useAggregates
+            ? _repo.GetTop5ReimbursementFromAggregatesAsync(connStr, aggregatePrefix!, ct)
+            : _repo.GetTop5ReimbursementAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var totalPaymentsTask = !showTotalPayments
+            ? Task.FromResult(new Top5TotalPaymentsResult([]))
+            : useAggregates
+                ? _repo.GetTop5TotalPaymentsFromAggregatesAsync(connStr, aggregatePrefix!, ct)
+                : _repo.GetTop5TotalPaymentsAsync(connStr, payerFilter, panelFilter,
+                    fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var insuranceAgingTask = useAggregates
+            ? _repo.GetInsuranceAgingFromAggregatesAsync(connStr, aggregatePrefix!, ct)
+            : _repo.GetInsuranceAgingAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var panelPaymentTask = useAggregates
+            ? _repo.GetPanelPaymentFromAggregatesAsync(connStr, aggregatePrefix!, ct)
+            : _repo.GetPanelPaymentAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var insurancePaymentPctTask = useAggregates
+            ? _repo.GetInsurancePaymentPctFromAggregatesAsync(connStr, aggregatePrefix!, ct)
+            : _repo.GetInsurancePaymentPctAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var cptPaymentPctTask = useAggregates
+            ? _repo.GetCptPaymentPctFromAggregatesAsync(connStr, aggregatePrefix!, ct)
+            : _repo.GetCptPaymentPctAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
         var showPanelAverage = LabCollectionPrefix.ShowsPanelAverage(selectedLab);
-        var panelAveragesTask = showPanelAverage
-            ? _repo.GetPanelAveragesAsync(connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
-            : Task.FromResult(new PanelAveragesResult([]));
+        var panelAveragesTask = !showPanelAverage
+            ? Task.FromResult(new PanelAveragesResult([]))
+            : useAggregates
+                ? _repo.GetPanelAveragesFromAggregatesAsync(connStr, aggregatePrefix!, ct)
+                : _repo.GetPanelAveragesAsync(connStr, payerFilter, panelFilter,
+                    fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
         var avgPayByDateBasis = LabCollectionPrefix.UsesAvgPaymentsByDateBasis(selectedLab);
         var avgPaymentsTask = avgPayByDateBasis
             ? _repo.GetAvgPaymentsByDateBasisAsync(connStr, AvgPaymentsDateBasis.CheckDate,
                 payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
-            : _repo.GetAvgPaymentsAsync(
-                connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+            : useAggregates
+                ? _repo.GetAvgPaymentsFromAggregatesAsync(connStr, aggregatePrefix!, ct)
+                : _repo.GetAvgPaymentsAsync(
+                    connStr, payerFilter, panelFilter,
+                    fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
         var avgPayments3Task = LabCollectionPrefix.ShowsAvgPaymentsLast3Months(selectedLab)
             ? _repo.GetAvgPaymentsAsync(
                 connStr, payerFilter, panelFilter,
@@ -654,24 +689,32 @@ public class CollectionSummaryController : Controller
                 payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
             : Task.FromResult(new PanelAveragesResult([]));
         var showStatusProvider = LabCollectionPrefix.ShowsStatusProviderSummaries(selectedLab);
-        var statusSummaryTask = showStatusProvider
-            ? _repo.GetStatusSummaryAsync(
+        var statusSummaryTask = !showStatusProvider
+            ? Task.FromResult(StatusSummaryResult.Empty)
+            : useAggregates
+                ? _repo.GetStatusSummaryFromAggregatesAsync(connStr, aggregatePrefix!, ct)
+                : _repo.GetStatusSummaryAsync(
+                    connStr, payerFilter, panelFilter,
+                    fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var providerSummaryTask = !showStatusProvider
+            ? Task.FromResult(ProviderSummaryResult.Empty)
+            : useAggregates
+                ? _repo.GetProviderSummaryFromAggregatesAsync(connStr, aggregatePrefix!, ct)
+                : _repo.GetProviderSummaryAsync(
+                    connStr, payerFilter, panelFilter,
+                    fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var repPaymentTask = !showStatusProvider
+            ? Task.FromResult(new RepPaymentResult([]))
+            : useAggregates
+                ? _repo.GetRepPaymentFromAggregatesAsync(connStr, aggregatePrefix!, ct)
+                : _repo.GetRepPaymentAsync(
+                    connStr, payerFilter, panelFilter,
+                    fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var insuranceVsPaymentTask = useAggregates
+            ? _repo.GetInsuranceVsPaymentFromAggregatesAsync(connStr, aggregatePrefix!, ct)
+            : _repo.GetInsuranceVsPaymentAsync(
                 connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
-            : Task.FromResult(StatusSummaryResult.Empty);
-        var providerSummaryTask = showStatusProvider
-            ? _repo.GetProviderSummaryAsync(
-                connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
-            : Task.FromResult(ProviderSummaryResult.Empty);
-        var repPaymentTask = showStatusProvider
-            ? _repo.GetRepPaymentAsync(
-                connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
-            : Task.FromResult(new RepPaymentResult([]));
-        var insuranceVsPaymentTask = _repo.GetInsuranceVsPaymentAsync(
-            connStr, payerFilter, panelFilter,
-            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
         var showGeneticsVsIdAvg = LabCollectionPrefix.ShowsGeneticsVsIdAvg(selectedLab);
         var geneticsVsIdAvgTask = showGeneticsVsIdAvg
             ? _repo.GetGeneticsVsIdAvgAsync(
@@ -722,6 +765,8 @@ public class CollectionSummaryController : Controller
         return new CollectionSummaryViewModel
         {
             SelectedLab = selectedLab,
+            IsAggregateMode = useAggregates,
+            SupportsAggregateMode = aggregatePrefix is not null,
             MonthlyClaimVolume = BuildCollectionMonthlyPivot(
                 await AwaitOrDefaultAsync(monthlyVolumeTask, emptyMonthly, "Monthly Claim Volume", selectedLab, _logger)),
             WeeklyClaimVolume = BuildCollectionWeeklyPivot(

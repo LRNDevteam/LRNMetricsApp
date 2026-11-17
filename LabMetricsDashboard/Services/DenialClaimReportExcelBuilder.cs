@@ -68,7 +68,7 @@ public static class DenialClaimReportExcelBuilder
         model.Insight.Rows = await repo.GetInsightsAsync(connectionString, model.Insight.Bucket, ct);
 
         // Same SPs the page's Denial List / Plan Type tabs read.
-        if (LabCollectionPrefix.HasDenialSummary(labName))
+        if (LabCollectionPrefix.HasDenialLists(labName))
         {
             var lists = new SqlDenialSummaryRepository();
             var prefix = LabCollectionPrefix.GetPrefix(labName);
@@ -144,6 +144,17 @@ public static class DenialClaimReportExcelBuilder
         var workbook = new XLWorkbook();
         WritePivot(workbook.Worksheets.Add("Monthly Summary"), model.Monthly, "Monthly Summary", model.CurrentLab);
         WritePivot(workbook.Worksheets.Add("Weekly Summary"), model.Weekly, "Weekly Summary", model.CurrentLab);
+        return workbook;
+    }
+
+    /// <summary>
+    /// Monthly Summary, Weekly Summary and Denial Insight - the Executive Summary's Denial Highlights
+    /// tab. <paramref name="model"/>'s Insight carries the rows of the bucket the tab shows (Current Week).
+    /// </summary>
+    public static XLWorkbook BuildHighlights(DenialClaimReportViewModel model)
+    {
+        var workbook = BuildSummary(model);
+        WriteInsight(workbook.Worksheets.Add("Denial Insight"), model.Insight, model.CurrentLab);
         return workbook;
     }
 

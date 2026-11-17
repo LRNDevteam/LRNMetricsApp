@@ -1,4 +1,4 @@
-﻿/* =============================================================================
+/* =============================================================================
    VariantX Labs — cloned from Elixir (17_Elixir_ExecutiveSummary_Read.sql)
    Prefix: VarX_ / VarX_CS_ / VarX_ES_
    Refresh: usp_RefreshVarX_*
@@ -13,11 +13,11 @@
 -- DB   : VariantX_LRN
 --
 -- Mirrors PhiLife\17_PhiLife_ExecutiveSummary_Read.sql, but uses the
--- SIMPLER VariantX RoleID scheme (see 15_VariantX_ExecutiveSummary_Tables.sql):
---   LIS  : A, B, C, D (+D.1), E (+E.1-E.6)
---   PMS  : F-P (+P.1-P.3)
---   Cash : Q-X (+X.1-X.3)
---   Avg  : Y, Z, AA
+-- Client Executive Summary sheet RoleID scheme (see 16/19):
+--   LIS  : A, B (+B.TestType), C, D (+D.SampleStatus)
+--   PMS  : F, G, H-N (+N.1-N.3)   [F1-F3 omitted — Doubt]
+--   Cash : O-U (+U.1-U.3)
+--   Avg  : V, W, X
 --
 -- Returns the 6-column contract:
 --   RowCode      NVARCHAR(350)
@@ -222,8 +222,10 @@ BEGIN
 		SET @NewStatusCol = (
 			SELECT TOP 1 name FROM sys.columns
 			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
-			  AND name IN ('NewStatus','Status')
-			ORDER BY CASE name WHEN 'NewStatus' THEN 0 WHEN 'Status' THEN 1 ELSE 2 END);
+			  AND name IN ('SampleStatus','NewStatus','Status','LRNSampleStatus')
+			ORDER BY CASE name
+				WHEN 'SampleStatus' THEN 0 WHEN 'LRNSampleStatus' THEN 1
+				WHEN 'NewStatus' THEN 2 WHEN 'Status' THEN 3 ELSE 4 END);
 
 		SET @BillCategoryCol = (
 			SELECT TOP 1 name FROM sys.columns
@@ -250,8 +252,10 @@ BEGIN
 		SET @PanelCol = (
 			SELECT TOP 1 name FROM sys.columns
 			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
-			  AND name IN ('PanelName','Panel','PanelType','TestPanel')
-			ORDER BY CASE name WHEN 'PanelName' THEN 0 WHEN 'Panel' THEN 1 WHEN 'PanelType' THEN 2 WHEN 'TestPanel' THEN 3 ELSE 4 END);
+			  AND name IN ('TestType','PanelName','Panel','PanelType','TestPanel')
+			ORDER BY CASE name
+				WHEN 'TestType' THEN 0 WHEN 'PanelName' THEN 1
+				WHEN 'Panel' THEN 2 WHEN 'PanelType' THEN 3 WHEN 'TestPanel' THEN 4 ELSE 5 END);
 
 		SET @ClinicCol = (
 			SELECT TOP 1 name FROM sys.columns
@@ -334,11 +338,13 @@ BEGIN
 		--   DOS mode        : LISYear/LISMonth from DateOfCollection (no date bounds — independent period system).
 		--   BilledDate mode : LISYear/LISMonth from BilledDate, bounded by @BilledFrom/@BilledTo.
 		IF @AccCol IS NOT NULL AND @DateCol IS NOT NULL
-		   AND @NewStatusCol IS NOT NULL AND @BillCategoryCol IS NOT NULL AND @ResultStatusCol IS NOT NULL
+		   AND @NewStatusCol IS NOT NULL AND @BillCategoryCol IS NOT NULL
 		BEGIN
-			-- ResultStatus normalizer (IsResulted may be a bit/flag column)
+			-- ResultStatus optional (kept for compatibility; sheet no longer requires it)
 			DECLARE @ResultExpr NVARCHAR(400);
-			IF @ResultStatusCol = 'IsResulted'
+			IF @ResultStatusCol IS NULL
+				SET @ResultExpr = N'CAST('''' AS NVARCHAR(100))';
+			ELSE IF @ResultStatusCol = 'IsResulted'
 				SET @ResultExpr = N'(CASE WHEN TRY_CAST([' + @ResultStatusCol + N'] AS INT) = 1 THEN ''Resulted''
 										   WHEN CONVERT(NVARCHAR(20), [' + @ResultStatusCol + N']) IN (''Y'',''Yes'',''True'',''Resulted'') THEN ''Resulted''
 										   ELSE ''Not Resulted'' END)';
@@ -354,7 +360,7 @@ BEGIN
 				NewStatus    NVARCHAR(100) NOT NULL,
 				BillCategory NVARCHAR(100) NOT NULL,
 				ResultStatus NVARCHAR(100) NOT NULL,
-				Panel        NVARCHAR(300) NOT NULL  -- '' when @PanelCol not found
+				Panel        NVARCHAR(300) NOT NULL  -- TestType when present
 			);
 
 			-- Panel SELECT expression: use detected column or empty string if column absent
@@ -428,63 +434,38 @@ BEGIN
 				@iBilledFrom = @BilledFrom,
 				@iBilledTo   = @BilledTo;
 
-			-- Aggregate #Lis into #LisOut, one row per (RowCode, ESYear, ESMonth)
+			-- Aggregate #Lis into #LisOut (sheet RoleIDs A/B/C/D)
 			INSERT INTO #LisOut (RowCode, Description, ESYear, ESMonth, MetricValue)
-			-- A  Total Samples
-			SELECT 'A',   'Total Samples',                ESYear, ESMonth, CAST(COUNT(DISTINCT Accession) AS DECIMAL(18,2))
+			SELECT 'A', 'Total Samples', ESYear, ESMonth, CAST(COUNT(DISTINCT Accession) AS DECIMAL(18,2))
 			FROM #Lis GROUP BY ESYear, ESMonth
-			-- B  Billable Samples
 			UNION ALL
-			SELECT 'B',   'Billable Samples',             ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Billable'                                                           THEN Accession END) AS DECIMAL(18,2))
+			SELECT 'B', 'Billable Samples', ESYear, ESMonth,
+				CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Billable' THEN Accession END) AS DECIMAL(18,2))
 			FROM #Lis GROUP BY ESYear, ESMonth
-			-- C  Billed
 			UNION ALL
-			SELECT 'C',   'Billed',                       ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Billable' AND BillCategory = 'Billed'                             THEN Accession END) AS DECIMAL(18,2))
+			SELECT 'C', 'Billed', ESYear, ESMonth,
+				CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Billable' AND BillCategory = 'Billed' THEN Accession END) AS DECIMAL(18,2))
 			FROM #Lis GROUP BY ESYear, ESMonth
-			-- D  Unbilled
 			UNION ALL
-			SELECT 'D',   'Unbilled',                     ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Billable' AND BillCategory = 'Not Billed'                         THEN Accession END) AS DECIMAL(18,2))
-			FROM #Lis GROUP BY ESYear, ESMonth
-			-- D.1  Resulted yet to be billed
-			UNION ALL
-			SELECT 'D.1', '  Resulted yet to be billed', ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Billable' AND BillCategory = 'Not Billed' AND ResultStatus = 'Resulted' THEN Accession END) AS DECIMAL(18,2))
-			FROM #Lis GROUP BY ESYear, ESMonth
-			-- E  Other Samples
-			UNION ALL
-			SELECT 'E',   'Other Samples',                ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus <> 'Billable'                                                          THEN Accession END) AS DECIMAL(18,2))
-			FROM #Lis GROUP BY ESYear, ESMonth
-			-- E.1  Client Bill
-			UNION ALL
-			SELECT 'E.1', '  Client Bill',                ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Client Bill'         THEN Accession END) AS DECIMAL(18,2))
-			FROM #Lis GROUP BY ESYear, ESMonth
-			-- E.2  Self Pay
-			UNION ALL
-			SELECT 'E.2', '  Self Pay',                   ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Self Pay'            THEN Accession END) AS DECIMAL(18,2))
-			FROM #Lis GROUP BY ESYear, ESMonth
-			-- E.3  System Test
-			UNION ALL
-			SELECT 'E.3', '  System Test',                ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'System Test'         THEN Accession END) AS DECIMAL(18,2))
-			FROM #Lis GROUP BY ESYear, ESMonth
-			-- E.4  Deleted/Rejected
-			UNION ALL
-			SELECT 'E.4', '  Deleted/Rejected',           ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Deleted/Rejected'    THEN Accession END) AS DECIMAL(18,2))
-			FROM #Lis GROUP BY ESYear, ESMonth
-			-- E.5  CIP/Pending
-			UNION ALL
-			SELECT 'E.5', '  CIP/Pending',                ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'CIP/Pending'         THEN Accession END) AS DECIMAL(18,2))
-			FROM #Lis GROUP BY ESYear, ESMonth
-			-- E.6  Yet to be validated
-			UNION ALL
-			SELECT 'E.6', '  Yet to be validated',        ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Yet to be validated' THEN Accession END) AS DECIMAL(18,2))
+			SELECT 'D', 'Other Samples', ESYear, ESMonth,
+				CAST(COUNT(DISTINCT CASE WHEN NewStatus <> 'Billable' AND NewStatus <> '' THEN Accession END) AS DECIMAL(18,2))
 			FROM #Lis GROUP BY ESYear, ESMonth;
 
-			-- B.x  Panel sub-rows (Billable Samples by Panel, displayed under row B)
+			-- B.x TestType sub-rows
 			INSERT INTO #LisOut (RowCode, Description, ESYear, ESMonth, MetricValue)
 			SELECT 'B.' + Panel, '  ' + Panel, ESYear, ESMonth,
-			       CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Billable' THEN Accession END) AS DECIMAL(18,2))
+			       CAST(COUNT(DISTINCT Accession) AS DECIMAL(18,2))
 			FROM #Lis
 			WHERE NewStatus = 'Billable' AND Panel <> ''
 			GROUP BY Panel, ESYear, ESMonth;
+
+			-- D.x Other SampleStatus sub-rows
+			INSERT INTO #LisOut (RowCode, Description, ESYear, ESMonth, MetricValue)
+			SELECT 'D.' + NewStatus, '  ' + NewStatus, ESYear, ESMonth,
+			       CAST(COUNT(DISTINCT Accession) AS DECIMAL(18,2))
+			FROM #Lis
+			WHERE NewStatus <> 'Billable' AND NewStatus <> ''
+			GROUP BY NewStatus, ESYear, ESMonth;
 
 			-- Grand-total sentinel (0,0) rows — sums all per-period rows, including B.x
 			INSERT INTO #LisOut (RowCode, Description, ESYear, ESMonth, MetricValue)
@@ -501,6 +482,7 @@ BEGIN
 	DROP TABLE IF EXISTS #Base;
 	CREATE TABLE #Base
 	(
+		ClaimKey             NVARCHAR(100)  COLLATE DATABASE_DEFAULT NULL,
 		AccessionNumber      NVARCHAR(100)  COLLATE DATABASE_DEFAULT NOT NULL,
 		ESYear               INT            NOT NULL DEFAULT 0,
 		ESMonth              INT            NOT NULL DEFAULT 0,
@@ -571,11 +553,12 @@ BEGIN
 	IF @UseBilledDate = 0
 	BEGIN
 		SET @BaseSql = N'
-		INSERT INTO #Base (AccessionNumber, ESYear, ESMonth, BilledUnbilled, ClaimStatus,
+		INSERT INTO #Base (ClaimKey, AccessionNumber, ESYear, ESMonth, BilledUnbilled, ClaimStatus,
 						   ChargeAmount, InsurancePayment, PatientPayment,
 						   InsuranceAdjustments, PatientAdjustments,
 						   InsuranceBalance, PatientBalance)
 		SELECT
+			NULLIF(LTRIM(RTRIM(ClaimID)), ''''),
 			AccessionNumber,
 			ISNULL(YEAR (TRY_CAST(DateofService AS DATE)), 0),
 			ISNULL(MONTH(TRY_CAST(DateofService AS DATE)), 0),
@@ -590,7 +573,7 @@ BEGIN
 			ISNULL(TRY_CAST(PatientBalance       AS DECIMAL(18,2)), 0)
 		FROM dbo.ClaimLevelData
 		WHERE TRY_CAST(DateofService AS DATE) IS NOT NULL
-		  AND NULLIF(LTRIM(RTRIM(AccessionNumber)), '''') IS NOT NULL
+		  AND NULLIF(LTRIM(RTRIM(ClaimID)), '''') IS NOT NULL
 		  AND (@YearFrom  IS NULL OR YEAR (TRY_CAST(DateofService AS DATE)) >= @YearFrom)
 		  AND (@YearTo    IS NULL OR YEAR (TRY_CAST(DateofService AS DATE)) <= @YearTo)
 		  AND (@MonthFrom IS NULL OR MONTH(TRY_CAST(DateofService AS DATE)) >= @MonthFrom)
@@ -605,11 +588,12 @@ BEGIN
 	ELSE
 	BEGIN
 		SET @BaseSql = N'
-		INSERT INTO #Base (AccessionNumber, ESYear, ESMonth, BilledUnbilled, ClaimStatus,
+		INSERT INTO #Base (ClaimKey, AccessionNumber, ESYear, ESMonth, BilledUnbilled, ClaimStatus,
 						   ChargeAmount, InsurancePayment, PatientPayment,
 						   InsuranceAdjustments, PatientAdjustments,
 						   InsuranceBalance, PatientBalance)
 		SELECT
+			NULLIF(LTRIM(RTRIM(ClaimID)), ''''),
 			AccessionNumber,
 			ISNULL(YEAR (TRY_CAST(FirstBilledDate AS DATE)), 0),
 			ISNULL(MONTH(TRY_CAST(FirstBilledDate AS DATE)), 0),
@@ -624,7 +608,7 @@ BEGIN
 			ISNULL(TRY_CAST(PatientBalance       AS DECIMAL(18,2)), 0)
 		FROM dbo.ClaimLevelData
 		WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
-		  AND NULLIF(LTRIM(RTRIM(AccessionNumber)), '''') IS NOT NULL
+		  AND NULLIF(LTRIM(RTRIM(ClaimID)), '''') IS NOT NULL
 		  AND (@BilledFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @BilledFrom)
 		  AND (@BilledTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @BilledTo)
 		  AND (@HasPanelFilter = 0 OR CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(Panelname, ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @Panels + '','') COLLATE DATABASE_DEFAULT) > 0)
@@ -652,13 +636,12 @@ BEGIN
 	--  applied to the filtered #Base/#Periods).
 	-- ───────────────────────────────────────────────────────────────────────
 	DROP TABLE IF EXISTS #BaseBilledCount;
-	SELECT ESYear, ESMonth, COUNT(DISTINCT AccessionNumber) AS BilledCount
+	SELECT ESYear, ESMonth, COUNT(DISTINCT ClaimKey) AS BilledCount
 	INTO #BaseBilledCount
 	FROM #Base
-	WHERE BilledUnbilled = 'Billed'
 	GROUP BY ESYear, ESMonth
 	UNION ALL
-	SELECT 0, 0, COUNT(DISTINCT AccessionNumber) FROM #Base WHERE BilledUnbilled = 'Billed';
+	SELECT 0, 0, COUNT(DISTINCT ClaimKey) FROM #Base;
 
 	DROP TABLE IF EXISTS #LisBilled;
 	CREATE TABLE #LisBilled
@@ -760,295 +743,230 @@ BEGIN
 	),
 	PMS AS
 	(
-		-- F  No. of Billed Claims
 		SELECT p.ESYear, p.ESMonth, 'F' AS RowCode, 'No. of Billed Claims' AS Description,
-			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2)) AS MetricValue
+			   CAST(COUNT(DISTINCT b.ClaimKey) AS DECIMAL(18,2)) AS MetricValue
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed'
-						   AND b.ClaimStatus NOT IN ('Billed Amount 0','Unbilled','Unbilled - PB')
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- G  Unbilled Claims
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'G', 'Unbilled Claims',
-			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p
-		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.ClaimStatus IN ('Unbilled','Unbilled - PB')
-		GROUP BY p.ESYear, p.ESMonth
-
-		-- H  Voided claims (spec gave no formula - see file 16 header note)
-		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'H', 'Voided claims',
-			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p
-		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.ClaimStatus = 'Voided'
-		GROUP BY p.ESYear, p.ESMonth
-
-		-- I  Billed Mismatches - LIS Accession Cannot be Matched
-		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'I', 'Billed Mismatches - LIS Accession Cannot be Matched',
-			   CAST(ISNULL(bb.BilledCount, 0) - ISNULL(ll.BilledCount, 0) AS DECIMAL(18,2))
+		SELECT p.ESYear, p.ESMonth, 'G', 'Billed Mismatches - Accessions NA / Cove Claims billed',
+			   CAST(CASE WHEN ISNULL(bb.BilledCount, 0) - ISNULL(ll.BilledCount, 0) > 0
+						 THEN ISNULL(bb.BilledCount, 0) - ISNULL(ll.BilledCount, 0) ELSE 0 END AS DECIMAL(18,2))
 		FROM #Periods p
 		LEFT JOIN #BaseBilledCount bb ON bb.ESYear = p.ESYear AND bb.ESMonth = p.ESMonth
 		LEFT JOIN #LisBilledCount  ll ON ll.ESYear = p.ESYear AND ll.ESMonth = p.ESMonth
 
-		-- J  No. of Fully Paid Claims
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'J', 'No. of Fully Paid Claims',
-			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
+		SELECT p.ESYear, p.ESMonth, 'H', 'No. of Fully Paid Claims',
+			   CAST(COUNT(DISTINCT b.ClaimKey) AS DECIMAL(18,2))
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.ClaimStatus = 'Fully Paid'
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- K  No. of Fully Patient Responsibility Claims
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'K', 'No. of Fully Patient Responsibility Claims',
-			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
+		SELECT p.ESYear, p.ESMonth, 'I', 'No. of Patient Responsibility Claims',
+			   CAST(COUNT(DISTINCT b.ClaimKey) AS DECIMAL(18,2))
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Patient Responsibility'
+						   AND b.ClaimStatus = 'Patient Responsibility'
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- L  No. of Patient Paid Claims
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'L', 'No. of Patient Paid Claims',
-			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
+		SELECT p.ESYear, p.ESMonth, 'J', 'No. of Adjusted/ Written Off Claims',
+			   CAST(COUNT(DISTINCT b.ClaimKey) AS DECIMAL(18,2))
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Patient Payment'
+						   AND b.ClaimStatus = 'Fully Adjusted'
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- M  No. of Adjusted/Written Off Claims
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'M', 'No. of Adjusted/Written Off Claims',
-			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
+		SELECT p.ESYear, p.ESMonth, 'K', 'No. of Partially Adjusted/ Written Off Claims',
+			   CAST(COUNT(DISTINCT b.ClaimKey) AS DECIMAL(18,2))
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Fully Adjusted'
+						   AND b.ClaimStatus = 'Partially Adjusted'
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- N  No. of Partially Adjusted claims
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'N', 'No. of Partially Adjusted claims',
-			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
+		SELECT p.ESYear, p.ESMonth, 'L', 'No. of Partially Paid Claims',
+			   CAST(COUNT(DISTINCT b.ClaimKey) AS DECIMAL(18,2))
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Partially Adjusted'
+						   AND b.ClaimStatus = 'Partially Paid'
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- O  No. of Partially Paid Claims
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'O', 'No. of Partially Paid Claims',
-			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
+		SELECT p.ESYear, p.ESMonth, 'M', 'No. of Patient Paid Claims',
+			   CAST(COUNT(DISTINCT b.ClaimKey) AS DECIMAL(18,2))
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Partially Paid'
+						   AND b.ClaimStatus = 'Patient Payment'
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- P  No. of Insurance Balance Claims (parent)
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'P', 'No. of Insurance Balance Claims',
-			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
+		SELECT p.ESYear, p.ESMonth, 'N', 'No. of Insurance Balance Claims',
+			   CAST(COUNT(DISTINCT b.ClaimKey) AS DECIMAL(18,2))
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed'
-						   AND b.ClaimStatus IN ('Denied','No Response','Partially Denied')
+						   AND b.ClaimStatus IN ('Fully Denied','Denied','Partially Denied','No Response')
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- P.1  No. of Fully Denied Claims
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'P.1', '  No. of Fully Denied Claims',
-			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
+		SELECT p.ESYear, p.ESMonth, 'N.1', '  No. of Fully Denied Claims',
+			   CAST(COUNT(DISTINCT b.ClaimKey) AS DECIMAL(18,2))
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Denied'
+						   AND b.ClaimStatus IN ('Fully Denied','Denied')
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- P.2  No. of Partially Denied Claims (Partially Adjusted + Partially Denied)
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'P.2', '  No. of Partially Denied Claims',
-			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
+		SELECT p.ESYear, p.ESMonth, 'N.2', '  No. of Partially Denied Claims',
+			   CAST(COUNT(DISTINCT b.ClaimKey) AS DECIMAL(18,2))
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus IN ('Partially Adjusted','Partially Denied')
+						   AND b.ClaimStatus = 'Partially Denied'
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- P.3  No. of No Response from Payor Claims
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'P.3', '  No. of No Response from Payor Claims',
-			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
+		SELECT p.ESYear, p.ESMonth, 'N.3', '  No. of No Response from Payor Claims',
+			   CAST(COUNT(DISTINCT b.ClaimKey) AS DECIMAL(18,2))
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'No Response'
+						   AND b.ClaimStatus = 'No Response'
 		GROUP BY p.ESYear, p.ESMonth
 	),
 	Cash AS
 	(
-		-- Q  Total Billed ($)
-		SELECT p.ESYear, p.ESMonth, 'Q' AS RowCode, 'Total Billed ($)' AS Description,
+		SELECT p.ESYear, p.ESMonth, 'O' AS RowCode, 'Total Billed ($)' AS Description,
 			   ISNULL(SUM(b.ChargeAmount), 0) AS MetricValue
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed'
-						   AND b.ClaimStatus NOT IN ('Unbilled','Unbilled - PB','Billed Amount 0')
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- R  Unbilled Claims ($)
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'R', 'Unbilled Claims ($)',
-			   ISNULL(SUM(b.ChargeAmount), 0)
-		FROM #Periods p
-		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.ClaimStatus = 'Unbilled'
-		GROUP BY p.ESYear, p.ESMonth
-
-		-- S  Insurance Payment ($)
-		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'S', 'Insurance Payment ($)',
+		SELECT p.ESYear, p.ESMonth, 'P', 'Insurance Payment ($)',
 			   ISNULL(SUM(b.InsurancePayment), 0)
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.ClaimStatus = 'Fully Paid'
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- T  Patient Responsibility ($)
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'T', 'Patient Responsibility ($)',
+		SELECT p.ESYear, p.ESMonth, 'Q', 'Patient Responsibility ($)',
 			   ISNULL(SUM(b.PatientBalance), 0)
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed'
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- U  Adjustments / Write Off ($)
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'U', 'Adjustments / Write Off ($)',
-			   ISNULL(SUM(b.InsuranceAdjustments), 0)
-		FROM #Periods p
-		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed'
-		GROUP BY p.ESYear, p.ESMonth
-
-		-- V  Patient Paid ($)
-		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'V', 'Patient Paid ($)',
+		SELECT p.ESYear, p.ESMonth, 'R', 'Patient Payment ($)',
 			   ISNULL(SUM(b.PatientPayment), 0)
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed'
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- W  Partially Paid ($)
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'W', 'Partially Paid ($)',
+		SELECT p.ESYear, p.ESMonth, 'T', 'Partially Paid ($)',
 			   ISNULL(SUM(b.InsurancePayment), 0)
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Partially Paid'
+						   AND b.ClaimStatus = 'Partially Paid'
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- X  Insurance Balance ($) (parent)
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'X', 'Insurance Balance ($)',
+		SELECT p.ESYear, p.ESMonth, 'U', 'Insurance Balance ($)',
 			   ISNULL(SUM(b.InsuranceBalance), 0)
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed'
-						   AND b.ClaimStatus NOT IN ('Unbilled','Billed Amount 0')
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- X.1  Denials ($)
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'X.1', '  Denials ($)',
+		SELECT p.ESYear, p.ESMonth, 'U.1', '  Denials ($)',
 			   ISNULL(SUM(b.InsuranceBalance), 0)
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Denied'
+						   AND b.ClaimStatus IN ('Denied','Fully Denied')
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- X.2  Partially Denied ($)
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'X.2', '  Partially Denied ($)',
+		SELECT p.ESYear, p.ESMonth, 'U.2', '  Partially Denied ($)',
 			   ISNULL(SUM(b.InsuranceBalance), 0)
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed'
-						   AND b.ClaimStatus IN ('Partially Denied','Partially Paid','Partially Adjusted','Patient Responsibility')
+						   AND b.ClaimStatus = 'Partially Denied'
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- X.3  No Response from Payor ($)
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'X.3', '  No Response from Payor ($)',
+		SELECT p.ESYear, p.ESMonth, 'U.3', '  No Response from Payor ($)',
 			   ISNULL(SUM(b.InsuranceBalance), 0)
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'No Response'
+						   AND b.ClaimStatus = 'No Response'
 		GROUP BY p.ESYear, p.ESMonth
+	),
+	CashWithS AS
+	(
+		SELECT * FROM Cash
+		UNION ALL
+		-- S = O - P - Q - R - T - U
+		SELECT p.ESYear, p.ESMonth, 'S', 'Adjustments / Write Off ($)',
+			ISNULL(o.MetricValue,0) - ISNULL(ip.MetricValue,0) - ISNULL(q.MetricValue,0)
+			- ISNULL(r.MetricValue,0) - ISNULL(t.MetricValue,0) - ISNULL(u.MetricValue,0)
+		FROM #Periods p
+		LEFT JOIN Cash o  ON o.ESYear=p.ESYear  AND o.ESMonth=p.ESMonth  AND o.RowCode='O'
+		LEFT JOIN Cash ip ON ip.ESYear=p.ESYear AND ip.ESMonth=p.ESMonth AND ip.RowCode='P'
+		LEFT JOIN Cash q  ON q.ESYear=p.ESYear  AND q.ESMonth=p.ESMonth  AND q.RowCode='Q'
+		LEFT JOIN Cash r  ON r.ESYear=p.ESYear  AND r.ESMonth=p.ESMonth  AND r.RowCode='R'
+		LEFT JOIN Cash t  ON t.ESYear=p.ESYear  AND t.ESMonth=p.ESMonth  AND t.RowCode='T'
+		LEFT JOIN Cash u  ON u.ESYear=p.ESYear  AND u.ESMonth=p.ESMonth  AND u.RowCode='U'
 	),
 	AvgRows AS
 	(
-		-- Y  Average Payment ($) - Total Pay/Billed Claims
-		SELECT p.ESYear, p.ESMonth, 'Y' AS RowCode, 'Average Payment ($) - Total Pay/Billed Claims' AS Description,
-			   ISNULL(ROUND(SUM(CASE WHEN b.ClaimStatus = 'Fully Paid' OR (b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Partially Paid') THEN b.InsurancePayment ELSE 0 END)
-					 / NULLIF(COUNT(DISTINCT CASE WHEN b.BilledUnbilled = 'Billed' AND b.ClaimStatus NOT IN ('Billed Amount 0','Unbilled','Unbilled - PB') THEN b.AccessionNumber END), 0), 2), 0) AS MetricValue
+		SELECT p.ESYear, p.ESMonth, 'V' AS RowCode, 'Average Payment ($) - Total Pay/Billed Claims' AS Description,
+			   ISNULL(ROUND(SUM(CASE WHEN b.ClaimStatus IN ('Fully Paid','Partially Paid') THEN b.InsurancePayment ELSE 0 END)
+					 / NULLIF(COUNT(DISTINCT b.ClaimKey), 0), 2), 0) AS MetricValue
 		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- Z  Average Payment ($) - Total Pay/Paid Claims
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'Z', 'Average Payment ($) - Total Pay/Paid Claims',
+		SELECT p.ESYear, p.ESMonth, 'W', 'Average Payment ($) - Total Pay/Paid Claims',
 			   ISNULL(ROUND(SUM(CASE WHEN b.ClaimStatus = 'Fully Paid' THEN b.InsurancePayment ELSE 0 END)
-					 / NULLIF(COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Fully Paid' THEN b.AccessionNumber END), 0), 2), 0)
+					 / NULLIF(COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Fully Paid' THEN b.ClaimKey END), 0), 2), 0)
 		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- AA  Average Payment ($) - Total Pay/Adjudicated Claims
 		UNION ALL
-		SELECT p.ESYear, p.ESMonth, 'AA', 'Average Payment ($) - Total Pay/Adjudicated Claims',
+		SELECT p.ESYear, p.ESMonth, 'X', 'Average Payment ($) - Total Pay/Adjudicated Claims',
 			   ISNULL(ROUND(
-						(SUM(CASE WHEN b.ClaimStatus = 'Fully Paid' OR (b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Partially Paid') THEN b.InsurancePayment ELSE 0 END)
-						 + SUM(CASE WHEN b.BilledUnbilled = 'Billed' THEN b.PatientPayment ELSE 0 END))
-						/ NULLIF(COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Fully Paid'
-													   OR (b.BilledUnbilled = 'Billed'
-													       AND b.ClaimStatus IN ('Fully Adjusted','Patient Responsibility','Partially Paid','Fully Denied','Partially Denied'))
-												  THEN b.AccessionNumber END), 0), 2), 0)
+						SUM(CASE WHEN b.ClaimStatus IN ('Fully Paid','Partially Paid') THEN b.InsurancePayment ELSE 0 END)
+						/ NULLIF(COUNT(DISTINCT CASE WHEN b.ClaimStatus IN
+							('Fully Paid','Partially Paid','Fully Adjusted','Fully Denied','Denied','Partially Denied')
+							THEN b.ClaimKey END), 0), 2), 0)
 		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 		GROUP BY p.ESYear, p.ESMonth
 
-		-- Weighted annual Y/Z/AA rows (ESMonth=0). These prevent the UI
-		-- from adding monthly averages for filtered results.
 		UNION ALL
-		SELECT b.ESYear, 0, 'Y', 'Average Payment ($) - Total Pay/Billed Claims',
-			   ISNULL(ROUND(SUM(CASE WHEN b.ClaimStatus = 'Fully Paid' OR (b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Partially Paid') THEN b.InsurancePayment ELSE 0 END)
-					 / NULLIF(COUNT(DISTINCT CASE WHEN b.BilledUnbilled = 'Billed' AND b.ClaimStatus NOT IN ('Billed Amount 0','Unbilled','Unbilled - PB') THEN b.AccessionNumber END), 0), 2), 0)
-		FROM #Base b
-		WHERE b.ESYear > 0
-		GROUP BY b.ESYear
+		SELECT b.ESYear, 0, 'V', 'Average Payment ($) - Total Pay/Billed Claims',
+			   ISNULL(ROUND(SUM(CASE WHEN b.ClaimStatus IN ('Fully Paid','Partially Paid') THEN b.InsurancePayment ELSE 0 END)
+					 / NULLIF(COUNT(DISTINCT b.ClaimKey), 0), 2), 0)
+		FROM #Base b WHERE b.ESYear > 0 GROUP BY b.ESYear
 
 		UNION ALL
-		SELECT b.ESYear, 0, 'Z', 'Average Payment ($) - Total Pay/Paid Claims',
+		SELECT b.ESYear, 0, 'W', 'Average Payment ($) - Total Pay/Paid Claims',
 			   ISNULL(ROUND(SUM(CASE WHEN b.ClaimStatus = 'Fully Paid' THEN b.InsurancePayment ELSE 0 END)
-					 / NULLIF(COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Fully Paid' THEN b.AccessionNumber END), 0), 2), 0)
-		FROM #Base b
-		WHERE b.ESYear > 0
-		GROUP BY b.ESYear
+					 / NULLIF(COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Fully Paid' THEN b.ClaimKey END), 0), 2), 0)
+		FROM #Base b WHERE b.ESYear > 0 GROUP BY b.ESYear
 
 		UNION ALL
-		SELECT b.ESYear, 0, 'AA', 'Average Payment ($) - Total Pay/Adjudicated Claims',
+		SELECT b.ESYear, 0, 'X', 'Average Payment ($) - Total Pay/Adjudicated Claims',
 			   ISNULL(ROUND(
-						(SUM(CASE WHEN b.ClaimStatus = 'Fully Paid' OR (b.BilledUnbilled = 'Billed' AND b.ClaimStatus = 'Partially Paid') THEN b.InsurancePayment ELSE 0 END)
-						 + SUM(CASE WHEN b.BilledUnbilled = 'Billed' THEN b.PatientPayment ELSE 0 END))
-						/ NULLIF(COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Fully Paid'
-													   OR (b.BilledUnbilled = 'Billed'
-													       AND b.ClaimStatus IN ('Fully Adjusted','Patient Responsibility','Partially Paid','Fully Denied','Partially Denied'))
-												  THEN b.AccessionNumber END), 0), 2), 0)
-		FROM #Base b
-		WHERE b.ESYear > 0
-		GROUP BY b.ESYear
+						SUM(CASE WHEN b.ClaimStatus IN ('Fully Paid','Partially Paid') THEN b.InsurancePayment ELSE 0 END)
+						/ NULLIF(COUNT(DISTINCT CASE WHEN b.ClaimStatus IN
+							('Fully Paid','Partially Paid','Fully Adjusted','Fully Denied','Denied','Partially Denied')
+							THEN b.ClaimKey END), 0), 2), 0)
+		FROM #Base b WHERE b.ESYear > 0 GROUP BY b.ESYear
 	)
 	SELECT RowCode, Category, Description, BillYear, BillMonth, MetricValue
 	FROM
@@ -1057,7 +975,7 @@ BEGIN
 		UNION ALL
 		SELECT RowCode, 'PMS', Description, ESYear, ESMonth, MetricValue FROM PMS
 		UNION ALL
-		SELECT RowCode, 'Cash', Description, ESYear, ESMonth, MetricValue FROM Cash
+		SELECT RowCode, 'Cash', Description, ESYear, ESMonth, MetricValue FROM CashWithS
 		UNION ALL
 		SELECT RowCode, 'Avg', Description, ESYear, ESMonth, MetricValue FROM AvgRows
 	) all_rows

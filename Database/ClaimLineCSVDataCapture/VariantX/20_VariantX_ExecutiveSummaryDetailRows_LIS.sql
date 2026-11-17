@@ -1,57 +1,8 @@
 ﻿/* =============================================================================
-   VariantX Labs — cloned from Elixir (20_Elixir_ExecutiveSummaryDetailRows_LIS.sql)
-   Prefix: VarX_ / VarX_CS_ / VarX_ES_
-   Refresh: usp_RefreshVarX_*
-   Read:    usp_GetVarX_*
-   Source tables: dbo.ClaimLevelData, dbo.LineLevelData, dbo.LIMSMaster
-   No inline UI queries — dashboard/ReportWorker must call these SPs only.
+   VariantX – Executive Summary LIS Detail-Rows SP
+   Mirrors 19_VariantX_ExecutiveSummary_LIS_Alt RoleIDs / SampleStatus / TestType.
+   Generic name: dbo.usp_GetExecutiveSummaryDetail_LIS
    ============================================================================= */
--- ============================================================
--- VariantX – Executive Summary LIS Detail-Rows SP (generic name)
--- File : 20_VariantX_ExecutiveSummaryDetailRows_LIS.sql
--- DB   : VariantX_LRN
---
--- Mirrors 19_VariantX_ExecutiveSummary_LIS_Alt.sql
--- (usp_RefreshVarX_ExecutiveSummary_LIS_Alt), which sources the LIS
--- Breakdown from dbo.LIMSMaster using RoleIDs A..E (plus D.1, E.1-E.6).
--- This SP must use the SAME auto-detected columns and SAME predicates so
--- that drilling into any LIS Breakdown cell returns the LIMSMaster rows
--- that were counted for that cell.
---
--- Uses the GENERIC (non lab-prefixed) procedure name
--- dbo.usp_GetExecutiveSummaryDetail_LIS, called by
--- ExecutiveSummaryController.Detail for ANY lab's 'LIS' category, with
--- @RowCode = the RoleID stored on the clicked VarX_ES_LIS row
--- (e.g. 'A','B','C','D','D.1','E','E.1'...'E.6').
---
--- RoleID -> filter map (mirrors file 19's #Lis population/predicates):
---   A    Total Samples              -> no filter
---   B    Billable Samples           -> NewStatus = 'Billable'
---   C    Billed                     -> NewStatus = 'Billable' AND BillCategory = 'Billed'
---   D    Unbilled                   -> NewStatus = 'Billable' AND BillCategory = 'Not Billed'
---   D.1    Resulted yet to be billed  -> ResultStatus = 'Resulted' AND NewStatus = 'Billable' AND BillCategory = 'Not Billed'
---   E    Other Samples              -> NewStatus <> 'Billable'
---   E.1    Client Bill                -> NewStatus = 'Client Bill'
---   E.2    Self Pay                   -> NewStatus = 'Self Pay'
---   E.3    System Test                -> NewStatus = 'System Test'
---   E.4    Deleted/Rejected            -> NewStatus = 'Deleted/Rejected'
---   E.5    CIP/Pending                 -> NewStatus = 'CIP/Pending'
---   E.6    Yet to be validated         -> NewStatus = 'Yet to be validated'
---
--- Column auto-detection is identical to file 19 (@AccCol/@DateCol/
--- @NewStatusCol/@BillCategoryCol/@ResultStatusCol), plus a few extra
--- display-only columns (PatientName/PayerName/ClinicName/BillingProvider/
--- PanelName) auto-detected the same way as PhiLife/PCRLOA's file 20,
--- falling back to '' if not present.
---
--- @DateCol priority: DateOfCollection (0) > RequestCollectDate (1) >
---   CollectionDate (2) > DateofService (3) > ServiceDate (4) >
---   AccessionDate (5).  Filter is always by the collection/service date
---   that was used to bucket rows in file 19's aggregate.
---
--- @Year/@Month: 0 = all years / all months (matches the (0,0) grand-total
--- sentinel period used by file 19).
--- ============================================================
 SET NOCOUNT ON;
 GO
 
@@ -82,10 +33,6 @@ BEGIN
         RETURN;
     END
 
-    -- ───────────────────────────────────────────────────────────────────────
-    --  Auto-detect dbo.LIMSMaster column names for each logical field
-    --  (identical candidate lists/order to 19_VariantX_ExecutiveSummary_LIS_Alt.sql).
-    -- ───────────────────────────────────────────────────────────────────────
     DECLARE @AccCol SYSNAME = (
         SELECT TOP 1 name FROM sys.columns
         WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
@@ -97,25 +44,26 @@ BEGIN
         WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
           AND name IN ('DateOfCollection','RequestCollectDate','CollectionDate','DateofService','ServiceDate','AccessionDate')
         ORDER BY CASE name
-            WHEN 'DateOfCollection'   THEN 0
-            WHEN 'RequestCollectDate' THEN 1
-            WHEN 'CollectionDate'     THEN 2
-            WHEN 'DateofService'      THEN 3
-            WHEN 'ServiceDate'        THEN 4
-            WHEN 'AccessionDate'      THEN 5
-            ELSE 6 END);
+            WHEN 'DateOfCollection' THEN 0 WHEN 'RequestCollectDate' THEN 1
+            WHEN 'CollectionDate' THEN 2 WHEN 'DateofService' THEN 3
+            WHEN 'ServiceDate' THEN 4 WHEN 'AccessionDate' THEN 5 ELSE 6 END);
 
-    DECLARE @NewStatusCol SYSNAME = (
+    DECLARE @SampleStatusCol SYSNAME = (
         SELECT TOP 1 name FROM sys.columns
         WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
-          AND name IN ('NewStatus','Status')
-        ORDER BY CASE name WHEN 'NewStatus' THEN 0 WHEN 'Status' THEN 1 ELSE 2 END);
+          AND name IN ('SampleStatus','NewStatus','Status','LRNSampleStatus')
+        ORDER BY CASE name
+            WHEN 'SampleStatus' THEN 0 WHEN 'LRNSampleStatus' THEN 1
+            WHEN 'NewStatus' THEN 2 WHEN 'Status' THEN 3 ELSE 4 END);
 
     DECLARE @BillCategoryCol SYSNAME = (
         SELECT TOP 1 name FROM sys.columns
         WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
-          AND name IN ('BillCategory','Bill_Category','BillingCategory','BillStatus')
-        ORDER BY CASE name WHEN 'BillCategory' THEN 0 WHEN 'Bill_Category' THEN 1 WHEN 'BillingCategory' THEN 2 WHEN 'BillStatus' THEN 3 ELSE 4 END);
+          AND name IN ('BillCategory','Bill_Category','BillingCategory','BillStatus','LRNBillCategory')
+        ORDER BY CASE name
+            WHEN 'BillCategory' THEN 0 WHEN 'LRNBillCategory' THEN 1
+            WHEN 'Bill_Category' THEN 2 WHEN 'BillingCategory' THEN 3
+            WHEN 'BillStatus' THEN 4 ELSE 5 END);
 
     DECLARE @ResultStatusCol SYSNAME = (
         SELECT TOP 1 name FROM sys.columns
@@ -126,15 +74,13 @@ BEGIN
             WHEN 'ResultedStatus' THEN 2 WHEN 'RessultedStatus' THEN 3
             WHEN 'IsResulted' THEN 4 ELSE 5 END);
 
-    -- Extra display-only columns (auto-detected, fall back to '').
-    DECLARE @PanelCol SYSNAME = (
+    DECLARE @TestTypeCol SYSNAME = (
         SELECT TOP 1 name FROM sys.columns
         WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
-          AND name IN ('PanelCategory','PanelName','Panelname','TestPanel','TestPanelName','Panel','PanelDescription','TestName','Test_Panel','TestPanelname')
+          AND name IN ('TestType','Panel','PanelName','PanelType','TestPanel','PanelCategory')
         ORDER BY CASE name
-            WHEN 'PanelCategory' THEN 0 WHEN 'PanelName' THEN 1 WHEN 'Panelname' THEN 2
-            WHEN 'TestPanelName' THEN 3 WHEN 'TestPanelname' THEN 4 WHEN 'TestPanel' THEN 5
-            WHEN 'Panel' THEN 6 WHEN 'PanelDescription' THEN 7 WHEN 'TestName' THEN 8 ELSE 9 END);
+            WHEN 'TestType' THEN 0 WHEN 'Panel' THEN 1 WHEN 'PanelName' THEN 2
+            WHEN 'PanelType' THEN 3 WHEN 'TestPanel' THEN 4 ELSE 5 END);
 
     DECLARE @PatientCol SYSNAME = (
         SELECT TOP 1 name FROM sys.columns
@@ -157,10 +103,10 @@ BEGIN
     DECLARE @ProviderCol SYSNAME = (
         SELECT TOP 1 name FROM sys.columns
         WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
-          AND name IN ('BillingProvider','Provider','OrderingProvider','RenderingProvider')
-        ORDER BY CASE name WHEN 'BillingProvider' THEN 0 WHEN 'Provider' THEN 1 WHEN 'OrderingProvider' THEN 2 ELSE 3 END);
+          AND name IN ('BillingProvider','Provider','OrderingProvider','RenderingProvider','PhysicianName')
+        ORDER BY CASE name WHEN 'BillingProvider' THEN 0 WHEN 'Provider' THEN 1 WHEN 'OrderingProvider' THEN 2 WHEN 'PhysicianName' THEN 3 ELSE 4 END);
 
-    IF @AccCol IS NULL OR @DateCol IS NULL OR @NewStatusCol IS NULL OR @BillCategoryCol IS NULL OR @ResultStatusCol IS NULL
+    IF @AccCol IS NULL OR @DateCol IS NULL OR @SampleStatusCol IS NULL OR @BillCategoryCol IS NULL
     BEGIN
         SELECT TOP (0)
             CAST(NULL AS NVARCHAR(100)) AS Accession,
@@ -177,32 +123,31 @@ BEGIN
         RETURN;
     END
 
-    DECLARE @AccExpr      NVARCHAR(300) = N'LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @AccCol + N'])))';
-    DECLARE @DateExpr     NVARCHAR(300) = N'TRY_CAST([' + @DateCol + N'] AS DATE)';
-    DECLARE @NewStatusExpr    NVARCHAR(300) = N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(100), [' + @NewStatusCol    + N']), '''')))';
+    DECLARE @AccExpr NVARCHAR(300) = N'LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @AccCol + N'])))';
+    DECLARE @DateExpr NVARCHAR(300) = N'TRY_CAST([' + @DateCol + N'] AS DATE)';
+    DECLARE @SampleStatusExpr NVARCHAR(300) = N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(100), [' + @SampleStatusCol + N']), '''')))';
     DECLARE @BillCategoryExpr NVARCHAR(300) = N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(100), [' + @BillCategoryCol + N']), '''')))';
-    DECLARE @PanelExpr    NVARCHAR(400) = CASE WHEN @PanelCol    IS NOT NULL THEN N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @PanelCol    + N']), '''')))' ELSE N'''''' END;
-    DECLARE @PatientExpr  NVARCHAR(400) = CASE WHEN @PatientCol  IS NOT NULL THEN N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @PatientCol  + N']), '''')))' ELSE N'''''' END;
-    DECLARE @PayerExpr    NVARCHAR(400) = CASE WHEN @PayerCol    IS NOT NULL THEN N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @PayerCol    + N']), '''')))' ELSE N'''''' END;
-    DECLARE @ClinicExpr   NVARCHAR(400) = CASE WHEN @ClinicCol   IS NOT NULL THEN N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @ClinicCol   + N']), '''')))' ELSE N'''''' END;
+    DECLARE @TestTypeExpr NVARCHAR(400) = CASE WHEN @TestTypeCol IS NOT NULL THEN N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @TestTypeCol + N']), '''')))' ELSE N'''''' END;
+    DECLARE @PatientExpr NVARCHAR(400) = CASE WHEN @PatientCol IS NOT NULL THEN N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @PatientCol + N']), '''')))' ELSE N'''''' END;
+    DECLARE @PayerExpr NVARCHAR(400) = CASE WHEN @PayerCol IS NOT NULL THEN N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @PayerCol + N']), '''')))' ELSE N'''''' END;
+    DECLARE @ClinicExpr NVARCHAR(400) = CASE WHEN @ClinicCol IS NOT NULL THEN N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @ClinicCol + N']), '''')))' ELSE N'''''' END;
     DECLARE @ProviderExpr NVARCHAR(400) = CASE WHEN @ProviderCol IS NOT NULL THEN N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @ProviderCol + N']), '''')))' ELSE N'''''' END;
 
-    -- IsResulted is sometimes a bit/flag column rather than a status string;
-    -- normalize it to 'Resulted' / 'Not Resulted' (same as file 19) so the
-    -- D.1 filter (ResultStatus = 'Resulted') works regardless of type.
     DECLARE @ResultExpr NVARCHAR(400);
-    IF @ResultStatusCol = 'IsResulted'
+    IF @ResultStatusCol IS NULL
+        SET @ResultExpr = N'CAST('''' AS NVARCHAR(100))';
+    ELSE IF @ResultStatusCol = 'IsResulted'
         SET @ResultExpr = N'(CASE WHEN TRY_CAST([' + @ResultStatusCol + N'] AS INT) = 1 THEN ''Resulted''
                                    WHEN CONVERT(NVARCHAR(20), [' + @ResultStatusCol + N']) IN (''Y'',''Yes'',''True'',''Resulted'') THEN ''Resulted''
                                    ELSE ''Not Resulted'' END)';
     ELSE
         SET @ResultExpr = N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(100), [' + @ResultStatusCol + N']), '''')))';
 
-    -- ───────────────────────────────────────────────────────────────────────
-    --  Pull the matching LIMSMaster rows for the requested period into a
-    --  real temp table (must be CREATE TABLE, not SELECT...INTO inside
-    --  sp_executesql, so it survives past the EXEC call).
-    -- ───────────────────────────────────────────────────────────────────────
+    -- Sub-row suffixes: B.{TestType} or D.{SampleStatus}
+    DECLARE @Suffix NVARCHAR(300) = NULL;
+    IF @RowCode LIKE 'B.%' SET @Suffix = SUBSTRING(@RowCode, 3, 300);
+    IF @RowCode LIKE 'D.%' SET @Suffix = SUBSTRING(@RowCode, 3, 300);
+
     DROP TABLE IF EXISTS #LisBase;
     CREATE TABLE #LisBase
     (
@@ -225,16 +170,16 @@ BEGIN
             (Accession, DateOfService, PanelName, NewStatus, BillCategory, ResultStatus,
              PatientName, PayerName, ClinicName, BillingProvider, ESYear, ESMonth)
         SELECT
-            ' + @AccExpr          + N',
-            ' + @DateExpr         + N',
-            ' + @PanelExpr        + N',
-            ' + @NewStatusExpr    + N',
+            ' + @AccExpr + N',
+            ' + @DateExpr + N',
+            ' + @TestTypeExpr + N',
+            ' + @SampleStatusExpr + N',
             ' + @BillCategoryExpr + N',
-            ' + @ResultExpr       + N',
-            ' + @PatientExpr      + N',
-            ' + @PayerExpr        + N',
-            ' + @ClinicExpr       + N',
-            ' + @ProviderExpr     + N',
+            ' + @ResultExpr + N',
+            ' + @PatientExpr + N',
+            ' + @PayerExpr + N',
+            ' + @ClinicExpr + N',
+            ' + @ProviderExpr + N',
             YEAR (' + @DateExpr + N'),
             MONTH(' + @DateExpr + N')
         FROM dbo.LIMSMaster
@@ -246,44 +191,24 @@ BEGIN
     EXEC sp_executesql @LisSql, N'@iYear INT, @iMonth INT', @iYear = @Year, @iMonth = @Month;
 
     SELECT
-        b.Accession        AS Accession,
-        b.DateOfService     AS DateOfService,
-        b.PanelName         AS PanelName,
-        b.NewStatus         AS NewStatus,
-        b.BillCategory      AS BillCategory,
-        b.ResultStatus      AS ResultStatus,
-        b.PatientName       AS PatientName,
-        b.PayerName         AS PayerName,
-        b.ClinicName        AS ClinicName,
-        b.BillingProvider   AS BillingProvider
+        b.Accession,
+        b.DateOfService,
+        b.PanelName,
+        b.NewStatus,
+        b.BillCategory,
+        b.ResultStatus,
+        b.PatientName,
+        b.PayerName,
+        b.ClinicName,
+        b.BillingProvider
     FROM #LisBase b
     WHERE
-        -- A  Total Samples
-        (@RowCode = 'A')
-     OR -- B  Billable Samples
-        (@RowCode = 'B'   AND b.NewStatus = 'Billable')
-     OR -- C  Billed
-        (@RowCode = 'C'   AND b.NewStatus = 'Billable' AND b.BillCategory = 'Billed')
-     OR -- D  Unbilled
-        (@RowCode = 'D'   AND b.NewStatus = 'Billable' AND b.BillCategory = 'Not Billed')
-     OR -- D.1  Resulted yet to be billed
-        (@RowCode = 'D.1' AND b.ResultStatus = 'Resulted' AND b.NewStatus = 'Billable' AND b.BillCategory = 'Not Billed')
-     OR -- E  Other Samples
-        (@RowCode = 'E'   AND b.NewStatus <> 'Billable')
-     OR -- E.1  Client Bill
-        (@RowCode = 'E.1' AND b.NewStatus = 'Client Bill')
-     OR -- E.2  Self Pay
-        (@RowCode = 'E.2' AND b.NewStatus = 'Self Pay')
-     OR -- E.3  System Test
-        (@RowCode = 'E.3' AND b.NewStatus = 'System Test')
-     OR -- E.4  Deleted/Rejected
-        (@RowCode = 'E.4' AND b.NewStatus = 'Deleted/Rejected')
-     OR -- E.5  CIP/Pending
-        (@RowCode = 'E.5' AND b.NewStatus = 'CIP/Pending')
-     OR -- E.6  Yet to be validated
-        (@RowCode = 'E.6' AND b.NewStatus = 'Yet to be validated')
-     OR -- Fallback: unrecognized RowCode -> return everything in the period
-        (@RowCode NOT IN ('A','B','C','D','D.1','E','E.1','E.2','E.3','E.4','E.5','E.6'))
+           (@RowCode = 'A')
+        OR (@RowCode = 'B' AND b.NewStatus = 'Billable')
+        OR (@RowCode LIKE 'B.%' AND b.NewStatus = 'Billable' AND b.PanelName = @Suffix)
+        OR (@RowCode = 'C' AND b.NewStatus = 'Billable' AND b.BillCategory = 'Billed')
+        OR (@RowCode = 'D' AND b.NewStatus <> 'Billable' AND b.NewStatus <> '')
+        OR (@RowCode LIKE 'D.%' AND b.NewStatus = @Suffix)
     ORDER BY b.DateOfService, b.Accession;
 
     DROP TABLE IF EXISTS #LisBase;
@@ -292,4 +217,3 @@ GO
 
 PRINT '20_VariantX_ExecutiveSummaryDetailRows_LIS.sql completed.';
 GO
-

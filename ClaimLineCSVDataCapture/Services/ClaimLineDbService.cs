@@ -1114,9 +1114,27 @@ public sealed class ClaimLineDbService
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshElixirCollectionReports()
         => RunProductionReportSPs(BuildCollectionSummarySpList("Elix"));
 
-    /// <summary>Refreshes the VariantX Collection Summary aggregates (Elixir clone).</summary>
+    /// <summary>
+    /// Refreshes the VariantX Collection Summary aggregates (Elixir clone).
+    /// InsuranceVsPayment is not in the shared list — append it so tab 6
+    /// (InsurancePayment by CheckDate) stays current on every ingest.
+    /// </summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshVariantXCollectionReports()
-        => RunProductionReportSPs(BuildCollectionSummarySpList("VarX"));
+        => RunProductionReportSPs([
+            ..BuildCollectionSummarySpList("VarX"),
+            "dbo.usp_RefreshVarX_CS_InsuranceVsPayment",
+        ]);
+
+    /// <summary>
+    /// VariantX Denial Summary is aggregated live by the read SPs. These refresh
+    /// procedures exist so claim-file ingest records that the denial report ran.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshVariantXDenialReports()
+        => RunProductionReportSPs([
+            "dbo.usp_RefreshVarX_DenialMonthly",
+            "dbo.usp_RefreshVarX_DenialWeekly",
+            "dbo.usp_RefreshVarX_DenialList",
+        ]);
 
     /// <summary>Refreshes the Analyze Pathology Collection Summary aggregates (VariantX logic).</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshAnalyzePathologyCollectionReports()

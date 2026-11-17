@@ -452,7 +452,8 @@ public static partial class CollectionSummaryExcelExportBuilder
         ExcelTheme.ApplyDefaults(ws);
 
         var isSpLogic = LabCollectionPrefix.UsesSpCollectionLogic(labName) || LabCollectionPrefix.IsNorthWest(labName)
-            || LabCollectionPrefix.IsAugustus(labName);
+            || LabCollectionPrefix.IsAugustus(labName) || LabCollectionPrefix.IsVariantX(labName)
+            || LabCollectionPrefix.IsWellHealth(labName);
         string[] headers = isSpLogic
             ? ["Rank", "Payer Name", "Insurance Payment", "Charge Amount", "Claim Count", "Average Payment %"]
             : ["Rank", "Payer Name", "Insurance Payment", "Charge Amount", "Unique Visits", "Reimbursement %"];
@@ -871,10 +872,13 @@ public static partial class CollectionSummaryExcelExportBuilder
         // metric sub-headers on a third row for clarity
         int hRow3 = hRow2 + 1;
         hCol = 2;
+        var countHeader = LabCollectionPrefix.IsVariantX(labName) || LabCollectionPrefix.UsesSpCollectionLogic(labName)
+            ? "Claim Count"
+            : "No. of Claims";
         var paymentHeader = "Insurance Payments";
         void WriteMetricPair()
         {
-            WriteHeaderCell(ws, hRow3, hCol++, "No. of Claims", ColHeader);
+            WriteHeaderCell(ws, hRow3, hCol++, countHeader, ColHeader);
             WriteHeaderCell(ws, hRow3, hCol++, paymentHeader, ColHeader);
         }
         foreach (var year in years)
@@ -916,6 +920,33 @@ public static partial class CollectionSummaryExcelExportBuilder
             WriteCell(ws, row, col++, pr.TotalClaims, bg);
             WriteCell(ws, row, col, pr.TotalPay, bg, isCurrency: true);
             row++;
+        }
+
+        // Grand Total footer (matches web tfoot) — claims + payments per month / year / overall
+        if (pivotRows.Count > 0)
+        {
+            int col = 1;
+            WriteCell(ws, row, col++, "Grand Total", ColTotal, isText: true, bold: true);
+            foreach (var year in years)
+            {
+                int yClaims = 0;
+                decimal yPay = 0m;
+                foreach (var p in periods.Where(x => x.Year == year))
+                {
+                    var monthClaims = pivotRows.Sum(pr =>
+                        pr.Cells.TryGetValue((p.Year, p.Month), out var cell) ? cell.Count : 0);
+                    var monthPay = pivotRows.Sum(pr =>
+                        pr.Cells.TryGetValue((p.Year, p.Month), out var cell) ? cell.Payment : 0m);
+                    WriteCell(ws, row, col++, monthClaims, ColTotal, bold: true);
+                    WriteCell(ws, row, col++, monthPay, ColTotal, isCurrency: true, bold: true);
+                    yClaims += monthClaims;
+                    yPay += monthPay;
+                }
+                WriteCell(ws, row, col++, yClaims, ColTotal, bold: true);
+                WriteCell(ws, row, col++, yPay, ColTotal, isCurrency: true, bold: true);
+            }
+            WriteCell(ws, row, col++, pivotRows.Sum(pr => pr.TotalClaims), ColTotal, bold: true);
+            WriteCell(ws, row, col, pivotRows.Sum(pr => pr.TotalPay), ColTotal, isCurrency: true, bold: true);
         }
 
         AutoFitColumns(ws);
@@ -1056,7 +1087,10 @@ public static partial class CollectionSummaryExcelExportBuilder
             || LabCollectionPrefix.UsesSpCollectionLogic(labName)
             || LabCollectionPrefix.IsNorthWest(labName)
             || LabCollectionPrefix.IsAugustus(labName);
-        string[] headers = isInHealth
+        var isVariantX = LabCollectionPrefix.IsVariantX(labName);
+        // VariantX: AVG(PaymentPercent) + claim-count sort; include Grand Total like InHealth-style labs.
+        var writeGrandTotal = isInHealth || isVariantX || LabCollectionPrefix.IsWellHealth(labName);
+        string[] headers = isInHealth || isVariantX
             ? ["Row Labels", "Count of ClaimID", "Sum of InsurancePayment", "Average of PaymentPercent"]
             : ["Payer Name", "Total Claims", "Insurance Payments", "Payment %"];
         int colCount = headers.Length;
@@ -1067,9 +1101,13 @@ public static partial class CollectionSummaryExcelExportBuilder
         ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ColHeader);
         row++;
 
-        for (int i = 0; i < rows.Count; i++)
+        var exportRows = isVariantX || LabCollectionPrefix.IsAugustus(labName)
+            ? rows.OrderByDescending(r => r.TotalClaims).ThenByDescending(r => r.InsurancePayments).ToList()
+            : rows;
+
+        for (int i = 0; i < exportRows.Count; i++)
         {
-            var r = rows[i];
+            var r = exportRows[i];
             var bg = XLColor.White;
             WriteCell(ws, row, 1, r.PayerName, bg, isText: true);
             WriteCell(ws, row, 2, r.TotalClaims, bg);
@@ -1078,15 +1116,15 @@ public static partial class CollectionSummaryExcelExportBuilder
             row++;
         }
 
-        if (isInHealth && rows.Count > 0)
+        if (writeGrandTotal && exportRows.Count > 0)
         {
-            var totalClaims = rows.Sum(r => r.TotalClaims);
-            var avgPct = rows[0].TotalPaymentPctFromSp
+            var totalClaims = exportRows.Sum(r => r.TotalClaims);
+            var avgPct = exportRows[0].TotalPaymentPctFromSp
                 ?? (totalClaims == 0 ? 0m
-                    : Math.Round(rows.Sum(r => r.PaymentPct * r.TotalClaims) / totalClaims, 2));
+                    : Math.Round(exportRows.Sum(r => r.PaymentPct * r.TotalClaims) / totalClaims, 2));
             WriteCell(ws, row, 1, "Grand Total", ColTotal, isText: true, bold: true);
             WriteCell(ws, row, 2, totalClaims, ColTotal, bold: true);
-            WriteCell(ws, row, 3, rows.Sum(r => r.InsurancePayments), ColTotal, isCurrency: true, bold: true);
+            WriteCell(ws, row, 3, exportRows.Sum(r => r.InsurancePayments), ColTotal, isCurrency: true, bold: true);
             WriteCell(ws, row, 4, avgPct, ColTotal, isPct: true, bold: true);
         }
 
@@ -1100,13 +1138,21 @@ public static partial class CollectionSummaryExcelExportBuilder
     {
         if (TryBuildCptPaymentPctPivot(wb, rows, labName)) return;
 
-        var ws = wb.AddWorksheet("CPT vs Payment %");
+        var isVarXCpt = LabCollectionPrefix.IsVariantX(labName)
+            || (rows.Count > 0 && rows[0].HasChargeAmount && !rows.Any(r => r.IsPanelRow));
+        var ws = wb.AddWorksheet(isVarXCpt ? "CPT vs Payment" : "CPT vs Payment %");
         ws.TabColor = ExcelTheme.Collection.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
 
         if (rows.Any(r => r.IsPanelRow))
         {
             WriteCptPanelHierarchy(ws, rows, labName);
+            return;
+        }
+
+        if (isVarXCpt)
+        {
+            WriteCptUnitsAndCharges(ws, rows, labName);
             return;
         }
 
@@ -1173,6 +1219,32 @@ public static partial class CollectionSummaryExcelExportBuilder
         WriteCell(ws, row, 1, "Grand Total", ColTotal, isText: true, bold: true);
         WriteCell(ws, row, 2, rows.Sum(r => r.SumServiceUnits), ColTotal, bold: true);
         WriteCell(ws, row, 3, rows.Sum(r => r.PaidInsurancePayment), ColTotal, isCurrency: true, bold: true);
+
+        AutoFitColumns(ws);
+        ws.SheetView.FreezeRows(2);
+    }
+
+    /// <summary>VariantX CPT vs Payment: CPT Code | Sum of Units | Sum of Total Charges (no Payment %).</summary>
+    private static void WriteCptUnitsAndCharges(IXLWorksheet ws, List<CptPaymentPctRow> rows, string labName)
+    {
+        string[] headers = ["CPT Code", "Sum of Units", "Sum of Total Charges"];
+        int row = 1;
+        ExcelTheme.Collection.WriteTitleBar(ws, row, headers.Length, $"CPT vs Payment \u2014 {labName}");
+        row++;
+        ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ColHeader);
+        row++;
+
+        foreach (var r in rows)
+        {
+            WriteCell(ws, row, 1, r.CptCode, XLColor.White, isText: true);
+            WriteCell(ws, row, 2, r.SumServiceUnits, XLColor.White);
+            WriteCell(ws, row, 3, r.PaidChargeAmount, XLColor.White, isCurrency: true);
+            row++;
+        }
+
+        WriteCell(ws, row, 1, "Grand Total", ColTotal, isText: true, bold: true);
+        WriteCell(ws, row, 2, rows.Sum(r => r.SumServiceUnits), ColTotal, bold: true);
+        WriteCell(ws, row, 3, rows.Sum(r => r.PaidChargeAmount), ColTotal, isCurrency: true, bold: true);
 
         AutoFitColumns(ws);
         ws.SheetView.FreezeRows(2);

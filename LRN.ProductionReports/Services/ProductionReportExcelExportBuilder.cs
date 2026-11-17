@@ -1193,18 +1193,26 @@ public static partial class ProductionReportExcelExportBuilder
     private static bool IsCoreBioLab(ProductionReportViewModel vm) =>
         vm.SelectedLab.Replace("_", "").Replace(" ", "").Contains("CoreBio", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>InHealth CPT Breakdown: one row per CPT code, no month/year columns.</summary>
+    private static bool IsVariantXLab(ProductionReportViewModel vm) =>
+        vm.SelectedLab.Replace("_", "").Replace(" ", "").Contains("VariantX", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>InHealth / totals-only CPT: one row per CPT code, no month/year columns.</summary>
     private static void BuildCptFlatSheet(XLWorkbook wb, ProductionReportViewModel vm)
     {
         var ws = wb.AddWorksheet("CPT Breakdown");
         ws.TabColor = ExcelTheme.TabYellow;
         ExcelTheme.ApplyDefaults(ws);
 
-        var showUnits = IsCoreBioLab(vm);
-        var colCount = showUnits ? 4 : 3;
+        // VariantX sheet: CPT Code | Sum of Units | Sum of Total Charges (no claim-count column).
+        var unitsAndChargesOnly = IsVariantXLab(vm);
+        var showUnits = IsCoreBioLab(vm) || unitsAndChargesOnly;
+        var showClaimCount = !unitsAndChargesOnly;
+        var colCount = (showClaimCount ? 1 : 0) + (showUnits ? 1 : 0) + 2; // code + optional cols + charge
         int row = 1;
         ExcelTheme.WriteTitleBar(ws, row, colCount,
-            vm.CptTotalsOnly ? "CPT Breakdown (Line Level | sorted by Claim Count)" : "CPT Breakdown",
+            unitsAndChargesOnly
+                ? "CPT Breakdown (Sum of Units | Sum of Charge Amount)"
+                : vm.CptTotalsOnly ? "CPT Breakdown (Line Level | sorted by Claim Count)" : "CPT Breakdown",
             ExcelTheme.InsightsHeaderBg);
         row++;
 
@@ -1212,10 +1220,12 @@ public static partial class ProductionReportExcelExportBuilder
             ? "Claim Count"
             : string.IsNullOrWhiteSpace(vm.CptUnitsLabel) ? "Count of CPT" : vm.CptUnitsLabel;
         WriteHeaderCell(ws, row, 1, vm.CptTotalsOnly ? "CPT Code" : "CPT Codes", ExcelTheme.InsightsHeaderBg);
-        WriteHeaderCell(ws, row, 2, countHeader, ExcelTheme.InsightsHeaderBg);
+        int col = 2;
+        if (showClaimCount)
+            WriteHeaderCell(ws, row, col++, countHeader, ExcelTheme.InsightsHeaderBg);
         if (showUnits)
-            WriteHeaderCell(ws, row, 3, "Units", ExcelTheme.InsightsHeaderBg);
-        WriteHeaderCell(ws, row, showUnits ? 4 : 3, vm.CptTotalsOnly ? "Charge Amount" : "Total Charge", ExcelTheme.InsightsHeaderBg);
+            WriteHeaderCell(ws, row, col++, unitsAndChargesOnly ? "Sum of Units" : "Units", ExcelTheme.InsightsHeaderBg);
+        WriteHeaderCell(ws, row, col, unitsAndChargesOnly ? "Sum of Total Charges" : (vm.CptTotalsOnly ? "Charge Amount" : "Total Charge"), ExcelTheme.InsightsHeaderBg);
         row++;
 
         foreach (var cptRow in vm.CptBreakdownRows)
@@ -1223,29 +1233,34 @@ public static partial class ProductionReportExcelExportBuilder
             WriteCell(ws, row, 1, cptRow.CptCode, XLColor.White, isText: true);
             if (vm.CptTotalsOnly && IsPlainNumber(cptRow.CptCode, out var cptNumber))
                 ws.Cell(row, 1).Value = cptNumber;
-            WriteCell(ws, row, 2, cptRow.GrandTotalClaims, XLColor.White);
+            col = 2;
+            if (showClaimCount)
+                WriteCell(ws, row, col++, cptRow.GrandTotalClaims, XLColor.White);
             if (showUnits)
-                WriteDecimalCell(ws, row, 3, cptRow.GrandTotalUnits, XLColor.White);
-            WriteCurrencyCell(ws, row, showUnits ? 4 : 3, cptRow.GrandTotalCharges, XLColor.White);
+                WriteDecimalCell(ws, row, col++, cptRow.GrandTotalUnits, XLColor.White);
+            WriteCurrencyCell(ws, row, col, cptRow.GrandTotalCharges, XLColor.White);
             row++;
         }
 
         ExcelTheme.StyleGreenTotalRow(ws, row, 1, colCount);
         ws.Cell(row, 1).Value = "Grand Total";
-        ws.Cell(row, 2).Value = vm.CptTotalsOnly
-            ? vm.CptBreakdownGrandTotalClaims
-            : vm.CptBreakdownRows.Sum(r => r.GrandTotalClaims);
-        ws.Cell(row, 2).Style.NumberFormat.Format = ExcelTheme.CountNumberFormat;
+        col = 2;
+        if (showClaimCount)
+        {
+            ws.Cell(row, col).Value = vm.CptTotalsOnly
+                ? vm.CptBreakdownGrandTotalClaims
+                : vm.CptBreakdownRows.Sum(r => r.GrandTotalClaims);
+            ws.Cell(row, col++).Style.NumberFormat.Format = ExcelTheme.CountNumberFormat;
+        }
         if (showUnits)
         {
-            ws.Cell(row, 3).Value = vm.CptBreakdownGrandTotalUnits;
-            ws.Cell(row, 3).Style.NumberFormat.Format = ExcelTheme.CountNumberFormat;
+            ws.Cell(row, col).Value = vm.CptBreakdownGrandTotalUnits;
+            ws.Cell(row, col++).Style.NumberFormat.Format = ExcelTheme.CountNumberFormat;
         }
-        var chargeCol = showUnits ? 4 : 3;
-        ws.Cell(row, chargeCol).Value = vm.CptTotalsOnly
+        ws.Cell(row, col).Value = vm.CptTotalsOnly
             ? vm.CptBreakdownGrandTotalCharges
             : vm.CptBreakdownRows.Sum(r => r.GrandTotalCharges);
-        ws.Cell(row, chargeCol).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+        ws.Cell(row, col).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
 
         ExcelTheme.AutoFitColumns(ws, colCount);
     }

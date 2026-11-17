@@ -1,0 +1,227 @@
+/* Shared Filters card + action buttons — Production, Collection, LIS, Executive */
+
+.rpt-filter-panel,
+.pr-filter-panel,
+.cs-rpt-filter-panel,
+.es-filter-panel.rpt-filter-panel,
+.lis-filter-shell.rpt-filter-panel {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, .05);
+}
+
+.rpt-filter-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    margin-bottom: .35rem;
+}
+
+.rpt-filter-title {
+    font-size: .9rem;
+    font-weight: 600;
+    color: #1e293b;
+}
+
+.rpt-filter-title .bi-funnel {
+    margin-right: .15rem;
+}
+
+.rpt-filter-badge {
+    font-size: .7rem;
+    vertical-align: middle;
+}
+
+.rpt-filter-toggle-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+}
+
+.rpt-filter-toggle-wrap .rpt-ds-bolt {
+    font-size: 1.1rem;
+    color: #3b82f6;
+    line-height: 1;
+}
+
+.rpt-filter-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: .15rem;
+    padding: .12rem .55rem;
+    font-size: .8rem;
+    font-weight: 600;
+    color: #2563eb !important;
+    text-decoration: underline !important;
+    background: #fff;
+    border: 1px solid #93c5fd;
+    border-radius: .4rem;
+    line-height: 1.35;
+    box-shadow: none;
+}
+
+.rpt-filter-toggle:hover,
+.rpt-filter-toggle:focus {
+    color: #1d4ed8 !important;
+    border-color: #60a5fa;
+    background: #eff6ff;
+}
+
+.rpt-filter-panel .rpt-filter-label,
+.rpt-filter-panel .form-label,
+.es-filter-panel .es-filter-label {
+    display: block;
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    color: #374151;
+    margin-bottom: .3rem;
+}
+
+.rpt-filter-panel .form-control,
+.rpt-filter-panel .form-select,
+.rpt-filter-panel .filter-select {
+    border: 1px solid #ced4da;
+    border-radius: .375rem;
+    font-size: .82rem;
+    min-height: 31px;
+    box-shadow: none;
+}
+
+.rpt-filter-panel .form-control-sm {
+    min-height: 31px;
+}
+
+.rpt-filter-panel .form-check-label {
+    font-size: .72rem;
+    font-weight: 400;
+    letter-spacing: normal;
+    text-transform: none;
+    color: #6b7280;
+}
+
+.rpt-filter-wrap {
+    margin-bottom: 1.25rem;
+}
+
+.rpt-page-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .65rem 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+.rpt-page-head-main {
+    display: flex;
+    align-items: center;
+    gap: .65rem;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.rpt-page-head-right {
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    flex-wrap: wrap;
+    margin-left: auto;
+}
+
+.rpt-page-head .rpt-toolbar {
+    margin-bottom: 0;
+    justify-content: flex-end;
+}
+
+.rpt-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: .4rem;
+    margin-bottom: .5rem;
+}
+
+.rpt-toolbar-btn {
+    width: 1.55rem;
+    min-width: 1.55rem;
+    height: 1.55rem;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: .3rem;
+    font-size: .78rem;
+    line-height: 1;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.rpt-toolbar-btn.rpt-toolbar-busy {
+    width: auto;
+    padding: 0 .55rem;
+    gap: .3rem;
+    font-size: .72rem;
+    font-weight: 600;
+}
+
+.rpt-toolbar-btn .bi {
+    margin: 0;
+}
+
+.rpt-toolbar-btn.btn-outline-success {
+    color: #198754;
+    border-color: #198754;
+    background: #fff;
+}
+
+.rpt-toolbar-btn.btn-outline-primary {
+    color: #0d6efd;
+    border-color: #0d6efd;
+    background: #fff;
+}
+
+.rpt-filter-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: .5rem;
+    margin-top: .65rem;
+}
+
+.rpt-filter-actions .btn-sm {
+    border-radius: .375rem;
+    font-weight: 600;
+}
+
+.rpt-filter-actions .btn-outline-primary {
+    color: #0d6efd;
+    border-color: #0d6efd;
+    background: #fff;
+}
+
+.rpt-filter-actions .btn-outline-success {
+    color: #198754;
+    border-color: #198754;
+    background: #fff;
+}
+
+/* Multi-select trigger — Production / Collection / LIS */
+.rpt-filter-panel .pr-ms-btn,
+.rpt-filter-panel .cs-rpt-ms-btn,
+.rpt-filter-panel .lis-ms-btn,
+.rpt-filter-panel .es-dd-btn {
+    min-height: 31px;
+    border: 1px solid #ced4da;
+    border-radius: .375rem;
+    background: #fff;
+    font-size: .8rem;
+}
+
+.rpt-filter-panel .lis-ms-btn {
+    box-shadow: none;
+    padding: .3rem .6rem;
+}

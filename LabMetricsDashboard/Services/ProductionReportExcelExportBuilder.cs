@@ -136,12 +136,14 @@ public static class ProductionReportExcelExportBuilder
     {
         var wb = new XLWorkbook();
 
+        var isVariantX = LabCollectionPrefix.IsVariantX(labName);
+
         BuildMonthlyAndWeeklySheet(wb, vm, labName, weekFolder: null, runId: null);
-        BuildCodingSheet(wb, vm);
+        if (!isVariantX) BuildCodingSheet(wb, vm);
         BuildPayerBreakdownSheet(wb, vm);
         BuildPanelBreakdownSheet(wb, vm);
         BuildPayerPanelSheet(wb, vm);
-        BuildUnbilledAgingSheet(wb, vm);
+        if (!isVariantX) BuildUnbilledAgingSheet(wb, vm);
         BuildCptBreakdownSheet(wb, vm);
 
         WriteFilterFooter(wb, vm);
@@ -167,13 +169,14 @@ public static class ProductionReportExcelExportBuilder
         var totalSw = Stopwatch.StartNew();
         var sw      = Stopwatch.StartNew();
         var wb      = new XLWorkbook();
+        var isVariantX = LabCollectionPrefix.IsVariantX(labName);
 
         BuildMonthlyAndWeeklySheet(wb, vm, labName, weekFolder, runId);
         logger?.LogInformation(
             "[ProdExcelExport][Sheet] Insights (monthly/weekly) built in {Ms}ms", sw.ElapsedMilliseconds);
 
         sw.Restart();
-        BuildCodingSheet(wb, vm);
+        if (!isVariantX) BuildCodingSheet(wb, vm);
         logger?.LogInformation(
             "[ProdExcelExport][Sheet] Coding built in {Ms}ms ({Rows} panel rows)",
             sw.ElapsedMilliseconds, vm.CodingPanelRows.Count);
@@ -197,7 +200,7 @@ public static class ProductionReportExcelExportBuilder
             sw.ElapsedMilliseconds, vm.PayerPanelRows.Count);
 
         sw.Restart();
-        BuildUnbilledAgingSheet(wb, vm);
+        if (!isVariantX) BuildUnbilledAgingSheet(wb, vm);
         logger?.LogInformation(
             "[ProdExcelExport][Sheet] UnbilledXAging built in {Ms}ms ({Rows} panel rows)",
             sw.ElapsedMilliseconds, vm.UnbilledAgingRows.Count);
@@ -1111,6 +1114,49 @@ public static class ProductionReportExcelExportBuilder
         var ws = wb.AddWorksheet("CPT Breakdown");
         ws.TabColor = ExcelTheme.TabBlue;
         ExcelTheme.ApplyDefaults(ws);
+
+        // VariantX (and other totals-only labs): CPT Code | Sum of Units | Sum of Charge Amount
+        if (vm.CptTotalsOnly)
+        {
+            var isVarX = LabCollectionPrefix.IsVariantX(vm.SelectedLab);
+            int colCount = isVarX ? 3 : 3; // ClaimCount optional for non-VarX totals
+            if (!isVarX) colCount = 3; // Claim Count + Charge; CoreBio also has Units in shared builder
+            int row = 1;
+            ExcelTheme.WriteBlueTitleBar(ws, row, 3, "CPT Breakdown");
+            row++;
+            WriteHeaderCell(ws, row, 1, "CPT Code", ExcelTheme.BlueHeaderBg);
+            WriteHeaderCell(ws, row, 2, isVarX ? "Sum of Units" : "Claim Count", ExcelTheme.BlueHeaderBg);
+            WriteHeaderCell(ws, row, 3, isVarX ? "Sum of Total Charges" : "Charge Amount", ExcelTheme.BlueHeaderBg);
+            row++;
+            int dataIdx = 0;
+            foreach (var cptRow in vm.CptBreakdownRows)
+            {
+                var bg = ExcelTheme.GetBlueRowBg(dataIdx++);
+                WriteCell(ws, row, 1, cptRow.CptCode, bg, isText: true);
+                if (isVarX)
+                    WriteDecimalCell(ws, row, 2, cptRow.GrandTotalUnits, bg);
+                else
+                    WriteDecimalCell(ws, row, 2, cptRow.GrandTotalClaims, bg);
+                WriteCurrencyCell(ws, row, 3, cptRow.GrandTotalCharges, bg);
+                row++;
+            }
+            ExcelTheme.StyleBlueTotalRow(ws, row, 1, 3);
+            ws.Cell(row, 1).Value = "Grand Total";
+            if (isVarX)
+            {
+                ws.Cell(row, 2).Value = vm.CptBreakdownGrandTotalUnits;
+                ws.Cell(row, 2).Style.NumberFormat.Format = "#,##0";
+            }
+            else
+            {
+                ws.Cell(row, 2).Value = vm.CptBreakdownGrandTotalClaims;
+                ws.Cell(row, 2).Style.NumberFormat.Format = "#,##0";
+            }
+            ws.Cell(row, 3).Value = vm.CptBreakdownGrandTotalCharges;
+            ws.Cell(row, 3).Style.NumberFormat.Format = ExcelTheme.AccountingNumberFormat;
+            ExcelTheme.AutoFitColumns(ws, 3);
+            return;
+        }
 
         var cptYears = vm.CptBreakdownYears.Where(y => y > 1900).ToList();
         var cptMonths = vm.CptBreakdownMonths.Where(m => int.Parse(m[..4]) > 1900).ToList();
