@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using System.Text.Json;
 using LRN.MasterFileProcessorWorker.ExcelValidation;
 using SPD = LRN.MasterFileProcessorWorker.SharePoint.SharePointDownloader;
 
@@ -32,6 +33,13 @@ public static partial class SelfTests
         Check("Dated month: Sep-26 / Oct 26 -> 2026", Year("Sep-26") == 2026 && Year("Oct 26") == 2026);
         Check("Dated month: Sep 2026 / 09.Sep.2026 -> 2026", Year("Sep 2026") == 2026 && Year("09.Sep.2026") == 2026);
         Check("Dated month: plain month names carry no year", Year("09.Sep") is null && Year("September") is null);
+
+        // PNC has neither: "02. Master File/11. November/<week>". The year is inferred from today.
+        static int Infer(int month, int y, int m, int d) =>
+            LRN.MasterFileProcessorWorker.SharePoint.SharePointDownloader.InferUndatedMonthFolderYear(month, new DateTime(y, m, d));
+
+        Check("Undated month: current or earlier month is this year", Infer(11, 2026, 11, 11) == 2026 && Infer(1, 2026, 11, 11) == 2026);
+        Check("Undated month: a month still ahead is last year (December seen in January)", Infer(12, 2027, 1, 5) == 2026);
     }
 
     public static int Run()
@@ -60,6 +68,7 @@ public static partial class SelfTests
         AnalyzePathologyBillDatesModifiersAndIcd();
         CoreBioDenialAndIcdSources();
         TexasDiagnosticDenialIcdAndDateSources();
+        PncHeadersReachTheirColumns();
         WeekFolderFilesAreFoundInSubfolders();
         RelativeCsvLogFolderResolvesAgainstServiceDirectory();
         EmptyRowsAreNotImported();
@@ -2504,6 +2513,153 @@ public static partial class SelfTests
                 $"CheckDate='{Val(claimOut, 1, "CheckDate")}', Payment Posted Date='{Val(claimOut, 1, "Payment Posted Date")}'");
             Check("Texas claim: CPT summary source is Claim Level CPT",
                 Val(claimOut, 0, "CPT Code X Units X Modifier Orginal") == "87486*1", Val(claimOut, 0, "CPT Code X Units X Modifier Orginal"));
+        }
+        finally
+        {
+            TryDelete(folder);
+        }
+    }
+
+    /// <summary>
+    /// PNC, shipped schemas and mapping (V1.21), fed the sample workbook's full headers. Each non-COMMON
+    /// header reaches its COMMON column, a blank Deposit Date does not take the Posted Date, the sheets'
+    /// own columns are appended - and every CsvHeader in PNCFieldMappings.json exists in the output, so
+    /// nothing the bulk loader expects is silently NULL.
+    /// </summary>
+    private static void PncHeadersReachTheirColumns()
+    {
+        var schemas = Path.Combine(AppContext.BaseDirectory, "Schemas");
+        var paths = new[]
+        {
+            Path.Combine(schemas, "ClaimLevel.schema.json"),
+            Path.Combine(schemas, "PNC_ClaimLevel.schema.json"),
+            Path.Combine(schemas, "LineLevel.schema.json"),
+            Path.Combine(schemas, "PNC_LineLevel.schema.json"),
+            Path.Combine(schemas, "LabMappings", "PNCFieldMappings.json"),
+        };
+
+        if (paths.Any(p => !File.Exists(p)))
+        {
+            Check("PNC schemas are deployed next to the service", false, schemas);
+            return;
+        }
+
+        const string shared =
+            "Source,Claim ID,{TF}Status,Service Type,Form Type,Sales Rep,Sales Rep Facility,Patient Name,Patient Control #," +
+            "Patient DOB,Patient Gender,Group Number,Subscriber Relationship,Secondary Payer,Secondary Policy ID," +
+            "Secondary Group Number,Payer Name,Policy ID,Payer ID,Insurance Type,Rendering Provider,Billing Provider," +
+            "Service Facility,Referring Provider,Referring Provider NPI,Billing Provider NPI,Rendering Provider NPI," +
+            "Accession Number,Date of Service,Aging,Created Date,DOE Week,Billed Date,Billed Week,CPT / Procedure,Modifiers," +
+            "Units,{LLCPT}Claim Level CPT,Deposit Date,Deposit Week,Posted Date,Posted Week,Denial Code,Updated Denial Code," +
+            "Diagnosis Codes,Expected Amount,Predicted Decision Date,Predicted Payment Date,Predicted Days to Payment," +
+            "Days Past Expected Payment,Payer Status,Operational Status,Work Sub-Status,Rejection Source,Remark Codes," +
+            "Write-Off Reason,Billing Note,Additional Claim Info (Box 19),Total Charges,Insurance Paid,Patient Paid," +
+            "Write Off,Balance Due,Carrier Balance,Patient Responsibility,Allowed Amount,Payment %";
+        const string claimTail = ",Time to Pay,Bill Status,Fully Paid #,Fully Paid $,Adjucticated #,Adjucticated $," +
+                                 "30 Bucket #,30 Bucket $,60 Bucket #,60 Bucket $,Claim Status";
+
+        var claimHeader = shared.Replace("{TF}", "").Replace("{LLCPT}", "") + claimTail;
+        var lineHeader = shared.Replace("{TF}", "T/F,").Replace("{LLCPT}", "Line Level CPT,");
+
+        // Sample values for the columns the checks below look at; everything else is left blank.
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Source"] = "Historical", ["Claim ID"] = "C1", ["T/F"] = "True", ["Status"] = "Denied",
+            ["Service Type"] = "Toxicology", ["Sales Rep"] = "BRANDON MCDOWELL", ["Sales Rep Facility"] = "ASPIRE",
+            ["Patient Control #"] = "PCN1", ["Patient DOB"] = "11/29/2000", ["Payer Name"] = "Carelon",
+            ["Policy ID"] = "MD500", ["Insurance Type"] = "Commercial", ["Rendering Provider"] = "PRINCIPLE LABS",
+            ["Billing Provider"] = "PRINCIPLE LABS LLC", ["Service Facility"] = "PRINCIPLE FAC", ["Referring Provider"] = "NDJUIGA",
+            ["Accession Number"] = "T261760039", ["Date of Service"] = "06/24/2026", ["Aging"] = "120+",
+            ["Created Date"] = "06/30/2026", ["Billed Date"] = "06/30/2026", ["CPT / Procedure"] = "80307",
+            ["Modifiers"] = "QW", ["Units"] = "1", ["Line Level CPT"] = "80307*1", ["Claim Level CPT"] = "80307*1",
+            ["Posted Date"] = "09/08/2026", ["Denial Code"] = "CO-16", ["Updated Denial Code"] = "CO-197",
+            ["Diagnosis Codes"] = "F33.1", ["Total Charges"] = "660", ["Insurance Paid"] = "173.89", ["Patient Paid"] = "0",
+            ["Write Off"] = "486.11", ["Balance Due"] = "12", ["Carrier Balance"] = "5", ["Patient Responsibility"] = "7",
+            ["Allowed Amount"] = "173.89", ["Claim Status"] = "Fully Paid",
+        };
+
+        string Row(string header) => string.Join(",", header.Split(',').Select(h => values.TryGetValue(h, out var v) ? v : ""));
+
+        var folder = TempFolder();
+        try
+        {
+            var loader = new LRN.MasterFileProcessorWorker.ExcelValidation.JsonColumnSchemaLoader();
+
+            string Run(string header, string commonPath, string labPath, string name)
+            {
+                var source = Path.Combine(folder, name + "_src.csv");
+                File.WriteAllText(source, header + "\r\n" + Row(header) + "\r\n");
+                var outPath = Path.Combine(folder, name + "_out.csv");
+
+                StandardCsvExporter.Generate(
+                    sourceCsvPath: source,
+                    headerRow: 1,
+                    outputCsvPath: outPath,
+                    commonSchema: loader.LoadFromFile(commonPath),
+                    labId: 30,
+                    labName: "PNC",
+                    sourceFileName: name + "_src.csv",
+                    ingestedOnLocal: DateTime.Now,
+                    labSchema: loader.LoadFromFile(labPath),
+                    appendUnmappedSourceColumns: true);
+
+                return outPath;
+            }
+
+            var claimOut = Run(claimHeader, paths[0], paths[1], "claim");
+            var lineOut = Run(lineHeader, paths[2], paths[3], "line");
+
+            string Val(string path, string column)
+            {
+                var lines = File.ReadAllLines(path);
+                var h = SplitCsv(lines[0]);
+                var i = Array.FindIndex(h, x => x.Equals(column, StringComparison.OrdinalIgnoreCase));
+                return i < 0 ? $"<no column '{column}'>" : SplitCsv(lines[1])[i];
+            }
+
+            foreach (var (path, level) in new[] { (claimOut, "claim"), (lineOut, "line") })
+            {
+                Check($"PNC {level}: ClaimID is Claim ID", Val(path, "ClaimID") == "C1", Val(path, "ClaimID"));
+                Check($"PNC {level}: PayerType is Insurance Type", Val(path, "PayerType") == "Commercial", Val(path, "PayerType"));
+                Check($"PNC {level}: ClinicName is Sales Rep Facility", Val(path, "ClinicName") == "ASPIRE", Val(path, "ClinicName"));
+                Check($"PNC {level}: SalesRepname is Sales Rep", Val(path, "SalesRepname") == "BRANDON MCDOWELL", Val(path, "SalesRepname"));
+                Check($"PNC {level}: PatientID is Patient Control #", Val(path, "PatientID") == "PCN1", Val(path, "PatientID"));
+                Check($"PNC {level}: Panelname is Service Type", Val(path, "Panelname") == "Toxicology", Val(path, "Panelname"));
+                Check($"PNC {level}: DenialCode is Denial Code", Val(path, "DenialCode") == "CO-16", Val(path, "DenialCode"));
+                Check($"PNC {level}: Updated Denial Code is appended", Val(path, "Updated Denial Code") == "CO-197", Val(path, "Updated Denial Code"));
+                Check($"PNC {level}: ICDCode is Diagnosis Codes", Val(path, "ICDCode") == "F33.1", Val(path, "ICDCode"));
+                Check($"PNC {level}: InsuranceAdjustments is Write Off", Val(path, "InsuranceAdjustments") == "486.11", Val(path, "InsuranceAdjustments"));
+                Check($"PNC {level}: PatientBalance is Patient Responsibility", Val(path, "PatientBalance") == "7", Val(path, "PatientBalance"));
+                Check($"PNC {level}: Status is kept raw", Val(path, "Status") == "Denied", Val(path, "Status"));
+                Check($"PNC {level}: a blank Deposit Date does not fall back to Posted Date",
+                    Val(path, "CheckDate") == "" && Val(path, "Payment Posted Date") == "09/08/2026",
+                    $"CheckDate='{Val(path, "CheckDate")}', Payment Posted Date='{Val(path, "Payment Posted Date")}'");
+            }
+
+            Check("PNC claim: Claim Status is ClaimStatus", Val(claimOut, "ClaimStatus") == "Fully Paid", Val(claimOut, "ClaimStatus"));
+            Check("PNC claim: Aging fills Aging DOS", Val(claimOut, "Aging DOS") == "120+", Val(claimOut, "Aging DOS"));
+            Check("PNC claim: CPT summary source is Claim Level CPT",
+                Val(claimOut, "CPT Code X Units X Modifier Orginal") == "80307*1", Val(claimOut, "CPT Code X Units X Modifier Orginal"));
+            Check("PNC line: CPTCode is CPT / Procedure", Val(lineOut, "CPTCode") == "80307", Val(lineOut, "CPTCode"));
+            Check("PNC line: Modifier is Modifiers", Val(lineOut, "Modifier") == "QW", Val(lineOut, "Modifier"));
+            Check("PNC line: Source is the sheet's own value", Val(lineOut, "Source") == "Historical", Val(lineOut, "Source"));
+            Check("PNC line: Line Level CPT is appended", Val(lineOut, "Line Level CPT") == "80307*1", Val(lineOut, "Line Level CPT"));
+            Check("PNC line: Claim Level CPT fills its COMMON column", Val(lineOut, "Claim Level CPT") == "80307*1", Val(lineOut, "Claim Level CPT"));
+
+            var options = new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
+            using var mapping = JsonDocument.Parse(File.ReadAllText(paths[4]), options);
+
+            foreach (var (path, level) in new[] { (claimOut, "ClaimLevel"), (lineOut, "LineLevel") })
+            {
+                var csvHeader = new HashSet<string>(SplitCsv(File.ReadAllLines(path)[0]), StringComparer.OrdinalIgnoreCase);
+                var missing = mapping.RootElement.GetProperty(level).GetProperty("Fields").EnumerateArray()
+                    .Select(f => f.GetProperty("CsvHeader").GetString() ?? "")
+                    .Where(h => !csvHeader.Contains(h) && !AuditColumns.IsPipelineOwned(h))
+                    .Distinct()
+                    .ToList();
+
+                Check($"PNC {level}: every mapped CsvHeader is in the exported CSV", missing.Count == 0, string.Join(", ", missing));
+            }
         }
         finally
         {

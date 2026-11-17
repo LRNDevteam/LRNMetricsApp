@@ -101,6 +101,7 @@ never falls back to LRNMaster:
 | 27 WellHealth | `WellHealthConnStr` | `WellHealth` |
 | 28 CoreBio | `CoreBioConnStr` | `CoreBio` (tables: `Database/LRN.MasterFileProcessorWorker/CoreBio/`) |
 | 29 TexasDiagnostic | `TexasDiagnosticConnStr` | `TexasDiagnostic` (tables: `Database/LRN.MasterFileProcessorWorker/TexasDiagnostic/`) |
+| 30 PNC | `PNCConnStr` | `PNC` (tables: `Database/LRN.MasterFileProcessorWorker/PNC/`) |
 
 A literal `LabDbConnectionString` / `LimsDbConnectionString` on a lab is no longer read.
 

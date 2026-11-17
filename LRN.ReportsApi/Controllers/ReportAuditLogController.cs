@@ -37,7 +37,9 @@ public sealed class ReportAuditLogController : ControllerBase
             FromDate = fromDate,
             ToDate = toDate,
             Mode = mode,
-            IncludeInactiveReports = includeInactiveReports
+            IncludeInactiveReports = includeInactiveReports,
+            // Failed / re-run master file processor runs that never reached the report tracker.
+            IncludePipelineRuns = true
         };
         try { return Ok(await _service.GetRunsAsync(query, ct)); }
         catch (SqlException ex) when (ex.Number == 50000) { return BadRequest(new { message = ex.Message }); }

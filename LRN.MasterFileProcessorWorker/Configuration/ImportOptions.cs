@@ -13,8 +13,17 @@
     // If true, keep the downloaded XLSX in WatchFolder after processing (useful for debugging)
     public bool KeepDownloadedFiles { get; set; } = false;
 
-    // Poll interval
+    // Poll interval for the scheduled pass over every lab
     public int PollSeconds { get; set; } = 60;
+
+    // Between scheduled passes, how often the re-run queue (Report Audit Log / AR Workbench
+    // "Re-run Master Processor") is checked. A pending request starts a pass for just the requested
+    // lab(s) straight away instead of waiting out PollSeconds. Minimum 10.
+    public int RerunCheckSeconds { get; set; } = 30;
+
+    // A Pending re-run for a lab that no worker instance runs is closed as SKIPPED (with the reason)
+    // after this many minutes, so it does not block the lab's re-run button forever.
+    public int RerunOrphanMinutes { get; set; } = 360;
 
     // ---- CSV FILE output switches (MasterFileProcessor section) ---------------------------
     // Whether the standardized line-level / claim-level CSV is written to the output folder.

@@ -67,8 +67,15 @@ public sealed class RerunRequestStore
     /// needs a person to look, rather than silently re-queuing work whose outcome nobody knows.
     /// </para>
     /// </summary>
-    public async Task<IReadOnlyList<RerunRequest>> ClaimPendingAsync(CancellationToken ct)
+    /// <param name="labIds">
+    /// The labs THIS worker instance runs. Only their requests are claimed: a request for a lab that
+    /// another instance runs is left Pending for that instance, instead of being claimed here and
+    /// closed as "not configured" - which is how a re-run used to vanish without ever running.
+    /// </param>
+    public async Task<IReadOnlyList<RerunRequest>> ClaimPendingAsync(IReadOnlyCollection<int> labIds, CancellationToken ct)
     {
+        if (labIds.Count == 0) return Array.Empty<RerunRequest>();
+
         // UploadId arrives with Create_MasterFileUploads.sql. Before that script is run the column
         // does not exist, and OUTPUT naming it would fail the whole claim, so it is read as NULL.
         const string sql = @"
@@ -79,7 +86,8 @@ SET    Status        = 'Claimed',
 OUTPUT inserted.RerunRequestId, inserted.LabId, inserted.LabName,
        inserted.RequestedBy, inserted.RequestedOn, inserted.Notes, {0}
 FROM   dbo.MasterFileProcessorRerunRequest AS r WITH (UPDLOCK, READPAST)
-WHERE  r.Status = 'Pending';";
+WHERE  r.Status = 'Pending'
+  AND  r.LabId IN ({1});";
 
         var claimed = new List<RerunRequest>();
 
@@ -96,7 +104,9 @@ WHERE  r.Status = 'Pending';";
             }
 
             await using var cmd = new SqlCommand(
-                string.Format(sql, hasUploadId ? "inserted.UploadId" : "CAST(NULL AS bigint)"), conn) { CommandTimeout = 30 };
+                string.Format(sql, hasUploadId ? "inserted.UploadId" : "CAST(NULL AS bigint)", LabIdPlaceholders(labIds)),
+                conn) { CommandTimeout = 30 };
+            AddLabIdParameters(cmd, labIds);
             cmd.Parameters.Add("@Host", SqlDbType.NVarChar, 200).Value = _host;
 
             await using var rd = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -128,6 +138,153 @@ WHERE  r.Status = 'Pending';";
         }
 
         return claimed;
+    }
+
+    /// <summary>
+    /// True when a request for one of this instance's labs is waiting. A cheap read used between
+    /// scheduled passes so a re-run starts within seconds of being asked for, rather than after the
+    /// full PollSeconds sleep (20 minutes in production).
+    /// </summary>
+    public async Task<bool> HasPendingAsync(IReadOnlyCollection<int> labIds, CancellationToken ct)
+    {
+        if (labIds.Count == 0) return false;
+
+        var sql = $@"
+SELECT CAST(CASE WHEN EXISTS (
+           SELECT 1 FROM dbo.MasterFileProcessorRerunRequest WITH (READPAST)
+           WHERE Status = 'Pending' AND LabId IN ({LabIdPlaceholders(labIds)}))
+       THEN 1 ELSE 0 END AS bit);";
+
+        try
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync(ct).ConfigureAwait(false);
+
+            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 15 };
+            AddLabIdParameters(cmd, labIds);
+            return (bool)(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not check the re-run request queue.");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Closes requests this host claimed but never finished - the service was stopped or crashed
+    /// mid-run. Called once at startup, when by definition nothing on this host is running them.
+    ///
+    /// <para>
+    /// Without this, a Claimed row lives forever and every later request for that lab comes back
+    /// "Already in progress, not queued again", so the lab can never be re-run from the screen.
+    /// They are marked Failed (not re-queued): what the interrupted run already did is unknown, and
+    /// the requester should decide whether to ask again.
+    /// </para>
+    /// </summary>
+    public async Task ReleaseAbandonedClaimsAsync(CancellationToken ct)
+    {
+        const string sql = @"
+UPDATE dbo.MasterFileProcessorRerunRequest
+SET    Status        = 'Failed',
+       CompletedOn   = SYSUTCDATETIME(),
+       ResultStatus  = 'ABANDONED',
+       ResultMessage = CONCAT('The Master File Processor on ', @Host,
+                              ' was restarted while this re-run was in progress, so it did not finish. Request the re-run again.')
+WHERE  Status = 'Claimed'
+  AND  ClaimedByHost = @Host;";
+
+        try
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync(ct).ConfigureAwait(false);
+
+            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 30 };
+            cmd.Parameters.Add("@Host", SqlDbType.NVarChar, 200).Value = _host;
+
+            var rows = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            if (rows > 0)
+                _logger.LogWarning("Released {Count} re-run request(s) left Claimed by a previous run of this worker on {Host}.", rows, _host);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not release abandoned re-run claims for {Host}.", _host);
+        }
+    }
+
+    /// <summary>
+    /// Closes Pending requests for labs this instance does not run, once they have waited long
+    /// enough that no other instance can be expected to pick them up. Returns the UploadIds of
+    /// closed requests so the caller can purge stored upload content.
+    /// </summary>
+    public async Task<IReadOnlyList<long>> CloseUnclaimedOrphansAsync(
+        IReadOnlyCollection<int> labIds, TimeSpan olderThan, CancellationToken ct)
+    {
+        var notMine = labIds.Count == 0 ? "" : $" AND LabId NOT IN ({LabIdPlaceholders(labIds)})";
+
+        var sql = $@"
+UPDATE dbo.MasterFileProcessorRerunRequest
+SET    Status        = 'Completed',
+       CompletedOn   = SYSUTCDATETIME(),
+       ResultStatus  = 'SKIPPED',
+       ResultMessage = CONCAT('No Master File Processor picked this request up within ', @Minutes,
+                              ' minutes. Lab ', LabId, ' is not configured in this Master File Processor (', @Host,
+                              '). Add it under MasterFileProcessor:Labs (MasterDataSource ""Upload"" for a lab with no SharePoint master folder).')
+OUTPUT {{0}}
+WHERE  Status = 'Pending'
+  AND  RequestedOn < DATEADD(MINUTE, -@Minutes, SYSUTCDATETIME()){notMine};";
+
+        var uploads = new List<long>();
+
+        try
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync(ct).ConfigureAwait(false);
+
+            bool hasUploadId;
+            await using (var probe = new SqlCommand(
+                "SELECT CAST(CASE WHEN COL_LENGTH('dbo.MasterFileProcessorRerunRequest', 'UploadId') IS NULL THEN 0 ELSE 1 END AS bit);", conn))
+            {
+                hasUploadId = (bool)(await probe.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? false);
+            }
+
+            await using var cmd = new SqlCommand(
+                string.Format(sql, hasUploadId ? "inserted.UploadId" : "CAST(NULL AS bigint)"), conn) { CommandTimeout = 30 };
+            AddLabIdParameters(cmd, labIds);
+            cmd.Parameters.Add("@Minutes", SqlDbType.Int).Value = (int)Math.Max(1, olderThan.TotalMinutes);
+            cmd.Parameters.Add("@Host", SqlDbType.NVarChar, 200).Value = _host;
+
+            await using var rd = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            var closed = 0;
+            while (await rd.ReadAsync(ct).ConfigureAwait(false))
+            {
+                closed++;
+                if (!rd.IsDBNull(0)) uploads.Add(rd.GetInt64(0));
+            }
+
+            if (closed > 0)
+                _logger.LogWarning("Closed {Count} re-run request(s) for labs no Master File Processor runs.", closed);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not close unclaimed re-run requests.");
+        }
+
+        return uploads;
+    }
+
+    private static string LabIdPlaceholders(IReadOnlyCollection<int> labIds)
+        => string.Join(", ", Enumerable.Range(0, labIds.Count).Select(i => "@Lab" + i));
+
+    private static void AddLabIdParameters(SqlCommand cmd, IReadOnlyCollection<int> labIds)
+    {
+        var i = 0;
+        foreach (var id in labIds)
+            cmd.Parameters.Add("@Lab" + i++, SqlDbType.Int).Value = id;
     }
 
     /// <summary>Writes the outcome back onto the request so the screen can show what happened.</summary>
