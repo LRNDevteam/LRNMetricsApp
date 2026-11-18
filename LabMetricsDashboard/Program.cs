@@ -989,9 +989,15 @@ if (hybridAuth.EnableMicrosoftLogin)
         o.Authority = $"{instance}/{tenantId}/v2.0";
         o.ClientId = entraConfig["ClientId"]!.Trim();
         o.ClientSecret = entraConfig["ClientSecret"];
-        // Built on the request's PathBase, so production registers .../lrnAnalytics/signin-oidc.
+        // Production registers .../lrnAnalytics/signin-oidc. Entra compares redirect URIs case-sensitively,
+        // but IIS hands us PathBase in whatever casing the user typed (/lrnanalytics), so the events below
+        // send the registered casing (see EntraPathBase).
         o.CallbackPath = ConfigText(entraConfig, "CallbackPath", "/signin-oidc");
         o.SignedOutCallbackPath = ConfigText(entraConfig, "SignedOutCallbackPath", "/signout-callback-oidc");
+        // Browsers match cookie paths case-sensitively too: scoped to "/lrnanalytics/signin-oidc" these
+        // would not come back on the callback to "/lrnAnalytics/signin-oidc" (correlation failed).
+        o.CorrelationCookie.Path = "/";
+        o.NonceCookie.Path = "/";
         o.SignInScheme = LrnAuth.ExternalScheme;
         o.ResponseType = OpenIdConnectResponseType.Code;   // authorization code + PKCE: no implicit grant needed
         o.UsePkce = true;
@@ -1006,6 +1012,20 @@ if (hybridAuth.EnableMicrosoftLogin)
         o.TokenValidationParameters.ValidIssuer = $"https://login.microsoftonline.com/{tenantId}/v2.0";
         o.Events = new OpenIdConnectEvents
         {
+            // The handler stores this RedirectUri after the event, so code redemption uses the same value.
+            OnRedirectToIdentityProvider = ctx =>
+            {
+                ctx.ProtocolMessage.RedirectUri =
+                    $"{ctx.Request.Scheme}://{ctx.Request.Host}{EntraPathBase(ctx.Request, entraConfig)}{ctx.Options.CallbackPath}";
+                return Task.CompletedTask;
+            },
+            OnRedirectToIdentityProviderForSignOut = ctx =>
+            {
+                if (!string.IsNullOrEmpty(ctx.ProtocolMessage.PostLogoutRedirectUri))
+                    ctx.ProtocolMessage.PostLogoutRedirectUri =
+                        $"{ctx.Request.Scheme}://{ctx.Request.Host}{EntraPathBase(ctx.Request, entraConfig)}{ctx.Options.SignedOutCallbackPath}";
+                return Task.CompletedTask;
+            },
             // Cancelled at Microsoft, MFA not completed, or a correlation failure: back to the
             // login page with a message rather than the developer exception page.
             OnRemoteFailure = ctx =>
@@ -1231,6 +1251,25 @@ static async Task ApplySecurityHeadersMiddleware(HttpContext context, Func<Task>
 }
 
 /// <summary>A configuration value, or the fallback when it is absent or blank.</summary>
+/// <summary>
+/// The PathBase in the casing registered with Entra: MFAAzureAd:PathBase if set, otherwise the IIS
+/// application path (ASPNETCORE_APPL_PATH, set by the ASP.NET Core Module). Used only when it equals
+/// the request's PathBase ignoring case; otherwise the request's own PathBase is kept.
+/// </summary>
+static string EntraPathBase(HttpRequest request, IConfiguration entraConfig)
+{
+    var requestBase = request.PathBase.HasValue ? request.PathBase.Value! : string.Empty;
+    var configured = entraConfig["PathBase"]?.Trim();
+    if (string.IsNullOrEmpty(configured))
+        configured = Environment.GetEnvironmentVariable("ASPNETCORE_APPL_PATH")?.Trim();
+    if (string.IsNullOrEmpty(configured))
+        return requestBase;
+
+    configured = configured.Trim('/');
+    configured = configured.Length == 0 ? string.Empty : "/" + configured;
+    return string.Equals(configured, requestBase, StringComparison.OrdinalIgnoreCase) ? configured : requestBase;
+}
+
 static string ConfigText(IConfiguration configuration, string key, string fallback)
 {
     var value = configuration[key]?.Trim();

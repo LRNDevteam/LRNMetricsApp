@@ -252,6 +252,10 @@ public sealed class PayerMasterAuditQuery
     public string? Master { get; set; }
     public string? ActionType { get; set; }
     public string? Search { get; set; }
+    /// <summary>Grid column key to sort by; anything not whitelisted falls back to newest first.</summary>
+    public string? SortBy { get; set; }
+    /// <summary>"asc" or "desc" (default "desc").</summary>
+    public string? SortDir { get; set; }
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 50;
 }

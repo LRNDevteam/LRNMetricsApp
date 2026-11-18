@@ -29,6 +29,10 @@
     .mv-empty { padding: 3.5rem 1rem; text-align: center; color: #64748b; }
     .mv-footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem 1rem; border-top: 1px solid #e2e8f0; }
     .mv-note { font-size: .76rem; color: #9AA5B1; }
+    .mv-table thead th[data-sort] { cursor: pointer; user-select: none; }
+    .mv-table thead th[data-sort]:hover { background: #eef2f7; }
+    .mv-table thead th .mv-sort { margin-left: .3rem; font-size: .65rem; color: #94a3b8; }
+    .mv-table thead th.sorted .mv-sort { color: #0f172a; }
 </style>
 
 <div class="mv-shell">
@@ -53,7 +57,7 @@
         <div class="mv-loader" id="gridLoader"><div class="mv-loader-box"><span class="spinner-border spinner-border-sm"></span><span>Loading...</span></div></div>
         <div class="mv-grid-scroll">
             <table class="table table-sm table-hover table-bordered align-middle mv-table mb-0">
-                <thead><tr><th>Timestamp (UTC)</th><th>Master</th><th>Payer / Global ID</th><th>Field</th><th>Old Value</th><th>New Value</th><th>Action</th><th>Performed By</th><th>Approval</th></tr></thead>
+                <thead><tr id="sortHeader"><th data-sort="performedOn">Timestamp (UTC)</th><th data-sort="master">Master</th><th data-sort="payerName">Payer / Global ID</th><th data-sort="fieldName">Field</th><th data-sort="oldValue">Old Value</th><th data-sort="newValue">New Value</th><th data-sort="actionType">Action</th><th data-sort="performedBy">Performed By</th><th data-sort="approvalStatus">Approval</th></tr></thead>
                 <tbody id="rows"></tbody>
             </table>
         </div>
@@ -65,7 +69,7 @@
 @section Scripts {
 <script nonce='@Context.Items["CspNonce"]'>
 (function(){
-let page=1,pageSize=50,totalPages=1;
+let page=1,pageSize=50,totalPages=1,sortBy='performedOn',sortDir='desc';
 const urls={data:'@Url.Action("AuditData","MasterValues")'};
 const loader=document.getElementById('gridLoader');
 function esc(v){return (v??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
@@ -84,7 +88,7 @@ function renderRows(items){
 async function load(){
   setBusy(true);
   try{
-    const fd=new FormData(document.getElementById('filterForm'));fd.set('page',page);fd.set('pageSize',pageSize);
+    const fd=new FormData(document.getElementById('filterForm'));fd.set('page',page);fd.set('pageSize',pageSize);fd.set('sortBy',sortBy);fd.set('sortDir',sortDir);
     const r=await fetch(urls.data+'?'+new URLSearchParams(fd));
     const d=await r.json();
     totalPages=d.totalPages||1;
@@ -95,6 +99,24 @@ async function load(){
 }
 document.getElementById('filterForm').onsubmit=e=>{e.preventDefault();page=1;load();};
 document.getElementById('resetBtn').onclick=()=>{document.getElementById('filterForm').reset();page=1;load();};
+const sortHeaders=document.querySelectorAll('#sortHeader th[data-sort]');
+function renderSortIndicators(){
+  sortHeaders.forEach(th=>{
+    const active=th.dataset.sort===sortBy;
+    th.classList.toggle('sorted',active);
+    th.setAttribute('aria-sort',active?(sortDir==='asc'?'ascending':'descending'):'none');
+    let icon=th.querySelector('.mv-sort');
+    if(!icon){icon=document.createElement('i');th.appendChild(icon);}
+    icon.className='mv-sort bi '+(active?(sortDir==='asc'?'bi-caret-up-fill':'bi-caret-down-fill'):'bi-arrow-down-up');
+  });
+}
+sortHeaders.forEach(th=>th.addEventListener('click',()=>{
+  const key=th.dataset.sort;
+  if(sortBy===key)sortDir=sortDir==='asc'?'desc':'asc';
+  else{sortBy=key;sortDir=key==='performedOn'?'desc':'asc';}
+  page=1;renderSortIndicators();load();
+}));
+renderSortIndicators();
 document.getElementById('prevBtn').onclick=()=>{if(page>1){page--;load();}};
 document.getElementById('nextBtn').onclick=()=>{if(page<totalPages){page++;load();}};
 load();

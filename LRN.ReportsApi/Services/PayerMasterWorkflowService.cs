@@ -458,6 +458,30 @@ public sealed class PayerMasterWorkflowService : IPayerMasterWorkflowService
 
     // ── Audit trail ──────────────────────────────────────────────────────────
 
+    /// <summary>Grid column key → SQL column. Only these keys can reach the ORDER BY.</summary>
+    private static readonly Dictionary<string, string> AuditSortColumns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["performedOn"] = "PerformedOn",
+        ["master"] = "Master",
+        ["payerName"] = "PayerName",
+        ["fieldName"] = "FieldName",
+        ["oldValue"] = "OldValue",
+        ["newValue"] = "NewValue",
+        ["actionType"] = "ActionType",
+        ["performedBy"] = "PerformedBy",
+        ["approvalStatus"] = "ApprovalStatus",
+    };
+
+    internal static string BuildAuditOrderBy(string? sortBy, string? sortDir)
+    {
+        var direction = string.Equals(sortDir, "asc", StringComparison.OrdinalIgnoreCase) ? "ASC" : "DESC";
+        if (string.IsNullOrWhiteSpace(sortBy) || !AuditSortColumns.TryGetValue(sortBy.Trim(), out var column))
+            return "PerformedOn DESC, AuditId DESC";
+        return column == "PerformedOn"
+            ? $"PerformedOn {direction}, AuditId {direction}"
+            : $"{column} {direction}, PerformedOn DESC, AuditId DESC";
+    }
+
     public async Task<PagedResult<PayerMasterAuditEntryDto>> GetAuditAsync(PayerMasterAuditQuery query, CancellationToken ct)
     {
         await EnsureSchemaAsync(ct);
@@ -488,7 +512,7 @@ public sealed class PayerMasterWorkflowService : IPayerMasterWorkflowService
                    ActionType, PerformedBy, PerformedOn, ApprovalStatus, Approver, RejectionReason
             FROM dbo.PayerMasterAuditTrail
             WHERE {whereSql}
-            ORDER BY PerformedOn DESC, AuditId DESC
+            ORDER BY {BuildAuditOrderBy(query.SortBy, query.SortDir)}
             OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
             """, conn);
         cmd.Parameters.AddRange(parameters.ToArray());
