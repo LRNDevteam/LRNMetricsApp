@@ -272,12 +272,22 @@
                 <span><strong>Fully Paid / Adjudicated / 30 / 60 Days:</strong> FullyPaidCount / AdjucticatedCount / Bucket30Count / Bucket60Count not blank &bull;</span>
             }
         }
+        else if (Model.IsVariantXLab && months == 3 && result.WindowFrom.HasValue && result.WindowTo.HasValue)
+        {
+            <span><strong>Date Range:</strong> DOS @(result.WindowFrom.Value.ToString("MM/dd/yyyy")) &ndash; @(result.WindowTo.Value.ToString("MM/dd/yyyy")) (last 3 calendar months ending at max DateOfService month) &bull;</span>
+            <span><strong>Fully Paid / Adjudicated / 30 / 60 Days:</strong> FullyPaidCount = Fully Paid (FullyPaidAmount) / AdjucticatedAmount &gt; 0 / Bucket30Amount &gt; 0 / Bucket60Amount &gt; 0 &bull;</span>
+        }
+        else if (Model.IsVariantXLab && result.WindowFrom.HasValue && result.WindowTo.HasValue)
+        {
+            <span><strong>Date Range:</strong> DOS @(result.WindowFrom.Value.ToString("MM/dd/yyyy")) &ndash; @(result.WindowTo.Value.ToString("MM/dd/yyyy")) (last @months months ending at max DateOfService) &bull;</span>
+            <span><strong>Fully Paid / Adjudicated / 30 / 60 Days:</strong> FullyPaidCount = Fully Paid (FullyPaidAmount) / AdjucticatedAmount &gt; 0 / Bucket30Amount &gt; 0 / Bucket60Amount &gt; 0 &bull;</span>
+        }
         else
         {
             <span><strong>Date Range:</strong> Last @months calendar months by @windowBasis through billed week-range end (DATEADD(MONTH, -@months, week end) — not 180 days) &bull;</span>
         }
         <strong>Panel totals:</strong> ALL payers &bull;
-        <strong>Drill-down:</strong> Top 3 PayerName_Raw by claim count &bull;
+        <strong>Drill-down:</strong> Top @(Model.IsVariantXLab && months == 3 ? 2 : 3) PayerName_Raw by claim count &bull;
         <strong>Counts:</strong> @(Model.IsNorthWestLab || Model.IsAugustusLab || Model.UsesCoreBioCollectionLayout ? "Count of unique ClaimID" : "Count(ClaimID) — not DISTINCT")
     </div>
 }
@@ -285,7 +295,9 @@ else
 {
     <div class="text-center py-5 text-muted">
         <div style="font-size:2rem;opacity:.4">&#128184;</div>
-        <div class="fw-semibold mt-2">No Average Payments data available</div>
-        <div class="small mt-1">No claims found for the last @months calendar months by @windowBasis through the billed week-range end. Try adjusting your filters.</div>
+        <div class="fw-semibold mt-2">No @(Model.IsVariantXLab ? "Panel Averages" : "Average Payments") data available</div>
+        <div class="small mt-1">@(Model.IsVariantXLab && months == 3
+            ? "No claims found for the last 3 calendar months of DateOfService ending at max DOS. Try adjusting your filters."
+            : $"No claims found for the last {months} calendar months by {windowBasis} through the billed week-range end. Try adjusting your filters.")</div>
     </div>
 }

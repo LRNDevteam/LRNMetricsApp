@@ -20,6 +20,19 @@
     var current = null;
     var requestSeq = 0;
 
+    // Column-name synonyms across labs (ClaimLevelData vs LIMSMaster naming).
+    var DIM_COLS = {
+        panel:    ['Panelname', 'PanelName', 'TestCategory', 'Panel', 'TestType', 'PanelType', 'TestPanel'],
+        clinic:   ['ClinicName', 'Client', 'Facility', 'FacilityName', 'Clinic', 'ServiceLocationName'],
+        provider: ['ReferringProvider', 'DoctorFullName', 'ProviderName', 'PhysicianName', 'ReferringPhysician', 'Provider'],
+        rep:      ['SalesRepname', 'SalesRepName', 'SaleRepName', 'SalesRep', 'SalesRep_Name', 'Rep']
+    };
+    var DIM_FILTER_IDS = {
+        panel: 'escFilterPanel',
+        clinic: 'escFilterClinic',
+        provider: 'escFilterProvider',
+        rep: 'escFilterRep'
+    };
     function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -43,15 +56,34 @@
         if (!m) return y + ' Total';
         return MONTHS[m] + ' ' + y;
     }
-    function query(extra) {
+    // Builds the CellRows / export query. When applyClientFilters is true, modal Panel /
+    // Clinics / Referring Provider / Sales Rep selections replace the page dimension filters
+    // so Excel downloads only the filtered rows (and Filters used lists them).
+    function query(extra, applyClientFilters) {
         var ctx = el('esCellCtx');
-        var parts = ['lab=' + encodeURIComponent(ctx.dataset.lab || '')];
-        if (ctx.dataset.filters) parts.push(ctx.dataset.filters);
-        Object.keys(extra).forEach(function (k) {
-            if (extra[k] !== null && extra[k] !== undefined && extra[k] !== '')
-                parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(extra[k]));
+        var params = new URLSearchParams();
+        params.set('lab', ctx.dataset.lab || '');
+
+        var page = new URLSearchParams(ctx.dataset.filters || '');
+        var dimMap = { panels: 'panel', clinics: 'clinic', providers: 'provider', reps: 'rep' };
+        page.forEach(function (value, key) {
+            if (!Object.prototype.hasOwnProperty.call(dimMap, key))
+                params.append(key, value);
         });
-        return parts.join('&');
+
+        Object.keys(dimMap).forEach(function (param) {
+            var clientVals = applyClientFilters ? selectedValues(dimMap[param]) : [];
+            var vals = clientVals.length ? clientVals : page.getAll(param);
+            vals.forEach(function (v) {
+                if (v != null && String(v).trim() !== '') params.append(param, v);
+            });
+        });
+
+        Object.keys(extra || {}).forEach(function (k) {
+            if (extra[k] !== null && extra[k] !== undefined && extra[k] !== '')
+                params.set(k, String(extra[k]));
+        });
+        return params.toString();
     }
 
     function showAlert(msg) {
@@ -180,16 +212,268 @@
         }).join('');
     }
 
+    function findColIndex(columns, aliases) {
+        if (!columns || !columns.length) return -1;
+        var lower = columns.map(function (c) { return String(c || '').toLowerCase(); });
+        for (var i = 0; i < aliases.length; i++) {
+            var idx = lower.indexOf(String(aliases[i]).toLowerCase());
+            if (idx >= 0) return idx;
+        }
+        return -1;
+    }
+
+    function dimBtn(dim) { return el(DIM_FILTER_IDS[dim] + 'Btn'); }
+    function dimMenu(dim) { return el(DIM_FILTER_IDS[dim] + 'Menu'); }
+    function dimList(dim) { return el(DIM_FILTER_IDS[dim]); }
+
+    function selectedValues(dim) {
+        var list = dimList(dim);
+        if (!list) return [];
+        return Array.prototype.filter.call(list.querySelectorAll('input[type=checkbox]'), function (cb) {
+            return cb.checked;
+        }).map(function (cb) { return cb.value; });
+    }
+
+    function updateDimButton(dim) {
+        var btn = dimBtn(dim);
+        if (!btn) return;
+        var textEl = btn.querySelector('.esc-cf-btn-text');
+        var countEl = btn.querySelector('.esc-cf-btn-count');
+        var selected = selectedValues(dim);
+        var hasOptions = !btn.disabled && dimList(dim) && dimList(dim).querySelector('.esc-cf-item');
+        if (!selected.length) {
+            if (textEl) {
+                textEl.textContent = hasOptions ? 'All' : 'N/A';
+                textEl.classList.add('is-placeholder');
+            }
+            if (countEl) countEl.hidden = true;
+            btn.classList.remove('is-active');
+            return;
+        }
+        if (textEl) {
+            textEl.textContent = selected.length === 1 ? selected[0] : (selected.length + ' selected');
+            textEl.classList.remove('is-placeholder');
+        }
+        if (countEl) {
+            countEl.textContent = String(selected.length);
+            countEl.hidden = false;
+        }
+        btn.classList.add('is-active');
+    }
+
+    function closeAllDimMenus(exceptDim) {
+        Object.keys(DIM_FILTER_IDS).forEach(function (dim) {
+            if (exceptDim && dim === exceptDim) return;
+            var menu = dimMenu(dim);
+            var btn = dimBtn(dim);
+            if (menu) menu.hidden = true;
+            if (btn) btn.setAttribute('aria-expanded', 'false');
+        });
+    }
+
+    function openDimMenu(dim) {
+        var btn = dimBtn(dim);
+        var menu = dimMenu(dim);
+        if (!btn || !menu || btn.disabled) return;
+        closeAllDimMenus(dim);
+        menu.hidden = false;
+        btn.setAttribute('aria-expanded', 'true');
+        var search = menu.querySelector('.esc-cf-search input');
+        if (search) {
+            search.value = '';
+            search.dispatchEvent(new Event('input'));
+            setTimeout(function () { search.focus(); }, 0);
+        }
+    }
+
+    function rowMatchesClientFilters(row) {
+        if (!current || !current.dimIndex) return true;
+        var dims = Object.keys(DIM_COLS);
+        for (var i = 0; i < dims.length; i++) {
+            var dim = dims[i];
+            var colIdx = current.dimIndex[dim];
+            if (colIdx < 0) continue;
+            var wanted = selectedValues(dim);
+            if (!wanted.length) continue;
+            var cell = row[colIdx] == null ? '' : String(row[colIdx]).trim();
+            var hit = wanted.some(function (w) { return w.toLowerCase() === cell.toLowerCase(); });
+            if (!hit) return false;
+        }
+        return true;
+    }
+
+    function fillDimSelect(dim, values, keepSelection) {
+        var list = dimList(dim);
+        var btn = dimBtn(dim);
+        if (!list || !btn) return;
+        var prev = keepSelection ? selectedValues(dim) : [];
+        var prevSet = {};
+        prev.forEach(function (v) { prevSet[v.toLowerCase()] = true; });
+        var sorted = values.slice().sort(function (a, b) {
+            return a.localeCompare(b, undefined, { sensitivity: 'base' });
+        });
+        list.innerHTML = '';
+        if (!sorted.length) {
+            list.innerHTML = '<div class="esc-cf-empty">No values on this page</div>';
+            btn.disabled = true;
+            updateDimButton(dim);
+            return;
+        }
+        sorted.forEach(function (v) {
+            var label = document.createElement('label');
+            label.className = 'esc-cf-item';
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.value = v;
+            if (prevSet[v.toLowerCase()]) cb.checked = true;
+            var span = document.createElement('span');
+            span.textContent = v;
+            label.appendChild(cb);
+            label.appendChild(span);
+            list.appendChild(label);
+        });
+        btn.disabled = false;
+        updateDimButton(dim);
+    }
+
+    function uniqueDimValues(rows, colIdx) {
+        var set = {};
+        var out = [];
+        if (colIdx < 0) return out;
+        rows.forEach(function (r) {
+            var v = r[colIdx] == null ? '' : String(r[colIdx]).trim();
+            if (!v) return;
+            var key = v.toLowerCase();
+            if (set[key]) return;
+            set[key] = true;
+            out.push(v);
+        });
+        return out;
+    }
+
+    var DIM_HINT_LABELS = {
+        panel: 'Panel',
+        clinic: 'Clinics',
+        provider: 'Referring Provider',
+        rep: 'Sales Rep'
+    };
+
+    function updateClientFilterHint(shown, totalOnPage) {
+        var hint = el('escFilterHint');
+        if (!hint) return;
+        if (!totalOnPage && !Object.keys(DIM_FILTER_IDS).some(function (d) { return selectedValues(d).length > 0; })) {
+            hint.innerHTML = '';
+            return;
+        }
+
+        var chips = [];
+        Object.keys(DIM_FILTER_IDS).forEach(function (dim) {
+            var vals = selectedValues(dim);
+            if (!vals.length) return;
+            var joined = vals.join(', ');
+            chips.push(
+                '<span class="esc-cf-chip" title="' + esc(DIM_HINT_LABELS[dim] + ': ' + joined) + '">' +
+                '<span class="esc-cf-chip-dim">' + esc(DIM_HINT_LABELS[dim]) + ':</span>' +
+                '<span class="esc-cf-chip-val">' + esc(joined) + '</span></span>'
+            );
+        });
+
+        var showing = chips.length
+            ? ('Showing ' + count(shown) + ' of ' + count(totalOnPage) +
+                ' row' + (totalOnPage === 1 ? '' : 's') + ' on this page')
+            : ('Showing ' + count(totalOnPage) + ' row' + (totalOnPage === 1 ? '' : 's') + ' on this page');
+
+        hint.innerHTML =
+            (chips.length ? '<span class="esc-cf-selected">' + chips.join('') + '</span>' : '') +
+            '<span class="esc-cf-showing">' + esc(showing) + '</span>';
+    }
+
+    function resetClientFilters(hide) {
+        var box = el('esCellClientFilters');
+        if (!box) return;
+        closeAllDimMenus();
+        Object.keys(DIM_FILTER_IDS).forEach(function (dim) {
+            var list = dimList(dim);
+            var btn = dimBtn(dim);
+            if (list) list.innerHTML = '';
+            if (btn) {
+                btn.disabled = true;
+                updateDimButton(dim);
+            }
+        });
+        var hint = el('escFilterHint');
+        if (hint) hint.innerHTML = '';
+        box.hidden = !!hide;
+    }
+
+    function populateClientFilters(res) {
+        var box = el('esCellClientFilters');
+        if (!box) return;
+        if (!res || res.isFormula || !res.columns || !res.columns.length) {
+            resetClientFilters(true);
+            return;
+        }
+        current.dimIndex = {};
+        current.dimValues = current.dimValues || {};
+        Object.keys(DIM_COLS).forEach(function (dim) {
+            current.dimIndex[dim] = findColIndex(res.columns, DIM_COLS[dim]);
+        });
+        var hasAny = Object.keys(current.dimIndex).some(function (d) { return current.dimIndex[d] >= 0; });
+        box.hidden = !hasAny;
+        if (!hasAny) return;
+
+        Object.keys(DIM_COLS).forEach(function (dim) {
+            var idx = current.dimIndex[dim];
+            if (idx < 0) {
+                fillDimSelect(dim, [], false);
+                return;
+            }
+            var pageVals = uniqueDimValues(res.rows || [], idx);
+            var map = current.dimValues[dim] || {};
+            pageVals.forEach(function (v) { map[v.toLowerCase()] = v; });
+            current.dimValues[dim] = map;
+            var all = Object.keys(map).map(function (k) { return map[k]; });
+            fillDimSelect(dim, all, true);
+        });
+    }
+
+    function paintGridRows(res, rows) {
+        var table = el('esCellGrid');
+        var cols = res.columns;
+        var start = (res.page - 1) * res.pageSize;
+        table.tBodies[0].innerHTML = rows.length
+            ? rows.map(function (r, i) {
+                return '<tr><td class="esc-rownum">' + (start + i + 1) + '</td>' + r.map(function (v, ci) {
+                    var c = cols[ci];
+                    if (MONEY_COLS[c]) return '<td class="esc-num' + (c === 'Amount' ? ' esc-measured' : '') + '">' + (v === null ? '' : money(v)) + '</td>';
+                    return '<td>' + esc(v) + '</td>';
+                }).join('') + '</tr>';
+            }).join('')
+            : '<tr><td colspan="' + (cols.length + 1) + '" class="esc-empty">' +
+                ((res.rows && res.rows.length) ? 'No rows match the selected filters.' : 'No rows.') +
+              '</td></tr>';
+        updateClientFilterHint(rows.length, (res.rows || []).length);
+    }
+
+    function applyClientFilters() {
+        if (!current || !current.lastResult || current.lastResult.isFormula) return;
+        var res = current.lastResult;
+        var filtered = (res.rows || []).filter(rowMatchesClientFilters);
+        paintGridRows(res, filtered);
+    }
+
     function renderGrid(res) {
         var table = el('esCellGrid');
         var wrap = el('esCellGridWrap');
         table.classList.remove('esc-breakdown');
         if (!res.columns || !res.columns.length) {
             wrap.hidden = true;
+            resetClientFilters(true);
             return;
         }
         wrap.hidden = false;
         if (res.isFormula) {
+            resetClientFilters(true);
             renderBreakdown(res);
             return;
         }
@@ -198,16 +482,10 @@
             return '<th' + (MONEY_COLS[c] ? ' class="esc-num"' : '') + (c === 'Amount' ? ' title="' + esc(res.amountColumn) + '"' : '') + '>' +
                 esc(c === 'Amount' ? res.amountColumn + ' (measured)' : c) + '</th>';
         }).join('') + '</tr>';
-        var start = (res.page - 1) * res.pageSize;
-        table.tBodies[0].innerHTML = res.rows.length
-            ? res.rows.map(function (r, i) {
-                return '<tr><td class="esc-rownum">' + (start + i + 1) + '</td>' + r.map(function (v, ci) {
-                    var c = cols[ci];
-                    if (MONEY_COLS[c]) return '<td class="esc-num' + (c === 'Amount' ? ' esc-measured' : '') + '">' + (v === null ? '' : money(v)) + '</td>';
-                    return '<td>' + esc(v) + '</td>';
-                }).join('') + '</tr>';
-            }).join('')
-            : '<tr><td colspan="' + (cols.length + 1) + '" class="esc-empty">No rows.</td></tr>';
+        current.lastResult = res;
+        populateClientFilters(res);
+        var filtered = (res.rows || []).filter(rowMatchesClientFilters);
+        paintGridRows(res, filtered);
     }
 
     function renderPager(res) {
@@ -348,7 +626,7 @@
         var url = ctx.dataset.exportUrl + '?' + query({
             category: current.cat, rowCode: current.row, year: current.year, month: current.month,
             title: current.title, value: (current.valueText || '').trim(), progressId: id
-        });
+        }, true);
         fetch(url, { credentials: 'same-origin' })
             .then(function (r) {
                 polling = false;
@@ -391,6 +669,9 @@
         var ctx = el('esCellCtx');
         if (!ctx) return;
         current = cell;
+        current.lastResult = null;
+        current.dimIndex = null;
+        current.dimValues = {};
         el('esCellBack').hidden = backStack.length === 0;
         el('esCellModalTitle').textContent = current.title;
         el('esCellModalSub').textContent = current.cat + ' Breakdown · ' + periodLabel(current.year, current.month);
@@ -401,12 +682,73 @@
         el('esCellGrid').tHead.innerHTML = '';
         el('esCellGrid').tBodies[0].innerHTML = '';
         el('esCellPager').innerHTML = '';
+        resetClientFilters(true);
 
         getModal().show();
         load(1);
     }
 
+    // Client-side row filters: compact checkbox dropdowns, options from the loaded page.
+    Object.keys(DIM_FILTER_IDS).forEach(function (dim) {
+        var btn = dimBtn(dim);
+        var menu = dimMenu(dim);
+        var list = dimList(dim);
+        if (btn) {
+            btn.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (btn.disabled) return;
+                if (menu && !menu.hidden) closeAllDimMenus();
+                else openDimMenu(dim);
+            });
+        }
+        if (menu) {
+            menu.addEventListener('click', function (e) { e.stopPropagation(); });
+            var search = menu.querySelector('.esc-cf-search input');
+            if (search) {
+                search.addEventListener('input', function () {
+                    var q = search.value.trim().toLowerCase();
+                    Array.prototype.forEach.call(menu.querySelectorAll('.esc-cf-item'), function (item) {
+                        var txt = (item.textContent || '').toLowerCase();
+                        item.style.display = (!q || txt.indexOf(q) >= 0) ? '' : 'none';
+                    });
+                });
+                search.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); }
+                    if (e.key === 'Escape') closeAllDimMenus();
+                });
+            }
+            var done = menu.querySelector('.esc-cf-done');
+            if (done) done.addEventListener('click', function () { closeAllDimMenus(); });
+        }
+        if (list) {
+            list.addEventListener('change', function (e) {
+                if (e.target && e.target.type === 'checkbox') {
+                    updateDimButton(dim);
+                    applyClientFilters();
+                }
+            });
+        }
+    });
+    var clearBtn = el('escFilterClear');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function () {
+            Object.keys(DIM_FILTER_IDS).forEach(function (dim) {
+                var list = dimList(dim);
+                if (!list) return;
+                Array.prototype.forEach.call(list.querySelectorAll('input[type=checkbox]'), function (cb) {
+                    cb.checked = false;
+                });
+                updateDimButton(dim);
+            });
+            closeAllDimMenus();
+            applyClientFilters();
+        });
+    }
+
     document.addEventListener('click', function (e) {
+        if (!e.target.closest || !e.target.closest('.esc-cf-dd')) closeAllDimMenus();
+
         var link = e.target.closest && e.target.closest('a.es-cell-link');
         if (link) {
             e.preventDefault();

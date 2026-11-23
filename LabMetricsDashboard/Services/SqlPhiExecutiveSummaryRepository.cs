@@ -443,12 +443,22 @@ public sealed partial class SqlPhiExecutiveSummaryRepository
                 }
             }
 
-            // Month columns = periods with real activity only (drops empty Dec stubs, etc.).
-            var columns = periodActivity
+            // Month columns = contiguous months from first..last active month per year.
+            // Keeps empty in-between months (e.g. May/Jun with no DOS claims) as blank
+            // columns to match the client Executive Summary sheet, while still dropping
+            // empty stubs before the first / after the last active month in each year.
+            var columns = new List<(int Year, int Month)>();
+            foreach (var yearGroup in periodActivity
                 .Where(kv => kv.Value)
-                .Select(kv => kv.Key)
-                .OrderBy(p => p.Year).ThenBy(p => p.Month)
-                .ToList();
+                .GroupBy(kv => kv.Key.Year)
+                .OrderBy(g => g.Key))
+            {
+                var months = yearGroup.Select(kv => kv.Key.Month).ToList();
+                var first = months.Min();
+                var last = months.Max();
+                for (var m = first; m <= last; m++)
+                    columns.Add((yearGroup.Key, m));
+            }
             columns.Add((0, 0));
 
             vm.YearMonthColumns = columns;

@@ -671,14 +671,18 @@ public class CollectionSummaryController : Controller
                 : _repo.GetPanelAveragesAsync(connStr, payerFilter, panelFilter,
                     fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
         var avgPayByDateBasis = LabCollectionPrefix.UsesAvgPaymentsByDateBasis(selectedLab);
+        // DOS AvgPayments labs (VariantX / Elixir / Cove / AnP): always use the same live SP as the UI
+        // tab. Do not route through GetAvgPaymentsFromAggregatesAsync(prefix) — that used to pass the
+        // table prefix as labName, which skipped usp_Get*_CS_AvgPayments and produced Excel that
+        // differed from Panel Averages - by DOS.
         var avgPaymentsTask = avgPayByDateBasis
             ? _repo.GetAvgPaymentsByDateBasisAsync(connStr, AvgPaymentsDateBasis.CheckDate,
                 payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
-            : useAggregates
-                ? _repo.GetAvgPaymentsFromAggregatesAsync(connStr, aggregatePrefix!, ct)
-                : _repo.GetAvgPaymentsAsync(
+            : LabCollectionPrefix.UsesDateOfServiceAvgPayments(selectedLab) || !useAggregates
+                ? _repo.GetAvgPaymentsAsync(
                     connStr, payerFilter, panelFilter,
-                    fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+                    fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct, lastMonths: 6)
+                : _repo.GetAvgPaymentsFromAggregatesAsync(connStr, aggregatePrefix!, ct);
         var avgPayments3Task = LabCollectionPrefix.ShowsAvgPaymentsLast3Months(selectedLab)
             ? _repo.GetAvgPaymentsAsync(
                 connStr, payerFilter, panelFilter,

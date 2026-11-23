@@ -45,7 +45,9 @@ public static partial class CollectionSummaryExcelExportBuilder
         var insightsWs = BuildMonthlyClaimVolumeSheet(wb, vm, labName);
         BuildWeeklyClaimVolumeSheet(wb, vm, labName, insightsWs);
         if (vm.ShowAvgPaymentsLast3Months)
-            BuildAvgPaymentsSheet(wb, vm.AvgPaymentsLast3Months, lastMonths: 3);
+            BuildAvgPaymentsSheet(wb, vm.AvgPaymentsLast3Months, lastMonths: 3,
+                sheetName: LabCollectionPrefix.AvgPaymentsLast3MonthsSheetName(labName),
+                basisLabel: "Date of Service");
         BuildTop5ReimbursementSheet(wb, vm.Top5Reimbursement, labName);
         if (vm.ShowTop5TotalPayments)
             BuildTop5TotalPaymentsSheet(wb, vm.Top5TotalPayments, labName);
@@ -67,7 +69,9 @@ public static partial class CollectionSummaryExcelExportBuilder
         }
         else
         {
-            BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6);
+            BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6,
+                sheetName: LabCollectionPrefix.IsVariantX(labName) ? PanelAveragesDosSheetName : null,
+                basisLabel: "Date of Service");
         }
         if (vm.ShowStatusProviderSummaries)
             BuildStatusSummarySheet(wb, vm.StatusSummary, labName);
@@ -126,21 +130,26 @@ public static partial class CollectionSummaryExcelExportBuilder
         }
         else
         {
-            BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6);
+            BuildAvgPaymentsSheet(wb, vm.AvgPayments, lastMonths: 6,
+                sheetName: LabCollectionPrefix.IsVariantX(labName) ? PanelAveragesDosSheetName : null,
+                basisLabel: "Date of Service");
             if (vm.ShowAvgPaymentsLast3Months)
-                BuildAvgPaymentsSheet(wb, vm.AvgPaymentsLast3Months, lastMonths: 3);
+                BuildAvgPaymentsSheet(wb, vm.AvgPaymentsLast3Months, lastMonths: 3,
+                    sheetName: LabCollectionPrefix.AvgPaymentsLast3MonthsSheetName(labName),
+                    basisLabel: "Date of Service");
         }
 
         ApplySheetOrder(wb);
         return wb;
     }
 
-    /// <summary>Insights first, then Avg payments_Last 3 Months.</summary>
+    /// <summary>Insights first, then Last 3 Months averages sheet.</summary>
     internal static void ApplySheetOrder(XLWorkbook wb)
     {
         if (wb.Worksheets.TryGetWorksheet("Insights", out var insights))
             insights.Position = 1;
-        if (wb.Worksheets.TryGetWorksheet("Avg payments_Last 3 Months", out var avg3))
+        if (wb.Worksheets.TryGetWorksheet("Avg payments_Last 3 Months", out var avg3)
+            || wb.Worksheets.TryGetWorksheet("Panel Averages Last 3 Months", out avg3))
             avg3.Position = 2;
     }
 
@@ -1461,9 +1470,14 @@ public static partial class CollectionSummaryExcelExportBuilder
         int colCount = headers.Length;
 
         int row = 1;
+        var isPanelAveragesTitle = sheetName.StartsWith("Panel Averages", StringComparison.OrdinalIgnoreCase);
+        var titlePrefix = isPanelAveragesTitle ? "Panel Averages" : "Average Payments";
+        var threeMonthNote = lastMonths <= 3 && isPanelAveragesTitle
+            ? " (3 calendar months ending at max DOS month)"
+            : string.Empty;
         ExcelTheme.Collection.WriteTitleBar(
             ws, row, colCount,
-            $"Average Payments - Per Panel | Last {lastMonths} Months | Based on {basisLabel}{windowText}");
+            $"{titlePrefix} - Per Panel | Last {lastMonths} Months{threeMonthNote} | Based on {basisLabel}{windowText}");
         row++;
 
         var panelHdr   = ExcelTheme.Collection.AvgPayCovePanel;

@@ -1,4 +1,4 @@
-/* =============================================================================
+﻿/* =============================================================================
    VariantX Labs — cloned from Elixir (17_Elixir_ExecutiveSummary_Read.sql)
    Prefix: VarX_ / VarX_CS_ / VarX_ES_
    Refresh: usp_RefreshVarX_*
@@ -15,7 +15,7 @@
 -- Mirrors PhiLife\17_PhiLife_ExecutiveSummary_Read.sql, but uses the
 -- Client Executive Summary sheet RoleID scheme (see 16/19):
 --   LIS  : A, B (+B.TestType), C, D (+D.SampleStatus)
---   PMS  : F, G, H-N (+N.1-N.3)   [F1-F3 omitted — Doubt]
+--   PMS  : F, F.1 (Cove), F.2 (Others=F-F.1-F.3), F.3 (VariantX), G, H-N (+N.1-N.3)
 --   Cash : O-U (+U.1-U.3)
 --   Avg  : V, W, X
 --
@@ -55,11 +55,13 @@
 --   DateofService (3) > ServiceDate (4) > AccessionDate (5).
 --
 -- Date mode (DOS vs FirstBilledDate) — mutually exclusive in the UI:
+--   PMS/Cash/Avg population always requires FirstBilledDate; month buckets
+--   are always DateofService (monthwise display).
 --   DOS mode (@DosFrom/@DosTo, or no date filter):
---     PMS/Cash/Avg bucket by DateofService; LIS buckets by DateOfCollection.
+--     Filter/range on DateofService; LIS buckets by DateOfCollection.
 --   BilledDate mode (@BilledFrom/@BilledTo set, DOS NULL → @UseBilledDate=1):
---     PMS/Cash/Avg re-bucket #Base by FirstBilledDate; LIS/row-I re-bucket by
---     the LIMSMaster BilledDate column (triggers a live LIMSMaster scan).
+--     Filter range on FirstBilledDate; month buckets still DateofService;
+--     LIS/row-I re-bucket by the LIMSMaster BilledDate column (live scan).
 --   Mirrors 17_Cove_ExecutiveSummary_Read.sql's @UseBilledDate behaviour.
 -- ============================================================
 SET NOCOUNT ON;
@@ -103,9 +105,9 @@ BEGIN
 
 	-- Date mode: DOS vs FirstBilledDate are mutually exclusive in the UI.
 	-- @UseBilledDate = 1  → FirstBilledDate filter is active (@BilledFrom/@BilledTo set, @DosFrom/@DosTo NULL).
-	--   #Base : ESYear/ESMonth derived from FirstBilledDate (not DateofService).
+	--   #Base : population filtered by FirstBilledDate; ESYear/ESMonth from DateofService.
 	--   LIS   : LISYear/LISMonth derived from BilledDate in LIMSMaster; live scan triggered.
-	-- @UseBilledDate = 0  → DOS mode (or no date filter) — existing behaviour unchanged.
+	-- @UseBilledDate = 0  → DOS mode (or no date filter): FirstBilledDate population; DOS buckets/ranges.
 	DECLARE @UseBilledDate BIT = CASE
 		WHEN (@BilledFrom IS NOT NULL OR @BilledTo IS NOT NULL)
 		 AND  @DosFrom IS NULL AND @DosTo IS NULL
@@ -552,6 +554,7 @@ BEGIN
 
 	IF @UseBilledDate = 0
 	BEGIN
+		-- Population: FirstBilledDate. Monthwise: DateofService (+ DOS / Year / Month ranges).
 		SET @BaseSql = N'
 		INSERT INTO #Base (ClaimKey, AccessionNumber, ESYear, ESMonth, BilledUnbilled, ClaimStatus,
 						   ChargeAmount, InsurancePayment, PatientPayment,
@@ -572,7 +575,8 @@ BEGIN
 			ISNULL(TRY_CAST(InsuranceBalance     AS DECIMAL(18,2)), 0),
 			ISNULL(TRY_CAST(PatientBalance       AS DECIMAL(18,2)), 0)
 		FROM dbo.ClaimLevelData
-		WHERE TRY_CAST(DateofService AS DATE) IS NOT NULL
+		WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+		  AND TRY_CAST(DateofService AS DATE) IS NOT NULL
 		  AND NULLIF(LTRIM(RTRIM(ClaimID)), '''') IS NOT NULL
 		  AND (@YearFrom  IS NULL OR YEAR (TRY_CAST(DateofService AS DATE)) >= @YearFrom)
 		  AND (@YearTo    IS NULL OR YEAR (TRY_CAST(DateofService AS DATE)) <= @YearTo)
@@ -587,6 +591,7 @@ BEGIN
 	END
 	ELSE
 	BEGIN
+		-- Population + billed range: FirstBilledDate. Monthwise display: DateofService.
 		SET @BaseSql = N'
 		INSERT INTO #Base (ClaimKey, AccessionNumber, ESYear, ESMonth, BilledUnbilled, ClaimStatus,
 						   ChargeAmount, InsurancePayment, PatientPayment,
@@ -595,8 +600,8 @@ BEGIN
 		SELECT
 			NULLIF(LTRIM(RTRIM(ClaimID)), ''''),
 			AccessionNumber,
-			ISNULL(YEAR (TRY_CAST(FirstBilledDate AS DATE)), 0),
-			ISNULL(MONTH(TRY_CAST(FirstBilledDate AS DATE)), 0),
+			ISNULL(YEAR (TRY_CAST(DateofService AS DATE)), 0),
+			ISNULL(MONTH(TRY_CAST(DateofService AS DATE)), 0),
 			' + @BillStatusExpr + N',
 			ISNULL(LTRIM(RTRIM(ClaimStatus)), ''''),
 			ISNULL(TRY_CAST(ChargeAmount         AS DECIMAL(18,2)), 0),
@@ -608,6 +613,7 @@ BEGIN
 			ISNULL(TRY_CAST(PatientBalance       AS DECIMAL(18,2)), 0)
 		FROM dbo.ClaimLevelData
 		WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+		  AND TRY_CAST(DateofService AS DATE) IS NOT NULL
 		  AND NULLIF(LTRIM(RTRIM(ClaimID)), '''') IS NOT NULL
 		  AND (@BilledFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @BilledFrom)
 		  AND (@BilledTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @BilledTo)
@@ -733,6 +739,49 @@ BEGIN
 	UNION ALL
 	SELECT 0, 0, COUNT(DISTINCT Accession) FROM #LisBilled;
 
+	-- F1/F3: billed claims whose AccessionNumber exists in CoveLRN / local LIMSMaster.
+	DROP TABLE IF EXISTS #CoveAcc;
+	CREATE TABLE #CoveAcc (Acc NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL PRIMARY KEY);
+	IF DB_ID(N'CoveLRN') IS NOT NULL AND OBJECT_ID(N'CoveLRN.dbo.LIMSMaster', N'U') IS NOT NULL
+		INSERT INTO #CoveAcc (Acc)
+		SELECT DISTINCT NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(300), Accession))), N'')
+		FROM CoveLRN.dbo.LIMSMaster
+		WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(300), Accession))), N'') IS NOT NULL;
+
+	DROP TABLE IF EXISTS #VarAcc;
+	CREATE TABLE #VarAcc (Acc NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL PRIMARY KEY);
+	IF OBJECT_ID(N'dbo.LIMSMaster', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.LIMSMaster', N'Accession') IS NOT NULL
+		INSERT INTO #VarAcc (Acc)
+		SELECT DISTINCT NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(300), Accession))), N'')
+		FROM dbo.LIMSMaster
+		WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(300), Accession))), N'') IS NOT NULL;
+
+	DROP TABLE IF EXISTS #F1Count;
+	SELECT ESYear, ESMonth, COUNT(DISTINCT ClaimKey) AS Cnt
+	INTO #F1Count
+	FROM #Base b
+	WHERE b.AccessionNumber IS NOT NULL
+	  AND EXISTS (SELECT 1 FROM #CoveAcc c WHERE c.Acc = b.AccessionNumber)
+	GROUP BY ESYear, ESMonth
+	UNION ALL
+	SELECT 0, 0, COUNT(DISTINCT ClaimKey)
+	FROM #Base b
+	WHERE b.AccessionNumber IS NOT NULL
+	  AND EXISTS (SELECT 1 FROM #CoveAcc c WHERE c.Acc = b.AccessionNumber);
+
+	DROP TABLE IF EXISTS #F3Count;
+	SELECT ESYear, ESMonth, COUNT(DISTINCT ClaimKey) AS Cnt
+	INTO #F3Count
+	FROM #Base b
+	WHERE b.AccessionNumber IS NOT NULL
+	  AND EXISTS (SELECT 1 FROM #VarAcc v WHERE v.Acc = b.AccessionNumber)
+	GROUP BY ESYear, ESMonth
+	UNION ALL
+	SELECT 0, 0, COUNT(DISTINCT ClaimKey)
+	FROM #Base b
+	WHERE b.AccessionNumber IS NOT NULL
+	  AND EXISTS (SELECT 1 FROM #VarAcc v WHERE v.Acc = b.AccessionNumber);
+
 	;WITH LisFinal AS
 	(
 		-- Reads from #LisOut which is populated by either the aggregate fast-path
@@ -743,11 +792,33 @@ BEGIN
 	),
 	PMS AS
 	(
-		SELECT p.ESYear, p.ESMonth, 'F' AS RowCode, 'No. of Billed Claims' AS Description,
+		SELECT p.ESYear, p.ESMonth, 'F' AS RowCode, 'F: No. of Billed Claims' AS Description,
 			   CAST(COUNT(DISTINCT b.ClaimKey) AS DECIMAL(18,2)) AS MetricValue
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 		GROUP BY p.ESYear, p.ESMonth
+
+		UNION ALL
+		SELECT p.ESYear, p.ESMonth, 'F.1', '  1) Claim Submitted in Cove',
+			   CAST(ISNULL(f1.Cnt, 0) AS DECIMAL(18,2))
+		FROM #Periods p
+		LEFT JOIN #F1Count f1 ON f1.ESYear = p.ESYear AND f1.ESMonth = p.ESMonth
+
+		UNION ALL
+		SELECT p.ESYear, p.ESMonth, 'F.2', '  2) Claim Submitted in Others',
+			   CAST(CASE WHEN ISNULL(bb.BilledCount, 0) - ISNULL(f1.Cnt, 0) - ISNULL(f3.Cnt, 0) > 0
+						 THEN ISNULL(bb.BilledCount, 0) - ISNULL(f1.Cnt, 0) - ISNULL(f3.Cnt, 0)
+						 ELSE 0 END AS DECIMAL(18,2))
+		FROM #Periods p
+		LEFT JOIN #BaseBilledCount bb ON bb.ESYear = p.ESYear AND bb.ESMonth = p.ESMonth
+		LEFT JOIN #F1Count f1 ON f1.ESYear = p.ESYear AND f1.ESMonth = p.ESMonth
+		LEFT JOIN #F3Count f3 ON f3.ESYear = p.ESYear AND f3.ESMonth = p.ESMonth
+
+		UNION ALL
+		SELECT p.ESYear, p.ESMonth, 'F.3', '  3) Claim Submitted in VariantX',
+			   CAST(ISNULL(f3.Cnt, 0) AS DECIMAL(18,2))
+		FROM #Periods p
+		LEFT JOIN #F3Count f3 ON f3.ESYear = p.ESYear AND f3.ESMonth = p.ESMonth
 
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'G', 'Billed Mismatches - Accessions NA / Cove Claims billed',
@@ -895,7 +966,7 @@ BEGIN
 			   ISNULL(SUM(b.InsuranceBalance), 0)
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.ClaimStatus = 'Partially Denied'
+						   AND b.ClaimStatus NOT IN ('Denied','Fully Denied','No Response')
 		GROUP BY p.ESYear, p.ESMonth
 
 		UNION ALL
@@ -989,6 +1060,10 @@ BEGIN
 	DROP TABLE IF EXISTS #BaseBilledCount;
 	DROP TABLE IF EXISTS #LisBilled;
 	DROP TABLE IF EXISTS #LisBilledCount;
+	DROP TABLE IF EXISTS #CoveAcc;
+	DROP TABLE IF EXISTS #VarAcc;
+	DROP TABLE IF EXISTS #F1Count;
+	DROP TABLE IF EXISTS #F3Count;
 END;
 GO
 

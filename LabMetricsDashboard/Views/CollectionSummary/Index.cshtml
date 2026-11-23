@@ -1012,7 +1012,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <div class="top5-card-hdr reimb-hdr">
                     <div>
                         <div class="top5-card-hdr-title">Reimbursement Rate</div>
-                        <div class="top5-card-hdr-sub">@(Model.IsWellHealthLab || Model.IsNorthWestLab || Model.IsVariantXLab ? "Top 5 payers by insurance payment" : Model.UsesSpCollectionLogic || Model.IsAugustusLab ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
+                        <div class="top5-card-hdr-sub">@(Model.IsWellHealthLab || Model.IsNorthWestLab ? "Top 5 payers by insurance payment" : Model.IsVariantXLab || Model.UsesSpCollectionLogic || Model.IsAugustusLab ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
                     </div>
                     <span class="top5-card-badge reimb-badge">
                         <i class="bi bi-percent"></i> Reimbursement
@@ -1055,7 +1055,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                             <div class="top5-payer-bar-wrap">
                                 <div class="top5-payer-bar-bg">
                                     <div class="top5-payer-bar-fill reimb-fill" style="width:@(barW.ToString("F1"))%"></div>
-                                    <div class="top5-payer-bar-label">@pct.ToString("F1")%</div>
+                                    <div class="top5-payer-bar-label">@(Model.IsVariantXLab ? pct.ToString("F0") : pct.ToString("F1"))%</div>
                                 </div>
                             </div>
                         </div>
@@ -1065,7 +1065,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <div class="top5-card-footer">
                     @if (Model.IsVariantXLab)
                     {
-                        <span>Top 5 by <span class="top5-hl-blue">Insurance Payment</span> &bull;
+                        <span>Top 5 by <span class="top5-hl-blue">Claim Count</span> &bull;
                         InsurancePayment &gt; 0 &bull; Payment % = Average(InsurancePayment / ChargeAmount × 100)</span>
                     }
                     else if (Model.IsWellHealthLab || Model.IsNorthWestLab)
@@ -1090,7 +1090,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <div class="top5-card-hdr reimb-hdr">
                     <div>
                         <div class="top5-card-hdr-title">Reimbursement Rate</div>
-                        <div class="top5-card-hdr-sub">@(Model.IsVariantXLab ? "Top 5 payers by insurance payment" : "Top 5 payers by unique visit count")</div>
+                        <div class="top5-card-hdr-sub">@(Model.IsVariantXLab ? "Top 5 payers by claim count" : "Top 5 payers by unique visit count")</div>
                     </div>
                     <span class="top5-card-badge reimb-badge"><i class="bi bi-percent"></i> Reimbursement</span>
                 </div>
@@ -1247,7 +1247,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 <button class="nav-link" id="avgpay3-tab" data-bs-toggle="pill"
                         data-bs-target="#avgpay3-pane" type="button" role="tab"
                         aria-controls="avgpay3-pane" aria-selected="false">
-                    <i class="bi bi-cash-coin"></i> Avg Payments Last 3 Months
+                    <i class="bi bi-cash-coin"></i> @(Model.IsVariantXLab ? "Panel Averages Last 3 Months" : "Avg Payments Last 3 Months")
                 </button>
             </li>
         }

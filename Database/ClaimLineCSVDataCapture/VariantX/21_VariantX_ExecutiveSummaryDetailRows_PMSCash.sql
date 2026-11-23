@@ -1,6 +1,7 @@
-/* =============================================================================
+﻿/* =============================================================================
    VariantX – Executive Summary PMS/Cash Detail-Rows SP
-   Mirrors 16_VariantX_ExecutiveSummary_Aggregate RoleIDs (FirstBilledDate / ClaimID).
+   Mirrors 16_VariantX_ExecutiveSummary_Aggregate RoleIDs
+   (population = FirstBilledDate; month bucket = DateofService; ClaimID).
    Generic name: dbo.usp_GetExecutiveSummaryDetail_PMSCash
    ============================================================================= */
 SET NOCOUNT ON;
@@ -110,9 +111,10 @@ BEGIN
         ISNULL(TRY_CAST(PatientAdjustments   AS DECIMAL(18,2)), 0)
     FROM dbo.ClaimLevelData
     WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+      AND TRY_CAST(DateofService AS DATE) IS NOT NULL
       AND NULLIF(LTRIM(RTRIM(ClaimID)), '''') IS NOT NULL
-      AND (@Year = 0  OR YEAR (TRY_CAST(FirstBilledDate AS DATE)) = @Year)
-      AND (@Month = 0 OR MONTH(TRY_CAST(FirstBilledDate AS DATE)) = @Month);';
+      AND (@Year = 0  OR YEAR (TRY_CAST(DateofService AS DATE)) = @Year)
+      AND (@Month = 0 OR MONTH(TRY_CAST(DateofService AS DATE)) = @Month);';
 
     EXEC sys.sp_executesql @sql,
         N'@Year INT, @Month INT',
@@ -141,6 +143,28 @@ BEGIN
     FROM #Base b
     WHERE
            (@RowCode = 'F')
+        OR (@RowCode = 'F.1'  AND b.AccessionNumber IS NOT NULL
+                             AND EXISTS (
+                                   SELECT 1 FROM CoveLRN.dbo.LIMSMaster lm
+                                   WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(300), lm.Accession))), N'')
+                                         = b.AccessionNumber COLLATE DATABASE_DEFAULT))
+        OR (@RowCode = 'F.2'  AND (
+                b.AccessionNumber IS NULL
+                OR (
+                    NOT EXISTS (
+                        SELECT 1 FROM CoveLRN.dbo.LIMSMaster lm
+                        WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(300), lm.Accession))), N'')
+                              = b.AccessionNumber COLLATE DATABASE_DEFAULT)
+                    AND NOT EXISTS (
+                        SELECT 1 FROM dbo.LIMSMaster lm
+                        WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(300), lm.Accession))), N'')
+                              = b.AccessionNumber COLLATE DATABASE_DEFAULT)
+                )))
+        OR (@RowCode = 'F.3'  AND b.AccessionNumber IS NOT NULL
+                             AND EXISTS (
+                                   SELECT 1 FROM dbo.LIMSMaster lm
+                                   WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(300), lm.Accession))), N'')
+                                         = b.AccessionNumber COLLATE DATABASE_DEFAULT))
         OR (@RowCode = 'G')  -- mismatch drill: all billed claims (same as F)
         OR (@RowCode = 'H'   AND b.ClaimStatus = 'Fully Paid')
         OR (@RowCode = 'I'   AND b.ClaimStatus = 'Patient Responsibility')
@@ -160,7 +184,7 @@ BEGIN
         OR (@RowCode = 'T'   AND b.ClaimStatus = 'Partially Paid')
         OR (@RowCode = 'U')
         OR (@RowCode = 'U.1' AND b.ClaimStatus IN ('Denied','Fully Denied'))
-        OR (@RowCode = 'U.2' AND b.ClaimStatus = 'Partially Denied')
+        OR (@RowCode = 'U.2' AND b.ClaimStatus NOT IN ('Denied','Fully Denied','No Response'))
         OR (@RowCode = 'U.3' AND b.ClaimStatus = 'No Response')
     ORDER BY b.FirstBilledDate, b.ClaimKey;
 

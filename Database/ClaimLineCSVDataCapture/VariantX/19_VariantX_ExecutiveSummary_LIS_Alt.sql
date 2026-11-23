@@ -13,7 +13,7 @@
      D.xxx  Other-status sub-rows         SampleStatus = xxx (e.g. System Test)
 
    Period: RequestCollectDate / DateOfCollection (collection date), independent
-   of FirstBilledDate used by PMS/Cash/Avg in file 16.
+   of PMS/Cash/Avg in file 16 (FirstBilledDate population, DateofService months).
    ============================================================================= */
 SET NOCOUNT ON;
 GO

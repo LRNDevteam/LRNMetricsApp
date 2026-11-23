@@ -521,7 +521,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         DateOnly? filterCheckDateFrom, DateOnly? filterCheckDateTo,
         CancellationToken ct,
         int? lastMonths = null,
-        IEnumerable<SqlParameter>? extraParams = null)
+        IEnumerable<SqlParameter>? extraParams = null,
+        int topPayersForDrilldown = 3)
     {
         var rawRows = new List<PanelAveragesRawRow>();
         DateOnly? windowFrom = null, windowTo = null;
@@ -569,8 +570,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 Days60Amount:      GetDecimalOrDefault(r, "Days60Amount")));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rawRows.Count, sw.ElapsedMilliseconds);
-        // Panel totals = ALL payers returned by SP; drill-down shows Top 3 only.
-        return BuildPanelAveragesResult(rawRows, topPayersForDrilldown: 3) with
+        // Panel totals = ALL payers; drill-down Top N (VariantX Last 3 Months = Top 2).
+        return BuildPanelAveragesResult(rawRows, topPayersForDrilldown: topPayersForDrilldown) with
         {
             WindowFrom = windowFrom,
             WindowTo = windowTo,
@@ -2889,9 +2890,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         var months = lastMonths is 3 or 6 ? lastMonths : 6;
         var prefix = LabCollectionPrefix.GetPrefix(labName);
 
-        // Elixir / VariantX / Cove SPs own their rolling DateOfService window, anchored
-        // to the latest processed week-range end date. Check-date parameters remain
-        // optional user filters.
+        // Elixir / VariantX / Cove SPs own their rolling DateOfService window.
+        // VariantX Last 3 Months: exclude current DOS month; drill-down Top 2 payers.
         if (LabCollectionPrefix.UsesDateOfServiceAvgPayments(labName))
             return await GetAvgPaymentsViaSpAsync(
                 connectionString,
@@ -2901,7 +2901,9 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 filterDosFrom, filterDosTo,
                 filterCheckDateFrom, filterCheckDateTo,
                 ct,
-                lastMonths: months).ConfigureAwait(false);
+                lastMonths: months,
+                topPayersForDrilldown: LabCollectionPrefix.IsVariantX(labName) && months == 3 ? 2 : 3)
+                .ConfigureAwait(false);
 
         var (windowFrom, windowTo) = await ResolveAvgPaymentsCheckWindowAsync(
             connectionString, filterCheckDateFrom, filterCheckDateTo, months, ct).ConfigureAwait(false);

@@ -92,7 +92,7 @@ public sealed class ExecutiveSummaryHighlightsExcel
         // VariantX labels Avg Payments as Panel Averages - by DOS (avgpay-pane).
         // Others show Average Payments and, where the lab has it, Last 3 Months.
         var collectionTabs = LabCollectionPrefix.IsVariantX(labName)
-            ? "mcv-pane,wcv-pane,top5grid-pane,avgpay-pane"
+            ? "mcv-pane,wcv-pane,top5grid-pane,avgpay-pane,avgpay3-pane"
             : LabCollectionPrefix.UsesAvgPaymentsByDateBasis(labName)
             ? "mcv-pane,wcv-pane,top5grid-pane,avgpaydos-pane,avgpay-pane"
             : "mcv-pane,wcv-pane,top5grid-pane,avgpay-pane,avgpay3-pane";

@@ -168,9 +168,25 @@ BEGIN
          WHERE TRY_CAST(DateOfService AS DATE) IS NOT NULL
            AND TRY_CAST(DateOfService AS DATE) <= CAST(GETDATE() AS DATE));
 
-    DECLARE @WindowEnd DATE = DATEADD(DAY, 1, @MaxDos);
-    DECLARE @Cutoff DATE = DATEADD(MONTH, -@LastMonths, @MaxDos);
-    DECLARE @WindowFrom DATE = DATEADD(DAY, 1, @Cutoff);
+    -- Last 3 months: last 3 calendar months ending at MaxDos month (inclusive).
+    -- Example: MaxDos in Mar → Jan..Mar; MaxDos in Apr → Feb..Apr (sheet "Feb..Apr").
+    -- Last 6 months: rolling window ending at max DOS (inclusive).
+    DECLARE @WindowFrom DATE;
+    DECLARE @WindowEnd  DATE; -- exclusive
+    DECLARE @WindowTo   DATE; -- inclusive (for UI / Excel)
+
+    IF @LastMonths = 3
+    BEGIN
+        SET @WindowEnd  = DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(@MaxDos), MONTH(@MaxDos), 1));
+        SET @WindowFrom = DATEADD(MONTH, -3, @WindowEnd);
+        SET @WindowTo   = DATEADD(DAY, -1, @WindowEnd);
+    END
+    ELSE
+    BEGIN
+        SET @WindowEnd  = DATEADD(DAY, 1, @MaxDos);
+        SET @WindowFrom = DATEADD(DAY, 1, DATEADD(MONTH, -@LastMonths, @MaxDos));
+        SET @WindowTo   = @MaxDos;
+    END
 
     ;WITH base AS
     (
@@ -180,13 +196,17 @@ BEGIN
             ClaimID,
             TRY_CAST(ChargeAmount AS DECIMAL(18,2))        AS Chg,
             TRY_CAST(InsurancePayment AS DECIMAL(18,2))    AS InsPay,
-            NULLIF(LTRIM(RTRIM(FullyPaidCount)), '')       AS FullyPaidFlag,
-            NULLIF(LTRIM(RTRIM(AdjucticatedCount)), '')    AS AdjudicatedFlag,
-            TRY_CAST(AdjucticatedAmount AS DECIMAL(18,2))  AS AdjudicatedAmt,
-            NULLIF(LTRIM(RTRIM(Bucket30Count)), '')        AS Bucket30Flag,
-            TRY_CAST(Bucket30Amount AS DECIMAL(18,2))      AS Bucket30Amt,
-            NULLIF(LTRIM(RTRIM(Bucket60Count)), '')        AS Bucket60Flag,
-            TRY_CAST(Bucket60Amount AS DECIMAL(18,2))      AS Bucket60Amt
+            CASE WHEN LTRIM(RTRIM(FullyPaidCount)) = N'Fully Paid' THEN 1 ELSE 0 END AS IsFullyPaid,
+            COALESCE(
+                TRY_CAST(FullyPaidAmount AS DECIMAL(18,2)),
+                TRY_CAST(InsurancePayment AS DECIMAL(18,2)),
+                0) AS FullyPaidAmt,
+            CASE WHEN ISNULL(TRY_CAST(AdjucticatedAmount AS DECIMAL(18,2)), 0) > 0 THEN 1 ELSE 0 END AS IsAdjudicated,
+            ISNULL(TRY_CAST(AdjucticatedAmount AS DECIMAL(18,2)), 0) AS AdjudicatedAmt,
+            CASE WHEN ISNULL(TRY_CAST(Bucket30Amount AS DECIMAL(18,2)), 0) > 0 THEN 1 ELSE 0 END AS IsBucket30,
+            ISNULL(TRY_CAST(Bucket30Amount AS DECIMAL(18,2)), 0) AS Bucket30Amt,
+            CASE WHEN ISNULL(TRY_CAST(Bucket60Amount AS DECIMAL(18,2)), 0) > 0 THEN 1 ELSE 0 END AS IsBucket60,
+            ISNULL(TRY_CAST(Bucket60Amount AS DECIMAL(18,2)), 0) AS Bucket60Amt
         FROM dbo.ClaimLevelData
         WHERE TRY_CAST(DateOfService AS DATE) >= @WindowFrom
           AND TRY_CAST(DateOfService AS DATE) < @WindowEnd
@@ -202,19 +222,21 @@ BEGIN
           AND (@CheckDateTo IS NULL OR TRY_CAST(CheckDate AS DATE) <= @CheckDateTo)
     )
     SELECT
+        @WindowFrom AS WindowFrom,
+        @WindowTo   AS WindowTo,
         PanelName,
         PayerName,
         COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), '')) AS NoOfClaims,
         ISNULL(SUM(Chg), 0) AS TotalCharges,
         ISNULL(SUM(InsPay), 0) AS CarrierPayment,
-        COUNT(CASE WHEN FullyPaidFlag IS NOT NULL THEN ClaimID END) AS FullyPaidCount,
-        ISNULL(SUM(CASE WHEN FullyPaidFlag IS NOT NULL THEN InsPay ELSE 0 END), 0) AS FullyPaidAmount,
-        COUNT(CASE WHEN AdjudicatedFlag IS NOT NULL THEN ClaimID END) AS AdjudicatedCount,
-        ISNULL(SUM(CASE WHEN AdjudicatedFlag IS NOT NULL THEN AdjudicatedAmt ELSE 0 END), 0) AS AdjudicatedAmount,
-        COUNT(CASE WHEN Bucket30Flag IS NOT NULL THEN ClaimID END) AS Days30Count,
-        ISNULL(SUM(CASE WHEN Bucket30Flag IS NOT NULL THEN Bucket30Amt ELSE 0 END), 0) AS Days30Amount,
-        COUNT(CASE WHEN Bucket60Flag IS NOT NULL THEN ClaimID END) AS Days60Count,
-        ISNULL(SUM(CASE WHEN Bucket60Flag IS NOT NULL THEN Bucket60Amt ELSE 0 END), 0) AS Days60Amount
+        COUNT(CASE WHEN IsFullyPaid = 1 THEN ClaimID END) AS FullyPaidCount,
+        ISNULL(SUM(CASE WHEN IsFullyPaid = 1 THEN FullyPaidAmt ELSE 0 END), 0) AS FullyPaidAmount,
+        COUNT(CASE WHEN IsAdjudicated = 1 THEN ClaimID END) AS AdjudicatedCount,
+        ISNULL(SUM(CASE WHEN IsAdjudicated = 1 THEN AdjudicatedAmt ELSE 0 END), 0) AS AdjudicatedAmount,
+        COUNT(CASE WHEN IsBucket30 = 1 THEN ClaimID END) AS Days30Count,
+        ISNULL(SUM(CASE WHEN IsBucket30 = 1 THEN Bucket30Amt ELSE 0 END), 0) AS Days30Amount,
+        COUNT(CASE WHEN IsBucket60 = 1 THEN ClaimID END) AS Days60Count,
+        ISNULL(SUM(CASE WHEN IsBucket60 = 1 THEN Bucket60Amt ELSE 0 END), 0) AS Days60Amount
     FROM base
     GROUP BY PanelName, PayerName
     ORDER BY PanelName, NoOfClaims DESC, PayerName;

@@ -386,14 +386,21 @@ public sealed partial class SqlCollectionSummaryRepository
     public async Task<PanelAveragesResult> GetAvgPaymentsFromAggregatesAsync(
         string connectionString, string prefix, CancellationToken ct = default)
     {
-        // Try the SP first; fall back to direct snapshot table read if SP is not yet deployed.
+        // Call the Get SP by prefix directly (same result set as the UI Avg Payments / Panel Averages
+        // tab). Do not pass prefix as labName into GetAvgPaymentsAsync — GetPrefix("VarX") is null, so
+        // that path skipped usp_GetVarX_CS_AvgPayments and used CheckDate inline SQL instead.
         try
         {
-            return await GetAvgPaymentsAsync(
+            return await GetAvgPaymentsViaSpAsync(
                 connectionString,
-                labName: prefix,
-                ct: ct,
-                lastMonths: 6).ConfigureAwait(false);
+                $"dbo.usp_Get{prefix}_CS_AvgPayments",
+                filterPayerNames: null, filterPanelNames: null,
+                filterFirstBillFrom: null, filterFirstBillTo: null,
+                filterDosFrom: null, filterDosTo: null,
+                filterCheckDateFrom: null, filterCheckDateTo: null,
+                ct,
+                lastMonths: 6,
+                topPayersForDrilldown: 3).ConfigureAwait(false);
         }
         catch (SqlException ex) when (ex.Number == 2812) // SP not yet deployed
         {

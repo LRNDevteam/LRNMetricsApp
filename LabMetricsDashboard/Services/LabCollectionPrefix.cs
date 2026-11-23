@@ -32,13 +32,17 @@ public static class LabCollectionPrefix
         ["CERT"]               = "Cert",
         ["Cert"]               = "Cert",
         ["Cove"]               = "Cove",
+        ["COVELRN"]            = "Cove",
         ["Elixir"]             = "Elix",
+        ["Elix"]               = "Elix", // alias when callers pass the table prefix
         // VariantX is an Elixir clone; weekly Collection / Denial weeks are Thu–Wed. Prefix VarX_*.
         ["VariantX"]           = "VarX",
         ["VariantX_LRN"]       = "VarX",
+        ["VarX"]               = "VarX", // alias when callers pass the table prefix
         // Analyze Pathology: VariantX clone; Production Summary follows the client sheet. Prefix AnP_*.
         ["AnalyzePathology"]   = "AnP",
         ["Analyze_Pathology"]  = "AnP",
+        ["AnP"]                = "AnP",
         // WellHealth: Analyze Pathology SP-only Collection Summary pattern. Prefix WH_*.
         ["WellHealth"]         = "WH",
         ["Well_Health"]        = "WH",
@@ -138,11 +142,16 @@ public static class LabCollectionPrefix
         GetPrefix(labName) is "Aug";
 
     /// <summary>
-    /// Labs with the Collection Summary "Avg Payments Last 3 Months" tab and Excel sheet.
+    /// Labs with the Collection Summary "Avg Payments Last 3 Months" tab and Excel sheet
+    /// (VariantX titles it "Panel Averages Last 3 Months"; last 3 calendar months ending at max DOS month).
     /// Hidden for date-basis labs (<see cref="UsesAvgPaymentsByDateBasis"/>) and Analyze Pathology.
     /// </summary>
     public static bool ShowsAvgPaymentsLast3Months(string? labName) =>
         !UsesAvgPaymentsByDateBasis(labName) && GetPrefix(labName) is not "AnP";
+
+    /// <summary>Excel / UI sheet name for the Last 3 Months averages tab.</summary>
+    public static string AvgPaymentsLast3MonthsSheetName(string? labName) =>
+        IsVariantX(labName) ? "Panel Averages Last 3 Months" : "Avg payments_Last 3 Months";
 
     /// <summary>
     /// InHealth DTR: Collection Summary payment-percent tabs show Average of PaymentPercent

@@ -242,6 +242,11 @@ GO
 -- 1. Top 5 Insurances | Reimbursement Rate
 -- Same ranking as Top 5 Total Payments: InsurancePayment > 0, sort by SUM(InsurancePayment).
 -- Payment % = AVG(InsurancePayment / ChargeAmount * 100) per claim (client Excel).
+-- Top 5 Reimbursement Rate (client sheet):
+--   Filter: InsurancePayment > 0
+--   Sort:   Claim Count (COUNT DISTINCT ClaimID) DESC
+--   Payment % = Average(InsurancePayment / ChargeAmount * 100)  [Average of Payment %]
+-- Do not use CheckDate here — CheckDate would drop MEDICARE TX from Top 5 vs client sheet.
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshVarX_CS_Top5ReimbursementPct
 AS
 BEGIN
@@ -258,7 +263,7 @@ BEGIN
                        OR TRY_CAST(ChargeAmount AS DECIMAL(18,2)) = 0 THEN NULL
                      ELSE TRY_CAST(InsurancePayment AS DECIMAL(18,2))
                           / TRY_CAST(ChargeAmount AS DECIMAL(18,2)) * 100 END
-            ), 1)                                                                           AS PaymentPct
+            ), 0)                                                                           AS PaymentPct
         FROM dbo.ClaimLevelData
         WHERE PayerName_Raw IS NOT NULL
           AND LTRIM(RTRIM(PayerName_Raw)) <> ''
@@ -267,14 +272,14 @@ BEGIN
     ),
     ranked AS (
         SELECT TOP 5
-               ROW_NUMBER() OVER (ORDER BY a.SumIns DESC, a.Visits DESC) AS Rnk,
+               ROW_NUMBER() OVER (ORDER BY a.Visits DESC, a.SumIns DESC) AS Rnk,
                a.PayerName,
                a.SumIns,
                a.SumChg,
                a.Visits,
                a.PaymentPct
         FROM agg a
-        ORDER BY a.SumIns DESC, a.Visits DESC
+        ORDER BY a.Visits DESC, a.SumIns DESC
     )
     SELECT * INTO #out FROM ranked;
 

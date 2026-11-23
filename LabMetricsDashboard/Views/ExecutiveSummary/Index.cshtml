@@ -1385,6 +1385,75 @@ if (showHighlightTabs)
                     <ul class="esc-rules" id="esCellRules" aria-label="How this value is calculated"></ul>
                     <div class="esc-alert" id="esCellAlert" hidden></div>
                     <div class="esc-summary" id="esCellSummary"></div>
+                    <div class="esc-client-filters" id="esCellClientFilters" hidden>
+                        <div class="esc-cf-head">
+                            <div class="esc-cf-label"><i class="bi bi-funnel"></i> Filter these rows</div>
+                            <button type="button" class="btn btn-sm btn-link esc-cf-clear" id="escFilterClear" title="Clear row filters">Clear</button>
+                        </div>
+                        <div class="esc-cf-row">
+                            <div class="esc-cf-field" data-esc-dim="panel">
+                                <label>Panel</label>
+                                <div class="esc-cf-dd">
+                                    <button type="button" class="esc-cf-btn" id="escFilterPanelBtn" disabled aria-haspopup="listbox" aria-expanded="false">
+                                        <span class="esc-cf-btn-text">All</span>
+                                        <span class="esc-cf-btn-count" hidden></span>
+                                        <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                                    </button>
+                                    <div class="esc-cf-menu" id="escFilterPanelMenu" hidden>
+                                        <div class="esc-cf-search"><input type="text" placeholder="Search…" autocomplete="off" /></div>
+                                        <div class="esc-cf-list" id="escFilterPanel" role="listbox" aria-label="Panel"></div>
+                                        <div class="esc-cf-menu-foot"><button type="button" class="btn btn-sm btn-primary esc-cf-done">Done</button></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="esc-cf-field" data-esc-dim="clinic">
+                                <label>Clinics</label>
+                                <div class="esc-cf-dd">
+                                    <button type="button" class="esc-cf-btn" id="escFilterClinicBtn" disabled aria-haspopup="listbox" aria-expanded="false">
+                                        <span class="esc-cf-btn-text">All</span>
+                                        <span class="esc-cf-btn-count" hidden></span>
+                                        <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                                    </button>
+                                    <div class="esc-cf-menu" id="escFilterClinicMenu" hidden>
+                                        <div class="esc-cf-search"><input type="text" placeholder="Search…" autocomplete="off" /></div>
+                                        <div class="esc-cf-list" id="escFilterClinic" role="listbox" aria-label="Clinics"></div>
+                                        <div class="esc-cf-menu-foot"><button type="button" class="btn btn-sm btn-primary esc-cf-done">Done</button></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="esc-cf-field" data-esc-dim="provider">
+                                <label>Referring Provider</label>
+                                <div class="esc-cf-dd">
+                                    <button type="button" class="esc-cf-btn" id="escFilterProviderBtn" disabled aria-haspopup="listbox" aria-expanded="false">
+                                        <span class="esc-cf-btn-text">All</span>
+                                        <span class="esc-cf-btn-count" hidden></span>
+                                        <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                                    </button>
+                                    <div class="esc-cf-menu" id="escFilterProviderMenu" hidden>
+                                        <div class="esc-cf-search"><input type="text" placeholder="Search…" autocomplete="off" /></div>
+                                        <div class="esc-cf-list" id="escFilterProvider" role="listbox" aria-label="Referring Provider"></div>
+                                        <div class="esc-cf-menu-foot"><button type="button" class="btn btn-sm btn-primary esc-cf-done">Done</button></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="esc-cf-field" data-esc-dim="rep">
+                                <label>Sales Rep</label>
+                                <div class="esc-cf-dd">
+                                    <button type="button" class="esc-cf-btn" id="escFilterRepBtn" disabled aria-haspopup="listbox" aria-expanded="false">
+                                        <span class="esc-cf-btn-text">All</span>
+                                        <span class="esc-cf-btn-count" hidden></span>
+                                        <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                                    </button>
+                                    <div class="esc-cf-menu" id="escFilterRepMenu" hidden>
+                                        <div class="esc-cf-search"><input type="text" placeholder="Search…" autocomplete="off" /></div>
+                                        <div class="esc-cf-list" id="escFilterRep" role="listbox" aria-label="Sales Rep"></div>
+                                        <div class="esc-cf-menu-foot"><button type="button" class="btn btn-sm btn-primary esc-cf-done">Done</button></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="esc-cf-hint" id="escFilterHint"></div>
+                    </div>
                     <div class="esc-grid-wrap" id="esCellGridWrap">
                         <table class="esc-grid" id="esCellGrid"><thead></thead><tbody></tbody></table>
                     </div>
@@ -1656,6 +1725,9 @@ if (showHighlightTabs)
 
             menu.addEventListener('click', function (e) { e.stopPropagation(); });
 
+            // Chip clears and lazy FilterOptions refill call this to refresh the button label.
+            btn.addEventListener('_labelUpdate', updateBtnLabel);
+
             // initialise label
             updateBtnLabel();
         });
@@ -1850,6 +1922,14 @@ if (showHighlightTabs)
                 host.innerHTML = '<div class="alert alert-danger m-3">Failed to load Executive Summary. Please refresh the page.</div>';
             });
 
+        // Applied filter values survive the lazy FilterOptions refill (shell page has empty lists).
+        var esSelectedFilters = {
+            panels:    @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.SelectedPanels ?? [])),
+            clinics:   @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.SelectedClinics ?? [])),
+            providers: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.SelectedProviders ?? [])),
+            reps:      @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.SelectedReps ?? []))
+        };
+
         fetch('@Url.Action("FilterOptions", "ExecutiveSummary")' + qs, { credentials: 'same-origin' })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
@@ -1859,16 +1939,28 @@ if (showHighlightTabs)
                     var sel = document.getElementById(selectId);
                     if (!list || !names) return;
                     var selectedSet = {};
-                    (selected || []).forEach(function (v) { selectedSet[v] = true; });
+                    var selectedLower = {};
+                    (selected || []).forEach(function (v) {
+                        if (v == null || v === '') return;
+                        selectedSet[v] = true;
+                        selectedLower[String(v).toLowerCase()] = String(v);
+                    });
+                    // Keep applied values even if the options SP omits them (casing / stale cache).
+                    var allNames = names.slice();
+                    Object.keys(selectedSet).forEach(function (v) {
+                        var found = allNames.some(function (n) { return String(n).toLowerCase() === String(v).toLowerCase(); });
+                        if (!found) allNames.push(v);
+                    });
                     list.innerHTML = '';
                     if (sel) sel.innerHTML = '';
-                    names.forEach(function (name) {
+                    allNames.forEach(function (name) {
+                        var isSelected = !!selectedSet[name] || !!selectedLower[String(name).toLowerCase()];
                         var label = document.createElement('label');
                         label.className = 'es-dd-item';
                         var cb = document.createElement('input');
                         cb.type = 'checkbox';
                         cb.value = name;
-                        if (selectedSet[name]) cb.checked = true;
+                        if (isSelected) cb.checked = true;
                         label.appendChild(cb);
                         label.appendChild(document.createTextNode(name));
                         list.appendChild(label);
@@ -1876,20 +1968,22 @@ if (showHighlightTabs)
                             var opt = document.createElement('option');
                             opt.value = name;
                             opt.textContent = name;
-                            if (selectedSet[name]) opt.selected = true;
+                            if (isSelected) opt.selected = true;
                             sel.appendChild(opt);
                         }
                     });
-                    var btn = list.closest('.es-dropdown-wrap') && list.closest('.es-dropdown-wrap').querySelector('.es-dd-btn');
+                    var wrap = list.closest('.es-dropdown-wrap');
+                    var btn = wrap && wrap.querySelector('.es-dd-btn');
                     if (btn) {
-                        btn.disabled = names.length === 0;
-                        btn.classList.toggle('es-dd-btn-disabled', names.length === 0);
+                        btn.disabled = allNames.length === 0;
+                        btn.classList.toggle('es-dd-btn-disabled', allNames.length === 0);
+                        btn.dispatchEvent(new CustomEvent('_labelUpdate'));
                     }
                 }
-                fillList('listPanels', 'selPanels', d.panels);
-                fillList('listClinics', 'selClinics', d.clinics);
-                fillList('listProviders', 'selProviders', d.providers);
-                fillList('listReps', 'selReps', d.reps);
+                fillList('listPanels', 'selPanels', d.panels || [], esSelectedFilters.panels);
+                fillList('listClinics', 'selClinics', d.clinics || [], esSelectedFilters.clinics);
+                fillList('listProviders', 'selProviders', d.providers || [], esSelectedFilters.providers);
+                fillList('listReps', 'selReps', d.reps || [], esSelectedFilters.reps);
                 var banner = document.getElementById('es-analysis-banner');
                 if (banner && (d.weekFolder || d.runId || d.inserted)) {
                     var wrap = document.createElement('div');

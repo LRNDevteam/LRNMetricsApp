@@ -1,4 +1,4 @@
-/* =============================================================================
+﻿/* =============================================================================
    VariantX - Executive Summary cell rows (value click -> popup grid)
    File     : 37_VariantX_ExecutiveSummary_CellRows.sql
    Database : VariantX_LRN (any database named VariantX%)
@@ -20,8 +20,11 @@
           C  Billed                           Billable AND BillCategory = Billed
           D  Other Samples                    SampleStatus <> Billable (blank excluded)
           D.<status>                          SampleStatus = <status>
-     PMS  (dbo.ClaimLevelData, distinct ClaimID, period = FirstBilledDate)
+     PMS  (dbo.ClaimLevelData, distinct ClaimID; population = FirstBilledDate; month = DateofService)
           F  Billed Claims                    every claim
+     F.1 Claim Submitted in Cove          AccessionNumber IN CoveLRN.LIMSMaster.Accession
+     F.2 Claim Submitted in Others        formula F - F.1 - F.3 (floored at 0)
+     F.3 Claim Submitted in VariantX      AccessionNumber IN dbo.LIMSMaster.Accession
           G  Billed Mismatches                formula: F - LIS C (floored at 0)
           H  Fully Paid            I  Patient Responsibility      J  Fully Adjusted (Adjusted / Written Off)
           K  Partially Adjusted    L  Partially Paid              M  Patient Payment (Patient Paid)
@@ -35,8 +38,6 @@
           U  Sum InsuranceBalance             U.1 Denied | Fully Denied   U.2 Partially Denied   U.3 No Response
      Avg  (formulas)
           V  (P + T) / F      W  P / H      X  (P + T) / (H + L + J + N.1 + N.2)
-     F1 - F3 are omitted (marked Doubt on the sheet).
-
    Parameters
      @Category / @RowCode   the clicked row (LIS | PMS | Cash | Avg)
      @Year / @Month         (Y, M) month, (Y, 0) year total, (0, 0) grand total
@@ -50,7 +51,7 @@
                   columns first (Amount first for $ rows), then the rest in table order.
    Count rows : TotalRows = the cell count (distinct Accession / ClaimID), TotalAmount = the same count.
    $ rows     : TotalRows = rows summed, TotalAmount = Sum(measure), Amount column on every row.
-   Formula rows (PMS G, Cash S, Avg V / W / X) return the formula and calculation in Rules,
+   Formula rows (PMS G / F2, Cash S, Avg V / W / X) return the formula and calculation in Rules,
    IsFormula = 1, TotalAmount = the grid value, and result set 3 = the components
    (Section, Operator, Component, Category, RowCode, Value, IsMoney, IsTotal) read from
    usp_GetVarX_ExecutiveSummary for the same period and page filters.
@@ -63,9 +64,10 @@
                                          live scan; dimension filters; in Billed-date mode the period is
                                          BilledDate bounded by @BilledFrom / @BilledTo (Year / Month / DOS
                                          ranges are NOT applied to LIS in this mode)
-     PMS / Cash  no filter             : FirstBilledDate
+     PMS / Cash  population always requires FirstBilledDate; monthwise period = DateofService
+            no filter                  : DateofService month of clicked cell
             any filter, DOS mode       : DateofService, Year / Month ranges, DOS bounds, dimension filters
-            any filter, Billed mode    : FirstBilledDate bounded by @BilledFrom / @BilledTo, dimension filters
+            any filter, Billed mode    : DateofService month; FirstBilledDate bounded by @BilledFrom / @BilledTo
    ============================================================================= */
 
 IF DB_NAME() NOT LIKE N'VariantX%'
@@ -144,7 +146,8 @@ BEGIN
 
     -- LIS mode: 0 = aggregate (no filter), 1 = aggregate re-summed by Year/Month/DOS, 2 = live LIMSMaster scan.
     DECLARE @LisMode   TINYINT = CASE WHEN @HasFilter = 0 THEN 0 WHEN @HasLisFilter = 0 THEN 1 ELSE 2 END;
-    -- Claim mode: 0 = FirstBilledDate (no filter), 1 = DOS mode (DateofService), 2 = Billed-date mode (FirstBilledDate).
+    -- Claim mode: 0 = no filter, 1 = DOS mode, 2 = Billed-date mode (FirstBilledDate range).
+    -- Monthwise period is always DateofService; population always requires FirstBilledDate.
     DECLARE @ClaimMode TINYINT = CASE WHEN @HasFilter = 0 THEN 0 WHEN @UseBilledDate = 0 THEN 1 ELSE 2 END;
 
     /* ---- dbo.LIMSMaster column detection (as files 17 / 19 / 20) ------------- */
@@ -284,6 +287,9 @@ BEGIN
         ('LIS',  'C',   N'SampleStatus = Billable AND BillCategory = Billed', NULL, NULL, 0),
         ('LIS',  'D',   N'SampleStatus <> Billable (blank status excluded)', NULL, NULL, 0),
         ('PMS',  'F',   N'Billed Claims: every claim billed in the period (no ClaimStatus filter)', NULL, NULL, 0),
+        ('PMS',  'F.1',  N'Billed Claims whose AccessionNumber exists in CoveLRN.dbo.LIMSMaster.Accession', NULL, NULL, 0),
+        ('PMS',  'F.2',  N'Formula: Billed Claims (PMS F) - Claim Submitted in Cove (F.1) - Claim Submitted in VariantX (F.3), floored at 0', NULL, NULL, 1),
+        ('PMS',  'F.3',  N'Billed Claims whose AccessionNumber exists in dbo.LIMSMaster.Accession', NULL, NULL, 0),
         ('PMS',  'G',   N'Formula: Billed Claims (PMS F) - LIS Billed samples (LIS C) for the same period, floored at 0', NULL, NULL, 1),
         ('PMS',  'H',   N'ClaimStatus = Fully Paid', NULL, N'Fully Paid', 0),
         ('PMS',  'I',   N'ClaimStatus = Patient Responsibility', NULL, N'Patient Responsibility', 0),
@@ -303,7 +309,7 @@ BEGIN
         ('Cash', 'T',   N'Partially Paid ($): ClaimStatus = Partially Paid', N'InsurancePayment', N'Partially Paid', 0),
         ('Cash', 'U',   N'Insurance Balance ($): every claim billed in the period', N'InsuranceBalance', NULL, 0),
         ('Cash', 'U.1', N'Denials ($): ClaimStatus IN (Denied, Fully Denied)', N'InsuranceBalance', N'Denied|Fully Denied', 0),
-        ('Cash', 'U.2', N'Partially Denied ($): ClaimStatus = Partially Denied', N'InsuranceBalance', N'Partially Denied', 0),
+        ('Cash', 'U.2', N'Partially Denied ($): Sum(InsuranceBalance) where ClaimStatus NOT IN (Denied, Fully Denied, No Response)', N'InsuranceBalance', NULL, 0),
         ('Cash', 'U.3', N'No Response from Payor ($): ClaimStatus = No Response', N'InsuranceBalance', N'No Response', 0),
         ('Avg',  'V',   N'Formula: (Insurance Payment $ + Partially Paid $) / No. of Billed Claims (PMS F)', NULL, NULL, 1),
         ('Avg',  'W',   N'Formula: Insurance Payment $ / No. of Fully Paid Claims (PMS H)', NULL, NULL, 1),
@@ -343,7 +349,7 @@ BEGIN
 
     DECLARE @LisPeriodCol SYSNAME = CASE WHEN @LisMode = 2 AND @UseBilledDate = 1 AND @BilledDateCol IS NOT NULL
                                          THEN @BilledDateCol ELSE @DateCol END;
-    DECLARE @ClPeriodCol  SYSNAME = CASE WHEN @ClaimMode = 1 THEN N'DateofService' ELSE N'FirstBilledDate' END;
+    DECLARE @ClPeriodCol  SYSNAME = N'DateofService';
 
     DECLARE @PeriodText NVARCHAR(200) =
         CASE WHEN @Year = 0 AND @Month = 0 THEN N'all periods (Grand Total)'
@@ -378,13 +384,16 @@ BEGIN
         VALUES (N'Base filter',
                 CASE WHEN @IsLis = 1
                      THEN ISNULL(@LisPeriodCol, N'Date') + N' is a valid date and Accession is not blank; blank SampleStatus / BillCategory = empty text'
-                     ELSE @ClPeriodCol + N' is a valid date and ClaimID is not blank; blank ClaimStatus = empty text' END);
+                     ELSE N'FirstBilledDate and DateofService are valid dates and ClaimID is not blank; blank ClaimStatus = empty text' END);
 
     INSERT INTO @Rules (RuleGroup, RuleText)
     SELECT N'Period',
            CASE WHEN @IsFormula = 1 THEN N'Grid period: ' + @PeriodText
                 WHEN @IsLis = 1 THEN ISNULL(@LisPeriodCol, N'Date') + CASE WHEN @LisPeriodCol = @BilledDateCol THEN N' (billed date)' ELSE N' (collection date)' END + N' in ' + @PeriodText
-                ELSE @ClPeriodCol + CASE WHEN @ClaimMode = 1 THEN N' (DOS mode: a page filter is active)' ELSE N' (billed date)' END + N' in ' + @PeriodText END;
+                ELSE N'DateofService (monthwise) in ' + @PeriodText
+                     + CASE WHEN @ClaimMode = 2 THEN N'; FirstBilledDate bounded by Billed From/To'
+                            WHEN @ClaimMode = 1 THEN N'; DOS / Year / Month page filters active'
+                            ELSE N'; population requires FirstBilledDate' END END;
 
     INSERT INTO @Rules (RuleGroup, RuleText)
     VALUES (CASE WHEN @IsFormula = 1 THEN N'Formula' ELSE N'Row rule' END, @RuleText);
@@ -467,6 +476,12 @@ BEGIN
                 (1, N'Calculation', N'',  'PMS', N'F', NULL, 0, 0),
                 (2, N'Calculation', N'-', 'LIS', N'C', NULL, 0, 0),
                 (9, N'Result',      N'=', 'PMS', N'G', NULL, 0, 1);
+        ELSE IF @RowCodeU = N'F.2'     -- F - F.1 - F.3
+            INSERT INTO @Comp VALUES
+                (1, N'Calculation', N'',  'PMS', N'F',  NULL, 0, 0),
+                (2, N'Calculation', N'-', 'PMS', N'F.1', NULL, 0, 0),
+                (3, N'Calculation', N'-', 'PMS', N'F.3', NULL, 0, 0),
+                (9, N'Result',      N'=', 'PMS', N'F.2', NULL, 0, 1);
         ELSE IF @RowCodeU = N'S'      -- O - P - Q - R - T - U
             INSERT INTO @Comp VALUES
                 (1, N'Calculation', N'',  'Cash', N'O', NULL, 1, 0),
@@ -535,7 +550,7 @@ BEGIN
         DECLARE @Den DECIMAL(18,2) = ISNULL((SELECT SUM(Value) FROM #CellComp WHERE Section = N'Denominator' AND IsTotal = 0), 0);
         DECLARE @Calc NVARCHAR(1000);
 
-        IF @RowCodeU IN (N'G', N'S')
+        IF @RowCodeU IN (N'G', N'F.2', N'S')
         BEGIN
             SELECT @Calc = STRING_AGG(CAST(CASE WHEN Op = N'-' THEN N' - ' ELSE N'' END
                                            + CASE WHEN IsMoney = 1 THEN N'$' + FORMAT(Value, 'N2') ELSE FORMAT(Value, 'N0') END
@@ -545,7 +560,7 @@ BEGIN
 
             SET @Calc = @Calc + N' = ' + CASE WHEN @RowCodeU = N'S' THEN N'$' + FORMAT(@Result, 'N2') ELSE FORMAT(@Result, 'N0') END;
 
-            IF @RowCodeU = N'G'
+            IF @RowCodeU IN (N'G', N'F.2')
                AND (SELECT SUM(CASE WHEN Op = N'-' THEN -Value ELSE Value END) FROM #CellComp WHERE Section = N'Calculation') < 0
                 SET @Calc = @Calc + N' (a negative difference is shown as 0)';
         END
@@ -736,8 +751,8 @@ OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;';
       AND (@DosTo     IS NULL OR k.Es_Period <= @DosTo)';
     IF @ClaimMode = 2
         SET @W += N'
-      AND (@BilledFrom IS NULL OR k.Es_Period >= @BilledFrom)
-      AND (@BilledTo   IS NULL OR k.Es_Period <= @BilledTo)';
+      AND (@BilledFrom IS NULL OR TRY_CAST(c.FirstBilledDate AS DATE) >= @BilledFrom)
+      AND (@BilledTo   IS NULL OR TRY_CAST(c.FirstBilledDate AS DATE) <= @BilledTo)';
     IF @ClaimMode > 0
     BEGIN
         IF @HasPanel = 1 AND @ClPanelCol IS NOT NULL
@@ -751,8 +766,37 @@ OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;';
     END;
 
     -- Row rule: ClaimStatus list (file 16).
-    IF @Statuses IS NOT NULL
+    -- U.2 Partially Denied ($): InsuranceBalance where status is NOT Denied / Fully Denied / No Response.
+    IF @RowCodeU = N'U.2'
+        SET @W += N' AND k.Es_Status NOT IN (N''Denied'', N''Fully Denied'', N''No Response'')';
+    ELSE IF @Statuses IS NOT NULL
         SET @W += N' AND k.Es_Status IN (SELECT Val FROM #CellStatus)';
+
+    -- F1 / F3: AccessionNumber match against CoveLRN / local LIMSMaster.
+    IF @RowCodeU = N'F.1'
+    BEGIN
+        IF DB_ID(N'CoveLRN') IS NULL OR OBJECT_ID(N'CoveLRN.dbo.LIMSMaster', N'U') IS NULL
+            SET @W += N' AND 1 = 0';
+        ELSE
+            SET @W += N'
+      AND NULLIF(LTRIM(RTRIM(c.AccessionNumber)), N'''') IS NOT NULL
+      AND EXISTS (
+            SELECT 1 FROM CoveLRN.dbo.LIMSMaster lm
+            WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(300), lm.Accession))), N'''')
+                  = NULLIF(LTRIM(RTRIM(c.AccessionNumber)), N'''') COLLATE DATABASE_DEFAULT)';
+    END
+    ELSE IF @RowCodeU = N'F.3'
+    BEGIN
+        IF OBJECT_ID(N'dbo.LIMSMaster', N'U') IS NULL OR COL_LENGTH(N'dbo.LIMSMaster', N'Accession') IS NULL
+            SET @W += N' AND 1 = 0';
+        ELSE
+            SET @W += N'
+      AND NULLIF(LTRIM(RTRIM(c.AccessionNumber)), N'''') IS NOT NULL
+      AND EXISTS (
+            SELECT 1 FROM dbo.LIMSMaster lm
+            WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(300), lm.Accession))), N'''')
+                  = NULLIF(LTRIM(RTRIM(c.AccessionNumber)), N'''') COLLATE DATABASE_DEFAULT)';
+    END;
 
     SET @Sql = N'
 SELECT x.*
@@ -770,7 +814,8 @@ FROM
             ISNULL(LTRIM(RTRIM(c.[ClaimStatus])), N'''') AS Es_Status,
             ' + CASE WHEN @AmountCol IS NULL THEN N'CAST(NULL AS DECIMAL(18,2))'
                      ELSE N'ISNULL(TRY_CAST(c.' + QUOTENAME(@AmountCol) + N' AS DECIMAL(18,2)), 0)' END + N' AS Es_Amount) k
-    WHERE k.Es_ClaimKey IS NOT NULL AND k.Es_Period IS NOT NULL' + @W + N'
+    WHERE k.Es_ClaimKey IS NOT NULL AND k.Es_Period IS NOT NULL
+      AND TRY_CAST(c.FirstBilledDate AS DATE) IS NOT NULL' + @W + N'
 ) x
 WHERE x.Es_Rn = 1
 OPTION (RECOMPILE);

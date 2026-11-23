@@ -1,4 +1,4 @@
-/* =============================================================================
+﻿/* =============================================================================
    VariantX Labs — Executive Summary Aggregate Refresh (PMS / Cash / Avg)
    Prefix: VarX_ / VarX_ES_
    Refresh: usp_RefreshVarX_ExecutiveSummary
@@ -6,8 +6,11 @@
    =============================================================================
    Client Executive Summary sheet RoleIDs:
 
-   PMS (FirstBilledDate period, COUNT DISTINCT ClaimID):
+   PMS (population = FirstBilledDate present; month bucket = DateofService; COUNT DISTINCT ClaimID):
      F      No. of Billed Claims
+     F.1   Claim Submitted in Cove         AccessionNumber IN CoveLRN.dbo.LIMSMaster.Accession
+     F.2   Claim Submitted in Others       max(0, F - F.1 - F.3)
+     F.3   Claim Submitted in VariantX     AccessionNumber IN dbo.LIMSMaster.Accession
      G      Billed Mismatches = F - LIS C
      H      Fully Paid
      I      Patient Responsibility
@@ -19,7 +22,7 @@
      N      Insurance Balance Claims        Denied/Fully Denied, Partially Denied, No Response
      N.1 / N.2 / N.3                        Fully Denied|Denied / Partially Denied / No Response
 
-   Cash (FirstBilledDate period, dollar sums):
+   Cash (same FirstBilledDate population; DateofService month bucket; dollar sums):
      O      Total Billed ($)                Sum(ChargeAmount)
      P      Insurance Payment ($)           Sum(InsurancePayment) Fully Paid
      Q      Patient Responsibility ($)      Sum(PatientBalance)
@@ -28,13 +31,14 @@
      T      Partially Paid ($)              Sum(InsurancePayment) Partially Paid
      U      Insurance Balance ($)           Sum(InsuranceBalance)
      U.1 / U.2 / U.3                        Denials / Partially Denied / No Response
+                                            U.2 = Sum(InsuranceBalance) where ClaimStatus
+                                            NOT IN (Denied, Fully Denied, No Response)
 
    Avg:
      V  (P+T) / F
      W  P / H
      X  (P+T) / (H + L + J + N.1 + N.2)
 
-   F1–F3 (Cove / Others / VariantX) omitted — marked Doubt on the sheet.
    ============================================================================= */
 SET NOCOUNT ON;
 GO
@@ -50,11 +54,12 @@ BEGIN
 
 	DROP TABLE IF EXISTS #Base;
 
+	-- Population: claims with FirstBilledDate. Monthwise display: DateofService.
 	SELECT
 		NULLIF(LTRIM(RTRIM(ClaimID)), '') AS ClaimKey,
 		NULLIF(LTRIM(RTRIM(AccessionNumber)), '') AS AccessionNumber,
-		YEAR (TRY_CAST(FirstBilledDate AS DATE)) AS ESYear,
-		MONTH(TRY_CAST(FirstBilledDate AS DATE)) AS ESMonth,
+		YEAR (TRY_CAST(DateofService AS DATE)) AS ESYear,
+		MONTH(TRY_CAST(DateofService AS DATE)) AS ESMonth,
 		ISNULL(LTRIM(RTRIM(ClaimStatus)), '') AS ClaimStatus,
 		ISNULL(TRY_CAST(ChargeAmount     AS DECIMAL(18,2)), 0) AS ChargeAmount,
 		ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) AS InsurancePayment,
@@ -64,6 +69,7 @@ BEGIN
 	INTO #Base
 	FROM dbo.ClaimLevelData
 	WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+	  AND TRY_CAST(DateofService AS DATE) IS NOT NULL
 	  AND NULLIF(LTRIM(RTRIM(ClaimID)), '') IS NOT NULL;
 
 	DROP TABLE IF EXISTS #Periods;
@@ -149,16 +155,90 @@ BEGIN
 	UNION ALL
 	SELECT 0, 0, COUNT(DISTINCT Accession) FROM #LisBilled;
 
+	-- Accession sets for F1 (CoveLRN LIS) / F3 (VariantX LIS). Same server three-part name.
+	DROP TABLE IF EXISTS #CoveAcc;
+	CREATE TABLE #CoveAcc (Acc NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL PRIMARY KEY);
+	IF DB_ID(N'CoveLRN') IS NOT NULL AND OBJECT_ID(N'CoveLRN.dbo.LIMSMaster', N'U') IS NOT NULL
+	BEGIN
+		INSERT INTO #CoveAcc (Acc)
+		SELECT DISTINCT NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(300), Accession))), N'')
+		FROM CoveLRN.dbo.LIMSMaster
+		WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(300), Accession))), N'') IS NOT NULL;
+	END
+	ELSE
+		PRINT 'usp_RefreshVarX_ExecutiveSummary: CoveLRN.dbo.LIMSMaster not reachable - F1 will be 0.';
+
+	DROP TABLE IF EXISTS #VarAcc;
+	CREATE TABLE #VarAcc (Acc NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL PRIMARY KEY);
+	IF OBJECT_ID(N'dbo.LIMSMaster', N'U') IS NOT NULL
+	   AND COL_LENGTH(N'dbo.LIMSMaster', N'Accession') IS NOT NULL
+	BEGIN
+		INSERT INTO #VarAcc (Acc)
+		SELECT DISTINCT NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(300), Accession))), N'')
+		FROM dbo.LIMSMaster
+		WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(300), Accession))), N'') IS NOT NULL;
+	END
+	ELSE
+		PRINT 'usp_RefreshVarX_ExecutiveSummary: dbo.LIMSMaster.Accession missing - F3 will be 0.';
+
+	DROP TABLE IF EXISTS #F1Count;
+	SELECT ESYear, ESMonth, COUNT(DISTINCT ClaimKey) AS Cnt
+	INTO #F1Count
+	FROM #Base b
+	WHERE b.AccessionNumber IS NOT NULL
+	  AND EXISTS (SELECT 1 FROM #CoveAcc c WHERE c.Acc = b.AccessionNumber)
+	GROUP BY ESYear, ESMonth
+	UNION ALL
+	SELECT 0, 0, COUNT(DISTINCT ClaimKey)
+	FROM #Base b
+	WHERE b.AccessionNumber IS NOT NULL
+	  AND EXISTS (SELECT 1 FROM #CoveAcc c WHERE c.Acc = b.AccessionNumber);
+
+	DROP TABLE IF EXISTS #F3Count;
+	SELECT ESYear, ESMonth, COUNT(DISTINCT ClaimKey) AS Cnt
+	INTO #F3Count
+	FROM #Base b
+	WHERE b.AccessionNumber IS NOT NULL
+	  AND EXISTS (SELECT 1 FROM #VarAcc v WHERE v.Acc = b.AccessionNumber)
+	GROUP BY ESYear, ESMonth
+	UNION ALL
+	SELECT 0, 0, COUNT(DISTINCT ClaimKey)
+	FROM #Base b
+	WHERE b.AccessionNumber IS NOT NULL
+	  AND EXISTS (SELECT 1 FROM #VarAcc v WHERE v.Acc = b.AccessionNumber);
+
 	-- ── PMS ──────────────────────────────────────────────────────────────────
 	INSERT INTO dbo.VarX_ES_PMS (RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt)
 	SELECT RoleID, Description, ESYear, ESMonth, ClaimCount, 0, GETDATE()
 	FROM
 	(
-		SELECT p.ESYear, p.ESMonth, 'F' AS RoleID, 'No. of Billed Claims' AS Description,
+		SELECT p.ESYear, p.ESMonth, 'F' AS RoleID, 'F: No. of Billed Claims' AS Description,
 			   COUNT(DISTINCT b.ClaimKey) AS ClaimCount
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 		GROUP BY p.ESYear, p.ESMonth
+
+		UNION ALL
+		SELECT p.ESYear, p.ESMonth, 'F.1', '  1) Claim Submitted in Cove',
+			   ISNULL(f1.Cnt, 0)
+		FROM #Periods p
+		LEFT JOIN #F1Count f1 ON f1.ESYear = p.ESYear AND f1.ESMonth = p.ESMonth
+
+		UNION ALL
+		SELECT p.ESYear, p.ESMonth, 'F.2', '  2) Claim Submitted in Others',
+			   CASE WHEN ISNULL(bb.BilledCount, 0) - ISNULL(f1.Cnt, 0) - ISNULL(f3.Cnt, 0) > 0
+					THEN ISNULL(bb.BilledCount, 0) - ISNULL(f1.Cnt, 0) - ISNULL(f3.Cnt, 0)
+					ELSE 0 END
+		FROM #Periods p
+		LEFT JOIN #BaseBilledCount bb ON bb.ESYear = p.ESYear AND bb.ESMonth = p.ESMonth
+		LEFT JOIN #F1Count f1 ON f1.ESYear = p.ESYear AND f1.ESMonth = p.ESMonth
+		LEFT JOIN #F3Count f3 ON f3.ESYear = p.ESYear AND f3.ESMonth = p.ESMonth
+
+		UNION ALL
+		SELECT p.ESYear, p.ESMonth, 'F.3', '  3) Claim Submitted in VariantX',
+			   ISNULL(f3.Cnt, 0)
+		FROM #Periods p
+		LEFT JOIN #F3Count f3 ON f3.ESYear = p.ESYear AND f3.ESMonth = p.ESMonth
 
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'G',
@@ -312,7 +392,7 @@ BEGIN
 			   ISNULL(SUM(b.InsuranceBalance), 0)
 		FROM #Periods p
 		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						   AND b.ClaimStatus = 'Partially Denied'
+						   AND b.ClaimStatus NOT IN ('Denied','Fully Denied','No Response')
 		GROUP BY p.ESYear, p.ESMonth
 
 		UNION ALL
