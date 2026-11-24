@@ -26,7 +26,14 @@ public interface IMenuRepository
     /// </summary>
     Task<IReadOnlyList<RoleFeatureDto>> GetFeaturesForRolesAsync(IEnumerable<string> roleNames, CancellationToken ct);
     Task<IReadOnlyList<RoleFeatureDto>> GetRoleFeaturesAsync(int roleId, CancellationToken ct);
-    Task ReplaceRoleFeaturesAsync(int roleId, IReadOnlyCollection<RoleFeatureDto> features, string userName, CancellationToken ct);
+    /// <summary>
+    /// Replaces one role's feature rows. <paramref name="reportVisibility"/> false (Role Menu Mapping)
+    /// replaces every row EXCEPT the Report Visibility ones; true (Report Visibility) replaces only
+    /// the <see cref="ReportVisibilityFeatures"/> rows. Each screen therefore saves its own keys without
+    /// wiping the other's.
+    /// </summary>
+    Task ReplaceRoleFeaturesAsync(int roleId, IReadOnlyCollection<RoleFeatureDto> features, string userName, CancellationToken ct,
+        bool reportVisibility = false);
 }
 
 public sealed class SqlMenuRepository : IMenuRepository
@@ -400,12 +407,17 @@ SELECT FeatureKey, IsEnabled FROM dbo.RoleFeatureAccess WHERE RoleId = @RoleId;"
         return result;
     }
 
-    public async Task ReplaceRoleFeaturesAsync(int roleId, IReadOnlyCollection<RoleFeatureDto> features, string userName, CancellationToken ct)
+    public async Task ReplaceRoleFeaturesAsync(int roleId, IReadOnlyCollection<RoleFeatureDto> features, string userName, CancellationToken ct,
+        bool reportVisibility = false)
     {
         foreach (var feature in features)
         {
             if (!MenuFeatureCatalog.IsKnown(feature.FeatureKey))
                 throw new ArgumentException($"Unknown feature '{feature.FeatureKey}'.");
+            if (ReportVisibilityFeatures.IsReportKey(feature.FeatureKey) != reportVisibility)
+                throw new ArgumentException(reportVisibility
+                    ? $"'{feature.FeatureKey}' is not a Report Visibility setting."
+                    : $"'{feature.FeatureKey}' is a Report Visibility setting; save it from Report Visibility.");
         }
 
         // Full replace, like ReplaceRoleMenusAsync: a feature the admin left on "Default"
@@ -419,9 +431,15 @@ VALUES (@RoleId, @FeatureKey, @IsEnabled, @UserName);";
         await conn.OpenAsync(ct);
         await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct);
 
-        await using (var delete = new SqlCommand("DELETE FROM dbo.RoleFeatureAccess WHERE RoleId = @RoleId;", conn, tx))
+        // Scoped to the calling screen's keys: Role Menu Mapping must not wipe Report Visibility rows
+        // (and vice versa). "Report." has no LIKE wildcards, so it needs no escaping.
+        var deleteSql = reportVisibility
+            ? "DELETE FROM dbo.RoleFeatureAccess WHERE RoleId = @RoleId AND FeatureKey LIKE @Prefix + N'%';"
+            : "DELETE FROM dbo.RoleFeatureAccess WHERE RoleId = @RoleId AND FeatureKey NOT LIKE @Prefix + N'%';";
+        await using (var delete = new SqlCommand(deleteSql, conn, tx))
         {
             delete.Parameters.AddWithValue("@RoleId", roleId);
+            delete.Parameters.AddWithValue("@Prefix", ReportVisibilityFeatures.Prefix);
             await delete.ExecuteNonQueryAsync(ct);
         }
 

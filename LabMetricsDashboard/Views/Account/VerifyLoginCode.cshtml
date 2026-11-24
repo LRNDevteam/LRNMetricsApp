@@ -1,0 +1,109 @@
+@model LabMetricsDashboard.Controllers.VerifyLoginCodeViewModel
+@{
+    Layout = null;
+    ViewData["Title"] = "Enter your sign-in code - Lab Revenue Intelligence";
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
+    <title>@ViewData["Title"]</title>
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/lib/bootstrap-icons/font/bootstrap-icons.min.css" />
+    <style>
+        * { box-sizing: border-box; }
+        html, body { min-height: 100%; margin: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background:
+                radial-gradient(1100px 600px at 12% 18%, rgba(100,181,246,.18), transparent 60%),
+                radial-gradient(900px 600px at 92% 84%, rgba(0,184,212,.18), transparent 60%),
+                linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 55%, #1565c0 100%);
+            min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem 1rem;
+        }
+        .sp-card {
+            width: 100%; max-width: 460px; background: rgba(255,255,255,.97); color: #1a2744;
+            border-radius: 24px; box-shadow: 0 30px 80px rgba(0,0,0,.4); padding: 2.25rem 2.25rem 1.75rem;
+        }
+        .sp-brand { display: flex; align-items: center; justify-content: center; gap: .6rem; margin-bottom: 1.1rem; }
+        .sp-brand img { height: 38px; width: auto; filter: brightness(.2); }
+        .sp-brand .name { font-weight: 800; color: #0d1b2a; font-size: .95rem; letter-spacing: .04em; line-height: 1.1; }
+        .sp-brand .name small { display: block; font-weight: 600; color: #64748b; font-size: .62rem; letter-spacing: .18em; text-transform: uppercase; }
+        h2 { margin: 0 0 .25rem; font-weight: 800; color: #0d1b2a; font-size: 1.5rem; }
+        .subtitle { color: #64748b; font-size: .88rem; margin-bottom: 1.3rem; }
+        .form-label { font-size: .72rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: #5a6a8a; margin-bottom: .35rem; }
+        .form-control { padding: .7rem .85rem; font-size: .95rem; border-radius: 12px; border-color: #d1d9e6; }
+        .form-control:focus { border-color: #1565c0; box-shadow: 0 0 0 3px rgba(21,101,192,.12); }
+        .code { font-family: Consolas, monospace; font-size: 1.5rem; letter-spacing: .5em; text-align: center; }
+        .btn-primary-lrn {
+            width: 100%; background: linear-gradient(135deg, #1565c0, #00b8d4); color: #fff; font-weight: 700;
+            border: none; border-radius: 12px; padding: .85rem 1rem; font-size: .95rem; letter-spacing: .04em;
+            box-shadow: 0 8px 22px rgba(21,101,192,.35);
+        }
+        .btn-primary-lrn:hover { filter: brightness(1.05); color: #fff; }
+        .btn-link-lrn { background: none; border: none; padding: 0; color: #1565c0; font-weight: 600; font-size: .85rem; }
+        .btn-link-lrn:disabled { color: #94a3b8; }
+        .alert-sp { border-radius: 12px; padding: .7rem .9rem; font-size: .85rem; background: #f0f7ff; color: #1e3a8a; border: 1px solid #bfdbfe; display: flex; gap: .5rem; }
+        .row-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; font-size: .85rem; }
+        .row-actions a { color: #64748b; text-decoration: none; }
+        .footer { margin-top: 1.4rem; text-align: center; color: #94a3b8; font-size: .78rem; }
+    </style>
+</head>
+<body>
+<main class="sp-card">
+    <div class="sp-brand">
+        <img src="~/images/LRN-White-Logo-footer-1-1.png" alt="LRN Logo" />
+        <div class="name">Lab Revenue Intelligence<small>Navigator</small></div>
+    </div>
+
+    <h2>Check your email</h2>
+    <div class="subtitle">
+        We sent a 6-digit sign-in code to <b>@(Model.MaskedEmail ?? "your email address")</b>. A new code is sent every time you sign in.
+    </div>
+
+    @if (!string.IsNullOrEmpty(Model.Message))
+    {
+        <div class="alert-sp mb-3"><i class="bi bi-info-circle-fill"></i><div>@Model.Message</div></div>
+    }
+
+    <form action="./VerifyLoginCode" method="post" autocomplete="off">
+        @Html.AntiForgeryToken()
+        <div class="mb-3">
+            <label class="form-label" for="Code">Sign-in code</label>
+            <input name="Code" id="Code" class="form-control code" inputmode="numeric" pattern="[0-9 ]*" maxlength="9" required autofocus
+                   autocomplete="one-time-code" value="" />
+            <span asp-validation-for="Code" class="text-danger small"></span>
+        </div>
+        <button type="submit" class="btn btn-primary-lrn"><i class="bi bi-shield-check me-1"></i> Verify and sign in</button>
+    </form>
+
+    <div class="row-actions">
+        <a href="./Login"><i class="bi bi-arrow-left"></i> Back to sign in</a>
+        <form action="./ResendLoginCode" method="post" class="m-0">
+            @Html.AntiForgeryToken()
+            <button type="submit" id="resendBtn" class="btn-link-lrn" data-wait="@Model.ResendWaitSeconds" @(Model.ResendWaitSeconds > 0 ? "disabled" : "")>
+                Send a new code@(Model.ResendWaitSeconds > 0 ? $" ({Model.ResendWaitSeconds}s)" : "")
+            </button>
+        </form>
+    </div>
+
+    <div class="footer">Didn't get it? Check your junk folder, or contact your administrator.</div>
+</main>
+
+<script nonce='@Context.Items["CspNonce"]'>
+    (function () {
+        var btn = document.getElementById('resendBtn');
+        if (!btn) return;
+        var left = parseInt(btn.getAttribute('data-wait') || '0', 10);
+        if (!(left > 0)) return;
+        var timer = setInterval(function () {
+            left -= 1;
+            if (left <= 0) { clearInterval(timer); btn.disabled = false; btn.textContent = 'Send a new code'; }
+            else { btn.textContent = 'Send a new code (' + left + 's)'; }
+        }, 1000);
+    })();
+</script>
+</body>
+</html>

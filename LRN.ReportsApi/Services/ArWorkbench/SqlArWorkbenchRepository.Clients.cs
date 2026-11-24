@@ -15,6 +15,35 @@ public sealed partial class SqlArWorkbenchRepository
     private static (DateTime At, HashSet<int> Labs)? _inactiveCache;
     private static readonly TimeSpan InactiveCacheTtl = TimeSpan.FromSeconds(60);
 
+    private static readonly object DisabledLabCacheLock = new();
+    private static (DateTime At, HashSet<int> Labs)? _disabledLabCache;
+
+    /// <summary>
+    /// Labs switched off in Admin &gt; Manage Labs (LRNMaster dbo.Labs.IsActive = 0). Unlike the AR
+    /// Workbench's own client deactivation (<see cref="GetInactiveClientLabIdsAsync"/>), this hides the
+    /// lab from EVERYONE, administrators included: the lab is off across LRN Metrics, the Master File
+    /// Processor and the AR Workbench until it is re-enabled there. Cached for the same 60 seconds.
+    /// </summary>
+    public async Task<IReadOnlySet<int>> GetDisabledLabIdsAsync(CancellationToken ct)
+    {
+        lock (DisabledLabCacheLock)
+        {
+            if (_disabledLabCache is { } c && DateTime.UtcNow - c.At < InactiveCacheTtl) return c.Labs;
+        }
+        var labs = new HashSet<int>();
+        await using (var master = new SqlConnection(_masterConnectionString))
+        {
+            await master.OpenAsync(ct);
+            await using var cmd = new SqlCommand(@"
+IF OBJECT_ID(N'dbo.Labs', N'U') IS NOT NULL
+    SELECT LabId FROM dbo.Labs WHERE IsActive = 0;", master);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct)) labs.Add(r.GetInt32(0));
+        }
+        lock (DisabledLabCacheLock) _disabledLabCache = (DateTime.UtcNow, labs);
+        return labs;
+    }
+
     public async Task<IReadOnlySet<int>> GetInactiveClientLabIdsAsync(CancellationToken ct)
     {
         lock (InactiveCacheLock)

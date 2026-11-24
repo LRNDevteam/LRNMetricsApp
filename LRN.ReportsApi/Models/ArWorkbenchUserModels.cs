@@ -97,8 +97,11 @@ public sealed class ArWorkbenchUserManagement
 
 public sealed class ArWorkbenchCreateUserRequest
 {
+    /// <summary>microsoft (Lab Revenue Navigator account, Sign in with Microsoft) | external (any other email).</summary>
+    public string? AccountType { get; set; }
+    /// <summary>Ignored: the username is always the email address.</summary>
     public string? UserName { get; set; }
-    /// <summary>Email the invitation goes to. Several users may share one address.</summary>
+    /// <summary>The user's email - also their username. Unique across every LRN user.</summary>
     public string? Email { get; set; }
     public int? RoleId { get; set; }
     public List<int>? LabIds { get; set; }

@@ -5,6 +5,9 @@
     var esLazy = ViewData["EsLazy"] as bool? == true;
     ViewData["Title"]       = "Executive Summary";
     ViewData["SelectedLab"] = Model.SelectedLab;
+    // Admin > Report Visibility: lmd-report-tab drops the highlight tabs (and Notes & Insights) this user's role has hidden.
+    ViewData[LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.ViewDataKey] =
+        LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.ExecutiveSummary;
     Layout = esTableOnly ? null : "~/Views/Shared/_Layout.cshtml";
 
     bool esShowFilters = esLazy
@@ -451,7 +454,7 @@
                 </a>
             }
         </div>
-        <button type="button" data-ni-open
+        <button type="button" data-ni-open lmd-report-tab="key-insights"
                 class="btn btn-sm btn-outline-primary ni-btn-open"
                 title="Open Notes &amp; Insights for this report">
             <i class="bi bi-journal-text me-1"></i>Notes &amp; Insights
@@ -469,25 +472,25 @@ if (showHighlightTabs)
             <i class="bi bi-grid-3x3-gap-fill"></i> 1. Executive Summary
         </button>
     </li>
-    <li class="nav-item" role="presentation">
+    <li class="nav-item" role="presentation" lmd-report-tab="prod">
         <button class="nav-link" id="es-prod-tab" data-bs-toggle="tab" data-bs-target="#es-prod-pane"
                 type="button" role="tab" aria-controls="es-prod-pane" aria-selected="false">
             <i class="bi bi-bar-chart-line"></i> 2. Production Highlights
         </button>
     </li>
-    <li class="nav-item" role="presentation">
+    <li class="nav-item" role="presentation" lmd-report-tab="coll">
         <button class="nav-link" id="es-coll-tab" data-bs-toggle="tab" data-bs-target="#es-coll-pane"
                 type="button" role="tab" aria-controls="es-coll-pane" aria-selected="false">
             <i class="bi bi-cash-stack"></i> 3. Collection Highlights
         </button>
     </li>
-    <li class="nav-item" role="presentation">
+    <li class="nav-item" role="presentation" lmd-report-tab="lims">
         <button class="nav-link" id="es-lims-tab" data-bs-toggle="tab" data-bs-target="#es-lims-pane"
                 type="button" role="tab" aria-controls="es-lims-pane" aria-selected="false">
             <i class="bi bi-clipboard2-pulse"></i> 4. LIMS Highlights
         </button>
     </li>
-    <li class="nav-item" role="presentation">
+    <li class="nav-item" role="presentation" lmd-report-tab="denial">
         @if (showDenialHighlights)
         {
             <button class="nav-link" id="es-denial-tab" data-bs-toggle="tab" data-bs-target="#es-denial-pane"
@@ -1286,7 +1289,7 @@ if (showHighlightTabs)
     @Html.Raw("</div>")
     foreach (var f in hlFrames)
     {
-        <div class="tab-pane fade" id="@f.Pane" role="tabpanel" aria-labelledby="@f.Tab">
+        <div lmd-report-tab="@f.Pane.Replace("es-", "").Replace("-pane", "")" class="tab-pane fade" id="@f.Pane" role="tabpanel" aria-labelledby="@f.Tab">
             @if (string.IsNullOrEmpty(f.Src))
             {
                 <div class="es-hl-loading">

@@ -37,6 +37,8 @@ public interface IArWorkbenchRepository
     Task<(string Outcome, string CaseNumber, string? NewStatus)> CipActionAsync(int labId, long cipCaseId, ArWorkbenchCipAction action, string? note, ArWorkbenchUserContext user, Guid? bulkBatchId, CancellationToken ct);
     // Client Management (SqlArWorkbenchRepository.Clients.cs) - LRNMaster activation + lab figures
     Task<IReadOnlySet<int>> GetInactiveClientLabIdsAsync(CancellationToken ct);
+    /// <summary>Labs with dbo.Labs.IsActive = 0 (Admin &gt; Manage Labs): hidden from every AR Workbench user.</summary>
+    Task<IReadOnlySet<int>> GetDisabledLabIdsAsync(CancellationToken ct);
     Task<Dictionary<int, ArWorkbenchClientStatus>> GetClientStatusesAsync(CancellationToken ct);
     Task<ArWorkbenchSaveResult> SetClientActiveAsync(int labId, bool isActive, string? note, string user, CancellationToken ct);
     Task<ArWorkbenchSaveResult> SetClientConfigAsync(int labId, ArWorkbenchClientConfig config, string user, CancellationToken ct);
@@ -128,7 +130,7 @@ public interface IArWorkbenchRepository
     Task<IReadOnlySet<int>> GetUserLabIdsAsync(int labUserId, CancellationToken ct);
     Task<IReadOnlyList<ArWorkbenchRoleOption>> GetAssignableRolesAsync(CancellationToken ct);
     Task<IReadOnlyList<ArWorkbenchManagedUser>> GetManagedUsersAsync(int? callerLabUserId, bool allLabs, IReadOnlyList<ArWorkbenchLabOption> manageableLabs, CancellationToken ct);
-    Task<(ArWorkbenchSaveResult Result, int? LabUserId)> CreateWorkbenchUserAsync(string userName, string? passwordHash, string email, int roleId, IReadOnlyList<int> labIds,
+    Task<(ArWorkbenchSaveResult Result, int? LabUserId)> CreateWorkbenchUserAsync(string userName, string? passwordHash, string email, bool microsoftAccount, int roleId, IReadOnlyList<int> labIds,
         ArWorkbenchUserProfile profile, IReadOnlyCollection<int> manageableLabIds, string createdBy, CancellationToken ct);
     Task<ArWorkbenchSaveResult> UpdateWorkbenchUserAsync(int labUserId, string email, int roleId, IReadOnlyList<int> requestedLabIds, bool isActive, string? passwordHash,
         ArWorkbenchUserProfile profile, int? callerLabUserId, bool allLabs, IReadOnlySet<int> manageableLabIds, string modifiedBy, CancellationToken ct);

@@ -129,6 +129,9 @@ public sealed class ReportBoardController : Controller
         {
             var configKey = _labResolver.Resolve(apiRow.Lab);
 
+            // Switched off in Admin > Manage Labs: off the board for everyone, admins included.
+            if (_labSettings.IsInactive(configKey)) continue;
+
             // An unmapped lab is a configuration gap worth seeing, but only an admin can act on it -
             // and for anyone else we cannot prove the lab is one of theirs, so it stays hidden.
             if (configKey is null && !IsAdmin) continue;

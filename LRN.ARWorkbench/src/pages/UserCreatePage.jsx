@@ -6,16 +6,25 @@ import { LabPicker, ScopePicker, scopesBody } from '../components/UserFormParts'
 import { useWorkbench } from '../context/WorkbenchContext';
 import { arWorkbenchService } from '../services/arWorkbenchService';
 
-// User Management > Add User (#/users/new). No password is set here: the API emails the user an
-// invitation with their username, a one-time password and a single-use link to LRN Metrics, where
-// they create their own password. Several users may share one email address.
+// User Management > Add User (#/users/new). Every user signs in one of two ways, and the email
+// address is the username (one account per email, across every LRN user):
+//   Microsoft - a Lab Revenue Navigator address: "Sign in with Microsoft" with MFA. No password and
+//               no invitation; the account links itself on the person's first Microsoft sign-in.
+//   External  - any other address: the API emails an invitation with a one-time password and a
+//               single-use link to create a password, and every sign-in emails a new one-time code.
+
+const ORG_DOMAIN = 'labrevenuenavigator.com';
+const ACCOUNT_TYPES = [
+  { id: 'microsoft', label: 'Microsoft (Lab Revenue Navigator)', hint: `@${ORG_DOMAIN} staff. Signs in with “Sign in with Microsoft” and MFA. No password or invitation.` },
+  { id: 'external', label: 'External email', hint: 'Any other email address. Gets an invitation to create a password, then a one-time code by email at every sign-in.' }
+];
 
 export default function UserCreatePage() {
   const { labId } = useWorkbench();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState('');
-  const [form, setForm] = useState({ userName: '', email: '', roleId: '', labIds: [], managerUserId: '', teamName: '', scopes: {} });
+  const [form, setForm] = useState({ accountType: 'external', email: '', roleId: '', labIds: [], managerUserId: '', teamName: '', scopes: {} });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -35,12 +44,16 @@ export default function UserCreatePage() {
   const role = data.roles.find((r) => String(r.roleId) === String(form.roleId));
   const roleScope = role?.scope || null;
   const back = (notice) => navigate('/users', notice ? { state: { notice } } : undefined);
+  const microsoft = form.accountType === 'microsoft';
+  const isOrgEmail = (v) => v.trim().toLowerCase().endsWith(`@${ORG_DOMAIN}`);
 
   async function save(e) {
     e.preventDefault();
     if (busy) return;
-    if (!form.userName.trim()) { setError('Enter a username.'); return; }
-    if (!form.email.trim()) { setError('Enter the email address the invitation goes to.'); return; }
+    const email = form.email.trim();
+    if (!email) { setError('Enter the user’s email address. It is also their username.'); return; }
+    if (microsoft && !isOrgEmail(email)) { setError(`A Microsoft account must be an @${ORG_DOMAIN} address. Choose External email for anyone else.`); return; }
+    if (!microsoft && isOrgEmail(email)) { setError('Lab Revenue Navigator staff sign in with Microsoft. Choose Microsoft (Lab Revenue Navigator).'); return; }
     if (!form.roleId) { setError('Choose a role.'); return; }
     if (form.labIds.length === 0) { setError('Choose at least one lab.'); return; }
     if (roleScope && form.labIds.some((id) => !form.scopes[id])) {
@@ -51,8 +64,8 @@ export default function UserCreatePage() {
     setError('');
     try {
       const result = await arWorkbenchService.createUser(labId, {
-        userName: form.userName.trim(),
-        email: form.email.trim(),
+        accountType: form.accountType,
+        email,
         roleId: Number(form.roleId),
         labIds: form.labIds,
         managerUserId: form.managerUserId ? Number(form.managerUserId) : null,
@@ -79,16 +92,24 @@ export default function UserCreatePage() {
 
       <section className="arwb-form-section">
         <h4>Account</h4>
+        <div className="arwb-field" role="radiogroup" aria-label="How the user signs in">
+          <span className="arwb-field-label">Sign-in type</span>
+          {ACCOUNT_TYPES.map((t) => (
+            <label key={t.id} className="arwb-check-item">
+              <input type="radio" name="u-account-type" value={t.id} checked={form.accountType === t.id} onChange={() => set('accountType', t.id)} />
+              {' '}<b>{t.label}</b> <span className="arwb-hint">— {t.hint}</span>
+            </label>
+          ))}
+        </div>
         <div className="arwb-form-grid">
           <div className="arwb-field">
-            <label htmlFor="u-name">Username</label>
-            <input id="u-name" className="arwb-input" maxLength={100} autoFocus value={form.userName} onChange={(e) => set('userName', e.target.value)} />
-            <small className="arwb-hint">Letters, numbers and . _ @ - only. The user signs in with this.</small>
-          </div>
-          <div className="arwb-field">
-            <label htmlFor="u-email">Email</label>
-            <input id="u-email" type="email" className="arwb-input" maxLength={256} value={form.email} onChange={(e) => set('email', e.target.value)} />
-            <small className="arwb-hint">The invitation with a one-time password and first-login link is sent here.</small>
+            <label htmlFor="u-email">{microsoft ? 'Lab Revenue Navigator email' : 'Email'}</label>
+            <input id="u-email" type="email" className="arwb-input" maxLength={100} autoFocus value={form.email}
+              placeholder={microsoft ? `name@${ORG_DOMAIN}` : 'name@example.com'} onChange={(e) => set('email', e.target.value)} />
+            <small className="arwb-hint">
+              This is also the username, and must be a real mailbox not used by any other user.
+              {microsoft ? ' The user signs in with this Microsoft account.' : ' The invitation (one-time password + link) and every sign-in code are sent here.'}
+            </small>
           </div>
         </div>
       </section>
@@ -137,7 +158,9 @@ export default function UserCreatePage() {
       <div className="arwb-form-actions">
         <button type="button" className="arwb-btn arwb-btn-sm arwb-btn-ghost" onClick={() => back()} disabled={busy}>Cancel</button>
         <button type="submit" className="arwb-btn arwb-btn-sm arwb-btn-primary" disabled={busy}>
-          {busy ? <><span className="arwb-spinner" /> Creating…</> : <><Icon name="mail" size={14} /> Create User &amp; Send Invitation</>}
+          {busy ? <><span className="arwb-spinner" /> Creating…</>
+            : microsoft ? <>Create User</>
+              : <><Icon name="mail" size={14} /> Create User &amp; Send Invitation</>}
         </button>
       </div>
     </form>

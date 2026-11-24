@@ -101,6 +101,10 @@
         display:inline-flex; align-items:center; gap:.35rem;
     }
     .lab-action-btn:hover { border-color:#1565c0; background:#eef4ff; }
+    .lab-action-btn.lab-action-off { color:#b45309; }
+    .lab-action-btn.lab-action-off:hover { border-color:#b45309; background:#fff7ed; }
+    .lab-action-btn.lab-action-on { color:#1f7a3d; }
+    .lab-action-btn.lab-action-on:hover { border-color:#1f7a3d; background:#e6f5ec; }
 
     .lab-empty {
         text-align:center; padding:3rem 1rem; color:#8a9ab8;
@@ -125,7 +129,7 @@
 <div class="lab-page-header">
     <div style="flex:1 1 280px">
         <h2><i class="bi bi-buildings me-2"></i>Manage Labs</h2>
-        <div class="subtitle mt-1">Maintain the master list of labs available across the application.</div>
+        <div class="subtitle mt-1">Maintain the master list of labs available across the application. An inactive lab is hidden from the Report Board, lab dropdowns, user creation and the AR Workbench, and the Master File Processor skips it until it is enabled again.</div>
     </div>
     <div class="lab-stat muted">
         <i class="bi bi-collection"></i> Total <span class="num">@totalCount</span>
@@ -183,7 +187,7 @@
                         <th style="width:110px">Status</th>
                         <th>Created</th>
                         <th>Modified</th>
-                        <th style="width:100px;text-align:right">Actions</th>
+                        <th style="width:220px;text-align:right">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -219,6 +223,24 @@
                                 </div>
                             </td>
                             <td style="text-align:right">
+                                <form method="post" asp-action="SetLabActive" class="d-inline lab-toggle-form"
+                                      data-lab-name="@l.LabName" data-enable="@(l.IsActive ? "false" : "true")">
+                                    @Html.AntiForgeryToken()
+                                    <input type="hidden" name="id" value="@l.LabId" />
+                                    <input type="hidden" name="isActive" value="@(l.IsActive ? "false" : "true")" />
+                                    @if (l.IsActive)
+                                    {
+                                        <button type="submit" class="lab-action-btn lab-action-off" title="Hide this lab everywhere and stop the Master File Processor for it">
+                                            <i class="bi bi-pause-circle"></i> Disable
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <button type="submit" class="lab-action-btn lab-action-on" title="Show this lab again and resume the Master File Processor for it">
+                                            <i class="bi bi-play-circle"></i> Enable
+                                        </button>
+                                    }
+                                </form>
                                 <a class="lab-action-btn" asp-action="EditLab" asp-route-id="@l.LabId">
                                     <i class="bi bi-pencil"></i> Edit
                                 </a>
@@ -290,6 +312,18 @@
         if (countEl) countEl.textContent = visible + ' lab' + (visible === 1 ? '' : 's');
     }
     if (searchEl) searchEl.addEventListener('input', applyLabSearch);
+
+    // Enable / Disable: confirm first - it changes what every user sees.
+    document.querySelectorAll('form.lab-toggle-form').forEach(function (f) {
+        f.addEventListener('submit', function (e) {
+            var name = f.getAttribute('data-lab-name') || 'this lab';
+            var enable = f.getAttribute('data-enable') === 'true';
+            var msg = enable
+                ? 'Enable ' + name + '?\n\nIt returns to the Report Board, lab dropdowns, user creation and the AR Workbench, and the Master File Processor resumes processing it.'
+                : 'Disable ' + name + '?\n\nIt is hidden from the Report Board, lab dropdowns, user creation and the AR Workbench, and the Master File Processor stops processing it. User assignments are kept.';
+            if (!window.confirm(msg)) e.preventDefault();
+        });
+    });
 
     // ?? Create-lab modal: live duplicate check ?????????????????
     var form     = document.getElementById('frmCreateLab');

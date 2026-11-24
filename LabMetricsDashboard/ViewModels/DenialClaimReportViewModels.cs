@@ -78,7 +78,30 @@ public sealed class DenialClaimReportViewModel
 public sealed class DenialInsightPanelViewModel
 {
     public string CurrentLab { get; set; } = string.Empty;
-    public bool CanEdit { get; set; }
+
+    // What this user may do, set from the DenialInsight:EditorRoles list and Admin > Report Visibility
+    // (Denial Summary > Key Insights). Each one shows / hides its own buttons.
+
+    /// <summary>The Import button and panel, on Current and Previous Week.</summary>
+    public bool CanImport { get; set; }
+    /// <summary>A Current Week row's Edit / Save.</summary>
+    public bool CanEditRows { get; set; }
+    /// <summary>A Current Week row's Delete.</summary>
+    public bool CanDeleteRows { get; set; }
+    /// <summary>Copy to Previous Week.</summary>
+    public bool CanCopyWeek { get; set; }
+    /// <summary>The Export (download as template) button.</summary>
+    public bool CanExport { get; set; } = true;
+
+    /// <summary>
+    /// Any write at all. Setting it sets every write permission at once (snapshot viewer, embedded frame,
+    /// tests); Export is a download and is left as it is.
+    /// </summary>
+    public bool CanEdit
+    {
+        get => CanImport || CanEditRows || CanDeleteRows || CanCopyWeek;
+        set => CanImport = CanEditRows = CanDeleteRows = CanCopyWeek = value;
+    }
 
     /// <summary>Current or Previous - which sub-tab is open.</summary>
     public string Bucket { get; set; } = DenialInsightBuckets.Current;
@@ -103,7 +126,7 @@ public sealed class DenialInsightPanelViewModel
     /// Only Current Week is editable. Previous Week is the record of what was discussed last time,
     /// so it is shown read-only rather than left open to being rewritten after the fact.
     /// </summary>
-    public bool IsEditableTab => CanEdit && Bucket == DenialInsightBuckets.Current;
+    public bool IsEditableTab => (CanEditRows || CanDeleteRows) && Bucket == DenialInsightBuckets.Current;
 
     public DateTime CurrentWeekStart { get; set; }
 

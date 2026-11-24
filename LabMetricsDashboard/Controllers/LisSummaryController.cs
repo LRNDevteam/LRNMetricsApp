@@ -34,6 +34,21 @@ public class LisSummaryController : Controller
 		_logger = logger;
 	}
 
+	private const string NoTabsMessage = "LIS Summary has no tabs available for your role. Contact your administrator.";
+
+	/// <summary>
+	/// Admin &gt; Report Visibility: moves the request off a tab the role has hidden (the view drops its
+	/// link). False when the role has both LIS tabs hidden.
+	/// </summary>
+	private static async Task<bool> ApplyTabVisibilityAsync(LisSummaryFilters filters, IReportAccessService reportAccess, CancellationToken ct)
+	{
+		var access = await reportAccess.GetAsync(Models.ReportVisibility.ReportVisibilityCatalog.LisSummary, ct);
+		var tab = access.FirstVisibleTab(filters.EffectiveActiveTab, ["summary", "line"]);
+		if (tab is null) return false;
+		filters.ActiveTab = tab;
+		return true;
+	}
+
 	/// <summary>The selected range as a week label, matching the Report Control Board's format.</summary>
 	private static string WeekLabel(DateOnly? from, DateOnly? to)
 		=> from.HasValue && to.HasValue
@@ -45,14 +60,28 @@ public class LisSummaryController : Controller
 		[FromQuery] LisSummaryFilters filters,
 		[FromQuery] string? lab,
 		[FromQuery] string? runId,
+		[FromServices] IReportAccessService reportAccess,
 		CancellationToken cancellationToken)
 	{
 		filters ??= new LisSummaryFilters();
 		filters.Normalize();
+		var tabsAvailable = await ApplyTabVisibilityAsync(filters, reportAccess, cancellationToken);
 
 		var availableLabs = GetAvailableLisLabs();
 		var selectedLabName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 		selectedLabName = ResolveConfiguredLabKey(selectedLabName, availableLabs);
+
+		if (!tabsAvailable)
+		{
+			return View(new LisSummaryPageViewModel
+			{
+				Filters = filters,
+				LabOptions = [],
+				CurrentLabName = selectedLabName ?? string.Empty,
+				ConfiguredLabKey = selectedLabName ?? string.Empty,
+				ErrorMessage = NoTabsMessage
+			});
+		}
 
 		if (availableLabs.Count == 0 || string.IsNullOrWhiteSpace(selectedLabName))
 		{
@@ -126,10 +155,13 @@ public class LisSummaryController : Controller
 		[FromQuery] LisSummaryFilters filters,
 		[FromQuery] string? lab,
 		[FromQuery] string? runId,
+		[FromServices] IReportAccessService reportAccess,
 		CancellationToken cancellationToken)
 	{
 		filters ??= new LisSummaryFilters();
 		filters.Normalize();
+		if (!await ApplyTabVisibilityAsync(filters, reportAccess, cancellationToken))
+			return Content($"<div class=\"alert alert-warning m-3\">{NoTabsMessage}</div>", "text/html");
 
 		var availableLabs = GetAvailableLisLabs();
 		var selectedLabName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);

@@ -256,12 +256,23 @@ SELECT 1;";
     private static ArWorkbenchSaveResult ScopeTableMissing() =>
         ArWorkbenchSaveResult.Invalid("Clinic / Provider access needs dbo.ARWB_UserScope in LRNMaster. Run Database/LRN.ReportsApi/ArWorkbench/LRNMaster/LRNMaster_01_ARWB_Roles_Access.sql.");
 
+    /// <summary>
+    /// The email is unique across every LRN user (all roles), and since a username may itself be an
+    /// email address, it must not be another user's username either. Compared trimmed, ignoring case.
+    /// </summary>
+    private const string EmailTakenSql = @"
+EXISTS (SELECT 1 FROM dbo.LabUsers WITH (UPDLOCK, HOLDLOCK)
+        WHERE (LOWER(LTRIM(RTRIM(Email))) = LOWER(@Email) OR LOWER(LTRIM(RTRIM(UserName))) = LOWER(@Email))
+          AND LabUserID <> ISNULL(@ExceptId, 0))";
+
     public async Task<(ArWorkbenchSaveResult Result, int? LabUserId)> CreateWorkbenchUserAsync(
-        string userName, string? passwordHash, string email, int roleId, IReadOnlyList<int> labIds, ArWorkbenchUserProfile profile,
+        string userName, string? passwordHash, string email, bool microsoftAccount, int roleId, IReadOnlyList<int> labIds, ArWorkbenchUserProfile profile,
         IReadOnlyCollection<int> manageableLabIds, string createdBy, CancellationToken ct)
     {
         // passwordHash is null for an invited user: LRN Metrics refuses a blank hash at sign-in, so the
-        // account cannot be used until the user sets a password from the invitation link.
+        // account cannot be used until the user sets a password from the invitation link. A Microsoft
+        // account never gets one: it is AuthProvider 'Entra' with no object id until the person's first
+        // "Sign in with Microsoft", which links it (LabMetricsDashboard AccountController.MicrosoftCallback).
         await using var master = new SqlConnection(_masterConnectionString);
         await master.OpenAsync(ct);
         await using var tx = (SqlTransaction)await master.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
@@ -272,16 +283,27 @@ SELECT 1;";
 IF EXISTS (SELECT 1 FROM dbo.LabUsers WITH (UPDLOCK, HOLDLOCK) WHERE UserName = @UserName)
 BEGIN SELECT -1; RETURN; END;
 
+IF {EmailTakenSql}
+BEGIN SELECT -4; RETURN; END;
+
+IF @Microsoft = 1 AND COL_LENGTH(N'dbo.LabUsers', N'AuthProvider') IS NULL
+BEGIN SELECT -5; RETURN; END;
+
 IF NOT EXISTS (SELECT 1 FROM dbo.Roles WHERE RoleID = @RoleId AND ISNULL(IsActive, 0) = 1 AND RoleName LIKE @RolePrefix + N'%')
 BEGIN SELECT -2; RETURN; END;
 
 IF (SELECT COUNT(*) FROM dbo.Labs WHERE LabId IN ({labParams})) <> @LabCount
 BEGIN SELECT -3; RETURN; END;
 
--- Blank name fields as the LRN Metrics admin screen writes them.
+-- Blank name fields as the LRN Metrics admin screen writes them. IsExternalUser marks the
+-- external-email accounts (password + emailed sign-in code).
 INSERT INTO dbo.LabUsers (UserName, PasswordHash, FirstName, LastName, MiddleName, Email, Mobile, IsExternalUser, IsActive, ManagerUserID, TeamName, CreatedBy)
-VALUES (@UserName, @PasswordHash, N'', N'', N'', @Email, N'', 0, 1, NULL, N'', @CreatedBy);
+VALUES (@UserName, @PasswordHash, N'', N'', N'', @Email, N'', CASE WHEN @Microsoft = 1 THEN 0 ELSE 1 END, 1, NULL, N'', @CreatedBy);
 DECLARE @Id int = CAST(SCOPE_IDENTITY() AS int);
+
+-- Dynamic SQL: the column exists only after HybridAuth_Setup.sql (checked above).
+IF @Microsoft = 1
+    EXEC sp_executesql N'UPDATE dbo.LabUsers SET AuthProvider = ''Entra'', PasswordHash = NULL WHERE LabUserID = @Uid;', N'@Uid int', @Uid = @Id;
 
 INSERT INTO dbo.UserRoles (LabUserID, RoleID) VALUES (@Id, @RoleId);
 
@@ -296,14 +318,29 @@ SELECT @Id;";
         cmd.Parameters.Add("@RolePrefix", SqlDbType.NVarChar, 100).Value = ArWorkbenchFeatures.RolePrefix;
         cmd.Parameters.Add("@LabCount", SqlDbType.Int).Value = labIds.Count;
         cmd.Parameters.Add("@CreatedBy", SqlDbType.NVarChar, 100).Value = Truncate(createdBy, 100);
+        cmd.Parameters.Add("@Microsoft", SqlDbType.Bit).Value = microsoftAccount;
+        cmd.Parameters.Add("@ExceptId", SqlDbType.Int).Value = DBNull.Value;
 
-        var outcome = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+        int outcome;
+        try
+        {
+            outcome = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+        }
+        catch (SqlException ex) when (ex.Number is 547 or 2601 or 2627)
+        {
+            await tx.RollbackAsync(ct);
+            return (ex.Number == 547
+                ? ArWorkbenchSaveResult.Invalid("Microsoft accounts cannot be created yet: run Database/LabMetricsDashboard/ArwbLoginAccounts_Setup.sql in LRNMaster.")
+                : ArWorkbenchSaveResult.Conflict($"The email address '{email}' is already used by another user. Each user needs their own email address."), null);
+        }
         if (outcome <= 0)
         {
             await tx.RollbackAsync(ct);
             return (outcome switch
             {
                 -1 => ArWorkbenchSaveResult.Conflict($"Username '{userName}' is already taken. If this person already uses LRN Metrics, ask a Super Admin to add the AR Workbench role to that account."),
+                -4 => ArWorkbenchSaveResult.Conflict($"The email address '{email}' is already used by another user. Each user needs their own email address; if this person already has an account, add the AR Workbench role to it instead."),
+                -5 => ArWorkbenchSaveResult.Invalid("Microsoft accounts need Database/LabMetricsDashboard/HybridAuth_Setup.sql in LRNMaster."),
                 -2 => ArWorkbenchSaveResult.Invalid("Choose an AR Workbench role."),
                 _ => ArWorkbenchSaveResult.Invalid("One of the chosen labs no longer exists.")
             }, null);
@@ -327,18 +364,23 @@ SELECT @Id;";
 
         // Read the user under lock, then decide in C# with the same rule the list used.
         string? userName = null;
+        string? currentEmail = null;
         var roleNames = new List<(int Id, string Name)>();
         var currentLabs = new List<int>();
         await using (var read = master.CreateCommand())
         {
             read.Transaction = tx;
             read.CommandText = @"
-SELECT UserName FROM dbo.LabUsers WITH (UPDLOCK, HOLDLOCK) WHERE LabUserID = @Id;
+SELECT UserName, Email FROM dbo.LabUsers WITH (UPDLOCK, HOLDLOCK) WHERE LabUserID = @Id;
 SELECT r.RoleID, r.RoleName FROM dbo.UserRoles ur INNER JOIN dbo.Roles r ON r.RoleID = ur.RoleID WHERE ur.LabUserID = @Id;
 SELECT LabId FROM dbo.UserLabs WHERE LabUserID = @Id;";
             read.Parameters.Add("@Id", SqlDbType.Int).Value = labUserId;
             await using var r = await read.ExecuteReaderAsync(ct);
-            if (await r.ReadAsync(ct)) userName = r.IsDBNull(0) ? string.Empty : r.GetString(0);
+            if (await r.ReadAsync(ct))
+            {
+                userName = r.IsDBNull(0) ? string.Empty : r.GetString(0);
+                currentEmail = r.IsDBNull(1) ? null : r.GetString(1);
+            }
             await r.NextResultAsync(ct);
             while (await r.ReadAsync(ct)) roleNames.Add((r.GetInt32(0), r.GetString(1)));
             await r.NextResultAsync(ct);
@@ -362,9 +404,26 @@ SELECT LabId FROM dbo.UserLabs WHERE LabUserID = @Id;";
         await using var cmd = master.CreateCommand();
         cmd.Transaction = tx;
         var labParams = AddIntList(cmd, "@Lab", finalLabs);
+        // Username = email for every account created since sign-in became Microsoft / external email:
+        // such an account keeps its email (the username cannot change - the workbench stores it in
+        // AssignedTo). Older accounts with a plain username may change email, to one nobody else uses.
+        if (userName.Contains('@')
+            && string.Equals(userName.Trim(), currentEmail?.Trim(), StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(userName.Trim(), email.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            await tx.RollbackAsync(ct);
+            return ArWorkbenchSaveResult.Invalid($"This user signs in with their email address ({userName}), so the email cannot be changed. Create a new user for a different address.");
+        }
+
         cmd.CommandText = $@"
 IF NOT EXISTS (SELECT 1 FROM dbo.Roles WHERE RoleID = @RoleId AND ISNULL(IsActive, 0) = 1 AND RoleName LIKE @RolePrefix + N'%')
 BEGIN SELECT -2; RETURN; END;
+
+-- Only a changed email is checked, so a user who already shared an address (before emails were
+-- unique) can still be edited.
+IF NOT EXISTS (SELECT 1 FROM dbo.LabUsers WHERE LabUserID = @Id AND LOWER(LTRIM(RTRIM(ISNULL(Email, N'')))) = LOWER(@Email))
+   AND {EmailTakenSql}
+BEGIN SELECT -4; RETURN; END;
 
 UPDATE dbo.LabUsers
 SET Email = @Email, IsActive = @IsActive, ModifiedBy = @ModifiedBy, ModifiedDate = SYSUTCDATETIME(),
@@ -390,11 +449,23 @@ SELECT 1;";
         cmd.Parameters.Add("@PasswordHash", SqlDbType.NVarChar, 512).Value = (object?)passwordHash ?? DBNull.Value;
         cmd.Parameters.Add("@RoleId", SqlDbType.Int).Value = roleId;
         cmd.Parameters.Add("@RolePrefix", SqlDbType.NVarChar, 100).Value = ArWorkbenchFeatures.RolePrefix;
+        cmd.Parameters.Add("@ExceptId", SqlDbType.Int).Value = labUserId;
 
-        if (Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)) != 1)
+        int outcome;
+        try
+        {
+            outcome = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+        }
+        catch (SqlException ex) when (ex.Number is 2601 or 2627)
+        {
+            outcome = -4;
+        }
+        if (outcome != 1)
         {
             await tx.RollbackAsync(ct);
-            return ArWorkbenchSaveResult.Invalid("Choose an AR Workbench role.");
+            return outcome == -4
+                ? ArWorkbenchSaveResult.Conflict($"The email address '{email}' is already used by another user. Each user needs their own email address.")
+                : ArWorkbenchSaveResult.Invalid("Choose an AR Workbench role.");
         }
         if (!await WriteProfileAsync(master, tx, labUserId, profile, manageableLabIds, modifiedBy, ct))
         {

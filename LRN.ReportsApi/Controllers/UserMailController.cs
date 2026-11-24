@@ -53,6 +53,32 @@ public sealed class UserMailController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// A new one-time sign-in code for an external user, emailed to them. Called by LRN Metrics during
+    /// sign-in - before anyone is signed in - with a short-lived service token that only it can mint
+    /// (role <see cref="SignInServiceRole"/>, signed with the shared DenialWorkflowAuth:JwtSigningKey).
+    /// </summary>
+    [HttpPost("login-codes/{labUserId:int}")]
+    public async Task<ActionResult> SendLoginCode([FromRoute] int labUserId, [FromBody] SendLoginCodeRequest? request,
+        [FromServices] ILoginCodeService loginCodes, CancellationToken ct)
+    {
+        // A service token has sub "0" (no user). Checking it as well means a dbo.Roles row that happens
+        // to carry this name can never turn a signed-in user's token into a service token.
+        if (!User.IsInRole(SignInServiceRole) || User.FindFirstValue(ClaimTypes.NameIdentifier) != "0")
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only the LRN sign-in service can request sign-in codes." });
+        var result = await loginCodes.SendAsync(labUserId, request?.IpAddress, ct);
+        return Ok(new { sent = result.Sent, challengeId = result.ChallengeId, maskedEmail = result.MaskedEmail, expiresUtc = result.ExpiresUtc, message = result.Error });
+    }
+
+    /// <summary>Must match LabMetricsDashboard WorkflowJwtIssuer.SignInServiceRole.</summary>
+    public const string SignInServiceRole = "LRN Sign-in Service";
+
+    public sealed class SendLoginCodeRequest
+    {
+        /// <summary>The signing-in browser's IP, shown in the email.</summary>
+        public string? IpAddress { get; set; }
+    }
+
     /// <summary>Sent emails, most recent first unless oldestFirst; filter by role, status, application, search.</summary>
     [HttpGet("emails")]
     public async Task<ActionResult<UserEmailLogPage>> Emails([FromQuery] UserEmailLogQuery query, CancellationToken ct)

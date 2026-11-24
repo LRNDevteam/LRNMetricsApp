@@ -1,6 +1,7 @@
 using System.Globalization;
 using ClosedXML.Excel;
 using LabMetricsDashboard.Models;
+using LabMetricsDashboard.Models.ReportVisibility;
 using LabMetricsDashboard.Services;
 using LabMetricsDashboard.ViewModels;
 using Microsoft.AspNetCore.Authorization;
@@ -72,6 +73,7 @@ public sealed class DenialClaimReportController : Controller
     private readonly IDenialSummaryRepository _denialLists;
     private readonly IConfiguration _configuration;
     private readonly IReportSnapshotRequestQueue _snapshotRequests;
+    private readonly IReportAccessService _reportAccess;
     private readonly ILogger<DenialClaimReportController> _logger;
 
     public DenialClaimReportController(
@@ -81,6 +83,7 @@ public sealed class DenialClaimReportController : Controller
         IDenialSummaryRepository denialLists,
         IConfiguration configuration,
         IReportSnapshotRequestQueue snapshotRequests,
+        IReportAccessService reportAccess,
         ILogger<DenialClaimReportController> logger)
     {
         _labSettings = labSettings;
@@ -89,6 +92,7 @@ public sealed class DenialClaimReportController : Controller
         _denialLists = denialLists;
         _configuration = configuration;
         _snapshotRequests = snapshotRequests;
+        _reportAccess = reportAccess;
         _logger = logger;
     }
 
@@ -138,6 +142,37 @@ public sealed class DenialClaimReportController : Controller
         var allowed = configured is { Length: > 0 } ? configured : DefaultEditorRoles;
         return allowed.Any(HasRole);
     }
+
+    /// <summary>
+    /// One Denial Insight action with Admin &gt; Report Visibility applied (the Denial Insight tab is this
+    /// page's Key Insights). An explicit Allow / Deny for the role wins; Default keeps the
+    /// <see cref="CanEditInsights"/> role list for writes, and lets everyone Export as before.
+    /// </summary>
+    private async Task<bool> CanInsightAsync(KeyInsightAction action, CancellationToken ct)
+        => (await _reportAccess.GetAsync(ReportVisibilityCatalog.DenialSummary, ct))
+            .CanKeyInsights(action, fallback: action == KeyInsightAction.Template || CanEditInsights());
+
+    /// <summary>Sets every per-action flag the Denial Insight panel shows / hides its buttons by.</summary>
+    private async Task ApplyInsightPermissionsAsync(DenialInsightPanelViewModel panel, bool readOnly, CancellationToken ct)
+    {
+        panel.CanImport = !readOnly && await CanInsightAsync(KeyInsightAction.Import, ct);
+        panel.CanEditRows = !readOnly && await CanInsightAsync(KeyInsightAction.Edit, ct);
+        panel.CanDeleteRows = !readOnly && await CanInsightAsync(KeyInsightAction.Delete, ct);
+        panel.CanCopyWeek = !readOnly && await CanInsightAsync(KeyInsightAction.CopyWeek, ct);
+        panel.CanExport = await CanInsightAsync(KeyInsightAction.Template, ct);
+    }
+
+    /// <summary>The Report Visibility key of a Denial Summary tab: Denial Insight follows Key Insights.</summary>
+    private static string VisibilityKey(string tab) => tab == "insight" ? ReportVisibilityCatalog.KeyInsightsTab : tab;
+
+    private static readonly string[] TabOrder =
+        ["monthly", "weekly", "list", "plantype", "payor", "facility", "facilitypct", "insight", "claims"];
+
+    private async Task<bool> IsTabVisibleAsync(string tab, CancellationToken ct)
+        => (await _reportAccess.GetAsync(ReportVisibilityCatalog.DenialSummary, ct)).IsTabVisible(VisibilityKey(tab));
+
+    private ObjectResult TabHidden() =>
+        StatusCode(StatusCodes.Status403Forbidden, "This tab is not available for your role.");
 
     /// <summary>Labs this user may open - the same visibility rule the rest of the app applies.</summary>
     private List<string> VisibleLabs()
@@ -221,7 +256,6 @@ public sealed class DenialClaimReportController : Controller
             ActiveTab = NormalizeTab(tab),
             Insight = new DenialInsightPanelViewModel
             {
-                CanEdit = !embed && CanEditInsights(),
                 Bucket = embed ? DenialInsightBuckets.Current : DenialInsightBuckets.Normalize(bucket),
                 CurrentWeekStart = SqlDenialClaimReportRepository.WeekStartOf(DateTime.Today)
             },
@@ -233,6 +267,7 @@ public sealed class DenialClaimReportController : Controller
                 PageSize = ResolvePageSize(claimPageSize)
             }
         };
+        await ApplyInsightPermissionsAsync(model.Insight, readOnly: embed, ct);
 
         if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
         {
@@ -356,6 +391,18 @@ public sealed class DenialClaimReportController : Controller
         }
         if (model.ActiveTab == "plantype" && !model.HasDenialPlanType)
             model.ActiveTab = "monthly";
+
+        // Admin > Report Visibility: never open on a tab the role has hidden (the view drops it).
+        var access = await _reportAccess.GetAsync(ReportVisibilityCatalog.DenialSummary, ct);
+        bool OnThisLab(string t) => t switch
+        {
+            "list" => model.HasDenialLists,
+            "plantype" => model.HasDenialLists && model.HasDenialPlanType,
+            "payor" or "facility" or "facilitypct" => model.HasDenialLists && model.HasDenialFacilityTabs,
+            _ => true
+        };
+        if (!access.IsTabVisible(VisibilityKey(model.ActiveTab)))
+            model.ActiveTab = TabOrder.FirstOrDefault(t => OnThisLab(t) && access.IsTabVisible(VisibilityKey(t))) ?? model.ActiveTab;
 
         try
         {
@@ -486,12 +533,14 @@ public sealed class DenialClaimReportController : Controller
     [HttpGet]
     public async Task<IActionResult> InsightPanel(string? lab, string? bucket, CancellationToken ct)
     {
+        if (!await IsTabVisibleAsync("insight", ct)) return TabHidden();
+
         var panel = new DenialInsightPanelViewModel
         {
-            CanEdit = CanEditInsights(),
             Bucket = DenialInsightBuckets.Normalize(bucket),
             CurrentWeekStart = SqlDenialClaimReportRepository.WeekStartOf(DateTime.Today)
         };
+        await ApplyInsightPermissionsAsync(panel, readOnly: false, ct);
 
         if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
         {
@@ -523,6 +572,8 @@ public sealed class DenialClaimReportController : Controller
     public async Task<IActionResult> ClaimsPanel(string? lab, string? denialCode, string? payerName,
                                                  int claimPage, int claimPageSize, CancellationToken ct)
     {
+        if (!await IsTabVisibleAsync("claims", ct)) return TabHidden();
+
         var claims = new DenialClaimLevelTabViewModel
         {
             DenialCode = denialCode?.Trim(),
@@ -586,7 +637,7 @@ public sealed class DenialClaimReportController : Controller
                                                     bool replaceCurrentWeek, string? bucket,
                                                     string? previousMode, CancellationToken ct)
     {
-        if (!CanEditInsights())
+        if (!await CanInsightAsync(KeyInsightAction.Import, ct))
             return Redirect(InsightError("You do not have permission to import denial insights.", lab));
 
         if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
@@ -772,7 +823,7 @@ public sealed class DenialClaimReportController : Controller
         [FromForm] string? status,
         CancellationToken ct)
     {
-        if (!CanEditInsights())
+        if (!await CanInsightAsync(KeyInsightAction.Edit, ct))
             return Redirect(InsightError("You do not have permission to edit denial insights.", lab));
 
         if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
@@ -830,7 +881,7 @@ public sealed class DenialClaimReportController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> DeleteInsight(string? lab, long id, string? bucket, CancellationToken ct)
     {
-        if (!CanEditInsights())
+        if (!await CanInsightAsync(KeyInsightAction.Delete, ct))
             return Redirect(InsightError("You do not have permission to delete denial insights.", lab, bucket));
 
         if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
@@ -861,7 +912,7 @@ public sealed class DenialClaimReportController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> CopyToPreviousWeek(string? lab, CancellationToken ct)
     {
-        if (!CanEditInsights())
+        if (!await CanInsightAsync(KeyInsightAction.CopyWeek, ct))
             return Redirect(InsightError("You do not have permission to move denial insights.", lab));
 
         if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
@@ -889,6 +940,10 @@ public sealed class DenialClaimReportController : Controller
     [HttpGet]
     public async Task<IActionResult> ExportInsights(string? lab, string? bucket, CancellationToken ct)
     {
+        if (!await IsTabVisibleAsync("insight", ct)) return TabHidden();
+        if (!await CanInsightAsync(KeyInsightAction.Template, ct))
+            return StatusCode(StatusCodes.Status403Forbidden, "Your role cannot export denial insights.");
+
         if (!TryResolveLab(lab, out var labName, out var connectionString, out var error))
             return Redirect(InsightError(error, lab));
 

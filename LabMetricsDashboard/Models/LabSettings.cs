@@ -169,7 +169,39 @@ public sealed class LabIdInfo
 /// </summary>
 public sealed class LabSettings
 {
-    // NOTE: This is updated at runtime when lab JSON files change (reloadOnChange).
-    // Replace the dictionary reference atomically to avoid thread-safety issues.
-    public Dictionary<string, LabCsvConfig> Labs { get; set; } = [];
+    private readonly object _gate = new();
+    private Dictionary<string, LabCsvConfig> _allLabs = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlySet<string> _inactiveLabs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    // NOTE: This is updated at runtime when lab JSON files change (reloadOnChange) and when a lab is
+    // switched on or off in Admin > Manage Labs. Replace the dictionary reference atomically to avoid
+    // thread-safety issues.
+    /// <summary>
+    /// The ACTIVE labs: every configured lab except those switched off in Admin &gt; Manage Labs
+    /// (dbo.Labs.IsActive = 0). Every lab picker, the navbar, the Report Control Board and the
+    /// background services read this, so an inactive lab disappears from all of them at once.
+    /// </summary>
+    public Dictionary<string, LabCsvConfig> Labs { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Every configured lab, active or not. Set by Program.cs from the per-lab JSON files.</summary>
+    public Dictionary<string, LabCsvConfig> AllLabs
+    {
+        get => _allLabs;
+        set { lock (_gate) { _allLabs = value; Recompute(); } }
+    }
+
+    /// <summary>Config keys of the labs switched off in Admin &gt; Manage Labs.</summary>
+    public IReadOnlySet<string> InactiveLabs
+    {
+        get => _inactiveLabs;
+        set { lock (_gate) { _inactiveLabs = value; Recompute(); } }
+    }
+
+    public bool IsInactive(string? labKey) =>
+        !string.IsNullOrWhiteSpace(labKey) && _inactiveLabs.Contains(labKey);
+
+    private void Recompute() =>
+        Labs = _allLabs
+            .Where(kv => !_inactiveLabs.Contains(kv.Key))
+            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
 }

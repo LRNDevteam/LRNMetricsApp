@@ -6,7 +6,19 @@
     (notes-insights.js) drives all interactions through the
     NotesController JSON API.
 *@
+@{
+    // Admin > Report Visibility: hidden Key Insights drop the panel; Add / Edit / Delete / Import /
+    // Template are allowed or denied one by one (NotesController refuses denied writes as well).
+    var niAccess = await Context.GetReportAccessAsync(LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.ExecutiveSummary);
+    if (!niAccess.KeyInsightsVisible) { return; }
+    string NiFlag(LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction a) => niAccess.CanKeyInsights(a, fallback: true) ? "1" : "0";
+}
 <div id="niRoot"
+     data-can-add="@NiFlag(LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction.Add)"
+     data-can-edit="@NiFlag(LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction.Edit)"
+     data-can-delete="@NiFlag(LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction.Delete)"
+     data-can-import="@NiFlag(LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction.Import)"
+     data-can-template="@NiFlag(LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction.Template)"
      data-base="@Url.Content("~/")"
      data-lab="@Model.SelectedLab"
      data-report-name="Executive Summary"

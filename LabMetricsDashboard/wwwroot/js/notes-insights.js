@@ -16,6 +16,16 @@
 
     const root = document.getElementById("niRoot");
     if (!root) return;
+    // Admin > Report Visibility: what this role may do. A missing flag means allowed.
+    const flag = name => root.dataset[name] !== "0";
+    const can = {
+        add: flag("canAdd"),
+        edit: flag("canEdit"),
+        del: flag("canDelete"),
+        import: flag("canImport"),
+        template: flag("canTemplate")
+    };
+    const canWrite = can.add || can.edit || can.del;
 
     function parseWeekRange(text) {
         const out = { start: "", end: "" };
@@ -166,25 +176,31 @@
     async function showActive() {
         renderContext(false);
         el.body.classList.add("ni-body-active");
+        // Each toolbar / footer button only for a role allowed that action (Admin > Report Visibility).
         el.toolbar.innerHTML =
-            `<button class="btn btn-sm btn-primary" data-act="add">＋ Add Insight Row</button>` +
-            `<button class="btn btn-sm btn-outline-secondary" data-act="import">⇧ Import Excel</button>` +
-            `<button class="btn btn-sm btn-outline-secondary" data-act="template">▤ Template Library</button>` +
+            (can.add ? `<button class="btn btn-sm btn-primary" data-act="add">＋ Add Insight Row</button>` : "") +
+            (can.import ? `<button class="btn btn-sm btn-outline-secondary" data-act="import">⇧ Import Excel</button>` : "") +
+            (can.template ? `<button class="btn btn-sm btn-outline-secondary" data-act="template">▤ Template Library</button>` : "") +
             `<button class="btn btn-sm btn-outline-secondary" data-act="archive">▥ Archived Notes</button>` +
             `<span class="ni-spacer"></span>` +
-            `<span class="ni-drag-hint">Drag header to move · drag bottom-right corner to resize</span>`;
-        el.toolbar.querySelector('[data-act="add"]').onclick = addRow;
-        el.toolbar.querySelector('[data-act="import"]').onclick = () => toast("Import Excel: backend ready (usp_NotesImport_*). UI coming in a later iteration.");
-        el.toolbar.querySelector('[data-act="template"]').onclick = () => toast("Template Library: backend ready (usp_NotesTemplate_*). UI coming in a later iteration.");
-        el.toolbar.querySelector('[data-act="archive"]').onclick = showArchive;
+            `<span class="ni-drag-hint">${canWrite ? "Drag header to move · drag bottom-right corner to resize" : "View only · drag header to move"}</span>`;
+        const on = (act, fn) => { const b = el.toolbar.querySelector(`[data-act="${act}"]`); if (b) b.onclick = fn; };
+        on("add", addRow);
+        on("import", () => toast("Import Excel: backend ready (usp_NotesImport_*). UI coming in a later iteration."));
+        on("template", () => toast("Template Library: backend ready (usp_NotesTemplate_*). UI coming in a later iteration."));
+        on("archive", showArchive);
 
-        el.footer.innerHTML =
-            `<span class="ni-foot-note">Shows latest 4-week Notes &amp; Insights plus older Open / WIP / Deferred carry-forward items. Closed notes older than 4 weeks move to Archived Notes.</span>` +
-            `<span class="ni-spacer"></span>` +
-            `<button class="btn btn-sm btn-outline-secondary" data-act="cancel">Cancel</button>` +
-            `<button class="btn btn-sm btn-success" data-act="save">💾 Save Changes</button>`;
-        el.footer.querySelector('[data-act="cancel"]').onclick = onCancel;
-        el.footer.querySelector('[data-act="save"]').onclick = saveAll;
+        // Save Changes saves new rows (Add) and changed rows (Edit); with neither there is nothing to save.
+        el.footer.innerHTML = (can.add || can.edit)
+            ? `<span class="ni-foot-note">Shows latest 4-week Notes &amp; Insights plus older Open / WIP / Deferred carry-forward items. Closed notes older than 4 weeks move to Archived Notes.</span>` +
+              `<span class="ni-spacer"></span>` +
+              `<button class="btn btn-sm btn-outline-secondary" data-act="cancel">Cancel</button>` +
+              `<button class="btn btn-sm btn-success" data-act="save">💾 Save Changes</button>`
+            : `<span class="ni-foot-note">Your role can view Notes &amp; Insights but not change them.</span>`;
+        const cancelBtn = el.footer.querySelector('[data-act="cancel"]');
+        if (cancelBtn) cancelBtn.onclick = onCancel;
+        const saveBtn = el.footer.querySelector('[data-act="save"]');
+        if (saveBtn) saveBtn.onclick = saveAll;
 
         el.body.innerHTML = `<div class="ni-loading">Loading active notes…</div>`;
         await loadActive();
@@ -371,6 +387,14 @@
     function bindGrid() {
         const grid = el.body.querySelector(".ni-grid-edit");
         if (!grid) return;
+        // Saved rows are locked without Edit, and lose their Delete without Delete. A new unsaved row
+        // (only there with Add) stays editable and can always be discarded.
+        grid.querySelectorAll("tr[data-rid]").forEach(tr => {
+            const row = rowByRid(tr.dataset.rid);
+            if (!row || row._new) return;
+            if (!can.edit) tr.querySelectorAll("input, select, textarea").forEach(f => { f.disabled = true; });
+            if (!can.del) tr.querySelectorAll('[data-rowact="del"]').forEach(b => b.remove());
+        });
         const onEdit = e => {
             const t = e.target;
             if (!t.dataset || !t.dataset.field) return;

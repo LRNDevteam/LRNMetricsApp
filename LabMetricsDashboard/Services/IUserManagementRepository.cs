@@ -45,6 +45,17 @@ public interface IUserManagementRepository
     /// <summary>Returns the Entra user for <paramref name="objectId"/>, creating it - active, no roles, no labs - on first sign-in.</summary>
     Task<LabUser> GetOrCreateEntraUserAsync(Guid objectId, Guid tenantId, string upn, string? email, string? displayName);
 
+    /// <summary>
+    /// First "Sign in with Microsoft" of an account an administrator created in advance (AR Workbench
+    /// Add User > Microsoft): AuthProvider 'Entra' with no object id yet, whose email / username is
+    /// exactly this organization UPN. Stores the object id on it and returns it; null when there is no
+    /// such account (or more than one).
+    /// </summary>
+    Task<LabUser?> ClaimPreCreatedEntraUserAsync(Guid objectId, Guid tenantId, string upn);
+
+    /// <summary>True when another user (not <paramref name="exceptLabUserId"/>) already has this email, as email or username.</summary>
+    Task<bool> IsEmailInUseAsync(string email, int? exceptLabUserId = null);
+
     /// <summary>Persistent per-account lockout: after <paramref name="maxAttempts"/> failures the account is locked for <paramref name="lockoutMinutes"/>.</summary>
     Task RecordFailedLoginAsync(int labUserId, int maxAttempts, int lockoutMinutes);
     Task RecordSuccessfulLoginAsync(int labUserId);

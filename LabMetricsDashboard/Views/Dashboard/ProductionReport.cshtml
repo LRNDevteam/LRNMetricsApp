@@ -8,6 +8,9 @@
     ViewData["Title"]       = $"Production Report - {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Production Report";
+    // Admin > Report Visibility: lmd-report-tab drops the tabs this user's role has hidden.
+    ViewData[LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.ViewDataKey] =
+        LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.Production;
     if (ViewData["PrPaneOnly"] is string paneOnly && !string.IsNullOrEmpty(paneOnly))
         Layout = null;
 
@@ -231,6 +234,7 @@
     var prPaneOnly = ViewData["PrPaneOnly"] as string;
     var prChrome = string.IsNullOrEmpty(prPaneOnly);
     var prSnapshot = LabMetricsDashboard.Services.ReportSnapshots.ReportSnapshotViewContext.From(ViewData);
+    var prAccess = await Context.GetReportAccessAsync(LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.Production);
     bool PrShow(string paneId) =>
         (!string.IsNullOrEmpty(prPaneOnly)
             && string.Equals(prPaneOnly, paneId, StringComparison.OrdinalIgnoreCase))
@@ -776,14 +780,14 @@ th.pr-month-data, td.pr-month-data {
     {
     <!-- ??? Premium Tabs ????????????????????????????????????????? -->
     <ul class="nav nav-pills pr-tabs mb-3" id="prTabs" role="tablist">
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="monthly">
             <button class="nav-link active" id="monthly-tab" data-bs-toggle="pill"
                     data-bs-target="#monthly-pane" type="button" role="tab"
                     aria-controls="monthly-pane" aria-selected="true">
                 <i class="bi bi-calendar-month"></i> Monthly Claim Volume
             </button>
         </li>
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="weekly">
             <button class="nav-link" id="weekly-tab" data-bs-toggle="pill"
                     data-bs-target="#weekly-pane" type="button" role="tab"
                     aria-controls="weekly-pane" aria-selected="false">
@@ -792,7 +796,7 @@ th.pr-month-data, td.pr-month-data {
         </li>
         @if (!isCoreBio && !isTexas && !isVariantX)
         {
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="coding">
             <button class="nav-link" id="coding-tab" data-bs-toggle="pill"
                     data-bs-target="#coding-pane" type="button" role="tab"
                     aria-controls="coding-pane" aria-selected="false">
@@ -800,14 +804,14 @@ th.pr-month-data, td.pr-month-data {
             </button>
         </li>
         }
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="payer-breakdown">
             <button class="nav-link" id="payer-breakdown-tab" data-bs-toggle="pill"
                     data-bs-target="#payer-breakdown-pane" type="button" role="tab"
                     aria-controls="payer-breakdown-pane" aria-selected="false">
                 <i class="bi bi-pie-chart"></i> Payer Breakdown
             </button>
         </li>
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="payer-panel">
             <button class="nav-link" id="payer-panel-tab" data-bs-toggle="pill"
                     data-bs-target="#payer-panel-pane" type="button" role="tab"
                     aria-controls="payer-panel-pane" aria-selected="false">
@@ -816,7 +820,7 @@ th.pr-month-data, td.pr-month-data {
         </li>
         @if (!isVariantX)
         {
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="unbilled-aging">
             <button class="nav-link" id="unbilled-aging-tab" data-bs-toggle="pill"
                     data-bs-target="#unbilled-aging-pane" type="button" role="tab"
                     aria-controls="unbilled-aging-pane" aria-selected="false">
@@ -824,14 +828,14 @@ th.pr-month-data, td.pr-month-data {
             </button>
         </li>
         }
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="cpt-breakdown">
             <button class="nav-link" id="cpt-breakdown-tab" data-bs-toggle="pill"
                     data-bs-target="#cpt-breakdown-pane" type="button" role="tab"
                     aria-controls="cpt-breakdown-pane" aria-selected="false">
                 <i class="bi bi-list-ol"></i> CPT Breakdown
             </button>
         </li>
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="panel-breakdown">
             <button class="nav-link" id="panel-breakdown-tab" data-bs-toggle="pill"
                     data-bs-target="#panel-breakdown-pane" type="button" role="tab"
                     aria-controls="panel-breakdown-pane" aria-selected="false">
@@ -840,14 +844,14 @@ th.pr-month-data, td.pr-month-data {
         </li>
         @if (Model.IsNorthWestLab)
         {
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="highest-payer">
             <button class="nav-link" id="highest-payer-tab" data-bs-toggle="pill"
                     data-bs-target="#highest-payer-pane" type="button" role="tab"
                     aria-controls="highest-payer-pane" aria-selected="false">
                 <i class="bi bi-trophy"></i> Highest payer Breakdown
             </button>
         </li>
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="top10-payer">
             <button class="nav-link" id="top10-payer-tab" data-bs-toggle="pill"
                     data-bs-target="#top10-payer-pane" type="button" role="tab"
                     aria-controls="top10-payer-pane" aria-selected="false">
@@ -865,7 +869,9 @@ th.pr-month-data, td.pr-month-data {
          data-pr-meta-url="@(prSnapshot?.ProductionMetaUrl ?? Url.Action("ProductionSummaryReportMeta", "Dashboard"))">
 
         <!-- ??? Monthly Claim Volume tab pane ????????????????????? -->
-        @if (prChrome || PrShow("monthly-pane"))
+        @* Report Visibility is checked here rather than with lmd-report-tab: on a tag-helper element the
+           conditional data-pr-lazy below could not be written as-is. *@
+        @if ((prChrome || PrShow("monthly-pane")) && prAccess.IsTabVisible("monthly"))
         {
         <div class="tab-pane fade show active" id="monthly-pane" role="tabpanel" aria-labelledby="monthly-tab"@(PrShow("monthly-pane") ? null : Html.Raw(" data-pr-lazy=\"monthly-pane\""))>
             @if (!PrShow("monthly-pane"))
@@ -1117,7 +1123,7 @@ th.pr-month-data, td.pr-month-data {
         <!-- ??? Weekly Claim Volume tab pane ?????????????????????? -->
         @if (prChrome || PrShow("weekly-pane"))
         {
-        <div class="tab-pane fade" id="weekly-pane" role="tabpanel" aria-labelledby="weekly-tab" data-pr-lazy="weekly-pane">
+        <div lmd-report-tab="weekly" class="tab-pane fade" id="weekly-pane" role="tabpanel" aria-labelledby="weekly-tab" data-pr-lazy="weekly-pane">
             @if (PrShow("weekly-pane"))
             {
             @if (Model.WeeklyPanelRows.Count > 0 && Model.WeekColumns.Count > 0)
@@ -1351,7 +1357,7 @@ th.pr-month-data, td.pr-month-data {
         <!-- ??? Coding tab pane ?????????????????????????????????? -->
         @if (!isCoreBio && !isTexas && !isVariantX && (prChrome || PrShow("coding-pane")))
         {
-        <div class="tab-pane fade" id="coding-pane" role="tabpanel" aria-labelledby="coding-tab" data-pr-lazy="coding-pane">
+        <div lmd-report-tab="coding" class="tab-pane fade" id="coding-pane" role="tabpanel" aria-labelledby="coding-tab" data-pr-lazy="coding-pane">
             @if (PrShow("coding-pane"))
             {
             @if (Model.CodingPanelRows.Count > 0)
@@ -1423,7 +1429,7 @@ th.pr-month-data, td.pr-month-data {
         <!-- ??? Payer Breakdown tab pane ?????????????????????????? -->
         @if (prChrome || PrShow("payer-breakdown-pane"))
         {
-        <div class="tab-pane fade" id="payer-breakdown-pane" role="tabpanel" aria-labelledby="payer-breakdown-tab" data-pr-lazy="payer-breakdown-pane">
+        <div lmd-report-tab="payer-breakdown" class="tab-pane fade" id="payer-breakdown-pane" role="tabpanel" aria-labelledby="payer-breakdown-tab" data-pr-lazy="payer-breakdown-pane">
             @if (PrShow("payer-breakdown-pane"))
             {
             @if (Model.PayerBreakdownRows.Count > 0 && pbYears.Count > 0)
@@ -1643,7 +1649,7 @@ th.pr-month-data, td.pr-month-data {
         <!-- ??? Payer X Panel tab pane ??????????????????????????? -->
         @if (prChrome || PrShow("payer-panel-pane"))
         {
-        <div class="tab-pane fade" id="payer-panel-pane" role="tabpanel" aria-labelledby="payer-panel-tab" data-pr-lazy="payer-panel-pane">
+        <div lmd-report-tab="payer-panel" class="tab-pane fade" id="payer-panel-pane" role="tabpanel" aria-labelledby="payer-panel-tab" data-pr-lazy="payer-panel-pane">
             @if (PrShow("payer-panel-pane"))
             {
             @if (Model.PayerPanelRows.Count > 0 && pxpPanels.Count > 0)
@@ -1801,7 +1807,7 @@ th.pr-month-data, td.pr-month-data {
         <!-- ??? Unbilled X Aging tab pane ???????????????????????? -->
         @if (!isVariantX && (prChrome || PrShow("unbilled-aging-pane")))
         {
-        <div class="tab-pane fade" id="unbilled-aging-pane" role="tabpanel" aria-labelledby="unbilled-aging-tab" data-pr-lazy="unbilled-aging-pane">
+        <div lmd-report-tab="unbilled-aging" class="tab-pane fade" id="unbilled-aging-pane" role="tabpanel" aria-labelledby="unbilled-aging-tab" data-pr-lazy="unbilled-aging-pane">
             @if (PrShow("unbilled-aging-pane"))
             {
             @if (Model.UnbilledAgingRows.Count > 0)
@@ -1955,7 +1961,7 @@ th.pr-month-data, td.pr-month-data {
         <!-- ??? CPT Breakdown tab pane ??????????????????????????? -->
         @if (prChrome || PrShow("cpt-breakdown-pane"))
         {
-        <div class="tab-pane fade" id="cpt-breakdown-pane" role="tabpanel" aria-labelledby="cpt-breakdown-tab" data-pr-lazy="cpt-breakdown-pane">
+        <div lmd-report-tab="cpt-breakdown" class="tab-pane fade" id="cpt-breakdown-pane" role="tabpanel" aria-labelledby="cpt-breakdown-tab" data-pr-lazy="cpt-breakdown-pane">
             @if (PrShow("cpt-breakdown-pane"))
             {
                 var cptDaqSrc = Model.CptBreakdownRows.FirstOrDefault(r => r.CptCode.Equals("DAQ", StringComparison.OrdinalIgnoreCase));
@@ -2337,7 +2343,7 @@ th.pr-month-data, td.pr-month-data {
 
         @if (prChrome || PrShow("panel-breakdown-pane"))
         {
-        <div class="tab-pane fade" id="panel-breakdown-pane" role="tabpanel" aria-labelledby="panel-breakdown-tab" data-pr-lazy="panel-breakdown-pane">
+        <div lmd-report-tab="panel-breakdown" class="tab-pane fade" id="panel-breakdown-pane" role="tabpanel" aria-labelledby="panel-breakdown-tab" data-pr-lazy="panel-breakdown-pane">
             @if (PrShow("panel-breakdown-pane"))
             {
             @if (Model.PanelBreakdownRows.Count > 0 && pnlYears.Count > 0)
@@ -2534,7 +2540,7 @@ th.pr-month-data, td.pr-month-data {
 
         @if ((prChrome || PrShow("top10-payer-pane")) && Model.IsNorthWestLab)
         {
-        <div class="tab-pane fade" id="top10-payer-pane" role="tabpanel" aria-labelledby="top10-payer-tab" data-pr-lazy="top10-payer-pane">
+        <div lmd-report-tab="top10-payer" class="tab-pane fade" id="top10-payer-pane" role="tabpanel" aria-labelledby="top10-payer-tab" data-pr-lazy="top10-payer-pane">
             @if (PrShow("top10-payer-pane"))
             {
             <div class="pr-filter-summary">
@@ -2675,7 +2681,7 @@ th.pr-month-data, td.pr-month-data {
 
         @if ((prChrome || PrShow("highest-payer-pane")) && Model.IsNorthWestLab)
         {
-        <div class="tab-pane fade" id="highest-payer-pane" role="tabpanel" aria-labelledby="highest-payer-tab" data-pr-lazy="highest-payer-pane">
+        <div lmd-report-tab="highest-payer" class="tab-pane fade" id="highest-payer-pane" role="tabpanel" aria-labelledby="highest-payer-tab" data-pr-lazy="highest-payer-pane">
             @if (PrShow("highest-payer-pane"))
             {
             @if (Model.HighestPayerRows.Count > 0 && hpYears.Count > 0)

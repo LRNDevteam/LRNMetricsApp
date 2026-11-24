@@ -27,18 +27,49 @@ public sealed class NotesController : Controller
     private readonly INotesImportFileRepository _importFiles;
     private readonly IAnalysisRangeService _analysisRange;
     private readonly IReportSnapshotRequestQueue _snapshotRequests;
+    private readonly IReportAccessService _reportAccess;
     private readonly ILogger<NotesController> _logger;
 
     public NotesController(LabSettings labSettings, INotesRepository repo, INotesImportFileRepository importFiles,
-        IAnalysisRangeService analysisRange, IReportSnapshotRequestQueue snapshotRequests, ILogger<NotesController> logger)
+        IAnalysisRangeService analysisRange, IReportSnapshotRequestQueue snapshotRequests,
+        IReportAccessService reportAccess, ILogger<NotesController> logger)
     {
         _labSettings = labSettings;
         _repo = repo;
         _importFiles = importFiles;
         _analysisRange = analysisRange;
         _snapshotRequests = snapshotRequests;
+        _reportAccess = reportAccess;
         _logger = logger;
     }
+
+    // ── Admin > Report Visibility: Key Insights Hidden / View only per role ──
+
+    private async Task<ReportPageAccess> AccessForAsync(string? reportName, CancellationToken ct)
+        => Models.ReportVisibility.ReportVisibilityCatalog.PageForNotesReport(reportName) is { } page
+            ? await _reportAccess.GetAsync(page, ct)
+            : ReportPageAccess.Unrestricted(string.Empty);
+
+    /// <summary>A 403 when the role has this report's Key Insights hidden; null to carry on.</summary>
+    private async Task<IActionResult?> DenyViewAsync(string? reportName, CancellationToken ct)
+        => (await AccessForAsync(reportName, ct)).KeyInsightsVisible
+            ? null
+            : StatusCode(StatusCodes.Status403Forbidden, new { error = "Key Insights are not available for your role on this report." });
+
+    /// <summary>A 403 when the role may not take <paramref name="action"/> on this report's Key Insights; null to carry on.</summary>
+    /// <remarks>Default is allowed: before Report Visibility every report user could add, edit, delete and import.</remarks>
+    private async Task<IActionResult?> DenyActionAsync(string? reportName, Models.ReportVisibility.KeyInsightAction action, CancellationToken ct)
+        => (await AccessForAsync(reportName, ct)).CanKeyInsights(action, fallback: true)
+            ? null
+            : StatusCode(StatusCodes.Status403Forbidden, new { error = action switch
+            {
+                Models.ReportVisibility.KeyInsightAction.Add => "Your role cannot add Key Insights on this report.",
+                Models.ReportVisibility.KeyInsightAction.Edit => "Your role cannot edit Key Insights on this report.",
+                Models.ReportVisibility.KeyInsightAction.Delete => "Your role cannot delete Key Insights on this report.",
+                Models.ReportVisibility.KeyInsightAction.Import => "Your role cannot import Key Insights on this report.",
+                Models.ReportVisibility.KeyInsightAction.Template => "Your role cannot download the Key Insights template on this report.",
+                _ => "Your role cannot change Key Insights on this report."
+            } });
 
     /// <summary>
     /// Asks LRN.SnapshotGenerator to capture the report's Key Insights for the week (Report Snapshots): the
@@ -138,6 +169,7 @@ public sealed class NotesController : Controller
     {
         if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
         if (!TryResolveReportName(report, out var reportName)) return BadRequest(new { error = $"Unknown report '{report}'." });
+        if (await DenyViewAsync(reportName, ct) is { } denied) return denied;
         try
         {
             var reportKeyId = await _repo.EnsureReportAsync(cs, reportName, ct);
@@ -163,6 +195,7 @@ public sealed class NotesController : Controller
     {
         if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
         if (!TryResolveReportName(report, out var reportName)) return BadRequest(new { error = $"Unknown report '{report}'." });
+        if (await DenyViewAsync(reportName, ct) is { } denied) return denied;
         try
         {
             var reportKeyId = await _repo.EnsureReportAsync(cs, reportName, ct);
@@ -181,6 +214,7 @@ public sealed class NotesController : Controller
         {
             var note = await _repo.GetByIdAsync(cs, id, ct);
             if (note is null) return NotFound(new { error = "Note not found." });
+            if (await DenyViewAsync(note.ReportName, ct) is { } denied) return denied;
             return Json(note);
         }
         catch (Exception ex) { return Fail(ex, "load note detail"); }
@@ -217,6 +251,10 @@ public sealed class NotesController : Controller
         }
         var reportRaw = string.IsNullOrWhiteSpace(report) ? req.ReportName : report;
         if (!TryResolveReportName(reportRaw, out var reportName)) return BadRequest(new { error = $"Unknown report '{reportRaw}'." });
+        var saveAction = req.NoteId is null or <= 0
+            ? Models.ReportVisibility.KeyInsightAction.Add
+            : Models.ReportVisibility.KeyInsightAction.Edit;
+        if (await DenyActionAsync(reportName, saveAction, ct) is { } denied) return denied;
         req.ReportName = reportName;
         NormalizeWeekRange(req);
         try
@@ -329,6 +367,7 @@ public sealed class NotesController : Controller
         {
             // Read first: the report it belonged to decides which insights snapshot to refresh.
             var note = await _repo.GetByIdAsync(cs, id, ct);
+            if (note is not null && await DenyActionAsync(note.ReportName, Models.ReportVisibility.KeyInsightAction.Delete, ct) is { } denied) return denied;
             var result = await _repo.DeleteAsync(cs, id, CurrentUser, ct);
             if (result.Success && note is not null)
                 await RequestInsightSnapshotAsync(lab!, note.ReportName, "Insight deleted");
@@ -343,6 +382,7 @@ public sealed class NotesController : Controller
     {
         if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
         if (!TryResolveReportName(report, out var reportName)) return BadRequest(new { error = $"Unknown report '{report}'." });
+        if (await DenyActionAsync(reportName, Models.ReportVisibility.KeyInsightAction.Template, ct) is { } denied) return denied;
         try
         {
             var columns = await InsightsExcelBuilder.LoadTemplateColumnsAsync(_repo, cs, reportName, ct);
@@ -369,6 +409,7 @@ public sealed class NotesController : Controller
     {
         if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
         if (!TryResolveReportName(report, out var reportName)) return BadRequest(new { error = $"Unknown report '{report}'." });
+        if (await DenyActionAsync(reportName, Models.ReportVisibility.KeyInsightAction.Import, ct) is { } denied) return denied;
         if (file is null || file.Length == 0) return BadRequest(new { error = "Choose an Excel file to import." });
         var uploadError = await FileUploadGuard.ValidateExcelAsync(file, 25 * 1024 * 1024, ct);
         if (uploadError is not null) return BadRequest(new { error = uploadError });
@@ -466,6 +507,7 @@ public sealed class NotesController : Controller
     {
         if (!TryResolveConnection(lab, out var cs, out var err)) return BadRequest(new { error = err });
         if (!TryResolveReportName(report, out var reportName)) return BadRequest(new { error = $"Unknown report '{report}'." });
+        if (await DenyActionAsync(reportName, Models.ReportVisibility.KeyInsightAction.Import, ct) is { } denied) return denied;
         try
         {
             var files = await _importFiles.ListAsync(cs, reportName, 100, ct);

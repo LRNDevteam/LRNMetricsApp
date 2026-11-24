@@ -339,8 +339,14 @@ public class CollectionSummaryController : Controller
         string? filterDosTo,
         string? filterCheckDateFrom,
         string? filterCheckDateTo,
+        [FromServices] IReportAccessService reportAccess,
         CancellationToken ct = default)
     {
+        // Admin > Report Visibility: the page leaves a hidden tab out; refuse a hand-made request for it too.
+        var access = await reportAccess.GetAsync(Models.ReportVisibility.ReportVisibilityCatalog.CollectionSummary, ct);
+        if (!access.IsTabVisible(tab))
+            return StatusCode(StatusCodes.Status403Forbidden, "This tab is not available for your role.");
+
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 

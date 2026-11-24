@@ -2301,6 +2301,23 @@
         @await Html.PartialAsync("_HelpBotWidget")
     }
     @await RenderSectionAsync("Scripts", required: false)
+    @if (Context.Items.ContainsKey(LabMetricsDashboard.TagHelpers.ReportTabTagHelper.HiddenTabsItemKey))
+    {
+        @* Report Visibility removed at least one tab (lmd-report-tab). If that was the tab the page
+           opens on, no tab is active any more: open the first one left. A click (not Tab.show) so the
+           page's own lazy loaders, bound to click or shown.bs.tab, load it exactly as a user click would. *@
+        <script nonce='@Context.Items["CspNonce"]'>
+            (function () {
+                document.querySelectorAll('[role="tablist"]').forEach(function (list) {
+                    var buttons = Array.prototype.filter.call(
+                        list.querySelectorAll('[data-bs-toggle="tab"], [data-bs-toggle="pill"]'),
+                        function (b) { return !b.classList.contains('disabled') && !b.disabled; });
+                    if (buttons.length === 0 || buttons.some(function (b) { return b.classList.contains('active'); })) return;
+                    buttons[0].click();
+                });
+            })();
+        </script>
+    }
 </body>
 
 </html>

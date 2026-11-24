@@ -167,6 +167,174 @@ public sealed class ReportSnapshotViewRenderTests
         Assert.Contains("Export", html);
     }
 
+    // ── Admin > Report Visibility ─────────────────────────────────────────────
+
+    private sealed class FixedAccess(ReportPageAccess access) : IReportAccessService
+    {
+        public Task<ReportPageAccess> GetAsync(string pageKey, CancellationToken ct = default) =>
+            Task.FromResult(string.Equals(pageKey, access.PageKey, StringComparison.OrdinalIgnoreCase)
+                ? access
+                : ReportPageAccess.Unrestricted(pageKey));
+    }
+
+    [Fact]
+    public async Task A_hidden_production_tab_is_left_out_of_the_page()
+    {
+        var vm = Populated<LRN.ProductionReports.Models.ProductionReportViewModel>();
+        var access = new FixedAccess(new ReportPageAccess(
+            LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.Production, ["weekly", "monthly"], true, null));
+
+        var html = await RenderAsync("~/Views/Dashboard/ProductionSummaryReport.cshtml", vm, Context(Codes.ProductionSummary),
+            viewData => viewData["PrCacheKey"] = "42", reportAccess: access);
+
+        Assert.DoesNotContain("id=\"weekly-tab\"", html);
+        Assert.DoesNotContain("id=\"weekly-pane\"", html);
+        Assert.DoesNotContain("id=\"monthly-tab\"", html);
+        Assert.DoesNotContain("id=\"monthly-pane\"", html);
+        Assert.Contains("id=\"payer-breakdown-tab\"", html);
+        Assert.Contains("id=\"payer-breakdown-pane\"", html);
+        Assert.DoesNotContain("lmd-report-tab", html);   // the tag helper's own attribute never reaches the browser
+    }
+
+    [Fact]
+    public async Task Production_tabs_are_all_there_by_default()
+    {
+        var vm = Populated<LRN.ProductionReports.Models.ProductionReportViewModel>();
+        var access = new FixedAccess(ReportPageAccess.Unrestricted(
+            LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.Production));
+
+        var html = await RenderAsync("~/Views/Dashboard/ProductionSummaryReport.cshtml", vm, Context(Codes.ProductionSummary),
+            viewData => viewData["PrCacheKey"] = "42", reportAccess: access);
+
+        Assert.Contains("id=\"monthly-tab\"", html);
+        Assert.Contains("id=\"weekly-pane\"", html);
+        Assert.DoesNotContain("data-pr-lazy=\"\"", html);   // a null conditional attribute is dropped, not emptied
+    }
+
+    [Fact]
+    public async Task Hidden_key_insights_remove_the_denial_insight_tab()
+    {
+        var vm = Populated<DenialClaimReportViewModel>();
+        vm.CurrentLab = Lab;
+        vm.ActiveTab = "monthly";
+        var access = new FixedAccess(new ReportPageAccess(
+            LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.DenialSummary, ["claims"], false, null));
+
+        var html = await RenderAsync("~/Views/DenialClaimReport/Index.cshtml", vm, context: null,
+            controller: "DenialClaimReport", reportAccess: access);
+
+        Assert.DoesNotContain("id=\"dcr-insight\"", html);
+        Assert.DoesNotContain("data-tab-key=\"insight\"", html);
+        Assert.DoesNotContain("id=\"dcr-claims\"", html);
+        Assert.Contains("id=\"dcr-monthly\"", html);
+    }
+
+    [Fact]
+    public async Task Hidden_collection_tab_is_left_out_of_the_page()
+    {
+        var vm = Populated<CollectionSummaryViewModel>();
+        vm.SelectedLab = Lab;
+        vm.LazyLoadTabs = true;
+        var access = new FixedAccess(new ReportPageAccess(
+            LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.CollectionSummary, ["aging"], true, null));
+
+        var html = await RenderAsync("~/Views/CollectionSummary/Index.cshtml", vm, Context(Codes.CollectionSummary), reportAccess: access);
+
+        Assert.DoesNotContain("id=\"aging-tab\"", html);
+        Assert.DoesNotContain("id=\"aging-pane\"", html);
+        Assert.Contains("id=\"panelpay-tab\"", html);
+    }
+
+    [Fact]
+    public async Task Key_insights_buttons_follow_each_action_setting()
+    {
+        var actions = new Dictionary<LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction, bool>
+        {
+            [LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction.Add] = true,
+            [LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction.Import] = false,
+            [LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction.Template] = false,
+            [LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction.Delete] = false,
+        };
+        var access = new FixedAccess(new ReportPageAccess(
+            LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.LisSummary, [], true, actions));
+
+        var html = await RenderAsync("~/Views/LisSummary/Index.cshtml", new LisSummaryPageViewModel
+        {
+            CurrentLabName = Lab,
+            ConfiguredLabKey = Lab,
+            Result = Populated<LisSummaryResult>(),
+            FilterOptions = new([], [], [], [], [])
+        }, context: null, controller: "LisSummary", reportAccess: access);
+
+        Assert.Contains("data-can-add=\"1\"", html);
+        Assert.Contains("data-can-import=\"0\"", html);
+        Assert.Contains("data-can-template=\"0\"", html);
+        Assert.Contains("data-can-delete=\"0\"", html);
+        Assert.Contains("data-can-edit=\"1\"", html);   // Default
+        Assert.Matches("id=\"riImportBtn\"[^>]*hidden", html);
+        Assert.Matches("id=\"riTemplateBtn\"[^>]*hidden", html);
+        Assert.Matches("id=\"riImportTemplateLink\"[^>]*hidden", html);
+        Assert.DoesNotMatch("id=\"riAddBtn\"[^>]*hidden", html);
+    }
+
+    [Fact]
+    public async Task Hidden_key_insights_leave_the_panel_out()
+    {
+        var access = new FixedAccess(new ReportPageAccess(
+            LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.LisSummary, [], keyInsightsVisible: false));
+
+        var html = await RenderAsync("~/Views/LisSummary/Index.cshtml", new LisSummaryPageViewModel
+        {
+            CurrentLabName = Lab,
+            ConfiguredLabKey = Lab,
+            Result = Populated<LisSummaryResult>(),
+            FilterOptions = new([], [], [], [], [])
+        }, context: null, controller: "LisSummary", reportAccess: access);
+
+        Assert.DoesNotContain("id=\"riRoot\"", html);
+        Assert.DoesNotContain("report-insights.js", html);
+    }
+
+    [Fact]
+    public async Task Denial_insight_import_only_shows_import_and_no_row_or_copy_buttons()
+    {
+        var vm = Populated<DenialClaimReportViewModel>();
+        vm.CurrentLab = Lab;
+        vm.ActiveTab = "insight";
+        vm.Insight.CurrentLab = Lab;
+        vm.Insight.Bucket = DenialInsightBuckets.Current;
+        vm.Insight.CanEdit = false;
+        vm.Insight.CanImport = true;
+        vm.Insight.CanExport = false;
+
+        var html = await RenderAsync("~/Views/DenialClaimReport/Index.cshtml", vm, context: null, controller: "DenialClaimReport");
+
+        Assert.Contains("data-bs-target=\"#insightImportPanel\"", html);
+        Assert.Contains("id=\"insightImportPanel\"", html);
+        Assert.DoesNotContain("class=\"row-btn row-edit\"", html);
+        Assert.DoesNotContain("id=\"confirmDeleteModal\"", html);
+        Assert.DoesNotContain("id=\"confirmCopyModal\"", html);
+        Assert.DoesNotContain("id=\"copyPreviousForm\"", html);
+        Assert.DoesNotContain("> Export", html);
+    }
+
+    [Fact]
+    public async Task Denial_insight_view_only_has_no_write_buttons()
+    {
+        var vm = Populated<DenialClaimReportViewModel>();
+        vm.CurrentLab = Lab;
+        vm.ActiveTab = "insight";
+        vm.Insight.CurrentLab = Lab;
+        vm.Insight.Bucket = DenialInsightBuckets.Current;
+        vm.Insight.CanEdit = false;
+
+        var html = await RenderAsync("~/Views/DenialClaimReport/Index.cshtml", vm, context: null, controller: "DenialClaimReport");
+
+        Assert.DoesNotContain("data-bs-target=\"#insightImportPanel\"", html);
+        Assert.DoesNotContain("class=\"row-btn row-edit\"", html);
+        Assert.DoesNotContain("id=\"copyPreviousForm\"", html);
+    }
+
     // ── harness ───────────────────────────────────────────────────────────────
 
     private static void AssertSnapshotPage(string html)
@@ -228,12 +396,15 @@ public sealed class ReportSnapshotViewRenderTests
         return app;
     });
 
-    private static async Task<string> RenderAsync(string viewPath, object model, ReportSnapshotViewContext? context,
-        Action<ViewDataDictionary>? setup = null, bool mainPage = true, string controller = "ReportSnapshotViewer")
+    internal static async Task<string> RenderAsync(string viewPath, object model, ReportSnapshotViewContext? context,
+        Action<ViewDataDictionary>? setup = null, bool mainPage = true, string controller = "ReportSnapshotViewer",
+        IReportAccessService? reportAccess = null)
     {
         var app = App.Value;
         using var scope = app.Services.CreateScope();
-        var services = scope.ServiceProvider;
+        IServiceProvider services = scope.ServiceProvider;
+        // Report Visibility is off unless a test supplies it (the app registers it; this harness does not).
+        if (reportAccess is not null) services = new WithReportAccess(services, reportAccess);
 
         var http = new DefaultHttpContext { RequestServices = services, User = new ClaimsPrincipal(new ClaimsIdentity()) };
         http.Items["CspNonce"] = "test-nonce";
@@ -271,11 +442,18 @@ public sealed class ReportSnapshotViewRenderTests
         return Path.Combine(dir?.FullName ?? throw new DirectoryNotFoundException("LabMetricsDashboard not found."), "LabMetricsDashboard");
     }
 
+    private sealed class WithReportAccess(IServiceProvider inner, IReportAccessService access) : IServiceProvider
+    {
+        public object? GetService(Type serviceType) =>
+            serviceType == typeof(IReportAccessService) ? access : inner.GetService(serviceType);
+    }
+
     private sealed class NoMenu : IMenuService
     {
         public Task<List<MenuItemVm>> GetMenuForUserAsync(ClaimsPrincipal user, CancellationToken ct) => Task.FromResult(new List<MenuItemVm>());
         public Task<bool> CanAccessAsync(ClaimsPrincipal user, string? area, string? controller, string? action, CancellationToken ct) => Task.FromResult(true);
         public Task<bool> IsFeatureEnabledAsync(ClaimsPrincipal user, string featureKey, bool fallback, CancellationToken ct) => Task.FromResult(fallback);
+        public Task<bool?> GetFeatureSettingAsync(ClaimsPrincipal user, string featureKey, CancellationToken ct) => Task.FromResult<bool?>(null);
         public void InvalidateCache() { }
     }
 }

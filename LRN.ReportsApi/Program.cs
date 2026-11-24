@@ -111,6 +111,8 @@ builder.Services.Configure<LRN.ReportsApi.Services.UserMail.UserMailOptions>(bui
 builder.Services.AddSingleton<LRN.ReportsApi.Services.UserMail.IUserMailSender, LRN.ReportsApi.Services.UserMail.GraphUserMailSender>();
 builder.Services.AddSingleton<LRN.ReportsApi.Services.UserMail.IUserMailRepository, LRN.ReportsApi.Services.UserMail.SqlUserMailRepository>();
 builder.Services.AddScoped<LRN.ReportsApi.Services.UserMail.IUserInvitationService, LRN.ReportsApi.Services.UserMail.UserInvitationService>();
+// Emailed one-time sign-in code for external users, on every sign-in (dbo.UserLoginOtp).
+builder.Services.AddScoped<LRN.ReportsApi.Services.UserMail.ILoginCodeService, LRN.ReportsApi.Services.UserMail.LoginCodeService>();
 builder.Services.AddScoped<IPayerMasterWorkflowService, PayerMasterWorkflowService>();
 builder.Services.AddHostedService<PayerMasterSlaEscalationService>();
 // Denial Summary observations and weekly/monthly Excel snapshots (Denial Workflow v1.1, 4a-4i).
