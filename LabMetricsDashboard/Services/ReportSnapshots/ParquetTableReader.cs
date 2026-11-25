@@ -70,6 +70,42 @@ public static class ParquetTableReader
         };
     }
 
+    /// <summary>
+    /// Streams every row of the file, one row group at a time, to <paramref name="onRow"/>. Only the
+    /// columns named in <paramref name="onlyColumns"/> (case-insensitive) are decoded; null reads all.
+    /// <paramref name="onSchema"/> receives the decoded column names once, in the order the row
+    /// values use. The row array is reused between calls - copy anything kept.
+    /// </summary>
+    public static async Task ReadAllRowsAsync(byte[] file, IReadOnlyCollection<string>? onlyColumns,
+        Action<IReadOnlyList<string>> onSchema, Action<object?[]> onRow, CancellationToken ct)
+    {
+        await using var stream = new MemoryStream(file, writable: false);
+        await using var reader = await ParquetReader.CreateAsync(stream, null, false, ct);
+
+        var wanted = onlyColumns is null ? null : new HashSet<string>(onlyColumns, StringComparer.OrdinalIgnoreCase);
+        var fields = reader.Schema.DataFields
+            .Where(f => !f.IsArray && (wanted is null || wanted.Contains(f.Name)))
+            .ToArray();
+        onSchema(fields.Select(f => f.Name).ToList());
+
+        var row = new object?[fields.Length];
+        for (int g = 0; g < reader.RowGroupCount; g++)
+        {
+            ct.ThrowIfCancellationRequested();
+            using var group = reader.OpenRowGroupReader(g);
+            var groupRows = checked((int)group.RowCount);
+            var columnValues = new object?[fields.Length][];
+            for (int c = 0; c < fields.Length; c++)
+                columnValues[c] = await ReadColumnAsync(group, fields[c], groupRows, ct);
+
+            for (int r = 0; r < groupRows; r++)
+            {
+                for (int c = 0; c < fields.Length; c++) row[c] = columnValues[c][r];
+                onRow(row);
+            }
+        }
+    }
+
     private static async Task<object?[]> ReadColumnAsync(ParquetRowGroupReader group, DataField field, int count, CancellationToken ct)
     {
         if (field.IsArray)

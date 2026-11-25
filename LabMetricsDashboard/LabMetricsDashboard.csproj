@@ -92,6 +92,8 @@
 
     <ItemGroup>
       <Folder Include="Templates\" />
+    <!-- Revenue Analysis dashboard page (built by tools/RevenueAnalysisTemplate/build_template.py). -->
+    <EmbeddedResource Include="Templates\RevenueAnalysis\RevenueAnalysisTemplate.html" LogicalName="RevenueAnalysisTemplate.html" />
     </ItemGroup>
 
 </Project>

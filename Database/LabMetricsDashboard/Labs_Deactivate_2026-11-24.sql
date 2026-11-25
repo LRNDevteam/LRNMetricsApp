@@ -56,11 +56,24 @@ FROM   dbo.Labs l
 JOIN   @Deactivate d ON d.LabId = l.LabId
 WHERE  l.IsActive = 1;
 
-PRINT CAST(@@ROWCOUNT AS NVARCHAR(10)) + ' lab(s) deactivated.';
+DECLARE @Changed INT = @@ROWCOUNT;
 
--- Review the preview above, then COMMIT (or ROLLBACK if any LabName is wrong).
--- COMMIT TRANSACTION;
--- ROLLBACK TRANSACTION;
+-- Commits on its own: an open transaction left in an editor window is rolled back when the window
+-- closes, which silently undid the first run of this script. Only labs still active are counted,
+-- so a re-run changes 0 rows and commits nothing.
+IF @Changed <= (SELECT COUNT(*) FROM @Deactivate)
+BEGIN
+    COMMIT TRANSACTION;
+    PRINT CAST(@Changed AS NVARCHAR(10)) + ' lab(s) deactivated and committed.';
+END
+ELSE
+BEGIN
+    ROLLBACK TRANSACTION;
+    PRINT 'Rolled back: more rows changed than expected.';
+END
 
--- 3. Verify (after COMMIT).
--- SELECT LabId, LabName, IsActive, ModifiedBy, ModifiedDate FROM dbo.Labs ORDER BY IsActive, LabName;
+-- 3. Verify.
+SELECT LabId, LabName, IsActive, ModifiedBy, ModifiedDate
+FROM   dbo.Labs
+WHERE  LabId IN (SELECT LabId FROM @Deactivate)
+ORDER BY LabId;

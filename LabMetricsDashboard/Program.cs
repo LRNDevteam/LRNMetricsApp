@@ -675,6 +675,10 @@ builder.Services.AddSingleton<LabMetricsDashboard.Services.ReportSnapshots.IRepo
     LabMetricsDashboard.Services.ReportSnapshots.ReportPageSnapshotReader>();
 // Denial Insight upload / edit -> LRN.SnapshotGenerator snapshots the tab (LRNMaster.dbo.ReportSnapshotRequest).
 builder.Services.AddSingleton<IReportSnapshotRequestQueue, SqlReportSnapshotRequestQueue>();
+// Revenue Analysis: the report team's client dashboard built from a lab's Claim / Line Level data (live or a
+// weekly snapshot). Singleton: it owns the background build jobs and the generated-page store.
+builder.Services.AddSingleton<LabMetricsDashboard.Services.RevenueAnalysis.IRevenueAnalysisService,
+    LabMetricsDashboard.Services.RevenueAnalysis.RevenueAnalysisService>();
 
 // ── Reimbursement Insights chat (Foundry agent via the ReimbursementAgentProxy App Service) ──
 // The browser posts to ReimbursementChatController on this origin and this app calls the proxy,

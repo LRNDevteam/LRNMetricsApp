@@ -1,0 +1,285 @@
+@using LabMetricsDashboard.Services.RevenueAnalysis
+@model LabMetricsDashboard.Controllers.RevenueAnalysisIndexViewModel
+@{
+    ViewData["Title"] = "Revenue Analysis";
+    var pages = RevenueAnalysisPages.All;
+}
+
+<style>
+    .ra-pages { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:12px; }
+    .ra-tile { display:flex; gap:12px; align-items:flex-start; text-align:left; width:100%; padding:14px 16px;
+               border:1px solid #dbe3e6; border-radius:12px; background:#fff; transition:box-shadow .15s, border-color .15s; }
+    .ra-tile:hover:not(:disabled) { border-color:#0F6B66; box-shadow:0 4px 14px rgba(14,36,56,.10); }
+    .ra-tile:disabled { opacity:.5; cursor:not-allowed; }
+    .ra-tile .ra-ico { flex:0 0 38px; height:38px; border-radius:10px; background:#E4F1EF; color:#0F6B66;
+                       display:flex; align-items:center; justify-content:center; font-size:18px; }
+    .ra-tile .ra-num { font-size:11px; color:#8B9BA5; font-weight:600; }
+    .ra-tile .ra-title { font-weight:600; color:#0E2438; }
+    .ra-tile .ra-desc { font-size:12px; color:#5C6E79; line-height:1.35; }
+    .ra-tile .ra-open { margin-left:auto; color:#8B9BA5; }
+    .ra-status { min-height:24px; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h4 class="mb-0"><i class="bi bi-window-stack"></i> Revenue Analysis</h4>
+        <small class="text-muted">
+            The client revenue dashboard - overview, trends, payers, panels, CPT, clinics &amp; providers, claim status, denials and source
+            data - built from <strong>@Model.LabDisplayName</strong>'s Claim Level and Line Level data. Each page opens in its own window,
+            and the whole dashboard downloads as one HTML file to send to the client or accounting team.
+        </small>
+    </div>
+</div>
+
+@if (Model.Error is not null)
+{
+    <div class="alert alert-warning">@Model.Error</div>
+    return;
+}
+
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+        <form id="ra-form" class="row g-3 align-items-end">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="lab" value="@Model.LabKey" />
+
+            <div class="col-lg-5">
+                <label class="form-label fw-semibold small mb-1" for="ra-source">Data source</label>
+                <select id="ra-source" name="source" class="form-select form-select-sm">
+                    @if (Model.LiveAvailable)
+                    {
+                        <option value="live" selected>Live - current Claim Level &amp; Line Level data (lab database)</option>
+                    }
+                    else
+                    {
+                        <option value="" disabled>Live database - @Model.LiveUnavailableReason</option>
+                    }
+                    @if (Model.Snapshots.Count > 0)
+                    {
+                        <optgroup label="Historic weekly snapshots">
+                            @foreach (var s in Model.Snapshots)
+                            {
+                                <option value="snapshot:@s.SnapshotRunId" selected="@(!Model.LiveAvailable && s == Model.Snapshots[0])">
+                                    @s.Label - @s.ClaimRows.ToString("N0") claims
+                                </option>
+                            }
+                        </optgroup>
+                    }
+                </select>
+                <div class="form-text">
+                    @if (Model.SnapshotError is not null)
+                    {
+                        <span class="text-warning">@Model.SnapshotError</span>
+                    }
+                    else if (Model.Snapshots.Count == 0)
+                    {
+                        <span>No weekly Claim / Line Level snapshots are on file for this lab yet.</span>
+                    }
+                    else
+                    {
+                        <span>Snapshots are the Claim and Line Level masters exactly as they stood at the end of that week.</span>
+                    }
+                </div>
+            </div>
+
+            <div class="col-sm-6 col-lg-2">
+                <label class="form-label fw-semibold small mb-1" for="ra-from">DOS from</label>
+                <input type="date" id="ra-from" name="dosFrom" class="form-control form-control-sm" value="@Model.DefaultFrom.ToString("yyyy-MM-dd")" />
+            </div>
+            <div class="col-sm-6 col-lg-2">
+                <label class="form-label fw-semibold small mb-1" for="ra-to">DOS to</label>
+                <input type="date" id="ra-to" name="dosTo" class="form-control form-control-sm" value="@Model.DefaultTo.ToString("yyyy-MM-dd")" />
+            </div>
+
+            <div class="col-lg-3 d-flex gap-2 align-items-center">
+                <button type="submit" id="ra-generate" class="btn btn-primary btn-sm">
+                    <i class="bi bi-gear-wide-connected"></i> Generate dashboard
+                </button>
+                <div class="form-check small mb-0" title="Rebuild even if the same dashboard was built earlier today">
+                    <input class="form-check-input" type="checkbox" id="ra-refresh" name="refresh" value="true" />
+                    <label class="form-check-label" for="ra-refresh">Rebuild</label>
+                </div>
+            </div>
+
+            <div class="col-12">
+                <div id="ra-status" class="ra-status small text-muted">
+                    Choose the source and date-of-service window, then generate. Larger windows take longer: every claim in the window is
+                    loaded so each page can be filtered in the browser.
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <span class="fw-semibold">Dashboard pages</span>
+            <span id="ra-current" class="small text-muted ms-2">Generate a dashboard to open its pages.</span>
+        </div>
+        <div class="d-flex gap-2">
+            <button type="button" id="ra-open-all" class="btn btn-outline-primary btn-sm" disabled
+                    title="Opens every page in its own window - allow pop-ups for this site if the browser asks">
+                <i class="bi bi-windows"></i> Open all pages
+            </button>
+            <a id="ra-download" class="btn btn-outline-success btn-sm disabled" href="#" aria-disabled="true">
+                <i class="bi bi-download"></i> Download HTML
+            </a>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="ra-pages">
+            @foreach (var p in pages)
+            {
+                <button type="button" class="ra-tile" data-page="@p.Key" disabled>
+                    <span class="ra-ico"><i class="bi @p.Icon"></i></span>
+                    <span>
+                        <span class="ra-num">@p.Number</span>
+                        <span class="ra-title d-block">@p.Title</span>
+                        <span class="ra-desc d-block">@p.Description</span>
+                    </span>
+                    <i class="bi bi-box-arrow-up-right ra-open"></i>
+                </button>
+            }
+        </div>
+        <div id="ra-warnings" class="small text-warning mt-3"></div>
+    </div>
+</div>
+
+@if (Model.Recent.Count > 0)
+{
+    <div class="card shadow-sm mb-3">
+        <div class="card-header bg-white fw-semibold">Built recently for @Model.LabDisplayName</div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr><th>Built</th><th>Source</th><th>DOS window</th><th class="text-end">Claims</th><th class="text-end">Lines</th><th>By</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var m in Model.Recent)
+                    {
+                        <tr>
+                            <td class="text-nowrap">@m.GeneratedOnUtc.ToLocalTime().ToString("MMM d, h:mm tt")</td>
+                            <td>@m.SourceLabel</td>
+                            <td class="text-nowrap">@((m.DosFrom ?? m.DataDosMin)?.ToString("MM/dd/yyyy")) – @((m.DosTo ?? m.DataDosMax)?.ToString("MM/dd/yyyy"))</td>
+                            <td class="text-end">@m.Claims.ToString("N0")</td>
+                            <td class="text-end">@m.Lines.ToString("N0")</td>
+                            <td>@m.GeneratedBy</td>
+                            <td class="text-end text-nowrap">
+                                <button type="button" class="btn btn-link btn-sm p-0 me-2 ra-use" data-token="@m.Token"
+                                        data-label="@m.SourceLabel · @m.Claims.ToString("N0") claims">Use</button>
+                                <a class="btn btn-link btn-sm p-0" href="@Url.Content($"~/RevenueAnalysis/Download/{m.Token}")">Download</a>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@section Scripts {
+<script nonce='@Context.Items["CspNonce"]'>
+(function () {
+    const pageUrl = token => '@Url.Content("~/RevenueAnalysis/Page/")' + token;
+    const downloadUrl = token => '@Url.Content("~/RevenueAnalysis/Download/")' + token;
+    const form = document.getElementById('ra-form');
+    const status = document.getElementById('ra-status');
+    const genBtn = document.getElementById('ra-generate');
+    const tiles = [...document.querySelectorAll('.ra-tile')];
+    const openAll = document.getElementById('ra-open-all');
+    const download = document.getElementById('ra-download');
+    const current = document.getElementById('ra-current');
+    const warnings = document.getElementById('ra-warnings');
+    let token = null;
+
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+    function setStatus(html, cls) {
+        status.className = 'ra-status small ' + (cls || 'text-muted');
+        status.innerHTML = html;
+    }
+
+    function activate(t, label, warn) {
+        token = t;
+        tiles.forEach(b => b.disabled = false);
+        openAll.disabled = false;
+        download.classList.remove('disabled');
+        download.removeAttribute('aria-disabled');
+        download.href = downloadUrl(t);
+        current.textContent = label || '';
+        warnings.innerHTML = (warn || []).map(w => '<div><i class="bi bi-exclamation-triangle"></i> ' + esc(w) + '</div>').join('');
+    }
+
+    // Each page gets its own named window, so opening Payer and then Denial gives two windows side by side;
+    // opening the same page again brings its window back rather than stacking duplicates.
+    function openPage(page) {
+        if (!token) return null;
+        const w = window.open(pageUrl(token) + '#' + page, 'lrn-ra-' + token.slice(0, 8) + '-' + page,
+            'popup=yes,width=1440,height=900,resizable=yes,scrollbars=yes');
+        if (w) w.focus();
+        return w;
+    }
+
+    tiles.forEach(b => b.addEventListener('click', () => openPage(b.dataset.page)));
+    openAll.addEventListener('click', () => {
+        let blocked = 0;
+        tiles.forEach(b => { if (!openPage(b.dataset.page)) blocked++; });
+        if (blocked) setStatus('Your browser blocked ' + blocked + ' window(s). Allow pop-ups for this site, or open the pages one at a time.', 'text-warning');
+    });
+
+    document.querySelectorAll('.ra-use').forEach(b => b.addEventListener('click', () => {
+        activate(b.dataset.token, b.dataset.label, []);
+        setStatus('Using the dashboard built earlier. Open any page below.', 'text-success');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }));
+
+    async function poll(jobId) {
+        const res = await fetch('@Url.Action("Status")?id=' + encodeURIComponent(jobId), { headers: { 'Accept': 'application/json' } });
+        const s = await res.json();
+        if (s.state === 'done') {
+            const m = s.meta || {};
+            const label = (m.source || '') + ' · DOS ' + (m.dos || '') + ' · ' + Number(m.claims || 0).toLocaleString() + ' claims';
+            activate(s.token, label, m.warnings);
+            setStatus('<i class="bi bi-check-circle"></i> ' + esc(s.message) + (m.sizeMb ? ' Page size ' + m.sizeMb + ' MB.' : '') +
+                ' Click a page below to open it in its own window.', 'text-success');
+            genBtn.disabled = false;
+            return;
+        }
+        if (s.state === 'failed' || s.state === 'missing') {
+            setStatus('<i class="bi bi-x-circle"></i> ' + esc(s.error || s.message), 'text-danger');
+            genBtn.disabled = false;
+            return;
+        }
+        setStatus('<span class="spinner-border spinner-border-sm me-2"></span>' + esc(s.message));
+        setTimeout(() => poll(jobId).catch(onError), 2000);
+    }
+
+    function onError(e) {
+        setStatus('<i class="bi bi-x-circle"></i> The dashboard service did not respond: ' + esc(e && e.message), 'text-danger');
+        genBtn.disabled = false;
+    }
+
+    form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const body = new URLSearchParams(new FormData(form));
+        if (!document.getElementById('ra-refresh').checked) body.delete('refresh');
+        genBtn.disabled = true;
+        setStatus('<span class="spinner-border spinner-border-sm me-2"></span>Starting…');
+        try {
+            const res = await fetch('@Url.Action("Generate")', {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'RequestVerificationToken': form.querySelector('input[name="__RequestVerificationToken"]').value
+                },
+                body
+            });
+            const r = await res.json();
+            if (!r.ok) { setStatus('<i class="bi bi-x-circle"></i> ' + esc(r.error), 'text-danger'); genBtn.disabled = false; return; }
+            await poll(r.jobId);
+        } catch (err) { onError(err); }
+    });
+})();
+</script>
+}
