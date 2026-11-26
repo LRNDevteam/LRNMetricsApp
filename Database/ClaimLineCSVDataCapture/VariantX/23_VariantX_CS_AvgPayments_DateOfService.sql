@@ -201,11 +201,12 @@ BEGIN
                 TRY_CAST(FullyPaidAmount AS DECIMAL(18,2)),
                 TRY_CAST(InsurancePayment AS DECIMAL(18,2)),
                 0) AS FullyPaidAmt,
-            CASE WHEN ISNULL(TRY_CAST(AdjucticatedAmount AS DECIMAL(18,2)), 0) > 0 THEN 1 ELSE 0 END AS IsAdjudicated,
+            -- Counts = Excel "Count of <FlagColumn>" (non-blank), not amount > 0.
+            CASE WHEN NULLIF(LTRIM(RTRIM(AdjucticatedCount)), '') IS NOT NULL THEN 1 ELSE 0 END AS IsAdjudicated,
             ISNULL(TRY_CAST(AdjucticatedAmount AS DECIMAL(18,2)), 0) AS AdjudicatedAmt,
-            CASE WHEN ISNULL(TRY_CAST(Bucket30Amount AS DECIMAL(18,2)), 0) > 0 THEN 1 ELSE 0 END AS IsBucket30,
+            CASE WHEN NULLIF(LTRIM(RTRIM(Bucket30Count)), '') IS NOT NULL THEN 1 ELSE 0 END AS IsBucket30,
             ISNULL(TRY_CAST(Bucket30Amount AS DECIMAL(18,2)), 0) AS Bucket30Amt,
-            CASE WHEN ISNULL(TRY_CAST(Bucket60Amount AS DECIMAL(18,2)), 0) > 0 THEN 1 ELSE 0 END AS IsBucket60,
+            CASE WHEN NULLIF(LTRIM(RTRIM(Bucket60Count)), '') IS NOT NULL THEN 1 ELSE 0 END AS IsBucket60,
             ISNULL(TRY_CAST(Bucket60Amount AS DECIMAL(18,2)), 0) AS Bucket60Amt
         FROM dbo.ClaimLevelData
         WHERE TRY_CAST(DateOfService AS DATE) >= @WindowFrom

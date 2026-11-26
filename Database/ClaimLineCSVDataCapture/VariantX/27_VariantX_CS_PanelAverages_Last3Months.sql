@@ -8,11 +8,13 @@
 --   Sheet example "Feb..Apr excluding May" = those 3 months when MaxDos is in Apr.
 -- @LastMonths = 6 → rolling window ending at max DOS (unchanged).
 --
--- Metrics (client Panel Averages sheet):
+-- Metrics (client Excel pivot / Panel Averages sheet):
 --   Billed     = Count(ClaimID), Sum/Avg(ChargeAmount)
---   Fully Paid = FullyPaidCount = 'Fully Paid', Sum/Avg(FullyPaidAmount)
---   Adjusted   = AdjucticatedAmount > 0, Sum/Avg(AdjucticatedAmount)
---   30 / 60    = Bucket30/60 Amount > 0 (flag text is present on nearly all rows)
+--   Fully Paid = Count(FullyPaidCount='Fully Paid'), Sum/Avg(FullyPaidAmount)
+--   Adjudicated= Count(AdjucticatedCount non-blank), Sum(AdjucticatedAmount),
+--                Avg = Sum/Count(flag)  — includes $0 flagged rows (client pivot)
+--   30 / 60    = Count(Bucket30/60Count non-blank), Sum(Bucket30/60Amount),
+--                Avg = Sum/Count(flag)
 -- Returns WindowFrom / WindowTo for UI and Excel.
 -- =====================================================================
 SET NOCOUNT ON;
@@ -103,11 +105,12 @@ BEGIN
                 TRY_CAST(FullyPaidAmount AS DECIMAL(18,2)),
                 TRY_CAST(InsurancePayment AS DECIMAL(18,2)),
                 0) AS FullyPaidAmt,
-            CASE WHEN ISNULL(TRY_CAST(AdjucticatedAmount AS DECIMAL(18,2)), 0) > 0 THEN 1 ELSE 0 END AS IsAdjudicated,
+            -- Counts follow Excel "Count of <FlagColumn>" (non-blank), not amount > 0.
+            CASE WHEN NULLIF(LTRIM(RTRIM(AdjucticatedCount)), '') IS NOT NULL THEN 1 ELSE 0 END AS IsAdjudicated,
             ISNULL(TRY_CAST(AdjucticatedAmount AS DECIMAL(18,2)), 0) AS AdjudicatedAmt,
-            CASE WHEN ISNULL(TRY_CAST(Bucket30Amount AS DECIMAL(18,2)), 0) > 0 THEN 1 ELSE 0 END AS IsBucket30,
+            CASE WHEN NULLIF(LTRIM(RTRIM(Bucket30Count)), '') IS NOT NULL THEN 1 ELSE 0 END AS IsBucket30,
             ISNULL(TRY_CAST(Bucket30Amount AS DECIMAL(18,2)), 0) AS Bucket30Amt,
-            CASE WHEN ISNULL(TRY_CAST(Bucket60Amount AS DECIMAL(18,2)), 0) > 0 THEN 1 ELSE 0 END AS IsBucket60,
+            CASE WHEN NULLIF(LTRIM(RTRIM(Bucket60Count)), '') IS NOT NULL THEN 1 ELSE 0 END AS IsBucket60,
             ISNULL(TRY_CAST(Bucket60Amount AS DECIMAL(18,2)), 0) AS Bucket60Amt
         FROM dbo.ClaimLevelData
         WHERE TRY_CAST(DateOfService AS DATE) >= @WindowFrom

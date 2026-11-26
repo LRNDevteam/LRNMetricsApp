@@ -275,12 +275,12 @@
         else if (Model.IsVariantXLab && months == 3 && result.WindowFrom.HasValue && result.WindowTo.HasValue)
         {
             <span><strong>Date Range:</strong> DOS @(result.WindowFrom.Value.ToString("MM/dd/yyyy")) &ndash; @(result.WindowTo.Value.ToString("MM/dd/yyyy")) (last 3 calendar months ending at max DateOfService month) &bull;</span>
-            <span><strong>Fully Paid / Adjudicated / 30 / 60 Days:</strong> FullyPaidCount = Fully Paid (FullyPaidAmount) / AdjucticatedAmount &gt; 0 / Bucket30Amount &gt; 0 / Bucket60Amount &gt; 0 &bull;</span>
+            <span><strong>Fully Paid / Adjudicated / 30 / 60 Days:</strong> FullyPaidCount = Fully Paid (FullyPaidAmount) / Count(AdjucticatedCount) + Sum(AdjucticatedAmount) / Count(Bucket30Count|Bucket60Count) + Sum(amount) &bull;</span>
         }
         else if (Model.IsVariantXLab && result.WindowFrom.HasValue && result.WindowTo.HasValue)
         {
             <span><strong>Date Range:</strong> DOS @(result.WindowFrom.Value.ToString("MM/dd/yyyy")) &ndash; @(result.WindowTo.Value.ToString("MM/dd/yyyy")) (last @months months ending at max DateOfService) &bull;</span>
-            <span><strong>Fully Paid / Adjudicated / 30 / 60 Days:</strong> FullyPaidCount = Fully Paid (FullyPaidAmount) / AdjucticatedAmount &gt; 0 / Bucket30Amount &gt; 0 / Bucket60Amount &gt; 0 &bull;</span>
+            <span><strong>Fully Paid / Adjudicated / 30 / 60 Days:</strong> FullyPaidCount = Fully Paid (FullyPaidAmount) / Count(AdjucticatedCount) + Sum(AdjucticatedAmount) / Count(Bucket30Count|Bucket60Count) + Sum(amount) &bull;</span>
         }
         else
         {
