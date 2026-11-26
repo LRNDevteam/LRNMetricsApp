@@ -37,6 +37,8 @@ function EditUserModal({ data, user, onClose, onSaved }) {
   // A Microsoft (Azure AD) user's password lives in their Microsoft account: nothing to set here.
   const microsoft = isAzureAd(user);
   const canSetPassword = Boolean(data.canSetPasswords) && !microsoft;
+  // Accounts created with Microsoft / external email sign in with their email address as username.
+  const emailIsUserName = user.userName.includes('@') && user.userName.trim().toLowerCase() === (user.email || '').trim().toLowerCase();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -86,7 +88,8 @@ function EditUserModal({ data, user, onClose, onSaved }) {
         <div className="arwb-field">
           <label htmlFor="u-email">Email</label>
           <input id="u-email" type="email" className="arwb-input" maxLength={256} autoComplete="off" value={form.email}
-            onChange={(e) => set('email', e.target.value)} />
+            readOnly={emailIsUserName} onChange={(e) => set('email', e.target.value)} />
+          {emailIsUserName && <small className="arwb-hint">The email is this user’s username, so it cannot be changed. Create a new user for a different address.</small>}
         </div>
         <div className="arwb-field">
           <label htmlFor="u-role">Role</label>
@@ -359,6 +362,9 @@ export default function UsersPage() {
                     <td>
                       <div className="arwb-status-stack">
                         {u.isActive ? <Badge className="arwb-badge-good">Active</Badge> : <Badge className="arwb-badge-neutral">Inactive</Badge>}
+                        {isAzureAd(u)
+                          ? <Badge className="arwb-badge-info" title="Signs in with Microsoft (MFA)">Microsoft</Badge>
+                          : <Badge className="arwb-badge-neutral" title="Password + emailed one-time code at each sign-in">External</Badge>}
                         {u.isActive && !isAzureAd(u) && <InviteBadge invite={u.invite} />}
                       </div>
                     </td>

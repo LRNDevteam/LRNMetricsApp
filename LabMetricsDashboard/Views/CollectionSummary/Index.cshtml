@@ -10,6 +10,9 @@
     ViewData["Title"]       = $"Collection Summary - {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Collection Summary";
+    // Admin > Report Visibility: lmd-report-tab drops the tabs this user's role has hidden.
+    ViewData[LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.ViewDataKey] =
+        LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.CollectionSummary;
 }
 
 @if (string.IsNullOrEmpty(csPaneOnly))
@@ -1200,14 +1203,14 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
     {
     <!-- Premium Tabs -->
     <ul class="nav nav-pills cs-rpt-tabs mb-3" id="csRptTabs" role="tablist">
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="mcv">
             <button class="nav-link active" id="mcv-tab" data-bs-toggle="pill"
                     data-bs-target="#mcv-pane" type="button" role="tab"
                     aria-controls="mcv-pane" aria-selected="true">
                 <i class="bi bi-calendar-month"></i> Monthly Claim Volume <span class="text-white-50 fw-normal" style="font-size:.7em">(@(Model.UsesCoreBioCollectionLayout ? "Check Date" : "Posted Date"))</span>
             </button>
         </li>
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="wcv">
             <button class="nav-link" id="wcv-tab" data-bs-toggle="pill"
                     data-bs-target="#wcv-pane" type="button" role="tab"
                     aria-controls="wcv-pane" aria-selected="false">
@@ -1216,7 +1219,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         </li>
         @if (csEmbed)
         {
-            <li class="nav-item" role="presentation">
+            <li class="nav-item" role="presentation" lmd-report-tab="top5grid">
                 <button class="nav-link" id="top5grid-tab" data-bs-toggle="pill"
                         data-bs-target="#top5grid-pane" type="button" role="tab"
                         aria-controls="top5grid-pane" aria-selected="false">
@@ -1226,7 +1229,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         }
         @if (Model.ShowAvgPaymentsByDateBasis)
         {
-            <li class="nav-item" role="presentation">
+            <li class="nav-item" role="presentation" lmd-report-tab="avgpaydos">
                 <button class="nav-link" id="avgpaydos-tab" data-bs-toggle="pill"
                         data-bs-target="#avgpaydos-pane" type="button" role="tab"
                         aria-controls="avgpaydos-pane" aria-selected="false">
@@ -1234,7 +1237,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 </button>
             </li>
         }
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="avgpay">
             <button class="nav-link" id="avgpay-tab" data-bs-toggle="pill"
                     data-bs-target="#avgpay-pane" type="button" role="tab"
                     aria-controls="avgpay-pane" aria-selected="false">
@@ -1243,7 +1246,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         </li>
         @if (Model.ShowAvgPaymentsLast3Months)
         {
-            <li class="nav-item" role="presentation">
+            <li class="nav-item" role="presentation" lmd-report-tab="avgpay3">
                 <button class="nav-link" id="avgpay3-tab" data-bs-toggle="pill"
                         data-bs-target="#avgpay3-pane" type="button" role="tab"
                         aria-controls="avgpay3-pane" aria-selected="false">
@@ -1253,7 +1256,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         }
         @if (Model.ShowPanelAverage)
         {
-            <li class="nav-item" role="presentation">
+            <li class="nav-item" role="presentation" lmd-report-tab="panelavg">
                 <button class="nav-link" id="panelavg-tab" data-bs-toggle="pill"
                         data-bs-target="#panelavg-pane" type="button" role="tab"
                         aria-controls="panelavg-pane" aria-selected="false">
@@ -1261,21 +1264,21 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 </button>
             </li>
         }
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="aging">
             <button class="nav-link" id="aging-tab" data-bs-toggle="pill"
                     data-bs-target="#aging-pane" type="button" role="tab"
                     aria-controls="aging-pane" aria-selected="false">
                 <i class="bi bi-hourglass-split"></i> @(Model.IsAugustusLab || Model.UsesCoreBioCollectionLayout ? "No Response vs Aging" : "Insurance vs Aging")
             </button>
         </li>
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="panelpay">
             <button class="nav-link" id="panelpay-tab" data-bs-toggle="pill"
                     data-bs-target="#panelpay-pane" type="button" role="tab"
                     aria-controls="panelpay-pane" aria-selected="false">
                 <i class="bi bi-grid-3x3-gap"></i> Panel vs Payment
             </button>
         </li>
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="inspctpay">
             <button class="nav-link" id="inspctpay-tab" data-bs-toggle="pill"
                     data-bs-target="#inspctpay-pane" type="button" role="tab"
                     aria-controls="inspctpay-pane" aria-selected="false">
@@ -1284,7 +1287,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         </li>
         @if (Model.ShowInsuranceVsPayment)
         {
-            <li class="nav-item" role="presentation">
+            <li class="nav-item" role="presentation" lmd-report-tab="insvspay">
                 <button class="nav-link" id="insvspay-tab" data-bs-toggle="pill"
                         data-bs-target="#insvspay-pane" type="button" role="tab"
                         aria-controls="insvspay-pane" aria-selected="false">
@@ -1292,7 +1295,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
                 </button>
             </li>
         }
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="cptpctpay">
             <button class="nav-link" id="cptpctpay-tab" data-bs-toggle="pill"
                     data-bs-target="#cptpctpay-pane" type="button" role="tab"
                     aria-controls="cptpctpay-pane" aria-selected="false">
@@ -1301,7 +1304,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         </li>
             @if (Model.ShowStatusProviderSummaries)
             {
-            <li class="nav-item" role="presentation">
+            <li class="nav-item" role="presentation" lmd-report-tab="statussummary">
                 <button class="nav-link" id="statussummary-tab" data-bs-toggle="pill"
                         data-bs-target="#statussummary-pane" type="button" role="tab"
                         aria-controls="statussummary-pane" aria-selected="false">
@@ -1311,7 +1314,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             }
             @if (Model.IsNorthWestLab)
             {
-                <li class="nav-item" role="presentation">
+                <li class="nav-item" role="presentation" lmd-report-tab="whpanel">
                     <button class="nav-link" id="whpanel-tab" data-bs-toggle="pill"
                             data-bs-target="#whpanel-pane" type="button" role="tab"
                             aria-controls="whpanel-pane" aria-selected="false">
@@ -1321,7 +1324,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             }
             @if (Model.ShowGeneticsVsIdAvg)
             {
-                <li class="nav-item" role="presentation">
+                <li class="nav-item" role="presentation" lmd-report-tab="genidavg">
                     <button class="nav-link" id="genidavg-tab" data-bs-toggle="pill"
                             data-bs-target="#genidavg-pane" type="button" role="tab"
                             aria-controls="genidavg-pane" aria-selected="false">
@@ -1331,7 +1334,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
             }
             @if (Model.ShowStatusProviderSummaries)
             {
-            <li class="nav-item" role="presentation">
+            <li class="nav-item" role="presentation" lmd-report-tab="provider">
                 <button class="nav-link" id="provider-tab" data-bs-toggle="pill"
                         data-bs-target="#provider-pane" type="button" role="tab"
                         aria-controls="provider-pane" aria-selected="false">
@@ -1352,7 +1355,7 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
     <div class="tab-content" id="csRptTabContent" @(string.IsNullOrEmpty(csPaneOnly) || csPaneOnly == "mcv" ? null : Html.Raw("style=\"display:none\""))>
 
         <!-- ?? Monthly Claim Volume tab ???????????????????????? -->
-        <div class="tab-pane fade show active" id="mcv-pane" role="tabpanel" aria-labelledby="mcv-tab" data-cs-tab="mcv">
+        <div lmd-report-tab="mcv" class="tab-pane fade show active" id="mcv-pane" role="tabpanel" aria-labelledby="mcv-tab" data-cs-tab="mcv">
             @if (csPaneOnly == "mcv")
             {
             @if (Model.MonthlyClaimVolume.HasData)
@@ -1567,57 +1570,57 @@ tr.cs-ag-open .cs-ag-chevron { transform: rotate(90deg); }
         @if (string.IsNullOrEmpty(csPaneOnly))
         {
         <!-- Weekly Claim Volume tab -->
-        <div class="tab-pane fade" id="wcv-pane"           role="tabpanel" aria-labelledby="wcv-tab"           data-cs-tab="wcv">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabWcv",          Model) } else { <div class="cs-lazy-pane" data-lazy-tab="wcv"></div> }</div>
+        <div lmd-report-tab="wcv" class="tab-pane fade" id="wcv-pane"           role="tabpanel" aria-labelledby="wcv-tab"           data-cs-tab="wcv">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabWcv",          Model) } else { <div class="cs-lazy-pane" data-lazy-tab="wcv"></div> }</div>
         @if (csEmbed)
         {
-            <div class="tab-pane fade" id="top5grid-pane" role="tabpanel" aria-labelledby="top5grid-tab" data-cs-tab="top5grid"><div class="cs-lazy-pane" data-lazy-tab="top5grid"></div></div>
+            <div lmd-report-tab="top5grid" class="tab-pane fade" id="top5grid-pane" role="tabpanel" aria-labelledby="top5grid-tab" data-cs-tab="top5grid"><div class="cs-lazy-pane" data-lazy-tab="top5grid"></div></div>
         }
         @if (Model.ShowPanelAverage)
         {
-            <div class="tab-pane fade" id="panelavg-pane" role="tabpanel" aria-labelledby="panelavg-tab" data-cs-tab="panelavg">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabPanelAvg", Model) } else { <div class="cs-lazy-pane" data-lazy-tab="panelavg"></div> }</div>
+            <div lmd-report-tab="panelavg" class="tab-pane fade" id="panelavg-pane" role="tabpanel" aria-labelledby="panelavg-tab" data-cs-tab="panelavg">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabPanelAvg", Model) } else { <div class="cs-lazy-pane" data-lazy-tab="panelavg"></div> }</div>
         }
         <!-- Average Payments tab -->
-        <div class="tab-pane fade" id="avgpay-pane"        role="tabpanel" aria-labelledby="avgpay-tab"        data-cs-tab="avgpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabAvgPayments",  Model) } else { <div class="cs-lazy-pane" data-lazy-tab="avgpay"></div> }</div>
+        <div lmd-report-tab="avgpay" class="tab-pane fade" id="avgpay-pane"        role="tabpanel" aria-labelledby="avgpay-tab"        data-cs-tab="avgpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabAvgPayments",  Model) } else { <div class="cs-lazy-pane" data-lazy-tab="avgpay"></div> }</div>
         @if (Model.ShowAvgPaymentsByDateBasis)
         {
-            <div class="tab-pane fade" id="avgpaydos-pane" role="tabpanel" aria-labelledby="avgpaydos-tab"     data-cs-tab="avgpaydos"><div class="cs-lazy-pane" data-lazy-tab="avgpaydos"></div></div>
+            <div lmd-report-tab="avgpaydos" class="tab-pane fade" id="avgpaydos-pane" role="tabpanel" aria-labelledby="avgpaydos-tab"     data-cs-tab="avgpaydos"><div class="cs-lazy-pane" data-lazy-tab="avgpaydos"></div></div>
         }
         else if (Model.ShowAvgPaymentsLast3Months)
         {
-            <div class="tab-pane fade" id="avgpay3-pane"       role="tabpanel" aria-labelledby="avgpay3-tab"       data-cs-tab="avgpay3">@if (!Model.LazyLoadTabs) { ViewData["AvgPayMonths"] = 3; @await Html.PartialAsync("_CsTabAvgPayments", Model) } else { <div class="cs-lazy-pane" data-lazy-tab="avgpay3"></div> }</div>
+            <div lmd-report-tab="avgpay3" class="tab-pane fade" id="avgpay3-pane"       role="tabpanel" aria-labelledby="avgpay3-tab"       data-cs-tab="avgpay3">@if (!Model.LazyLoadTabs) { ViewData["AvgPayMonths"] = 3; @await Html.PartialAsync("_CsTabAvgPayments", Model) } else { <div class="cs-lazy-pane" data-lazy-tab="avgpay3"></div> }</div>
         }
         <!-- Insurance vs Aging tab -->
-        <div class="tab-pane fade" id="aging-pane"         role="tabpanel" aria-labelledby="aging-tab"         data-cs-tab="aging">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabAging",        Model) } else { <div class="cs-lazy-pane" data-lazy-tab="aging"></div> }</div>
+        <div lmd-report-tab="aging" class="tab-pane fade" id="aging-pane"         role="tabpanel" aria-labelledby="aging-tab"         data-cs-tab="aging">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabAging",        Model) } else { <div class="cs-lazy-pane" data-lazy-tab="aging"></div> }</div>
         <!-- Panel vs Payment tab -->
-        <div class="tab-pane fade" id="panelpay-pane"      role="tabpanel" aria-labelledby="panelpay-tab"      data-cs-tab="panelpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabPanelPay",     Model) } else { <div class="cs-lazy-pane" data-lazy-tab="panelpay"></div> }</div>
+        <div lmd-report-tab="panelpay" class="tab-pane fade" id="panelpay-pane"      role="tabpanel" aria-labelledby="panelpay-tab"      data-cs-tab="panelpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabPanelPay",     Model) } else { <div class="cs-lazy-pane" data-lazy-tab="panelpay"></div> }</div>
         <!-- Insurance vs Payment % tab -->
-        <div class="tab-pane fade" id="inspctpay-pane"     role="tabpanel" aria-labelledby="inspctpay-tab"     data-cs-tab="inspctpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabInsPctPay",    Model) } else { <div class="cs-lazy-pane" data-lazy-tab="inspctpay"></div> }</div>
+        <div lmd-report-tab="inspctpay" class="tab-pane fade" id="inspctpay-pane"     role="tabpanel" aria-labelledby="inspctpay-tab"     data-cs-tab="inspctpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabInsPctPay",    Model) } else { <div class="cs-lazy-pane" data-lazy-tab="inspctpay"></div> }</div>
         @if (Model.ShowInsuranceVsPayment)
         {
             <!-- Insurance Vs Payment (snapshot pivot) tab -->
-            <div class="tab-pane fade" id="insvspay-pane"  role="tabpanel" aria-labelledby="insvspay-tab"     data-cs-tab="insvspay"><div class="cs-lazy-pane" data-lazy-tab="insvspay"></div></div>
+            <div lmd-report-tab="insvspay" class="tab-pane fade" id="insvspay-pane"  role="tabpanel" aria-labelledby="insvspay-tab"     data-cs-tab="insvspay"><div class="cs-lazy-pane" data-lazy-tab="insvspay"></div></div>
         }
         <!-- CPT vs Payment % tab -->
-        <div class="tab-pane fade" id="cptpctpay-pane"     role="tabpanel" aria-labelledby="cptpctpay-tab"     data-cs-tab="cptpctpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabCptPctPay",    Model) } else { <div class="cs-lazy-pane" data-lazy-tab="cptpctpay"></div> }</div>
+        <div lmd-report-tab="cptpctpay" class="tab-pane fade" id="cptpctpay-pane"     role="tabpanel" aria-labelledby="cptpctpay-tab"     data-cs-tab="cptpctpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabCptPctPay",    Model) } else { <div class="cs-lazy-pane" data-lazy-tab="cptpctpay"></div> }</div>
         @if (Model.ShowStatusProviderSummaries)
         {
         <!-- Status Summary tab -->
-        <div class="tab-pane fade" id="statussummary-pane" role="tabpanel" aria-labelledby="statussummary-tab" data-cs-tab="statussummary">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabStatusSummary", Model) } else { <div class="cs-lazy-pane" data-lazy-tab="statussummary"></div> }</div>
+        <div lmd-report-tab="statussummary" class="tab-pane fade" id="statussummary-pane" role="tabpanel" aria-labelledby="statussummary-tab" data-cs-tab="statussummary">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabStatusSummary", Model) } else { <div class="cs-lazy-pane" data-lazy-tab="statussummary"></div> }</div>
         }
         @if (Model.IsNorthWestLab)
         {
             <!-- Women's Health Panel breakdown tab (NorthWest, live SP) -->
-            <div class="tab-pane fade" id="whpanel-pane"   role="tabpanel" aria-labelledby="whpanel-tab"      data-cs-tab="whpanel"><div class="cs-lazy-pane" data-lazy-tab="whpanel"></div></div>
+            <div lmd-report-tab="whpanel" class="tab-pane fade" id="whpanel-pane"   role="tabpanel" aria-labelledby="whpanel-tab"      data-cs-tab="whpanel"><div class="cs-lazy-pane" data-lazy-tab="whpanel"></div></div>
         }
         @if (Model.ShowGeneticsVsIdAvg)
         {
             <!-- Genetics vs ID Avg tab (Rising Tides) -->
-            <div class="tab-pane fade" id="genidavg-pane"  role="tabpanel" aria-labelledby="genidavg-tab"     data-cs-tab="genidavg"><div class="cs-lazy-pane" data-lazy-tab="genidavg"></div></div>
+            <div lmd-report-tab="genidavg" class="tab-pane fade" id="genidavg-pane"  role="tabpanel" aria-labelledby="genidavg-tab"     data-cs-tab="genidavg"><div class="cs-lazy-pane" data-lazy-tab="genidavg"></div></div>
         }
         @if (Model.ShowStatusProviderSummaries)
         {
         <!-- Provider tab -->
-        <div class="tab-pane fade" id="provider-pane"      role="tabpanel" aria-labelledby="provider-tab"      data-cs-tab="provider">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabProvider",     Model) } else { <div class="cs-lazy-pane" data-lazy-tab="provider"></div> }</div>
+        <div lmd-report-tab="provider" class="tab-pane fade" id="provider-pane"      role="tabpanel" aria-labelledby="provider-tab"      data-cs-tab="provider">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabProvider",     Model) } else { <div class="cs-lazy-pane" data-lazy-tab="provider"></div> }</div>
         }
         }
     </div>

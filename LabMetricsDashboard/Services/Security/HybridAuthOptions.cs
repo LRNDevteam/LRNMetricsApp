@@ -31,6 +31,32 @@ public sealed class HybridAuthOptions
     }
 }
 
+/// <summary>
+/// The "LoginCode" section: the one-time code emailed on every password sign-in of an external
+/// user. Microsoft sign-ins never get one - Entra already enforces MFA.
+/// </summary>
+public sealed class LoginCodeOptions
+{
+    public const string Section = "LoginCode";
+    public const string ArWorkbenchUsers = "ArWorkbench";
+    public const string AllPasswordUsers = "AllLocal";
+
+    /// <summary>The rollback switch: false signs password users straight in, as before.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// ArWorkbench (default): password users who hold an "AR Workbench - ..." role - the external
+    /// AR Workbench users. AllLocal: every password sign-in, whatever the role.
+    /// </summary>
+    public string AppliesTo { get; set; } = ArWorkbenchUsers;
+
+    /// <summary>Wait at least this long before "Send a new code".</summary>
+    public int ResendSeconds { get; set; } = 60;
+
+    /// <summary>The sign-in page waits this long for the code to be entered (the code itself expires per UserMail:LoginCodeMinutes in LRN.ReportsApi).</summary>
+    public int PendingMinutes { get; set; } = 15;
+}
+
 public static class LrnAuth
 {
     /// <summary>Short-lived cookie that holds the Entra result for one redirect, before the database decides.</summary>
@@ -52,4 +78,7 @@ public static class LrnAuth
     }
 
     public static string ExternalCookieName(IConfiguration configuration) => AuthCookieName(configuration) + ".External";
+
+    /// <summary>Holds "password accepted, waiting for the emailed code" between the two sign-in steps (data-protected).</summary>
+    public static string LoginCodeCookieName(IConfiguration configuration) => AuthCookieName(configuration) + ".Code";
 }

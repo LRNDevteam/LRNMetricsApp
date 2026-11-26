@@ -66,6 +66,9 @@ public sealed class ArWorkbenchController : ControllerBase
     {
         IReadOnlyList<DenialWorkflowLabOption> labs = LabsFromToken();
         if (labs.Count == 0) labs = await _workflowService.GetLabsForUserAsync(CurrentUserName(), ct);
+        // A lab switched off in LRN Metrics (Admin > Manage Labs) is hidden from everyone.
+        var disabled = await _repository.GetDisabledLabIdsAsync(ct);
+        labs = labs.Where(l => !disabled.Contains(l.LabId)).ToList();
         // T068: a deactivated client is hidden except from those who can reactivate it.
         if (IsClientAdminByRole()) return Ok(labs);
         var inactive = await _repository.GetInactiveClientLabIdsAsync(ct);
@@ -1820,11 +1823,17 @@ public sealed class ArWorkbenchController : ControllerBase
         if (denied is not null) return denied;
         if (request is null) return BadRequest(new { message = "Send the user to create." });
 
-        var (userName, nameError) = ArWorkbenchUserRules.ValidateUserName(request.UserName);
-        if (userName is null) return BadRequest(new { message = nameError });
-        // No password: the user sets one from the invitation email. Email may repeat across users.
-        var (email, emailError) = ArWorkbenchUserRules.ValidateEmail(request.Email);
+        // Two kinds of account, and the username is always the email address (unique across every
+        // LRN user): Microsoft = a Lab Revenue Navigator address, signs in with Microsoft + MFA, no
+        // password and no invitation; External = any other address, gets the invitation (one-time
+        // password + link to create a password) and an emailed sign-in code on every sign-in.
+        var configuration = HttpContext.RequestServices.GetRequiredService<IConfiguration>();
+        var accountType = ArWorkbenchUserRules.NormalizeAccountType(request.AccountType);
+        var (email, emailError) = ArWorkbenchUserRules.ValidateAccountEmail(accountType, request.Email,
+            ArWorkbenchUserRules.OrganizationDomains(configuration));
         if (email is null) return BadRequest(new { message = emailError });
+        var microsoft = accountType == ArWorkbenchUserRules.MicrosoftAccount;
+        var userName = email;
         var roleError = await ValidateAssignableRoleAsync(request.RoleId, ct);
         if (roleError is not null) return BadRequest(new { message = roleError });
         var (labIds, labError) = ArWorkbenchUserRules.ValidateLabs(request.LabIds, manager!.LabIds);
@@ -1832,10 +1841,21 @@ public sealed class ArWorkbenchController : ControllerBase
         var (profile, profileError) = await ValidateUserProfileAsync(manager, request.RoleId!.Value, labIds, request.Scopes, request.ManagerUserId, request.TeamName, null, ct);
         if (profile is null) return BadRequest(new { message = profileError });
 
-        var (result, id) = await _repository.CreateWorkbenchUserAsync(userName, null, email,
+        var (result, id) = await _repository.CreateWorkbenchUserAsync(userName, null, email, microsoft,
             request.RoleId!.Value, labIds, profile, manager.LabIds, manager.User.UserName, ct);
         if (result.Status != ArWorkbenchSaveStatus.Ok || id is null) return ToResult(result);
-        _logger.LogInformation("AR Workbench user {NewUser} (LabUserID {Id}) created by {Admin} for labs {Labs}", userName, id, manager.User.UserName, string.Join(",", labIds));
+        _logger.LogInformation("AR Workbench {Kind} user {NewUser} (LabUserID {Id}) created by {Admin} for labs {Labs}",
+            microsoft ? "Microsoft" : "external", userName, id, manager.User.UserName, string.Join(",", labIds));
+
+        if (microsoft)
+        {
+            return Ok(new
+            {
+                message = $"User '{userName}' created. They sign in with \"Sign in with Microsoft\" using {email} (MFA); no password or invitation is needed.",
+                labUserId = id,
+                emailSent = (bool?)null
+            });
+        }
 
         var (sent, mailError) = await SendInviteAsync(manager, id.Value, userName, isResend: false, ct);
         return Ok(new
@@ -2943,6 +2963,11 @@ public sealed class ArWorkbenchController : ControllerBase
         if (labId <= 0) return (null, BadRequest(new { message = "LabId is required." }));
         if (!await CanAccessLabAsync(labId, ct))
             return (null, Forbidden("Access denied. You can open the AR Workbench only for your authorized labs."));
+
+        // Switched off in LRN Metrics Admin > Manage Labs: closed to everyone, admins included,
+        // until it is enabled there again.
+        if ((await _repository.GetDisabledLabIdsAsync(ct)).Contains(labId))
+            return (null, Forbidden("This lab is inactive. An administrator can enable it in LRN Metrics under Admin > Manage Labs."));
 
         var user = await _repository.GetUserContextAsync(labId, CurrentUserName(), SiteAdminRole(), ct);
         if (user is null)

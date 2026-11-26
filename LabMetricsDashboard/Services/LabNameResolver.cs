@@ -34,7 +34,10 @@ public sealed class LabNameResolver : ILabNameResolver
         var name = trackerLabName.Trim();
 
         // The dictionary reference is swapped atomically on config reload - read it once.
-        var labs = _labSettings.Labs;
+        // AllLabs, not Labs: an inactive lab must still resolve to its key so the board can drop
+        // it, rather than showing it to admins as an unmapped row. Falls back to Labs where only
+        // that was populated (tests).
+        var labs = _labSettings.AllLabs.Count > 0 ? _labSettings.AllLabs : _labSettings.Labs;
 
         // 1. exact key
         var exact = labs.Keys.FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase));

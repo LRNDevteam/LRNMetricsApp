@@ -30,6 +30,9 @@ public interface IMenuApiClient
     Task<IReadOnlyList<MenuFeatureDto>> GetFeatureCatalogAsync(CancellationToken ct);
     Task<IReadOnlyList<RoleFeatureDto>> GetRoleFeaturesAsync(int roleId, CancellationToken ct);
     Task SaveRoleFeaturesAsync(int roleId, IReadOnlyCollection<RoleFeatureDto> features, CancellationToken ct);
+
+    /// <summary>Replaces only the role's Report Visibility (Report.*) rows.</summary>
+    Task SaveRoleReportVisibilityAsync(int roleId, IReadOnlyCollection<RoleFeatureDto> features, CancellationToken ct);
 }
 
 /// <summary>
@@ -107,6 +110,9 @@ public sealed class MenuApiClient : IMenuApiClient
 
     public Task SaveRoleFeaturesAsync(int roleId, IReadOnlyCollection<RoleFeatureDto> features, CancellationToken ct)
         => SendJsonAsync<object, CreateResult>(HttpMethod.Put, $"api/menu/roles/{roleId}/features", new { features }, ct);
+
+    public Task SaveRoleReportVisibilityAsync(int roleId, IReadOnlyCollection<RoleFeatureDto> features, CancellationToken ct)
+        => SendJsonAsync<object, CreateResult>(HttpMethod.Put, $"api/menu/roles/{roleId}/report-visibility", new { features }, ct);
 
     private sealed class CreateResult
     {

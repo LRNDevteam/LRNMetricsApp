@@ -85,6 +85,28 @@ public sealed class WorkflowJwtIssuer
         return new WorkflowJwtTokenResult(token, expires.UtcDateTime, userName, displayName, roles.FirstOrDefault() ?? string.Empty, roles, labs);
     }
 
+    /// <summary>Must match LRN.ReportsApi UserMailController.SignInServiceRole.</summary>
+    public const string SignInServiceRole = "LRN Sign-in Service";
+
+    /// <summary>
+    /// A two-minute token for the sign-in page's own calls to LRN.ReportsApi, made before anyone is
+    /// signed in (the emailed sign-in code). sub "0": it is no user, and has no labs.
+    /// </summary>
+    public string CreateSignInServiceToken()
+    {
+        var now = DateTimeOffset.UtcNow;
+        return Sign(new Dictionary<string, object?>
+        {
+            ["iss"] = _configuration["DenialWorkflowAuth:Issuer"] ?? "LRNMetrics",
+            ["aud"] = _configuration["DenialWorkflowAuth:Audience"] ?? "LRNReportsApi",
+            ["sub"] = "0",
+            ["name"] = "lrn-sign-in",
+            ["roles"] = new[] { SignInServiceRole },
+            ["iat"] = now.ToUnixTimeSeconds(),
+            ["exp"] = now.AddMinutes(2).ToUnixTimeSeconds()
+        });
+    }
+
     private string Sign(Dictionary<string, object?> payload)
     {
         var key = _configuration["DenialWorkflowAuth:JwtSigningKey"] ?? string.Empty;

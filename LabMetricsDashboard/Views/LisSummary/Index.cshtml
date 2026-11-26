@@ -9,6 +9,9 @@
     ViewData["Title"] = $"LIS Summary - {Model.CurrentLabName}";
     ViewData["SelectedLab"] = Model.CurrentLabName;
     ViewData["PageLabel"] = "LIS Summary";
+    // Admin > Report Visibility: lmd-report-tab drops the tab links this user's role has hidden.
+    ViewData[LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.ViewDataKey] =
+        LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.LisSummary;
     var result = Model.Result;
     var monthColumns = new List<(string Key, int Year, string Label, bool IsYearTotal)>();
     if (result is not null)
@@ -1652,8 +1655,8 @@
 
 <div class="mb-3">
     <div class="lis-tabs" role="tablist" aria-label="LIS Summary tabs">
-        <a class="lis-tab @(activeTab == "summary" ? "active" : "")" href="@TabUrl("summary", 1)">LIMS Summary</a>
-        <a class="lis-tab @(activeTab == "line" ? "active" : "")" href="@TabUrl("line", 1)">LIMS Line Data</a>
+        <a lmd-report-tab="summary" class="lis-tab @(activeTab == "summary" ? "active" : "")" href="@TabUrl("summary", 1)">LIMS Summary</a>
+        <a lmd-report-tab="line" class="lis-tab @(activeTab == "line" ? "active" : "")" href="@TabUrl("line", 1)">LIMS Line Data</a>
     </div>
 </div>
 }

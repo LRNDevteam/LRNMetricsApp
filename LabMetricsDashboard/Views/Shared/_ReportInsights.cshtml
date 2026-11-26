@@ -4,12 +4,31 @@
     var riSnapshot = LabMetricsDashboard.Services.ReportSnapshots.ReportSnapshotViewContext.From(ViewData);
     // Embedded in the NorthWest Executive Summary highlight tabs: display only.
     var riReadOnly = riSnapshot is not null || string.Equals(Context.Request.Query["embed"], "1", StringComparison.Ordinal);
+
+    // Admin > Report Visibility: hidden Key Insights drop the panel; otherwise each action (Add, Edit,
+    // Delete, Import, Template) is allowed or denied on its own. A denied action's buttons are left
+    // out - top bar, row buttons and the import window alike - and NotesController refuses it too.
+    var riAccess = await Context.GetReportAccessAsync(
+        LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.PageForNotesReport(Model.ReportName));
+    if (!riAccess.KeyInsightsVisible) { return; }
+    bool RiCan(LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction a) => !riReadOnly && riAccess.CanKeyInsights(a, fallback: true);
+    var riCanAdd = RiCan(LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction.Add);
+    var riCanEdit = RiCan(LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction.Edit);
+    var riCanDelete = RiCan(LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction.Delete);
+    var riCanImport = RiCan(LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction.Import);
+    var riCanTemplate = RiCan(LabMetricsDashboard.Models.ReportVisibility.KeyInsightAction.Template);
+    string Flag(bool on) => on ? "1" : "0";
 }
 <link rel="stylesheet" href="~/css/report-insights.css" asp-append-version="true" />
 
 <div id="riRoot"
      class="ri-panel ri-collapsed"
      data-readonly="@(riReadOnly ? "1" : null)"
+     data-can-add="@Flag(riCanAdd)"
+     data-can-edit="@Flag(riCanEdit)"
+     data-can-delete="@Flag(riCanDelete)"
+     data-can-import="@Flag(riCanImport)"
+     data-can-template="@Flag(riCanTemplate)"
      data-snapshot="@(riSnapshot is null ? null : "1")"
      data-snapshot-url="@(riSnapshot?.InsightsUrl)"
      data-base="@Url.Content("~/")"
@@ -44,15 +63,15 @@
             <button type="button" class="btn btn-sm btn-outline-light" id="riArchiveBtn" hidden="@riReadOnly">
                 Archived Notes
             </button>
-            <a class="btn btn-sm btn-outline-light" id="riTemplateBtn" hidden="@riReadOnly"
+            <a class="btn btn-sm btn-outline-light" id="riTemplateBtn" hidden="@(!riCanTemplate)"
                title="Download the Key Insights import template for this report">
                 <i class="bi bi-file-earmark-arrow-down"></i> Template
             </a>
-            <button type="button" class="btn btn-sm btn-outline-light" id="riImportBtn" hidden="@riReadOnly"
+            <button type="button" class="btn btn-sm btn-outline-light" id="riImportBtn" hidden="@(!riCanImport)"
                     title="Import insights from a filled-in template">
                 <i class="bi bi-upload"></i> Import
             </button>
-            <button type="button" class="btn btn-sm btn-primary" id="riAddBtn" hidden="@riReadOnly">
+            <button type="button" class="btn btn-sm btn-primary" id="riAddBtn" hidden="@(!riCanAdd)">
                 <i class="bi bi-plus-lg"></i> Add Insight
             </button>
             <button type="button" class="ri-expand-btn" id="riExpandBtn" hidden="@riReadOnly"
@@ -225,7 +244,7 @@
                 </div>
             </div>
             <div class="modal-footer ri-detail-footer">
-                <a class="btn btn-outline-secondary me-auto" id="riImportTemplateLink">
+                <a class="btn btn-outline-secondary me-auto" id="riImportTemplateLink" hidden="@(!riCanTemplate)">
                     <i class="bi bi-file-earmark-arrow-down"></i> Download Template
                 </a>
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>

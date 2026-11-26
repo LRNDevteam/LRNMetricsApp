@@ -510,6 +510,55 @@ VALUES (@Name, NULL, @FirstName, @LastName, @Email, 0, 1, N'EntraAutoProvision',
             ?? throw new InvalidOperationException($"Microsoft user {objectId} could not be provisioned.");
     }
 
+    public async Task<LabUser?> ClaimPreCreatedEntraUserAsync(Guid objectId, Guid tenantId, string upn)
+    {
+        if (string.IsNullOrWhiteSpace(upn)) return null;
+        // Exactly one waiting account must match, or nothing is linked (an administrator decides).
+        const string sql = @"
+SET XACT_ABORT ON;
+BEGIN TRAN;
+DECLARE @Ids TABLE (LabUserID int);
+INSERT INTO @Ids (LabUserID)
+SELECT LabUserID FROM dbo.LabUsers WITH (UPDLOCK, HOLDLOCK)
+WHERE AuthProvider = 'Entra' AND EntraObjectId IS NULL AND ISNULL(IsActive, 0) = 1
+  AND (LOWER(LTRIM(RTRIM(Email))) = LOWER(@Upn) OR LOWER(LTRIM(RTRIM(UserName))) = LOWER(@Upn));
+IF (SELECT COUNT(*) FROM @Ids) = 1
+    UPDATE u SET EntraObjectId = @Oid, EntraTenantId = @Tid, PasswordHash = NULL, SecurityStamp = NEWID(),
+                 ModifiedBy = N'EntraFirstSignIn', ModifiedDate = SYSUTCDATETIME()
+    FROM dbo.LabUsers u INNER JOIN @Ids i ON i.LabUserID = u.LabUserID;
+COMMIT;";
+        try
+        {
+            await using var conn = new SqlConnection(_conn);
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.Add("@Upn", SqlDbType.NVarChar, 256).Value = upn.Trim();
+            cmd.Parameters.Add("@Oid", SqlDbType.UniqueIdentifier).Value = objectId;
+            cmd.Parameters.Add("@Tid", SqlDbType.UniqueIdentifier).Value = tenantId;
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch (SqlException ex) when (ex.Number is 2601 or 2627)
+        {
+            // The object id is already on another row (a race with a parallel first sign-in).
+        }
+        return await GetUserByEntraObjectIdAsync(objectId);
+    }
+
+    public async Task<bool> IsEmailInUseAsync(string email, int? exceptLabUserId = null)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return false;
+        await using var conn = new SqlConnection(_conn);
+        await conn.OpenAsync();
+        await using var cmd = new SqlCommand(@"
+SELECT CAST(CASE WHEN EXISTS (
+    SELECT 1 FROM dbo.LabUsers
+    WHERE (LOWER(LTRIM(RTRIM(Email))) = LOWER(@Email) OR LOWER(LTRIM(RTRIM(UserName))) = LOWER(@Email))
+      AND LabUserID <> ISNULL(@Except, 0)) THEN 1 ELSE 0 END AS bit);", conn);
+        cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 256).Value = email.Trim();
+        cmd.Parameters.Add("@Except", SqlDbType.Int).Value = (object?)exceptLabUserId ?? DBNull.Value;
+        return (bool)(await cmd.ExecuteScalarAsync())!;
+    }
+
     public Task RecordFailedLoginAsync(int labUserId, int maxAttempts, int lockoutMinutes) => ExecAsync(
         // Right-hand values are the pre-update ones, so both CASEs see the same count. Survives an
         // app-pool recycle, unlike the per-IP lockout kept in memory by AccountController.

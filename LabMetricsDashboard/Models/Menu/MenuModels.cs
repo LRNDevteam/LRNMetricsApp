@@ -82,6 +82,13 @@ public sealed class RoleMenuSaveDto
     public List<RoleFeatureDto> Features { get; set; } = new();
 }
 
+/// <summary>Admin &gt; Report Visibility save: one role's Report.* rows (absent key = Default).</summary>
+public sealed class RoleFeatureSaveDto
+{
+    public int RoleId { get; set; }
+    public List<RoleFeatureDto> Features { get; set; } = new();
+}
+
 /// <summary>A togglable UI element that is not a navbar menu item.</summary>
 public sealed class MenuFeatureDto
 {

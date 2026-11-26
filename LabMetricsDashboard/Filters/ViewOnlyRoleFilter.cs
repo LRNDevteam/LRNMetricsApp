@@ -42,6 +42,7 @@ public sealed class ViewOnlyRoleFilter : IAsyncAuthorizationFilter
         "helpbot/ask",
         "reimbursementchat/ask",
         "denialworkflow/authtoken", // issues the React JWT; the API enforces the role again
+        "revenueanalysis/generate", // builds a read-only dashboard file from the lab's data - reading
     ];
 
     private readonly IConfiguration _configuration;

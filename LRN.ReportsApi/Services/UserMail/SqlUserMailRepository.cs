@@ -16,6 +16,8 @@ public static class EmailTypes
     public const string DenialWorkflowSupport = "DenialWorkflowSupport";
     public const string DenialWorkflowNotification = "DenialWorkflowNotification";
     public const string PayerMasterNotification = "PayerMasterNotification";
+    /// <summary>The one-time sign-in code an external user gets on every sign-in.</summary>
+    public const string LoginCode = "LoginCode";
 }
 
 public sealed class UserEmailLogQuery
@@ -92,6 +94,10 @@ public interface IUserMailRepository
 {
     Task<UserMailTarget?> GetTargetAsync(int labUserId, CancellationToken ct);
     Task CreateInvitationAsync(int labUserId, string application, string tokenHash, string otpHash, DateTime expiresUtc, string createdBy, CancellationToken ct);
+    /// <summary>A new sign-in code (dbo.UserLoginOtp); earlier open codes for the user are revoked. Returns its id.</summary>
+    Task<long> CreateLoginCodeAsync(int labUserId, string codeHash, DateTime expiresUtc, CancellationToken ct);
+    /// <summary>Codes issued to the user since <paramref name="sinceUtc"/> (throttles resends).</summary>
+    Task<int> CountLoginCodesSinceAsync(int labUserId, DateTime sinceUtc, CancellationToken ct);
     Task WriteEmailLogAsync(int? labUserId, string? userName, string application, string emailType, string toAddress, string? fromAddress,
         string subject, string? bodyHtml, bool sent, string? error, string? sentBy, CancellationToken ct);
     Task<Dictionary<int, ArWorkbenchInviteStatus>> GetInviteStatusesAsync(IReadOnlyCollection<int> labUserIds, CancellationToken ct);
@@ -160,6 +166,29 @@ VALUES (@Id, @App, @Token, @Otp, @Expires, @By);", conn);
         cmd.Parameters.Add("@Expires", SqlDbType.DateTime2).Value = expiresUtc;
         cmd.Parameters.Add("@By", SqlDbType.NVarChar, 100).Value = Truncate(createdBy, 100);
         await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<long> CreateLoginCodeAsync(int labUserId, string codeHash, DateTime expiresUtc, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = new SqlCommand(@"
+UPDATE dbo.UserLoginOtp SET RevokedUtc = SYSUTCDATETIME()
+WHERE LabUserID = @Id AND UsedUtc IS NULL AND RevokedUtc IS NULL;
+INSERT INTO dbo.UserLoginOtp (LabUserID, CodeHash, ExpiresUtc) VALUES (@Id, @Hash, @Expires);
+SELECT CAST(SCOPE_IDENTITY() AS bigint);", conn);
+        cmd.Parameters.Add("@Id", SqlDbType.Int).Value = labUserId;
+        cmd.Parameters.Add("@Hash", SqlDbType.NVarChar, 200).Value = codeHash;
+        cmd.Parameters.Add("@Expires", SqlDbType.DateTime2).Value = expiresUtc;
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct));
+    }
+
+    public async Task<int> CountLoginCodesSinceAsync(int labUserId, DateTime sinceUtc, CancellationToken ct)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = new SqlCommand("SELECT COUNT(*) FROM dbo.UserLoginOtp WHERE LabUserID = @Id AND CreatedUtc >= @Since;", conn);
+        cmd.Parameters.Add("@Id", SqlDbType.Int).Value = labUserId;
+        cmd.Parameters.Add("@Since", SqlDbType.DateTime2).Value = sinceUtc;
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
     }
 
     public async Task WriteEmailLogAsync(int? labUserId, string? userName, string application, string emailType, string toAddress, string? fromAddress,

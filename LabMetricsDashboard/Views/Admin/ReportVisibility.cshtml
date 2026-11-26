@@ -1,0 +1,367 @@
+@{
+    ViewData["Title"] = "Report Visibility";
+}
+
+<style>
+    .rv-page .rv-row { display: flex; align-items: center; gap: .75rem; }
+    .rv-page .rv-row .rv-name { flex: 1 1 auto; min-width: 0; }
+    .rv-page .rv-row .rv-note { font-size: .75rem; color: #6c757d; }
+    .rv-page .rv-row select { width: 9.5rem; flex: 0 0 auto; }
+    .rv-page .rv-section { background: #f6f8fc; font-size: .72rem; font-weight: 800; letter-spacing: .05em;
+                           text-transform: uppercase; color: #5b6b82; padding: .45rem 1rem; }
+    .rv-page .rv-section .btn { font-size: .78rem; text-transform: none; letter-spacing: 0; font-weight: 600; }
+    .rv-page .rv-preset { background: #fffdf5; }
+    .rv-page .rv-preset select { width: 13rem; }
+    .rv-page .rv-action { padding-left: 2.25rem; }
+    .rv-page .rv-action.rv-off { opacity: .45; }
+    .rv-page select.rv-deny { border-color: #dc3545; color: #b02a37; }
+    .rv-page select.rv-allow { border-color: #198754; color: #146c43; }
+    .rv-page .accordion-button .badge { font-weight: 600; }
+</style>
+
+<div class="container py-3 rv-page" style="max-width: 920px">
+    <h3 class="fw-bold">Report Visibility</h3>
+    <p class="text-secondary mb-2">
+        For each role, choose which tabs it sees on the Standard Reports pages and exactly what it can do with
+        each page's Key Insights. Which pages a role can open is still set in
+        <a asp-controller="Admin" asp-action="RoleMenuMapping">Role Menu Mapping</a>.
+    </p>
+    <ul class="text-secondary small mb-3">
+        <li><strong>Default</strong> keeps the page's normal behaviour. Nothing changes until you pick another option.</li>
+        <li><strong>Key Insights</strong>: <em>See Key Insights</em> decides whether the panel is there at all. Each action under it
+            (Add, Edit, Delete, Import, Template / Export, Copy to Previous Week) is allowed or denied on its own, and its buttons
+            are removed everywhere on the page &mdash; the top bar, the row buttons and the import window. On Denial Summary
+            Key Insights is the Denial Insight tab.</li>
+        <li><strong>Quick setting</strong> fills the actions in one go (for example <em>View only</em>, <em>View + add</em> or
+            <em>View + import</em>). Change any single action afterwards and it shows as <em>Custom</em>.</li>
+        <li>A user with several roles gets a tab or action if <em>any</em> of their roles allows it. One role on
+            <strong>Hidden</strong> / <strong>Deny</strong> and another on <strong>Default</strong> stays hidden / denied, so set
+            <strong>Visible</strong> / <strong>Allow</strong> to override.</li>
+        <li>Admin, Super Admin and LRN Admin always see and can do everything. Lab User stays view-only whatever is set here.</li>
+    </ul>
+
+    <div id="rvAlert" class="alert d-none" role="alert"></div>
+
+    <div class="row g-2 align-items-end mb-3">
+        <div class="col-md-6">
+            <label class="form-label small fw-semibold" for="rvRole">ROLE</label>
+            <select id="rvRole" class="form-select">
+                <option value="">Select a role…</option>
+            </select>
+        </div>
+        <div class="col-md-6 text-md-end">
+            <button class="btn btn-link btn-sm" type="button" id="rvExpandAll">Expand all</button>
+            <button class="btn btn-link btn-sm" type="button" id="rvResetAll">Reset all to Default</button>
+        </div>
+    </div>
+
+    <div id="rvPages" class="accordion mb-3">
+        <div class="text-secondary">Select a role to load its report visibility.</div>
+    </div>
+
+    <button class="btn btn-primary" type="button" id="rvSave" disabled>
+        <i class="bi bi-save me-1"></i>Save visibility
+    </button>
+</div>
+
+@Html.AntiForgeryToken()
+
+@section Scripts {
+<script nonce='@Context.Items["CspNonce"]'>
+(function () {
+    'use strict';
+
+    const urls = {
+        roles: '@Url.Action("MenuRoles", "Admin")',
+        catalog: '@Url.Action("ReportVisibilityCatalog", "Admin")',
+        roleFeatures: '@Url.Action("RoleFeatures", "Admin")',
+        save: '@Url.Action("SaveRoleReportVisibility", "Admin")'
+    };
+    const antiForgery = () => document.querySelector('input[name="__RequestVerificationToken"]').value;
+
+    // Visibility selects (tabs, "See Key Insights"): "" Default, "allow" Visible, "deny" Hidden.
+    // Action selects: "" Default, "allow" Allow, "deny" Deny. Each non-Default value saves one row.
+    const SHOW_OPTIONS = [['', 'Default'], ['allow', 'Visible'], ['deny', 'Hidden']];
+    const ACTION_OPTIONS = [['', 'Default'], ['allow', 'Allow'], ['deny', 'Deny']];
+
+    // Quick settings for Key Insights. Each is { view, actions: Action -> value }; an action the page
+    // does not have is skipped. "custom" is never applied - it is what the select shows for a mix.
+    const PRESETS = [
+        { id: '', label: 'Default (no change)', view: '', all: '' },
+        { id: 'full', label: 'Full access', view: 'allow', all: 'allow' },
+        { id: 'add', label: 'View + add insights', view: 'allow', all: 'deny', allow: ['Add'], needs: 'Add' },
+        { id: 'import', label: 'View + import', view: 'allow', all: 'deny', allow: ['Import', 'Template'], needs: 'Import' },
+        { id: 'view', label: 'View only', view: 'allow', all: 'deny' },
+        { id: 'hidden', label: 'Hidden', view: 'deny', all: 'deny' },
+    ];
+
+    let catalog = [];
+
+    function showAlert(message, isError) {
+        const el = document.getElementById('rvAlert');
+        el.className = 'alert ' + (isError ? 'alert-danger' : 'alert-success');
+        el.textContent = message;
+        el.classList.remove('d-none');
+        window.clearTimeout(el._t);
+        el._t = window.setTimeout(() => el.classList.add('d-none'), 5000);
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text == null ? '' : String(text);
+        return div.innerHTML;
+    }
+
+    async function getJson(url) {
+        const resp = await fetch(url, { credentials: 'same-origin' });
+        if (!resp.ok) {
+            let message = 'Request failed (' + resp.status + ')';
+            try { const data = await resp.json(); if (data && data.message) message = data.message; } catch (e) { /* ignore */ }
+            throw new Error(message);
+        }
+        return resp.json();
+    }
+
+    function selectHtml(options, current, attrs) {
+        return '<select class="form-select form-select-sm rv-select" ' + attrs + '>' +
+            options.map(o => '<option value="' + o[0] + '"' + (o[0] === current ? ' selected' : '') + '>' + o[1] + '</option>').join('') +
+            '</select>';
+    }
+
+    const stateOf = (settings, key) => settings.get(key) === true ? 'allow' : settings.get(key) === false ? 'deny' : '';
+
+    function presetsFor(page) {
+        const actions = page.keyInsightActions.map(a => a.action);
+        return PRESETS.filter(p => !p.needs || actions.includes(p.needs));
+    }
+
+    function presetValues(preset, page) {
+        const values = {};
+        page.keyInsightActions.forEach(a => {
+            values[a.action] = preset.allow && preset.allow.includes(a.action) ? 'allow' : preset.all;
+        });
+        return values;
+    }
+
+    // ── rendering ────────────────────────────────────────────────────────────
+
+    function keyInsightsHtml(page, settings) {
+        const pk = escapeHtml(page.key);
+        const presetOptions = presetsFor(page).map(p => [p.id, p.label]).concat([['custom', 'Custom']]);
+        return '<div class="list-group-item rv-section"><i class="bi bi-lightbulb me-1 text-warning"></i>Key Insights &middot; ' +
+                    escapeHtml(page.keyInsightsLabel) + '</div>' +
+            '<div class="list-group-item rv-preset"><div class="rv-row">' +
+                '<div class="rv-name"><strong>Quick setting</strong>' +
+                    '<div class="rv-note">Fills See Key Insights and every action below.</div></div>' +
+                selectHtml(presetOptions, '', 'data-kind="preset" data-page="' + pk + '" aria-label="Key Insights quick setting for ' + escapeHtml(page.displayName) + '"') +
+            '</div></div>' +
+            '<div class="list-group-item"><div class="rv-row">' +
+                '<div class="rv-name"><strong>See Key Insights</strong>' +
+                    '<div class="rv-note">Hidden removes the whole panel' + (page.key === 'DenialSummary' ? ' (the Denial Insight tab)' : '') + '.</div></div>' +
+                selectHtml(SHOW_OPTIONS, stateOf(settings, page.keyInsightsViewKey),
+                    'data-kind="ki-view" data-page="' + pk + '" data-key="' + escapeHtml(page.keyInsightsViewKey) + '" aria-label="See Key Insights"') +
+            '</div></div>' +
+            page.keyInsightActions.map(a =>
+                '<div class="list-group-item rv-action" data-action-row="' + pk + '"><div class="rv-row">' +
+                    '<div class="rv-name">' + escapeHtml(a.displayName) +
+                        '<div class="rv-note">' + escapeHtml(a.description) + '</div></div>' +
+                    selectHtml(ACTION_OPTIONS, stateOf(settings, a.featureKey),
+                        'data-kind="ki-action" data-page="' + pk + '" data-action="' + escapeHtml(a.action) +
+                        '" data-key="' + escapeHtml(a.featureKey) + '" aria-label="' + escapeHtml(a.displayName) + '"') +
+                '</div></div>').join('');
+    }
+
+    function tabsHtml(page, settings) {
+        const pk = escapeHtml(page.key);
+        return '<div class="list-group-item rv-section d-flex justify-content-between align-items-center">' +
+                '<span><i class="bi bi-window-stack me-1"></i>Tabs</span>' +
+                '<span>' +
+                    '<button type="button" class="btn btn-link btn-sm p-0 me-3" data-bulk="allow" data-page="' + pk + '">All visible</button>' +
+                    '<button type="button" class="btn btn-link btn-sm p-0" data-bulk="" data-page="' + pk + '">All default</button>' +
+                '</span></div>' +
+            page.tabs.map(tab =>
+                '<div class="list-group-item"><div class="rv-row">' +
+                    '<div class="rv-name">' + escapeHtml(tab.displayName) +
+                        (tab.note ? '<div class="rv-note">' + escapeHtml(tab.note) + '</div>' : '') + '</div>' +
+                    selectHtml(SHOW_OPTIONS, stateOf(settings, tab.viewKey),
+                        'data-kind="tab" data-page="' + pk + '" data-key="' + escapeHtml(tab.viewKey) +
+                        '" aria-label="' + escapeHtml(tab.displayName) + ' tab visibility"') +
+                '</div></div>').join('');
+    }
+
+    function render(roleFeatures) {
+        const settings = new Map((roleFeatures || [])
+            .filter(f => (f.featureKey || '').startsWith('Report.'))
+            .map(f => [f.featureKey, !!f.isEnabled]));
+
+        const html = catalog.map((page, i) => {
+            const bodyId = 'rvBody' + i;
+            return '<div class="accordion-item" data-page="' + escapeHtml(page.key) + '">' +
+                '<h2 class="accordion-header">' +
+                    '<button class="accordion-button collapsed gap-2" type="button" data-bs-toggle="collapse" data-bs-target="#' + bodyId + '">' +
+                        '<span class="fw-semibold">' + escapeHtml(page.displayName) + '</span>' +
+                        '<span class="rv-badge ms-auto me-2"></span>' +
+                    '</button>' +
+                '</h2>' +
+                '<div id="' + bodyId + '" class="accordion-collapse collapse">' +
+                    '<div class="accordion-body p-0"><div class="list-group list-group-flush">' +
+                        keyInsightsHtml(page, settings) + tabsHtml(page, settings) +
+                    '</div></div>' +
+                '</div>' +
+            '</div>';
+        }).join('');
+
+        const host = document.getElementById('rvPages');
+        host.innerHTML = html || '<div class="text-secondary">No report pages are defined.</div>';
+        catalog.forEach(p => refreshPage(p.key));
+    }
+
+    // ── state ────────────────────────────────────────────────────────────────
+
+    const pageByKey = key => catalog.find(p => p.key === key);
+    const itemOf = key => document.querySelector('.accordion-item[data-page="' + key + '"]');
+
+    function paintSelect(sel) {
+        sel.classList.remove('rv-deny', 'rv-allow');
+        if (sel.value === 'deny') sel.classList.add('rv-deny');
+        else if (sel.value === 'allow') sel.classList.add('rv-allow');
+    }
+
+    /** The preset the current Key Insights values match, or "custom". */
+    function matchPreset(page, item) {
+        const view = item.querySelector('[data-kind="ki-view"]').value;
+        const actions = {};
+        item.querySelectorAll('[data-kind="ki-action"]').forEach(s => { actions[s.dataset.action] = s.value; });
+        const match = presetsFor(page).find(p => {
+            if (p.view !== view) return false;
+            const values = presetValues(p, page);
+            return Object.keys(values).every(k => values[k] === actions[k]);
+        });
+        return match ? match.id : 'custom';
+    }
+
+    function refreshPage(key) {
+        const page = pageByKey(key);
+        const item = itemOf(key);
+        if (!page || !item) return;
+        item.querySelectorAll('.rv-select:not([data-kind="preset"])').forEach(paintSelect);
+
+        // Actions do nothing while Key Insights are hidden: dim them so that is obvious.
+        const hidden = item.querySelector('[data-kind="ki-view"]').value === 'deny';
+        item.querySelectorAll('[data-action-row]').forEach(r => r.classList.toggle('rv-off', hidden));
+
+        item.querySelector('[data-kind="preset"]').value = matchPreset(page, item);
+
+        const selects = Array.from(item.querySelectorAll('.rv-select:not([data-kind="preset"])'));
+        const set = selects.filter(s => s.value !== '').length;
+        const denied = selects.filter(s => s.value === 'deny').length;
+        item.querySelector('.rv-badge').innerHTML = set === 0
+            ? '<span class="badge bg-light text-secondary border">All default</span>'
+            : '<span class="badge bg-primary-subtle text-primary-emphasis border">' + set + ' set</span>' +
+              (denied ? ' <span class="badge bg-danger-subtle text-danger-emphasis border">' + denied + ' hidden / denied</span>' : '');
+    }
+
+    function applyPreset(key, presetId) {
+        const page = pageByKey(key);
+        const preset = presetsFor(page).find(p => p.id === presetId);
+        if (!preset) return; // "custom": leave the actions as they are
+        const item = itemOf(key);
+        item.querySelector('[data-kind="ki-view"]').value = preset.view;
+        const values = presetValues(preset, page);
+        item.querySelectorAll('[data-kind="ki-action"]').forEach(s => { s.value = values[s.dataset.action] || ''; });
+        refreshPage(key);
+    }
+
+    function collect() {
+        const features = [];
+        document.querySelectorAll('#rvPages .rv-select[data-key]').forEach(sel => {
+            if (sel.value) features.push({ featureKey: sel.dataset.key, isEnabled: sel.value === 'allow' });
+        });
+        return features;
+    }
+
+    // ── load / save ──────────────────────────────────────────────────────────
+
+    async function loadRole(roleId) {
+        const saveBtn = document.getElementById('rvSave');
+        saveBtn.disabled = true;
+        if (!roleId) {
+            document.getElementById('rvPages').innerHTML =
+                '<div class="text-secondary">Select a role to load its report visibility.</div>';
+            return;
+        }
+        try {
+            render(await getJson(urls.roleFeatures + '?roleId=' + encodeURIComponent(roleId)));
+            saveBtn.disabled = false;
+        } catch (err) {
+            showAlert(err.message, true);
+        }
+    }
+
+    async function save() {
+        const roleId = +document.getElementById('rvRole').value;
+        if (!roleId) return showAlert('Select a role first.', true);
+        const btn = document.getElementById('rvSave');
+        btn.disabled = true;
+        try {
+            const resp = await fetch(urls.save, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': antiForgery() },
+                body: JSON.stringify({ roleId: roleId, features: collect() })
+            });
+            if (!resp.ok) {
+                let message = 'Save failed (' + resp.status + ')';
+                try { const data = await resp.json(); if (data && data.message) message = data.message; } catch (e) { /* ignore */ }
+                throw new Error(message);
+            }
+            showAlert('Report visibility saved. Users see the change on their next page load.', false);
+        } catch (err) {
+            showAlert(err.message, true);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    async function init() {
+        try {
+            const [roles, pages] = await Promise.all([getJson(urls.roles), getJson(urls.catalog)]);
+            catalog = pages;
+            document.getElementById('rvRole').innerHTML =
+                '<option value="">Select a role…</option>' +
+                roles.map(r => '<option value="' + r.roleId + '">' + escapeHtml(r.roleName) +
+                    (r.isActive === false ? ' (inactive)' : '') + '</option>').join('');
+        } catch (err) {
+            showAlert(err.message, true);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        init();
+        document.getElementById('rvRole').addEventListener('change', e => loadRole(e.target.value));
+        document.getElementById('rvSave').addEventListener('click', save);
+
+        const host = document.getElementById('rvPages');
+        host.addEventListener('change', e => {
+            const sel = e.target.closest('.rv-select');
+            if (!sel) return;
+            if (sel.dataset.kind === 'preset') applyPreset(sel.dataset.page, sel.value);
+            else refreshPage(sel.dataset.page);
+        });
+        host.addEventListener('click', e => {
+            const bulk = e.target.closest('[data-bulk]');
+            if (!bulk) return;
+            itemOf(bulk.dataset.page).querySelectorAll('.rv-select[data-kind="tab"]').forEach(s => { s.value = bulk.dataset.bulk; });
+            refreshPage(bulk.dataset.page);
+        });
+
+        document.getElementById('rvExpandAll').addEventListener('click', () =>
+            host.querySelectorAll('.accordion-collapse').forEach(c => bootstrap.Collapse.getOrCreateInstance(c, { toggle: false }).show()));
+        document.getElementById('rvResetAll').addEventListener('click', () => {
+            host.querySelectorAll('.rv-select').forEach(s => { s.value = ''; });
+            catalog.forEach(p => refreshPage(p.key));
+        });
+    });
+})();
+</script>
+}

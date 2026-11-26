@@ -3,6 +3,11 @@
 @{
     ViewData["Title"] = "Denial Summary";
     ViewData["SelectedLab"] = Model.CurrentLab;
+    // Admin > Report Visibility: lmd-report-tab drops the tabs this user's role has hidden; the
+    // Denial Insight tab follows the page's Key Insights setting. The controller moves ActiveTab
+    // off a hidden tab.
+    ViewData[LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.ViewDataKey] =
+        LabMetricsDashboard.Models.ReportVisibility.ReportVisibilityCatalog.DenialSummary;
 
     var tab = Model.ActiveTab;
     // Framed in Executive Summary > Denial Highlights: only the Monthly / Weekly grids are shown,
@@ -116,13 +121,13 @@
     }
 
     <ul class="nav nav-pills denial-tabs mb-3" role="tablist">
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="monthly">
             <button class="nav-link @(tab == "monthly" ? "active" : "")" data-bs-toggle="pill"
                     data-bs-target="#dcr-monthly" type="button" data-tab-key="monthly">
                 <i class="bi bi-calendar-month me-2"></i>Monthly Summary
             </button>
         </li>
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="weekly">
             <button class="nav-link @(tab == "weekly" ? "active" : "")" data-bs-toggle="pill"
                     data-bs-target="#dcr-weekly" type="button" data-tab-key="weekly">
                 <i class="bi bi-calendar-week me-2"></i>Weekly Summary
@@ -130,7 +135,7 @@
         </li>
         @if (Model.HasDenialLists)
         {
-            <li class="nav-item" role="presentation">
+            <li class="nav-item" role="presentation" lmd-report-tab="list">
                 <button class="nav-link @(tab == "list" ? "active" : "")" data-bs-toggle="pill"
                         data-bs-target="#dcr-list" type="button" data-tab-key="list">
                     <i class="bi bi-list-ol me-2"></i>Denial List
@@ -138,7 +143,7 @@
             </li>
             @if (Model.HasDenialPlanType)
             {
-            <li class="nav-item" role="presentation">
+            <li class="nav-item" role="presentation" lmd-report-tab="plantype">
                 <button class="nav-link @(tab == "plantype" ? "active" : "")" data-bs-toggle="pill"
                         data-bs-target="#dcr-plantype" type="button" data-tab-key="plantype">
                     <i class="bi bi-diagram-3 me-2"></i>@(Model.HasDenialFacilityTabs ? "Plan Type" : "Denial List - Plan Type")
@@ -147,19 +152,19 @@
             }
             @if (Model.HasDenialFacilityTabs)
             {
-                <li class="nav-item" role="presentation">
+                <li class="nav-item" role="presentation" lmd-report-tab="payor">
                     <button class="nav-link @(tab == "payor" ? "active" : "")" data-bs-toggle="pill"
                             data-bs-target="#dcr-payor" type="button" data-tab-key="payor">
                         <i class="bi bi-people me-2"></i>Panel vs Payer
                     </button>
                 </li>
-                <li class="nav-item" role="presentation">
+                <li class="nav-item" role="presentation" lmd-report-tab="facility">
                     <button class="nav-link @(tab == "facility" ? "active" : "")" data-bs-toggle="pill"
                             data-bs-target="#dcr-facility" type="button" data-tab-key="facility">
                         <i class="bi bi-building me-2"></i>Facility wise Denial
                     </button>
                 </li>
-                <li class="nav-item" role="presentation">
+                <li class="nav-item" role="presentation" lmd-report-tab="facilitypct">
                     <button class="nav-link @(tab == "facilitypct" ? "active" : "")" data-bs-toggle="pill"
                             data-bs-target="#dcr-facilitypct" type="button" data-tab-key="facilitypct">
                         <i class="bi bi-percent me-2"></i>Denial vs Facility %
@@ -178,7 +183,7 @@
         }
         @if (!dcrEmbed || currentInsightCount > 0)
         {
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="key-insights">
             <button class="nav-link @(tab == "insight" ? "active" : "")" data-bs-toggle="pill"
                     data-bs-target="#dcr-insight" type="button" data-tab-key="insight">
                 <i class="bi bi-lightbulb me-2"></i>@(dcrEmbed ? "Current Week Denial Insight" : "Denial Insight")
@@ -191,7 +196,7 @@
         }
         @if (dcrSnapshot is null)
         {
-        <li class="nav-item" role="presentation">
+        <li class="nav-item" role="presentation" lmd-report-tab="claims">
             <button class="nav-link @(tab == "claims" ? "active" : "")" data-bs-toggle="pill"
                     data-bs-target="#dcr-claims" type="button" data-tab-key="claims">
                 <i class="bi bi-list-columns-reverse me-2"></i>Claim Level
@@ -205,7 +210,7 @@
     </ul>
 
     <div class="tab-content">
-        <div class="tab-pane fade @(tab == "monthly" ? "show active" : "")" id="dcr-monthly">
+        <div lmd-report-tab="monthly" class="tab-pane fade @(tab == "monthly" ? "show active" : "")" id="dcr-monthly">
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
                     <div class="fs-host" id="monthlyFsHost">
@@ -223,7 +228,7 @@
             </div>
         </div>
 
-        <div class="tab-pane fade @(tab == "weekly" ? "show active" : "")" id="dcr-weekly">
+        <div lmd-report-tab="weekly" class="tab-pane fade @(tab == "weekly" ? "show active" : "")" id="dcr-weekly">
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
                     <div class="fs-host" id="weeklyFsHost">
@@ -243,7 +248,7 @@
 
         @if (Model.HasDenialLists)
         {
-            <div class="tab-pane fade @(tab == "list" ? "show active" : "")" id="dcr-list">
+            <div lmd-report-tab="list" class="tab-pane fade @(tab == "list" ? "show active" : "")" id="dcr-list">
                 <div class="card border-0 shadow-sm">
                     <div class="card-body">
                         <form method="get" asp-action="Index" class="dcr-list-search" role="search">
@@ -284,7 +289,7 @@
 
             @if (Model.HasDenialPlanType)
             {
-            <div class="tab-pane fade @(tab == "plantype" ? "show active" : "")" id="dcr-plantype">
+            <div lmd-report-tab="plantype" class="tab-pane fade @(tab == "plantype" ? "show active" : "")" id="dcr-plantype">
                 <div class="card border-0 shadow-sm">
                     <div class="card-body">
                         @await Html.PartialAsync("_DenialPlanTypeGrid", Model.PlanType)
@@ -294,21 +299,21 @@
             }
             @if (Model.HasDenialFacilityTabs)
             {
-                <div class="tab-pane fade @(tab == "payor" ? "show active" : "")" id="dcr-payor">
+                <div lmd-report-tab="payor" class="tab-pane fade @(tab == "payor" ? "show active" : "")" id="dcr-payor">
                     <div class="card border-0 shadow-sm">
                         <div class="card-body">
                             @await Html.PartialAsync("_DenialPayorVsPayerGrid", Model.PayorVsPayer)
                         </div>
                     </div>
                 </div>
-                <div class="tab-pane fade @(tab == "facility" ? "show active" : "")" id="dcr-facility">
+                <div lmd-report-tab="facility" class="tab-pane fade @(tab == "facility" ? "show active" : "")" id="dcr-facility">
                     <div class="card border-0 shadow-sm">
                         <div class="card-body">
                             @await Html.PartialAsync("_DenialFacilityGrid", Model.FacilityDenial)
                         </div>
                     </div>
                 </div>
-                <div class="tab-pane fade @(tab == "facilitypct" ? "show active" : "")" id="dcr-facilitypct">
+                <div lmd-report-tab="facilitypct" class="tab-pane fade @(tab == "facilitypct" ? "show active" : "")" id="dcr-facilitypct">
                     <div class="card border-0 shadow-sm">
                         <div class="card-body">
                             @await Html.PartialAsync("_DenialFacilityPctGrid", Model.FacilityPct)
@@ -318,13 +323,13 @@
             }
         }
 
-        <div class="tab-pane fade @(tab == "insight" ? "show active" : "")" id="dcr-insight">
+        <div lmd-report-tab="key-insights" class="tab-pane fade @(tab == "insight" ? "show active" : "")" id="dcr-insight">
             @await Html.PartialAsync("_DenialInsightPanel", Model.Insight)
         </div>
 
         @if (dcrSnapshot is null)
         {
-        <div class="tab-pane fade @(tab == "claims" ? "show active" : "")" id="dcr-claims">
+        <div lmd-report-tab="claims" class="tab-pane fade @(tab == "claims" ? "show active" : "")" id="dcr-claims">
             @await Html.PartialAsync("_DenialClaimLevelTab", Model.Claims)
         </div>
         }

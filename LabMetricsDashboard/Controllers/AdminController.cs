@@ -17,15 +17,36 @@ public class AdminController : Controller
     private readonly IMenuApiClient _menuApi;
     private readonly IMenuService _menuService;
     private readonly IUserMailApiClient _userMail;
+    private readonly LabActivationService? _labActivation;
 
     public AdminController(IUserManagementRepository repo, IPasswordHasher hasher,
-        IMenuApiClient menuApi, IMenuService menuService, IUserMailApiClient userMail)
+        IMenuApiClient menuApi, IMenuService menuService, IUserMailApiClient userMail,
+        LabActivationService? labActivation = null)
     {
         _repo = repo;
         _hasher = hasher;
         _menuApi = menuApi;
         _menuService = menuService;
         _userMail = userMail;
+        _labActivation = labActivation;
+    }
+
+    /// <summary>
+    /// Labs a user can be given: those active on Manage Labs. Inactive labs are left out of every
+    /// user-creation and assignment picker; Manage Labs itself still lists them so they can be enabled.
+    /// </summary>
+    private async Task<List<Lab>> ActiveLabsAsync()
+        => (await _repo.GetAllLabsAsync()).Where(lab => lab.IsActive).ToList();
+
+    /// <summary>Null when every lab is active; otherwise why the assignment is refused.</summary>
+    private async Task<string?> InactiveLabErrorAsync(IEnumerable<int> labIds)
+    {
+        var ids = labIds.ToList();
+        if (ids.Count == 0) return null;
+        var active = (await ActiveLabsAsync()).Select(l => l.LabId).ToHashSet();
+        return ids.All(active.Contains)
+            ? null
+            : "That lab is inactive. Enable it under Admin > Manage Labs before assigning users to it.";
     }
 
     // Same rule as LRN.ReportsApi ArWorkbenchUserRules.ValidateEmail. Several users may share an address.
@@ -198,7 +219,7 @@ public class AdminController : Controller
         {
             Users = await _repo.GetAllUsersAsync(),
             Roles = await _repo.GetAllRolesAsync(),
-            Labs = await _repo.GetAllLabsAsync()
+            Labs = await ActiveLabsAsync()
         };
         // keep existing Users view for backward compatibility
         return View(vm);
@@ -210,7 +231,7 @@ public class AdminController : Controller
         var vm = new AdminViewModel
         {
             Roles = await _repo.GetAllRolesAsync(),
-            Labs = await _repo.GetAllLabsAsync()
+            Labs = await ActiveLabsAsync()
         };
         return View(vm);
     }
@@ -222,7 +243,7 @@ public class AdminController : Controller
         {
             Users = await _repo.GetAllUsersAsync(),
             Roles = await _repo.GetAllRolesAsync(),
-            Labs = await _repo.GetAllLabsAsync()
+            Labs = await ActiveLabsAsync()
         };
         // Populate user -> labs map for server-side rendering
         var map = new Dictionary<int, IEnumerable<UserLab>>();
@@ -266,7 +287,7 @@ public class AdminController : Controller
         {
             Users = await _repo.GetAllUsersAsync(),
             Roles = await _repo.GetAllRolesAsync(),
-            Labs = await _repo.GetAllLabsAsync()
+            Labs = await ActiveLabsAsync()
         };
         return View(vm);
     }
@@ -278,7 +299,7 @@ public class AdminController : Controller
         {
             Users = await _repo.GetAllUsersAsync(),
             Roles = await _repo.GetAllRolesAsync(),
-            Labs = await _repo.GetAllLabsAsync()
+            Labs = await ActiveLabsAsync()
         };
         return View(vm);
     }
@@ -336,7 +357,7 @@ public class AdminController : Controller
     [HttpGet]
     public async Task<IActionResult> GetLabsJson()
     {
-        var labs = await _repo.GetAllLabsAsync();
+        var labs = await ActiveLabsAsync();
         return Json(labs);
     }
 
@@ -365,7 +386,7 @@ public class AdminController : Controller
         var errors = new List<string>();
         if (vm == null) return BadRequest(new { success = false, errors = new[] { "Invalid request" } });
         if (vm.NewUserRoleId is > 0 && await RoleGrantErrorAsync(vm.NewUserRoleId.Value) is { } roleError) return Refused(roleError);
-        if (await LabGrantErrorAsync(GetSelectedLabIds(vm)) is { } labError) return Refused(labError);
+        if ((await LabGrantErrorAsync(GetSelectedLabIds(vm)) ?? await InactiveLabErrorAsync(GetSelectedLabIds(vm))) is { } labError) return Refused(labError);
         if (!IsFullAdmin && !GetSelectedLabIds(vm).Any()) return Refused("Assign at least one of your labs.");
 
         // DataAnnotation validation for password/compare will be on ModelState
@@ -389,6 +410,8 @@ public class AdminController : Controller
             user.UserName = user.UserName.Trim();
             if (await _repo.GetUserByUserNameAsync(user.UserName) != null)
                 return Conflict(new { success = false, errors = new[] { $"UserName '{user.UserName}' already exists" } });
+            if (await _repo.IsEmailInUseAsync(user.Email))
+                return Conflict(new { success = false, errors = new[] { EmailInUseMessage(user.Email) } });
 
             user.Email = user.Email.Trim();
             user.PasswordHash = string.Empty;   // stored as NULL; the user sets it from the invitation
@@ -439,7 +462,7 @@ public class AdminController : Controller
     public async Task<IActionResult> AssignUserLabAjax([FromForm] int assignUserId, [FromForm] int labId)
     {
         if (assignUserId <= 0 || labId <= 0) return BadRequest(new { success = false, errors = new[] { "Invalid user or lab" } });
-        if ((await UserScopeErrorAsync(assignUserId) ?? await LabGrantErrorAsync(new[] { labId })) is { } error) return Refused(error);
+        if ((await UserScopeErrorAsync(assignUserId) ?? await LabGrantErrorAsync(new[] { labId }) ?? await InactiveLabErrorAsync(new[] { labId })) is { } error) return Refused(error);
         var ul = new UserLab { LabId = labId, LabUserID = assignUserId };
         await _repo.AssignUserLabAsync(ul);
         return Json(new { success = true });
@@ -518,7 +541,7 @@ public class AdminController : Controller
     {
         if (vm.NewUserRoleId is > 0 && await RoleGrantErrorAsync(vm.NewUserRoleId.Value) is { } roleError)
             ModelState.AddModelError("NewUserRoleId", roleError);
-        if (await LabGrantErrorAsync(GetSelectedLabIds(vm)) is { } labError)
+        if ((await LabGrantErrorAsync(GetSelectedLabIds(vm)) ?? await InactiveLabErrorAsync(GetSelectedLabIds(vm))) is { } labError)
             ModelState.AddModelError("NewUserLabIds", labError);
         else if (!IsFullAdmin && !GetSelectedLabIds(vm).Any())
             ModelState.AddModelError("NewUserLabIds", "Assign at least one of your labs.");
@@ -528,7 +551,7 @@ public class AdminController : Controller
         {
             vm.Users = await _repo.GetAllUsersAsync();
             vm.Roles = await _repo.GetAllRolesAsync();
-            vm.Labs = await _repo.GetAllLabsAsync();
+            vm.Labs = await ActiveLabsAsync();
 
             // Populate labs map for the list view
             var map = new Dictionary<int, IEnumerable<UserLab>>();
@@ -552,11 +575,13 @@ public class AdminController : Controller
             if (emailError != null) ModelState.AddModelError("NewUser.Email", emailError);
             if (await _repo.GetUserByUserNameAsync(user.UserName) != null)
                 ModelState.AddModelError("NewUser.UserName", $"UserName '{user.UserName}' already exists");
+            if (emailError == null && await _repo.IsEmailInUseAsync(user.Email))
+                ModelState.AddModelError("NewUser.Email", EmailInUseMessage(user.Email));
             if (!ModelState.IsValid)
             {
                 vm.Users = await _repo.GetAllUsersAsync();
                 vm.Roles = await _repo.GetAllRolesAsync();
-                vm.Labs = await _repo.GetAllLabsAsync();
+                vm.Labs = await ActiveLabsAsync();
                 ViewData["OpenCreateUserModal"] = true;
                 return View("ListUsers", vm);
             }
@@ -587,7 +612,7 @@ public class AdminController : Controller
     {
         var user = await _repo.GetUserByIdAsync(id);
         if (user == null) return NotFound();
-        ViewBag.Labs = (await _repo.GetAllLabsAsync()).Where(lab => lab.IsActive).ToList();
+        ViewBag.Labs = await ActiveLabsAsync();
         ViewBag.SelectedLabIds = (await _repo.GetUserLabsAsync(id)).Select(lab => lab.LabId).Distinct().ToList();
         // Roles: active ones, plus any the user already holds (so an inactive role still shows and can
         // be removed). A Lab Admin is not offered administrator roles they cannot grant.
@@ -658,6 +683,23 @@ public class AdminController : Controller
             }
         }
 
+        // One account per email address, for every role. A user whose username is their email
+        // address (AR Workbench Microsoft / external accounts) keeps that email.
+        var newEmail = (user.Email ?? string.Empty).Trim();
+        if (existing.UserName.Contains('@') && !string.Equals(newEmail, existing.UserName.Trim(), StringComparison.OrdinalIgnoreCase)
+            && string.Equals((existing.Email ?? string.Empty).Trim(), existing.UserName.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            TempData["AdminError"] = $"{existing.UserName} signs in with their email address, so the email cannot be changed.";
+            return RedirectToAction("Edit", new { id = user.LabUserID });
+        }
+        var emailChanged = !string.Equals(newEmail, (existing.Email ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase);
+        if (newEmail.Length > 0 && emailChanged && await _repo.IsEmailInUseAsync(newEmail, existing.LabUserID))
+        {
+            TempData["AdminError"] = EmailInUseMessage(newEmail);
+            return RedirectToAction("Edit", new { id = user.LabUserID });
+        }
+        user.Email = newEmail;
+
         existing.UserName = user.UserName;
         existing.FirstName = user.FirstName;
         existing.LastName = user.LastName;
@@ -693,10 +735,15 @@ public class AdminController : Controller
 
         await _repo.UpdateUserAsync(existing, pwdHash);
         var existingLabs = (await _repo.GetUserLabsAsync(existing.LabUserID)).ToList();
+        var activeLabIds = (await ActiveLabsAsync()).Select(l => l.LabId).ToHashSet();
+        submittedLabIds = submittedLabIds.Where(activeLabIds.Contains).ToList();
         // Labs outside a Lab Admin's own set are not theirs to change: keep them as they are.
         var untouchable = myLabs is null
             ? new HashSet<int>()
             : existingLabs.Select(l => l.LabId).Where(id => !myLabs.Contains(id)).ToHashSet();
+        // Inactive labs are not on the edit form, so they never come back in LabIds. Keep the
+        // user's assignment: they get the lab back when it is enabled on Manage Labs.
+        untouchable.UnionWith(existingLabs.Select(l => l.LabId).Where(id => !activeLabIds.Contains(id)));
         foreach (var lab in existingLabs.Where(l => !untouchable.Contains(l.LabId)))
         {
             await _repo.RemoveUserLabAsync(lab.ULID);
@@ -713,6 +760,9 @@ public class AdminController : Controller
 
         return RedirectToAction(nameof(ListUsers));
     }
+
+    private static string EmailInUseMessage(string? email) =>
+        $"The email address '{email?.Trim()}' is already used by another user. Each user needs their own email address.";
 
     private static IEnumerable<int> GetSelectedLabIds(AdminViewModel vm)
     {
@@ -757,7 +807,7 @@ public class AdminController : Controller
     {
         if (assignUserId <= 0 || labId <= 0)
             return RedirectToAction("Index");
-        if ((await UserScopeErrorAsync(assignUserId) ?? await LabGrantErrorAsync(new[] { labId })) is not null)
+        if ((await UserScopeErrorAsync(assignUserId) ?? await LabGrantErrorAsync(new[] { labId }) ?? await InactiveLabErrorAsync(new[] { labId })) is not null)
             return Forbid();
 
         var ul = new UserLab { LabId = labId, LabUserID = assignUserId };
@@ -819,8 +869,44 @@ public class AdminController : Controller
         lab!.LabName = lab.LabName.Trim();
         lab.CreatedBy = User?.Identity?.Name ?? "system";
         await _repo.CreateLabAsync(lab);
+        await RefreshLabActivationAsync();
         TempData["LabSuccess"] = $"Lab '{lab.LabName}' created successfully.";
         return RedirectToAction(nameof(ManageLabs));
+    }
+
+    /// <summary>
+    /// One-click Enable / Disable from the Manage Labs list. An inactive lab is hidden from the
+    /// Report Control Board, the navbar lab dropdown, every user-creation lab picker and the AR
+    /// Workbench, and the Master File Processor stops running it. Enabling brings all of it back:
+    /// this web server at once, other web servers, the AR Workbench and the processor within a
+    /// minute or by their next pass.
+    /// </summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
+    public async Task<IActionResult> SetLabActive(int id, bool isActive)
+    {
+        var lab = await _repo.GetLabByIdAsync(id);
+        if (lab == null) return NotFound();
+
+        if (lab.IsActive != isActive)
+        {
+            lab.IsActive = isActive;
+            lab.ModifiedBy = User?.Identity?.Name ?? "system";
+            await _repo.UpdateLabAsync(lab);
+            await RefreshLabActivationAsync();
+        }
+
+        TempData["LabSuccess"] = isActive
+            ? $"Lab '{lab.LabName}' enabled. It is back on the Report Board, lab dropdowns and AR Workbench, and the Master File Processor will process it on its next pass."
+            : $"Lab '{lab.LabName}' disabled. It is hidden from the Report Board, lab dropdowns, user creation and AR Workbench, and the Master File Processor will skip it.";
+        return RedirectToAction(nameof(ManageLabs));
+    }
+
+    private async Task RefreshLabActivationAsync()
+    {
+        if (_labActivation is not null)
+            await _labActivation.RefreshAsync(HttpContext.RequestAborted);
     }
 
     [HttpGet]
@@ -859,6 +945,7 @@ public class AdminController : Controller
         lab.LabName = lab.LabName.Trim();
         lab.ModifiedBy = User?.Identity?.Name ?? "system";
         await _repo.UpdateLabAsync(lab);
+        await RefreshLabActivationAsync();
         TempData["LabSuccess"] = $"Lab '{lab.LabName}' updated successfully.";
         return RedirectToAction(nameof(ManageLabs));
     }
@@ -980,6 +1067,59 @@ public class AdminController : Controller
     public async Task<IActionResult> RoleFeatures(int roleId, CancellationToken ct)
     {
         try { return Json(await _menuApi.GetRoleFeaturesAsync(roleId, ct)); }
+        catch (InvalidOperationException ex) { return MenuError(ex); }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Report Visibility: per-role tab and Key Insights access on the Standard
+    // Reports pages, stored as Report.* rows of dbo.RoleFeatureAccess.
+    // ─────────────────────────────────────────────────────────────────────
+
+    [HttpGet]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
+    public IActionResult ReportVisibility() => View();
+
+    /// <summary>The pages, tabs and Key Insights the Report Visibility screen renders.</summary>
+    [HttpGet]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
+    public IActionResult ReportVisibilityCatalog() =>
+        Json(Models.ReportVisibility.ReportVisibilityCatalog.Pages.Select(p => new
+        {
+            p.Key,
+            p.DisplayName,
+            p.KeyInsightsLabel,
+            KeyInsightsViewKey = Models.ReportVisibility.ReportVisibilityCatalog.KeyInsightsViewKey(p.Key),
+            KeyInsightActions = p.KeyInsightActions.Select(a => new
+            {
+                Action = a.Action.ToString(),
+                a.DisplayName,
+                a.Description,
+                FeatureKey = Models.ReportVisibility.ReportVisibilityCatalog.KeyInsightsKey(p.Key, a.Action)
+            }),
+            Tabs = p.Tabs.Select(t => new
+            {
+                t.Key,
+                t.DisplayName,
+                t.Note,
+                ViewKey = Models.ReportVisibility.ReportVisibilityCatalog.TabViewKey(p.Key, t.Key)
+            })
+        }));
+
+    [HttpPost]
+    [Authorize(Policy = MenuAccessFilter.FullAdminPolicy)]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SaveRoleReportVisibility([FromBody] RoleFeatureSaveDto dto, CancellationToken ct)
+    {
+        if (dto.RoleId <= 0) return BadRequest(new { message = "Select a role first." });
+        var features = (dto.Features ?? new List<RoleFeatureDto>())
+            .Where(f => f.FeatureKey.StartsWith(Models.ReportVisibility.ReportVisibilityCatalog.Prefix, StringComparison.Ordinal))
+            .ToList();
+        try
+        {
+            await _menuApi.SaveRoleReportVisibilityAsync(dto.RoleId, features, ct);
+            _menuService.InvalidateCache();
+            return Json(new { success = true });
+        }
         catch (InvalidOperationException ex) { return MenuError(ex); }
     }
 

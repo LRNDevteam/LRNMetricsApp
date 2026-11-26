@@ -2739,8 +2739,19 @@ public class DashboardController : Controller
     /// other tabs call this so the IDE/browser is not blocked parsing 8 huge tables.
     /// </summary>
     [HttpGet]
-    public async Task<IActionResult> ProductionSummaryReportTab(string key, string pane, CancellationToken ct)
+    public async Task<IActionResult> ProductionSummaryReportTab(string key, string pane,
+        [FromServices] IReportAccessService reportAccess, CancellationToken ct)
     {
+        // Admin > Report Visibility: the page leaves a hidden tab out; refuse a hand-made request for it too.
+        // Panes are "<tab>-pane" (monthly-pane, payer-breakdown-pane, ...).
+        if (!string.IsNullOrWhiteSpace(pane))
+        {
+            var tabKey = pane.EndsWith("-pane", StringComparison.OrdinalIgnoreCase) ? pane[..^"-pane".Length] : pane;
+            var access = await reportAccess.GetAsync(Models.ReportVisibility.ReportVisibilityCatalog.Production, ct);
+            if (!access.IsTabVisible(tabKey))
+                return StatusCode(StatusCodes.Status403Forbidden, "This tab is not available for your role.");
+        }
+
         ProductionDiagLog.Write(_logger,
             $"tab-start pane={pane} keyLen={key?.Length ?? 0} host={Request.Host} path={Request.PathBase}{Request.Path} cancel={ct.IsCancellationRequested}");
         if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(pane))

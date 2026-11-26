@@ -59,7 +59,7 @@
                     <i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span>
                 </button>
 
-                @if (insightSnapshot is null)
+                @if (insightSnapshot is null && Model.CanExport)
                 {
                 <a class="btn btn-sm btn-outline-secondary" asp-action="ExportInsights"
                    asp-route-lab="@Model.CurrentLab" asp-route-bucket="@Model.Bucket">
@@ -67,7 +67,7 @@
                 </a>
                 }
 
-                @if (Model.CanEdit && !isCurrent)
+                @if (Model.CanImport && !isCurrent)
                 {
                     @* Previous Week takes an import too - a client who sends last week's workbook
                        late has nowhere else to put it. Same deliberate two-step as Current Week,
@@ -78,7 +78,7 @@
                     </button>
                 }
 
-                @if (Model.CanEdit && isCurrent)
+                @if (Model.CanImport && isCurrent)
                 {
                     @* The import opens a panel rather than firing on file-pick: it rewrites the whole
                        of Current Week, and a destructive step needs a deliberate second gesture. *@
@@ -86,7 +86,10 @@
                             data-bs-toggle="offcanvas" data-bs-target="#insightImportPanel">
                         <i class="bi bi-upload"></i> Import
                     </button>
+                }
 
+                @if (Model.CanCopyWeek && isCurrent)
+                {
                     <form method="post" asp-action="CopyToPreviousWeek" asp-route-lab="@Model.CurrentLab"
                           class="d-inline-block" id="copyPreviousForm">
                         @Html.AntiForgeryToken()
@@ -122,13 +125,13 @@
                 </li>
             </ul>
 
-            @if (editable && Model.Rows.Count > 0)
+            @if (editable && Model.CanEditRows && Model.Rows.Count > 0)
             {
                 <span class="text-muted" style="font-size:.78rem;">
                     <i class="bi bi-pencil"></i> Use <strong>Edit</strong> on a row to change it, then <strong>Save</strong>.
                 </span>
             }
-            else if (!editable && Model.Rows.Count > 0)
+            else if (!Model.CanEditRows && Model.Rows.Count > 0)
             {
                 <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">
                     <i class="bi bi-lock"></i> Read-only
@@ -471,15 +474,21 @@
                                     {
                                         <td class="col-actions">
                                             <span class="cell-view row-buttons">
+                                                @if (Model.CanEditRows)
+                                                {
                                                 <button type="button" class="row-btn row-edit" title="Edit this row">
                                                     <i class="bi bi-pencil"></i>
                                                 </button>
+                                                }
+                                                @if (Model.CanDeleteRows)
+                                                {
                                                 <button type="button" class="row-delete" title="Delete this insight row"
                                                         data-bs-toggle="modal" data-bs-target="#confirmDeleteModal"
                                                         data-row-id="@row.Id" data-row-code="@row.DenialCode"
                                                         data-row-payer="@row.PayerName">
                                                     <i class="bi bi-trash"></i>
                                                 </button>
+                                                }
                                             </span>
                                             <span class="cell-edit row-buttons">
                                                 <button type="submit" form="@formId" class="row-btn row-save" title="Save this row">
@@ -549,7 +558,7 @@
 </div>
 </div>
 
-@if (Model.CanEdit && isCurrent)
+@if (Model.CanImport && isCurrent)
 {
     @* ── Import panel ──────────────────────────────────────────────────────
        Slides in from the right. The checkbox picks between the two things an
@@ -635,7 +644,7 @@
     </div>
 }
 
-@if (Model.CanEdit && !isCurrent)
+@if (Model.CanImport && !isCurrent)
 {
     @* ── Previous Week import panel ────────────────────────────────────────
        Same shape as the Current Week panel, but the choice is Append or Override
@@ -729,7 +738,7 @@
     </div>
 }
 
-@if (Model.CanEdit)
+@if (Model.CanDeleteRows)
 {
     <div class="modal fade" id="confirmDeleteModal" tabindex="-1" aria-labelledby="confirmDeleteLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered modal-sm">
@@ -757,7 +766,10 @@
             </div>
         </div>
     </div>
+}
 
+@if (Model.CanCopyWeek)
+{
     <div class="modal fade" id="confirmCopyModal" tabindex="-1" aria-labelledby="confirmCopyLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">

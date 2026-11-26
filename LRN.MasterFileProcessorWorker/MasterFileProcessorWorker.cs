@@ -49,6 +49,7 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 	private readonly LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncService _arWorkbenchSync;
 	private readonly LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotService _masterDataSnapshot;
 	private readonly TempFileJanitor _tempFiles;
+	private readonly LRN.MasterFileProcessorWorker.Database.LabActivationReader _labActivation;
 
 	private ColumnSchema? _commonLineSchema;
 	private ColumnSchema? _commonClaimSchema;
@@ -79,8 +80,10 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 		LRN.MasterFileProcessorWorker.ProcessLogging.MasterFileUploadStore uploads,
 		LRN.MasterFileProcessorWorker.ArWorkbench.ArWorkbenchSyncService arWorkbenchSync,
 		LRN.MasterFileProcessorWorker.Snapshots.MasterDataSnapshotService masterDataSnapshot,
-		TempFileJanitor tempFiles)
+		TempFileJanitor tempFiles,
+		LRN.MasterFileProcessorWorker.Database.LabActivationReader labActivation)
 	{
+		_labActivation = labActivation;
 		_logger = logger;
 		_fileLog = fileLog;
 		_opt = options.Value;
@@ -301,6 +304,16 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 			_fileLog.Error("Failed to resolve SharePoint driveId.", ex);
 		}
 
+		// Labs switched off in LRN Metrics (Admin > Manage Labs, dbo.Labs.IsActive = 0). Read once
+		// per pass, so enabling a lab again takes effect on the next pass without a restart.
+		var inactiveLabs = await _labActivation.GetInactiveLabsAsync(ct);
+		var skippedInactive = _opt.Labs.Where(l => inactiveLabs.ContainsKey(l.LabId)).Select(l => l.LabName).Distinct().ToList();
+		if (skippedInactive.Count > 0 && !rerunOnly)
+		{
+			_logger.LogInformation("Inactive labs skipped this pass (Admin > Manage Labs): {Labs}", string.Join(", ", skippedInactive));
+			_fileLog.Info($"Inactive labs skipped this pass (Admin > Manage Labs): {string.Join(", ", skippedInactive)}");
+		}
+
 		foreach (var lab in _opt.Labs)
 		{
 			ct.ThrowIfCancellationRequested();
@@ -318,6 +331,22 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 			// The first entry takes it; the request is removed so later entries run as scheduled.
 			if (rerun is not null)
 				rerunByLab.Remove(lab.LabId);
+
+			// An inactive lab is not processed at all - no SharePoint lookup, no run log row, no
+			// reports, no AR Workbench sync. A re-run asked for it is closed with the reason rather
+			// than left Claimed, which would block the lab once it is enabled again.
+			if (inactiveLabs.ContainsKey(lab.LabId))
+			{
+				if (rerun is not null)
+				{
+					await _rerunRequests.CompleteAsync(rerun.RerunRequestId, runId: null, resultStatus: "SKIPPED",
+						message: $"{lab.LabName} is inactive. Enable it in LRN Metrics under Admin > Manage Labs, then request the re-run again.",
+						ct);
+					if (rerun.UploadId is long inactiveUpload)
+						await _uploads.PurgeContentAsync(inactiveUpload, ct);
+				}
+				continue;
+			}
 
 			// A master file uploaded in the AR Workbench (standard template). It replaces the
 			// SharePoint / lab-database read for this run only; every later step is unchanged.

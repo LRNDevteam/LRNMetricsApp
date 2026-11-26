@@ -135,7 +135,10 @@ public sealed class LrnSignInService
         claims.AddRange(mappedLabs.Select(l => new Claim("LabName", l.Name!)));
 
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
-        return new(LrnSignInOutcome.Ok, new ClaimsPrincipal(identity), mappedLabs.FirstOrDefault()?.Name, isAdmin, isDenialWorkflowUser);
+        // Land on an active lab: one switched off in Admin > Manage Labs is in no lab picker.
+        var defaultLab = mappedLabs.FirstOrDefault(l => !_labSettings.IsInactive(l.Name))?.Name
+                         ?? mappedLabs.FirstOrDefault()?.Name;
+        return new(LrnSignInOutcome.Ok, new ClaimsPrincipal(identity), defaultLab, isAdmin, isDenialWorkflowUser);
     }
 
     /// <summary>Role names compared ignoring case, spaces and punctuation: "AR Manager" = "ARManager".</summary>

@@ -139,4 +139,21 @@ public sealed class MenuController : ControllerBase
         }
         catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
     }
+
+    /// <summary>
+    /// Saves one role's Standard Reports tab / Key Insights visibility (dashboard Admin &gt; Report
+    /// Visibility). Replaces only the <c>Report.*</c> rows; read them back with roles/{id}/features.
+    /// </summary>
+    [HttpPut("roles/{roleId:int}/report-visibility")]
+    public async Task<ActionResult> SaveRoleReportVisibility(int roleId, RoleFeatureSaveRequest request, CancellationToken ct)
+    {
+        if (!IsAdmin) return Denied();
+        try
+        {
+            await _repository.ReplaceRoleFeaturesAsync(roleId, request.Features ?? new List<RoleFeatureDto>(), UserName(), ct,
+                reportVisibility: true);
+            return Ok(new { success = true });
+        }
+        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+    }
 }

@@ -127,7 +127,36 @@ public static class MenuFeatureCatalog
 
     public static bool IsKnown(string? featureKey)
         => !string.IsNullOrWhiteSpace(featureKey)
-        && All.Any(f => string.Equals(f.FeatureKey, featureKey, StringComparison.OrdinalIgnoreCase));
+        && (All.Any(f => string.Equals(f.FeatureKey, featureKey, StringComparison.OrdinalIgnoreCase))
+            || ReportVisibilityFeatures.IsValidKey(featureKey));
+}
+
+/// <summary>
+/// dbo.RoleFeatureAccess keys for Standard Reports tab / Key Insights visibility, edited on the
+/// dashboard's Admin &gt; Report Visibility screen (LabMetricsDashboard ReportVisibilityCatalog):
+/// <c>Report.{Page}.Tab.{Tab}.View</c>, <c>Report.{Page}.KeyInsights.View</c> and one
+/// <c>Report.{Page}.KeyInsights.{Action}</c> per Key Insights action (Add, Edit, Delete, Import,
+/// Template, CopyWeek).
+/// </summary>
+/// <remarks>
+/// Only the key <i>shape</i> is checked here. The pages and tabs live with the views in the dashboard,
+/// so a new tab needs no API change. These keys are not in <see cref="MenuFeatureCatalog.All"/>: they
+/// have their own screen and are saved through <c>PUT api/menu/roles/{id}/report-visibility</c>, and
+/// the Role Menu Mapping save leaves them alone.
+/// </remarks>
+public static class ReportVisibilityFeatures
+{
+    public const string Prefix = "Report.";
+
+    private static readonly System.Text.RegularExpressions.Regex KeyPattern = new(
+        @"^Report\.[A-Za-z0-9]{1,40}\.(Tab\.[A-Za-z0-9-]{1,40}\.View|KeyInsights\.(View|Add|Edit|Delete|Import|Template|CopyWeek))$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    public static bool IsValidKey(string? featureKey)
+        => !string.IsNullOrWhiteSpace(featureKey) && featureKey.Length <= 100 && KeyPattern.IsMatch(featureKey);
+
+    public static bool IsReportKey(string? featureKey)
+        => featureKey?.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase) == true;
 }
 
 /// <summary>

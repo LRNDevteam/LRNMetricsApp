@@ -30,6 +30,10 @@ public sealed class UserMailOptions
     /// <summary>AR Workbench address, shown in the email when the user has an AR Workbench role.</summary>
     public string? ArWorkbenchUrl { get; set; }
     public int InvitationExpiryHours { get; set; } = 72;
+    /// <summary>How long an emailed sign-in code (external users, every sign-in) stays valid.</summary>
+    public int LoginCodeMinutes { get; set; } = 10;
+    /// <summary>At most this many sign-in codes per user per hour (sign-ins and resends together).</summary>
+    public int LoginCodesPerHour { get; set; } = 10;
     /// <summary>Support contacts shown in every user email (Need help? ...). Several allowed.</summary>
     public List<string> SupportEmails { get; set; } = new();
     /// <summary>Older single-address setting; still honoured, added to <see cref="SupportEmails"/>.</summary>

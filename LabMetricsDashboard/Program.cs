@@ -333,8 +333,10 @@ var labSettings = new LabSettings();
 
 void RebuildLabSettings()
 {
-    var previous = labSettings.Labs;
-    labSettings.Labs = validLabNames.ToDictionary(
+    var previous = labSettings.AllLabs;
+    // AllLabs, not Labs: Labs is derived from it minus the labs switched off in Admin > Manage Labs
+    // (LabActivationService), so a config reload never brings an inactive lab back.
+    labSettings.AllLabs = validLabNames.ToDictionary(
         labName => labName,
         labName =>
         {
@@ -523,6 +525,9 @@ else
 
 builder.Services.AddSingleton(labSettings);
 builder.Services.AddSingleton(labConfigOptions);
+// Hides labs switched off in Admin > Manage Labs (dbo.Labs.IsActive = 0) from LabSettings.Labs.
+builder.Services.AddSingleton<LabMetricsDashboard.Services.LabActivationService>();
+builder.Services.AddHostedService<LabMetricsDashboard.Services.LabActivationRefresher>();
 builder.Services.AddSingleton<LabCsvFileResolver>();
 builder.Services.AddSingleton<CsvParserService>();
 builder.Services.AddSingleton<PredictionInsightLoader>();
@@ -596,6 +601,9 @@ builder.Services.Configure<HybridAuthOptions>(o =>
     o.RevalidateMinutes = hybridAuth.RevalidateMinutes;
 });
 builder.Services.AddScoped<LrnSignInService>();
+// Emailed one-time code on every password sign-in of an external AR Workbench user (LoginCode section).
+builder.Services.Configure<LoginCodeOptions>(builder.Configuration.GetSection(LoginCodeOptions.Section));
+builder.Services.AddScoped<ILoginCodeRepository, SqlLoginCodeRepository>();
 // First-login password page for users invited from AR Workbench User Management.
 builder.Services.AddScoped<IUserInvitationRepository, SqlUserInvitationRepository>();
 // Invitation email + sent-mail log, shared with the AR Workbench (LRN.ReportsApi /api/user-mail).
@@ -667,6 +675,10 @@ builder.Services.AddSingleton<LabMetricsDashboard.Services.ReportSnapshots.IRepo
     LabMetricsDashboard.Services.ReportSnapshots.ReportPageSnapshotReader>();
 // Denial Insight upload / edit -> LRN.SnapshotGenerator snapshots the tab (LRNMaster.dbo.ReportSnapshotRequest).
 builder.Services.AddSingleton<IReportSnapshotRequestQueue, SqlReportSnapshotRequestQueue>();
+// Revenue Analysis: the report team's client dashboard built from a lab's Claim / Line Level data (live or a
+// weekly snapshot). Singleton: it owns the background build jobs and the generated-page store.
+builder.Services.AddSingleton<LabMetricsDashboard.Services.RevenueAnalysis.IRevenueAnalysisService,
+    LabMetricsDashboard.Services.RevenueAnalysis.RevenueAnalysisService>();
 
 // ── Reimbursement Insights chat (Foundry agent via the ReimbursementAgentProxy App Service) ──
 // The browser posts to ReimbursementChatController on this origin and this app calls the proxy,
@@ -717,6 +729,10 @@ builder.Services
         builder.Configuration.GetValue<int?>("DenialWorkflowApi:MenuTimeoutSeconds") ?? 5));
 builder.Services.AddScoped<IMenuService, MenuService>();
 builder.Services.AddScoped<MenuAccessFilter>();
+
+// Per-role tab / Key Insights visibility on the Standard Reports pages (Admin > Report Visibility),
+// stored in dbo.RoleFeatureAccess next to the Role Menu Mapping feature toggles.
+builder.Services.AddScoped<IReportAccessService, ReportAccessService>();
 
 // Blocks every state-changing request from a view-only role (Lab User). Menu mapping decides which
 // pages a role can open; this decides whether it can change anything once there.

@@ -7,6 +7,16 @@
     if (!root) return;
     // Embedded report (Executive Summary highlights): insights are shown open, without row actions.
     const readOnly = root.dataset.readonly === "1";
+    // Admin > Report Visibility: what this role may do. Each flag is set by _ReportInsights.cshtml; a
+    // missing flag means allowed (pages that predate the setting). The server refuses denied actions too.
+    const flag = name => root.dataset[name] !== "0";
+    const can = {
+        add: flag("canAdd"),
+        edit: flag("canEdit"),
+        del: flag("canDelete"),
+        import: flag("canImport"),
+        template: flag("canTemplate")
+    };
     // A saved snapshot: the week's insights as captured (data-snapshot-url, empty when none were), never the
     // live Notes API, and nothing can be added, edited or deleted.
     const snapshot = root.dataset.snapshot === "1";
@@ -471,7 +481,7 @@
         const tfoot = float ? "" : `<tfoot><tr class="ri-foot-row"><td colspan="${colCount}"><div class="ri-footer">${esc(L.footer)}<small>${esc(L.footerSub)}</small></div></td></tr></tfoot>`;
         return `<table class="ri-table">${thead}<tbody>${rows.map(n => {
             const carry = n.archiveStatus === "Carry Forward" ? `<span class="ri-carry">Carry Forward</span>` : "";
-            const canDelete = n.archiveStatus !== "Archived";
+            const canDelete = can.del && n.archiveStatus !== "Archived";
             const acts = noActs ? "" : `<td class="ri-row-acts">
                     <button type="button" class="btn btn-sm btn-outline-secondary" data-view="${n.noteId}">View</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" data-hist="${n.noteId}">History</button>
@@ -541,7 +551,9 @@
         dirty = !!on;
         if (!el.versionNote) return;
         if (detailReadOnly) {
-            el.versionNote.textContent = "Archived notes are read-only.";
+            el.versionNote.textContent = editing && editing.archiveStatus === "Archived"
+                ? "Archived notes are read-only."
+                : "View only - your role cannot edit this insight.";
             return;
         }
         if (!editing) {
@@ -626,32 +638,38 @@
 
     function openDetail(row, archived) {
         editing = row || null;
-        detailReadOnly = !!archived || (row && row.archiveStatus === "Archived");
-        const L = reportLayout();
+        const isArchived = !!archived || !!(row && row.archiveStatus === "Archived");
         const isNew = !row;
-        if (el.title) el.title.textContent = isNew ? "Add Insight" : (detailReadOnly ? "Archived Note Detail" : "Active Note Detail");
+        // No Edit permission locks an active note exactly like an archived one, but it is still labelled
+        // Active. A new note needs Add (the Add button is not even shown without it).
+        const viewOnlyActive = !isArchived && (isNew ? !can.add : !can.edit);
+        detailReadOnly = isArchived || viewOnlyActive;
+        const L = reportLayout();
+        if (el.title) el.title.textContent = isNew ? "Add Insight" : (isArchived ? "Archived Note Detail" : (viewOnlyActive ? "Active Note Detail (view only)" : "Active Note Detail"));
         if (el.sub) el.sub.textContent = isNew
             ? "New insight · appended to the active log on save"
-            : (detailReadOnly
+            : (isArchived
                 ? "Read-only historical insight · current report archive"
-                : "Editable active insight · authorized report users");
+                : (viewOnlyActive ? "Read-only active insight · your role can view but not edit" : "Editable active insight · authorized report users"));
         if (el.activeBadge) {
-            el.activeBadge.textContent = detailReadOnly ? "Archived" : "Active";
-            el.activeBadge.className = "ri-badge" + (detailReadOnly ? " archived" : "");
+            el.activeBadge.textContent = isArchived ? "Archived" : "Active";
+            el.activeBadge.className = "ri-badge" + (isArchived ? " archived" : "");
         }
         if (el.save) el.save.hidden = detailReadOnly;
-        if (el.historyBtn) el.historyBtn.hidden = isNew || detailReadOnly;
+        if (el.historyBtn) el.historyBtn.hidden = isNew || isArchived;
 
         const ro = detailReadOnly ? "disabled" : "";
         const roAttr = detailReadOnly ? "readonly" : "";
         const editable = detailReadOnly ? "false" : "true";
-        const banner = detailReadOnly
+        const banner = isArchived
             ? `<div class="ri-lock-note"><span>Archived notes are read-only. This entry cannot be edited, deleted, saved, or reopened.</span></div>`
-            : `<div class="ri-edit-banner"><span>Active notes can be edited by authorized users with access to this report. Saving changes updates the active row, increments the version number, and records a revision event.</span></div>`;
+            : viewOnlyActive
+                ? `<div class="ri-lock-note"><span>Your role can view this insight but not edit it.</span></div>`
+                : `<div class="ri-edit-banner"><span>Active notes can be edited by authorized users with access to this report. Saving changes updates the active row, increments the version number, and records a revision event.</span></div>`;
 
         const week = (row && row.weekRangeText) || ctx.weekText || "—";
         const runId = (row && row.reportRunId) || ctx.runId || "—";
-        const archiveLabel = detailReadOnly ? "Archived" : ((row && row.archiveStatus) || "Active");
+        const archiveLabel = isArchived ? "Archived" : ((row && row.archiveStatus) || "Active");
         const wkStart = row ? ymd(row.weekRangeStart) : (ctx.weekStart || "");
         const wkEnd = row ? ymd(row.weekRangeEnd) : (ctx.weekEnd || ctx.weekStart || "");
         const weekSection = !weekLifecycle ? "" : `
@@ -1279,15 +1297,18 @@
     if (el.historyBtn) el.historyBtn.addEventListener("click", () => {
         if (editing && editing.noteId) openHistory(editing.noteId);
     });
-    (function enableImport() {
-        const importBtn = document.getElementById("riImportBtn");
-        const node = document.getElementById("riImportModal");
-        if (!importBtn || !node || readOnly || snapshot) return;
+    // Template download is its own permission: wired even when the role cannot import.
+    if (can.template && !readOnly && !snapshot) {
         const templateUrl = `${apiBase}/Notes/ImportTemplate?${q({ lab: ctx.lab, report: ctx.reportName })}`;
         ["riTemplateBtn", "riImportTemplateLink"].forEach(id => {
             const a = document.getElementById(id);
             if (a) a.href = templateUrl;
         });
+    }
+    (function enableImport() {
+        const importBtn = document.getElementById("riImportBtn");
+        const node = document.getElementById("riImportModal");
+        if (!importBtn || !node || readOnly || !can.import || snapshot) return;
         const file = document.getElementById("riImportFile");
         const replace = document.getElementById("riImportReplace");
         const note = document.getElementById("riImportModeNote");

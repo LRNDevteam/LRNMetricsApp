@@ -26,6 +26,13 @@ public interface IMenuService
     /// </summary>
     Task<bool> IsFeatureEnabledAsync(ClaimsPrincipal user, string featureKey, bool fallback, CancellationToken ct);
 
+    /// <summary>
+    /// The explicit setting for <paramref name="featureKey"/> across the user's roles, or null when
+    /// no role has decided it (or the API is unavailable). Report Visibility reads this to tell
+    /// "Default" apart from an explicit Enable/Disable.
+    /// </summary>
+    Task<bool?> GetFeatureSettingAsync(ClaimsPrincipal user, string featureKey, CancellationToken ct);
+
     /// <summary>Invalidate all cached menu data. Call after any Menu Master / Role Menu Mapping save.</summary>
     void InvalidateCache();
 }
@@ -147,6 +154,14 @@ public sealed class MenuService : IMenuService
 
         var settings = await GetFeatureSettingsAsync(user, ct);
         return settings.TryGetValue(featureKey, out var isEnabled) ? isEnabled : fallback;
+    }
+
+    public async Task<bool?> GetFeatureSettingAsync(ClaimsPrincipal user, string featureKey, CancellationToken ct)
+    {
+        if (user.Identity?.IsAuthenticated != true) return null;
+
+        var settings = await GetFeatureSettingsAsync(user, ct);
+        return settings.TryGetValue(featureKey, out var isEnabled) ? isEnabled : null;
     }
 
     /// <summary>

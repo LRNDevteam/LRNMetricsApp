@@ -142,6 +142,8 @@ public class UserMailFailureTests
             return Task.CompletedTask;
         }
 
+        public Task<long> CreateLoginCodeAsync(int labUserId, string codeHash, DateTime expiresUtc, CancellationToken ct) => throw new NotImplementedException();
+        public Task<int> CountLoginCodesSinceAsync(int labUserId, DateTime sinceUtc, CancellationToken ct) => throw new NotImplementedException();
         public Task<Dictionary<int, ArWorkbenchInviteStatus>> GetInviteStatusesAsync(IReadOnlyCollection<int> labUserIds, CancellationToken ct) => throw new NotImplementedException();
         public Task<UserEmailLogPage> GetEmailLogAsync(UserEmailLogQuery query, IReadOnlyCollection<int>? labIds, CancellationToken ct) => throw new NotImplementedException();
         public Task<UserEmailDetail?> GetEmailAsync(long emailLogId, IReadOnlyCollection<int>? labIds, CancellationToken ct) => throw new NotImplementedException();

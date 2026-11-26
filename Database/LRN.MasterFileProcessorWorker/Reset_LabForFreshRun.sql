@@ -38,6 +38,9 @@
 	LABID - 27	 , LABNAME - WellHealth
 ================================================================================================
 */
+USE LRNMaster;
+
+GO
 
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
@@ -45,8 +48,8 @@ GO
 
 GO
 
-DECLARE @LabId    INT           = 25,          -- <<< Cove
-        @LabName  VARCHAR(120)  = 'VariantX',     -- <<< must match dbo.LRN_Run_Log.LabName
+DECLARE @LabId    INT           = 16,          -- <<< Cove
+        @LabName  VARCHAR(120)  = 'Elixir',     -- <<< must match dbo.LRN_Run_Log.LabName
         @WhatIf   BIT           = 0;          -- <<< 1 = preview only, 0 = actually delete
 
 ------------------------------------------------------------------------------------------------

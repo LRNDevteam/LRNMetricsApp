@@ -156,9 +156,13 @@ public sealed class ArWorkbenchSnapshotScheduler : BackgroundService
         IReadOnlySet<int> inactive;
         try { inactive = await repo.GetInactiveClientLabIdsAsync(ct); }
         catch (SqlException ex) { _logger.LogWarning(ex, "AR Workbench snapshot: client activation lookup failed; taking every lab."); inactive = new HashSet<int>(); }
+        IReadOnlySet<int> disabled;
+        try { disabled = await repo.GetDisabledLabIdsAsync(ct); }
+        catch (SqlException ex) { _logger.LogWarning(ex, "AR Workbench snapshot: dbo.Labs activation lookup failed; taking every lab."); disabled = new HashSet<int>(); }
         foreach (var labId in repo.GetConfiguredLabIds())
         {
             if (inactive.Contains(labId)) continue;     // deactivated client (T068)
+            if (disabled.Contains(labId)) continue;     // lab switched off in Admin > Manage Labs
             try
             {
                 if (await repo.HasSnapshotAsync(labId, date, ct)) continue;

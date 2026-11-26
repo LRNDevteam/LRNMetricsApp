@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Caching.Memory;
@@ -30,6 +31,10 @@ public class AccountController : Controller
     private readonly IConfiguration _configuration;
     private readonly IMemoryCache _cache;
     private readonly IUserInvitationRepository _invitations;
+    private readonly ILoginCodeRepository _loginCodes;
+    private readonly IUserMailApiClient _userMail;
+    private readonly LoginCodeOptions _codeOptions;
+    private readonly IDataProtector _codeProtector;
 
     public AccountController(
         IUserManagementRepository repo,
@@ -39,7 +44,11 @@ public class AccountController : Controller
         ILogger<AccountController> logger,
         IConfiguration configuration,
         IMemoryCache cache,
-        IUserInvitationRepository invitations)
+        IUserInvitationRepository invitations,
+        ILoginCodeRepository loginCodes,
+        IUserMailApiClient userMail,
+        IOptions<LoginCodeOptions> codeOptions,
+        IDataProtectionProvider dataProtection)
     {
         _repo = repo;
         _hasher = hasher;
@@ -49,6 +58,10 @@ public class AccountController : Controller
         _configuration = configuration;
         _cache = cache;
         _invitations = invitations;
+        _loginCodes = loginCodes;
+        _userMail = userMail;
+        _codeOptions = codeOptions.Value;
+        _codeProtector = dataProtection.CreateProtector("LRN.LoginCode.v1");
     }
 
     private string? RemoteIp => HttpContext.Connection.RemoteIpAddress?.ToString();
@@ -232,7 +245,175 @@ public class AccountController : Controller
         }
 
         ClearFailedLogin(login);
+
+        // External users: the password alone is not enough - a new code is emailed on every sign-in.
+        if (await RequiresLoginCodeAsync(user))
+        {
+            var sent = await _userMail.SendLoginCodeAsync(user.LabUserID, RemoteIp, HttpContext.RequestAborted);
+            if (!sent.Sent || sent.ChallengeId is null)
+            {
+                await AuditAsync(user.LabUserID, login, LrnAuth.LocalProvider, false, "LoginCodeNotSent");
+                _logger.LogWarning("Sign-in code for {User} not sent: {Reason}", user.UserName, sent.Message);
+                ModelState.AddModelError(string.Empty,
+                    "Your password was accepted, but we could not email your sign-in code. Please try again in a few minutes, or contact your administrator."
+                    + (sent.Message?.StartsWith("Too many", StringComparison.Ordinal) == true ? " " + sent.Message : string.Empty));
+                return View(model);
+            }
+
+            WritePendingCode(new PendingLoginCode(user.LabUserID, sent.ChallengeId.Value, user.SecurityStamp, sent.MaskedEmail,
+                Url.IsLocalUrl(returnUrl) ? returnUrl : null, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), 0));
+            await AuditAsync(user.LabUserID, login, LrnAuth.LocalProvider, false, "LoginCodeSent");
+            return RedirectToAction(nameof(VerifyLoginCode));
+        }
+
         return await CompleteSignInAsync(user, LrnAuth.LocalProvider, login, returnUrl);
+    }
+
+    // ── Step 2 for external users: the one-time code emailed at each sign-in ─────────────
+    // Between the two steps nothing is signed in: a data-protected cookie remembers who passed the
+    // password and which code was sent. The code is checked against dbo.UserLoginOtp (5 tries).
+
+    private sealed record PendingLoginCode(int LabUserId, long ChallengeId, Guid Stamp, string? MaskedEmail, string? ReturnUrl,
+        long IssuedUnix, long StartedUnixOrZero);
+
+    /// <summary>Password users who hold an AR Workbench role (or every password user, per LoginCode:AppliesTo).</summary>
+    private async Task<bool> RequiresLoginCodeAsync(LabUser user)
+    {
+        if (!_codeOptions.Enabled || user.IsEntra) return false;
+        if (string.Equals(_codeOptions.AppliesTo, LoginCodeOptions.AllPasswordUsers, StringComparison.OrdinalIgnoreCase)) return true;
+        var roleIds = (await _repo.GetUserRolesAsync(user.LabUserID)).Select(r => r.RoleID).ToHashSet();
+        if (roleIds.Count == 0) return false;   // no role: Access pending, nothing is signed in anyway
+        return (await _repo.GetAllRolesAsync()).Any(r => roleIds.Contains(r.RoleID)
+            && (r.RoleName ?? string.Empty).TrimStart().StartsWith("AR Workbench - ", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void WritePendingCode(PendingLoginCode pending)
+    {
+        // The whole wait, across resends, is capped from the first code.
+        var started = pending.StartedUnixOrZero > 0 ? pending.StartedUnixOrZero : pending.IssuedUnix;
+        pending = pending with { StartedUnixOrZero = started };
+        var expires = DateTimeOffset.FromUnixTimeSeconds(started).AddMinutes(Math.Clamp(_codeOptions.PendingMinutes, 5, 60));
+        Response.Cookies.Append(LrnAuth.LoginCodeCookieName(_configuration),
+            _codeProtector.Protect(System.Text.Json.JsonSerializer.Serialize(pending)),
+            new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = Request.IsHttps,
+                SameSite = SameSiteMode.Lax,
+                Path = string.IsNullOrEmpty(Request.PathBase) ? "/" : Request.PathBase.Value,
+                Expires = expires,
+                IsEssential = true
+            });
+    }
+
+    private PendingLoginCode? ReadPendingCode()
+    {
+        if (!Request.Cookies.TryGetValue(LrnAuth.LoginCodeCookieName(_configuration), out var raw) || string.IsNullOrEmpty(raw)) return null;
+        try
+        {
+            var pending = System.Text.Json.JsonSerializer.Deserialize<PendingLoginCode>(_codeProtector.Unprotect(raw));
+            if (pending is null) return null;
+            var expires = DateTimeOffset.FromUnixTimeSeconds(pending.StartedUnixOrZero).AddMinutes(Math.Clamp(_codeOptions.PendingMinutes, 5, 60));
+            return expires > DateTimeOffset.UtcNow ? pending : null;
+        }
+        catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    private void ClearPendingCode() => Response.Cookies.Delete(LrnAuth.LoginCodeCookieName(_configuration),
+        new CookieOptions { Path = string.IsNullOrEmpty(Request.PathBase) ? "/" : Request.PathBase.Value, Secure = Request.IsHttps, SameSite = SameSiteMode.Lax });
+
+    private IActionResult PendingExpired()
+    {
+        ClearPendingCode();
+        TempData["LoginError"] = "Your sign-in timed out. Enter your username and password again to get a new code.";
+        return RedirectToAction(nameof(Login));
+    }
+
+    private VerifyLoginCodeViewModel CodeModel(PendingLoginCode pending, string? message = null)
+    {
+        var wait = pending.IssuedUnix + Math.Max(0, _codeOptions.ResendSeconds) - DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        return new VerifyLoginCodeViewModel { MaskedEmail = pending.MaskedEmail, Message = message, ResendWaitSeconds = (int)Math.Max(0, wait) };
+    }
+
+    [HttpGet]
+    public IActionResult VerifyLoginCode()
+    {
+        var pending = ReadPendingCode();
+        return pending is null ? PendingExpired() : View(CodeModel(pending, TempData["LoginCodeInfo"] as string));
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [EnableRateLimiting("login")]
+    public async Task<IActionResult> VerifyLoginCode(VerifyLoginCodeViewModel model)
+    {
+        var pending = ReadPendingCode();
+        if (pending is null) return PendingExpired();
+
+        var user = await _repo.GetUserByIdAsync(pending.LabUserId);
+        // Deactivated, moved to Microsoft, or password changed since step 1: start again.
+        if (user is null || !user.IsActive || user.IsEntra || user.SecurityStamp != pending.Stamp)
+        {
+            await AuditAsync(pending.LabUserId, user?.UserName, LrnAuth.LocalProvider, false, "LoginCodeAccountChanged");
+            return PendingExpired();
+        }
+
+        if (string.IsNullOrWhiteSpace(model.Code))
+        {
+            ModelState.AddModelError(nameof(model.Code), "Enter the code from your email.");
+            return View(CodeModel(pending));
+        }
+
+        switch (await _loginCodes.VerifyAsync(pending.ChallengeId, pending.LabUserId, model.Code, _hasher))
+        {
+            case LoginCodeOutcome.Ok:
+                ClearPendingCode();
+                return await CompleteSignInAsync(user, LrnAuth.LocalProvider, user.UserName, pending.ReturnUrl);
+            case LoginCodeOutcome.WrongCode:
+                await AuditAsync(user.LabUserID, user.UserName, LrnAuth.LocalProvider, false, "BadLoginCode");
+                ModelState.AddModelError(nameof(model.Code), "That code is not correct. Check the latest email and try again.");
+                return View(CodeModel(pending));
+            case LoginCodeOutcome.TooManyAttempts:
+                await AuditAsync(user.LabUserID, user.UserName, LrnAuth.LocalProvider, false, "LoginCodeTooManyAttempts");
+                ClearPendingCode();
+                TempData["LoginError"] = "Too many incorrect codes. Sign in again to get a new code.";
+                return RedirectToAction(nameof(Login));
+            default:
+                await AuditAsync(user.LabUserID, user.UserName, LrnAuth.LocalProvider, false, "LoginCodeExpired");
+                return View(CodeModel(pending, "This code has expired or was replaced by a newer one. Use \"Send a new code\"."));
+        }
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [EnableRateLimiting("login")]
+    public async Task<IActionResult> ResendLoginCode()
+    {
+        var pending = ReadPendingCode();
+        if (pending is null) return PendingExpired();
+        var model = CodeModel(pending);
+        if (model.ResendWaitSeconds > 0)
+            return View(nameof(VerifyLoginCode), CodeModel(pending, $"Please wait {model.ResendWaitSeconds} seconds before asking for a new code."));
+
+        var user = await _repo.GetUserByIdAsync(pending.LabUserId);
+        if (user is null || !user.IsActive || user.IsEntra || user.SecurityStamp != pending.Stamp) return PendingExpired();
+
+        var sent = await _userMail.SendLoginCodeAsync(user.LabUserID, RemoteIp, HttpContext.RequestAborted);
+        if (!sent.Sent || sent.ChallengeId is null)
+        {
+            await AuditAsync(user.LabUserID, user.UserName, LrnAuth.LocalProvider, false, "LoginCodeNotSent");
+            return View(nameof(VerifyLoginCode), CodeModel(pending, sent.Message?.StartsWith("Too many", StringComparison.Ordinal) == true
+                ? sent.Message
+                : "We could not send a new code just now. Please try again in a few minutes."));
+        }
+
+        WritePendingCode(pending with { ChallengeId = sent.ChallengeId.Value, MaskedEmail = sent.MaskedEmail ?? pending.MaskedEmail, IssuedUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
+        await AuditAsync(user.LabUserID, user.UserName, LrnAuth.LocalProvider, false, "LoginCodeResent");
+        TempData["LoginCodeInfo"] = "A new code has been sent. Earlier codes no longer work.";
+        return RedirectToAction(nameof(VerifyLoginCode));
     }
 
     // ── Microsoft Entra ID ──────────────────────────────────────────────────────────────
@@ -284,6 +465,21 @@ public class AccountController : Controller
         // Match ONLY on the object id. Never link to a local account by email or UPN automatically:
         // an administrator does that (Admin > Manage Users > Link).
         var user = await _repo.GetUserByEntraObjectIdAsync(objectId);
+
+        // The one exception to "never by email": an account an administrator created in advance as a
+        // Microsoft account for exactly this organization address (AR Workbench Add User > Microsoft).
+        // It has no password and is waiting for this person's first Microsoft sign-in, so linking it
+        // hands nobody else's access over. Tenant and domain were both checked.
+        if (user is null && _hybrid.IsOrganizationEmail(upn))
+        {
+            user = await _repo.ClaimPreCreatedEntraUserAsync(objectId, tenantId, upn);
+            if (user is not null)
+            {
+                await AuditAsync(user.LabUserID, upn, LrnAuth.EntraProvider, false, "LinkedPreCreated");
+                _logger.LogInformation("Microsoft user {Upn} ({ObjectId}) linked to pre-created account LabUserID {Id}.", upn, objectId, user.LabUserID);
+            }
+        }
+
         if (user is null)
         {
             user = await _repo.GetOrCreateEntraUserAsync(objectId, tenantId, upn, p.FindFirstValue("email"), p.FindFirstValue("name"));
@@ -441,6 +637,16 @@ public sealed class LoginViewModel
     public string Password { get; set; } = string.Empty;
 
     public bool RememberMe { get; set; }
+}
+
+public sealed class VerifyLoginCodeViewModel
+{
+    public string Code { get; set; } = string.Empty;
+
+    // Display only; never bound from the form.
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever] public string? MaskedEmail { get; set; }
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever] public string? Message { get; set; }
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever] public int ResendWaitSeconds { get; set; }
 }
 
 public sealed class SetPasswordViewModel

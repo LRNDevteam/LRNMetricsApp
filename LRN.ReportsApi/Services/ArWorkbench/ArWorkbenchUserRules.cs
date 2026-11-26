@@ -99,6 +99,57 @@ public static partial class ArWorkbenchUserRules
         return (value, null);
     }
 
+    // ---- Sign-in account type ------------------------------------------------------------------
+    // Every AR Workbench user signs in one of two ways, and their username is their email address:
+    //   microsoft - a Lab Revenue Navigator (organization) account: Sign in with Microsoft + MFA.
+    //   external  - any other email: password from the invitation, plus an emailed code on every sign-in.
+
+    public const string MicrosoftAccount = "microsoft";
+    public const string ExternalAccount = "external";
+
+    /// <summary>The organization's Microsoft domains: HybridAuth:OrganizationDomains, default labrevenuenavigator.com.</summary>
+    public static IReadOnlyList<string> OrganizationDomains(IConfiguration configuration)
+    {
+        var domains = configuration.GetSection("HybridAuth:OrganizationDomains").Get<string[]>() ?? [];
+        var list = domains.Select(d => d?.Trim().TrimStart('@') ?? string.Empty).Where(d => d.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return list.Count > 0 ? list : ["labrevenuenavigator.com"];
+    }
+
+    public static bool IsOrganizationEmail(string? email, IReadOnlyList<string> organizationDomains)
+    {
+        var v = email?.Trim() ?? string.Empty;
+        return v.Length > 0 && organizationDomains.Any(d => v.EndsWith("@" + d, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static string? NormalizeAccountType(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        "microsoft" or "entra" or "mfa" or "organization" => MicrosoftAccount,
+        "external" or "email" or "local" => ExternalAccount,
+        _ => null
+    };
+
+    /// <summary>
+    /// The new user's email, which is also their username: a valid address, in the organization
+    /// domain for a Microsoft account and outside it for an external one (organization staff sign in
+    /// with Microsoft and MFA, never with a password).
+    /// </summary>
+    public static (string? Email, string? Error) ValidateAccountEmail(string? accountType, string? email, IReadOnlyList<string> organizationDomains)
+    {
+        var type = NormalizeAccountType(accountType);
+        if (type is null) return (null, "Choose how the user signs in: Microsoft (Lab Revenue Navigator) or external email.");
+        var (value, error) = ValidateEmail(email);
+        if (value is null) return (null, error);
+        if (value.Length > MaxUserNameLength) return (null, $"The email address is the username, so it must be {MaxUserNameLength} characters or fewer.");
+        if (!UserNamePattern().IsMatch(value)) return (null, "The email address is the username, so it can use letters, numbers and . _ @ - only.");
+        var org = IsOrganizationEmail(value, organizationDomains);
+        if (type == MicrosoftAccount && !org)
+            return (null, $"A Microsoft account must be a Lab Revenue Navigator address (@{string.Join(" or @", organizationDomains)}). Choose External email for anyone else.");
+        if (type == ExternalAccount && org)
+            return (null, "Lab Revenue Navigator staff sign in with Microsoft. Choose Microsoft (Lab Revenue Navigator) for this address.");
+        return (value.ToLowerInvariant(), null);
+    }
+
     public static string? ValidatePassword(string? password)
     {
         if (string.IsNullOrEmpty(password)) return "Password is required.";
